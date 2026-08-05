@@ -1,431 +1,65 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+// /issues/<identifier> — the canonical issue deep link.
+//
+// It used to be a second, entirely separate issue screen: its own header, its
+// own 320px sidebar, its own Tiptap wiring, its own comment box — none of it
+// shared with the detail you got by clicking a row inside /issues. Same issue,
+// two screens, and which one you saw depended on how you arrived.
+//
+// What is left here is the part that is genuinely about being a PAGE: where
+// Back goes, and the link you copy. The issue itself is IssueDetailSurface,
+// the same component the centre pane of /issues renders.
+
+import { useCallback } from "react"
 import { useRouter } from "next/navigation"
+import { ArrowLeft, ChevronRight, Link2 } from "lucide-react"
+import { toast } from "sonner"
 
 import { useShallowSearchParam } from "@/hooks/use-shallow-search-param"
 import { parseReturnTo } from "@/lib/return-to"
-import {
-  ArrowLeft,
-  Check,
-  ChevronRight,
-  Link2,
-  MessageSquare,
-  Pencil,
-  Send,
-  X,
-} from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useSession } from "@/hooks/use-auth"
 import { useUrlSegment } from "@/lib/use-url-segment"
-import { useRealtimeEvent } from "@/hooks/use-realtime"
-import { apiFetch } from "@/lib/api-fetch"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { MarkdownContent } from "@/components/features/issues/markdown-content"
-import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
-import { ActivityFeed } from "@/components/features/issues/activity-feed"
-import { RunActivityTimeline, RUN_WORK_ENTRY_TYPES } from "@/components/features/activity/run-activity-timeline"
-import { IssueSidebar, IssueSidebarMobile } from "@/components/features/orchestration/issue-sidebar"
-import { timeAgo, formatDate } from "@/lib/time"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Skeleton } from "@/components/ui/skeleton"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { toast } from "sonner"
-import type {
-  IssueActivity,
-  IssueComment,
-  IssueLabel,
-  IssueRelation,
-  Mission,
-  Project,
-} from "@/lib/types/mission"
+import { Skeleton } from "@/components/ui/skeleton"
+import { IssueDetailSurface } from "@/components/features/issues/issue-detail-surface"
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function isMac(): boolean {
-  if (typeof navigator === "undefined") return false
-  const nav = navigator as Navigator & { userAgentData?: { platform?: string } }
-  const platform = nav.userAgentData?.platform ?? navigator.platform ?? ""
-  return platform.includes("Mac")
-}
-
-// Issue identifier read from the URL, not useParams() — see useUrlSegment
-// for the static-export "_" placeholder bug this avoids. Module-scope so
-// the regex reference stays stable across renders.
+// Identifier read from the URL, not useParams() — see useUrlSegment for the
+// static-export "_" placeholder bug this avoids. Module scope so the regex
+// reference stays stable across renders.
 const ISSUE_PATH_RE = /^\/issues\/([^/]+)\/?$/
-
-// ---------------------------------------------------------------------------
-// Main page component
-// ---------------------------------------------------------------------------
 
 export function IssuePageClient() {
   const router = useRouter()
 
   // An issue is almost always opened FROM somewhere — an agent's Issues cell,
-  // a routine, the board. The origin rides in the URL so back returns there,
+  // a routine, the board. The origin rides in the URL so Back returns there,
   // and survives a refresh or a pasted link, which router.back() would not.
   // parseReturnTo rejects anything that is not an in-app path.
   const [fromParam] = useShallowSearchParam("from")
   const [fromLabelParam] = useShallowSearchParam("fromLabel")
   const origin = parseReturnTo(fromParam, fromLabelParam)
-  const back = () => router.push(origin?.href ?? "/issues")
+  const back = useCallback(() => router.push(origin?.href ?? "/issues"), [router, origin?.href])
+
   const identifier = useUrlSegment(ISSUE_PATH_RE)
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { data: session } = useSession()
 
-  // Core data
-  const [issue, setIssue] = useState<Mission | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  // Comments
-  const [comments, setComments] = useState<IssueComment[]>([])
-  const [loadingComments, setLoadingComments] = useState(false)
-  const [newComment, setNewComment] = useState("")
-  const [submittingComment, setSubmittingComment] = useState(false)
-
-  // Activity
-  const [activities, setActivities] = useState<IssueActivity[]>([])
-  const [loadingActivity, setLoadingActivity] = useState(false)
-
-  // Description editing
-  const [descDraft, setDescDraft] = useState("")
-
-  // Sync descDraft when issue description changes (prevents patching empty on blur)
-  useEffect(() => {
-    if (issue?.description !== undefined) {
-      setDescDraft(issue.description || "")
-    }
-  }, [issue?.description])
-
-  // Relations
-  const [relations, setRelations] = useState<IssueRelation[]>([])
-
-  // Sidebar data
-  const [agents, setAgents] = useState<{ id: string; name: string; slug?: string }[]>([])
-  const [allLabels, setAllLabels] = useState<IssueLabel[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
-
-  // Editing states
-  const [editingTitle, setEditingTitle] = useState(false)
-  const [titleDraft, setTitleDraft] = useState("")
-  const [saving, setSaving] = useState(false)
-
-  // Action loading
-  const [actionLoading, setActionLoading] = useState(false)
-
-  const commentInputRef = useRef<HTMLTextAreaElement>(null)
-
-  const crewId = issue?.crew_id
-
-  // -----------------------------------------------------------------------
-  // Fetch issue
-  // -----------------------------------------------------------------------
-
-  const fetchIssue = useCallback(async () => {
-    if (!workspaceId || !identifier) return
-    try {
-      const res = await apiFetch(
-        `/api/v1/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`,
-      )
-      if (!res.ok) {
-        setError(res.status === 404 ? "Issue not found" : "Failed to load issue")
-        return
-      }
-      const data: Mission = await res.json()
-      setIssue(data)
-      setError(null)
-    } catch {
-      setError("Failed to load issue")
-    } finally {
-      setLoading(false)
-    }
-  }, [workspaceId, identifier])
-
-  const fetchComments = useCallback(async () => {
-    if (!crewId || !identifier || !workspaceId) return
-    setLoadingComments(true)
-    try {
-      const res = await apiFetch(
-        `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`,
-      )
-      if (res.ok) {
-        const data = await res.json()
-        setComments(Array.isArray(data) ? data : [])
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingComments(false)
-    }
-  }, [crewId, identifier, workspaceId])
-
-  const fetchActivity = useCallback(async () => {
-    if (!crewId || !identifier || !workspaceId) return
-    setLoadingActivity(true)
-    try {
-      const res = await apiFetch(
-        `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/activity?workspace_id=${encodeURIComponent(workspaceId)}`,
-      )
-      if (res.ok) {
-        const data = await res.json()
-        setActivities(Array.isArray(data) ? data : [])
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingActivity(false)
-    }
-  }, [crewId, identifier, workspaceId])
-
-  const fetchRelations = useCallback(async () => {
-    if (!crewId || !identifier || !workspaceId) return
-    try {
-      const res = await apiFetch(
-        `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/relations?workspace_id=${encodeURIComponent(workspaceId)}`,
-      )
-      if (res.ok) {
-        const data = await res.json()
-        setRelations(Array.isArray(data) ? data : [])
-      }
-    } catch {
-      // ignore
-    }
-  }, [crewId, identifier, workspaceId])
-
-  const fetchSidebarData = useCallback(async () => {
-    if (!workspaceId) return
-    try {
-      const [agentsRes, labelsRes, projectsRes] = await Promise.all([
-        apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`),
-        apiFetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`),
-        apiFetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`),
-      ])
-      if (agentsRes.ok) {
-        const data = await agentsRes.json()
-        const list = Array.isArray(data) ? data : data.agents ?? []
-        setAgents(list.map((a: { id: string; name: string; slug?: string }) => ({
-          id: a.id,
-          name: a.name,
-          slug: a.slug,
-        })))
-      }
-      if (labelsRes.ok) {
-        const data = await labelsRes.json()
-        setAllLabels(Array.isArray(data) ? data : [])
-      }
-      if (projectsRes.ok) {
-        const data = await projectsRes.json()
-        setProjects(Array.isArray(data) ? data : [])
-      }
-    } catch {
-      // ignore
-    }
-  }, [workspaceId])
-
-  // Initial data load
-  useEffect(() => {
-    fetchIssue()
-  }, [fetchIssue])
-
-  useEffect(() => {
-    if (issue) {
-      fetchComments()
-      fetchActivity()
-      fetchRelations()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [issue?.id])
-
-  useEffect(() => {
-    fetchSidebarData()
-  }, [fetchSidebarData])
-
-  // Realtime updates
-  useRealtimeEvent(
-    "mission.updated",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    useCallback((payload: any) => {
-      if (payload?.id && payload.id !== issue?.id) return
-      fetchIssue()
-      fetchActivity()
-    }, [fetchIssue, fetchActivity, issue?.id]),
-  )
-
-  // -----------------------------------------------------------------------
-  // Mutations
-  // -----------------------------------------------------------------------
-
-  async function patchIssue(body: Record<string, unknown>) {
-    if (!crewId || !identifier || !workspaceId) return false
-    setSaving(true)
-    try {
-      const res = await apiFetch(
-        `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-      )
-      if (!res.ok) {
-        const b = await res.json().catch(() => null)
-        toast.error(b?.detail ?? "Failed to update issue")
-        return false
-      }
-      await fetchIssue()
-      return true
-    } catch {
-      toast.error("Failed to update issue")
-      return false
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleSaveTitle() {
-    if (!titleDraft.trim()) return
-    const ok = await patchIssue({ title: titleDraft.trim() })
-    if (ok) setEditingTitle(false)
-  }
-
-  async function handleSubmitComment() {
-    if (!crewId || !identifier || !workspaceId || !newComment.trim()) return
-    setSubmittingComment(true)
-    try {
-      const res = await apiFetch(
-        `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body: newComment.trim() }),
-        },
-      )
-      if (!res.ok) {
-        const b = await res.json().catch(() => null)
-        toast.error(b?.detail ?? "Failed to add comment")
-        return
-      }
-      setNewComment("")
-      fetchComments()
-    } catch {
-      toast.error("Failed to add comment")
-    } finally {
-      setSubmittingComment(false)
-    }
-  }
-
-  async function handleAction(action: "start" | "stop" | "review", reviewAction?: "approve" | "request_changes") {
-    if (!crewId || !identifier || !workspaceId) return
-    setActionLoading(true)
-    try {
-      const url = action === "review"
-        ? `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/review?workspace_id=${encodeURIComponent(workspaceId)}`
-        : `/api/v1/crews/${crewId}/issues/${encodeURIComponent(identifier)}/${action}?workspace_id=${encodeURIComponent(workspaceId)}`
-      const res = await apiFetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: action === "review" ? JSON.stringify({ action: reviewAction }) : undefined,
-      })
-      if (!res.ok) {
-        const b = await res.json().catch(() => null)
-        toast.error(b?.detail ?? `Failed to ${action} issue`)
-        return
-      }
-      toast.success(
-        action === "start" ? "Issue started" :
-        action === "stop" ? "Issue stopped" :
-        reviewAction === "approve" ? "Issue approved" : "Changes requested"
-      )
-      await fetchIssue()
-      fetchActivity()
-    } catch {
-      toast.error(`Failed to ${action} issue`)
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  async function handleToggleLabel(label: IssueLabel) {
-    if (!issue) return
-    const currentIds = (issue.labels ?? []).map((l) => l.id)
-    const isActive = currentIds.includes(label.id)
-    const newIds = isActive
-      ? currentIds.filter((id) => id !== label.id)
-      : [...currentIds, label.id]
-    await patchIssue({ label_ids: newIds })
-  }
-
-  function handleCopyUrl() {
-    const url = window.location.href
-    navigator.clipboard.writeText(url).then(() => {
-      toast.success("Link copied to clipboard")
-    }).catch(() => {
-      toast.error("Failed to copy link")
-    })
-  }
-
-  // -----------------------------------------------------------------------
-  // Loading / Error states
-  // -----------------------------------------------------------------------
-
-  if (wsLoading || loading) {
-    return (
-      <div className="h-full flex flex-col">
-        <div className="flex items-center gap-3 px-6 py-4 border-b border-border">
-          <Skeleton className="h-6 w-6 rounded" />
-          <Skeleton className="h-4 w-48" />
-        </div>
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 p-6 space-y-6">
-            <Skeleton className="h-8 w-3/4" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-2/3" />
-            <Skeleton className="h-32 w-full" />
-          </div>
-          <div className="w-[320px] border-l border-border p-6 space-y-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-8 w-full" />
-            ))}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (error || !issue) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center gap-4">
-        <p className="text-muted-foreground">{error ?? "Issue not found"}</p>
-        <Button variant="outline" onClick={back}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          {origin ? `Back to ${origin.label}` : "Back to Orchestration"}
-        </Button>
-      </div>
-    )
-  }
-
-  // -----------------------------------------------------------------------
-  // Derived
-  // -----------------------------------------------------------------------
-
-
-  // -----------------------------------------------------------------------
-  // Render
-  // -----------------------------------------------------------------------
+  const copyLink = useCallback(() => {
+    navigator.clipboard
+      .writeText(window.location.href)
+      .then(() => toast.success("Link copied to clipboard"))
+      .catch(() => toast.error("Failed to copy link"))
+  }, [])
 
   return (
-    <div className="h-full flex flex-col bg-background">
-      {/* ---- Header / Breadcrumb ---- */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
+    <div className="flex h-full flex-col bg-background">
+      {/* One line of page chrome: where Back goes, and the link to share. The
+          issue's own identity — title, identifier, crew, status — is the
+          first card below, so the header does not repeat it. */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
         <Button
           variant="ghost"
           size="icon"
@@ -435,26 +69,13 @@ export function IssuePageClient() {
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-
-        <nav className="flex items-center gap-1 text-body text-muted-foreground min-w-0">
-          <button className="hover:text-foreground transition-colors" onClick={back}>
-            {origin?.label ?? "Orchestration"}
+        <nav className="flex min-w-0 items-center gap-1 text-[12px] text-muted-foreground">
+          <button className="transition-colors hover:text-foreground" onClick={back}>
+            {origin?.label ?? "Issues"}
           </button>
           <ChevronRight className="h-3 w-3 shrink-0" />
-          <span className="text-foreground font-medium truncate">
-            {issue.identifier ?? issue.title}
-          </span>
+          <span className="truncate font-mono text-foreground/85">{identifier ?? "…"}</span>
         </nav>
-
-        {issue.crew_name && (
-          <Badge
-            variant="outline"
-            className="ml-2 text-micro px-1.5 py-0 border-border text-muted-foreground"
-          >
-            {issue.crew_name}
-          </Badge>
-        )}
-
         <div className="ml-auto flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -462,7 +83,7 @@ export function IssuePageClient() {
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                onClick={handleCopyUrl}
+                onClick={copyLink}
                 aria-label="Copy link"
               >
                 <Link2 className="h-3.5 w-3.5" />
@@ -473,259 +94,20 @@ export function IssuePageClient() {
         </div>
       </div>
 
-      {/* ---- Main 2-column layout ---- */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* ---- Left: main content ---- */}
-        <ScrollArea className="flex-1">
-          <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
-            {/* Title */}
-            <div>
-              {editingTitle ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={titleDraft}
-                    aria-label="Issue title"
-                    onChange={(e) => setTitleDraft(e.target.value)}
-                    className="text-title font-semibold bg-accent border-border h-10"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleSaveTitle()
-                      if (e.key === "Escape") setEditingTitle(false)
-                    }}
-                    autoFocus
-                  />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 shrink-0"
-                    onClick={handleSaveTitle}
-                    disabled={saving}
-                    aria-label="Save title"
-                  >
-                    {saving ? (
-                      <Spinner className="h-4 w-4" />
-                    ) : (
-                      <Check className="h-4 w-4" />
-                    )}
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 shrink-0"
-                    onClick={() => setEditingTitle(false)}
-                    aria-label="Cancel editing"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ) : (
-                <h1
-                  className="text-title font-semibold text-foreground leading-tight cursor-pointer hover:text-foreground/80 transition-colors group flex items-center gap-2"
-                  onClick={() => {
-                    setTitleDraft(issue.title)
-                    setEditingTitle(true)
-                  }}
-                >
-                  {issue.title}
-                  <Pencil className="h-3.5 w-3.5 text-muted-foreground/0 group-hover:text-muted-foreground/60 transition-colors" />
-                </h1>
-              )}
-              {issue.identifier && (
-                <p className="text-label text-muted-foreground font-mono mt-1">
-                  {issue.identifier}
-                </p>
-              )}
-            </div>
-
-            {/* Description (WYSIWYG Tiptap editor) */}
-            <div>
-              <TiptapEditor
-                content={issue.description || ""}
-                onChange={(md) => setDescDraft(md)}
-                onBlur={() => {
-                  if (descDraft !== (issue.description || "")) {
-                    patchIssue({ description: descDraft })
-                  }
-                }}
-                placeholder="Click to add description..."
-                editable={true}
-              />
-            </div>
-
-            <Separator />
-
-            {/* ---- Comments section ---- */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-muted-foreground/60" />
-                <h2 className="text-label font-semibold text-muted-foreground uppercase tracking-wider">
-                  Comments
-                </h2>
-                {comments.length > 0 && (
-                  <span className="text-label text-muted-foreground/50">
-                    ({comments.length})
-                  </span>
-                )}
-              </div>
-
-              {loadingComments ? (
-                <div className="flex items-center justify-center py-6">
-                  <Spinner className="h-4 w-4 text-muted-foreground" />
-                </div>
-              ) : comments.length === 0 ? (
-                <p className="text-label text-muted-foreground/50 py-3">
-                  No comments yet. Be the first to comment.
-                </p>
-              ) : (
-                <div className="space-y-4">
-                  {comments.map((comment) => (
-                    <div key={comment.id} className="flex gap-3">
-                      {/* Avatar */}
-                      <div className="shrink-0 mt-0.5">
-                        {comment.author_type === "agent" ? (
-                          <AgentAvatar
-                            seed={comment.author_name ?? comment.author_id}
-                            className="h-7 w-7 rounded-full"
-                          />
-                        ) : (
-                          <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-label font-medium text-primary">
-                            {(comment.author_name ?? "U").charAt(0).toUpperCase()}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline gap-2 mb-1">
-                          <span className="text-body font-medium text-foreground">
-                            {comment.author_name ?? "Unknown"}
-                          </span>
-                          <span className="text-label text-muted-foreground/60">
-                            {timeAgo(comment.created_at)}
-                          </span>
-                        </div>
-                        <div className="mt-1">
-                          <MarkdownContent>{comment.body}</MarkdownContent>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* New comment input */}
-              <div className="flex gap-3 pt-2">
-                <div className="shrink-0 mt-1">
-                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-label font-medium text-primary">
-                    {(session?.user?.name ?? session?.user?.email ?? "U").charAt(0).toUpperCase()}
-                  </div>
-                </div>
-                <div className="flex-1 space-y-2">
-                  <Textarea
-                    ref={commentInputRef}
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    placeholder="Write a comment..."
-                    className="min-h-[72px] text-body bg-card border-border resize-none"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                        handleSubmitComment()
-                      }
-                    }}
-                  />
-                  <div className="flex items-center justify-between">
-                    <span className="text-label text-muted-foreground/50">
-                      {isMac() ? "Cmd" : "Ctrl"}+Enter to send
-                    </span>
-                    <Button
-                      size="sm"
-                      className="h-7 text-label gap-1.5"
-                      onClick={handleSubmitComment}
-                      disabled={submittingComment || !newComment.trim()}
-                    >
-                      {submittingComment ? (
-                        <Spinner className="h-3 w-3" />
-                      ) : (
-                        <Send className="h-3 w-3" />
-                      )}
-                      Send
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* ---- Run activity (live agent work — exec/file/network/llm —
-                 pulled from the journal scoped to this mission; filtered to
-                 work entry types so it stays distinct from the lifecycle feed
-                 below. Hidden until the issue has produced run entries. ---- */}
-            <RunActivityTimeline
-              workspaceId={workspaceId}
-              params={{ mission_id: issue.id, entry_type: RUN_WORK_ENTRY_TYPES.join(",") }}
-              // Once the issue has been started (anything past TODO), keep the
-              // section visible even before the first entry lands so there's
-              // immediate "run starting…" feedback. Un-started issues stay clean.
-              hideWhenEmpty={issue.status === "BACKLOG" || issue.status === "TODO"}
-              forceRunning={issue.status === "IN_PROGRESS"}
-            />
-
-            {/* ---- Activity section (issue lifecycle: assignee/status/etc.) ---- */}
-            {loadingActivity ? (
-              <div className="flex items-center justify-center py-4">
-                <Spinner className="h-4 w-4 text-muted-foreground" />
-              </div>
-            ) : (
-              <ActivityFeed activities={activities} />
-            )}
-
-            {/* Footer metadata */}
-            <div className="text-label text-muted-foreground/60 font-mono space-y-0.5 pt-4">
-              {issue.created_by && (
-                <div data-testid="issue-created-by">
-                  Created by {issue.created_by.name || issue.created_by.id}
-                  {issue.created_by.type === "agent" && (
-                    <span
-                      data-testid="issue-creator-agent-badge"
-                      className="ml-1.5 inline-flex items-center rounded border border-primary/30 bg-primary/10 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-primary"
-                    >
-                      agent
-                    </span>
-                  )}
-                </div>
-              )}
-              <div>Created {formatDate(issue.created_at)}</div>
-              <div>Updated {formatDate(issue.updated_at)}</div>
-            </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {wsLoading || !workspaceId || !identifier ? (
+          <div className="flex flex-col gap-4 p-4">
+            <Skeleton className="h-[132px] w-full rounded-xl" />
+            <Skeleton className="h-[64px] w-full rounded-xl" />
           </div>
-        </ScrollArea>
-
-        {/* ---- Right: Sidebar ---- */}
-        <IssueSidebar
-          issue={issue}
-          agents={agents}
-          allLabels={allLabels}
-          projects={projects}
-          relations={relations}
-          patchIssue={patchIssue}
-          handleToggleLabel={handleToggleLabel}
-          handleAction={handleAction}
-          actionLoading={actionLoading}
-        />
+        ) : (
+          <IssueDetailSurface
+            workspaceId={workspaceId}
+            identifier={identifier}
+            viewerInitial={session?.user?.name ?? session?.user?.email ?? "U"}
+          />
+        )}
       </div>
-
-      {/* ---- Mobile sidebar (below content on small screens) ---- */}
-      <IssueSidebarMobile
-        issue={issue}
-        agents={agents}
-        allLabels={allLabels}
-        projects={projects}
-        relations={relations}
-        patchIssue={patchIssue}
-        handleToggleLabel={handleToggleLabel}
-        handleAction={handleAction}
-        actionLoading={actionLoading}
-      />
     </div>
   )
 }

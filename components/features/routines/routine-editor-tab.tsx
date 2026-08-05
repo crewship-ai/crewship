@@ -1,14 +1,19 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, Copy, RotateCcw, Save, Wand2 } from "lucide-react"
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { AlertCircle, Maximize2, Minimize2, RotateCcw, Save, Wand2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { FileEditor } from "@/components/features/files/file-editor"
+import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { convertDsl, hasYamlComments, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
+import { parseRoutineBuffer } from "@/lib/routine-buffer"
+import { stepIdAtLine, stepLineRanges } from "@/lib/routine-dsl-lines"
+import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
 import type { RoutineDetail } from "./routines-detail-panel"
 
-// RoutineEditorTab — editable JSON DSL view backed by the same
+// RoutineEditorTab — editable DSL view backed by the same
 // CodeMirror surface the file-editor uses. Three primary affordances:
 //
 //   - live syntax + structural validation (must parse to an object
@@ -27,36 +32,50 @@ interface Props {
   routine: RoutineDetail
   workspaceId: string
   onSaved: () => void
+  /**
+   * Fires with the step the caret sits in, or null between steps.
+   *
+   * Already deduped — only a change of STEP is reported, not every
+   * caret move — so the caller can drive a viewport with it directly.
+   * The caret fires on every arrow key; forwarding each one would have
+   * the graph re-centre on the node it is already centred on dozens of
+   * times a second while someone types.
+   */
+  onStepAtCaret?: (stepId: string | null) => void
 }
 
-interface ValidationResult {
-  ok: boolean
-  message?: string
-  parsed?: Record<string, unknown>
-}
+export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret }: Props) {
+  // Beside the graph the editor is a 48%-wide column, which is right
+  // for reading a step and wrong for reading a routine. Expanded, it
+  // takes the window and blurs everything behind it.
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    if (!expanded) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        const live = bufferRef.current
+        setText(live)
+        setLiveText(live)
+        setEditorKey((k) => k + 1)
+        setExpanded(false)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [expanded])
+  const [format, setFormat] = useState<DslFormat>("yaml")
 
-function validate(text: string): ValidationResult {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : "invalid JSON" }
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { ok: false, message: "definition must be a JSON object" }
-  }
-  const obj = parsed as Record<string, unknown>
-  if (typeof obj.name !== "string" || obj.name === "") {
-    return { ok: false, message: "missing or empty `name` field" }
-  }
-  if (!Array.isArray(obj.steps) || obj.steps.length === 0) {
-    return { ok: false, message: "missing or empty `steps` array" }
-  }
-  return { ok: true, parsed: obj }
-}
-
-export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
-  const initial = useMemo(() => {
+  // Canonical JSON of the STORED definition, deliberately independent
+  // of `format`.
+  //
+  // It used to depend on it, and the reset effect below keys on it — so
+  // the instant a format switch committed, the effect fired and
+  // overwrote the freshly converted buffer with the server's copy, then
+  // cleared `dirty` so Save went disabled. The conversion the switch had
+  // just performed was undone one tick later by the effect whose whole
+  // job is seeding from the server. Silent: the editor still showed a
+  // valid document, just not yours.
+  const initialJson = useMemo(() => {
     try {
       return JSON.stringify(routine.definition, null, 2)
     } catch {
@@ -64,17 +83,43 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
     }
   }, [routine.definition])
 
-  const [text, setText] = useState(initial)
+  /** The stored definition rendered in a given format. */
+  const renderInitial = useCallback(
+    (f: DslFormat) => {
+      if (f === "json") return initialJson
+      const converted = convertDsl(initialJson, "json", "yaml")
+      return converted.ok ? converted.text : initialJson
+    },
+    [initialJson],
+  )
+
+  // Read by the reset effect WITHOUT making `format` one of its
+  // dependencies — that dependency is the bug above.
+  const formatRef = useRef<DslFormat>("yaml")
+  formatRef.current = format
+
+
+  // `text` is what the editor is CONSTRUCTED from — it changes only
+  // when the buffer is replaced wholesale (Format, Revert, a refetch, a
+  // format switch). It must never track the live document: FileEditor
+  // rebuilds its EditorState when `code` changes, and a rebuild puts
+  // the caret back at position 0. Feeding typing into it shredded a
+  // routine in about four seconds.
+  //
+  // `liveText` mirrors what is actually in the buffer, for everything
+  // derived from it — validity, step spans, comment detection — none of
+  // which touches the editor's construction.
+  const [text, setText] = useState(() => renderInitial("yaml"))
+  const [liveText, setLiveText] = useState(() => renderInitial("yaml"))
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [copied, setCopied] = useState(false)
   const saveRef = useRef<(() => void) | null>(null)
   // bufferRef mirrors the editor's latest doc. FileEditor only hands
   // its buffer back through onSave (⌘S or a saveRef flush), and
   // setText is asynchronous — so the save path below must read this
   // ref, not the `text` state, or it validates + POSTs the PREVIOUS
   // value (typing then clicking Save silently saved stale JSON).
-  const bufferRef = useRef(initial)
+  const bufferRef = useRef(renderInitial("yaml"))
 
   // The editor is remounted on key change to force a fresh CodeMirror
   // instance after Format / Revert / refetch (FileEditor only consumes
@@ -83,30 +128,101 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
 
   // FileEditor controls its own internal state; we re-key it by the
   // routine slug so switching routines remounts with fresh content.
-  // A same-slug refetch (new `initial`) must ALSO remount — without
+  // A same-slug refetch (a new stored definition) must ALSO remount — without
   // the key bump the visible editor keeps the old buffer while
   // bufferRef already points at the new definition.
   useEffect(() => {
-    setText(initial)
-    bufferRef.current = initial
+    const seeded = renderInitial(formatRef.current)
+    setText(seeded)
+    setLiveText(seeded)
+    bufferRef.current = seeded
     setDirty(false)
     setEditorKey((k) => k + 1)
-  }, [initial, routine.slug])
+    // renderInitial changes only when the stored definition does, which
+    // is exactly when the editor should be re-seeded. `format` is read
+    // through the ref on purpose.
+  }, [renderInitial, routine.slug])
 
-  const validation = useMemo(() => validate(text), [text])
+  const validation = useMemo(() => parseRoutineBuffer(liveText, format), [liveText, format])
+
+  // Schema completion + inline diagnostics. Memoized on the format
+  // because FileEditor rebuilds its EditorState when this identity
+  // changes — an unmemoized array would blow the buffer away on every
+  // render.
+  const extraExtensions = useMemo(() => routineDslExtensions(format), [format])
+
+  // Line spans come from the LIVE buffer, not the definition as first
+  // rendered: inserting one line shifts every step below it, and spans
+  // computed once resolve the caret against positions that no longer
+  // exist. Deferred so a parse does not run on the keystroke itself —
+  // a frame of lag is invisible, parsing per character is not.
+  const deferredText = useDeferredValue(liveText)
+  const stepRanges = useMemo(() => stepLineRanges(deferredText), [deferredText])
+  const bufferHasComments = useMemo(
+    () => format === "yaml" && hasYamlComments(deferredText),
+    [deferredText, format],
+  )
+  const lastStepRef = useRef<string | null>(null)
+  const handleCursorLine = useCallback(
+    (line: number) => {
+      const id = stepIdAtLine(stepRanges, line)
+      if (id === lastStepRef.current) return
+      lastStepRef.current = id
+      onStepAtCaret?.(id)
+    },
+    [stepRanges, onStepAtCaret],
+  )
+
+  // Switching format converts the BUFFER, not the stored definition, so
+  // an in-progress edit survives the toggle instead of being discarded.
+  const switchFormat = (next: DslFormat) => {
+    if (next === format) return
+    const converted = convertDsl(bufferRef.current, format, next)
+    if (!converted.ok) {
+      toast.error(`Fix the ${format.toUpperCase()} error before switching`)
+      return
+    }
+    setFormat(next)
+    setText(converted.text)
+    setLiveText(converted.text)
+    bufferRef.current = converted.text
+    setEditorKey((k) => k + 1)
+  }
 
   const handleEditorSave = (next: string) => {
     bufferRef.current = next
-    setText(next)
+    setLiveText(next)
+  }
+
+  // Every keystroke. Updates the mirror, never the construction source.
+  const handleDocChange = (next: string) => {
+    bufferRef.current = next
+    setLiveText(next)
+  }
+
+  // Expanding moves the editor into a different place in the tree, so
+  // React unmounts and remounts it — and a remounted FileEditor is
+  // constructed from `text`, which by design does NOT track typing.
+  // Without carrying the live buffer across, the full-screen editor
+  // would open showing the document as it was before you started, and
+  // the work in between would be gone with no error and no undo.
+  const toggleExpanded = () => {
+    const live = bufferRef.current
+    setText(live)
+    setLiveText(live)
+    setEditorKey((k) => k + 1)
+    setExpanded((v) => !v)
   }
 
   const handleFormat = () => {
     if (!validation.ok || !validation.parsed) {
-      toast.error("Fix the JSON error before formatting")
+      toast.error(`Fix the ${format.toUpperCase()} error before formatting`)
       return
     }
-    const pretty = JSON.stringify(validation.parsed, null, 2)
+    const pretty =
+      format === "yaml" ? toYaml(validation.parsed) : JSON.stringify(validation.parsed, null, 2)
     setText(pretty)
+    setLiveText(pretty)
     bufferRef.current = pretty
     // Force the editor to remount with the formatted content. The
     // simplest way is to re-render with a new key, which we accomplish
@@ -116,21 +232,16 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
   }
 
   const handleRevert = () => {
-    setText(initial)
-    bufferRef.current = initial
+    // Revert to the stored definition IN THE FORMAT ON SCREEN. Reverting
+    // into the other format would be a second surprise on top of
+    // discarding the edit.
+    const seeded = renderInitial(format)
+    setText(seeded)
+    setLiveText(seeded)
+    bufferRef.current = seeded
     setEditorKey((k) => k + 1)
     setDirty(false)
     toast.success("Reverted")
-  }
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      toast.error("Copy failed")
-    }
   }
 
   const handleSave = async () => {
@@ -141,9 +252,12 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
     // saving a stale definition when the user types and clicks Save
     // without pressing ⌘S first.
     saveRef.current?.()
-    const v = validate(bufferRef.current)
-    if (!v.ok || !v.parsed) {
-      toast.error(v.message ?? "definition is not valid")
+    // The SAME parse the header's validity indicator ran. It used to be
+    // a second, JSON-only function, so a valid YAML buffer showed
+    // "syntax ok" and then failed on Save with a JSON parser error.
+    const v = parseRoutineBuffer(bufferRef.current, format)
+    if (!v.ok) {
+      toast.error(v.message)
       return
     }
     setSaving(true)
@@ -175,7 +289,20 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
         toast.error(msg)
         return
       }
-      toast.success("Routine saved")
+      // Save re-classifies risk, and a routine it judges risky lands as
+      // `proposed` — it stops being runnable until a manager approves
+      // it. That is the gate working, but a bare "Routine saved" while
+      // an approval banner silently appears above reads as the page
+      // breaking. Say which happened.
+      const saved = (await res.json().catch(() => null)) as { status?: string } | null
+      if (saved?.status === "proposed") {
+        toast.warning("Saved — sent for approval", {
+          description:
+            "The change was classified risky, so the routine can't run until a manager approves it.",
+        })
+      } else {
+        toast.success("Routine saved")
+      }
       setDirty(false)
       onSaved()
     } catch (err) {
@@ -185,16 +312,31 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
     }
   }
 
-  return (
+  const body = (
     <div className="flex h-full flex-col">
       {/* ── Toolbar ─────────────────────────────────────────────── */}
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
         <div className="flex items-center gap-2.5 text-[12px] text-muted-foreground">
-          <span className="font-medium text-foreground/85">JSON DSL</span>
+          <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+            {(["yaml", "json"] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => switchFormat(f)}
+                aria-pressed={format === f}
+                className={cn(
+                  "rounded px-1.5 py-0.5 font-mono text-[10px] uppercase transition-colors",
+                  format === f
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
           <span className="opacity-60">·</span>
-          <span className="tabular-nums">{text.length.toLocaleString()} chars</span>
-          <span className="opacity-60">·</span>
-          <span className="font-mono">v{routine.dsl_version}</span>
+          <span className="font-mono">DSL v{routine.dsl_version}</span>
           {dirty && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/20 px-2.5 py-0.5 text-[11px] font-medium text-warn">
               <span className="h-1.5 w-1.5 rounded-full bg-current" />
@@ -206,23 +348,23 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
           <Button
             size="sm"
             variant="ghost"
-            onClick={handleCopy}
-            className="h-8 gap-1.5 px-2.5 text-xs"
-            title="Copy current buffer"
+            onClick={handleFormat}
+            disabled={!validation.ok}
+            className="h-8 w-8 p-0"
+            title="Format — re-indent the buffer from the parsed definition; sorts nothing, changes no values"
+            aria-label="Format"
           >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            {copied ? "Copied" : "Copy"}
+            <Wand2 className="h-3.5 w-3.5" />
           </Button>
           <Button
             size="sm"
             variant="ghost"
-            onClick={handleFormat}
-            disabled={!validation.ok}
-            className="h-8 gap-1.5 px-2.5 text-xs"
-            title="Re-pretty-print the buffer"
+            onClick={toggleExpanded}
+            className="h-8 w-8 p-0"
+            title={expanded ? "Close the full-screen editor (Esc)" : "Open the whole definition full screen"}
+            aria-label={expanded ? "Collapse editor" : "Expand editor"}
           >
-            <Wand2 className="h-3.5 w-3.5" />
-            Format
+            {expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </Button>
           <Button
             size="sm"
@@ -241,7 +383,11 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
             onClick={handleSave}
             disabled={!validation.ok || !dirty || saving}
             className="h-8 gap-1.5 px-3 text-xs font-semibold"
-            title="Save changes (requires OWNER / ADMIN)"
+            title={
+              validation.ok
+                ? "Save changes. \u2318/Ctrl+S flushes the buffer first. Requires OWNER / ADMIN."
+                : `Cannot save: ${validation.ok ? "" : validation.message}`
+            }
           >
             <Save className="h-3.5 w-3.5" />
             {saving ? "Saving…" : "Save"}
@@ -262,19 +408,54 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
       {/* ── Editor ─────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden">
         <FileEditor
-          key={`${routine.slug}-${editorKey}`}
+          key={`${routine.slug}-${format}-${editorKey}`}
           code={text}
-          language="json"
+          language={format}
           onSave={handleEditorSave}
           onDirtyChange={setDirty}
           saveRef={saveRef}
+          onCursorLine={handleCursorLine}
+          onDocChange={handleDocChange}
+          extraExtensions={extraExtensions}
         />
       </div>
 
-      {/* ── Footer hint ────────────────────────────────────────── */}
-      <div className="shrink-0 border-t border-border/60 bg-card/20 px-4 py-2 text-[11px] text-muted-foreground">
-        <span className="font-mono">⌘/Ctrl+S</span> flushes the buffer · Save lands changes when JSON parses with both{" "}
-        <span className="font-mono">name</span> and <span className="font-mono">steps</span>. Requires OWNER/ADMIN role.
+      {/* The footer earns its place or it does not appear.
+          
+          It used to carry three permanent sentences — how to flush the
+          buffer, what makes a save land, which role is required — plus
+          a standing warning about YAML comments. All true, none of it
+          news after the first read, and a strip of always-on text is
+          what people learn to skip. The instructions moved onto the
+          Save button, which is where you look when Save does not do
+          what you expected. What is left is the one thing that can lose
+          work, shown only when there is work to lose. */}
+      {format === "yaml" && bufferHasComments && (
+        <div className="shrink-0 border-t border-warn/30 bg-warn/[0.06] px-4 py-2 text-[11px] text-warn">
+          This document has comments. Canonical JSON is what gets stored, so they will not survive
+          the save.
+        </div>
+      )}
+    </div>
+  )
+
+  // Same element, different parent — which React treats as a remount,
+  // so the live buffer is carried across in toggleExpanded rather than
+  // assumed to survive. Exactly one editor exists either way; a second
+  // one mounted over the first would keep its own CodeMirror state and
+  // the two would drift apart on the next keystroke.
+  if (!expanded) return body
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8">
+      <button
+        type="button"
+        aria-label="Close the full-screen editor"
+        onClick={toggleExpanded}
+        className="absolute inset-0 bg-background/70 backdrop-blur-md"
+      />
+      <div className="relative flex h-full max-h-[92vh] w-full max-w-[1400px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl">
+        {body}
       </div>
     </div>
   )

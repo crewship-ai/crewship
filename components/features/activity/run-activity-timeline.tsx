@@ -8,6 +8,7 @@ import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import type { JournalEntry } from "@/lib/types/journal"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { DetailCard } from "@/components/ui/detail"
 import {
   extractVerdict,
   humanizeRun,
@@ -74,6 +75,15 @@ interface RunActivityTimelineProps {
   /** Hide the whole section when there's nothing to show (default true). */
   hideWhenEmpty?: boolean
   /**
+   * Render inside a DetailCard instead of as a bare rail — for surfaces built
+   * out of the detail kit (the issue detail), where a headed section sitting
+   * on the page background is the one thing that breaks the rhythm.
+   *
+   * Opt-in, so the routine run panel and the activity bar keep the rail they
+   * were designed around.
+   */
+  card?: boolean
+  /**
    * Treat the run as in-flight even before its first journal row lands (e.g.
    * an issue is IN_PROGRESS but the container is still booting). Drives the
    * "waiting for the first step…" empty state instead of "no activity".
@@ -89,6 +99,7 @@ export function RunActivityTimeline({
   title = "Run activity",
   hideWhenEmpty = true,
   forceRunning = false,
+  card = false,
   className,
 }: RunActivityTimelineProps) {
   const hasFilter = Object.values(params).some((v) => !!v)
@@ -140,6 +151,7 @@ export function RunActivityTimeline({
       running={running}
       loading={loading}
       title={title}
+      card={card}
       className={className}
     />
   )
@@ -163,6 +175,8 @@ interface RunActivityRailProps {
   loading?: boolean
   title?: string
   emptyLabel?: string
+  /** Wrap in a DetailCard rather than drawing the bare header. See above. */
+  card?: boolean
   className?: string
 }
 
@@ -193,6 +207,7 @@ export function RunActivityRail({
   loading = false,
   title = "Run activity",
   emptyLabel,
+  card = false,
   className,
 }: RunActivityRailProps) {
   // Collapsed by default when a verdict exists — the one-liner is the
@@ -202,68 +217,93 @@ export function RunActivityRail({
   const open = verdict ? timelineOpen : true
   const VerdictIcon = verdict ? VERDICT_ICON[verdict.outcome] : null
 
+  const status = waiting ? (
+    <span className="inline-flex items-center gap-1 text-[10px] text-warn">
+      <span className="h-1.5 w-1.5 rounded-full bg-warn animate-pulse" />
+      Waiting for approval
+    </span>
+  ) : running ? (
+    <span className="inline-flex items-center gap-1 text-[10px] text-primary">
+      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+      Running
+    </span>
+  ) : null
+
+  const body = (
+    <Collapsible open={open} onOpenChange={setTimelineOpen}>
+      {verdict && VerdictIcon && (
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="mb-2 -mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-white/[0.03]"
+          >
+            <VerdictIcon className={cn("h-4 w-4 shrink-0 mt-0.5", VERDICT_ICON_TONE[verdict.outcome])} />
+            <div className="min-w-0 flex-1">
+              <span className="text-[12px] font-medium text-foreground/90">{verdict.verdict}</span>
+              {verdict.summary && (
+                <p className="mt-0.5 text-[10px] text-foreground/50">{verdict.summary}</p>
+              )}
+            </div>
+            <ChevronDown
+              className={cn(
+                "h-3.5 w-3.5 shrink-0 mt-0.5 text-foreground/30 transition-transform",
+                open && "rotate-180",
+              )}
+            />
+          </button>
+        </CollapsibleTrigger>
+      )}
+
+      <CollapsibleContent>
+        {loading && rows.length === 0 ? (
+          <p className="text-[11px] text-foreground/40">Loading activity…</p>
+        ) : rows.length === 0 ? (
+          <p className="text-[11px] text-foreground/40">
+            {running ? "Waiting for the first step…" : emptyLabel ?? "No activity recorded for this run"}
+          </p>
+        ) : (
+          <ol className="space-y-0">
+            {rows.map((row, i) => (
+              <RunActivityRowView key={row.id} row={row} last={i === rows.length - 1} />
+            ))}
+          </ol>
+        )}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+
+  // Card variant: the DetailCard draws the header, so the rail must not draw
+  // a second one. Title, step count and run status map onto the slots the kit
+  // already has — title / subtitle / action.
+  if (card) {
+    return (
+      <DetailCard
+        title={title}
+        subtitle={rows.length > 0 ? `${rows.length} ${rows.length === 1 ? "step" : "steps"}` : undefined}
+        action={status}
+        className={className}
+        data-testid="run-activity"
+      >
+        {body}
+      </DetailCard>
+    )
+  }
+
   return (
-    <div className={cn("border-t border-white/[0.06] pt-3 px-4 pb-4", className)}>
+    <div
+      data-testid="run-activity"
+      className={cn("border-t border-white/[0.06] pt-3 px-4 pb-4", className)}
+    >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-semibold text-foreground/80">{title}</span>
-          {waiting ? (
-            <span className="inline-flex items-center gap-1 text-[10px] text-warn">
-              <span className="h-1.5 w-1.5 rounded-full bg-warn animate-pulse" />
-              Waiting for approval
-            </span>
-          ) : running ? (
-            <span className="inline-flex items-center gap-1 text-[10px] text-primary">
-              <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-              Running
-            </span>
-          ) : null}
+          {status}
         </div>
         {rows.length > 0 && (
           <span className="text-[10px] text-foreground/35 tabular-nums">{rows.length} steps</span>
         )}
       </div>
-
-      <Collapsible open={open} onOpenChange={setTimelineOpen}>
-        {verdict && VerdictIcon && (
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="mb-2 -mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-md px-2 py-2 text-left hover:bg-white/[0.03]"
-            >
-              <VerdictIcon className={cn("h-4 w-4 shrink-0 mt-0.5", VERDICT_ICON_TONE[verdict.outcome])} />
-              <div className="min-w-0 flex-1">
-                <span className="text-[12px] font-medium text-foreground/90">{verdict.verdict}</span>
-                {verdict.summary && (
-                  <p className="mt-0.5 text-[10px] text-foreground/50">{verdict.summary}</p>
-                )}
-              </div>
-              <ChevronDown
-                className={cn(
-                  "h-3.5 w-3.5 shrink-0 mt-0.5 text-foreground/30 transition-transform",
-                  open && "rotate-180",
-                )}
-              />
-            </button>
-          </CollapsibleTrigger>
-        )}
-
-        <CollapsibleContent>
-          {loading && rows.length === 0 ? (
-            <p className="text-[11px] text-foreground/40">Loading activity…</p>
-          ) : rows.length === 0 ? (
-            <p className="text-[11px] text-foreground/40">
-              {running ? "Waiting for the first step…" : emptyLabel ?? "No activity recorded for this run"}
-            </p>
-          ) : (
-            <ol className="space-y-0">
-              {rows.map((row, i) => (
-                <RunActivityRowView key={row.id} row={row} last={i === rows.length - 1} />
-              ))}
-            </ol>
-          )}
-        </CollapsibleContent>
-      </Collapsible>
+      {body}
     </div>
   )
 }

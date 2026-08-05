@@ -107,6 +107,10 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/budget-summary", authed(wsCtx(http.HandlerFunc(pipes.GetBudgetSummary))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", authed(wsCtx(http.HandlerFunc(pipes.GetBudget))))
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", roleManage, pipes.SetBudget)
+	// Appearance is presentation, so it sits at the create tier rather
+	// than manage: picking an icon is not an operational act, and a
+	// MEMBER who can author a routine can reasonably label it.
+	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance", roleCreate, pipes.SetAppearance)
 	// Cross-run routine state (#1420). The DSL can only WRITE a watermark
 	// ({{ routine.state.* }} + state_write), so a bad cursor silently made every
 	// later run a no-op with no way to inspect or correct it short of a DB

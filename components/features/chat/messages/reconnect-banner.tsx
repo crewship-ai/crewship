@@ -21,7 +21,7 @@ export function ReconnectBanner({ status, queuedCount = 0 }: ReconnectBannerProp
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -32, opacity: 0 }}
           transition={spring.smooth}
-          className="absolute top-0 inset-x-0 z-30 flex items-center justify-center gap-2 px-4 py-1.5 text-xs bg-warn dark:bg-warn/30 text-warn dark:text-warn border-b border-warn dark:border-warn"
+          className="absolute top-0 inset-x-0 z-30 flex items-center justify-center gap-2 px-4 py-1.5 text-xs bg-warn/20 dark:bg-warn/30 text-warn dark:text-warn border-b border-warn/40 dark:border-warn"
           role="status"
           aria-live="polite"
         >

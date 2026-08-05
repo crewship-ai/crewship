@@ -112,6 +112,24 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	if pipes != nil {
 		routineAdapter := NewRoutineInternalAdapter(pipes)
 		r.mux.Handle("POST /api/v1/internal/routines/schedules", internalAuth(http.HandlerFunc(routineAdapter.CreateSchedule)))
+
+		// The two READ tools (#1763). list_routines and
+		// discover_capabilities forwarded to the public JWT-authed
+		// routes while the sidecar carries only X-Internal-Token, so
+		// both answered 401 and an agent authoring a routine could see
+		// neither the crew's reach nor the existing library. Their own
+		// CrewHandler is built here rather than threaded through the
+		// signature — it is stateless over (db, logger), the same pair
+		// router_crews.go constructs it from.
+		readAdapter := NewPipelineReadInternalAdapter(pipes, NewCrewHandler(r.db, r.logger))
+		// internalWsCtx, not a hand-rolled query read: it requires
+		// workspace_id, refuses one that disagrees with the token's
+		// binding, and injects the context — the middle step being the
+		// one a hand-rolled version forgets.
+		r.mux.Handle("GET /api/v1/internal/pipelines",
+			internalAuth(internalWsCtx(http.HandlerFunc(readAdapter.ListPipelines))))
+		r.mux.Handle("GET /api/v1/internal/crews/{crewId}/capabilities",
+			internalAuth(internalWsCtx(http.HandlerFunc(readAdapter.CrewCapabilities))))
 	}
 	if r.skillGenHandler != nil {
 		skillAdapter := NewSkillInternalAdapter(r.skillGenHandler)
@@ -185,6 +203,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("POST /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.Create)))
 	r.mux.Handle("PATCH /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.UpdateStatus)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/comments", internalAuth(http.HandlerFunc(internalIssues.CreateComment)))
+	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/relations", internalAuth(http.HandlerFunc(internalIssues.CreateRelation)))
 
 	// Query routes (peer-to-peer communication, standup summaries, escalations).
 	// Internal-auth side; public counterparts are registered in

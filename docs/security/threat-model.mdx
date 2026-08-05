@@ -620,12 +620,17 @@ second change (#1301) after the chokepoint (#1295, #1303) closed the leak.
 Coverage of the **rest** of the sidecar's routes is a different, weaker
 statement, deliberately kept honest here:
 
-- `/query`, `/escalate` and the agent-attribution routes (`/issue/create`,
-  `/expose-port`, `/keeper/*`, `/pipelines/save`, `/pipelines/<slug>/run`,
-  `/mcp/routines`, `/connections/<crew>/message`, `/report-confidence`)
-  resolve the acting agent **inside the handler** and fail closed there. They
-  are not behind a prefix gate; a route added next to them does not inherit
-  the check.
+- `/query`, `/escalate` and the agent-attribution routes (the whole issue
+  surface — `/issue/create`, `/issues`, `/issue/<id>` GET and PATCH,
+  `/issue/<id>/comment`, `/issue/<id>/link` — plus `/expose-port`,
+  `/keeper/*`, `/pipelines/save`, `/pipelines/<slug>/run`, `/mcp/routines`,
+  `/connections/<crew>/message`, `/report-confidence`) resolve the acting
+  agent **inside the handler** and fail closed there. They are not behind a
+  prefix gate; a route added next to them does not inherit the check.
+  The issue **reads** are on this list deliberately rather than in the
+  crew-scoped bucket below: the board is crew data, and a sibling that omits
+  its `Authorization` header must not fall back to the boot agent's identity
+  to read it.
 - Crew-scoped routes (mission start, pipeline dry-run, cross-crew message and
   file reads) carry **no per-agent** decision at all: any member of the crew
   may drive them, and authorization is applied by crewshipd on the far side of

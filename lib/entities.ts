@@ -20,6 +20,7 @@ export {
   type GradientPalette,
   GRADIENT_PALETTES,
   getGradientPalette,
+  iconColorProps,
   getCrewDotColor,
   crewColorHex,
   // Icon search / categories.

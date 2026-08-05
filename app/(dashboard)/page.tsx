@@ -15,6 +15,7 @@ import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
+import { Appear, AppearStack } from "@/components/ui/detail"
 import { StatusDonut, type StatusDonutDatum } from "@/components/features/dashboard/status-donut"
 import { ThroughputChart, type ThroughputBucket, type ThroughputSeries } from "@/components/features/dashboard/throughput-chart"
 import { CostBurnChart, type CostBucket, type CostSeries } from "@/components/features/dashboard/cost-burn-chart"
@@ -463,6 +464,7 @@ export default function DashboardPage() {
 
       {/* ── Row 1: 6 KPI cards ─ responsive 2→3→6 cols ──────────── */}
       <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+        <AppearStack>
         <KpiCard
           label="Agents"
           value={totalAgents}
@@ -506,10 +508,12 @@ export default function DashboardPage() {
           }
           subtitle={runsFailed > 0 ? `${runsFailed} failed` : runsToday > 0 ? "all clean" : "no data"}
         />
+        </AppearStack>
       </div>
 
       {/* ── Row 2: Throughput (2fr) + Status donut (1fr) ─────────── */}
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+        <AppearStack from={6}>
         <DashboardCard
           title="Issue throughput · 24h · by crew"
           icon={TrendingUp}
@@ -532,10 +536,12 @@ export default function DashboardPage() {
             <div className="flex items-center justify-center h-[160px] text-[11px] text-muted-foreground-soft">No missions yet</div>
           )}
         </DashboardCard>
+        </AppearStack>
       </div>
 
       {/* ── Row 3: Cost burn (2fr) + Top missions (1fr) ──────────── */}
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+        <AppearStack from={8}>
         <DashboardCard
           title="Cost burn · 7 days"
           icon={Banknote}
@@ -554,18 +560,22 @@ export default function DashboardPage() {
         <DashboardCard title="Top cost missions" icon={Gem} hint={`top ${topMissions.length}`}>
           <TopMissionsChart missions={topMissions} />
         </DashboardCard>
+        </AppearStack>
       </div>
 
       {/* ── Row 4: Container resources (live, full width) ────────── */}
-      <DashboardCard title="Container resources · live" icon={Box} hint="via container.stats">
-        <ContainerResourcesTile entries={containerEntries} />
-      </DashboardCard>
+      <Appear order={9}>
+        <DashboardCard title="Container resources · live" icon={Box} hint="via container.stats">
+          <ContainerResourcesTile entries={containerEntries} />
+        </DashboardCard>
+      </Appear>
 
       {/* ── Row 5: Heatmap (2fr) + Crew radial (1fr) + Projects (1fr) ──
           Mobile: each card on its own row.
           Tablet: heatmap full width, radial+projects side by side.
           Desktop: 4-col grid with heatmap spanning 2. */}
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
+        <AppearStack from={9}>
         <DashboardCard title="Agent activity · 24h" icon={Activity} hint="runs per hour" className="md:col-span-2">
           <AgentHeatmap agents={heatmapAgents} buckets={heatmapBuckets} />
         </DashboardCard>
@@ -575,26 +585,31 @@ export default function DashboardPage() {
         <DashboardCard title="Active projects" icon={FolderOpen} hint={`${projects.length} project${projects.length === 1 ? "" : "s"}`}>
           <ProjectProgress projects={projectEntries} />
         </DashboardCard>
+        </AppearStack>
       </div>
 
       {/* ── Row 6: Activity feed (2fr) + Inbox (1fr) ─────────────── */}
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+        <AppearStack from={9}>
         <DashboardCard title="Live activity" icon={Radio} hint="streaming" className="lg:col-span-2">
           <ActivityFeed />
         </DashboardCard>
         <DashboardCard title="Inbox" icon={InboxIcon} hint={`${inboxEntries.length} item${inboxEntries.length === 1 ? "" : "s"}`}>
           <InboxTile entries={inboxEntries} />
         </DashboardCard>
+        </AppearStack>
       </div>
 
       {/* ── Row 7: Recent missions table ─────────────────────────── */}
-      <DashboardCard
-        title="Recent missions"
-        icon={ListChecks}
-        action={<Link href="/issues" className="text-[10px] hover:text-foreground">Issues →</Link>}
-      >
-        <RecentMissionsTable missions={recentMissions} />
-      </DashboardCard>
+      <Appear order={9}>
+        <DashboardCard
+          title="Recent missions"
+          icon={ListChecks}
+          action={<Link href="/issues" className="text-[10px] hover:text-foreground">Issues →</Link>}
+        >
+          <RecentMissionsTable missions={recentMissions} />
+        </DashboardCard>
+      </Appear>
       </div>
     </div>
   )

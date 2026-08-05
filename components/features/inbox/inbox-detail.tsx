@@ -3,7 +3,8 @@
 import { useState } from "react"
 import { AlertTriangle, Clock, Eye, EyeOff } from "lucide-react"
 
-import { Appear, DetailCard, Pill } from "@/components/ui/detail"
+import { Appear, DetailCard, Pill, type DetailTone } from "@/components/ui/detail"
+import { RoutineProposalDiff } from "./routine-proposal-diff"
 import { Button } from "@/components/ui/button"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { FourEyesNotice } from "@/components/features/escalations/four-eyes-notice"
@@ -17,7 +18,7 @@ import { KindActions } from "./kind-actions"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import {
   absolute, canRole, categoryOf, decisionMetaFor, expiresIn, jumpFor, payloadNumber, remainingLabel,
-  payloadString, since, subjectOf, type WorkspaceRole,
+  payloadString, payloadStrings, since, subjectOf, type WorkspaceRole,
 } from "./inbox-derive"
 
 // =============================================================================
@@ -265,6 +266,14 @@ export function DecisionSubject({ item }: { item: InboxItem }) {
   const reasons = Array.isArray(item.payload?.risk_reasons)
     ? (item.payload?.risk_reasons as unknown[]).filter((r): r is string => typeof r === "string")
     : []
+  // What a proposed routine declares it will reach for. `risk_reasons`
+  // says "credentials_required", which is the category; these are the
+  // things themselves, and they are the reviewer's actual question.
+  const asks: { key: string; label: string; values: string[]; tone: DetailTone }[] = [
+    { key: "credentials_required", label: "Credentials", values: payloadStrings(item, "credentials_required"), tone: "warn" as DetailTone },
+    { key: "integrations_required", label: "Integrations", values: payloadStrings(item, "integrations_required"), tone: "purple" as DetailTone },
+    { key: "egress_targets", label: "Egress", values: payloadStrings(item, "egress_targets"), tone: "destructive" as DetailTone },
+  ].filter((a) => a.values.length > 0)
   const failures = payloadNumber(item, "consecutive_failures")
   const missed = payloadNumber(item, "missed_count")
   const policy = payloadString(item, "catchup_policy")
@@ -282,11 +291,23 @@ export function DecisionSubject({ item }: { item: InboxItem }) {
   if (rules != null) chips.push(<Pill key="rules" tone="purple">{rules} rules</Pill>)
   if (scanned != null) chips.push(<Pill key="scanned" tone="default">{scanned} entries scanned</Pill>)
 
-  if (chips.length === 0 && !intent && reasons.length === 0) return null
+  if (chips.length === 0 && !intent && reasons.length === 0 && asks.length === 0) return null
 
   return (
     <div className="flex flex-col gap-2">
       {chips.length > 0 && <div className="flex flex-wrap items-center gap-1.5">{chips}</div>}
+      {asks.map((a) => (
+        <div key={a.key} className="flex flex-wrap items-baseline gap-1.5">
+          <span className="type-meta uppercase tracking-wide text-muted-foreground-soft">
+            {a.label}
+          </span>
+          {a.values.map((v) => (
+            <Pill key={v} tone={a.tone}>
+              {v}
+            </Pill>
+          ))}
+        </div>
+      ))}
       {intent && <p className="type-row leading-snug text-muted-foreground">{intent}</p>}
       {reasons.length > 0 && (
         <ul className="type-meta flex flex-col gap-0.5 text-muted-foreground">
@@ -415,6 +436,19 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
             </div>
           </DetailCard>
         </Appear>
+      )}
+
+      {/* A routine proposal is a decision about a CHANGE, so the change
+          is on the item rather than three clicks away in another
+          surface. Only for that kind — every other inbox item has no
+          versions to compare. */}
+      {payloadString(item, "kind") === "routine_proposal" && (
+        <RoutineProposalDiff
+          workspaceId={item.workspace_id}
+          slug={payloadString(item, "slug")}
+          fromVersion={payloadNumber(item, "from_version")}
+          toVersion={payloadNumber(item, "to_version")}
+        />
       )}
 
       {item.body_md && (

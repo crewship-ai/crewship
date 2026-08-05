@@ -22,6 +22,8 @@ export interface Pipeline {
   invocation_count: number
   last_invoked_at?: string
   last_invocation_status?: string
+  icon?: string
+  color?: string
   // Lifecycle status: "active" (normal/runnable), "proposed" (risky /
   // agent-authored, awaiting MANAGER+ approval), "disabled" (killed by
   // OWNER/ADMIN). Absent on older payloads → treated as "active".
@@ -122,6 +124,12 @@ export function usePipelines(workspaceId: string | null | undefined) {
   // page reload. Cheap because the list endpoint is small + cached.
   useRealtimeEvent("pipeline.run.completed", refresh)
   useRealtimeEvent("pipeline.run.failed", refresh)
+  // The catalog itself moving — saved, approved, rejected, disabled,
+  // deleted. Run events covered "a routine ran"; nothing covered "a
+  // routine appeared", so an agent-authored routine stayed invisible
+  // until a manual refresh. That gap is what the Refresh button was
+  // really for.
+  useRealtimeEvent("pipeline.saved", refresh)
 
   return { pipelines, loading, error, refresh }
 }

@@ -37,6 +37,19 @@ export function payloadString(item: InboxItem, key: string): string {
   return typeof v === "string" ? v : ""
 }
 
+/**
+ * A payload list, filtered to the strings in it.
+ *
+ * Non-strings are dropped rather than stringified: these render as
+ * chips a reviewer reads as declarations, and `[object Object]` in that
+ * position is worse than one fewer chip.
+ */
+export function payloadStrings(item: InboxItem, key: string): string[] {
+  const v = item.payload?.[key]
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is string => typeof x === "string")
+}
+
 export function payloadNumber(item: InboxItem, key: string): number | null {
   const v = item.payload?.[key]
   return typeof v === "number" ? v : null

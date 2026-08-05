@@ -333,6 +333,14 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 // correct crew container -- exactly like the Create handler but driven by the
 // MissionEngine instead of a sidecar HTTP call.
 
+// NOTE (#1754): this path is NOT subject to the delegation caps. The row
+// already exists — the mission engine created it from a task list — so there is
+// no dispatch decision to refuse here, and it stores depth 0 by column default.
+// A mission an agent authored via /mission/create therefore fans out uncapped,
+// and its tasks read as roots when their agents delegate. Capping the mission
+// path means capping task-list creation, which is a different control on a
+// different door; the caps' own doc comment says so rather than implying
+// coverage this function does not have.
 func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestrator.DispatchRequest) error {
 	var target targetAgentInfo
 	err := h.db.QueryRowContext(ctx, `

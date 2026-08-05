@@ -1,16 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { RoutinesExplorer } from "../routines-explorer"
-import { RoutinesListView } from "../routines-list-view"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 
 // Live surfaces on /routines: the explorer sidebar row grows a
 // "▶ <current step> · <elapsed>" sub-line while a routine has an
-// active run (amber ⏸ variant for awaiting approval), and the list
-// table's status cell swaps the historical pill for a live Running
-// pill with step · elapsed · cost. Both read the shared
-// useActiveRoutineRuns hook, matched by pipeline_slug.
+// active run (amber ⏸ variant for awaiting approval), read from the
+// shared useActiveRoutineRuns hook and matched by pipeline_slug.
+//
+// The catalog table that used to sit beside it is gone — the overview
+// replaced it, and its live-row behaviour is covered in
+// routines-overview.test.tsx.
 
 const h = vi.hoisted(() => ({
   runs: [] as unknown[],
@@ -160,55 +161,5 @@ describe("<RoutinesExplorer> live rows", () => {
     h.runs = [activeRun({ pipeline_slug: "other-routine" })]
     render(<RoutinesExplorer routines={[pipeline({})]} {...EXPLORER_PROPS} />)
     expect(screen.queryByText(/ask-casey/)).not.toBeInTheDocument()
-  })
-})
-
-describe("<RoutinesListView> live status cell", () => {
-  const LIST_PROPS = {
-    loading: false,
-    error: null,
-    selectedSlug: null,
-    onSelect: vi.fn(),
-    onRefresh: vi.fn(),
-  }
-
-  beforeEach(() => {
-    h.runs = []
-  })
-
-  it("keeps the historical status pill when nothing is live", () => {
-    render(<RoutinesListView routines={[pipeline({})]} {...LIST_PROPS} />)
-    expect(screen.getByText("completed")).toBeInTheDocument()
-    expect(screen.queryByText("Running")).not.toBeInTheDocument()
-  })
-
-  it("swaps in a Running pill with step · elapsed · cost while a run is live", () => {
-    h.runs = [activeRun({})]
-    sleepRealMs(60)
-    render(<RoutinesListView routines={[pipeline({})]} {...LIST_PROPS} />)
-    expect(screen.getByText("Running")).toBeInTheDocument()
-    const sub = screen.getByText(/ask-casey/)
-    expect(sub.textContent).toMatch(/12\.0s/)
-    expect(sub.textContent).toMatch(/\$0\.0110/)
-    // The stale historical pill is replaced, not duplicated.
-    expect(screen.queryByText("completed")).not.toBeInTheDocument()
-  })
-
-  it("shows the amber Awaiting approval pill for a parked run", () => {
-    h.runs = [activeRun({ status: "waiting" })]
-    render(<RoutinesListView routines={[pipeline({})]} {...LIST_PROPS} />)
-    expect(screen.getByText("Awaiting approval")).toBeInTheDocument()
-  })
-
-  it("bubbles routines with a live run to the top of the table", () => {
-    const idle = pipeline({ id: "p-idle", slug: "idle-routine", name: "Idle routine", invocation_count: 999 })
-    const live = pipeline({ id: "p-live", slug: "live-routine", name: "Live routine", invocation_count: 1 })
-    h.runs = [activeRun({ pipeline_slug: "live-routine" })]
-    render(<RoutinesListView routines={[idle, live]} {...LIST_PROPS} />)
-    const rows = screen.getAllByRole("button", { name: /open routine/i })
-    // Default sort is invocation_count desc — idle would win without
-    // the live-first bubble.
-    expect(rows[0]).toHaveAccessibleName("Open routine Live routine")
-    expect(rows[1]).toHaveAccessibleName("Open routine Idle routine")
   })
 })

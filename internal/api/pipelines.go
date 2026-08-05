@@ -331,7 +331,27 @@ type pipelineResponse struct {
 	// Status is the governance lifecycle state: active | proposed | disabled.
 	// Risky agent/user-authored routines land 'proposed' and need MANAGER+
 	// approval; an OWNER/ADMIN can 'disabled' a live routine (airbag).
-	Status    string `json:"status"`
+	Status string `json:"status"`
+
+	// Icon and Color are presentation — a crew-icon name and a
+	// gradient-palette id. Omitted when unset so the client can tell
+	// "not chosen" from "chosen as empty" and fall back to deriving one
+	// from the slug.
+	Icon  string `json:"icon,omitempty"`
+	Color string `json:"color,omitempty"`
+
+	// RiskReasons explains WHY a routine is `proposed`. Populated only
+	// on the single-routine detail response, and only while a proposal
+	// is open — a reviewer needs to know what they are judging, and a
+	// banner that says "awaiting approval" and nothing else asks someone
+	// to approve something they cannot see.
+	RiskReasons []string `json:"risk_reasons,omitempty"`
+
+	// InboxItemID deep-links the routine's "awaiting approval" banner
+	// straight at the review row instead of the inbox root. Empty once
+	// the review is resolved.
+	InboxItemID string `json:"inbox_item_id,omitempty"`
+
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 	// LinkedIssueCount is the number of issues bound to this routine
@@ -372,6 +392,8 @@ func toPipelineResponse(p *pipeline.Pipeline, includeDefinition bool) pipelineRe
 		WorkspaceVisible:     p.WorkspaceVisible,
 		InvocationCount:      p.InvocationCount,
 		LastInvocationStatus: p.LastInvocationStatus,
+		Icon:                 p.Icon,
+		Color:                p.Color,
 		AuthorCrewID:         p.AuthorCrewID,
 		AuthorAgentID:        p.AuthorAgentID,
 		AuthorUserID:         p.AuthorUserID,

@@ -21,19 +21,23 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
-		Title         *string   `json:"title"`
-		Description   *string   `json:"description"`
-		Status        *string   `json:"status"`
-		Priority      *string   `json:"priority"`
-		AssigneeType  *string   `json:"assignee_type"`
-		AssigneeID    *string   `json:"assignee_id"`
-		DueDate       *string   `json:"due_date"`
-		ProjectID     *string   `json:"project_id"`
-		Estimate      *int      `json:"estimate"`
-		ParentIssueID *string   `json:"parent_issue_id"`
-		MilestoneID   *string   `json:"milestone_id"`
-		SortOrder     *float64  `json:"sort_order"`
-		Labels        *[]string `json:"labels"`
+		Title        *string `json:"title"`
+		Description  *string `json:"description"`
+		Status       *string `json:"status"`
+		Priority     *string `json:"priority"`
+		AssigneeType *string `json:"assignee_type"`
+		AssigneeID   *string `json:"assignee_id"`
+		DueDate      *string `json:"due_date"`
+		ProjectID    *string `json:"project_id"`
+		// Raw, not *int: a JSON null decodes into a nil *int, which is
+		// indistinguishable from the field being absent — so "clear the
+		// estimate" arrived as an empty patch and 400ed on "No fields to
+		// update". Raw keeps absent (nil) and null (the four bytes) apart.
+		Estimate      json.RawMessage `json:"estimate"`
+		ParentIssueID *string         `json:"parent_issue_id"`
+		MilestoneID   *string         `json:"milestone_id"`
+		SortOrder     *float64        `json:"sort_order"`
+		Labels        *[]string       `json:"labels"`
 		// Routine binding — pointer + map so the caller can clear it
 		// (RoutineID = ""), set it, or leave it untouched (nil).
 		// RoutineInputs is treated as a full replacement, not a merge,
@@ -148,8 +152,19 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.Set("project_id", *req.ProjectID)
 		}
 	}
-	if req.Estimate != nil {
-		ub.Set("estimate", *req.Estimate)
+	if len(req.Estimate) > 0 {
+		if string(req.Estimate) == "null" {
+			ub.SetNull("estimate")
+		} else {
+			// Reading it raw gives up the decoder's type check, so do it
+			// here — an agent writes this body itself and will send "eight".
+			var pts int
+			if err := json.Unmarshal(req.Estimate, &pts); err != nil {
+				writeProblem(w, r, http.StatusBadRequest, "estimate must be a number or null")
+				return
+			}
+			ub.Set("estimate", pts)
+		}
 	}
 	if req.ParentIssueID != nil {
 		if *req.ParentIssueID == "" {
@@ -158,9 +173,9 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			// Workspace check matches the same gate in Create — pre-fix a
 			// caller could PATCH parent_issue_id to point at another
 			// workspace's issue, silently linking unrelated tenants.
-			// Self-parenting is also rejected to stop the trivial cycle
-			// case (deeper cycles need a recursive walk; tracked
-			// separately).
+			// Self-parenting is rejected here for its specific message; the
+			// deeper A → B → A case is caught by wouldCycleParent below,
+			// the same helper the agent-facing relations endpoint calls.
 			if *req.ParentIssueID == missionID {
 				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id cannot be the issue itself")
 				return
@@ -175,6 +190,14 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 			if parentExists == 0 {
 				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id does not exist in this workspace")
+				return
+			}
+			switch cErr := wouldCycleParent(r.Context(), h.db, missionID, *req.ParentIssueID, wsID); {
+			case errors.Is(cErr, errParentCycle):
+				writeProblem(w, r, http.StatusBadRequest, "parent_issue_id would create a cycle")
+				return
+			case cErr != nil:
+				internalError(w, r, h.logger, "check parent cycle", cErr)
 				return
 			}
 			ub.Set("parent_issue_id", *req.ParentIssueID)

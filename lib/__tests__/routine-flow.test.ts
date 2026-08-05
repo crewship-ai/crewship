@@ -247,3 +247,26 @@ describe("isAgentless", () => {
     expect(isAgentless("agentless")).toBe(false)
   })
 })
+
+// Gmail and Google Drive are the two integrations the accounting
+// routine actually uses, and neither had a mark — they fell back to a
+// generic puzzle glyph in "what it touches" and in Access. A chip that
+// says "Gmail" next to a puzzle piece is a chip that has stopped
+// carrying its own meaning.
+describe("brandIconKey — Google apps", () => {
+  it("resolves Gmail", () => {
+    expect(brandIconKey("gmail")).toBe("gmail")
+    expect(brandIconKey("GMAIL")).toBe("gmail")
+  })
+
+  it("resolves Google Drive under the spellings integrations use", () => {
+    expect(brandIconKey("googledrive")).toBe("googledrive")
+    expect(brandIconKey("google-drive")).toBe("googledrive")
+    expect(brandIconKey("gdrive")).toBe("googledrive")
+  })
+
+  it("keeps Calendar distinct from the other Google apps", () => {
+    expect(brandIconKey("googlecalendar")).toBe("googlecalendar")
+    expect(brandIconKey("gmail")).not.toBe("googlecalendar")
+  })
+})

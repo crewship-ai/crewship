@@ -15469,6 +15469,53 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance": {
+      "patch": {
+        "operationId": "patch_api_v1_workspaces_workspaceId_pipelines_slug_appearance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve": {
       "post": {
         "operationId": "post_api_v1_workspaces_workspaceId_pipelines_slug_approve",

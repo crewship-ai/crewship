@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+// The upstream here is a mock that accepts anything, so this can only
+// prove WHICH route the sidecar calls — never that the server would
+// take the call. That gap is how #1763 shipped: the sidecar aimed at
+// the public, JWT-authed route while carrying only X-Internal-Token,
+// every real call answered 401, and this test stayed green throughout.
+//
+// The path assertion below is therefore load-bearing, and the
+// counterpart that exercises the real middleware lives in
+// internal/api/internal_pipelines_read_test.go.
 func TestCrewCapabilities_ProxiesToOwnCrew(t *testing.T) {
 	var gotPath string
 	var gotToken string
@@ -29,8 +38,9 @@ func TestCrewCapabilities_ProxiesToOwnCrew(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", status, body)
 	}
 	// Crew comes from IPC, not the caller — the agent can only see its own crew.
-	if gotPath != "/api/v1/crews/crew-9/capabilities" {
-		t.Errorf("path = %q, want /api/v1/crews/crew-9/capabilities", gotPath)
+	// The INTERNAL route: the public one refuses the sidecar's credential.
+	if gotPath != "/api/v1/internal/crews/crew-9/capabilities" {
+		t.Errorf("path = %q, want the internal capabilities route", gotPath)
 	}
 	if gotToken != "sekret" {
 		t.Errorf("internal token not forwarded: %q", gotToken)

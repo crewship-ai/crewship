@@ -11,8 +11,20 @@ import (
 )
 
 // newAssignmentServer creates a Server configured for assignment testing with a mock crewshipd.
+//
+// A fixture that leaves IPCConfig.AgentID empty gets a boot identity here.
+// /assign attributes every dispatch to an acting agent (#1754) and fails closed
+// when it can resolve none — a sidecar with no boot identity and no per-agent
+// tokens can attribute nothing, which is #1059's rule, not a quirk of this
+// route. Production always mints AgentID (orchestrator_run.go's ipcCfg). The
+// tests below are about target/crew validation; identity has its own file,
+// assignment_identity_test.go.
 func newAssignmentServer(t *testing.T, ipc *IPCConfig, members []CrewMember) *Server {
 	t.Helper()
+	if ipc != nil && ipc.AgentID == "" {
+		ipc.AgentID = "boot-agent"
+		ipc.AgentSlug = "boot"
+	}
 	return NewServer(ServerConfig{
 		Addr:        "127.0.0.1:0",
 		Logger:      slog.Default(),

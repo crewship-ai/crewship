@@ -15,6 +15,7 @@ import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { AppearStack } from "@/components/ui/detail"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -544,6 +545,7 @@ function LegacyIntegrationsPage() {
 
       {/* ── KPI strip ──────────────────────────────────────────── */}
       <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+        <AppearStack>
         <KpiCard
           label="Total"
           value={servers.length}
@@ -574,6 +576,7 @@ function LegacyIntegrationsPage() {
           value={totalBindings}
           subtitle={totalBindings === 0 ? "no agents bound" : `across ${servers.length} server${servers.length === 1 ? "" : "s"}`}
         />
+        </AppearStack>
       </div>
 
       {/* ── Servers list ───────────────────────────────────────── */}

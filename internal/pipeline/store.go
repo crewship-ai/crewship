@@ -636,6 +636,7 @@ const pipelineColumns = `
     COALESCE(execution_tier_json, ''),
     COALESCE(status, 'active'),
     COALESCE(monthly_budget_usd, 0),
+    COALESCE(icon, ''), COALESCE(color, ''),
     created_at, updated_at, deleted_at`
 
 // rowScanner narrows the rows interface to just what we need so
@@ -675,6 +676,7 @@ func scanPipeline(rs rowScanner) (*Pipeline, error) {
 		&p.ExecutionTierJSON,
 		&p.Status,
 		&p.MonthlyBudgetUSD,
+		&p.Icon, &p.Color,
 		&createdAt, &updatedAt, &deletedAt,
 	)
 	if err != nil {
@@ -693,6 +695,42 @@ func scanPipeline(rs rowScanner) (*Pipeline, error) {
 		p.DeletedAt = &t
 	}
 	return &p, nil
+}
+
+// SetAppearance stores a routine's icon and colour.
+//
+// Deliberately its own statement rather than a field on SaveInput: Save
+// rewrites definition_json, recomputes definition_hash and can mint a
+// new version, and none of that should happen because somebody picked a
+// different colour. This touches two columns and updated_at.
+//
+// Empty strings CLEAR the value — the UI falls back to deriving a stable
+// icon from the slug when unset, so "back to default" has to be
+// reachable. They are stored as NULL rather than ” so the column
+// carries one meaning for "not set" instead of two.
+func (s *Store) SetAppearance(ctx context.Context, workspaceID, slug, icon, color string) error {
+	iconVal := sql.NullString{String: icon, Valid: icon != ""}
+	colorVal := sql.NullString{String: color, Valid: color != ""}
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: pipelines.updated_at is not ordered/compared in SQL; the whole pipelines table writes RFC3339Nano consistently
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE pipelines SET icon = ?, color = ?, updated_at = ?
+         WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`,
+		iconVal, colorVal, now, workspaceID, slug,
+	)
+	if err != nil {
+		return fmt.Errorf("set appearance: %w", err)
+	}
+	// A workspace mismatch and a missing routine are the same zero rows
+	// here, and both are ErrNotFound on purpose: telling one tenant that
+	// another tenant's slug exists is a leak, however small.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set appearance: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // definitionHash returns sha256 of the raw DSL JSON bytes as lowercase

@@ -121,10 +121,10 @@ export function CrewNetworkPolicy({
           <CardTitle className="text-base">Network Policy</CardTitle>
           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
             isFree
-              ? "bg-success text-success dark:bg-success dark:text-success"
+              ? "bg-success/15 text-success dark:bg-success/20 dark:text-success"
               : isUnenforced
                 ? "bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-destructive"
-                : "bg-warn text-warn dark:bg-warn dark:text-warn"
+                : "bg-warn/15 text-warn dark:bg-warn/20 dark:text-warn"
           }`}>
             {isFree ? "Unrestricted" : isUnenforced ? "Restricted — not enforced" : "Restricted"}
           </span>
