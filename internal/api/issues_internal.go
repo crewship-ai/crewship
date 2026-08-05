@@ -4,13 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/untrusted"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -214,81 +212,7 @@ func (h *InternalIssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("load comment count", "issue_id", issue.ID, "error", err)
 	}
 
-	// Attached pull requests, with the provider-supplied free text fenced.
-	// This is the agent-facing read; see loadAgentCodeLinks.
-	issue.CodeLinks = h.loadAgentCodeLinks(r.Context(), issue.ID)
-
 	writeJSON(w, http.StatusOK, issue)
-}
-
-// agentCodeLink is one attached pull request as an AGENT sees it.
-//
-// URL, Provider and State are ours: the URL survived gitlink.Parse's
-// character-restricted grammar, and State is a four-value enum we derived.
-// Everything the pull-request AUTHOR typed — its title, their display name,
-// the branch names — is external content that arrives inside an agent prompt,
-// which is the ingress-side prompt-injection surface internal/untrusted
-// exists for (OWASP LLM01). Anyone who can open a PR against a linked
-// repository can put "ignore your previous instructions" in its title; on a
-// public repo, that is anyone at all.
-//
-// It is collapsed into ONE fenced block per link rather than four, because
-// the fence's contract is a nonce-delimited region of pure data and four of
-// them per pull request would be noise the model has to re-parse. The block
-// carries a per-call random nonce, so a title containing a literal
-// </untrusted> cannot close it.
-type agentCodeLink struct {
-	URL      string `json:"url"`
-	Provider string `json:"provider"`
-	State    string `json:"state,omitempty"`
-	// Details is the fenced block. It is NOT a plain string to be
-	// concatenated blind: it already carries its own <untrusted …> wrapper.
-	Details string `json:"details,omitempty"`
-}
-
-// loadAgentCodeLinks reads an issue's code links for agent consumption.
-// Best-effort: a failure here must not take the issue read down with it, so
-// it logs and returns nothing.
-func (h *InternalIssueHandler) loadAgentCodeLinks(ctx context.Context, missionID string) []agentCodeLink {
-	rows, err := h.db.QueryContext(ctx, `
-		SELECT url, provider, COALESCE(state, ''), COALESCE(title, ''), COALESCE(author, ''),
-		       COALESCE(source_branch, ''), COALESCE(target_branch, '')
-		FROM mission_code_links
-		WHERE mission_id = ?
-		ORDER BY created_at DESC, id DESC`, missionID)
-	if err != nil {
-		h.logger.Error("load agent code links", "issue_id", missionID, "error", err)
-		return nil
-	}
-	defer rows.Close()
-
-	var out []agentCodeLink
-	for rows.Next() {
-		var url, provider, state, title, author, src, dst string
-		if err := rows.Scan(&url, &provider, &state, &title, &author, &src, &dst); err != nil {
-			h.logger.Error("scan agent code link", "issue_id", missionID, "error", err)
-			continue
-		}
-		var b strings.Builder
-		if title != "" {
-			fmt.Fprintf(&b, "Title: %s\n", title)
-		}
-		if author != "" {
-			fmt.Fprintf(&b, "Author: %s\n", author)
-		}
-		if src != "" || dst != "" {
-			fmt.Fprintf(&b, "Branch: %s -> %s\n", src, dst)
-		}
-		link := agentCodeLink{URL: url, Provider: provider, State: state}
-		if b.Len() > 0 {
-			link.Details = untrusted.Wrap("git_pull_request", strings.TrimRight(b.String(), "\n"))
-		}
-		out = append(out, link)
-	}
-	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (agent code links)", "issue_id", missionID, "error", err)
-	}
-	return out
 }
 
 // Create handles POST /api/v1/internal/issues

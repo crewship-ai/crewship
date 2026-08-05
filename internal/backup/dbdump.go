@@ -194,10 +194,6 @@ var BackupTables = []string{
 	"mission_labels",
 	"mission_proposals",
 	"mission_relations",
-	// mission_code_links FKs into missions AND credentials (credential_id,
-	// ON DELETE SET NULL) — both are dumped above, so this position is
-	// FK-safe. Direct workspace_id column, so the generic filter applies.
-	"mission_code_links",
 	"skill_invocations",
 	"workflow_states",
 	"captain_chats",
