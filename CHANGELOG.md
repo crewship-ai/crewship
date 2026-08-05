@@ -69,6 +69,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The status chips on `/issues` could only ever select one status.** The
+  chip row was handed the list `useFilteredIssues` had *already* narrowed by
+  status, so picking "Backlog" dropped every other chip's count to 0 — and a
+  chip whose count is 0 is not rendered at all, which put the second status
+  permanently out of reach. The "All" pill had the mirror-image bug: it
+  advertised the filtered count as the total. The hook now returns
+  `{ visible, statusFacet }` — `visible` is what the board and list render,
+  `statusFacet` is the same set with the status filter left out, and it is
+  what the chips count. The code comment above the call site had described
+  the correct behaviour ("counts derive from the pre-status-filter set")
+  since it was written; only the code disagreed.
+
+- **Bulk editing from the issues list view did nothing.** `IssuesListInline`
+  — the wrapper `/issues` actually renders in list mode — never forwarded
+  `workspaceId`, so `IssuesListView.handleBulkUpdate` returned at
+  `if (!workspaceId) return`: select rows, pick a status, no request, no
+  error, no feedback. That also made the refusal reporting added in #1563
+  unreachable from the real UI. The wrapper now requires `workspaceId` (and
+  forwards `onBulkAction`), and the regression is pinned at the wrapper
+  level rather than only on the inner view, which the old tests had been
+  handing the prop themselves.
+
 - **Renaming a label was a 500 for everyone.** `PATCH /api/v1/labels/{labelId}`
   built its statement with `newUpdate()`, which always emits `updated_at = ?`
   first; the `labels` table has only `created_at`, so SQLite answered "no such

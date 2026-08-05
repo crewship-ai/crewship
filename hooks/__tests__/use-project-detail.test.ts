@@ -1,5 +1,23 @@
-import { describe, it, expect } from "vitest"
+// useProjectDetail after the selection moved into the URL.
+//
+// The old file tested an `initialProjectId` prop and a once-per-id ref that
+// existed to survive the gap before the project list arrived. The prop is
+// gone — the URL is the source of truth in both directions now — but every
+// invariant it protected still has to hold, so they are re-stated here
+// against `?project=` instead of against a prop.
+
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
+
+// The global setup mocks next/navigation with an always-empty
+// useSearchParams. This hook is about the URL, so read the real one.
+vi.mock("next/navigation", () => ({
+  useSearchParams: () =>
+    new URLSearchParams(typeof window !== "undefined" ? window.location.search : ""),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/issues",
+}))
+
 import { useProjectDetail } from "@/hooks/use-project-detail"
 import type { Project } from "@/lib/types/mission"
 
@@ -8,16 +26,31 @@ function project(id: string, name = id): Project {
     id,
     workspace_id: "ws-1",
     name,
+    slug: id,
     description: null,
-    status: "active",
-    crew_id: null,
-    color: null,
     icon: null,
+    color: "blue",
+    status: "in_progress",
+    priority: "none",
+    health: "on_track",
+    lead_type: null,
+    lead_id: null,
+    start_date: null,
     target_date: null,
     created_at: "2026-05-01T00:00:00Z",
     updated_at: "2026-05-01T00:00:00Z",
-  } as Project
+    issue_count: 0,
+    done_count: 0,
+    progress: 0,
+  }
 }
+
+/** Arrive on /issues with (or without) a project already named. */
+function arriveAt(url: string) {
+  window.history.replaceState(null, "", url)
+}
+
+beforeEach(() => arriveAt("/issues"))
 
 describe("useProjectDetail", () => {
   it("starts with no selection", () => {
@@ -26,7 +59,7 @@ describe("useProjectDetail", () => {
     expect(result.current.selectedProject).toBeNull()
   })
 
-  it("derives selectedProject from selectedProjectId + projects", () => {
+  it("derives selectedProject from the id + the list", () => {
     const { result, rerender } = renderHook(
       ({ projects }: { projects: Project[] }) => useProjectDetail({ projects }),
       { initialProps: { projects: [project("a", "Alpha"), project("b", "Beta")] } },
@@ -40,7 +73,7 @@ describe("useProjectDetail", () => {
     expect(result.current.selectedProject?.name).toBe("Bravo")
   })
 
-  it("clears selectedProjectId when the selected project disappears", () => {
+  it("clears the selection when the project disappears from the list", () => {
     const { result, rerender } = renderHook(
       ({ projects }: { projects: Project[] }) => useProjectDetail({ projects }),
       { initialProps: { projects: [project("a"), project("b")] } },
@@ -49,10 +82,11 @@ describe("useProjectDetail", () => {
     act(() => result.current.setSelectedProjectId("b"))
     expect(result.current.selectedProjectId).toBe("b")
 
-    // Project "b" deleted by another user — refreshed list no longer carries it.
+    // Project "b" deleted by another user — the refreshed list drops it.
     rerender({ projects: [project("a")] })
     expect(result.current.selectedProjectId).toBeNull()
     expect(result.current.selectedProject).toBeNull()
+    expect(window.location.search).not.toContain("project=")
   })
 
   it("handleProjectClose clears the selection", () => {
@@ -65,57 +99,28 @@ describe("useProjectDetail", () => {
 
 // ── Arriving from a link ───────────────────────────────────────────────────
 //
-// /issues?project=<id> — the ⌘K palette's Projects rows, and any bookmark —
-// used to be ignored outright: the hook started at null and nothing read the
-// URL, so picking a project in search dropped the caller on an unfiltered
-// board. The id has to survive the gap before the project list arrives, which
-// is the whole difficulty: on the first render `projects` is still [].
+// /issues?project=<id> — the ⌘K palette's Projects rows, and any bookmark.
+// The difficulty is the gap before the project list arrives: on the first
+// render `projects` is still [], and clearing there would wipe the very id
+// the URL carried.
 
-describe("useProjectDetail — initialProjectId", () => {
-  it("applies the id once the project list arrives", () => {
+describe("useProjectDetail — arriving on a link", () => {
+  it("holds the id until the list arrives, then resolves it", () => {
+    arriveAt("/issues?project=b")
     const { result, rerender } = renderHook(
-      ({ projects }: { projects: Project[] }) =>
-        useProjectDetail({ projects, initialProjectId: "b" }),
+      ({ projects }: { projects: Project[] }) => useProjectDetail({ projects }),
       { initialProps: { projects: [] as Project[] } },
     )
     // Nothing to match against yet — and crucially, not cleared either.
-    expect(result.current.selectedProjectId).toBeNull()
-
-    rerender({ projects: [project("a"), project("b")] })
     expect(result.current.selectedProjectId).toBe("b")
+    expect(result.current.selectedProject).toBeNull()
+
+    rerender({ projects: [project("a"), project("b")] })
+    expect(result.current.selectedProject?.id).toBe("b")
   })
 
-  it("ignores an id no project has", () => {
-    const { result, rerender } = renderHook(
-      ({ projects }: { projects: Project[] }) =>
-        useProjectDetail({ projects, initialProjectId: "ghost" }),
-      { initialProps: { projects: [] as Project[] } },
-    )
-    rerender({ projects: [project("a")] })
-    expect(result.current.selectedProjectId).toBeNull()
-  })
-
-  it("applies once, and never fights the user afterwards", () => {
-    const { result, rerender } = renderHook(
-      ({ projects }: { projects: Project[] }) =>
-        useProjectDetail({ projects, initialProjectId: "b" }),
-      { initialProps: { projects: [] as Project[] } },
-    )
-    rerender({ projects: [project("a"), project("b")] })
-    expect(result.current.selectedProjectId).toBe("b")
-
-    // The user clicks away; a later refresh of the list must not drag them
-    // back to the project the URL named.
-    act(() => result.current.setSelectedProjectId("a"))
-    rerender({ projects: [project("a"), project("b")] })
-    expect(result.current.selectedProjectId).toBe("a")
-
-    act(() => result.current.setSelectedProjectId(null))
-    rerender({ projects: [project("a"), project("b")] })
-    expect(result.current.selectedProjectId).toBeNull()
-  })
-
-  it("changes nothing when no id was given", () => {
+  it("drops an id no project has, once the list can say so", () => {
+    arriveAt("/issues?project=ghost")
     const { result, rerender } = renderHook(
       ({ projects }: { projects: Project[] }) => useProjectDetail({ projects }),
       { initialProps: { projects: [] as Project[] } },
@@ -123,54 +128,80 @@ describe("useProjectDetail — initialProjectId", () => {
     rerender({ projects: [project("a")] })
     expect(result.current.selectedProjectId).toBeNull()
   })
-})
 
-// ── A SECOND link, while the page stays mounted ────────────────────────────
-//
-// The "apply once" latch existed to survive the gap before the project list
-// arrives. It also swallowed every later link: on /issues?project=A, opening
-// ⌘K and picking project B changed the URL and nothing else, because the
-// component never unmounts and the latch was already set. It is the more
-// common path of the two, since the palette is most reachable from a page you
-// are already on.
-describe("useProjectDetail — a changed link on a mounted page", () => {
-  it("follows a new id without a remount", () => {
-    const { result, rerender } = renderHook(
-      ({ id }: { id: string }) =>
-        useProjectDetail({ projects: [project("a"), project("b")], initialProjectId: id }),
-      { initialProps: { id: "a" } },
-    )
-    expect(result.current.selectedProjectId).toBe("a")
+  it("corrects a dead id in place rather than pushing over it", () => {
+    // Pushed, the dead URL would sit behind the clean one: Back returns to
+    // ?project=ghost, this effect fires again, and the reader is thrown
+    // forward every time they try to leave the page.
+    //
+    // Asserted on the History call rather than on a Back, because both
+    // outcomes settle on "/issues" and only the number of entries between
+    // them differs — which jsdom/happy-dom will not let a test observe. Push
+    // versus replace IS the behaviour here, so it is what gets asserted.
+    const push = vi.spyOn(window.history, "pushState")
+    const replace = vi.spyOn(window.history, "replaceState")
+    arriveAt("/issues?project=ghost")
+    push.mockClear()
+    replace.mockClear()
 
-    rerender({ id: "b" })
-    expect(result.current.selectedProjectId).toBe("b")
+    renderHook(() => useProjectDetail({ projects: [project("a")] }))
+
+    expect(window.location.search).toBe("")
+    expect(replace).toHaveBeenCalledWith(null, "", "/issues")
+    expect(push).not.toHaveBeenCalled()
+    push.mockRestore()
+    replace.mockRestore()
   })
 
-  it("still does not drag the user back when only the list rerenders", () => {
+  it("an ordinary selection IS pushed, so Back closes it", () => {
+    const push = vi.spyOn(window.history, "pushState")
+    arriveAt("/issues")
+    push.mockClear()
+
+    const { result } = renderHook(() => useProjectDetail({ projects: [project("a")] }))
+    act(() => result.current.setSelectedProjectId("a"))
+
+    expect(push).toHaveBeenCalledWith(null, "", "/issues?project=a")
+    push.mockRestore()
+  })
+
+  it("never fights the user afterwards", () => {
+    arriveAt("/issues?project=b")
     const { result, rerender } = renderHook(
-      ({ projects }: { projects: Project[] }) =>
-        useProjectDetail({ projects, initialProjectId: "b" }),
+      ({ projects }: { projects: Project[] }) => useProjectDetail({ projects }),
       { initialProps: { projects: [project("a"), project("b")] } },
     )
     expect(result.current.selectedProjectId).toBe("b")
 
+    // The user clicks away; a later refresh of the roster is not a
+    // navigation and must not drag them back to the URL's project.
     act(() => result.current.setSelectedProjectId("a"))
-    // A refresh of the roster is not a navigation.
     rerender({ projects: [project("a"), project("b"), project("c")] })
     expect(result.current.selectedProjectId).toBe("a")
-  })
 
-  it("treats an id no project has as handled, and does not retry it later", () => {
-    const { result, rerender } = renderHook(
-      ({ projects }: { projects: Project[] }) =>
-        useProjectDetail({ projects, initialProjectId: "ghost" }),
-      { initialProps: { projects: [project("a")] } },
-    )
+    act(() => result.current.setSelectedProjectId(null))
+    rerender({ projects: [project("a"), project("b")] })
     expect(result.current.selectedProjectId).toBeNull()
+  })
+})
 
-    act(() => result.current.setSelectedProjectId("a"))
-    rerender({ projects: [project("a"), { ...project("ghost"), id: "ghost" }] })
-    // The ghost arriving later must not yank the user off what they chose.
+// ── A SECOND link, while the page stays mounted ────────────────────────────
+//
+// The first attempt at surviving the load gap was a once-ever latch, and it
+// swallowed every later link: on /issues?project=A, opening ⌘K and picking
+// project B changed the URL and nothing else, because the component never
+// unmounts. That is the commoner path of the two — the palette is most
+// reachable from a page you are already on.
+describe("useProjectDetail — a changed link on a mounted page", () => {
+  it("follows a new id without a remount", () => {
+    arriveAt("/issues?project=a")
+    const projects = [project("a"), project("b")]
+    const { result, rerender } = renderHook(() => useProjectDetail({ projects }))
     expect(result.current.selectedProjectId).toBe("a")
+
+    // ⌘K navigates: the App Router hands down new search params.
+    arriveAt("/issues?project=b")
+    rerender()
+    expect(result.current.selectedProjectId).toBe("b")
   })
 })

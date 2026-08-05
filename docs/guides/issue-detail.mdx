@@ -1,0 +1,166 @@
+---
+title: "The issue detail"
+description: "One issue, one screen — the card surface behind /issues/<identifier> and the /issues centre pane, and the URL that now carries your selection."
+icon: "circle-dot"
+---
+
+# The issue detail
+
+An issue has **one** screen. Whether you clicked a row on the board, followed a
+`/issues/ENG-4` link from the dashboard, hit it from ⌘K, or opened it from the
+Inbox, you land on the same surface with the same controls.
+
+That was not true before. Clicking a row inside `/issues` opened an inline
+panel; the canonical link `/issues/<identifier>` — the one the dashboard, the
+palette, the inbox, activity, the crew tabs and every sub-issue link point at —
+opened a completely different page, with different chrome, a different rail and
+a different set of things you could change. Which screen you got depended on how
+you arrived.
+
+## The two routes
+
+| URL | What it is |
+| --- | --- |
+| `/issues/<identifier>` | The canonical deep link. Back goes wherever `?from=` says, or to `/issues`. |
+| `/issues?issue=<identifier>` | The same detail in the centre pane, beside the explorer, the board and the bottom dock. |
+
+Both render `components/features/issues/issue-detail-surface.tsx`. The route
+only decides what sits above it.
+
+## The selection is in the URL
+
+Opening an issue or a project writes it into the query string:
+
+```
+/issues?issue=ENG-4
+/issues?project=p_31f0c9&issue=ENG-4
+```
+
+Three consequences, all of which were missing before:
+
+- **You can share it.** Paste the URL and the other person opens the same issue,
+  under the same project filter.
+- **A refresh keeps it.** The selection is no longer component state.
+- **Back closes the detail** instead of leaving the page. Selections are written
+  with `history.pushState`, so each one is a history entry.
+
+`?project=` used to be read on arrival and never written, so ⌘K could send you
+to a project but selecting one in the page left the URL saying nothing. Both
+params are now read *and* written, and they do not clobber each other — opening
+an issue inside a project keeps the project.
+
+<Note>
+Writes go through the History API rather than `router.push`. A same-path query
+change through the App Router re-evaluates the dashboard layout subtree and
+flashes the auth provider's full-screen spinner. Same reason as
+`hooks/use-shallow-search-param.ts`; the only difference is push versus replace.
+</Note>
+
+## What you can do on it
+
+Everything the two old screens could do, plus the things only one of them
+could.
+
+| | |
+| --- | --- |
+| **Title** | Click the pencil. Enter saves, Escape abandons. |
+| **Description** | A WYSIWYG editor (Tiptap). Saves on blur, and only when the markdown actually changed. |
+| **Status, Priority, Assignee** | Pickers in the Properties card. |
+| **Due date, Estimate, Milestone** | Same card. Milestone existed only on the inline panel; the shipped page never had it. |
+| **Project** | Picker in the Project card, with a link through to the project board. |
+| **Labels** | Add, remove, or **create** one that does not exist yet, from the Labels card. |
+| **Routine** | Bind, unbind, and **Run now** when one is bound. |
+| **Links** | Add a relation by identifier (blocks / blocked by / relates to / duplicate of), remove one, and follow it. Sub-issues are listed alongside. |
+| **Comments** | With `@` mentions — see [Issue mentions](/guides/issue-mentions). |
+| **Workflow** | Start work · Stop · Approve · Request changes (with a reason) · Reopen, top-right of the identity card, gated on status the way the server gates them. |
+| **Run activity** | The live agent-work timeline while the issue is running. See [Activity](/guides/activity). |
+
+Two of these did not work before this landed, and now do:
+
+- **Labels.** The sidebar sent `label_ids`, which
+  `PATCH /api/v1/crews/{crewId}/issues/{identifier}` has no field for — the
+  request fell through to `400 No fields to update`. The field is `labels`.
+- **Clear estimate.** `estimate` decoded into a `*int`, so a JSON `null` was
+  indistinguishable from an omitted field and the clear arrived as an empty
+  patch. The handler now reads it as raw JSON and tells `null` apart from
+  absent. A non-number is a `400`.
+
+## The layout
+
+Everything on the surface is a card, including **Run activity** — it used to
+render bare, a heading and a list of steps sitting on the page background in
+the middle of a stack of cards. It is now a card like the rest, with the step
+count as its subtitle and the Running / Waiting-for-approval indicator in the
+header. The timeline itself is shared with the routine run panel and the
+activity bar, which still get the bare rail; the card is opt-in.
+
+On wide viewports (`xl` and up) the **right rail follows you as you scroll**.
+A description longer than the rail used to leave an empty column beside it for
+the rest of the page. The rail is capped at the height of the viewport and
+scrolls internally if it is taller, so a long rail on a short window is still
+reachable. Below `xl` the columns stack and the rail scrolls with the page,
+exactly as before.
+
+## Finding issues: one filter, two places
+
+`/issues` filters by **crew, agent, priority and status**, and the four
+**combine** — "Engineering crew, high priority, still in Backlog" is one
+selection, not three attempts. Each pick used to clear the others, so the
+dropdown behaved like a set of switches; picking a crew left the priority
+alone, picking an agent did not, and no combination survived.
+
+| Where | What it is |
+| --- | --- |
+| **Filter** button in the explorer (left panel) | All four facets. The badge counts every active one. Stays open while you pick, so a second facet is one click away. |
+| **Status chips** over the board | The same status selection, with live counts per status, one click each. |
+
+The two are one piece of state, not two filters: picking **Backlog** in the
+dropdown lights the Backlog chip, and clearing the chip clears it in the
+dropdown. The chips are the quick, count-carrying affordance and disappear
+when an issue detail takes the centre pane; the dropdown is always reachable,
+which is why status belongs in it too.
+
+Clearing:
+
+- Click an active value again to drop **that** facet.
+- **All crews / All agents / Any priority / Any status** resets one facet and
+  leaves the others.
+- **Clear all** in the dropdown header drops everything, as does `Esc` on the
+  board.
+
+The explorer's own issue list runs the same filter as the board
+(`hooks/use-filtered-issues.ts`). It used to apply only crew and agent, so a
+priority picked in the dropdown narrowed the board while the list beside it
+went on showing the rows the filter had excluded.
+
+## Read-only
+
+The card renders without any of the editors when the host does not pass them —
+the same layout, every value as text. That is what a reader without permission
+gets, and it is what the `/issues-new` design preview was before this shipped.
+That route is gone: keeping it would have been a second URL for the same screen
+minus the editing, which is the defect this replaced.
+
+## The project detail
+
+`/issues?project=<id>` renders the matching project card:
+identity → figures → the project's issues → breakdown → health → properties.
+Name, icon, colour, status, priority, health, lead and **dates** are all
+editable. Dates are new: the old rail drew a row reading "Set dates" that had
+nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
+`target_date` all along.
+
+## Where the code is
+
+| Piece | File |
+| --- | --- |
+| Fetches + writes for one issue | `components/features/issues/issue-detail-surface.tsx` |
+| The card that draws it | `components/features/issues/issue-card-detail.tsx` |
+| Every picker and the workflow buttons | `components/features/issues/issue-card-editors.tsx` |
+| The project equivalents | `components/features/issues/project-detail-surface.tsx`, `project-card-detail.tsx`, `project-card-editors.tsx` |
+| The URL-backed selection | `hooks/use-issue-detail.ts`, `hooks/use-project-detail.ts` |
+| Shared card primitives | `components/ui/detail` |
+| The filter dropdown + explorer list | `components/features/orchestration/unified-explorer.tsx` |
+| The status chips | `components/features/issues/issues-status-chips.tsx` |
+| The one filter both run | `hooks/use-filtered-issues.ts` |
+| The run activity timeline | `components/features/activity/run-activity-timeline.tsx` |

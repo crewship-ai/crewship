@@ -92,3 +92,50 @@ describe("RunActivityTimeline", () => {
     expect(container).toBeEmptyDOMElement()
   })
 })
+
+describe("RunActivityTimeline — card variant", () => {
+  beforeEach(() => {
+    mockEntries = []
+    mockLoading = false
+  })
+
+  const twoSteps = () => [
+    entry({ entry_type: "run.started", ts: "2026-06-26T10:31:02Z" }),
+    entry({ entry_type: "file.written", ts: "2026-06-26T10:31:08Z", payload: { path: "/tmp/x.txt", size: 412 } }),
+  ]
+
+  it("wraps itself in the detail card chrome and hands the step count to the subtitle", () => {
+    // On the issue detail this was the one section rendered bare — a heading
+    // and rows sitting on the page background, next to a stack of cards.
+    mockEntries = twoSteps()
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} card />)
+    const root = screen.getByTestId("run-activity")
+    expect(root).toHaveClass("rounded-xl", "border", "bg-card")
+    expect(screen.getByText("Run activity")).toBeInTheDocument()
+    expect(screen.getByText("2 steps")).toBeInTheDocument()
+    // The card draws the header; the rail must not draw a second one.
+    expect(root.querySelector(".border-t")).toBeNull()
+  })
+
+  it("pluralises the subtitle for a single step", () => {
+    mockEntries = [entry({ entry_type: "run.started", ts: "2026-06-26T10:31:02Z" })]
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} card />)
+    expect(screen.getByText("1 step")).toBeInTheDocument()
+  })
+
+  it("keeps the running indicator visible in card mode", () => {
+    mockEntries = [entry({ entry_type: "run.started", ts: "2026-06-26T10:31:02Z" })]
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} card />)
+    expect(screen.getByText("Running")).toBeInTheDocument()
+  })
+
+  it("leaves the bare variant alone — other screens still get the rail", () => {
+    // The timeline is shared with the routine run panel and the activity bar;
+    // the card is opt-in precisely so those call sites do not move.
+    mockEntries = twoSteps()
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ trace_id: "trace_1" }} />)
+    const root = screen.getByTestId("run-activity")
+    expect(root).not.toHaveClass("rounded-xl")
+    expect(screen.getByText("2 steps")).toBeInTheDocument()
+  })
+})

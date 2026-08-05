@@ -1,122 +1,137 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
-import type { Mission, IssueComment } from "@/lib/types/mission"
-import { apiFetch } from "@/lib/api-fetch"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import type { Mission } from "@/lib/types/mission"
 
 /**
- * Manages the orchestration "selected issue" panel: which issue is open,
- * its comments, and the lifecycle callbacks used by the detail pane.
+ * A selection that lives in the URL.
  *
- * Extracted from orchestration-layout.tsx where it lived inline as five
- * stateful hooks + ~80 lines of handlers; consolidating here keeps the
- * comment-fetch URL shape, optimistic close, and refresh-after-update
- * flows in one place (and out of the layout component).
+ * The issues page used to hold the open issue in component state, which cost
+ * three things at once: the link could not be shared, a refresh lost the
+ * selection, and Back left /issues entirely instead of closing the detail.
+ * `?project=` was the mirror-image bug — read on arrival, never written — so
+ * the URL and the screen disagreed the moment anybody clicked.
+ *
+ * Writes go through `history.pushState`, not `router.push`:
+ *
+ *   - pushState, because a selection SHOULD be a history entry. That is what
+ *     makes Back mean "close this" rather than "leave".
+ *   - the History API rather than next/navigation, because a same-path query
+ *     change through the router re-evaluates the dashboard layout subtree and
+ *     flashes the auth provider's full-screen spinner. See
+ *     hooks/use-shallow-search-param.ts, which learned this the hard way; the
+ *     only difference here is push versus replace.
+ *
+ * Reads come from `useSearchParams` rather than `window.location`, because
+ * the App Router renders the new route before window.location catches up — a
+ * ⌘K jump to /issues?project=X from /issues would otherwise read the old URL.
+ * The ref makes each incoming value win exactly once, so a re-render never
+ * drags the reader back to a selection they have since clicked away from.
  */
-export function useIssueDetail({
-  workspaceId,
-  onIssueSelected,
-  fetchIssues,
-  fetchProjects,
-}: {
-  workspaceId: string
-  /** Called whenever the user opens an issue — orchestration uses this to clear the task detail-context. */
-  onIssueSelected?: () => void
-  /** Refreshes the orchestration issues list after an in-place update. */
-  fetchIssues: () => Promise<void> | void
-  /** Refreshes the projects list (project membership may have changed via issue edits). */
-  fetchProjects: () => Promise<void> | void
-}) {
-  const [selectedIssue, setSelectedIssue] = useState<Mission | null>(null)
-  const [issueComments, setIssueComments] = useState<IssueComment[]>([])
-  // Sequencing guards. Each is bumped by mutations that should invalidate
-  // in-flight async work so a stale completion can't smear over fresher state.
-  //   commentRequestId — protects setIssueComments inside fetchComments.
-  //   issueUpdateRequestId — protects setSelectedIssue inside handleIssueUpdated,
-  //     which has its own multi-await chain that fetchComments alone can't cover.
-  const commentRequestId = useRef(0)
-  const issueUpdateRequestId = useRef(0)
+export function useUrlSelection(key: string) {
+  const fromUrl = useSearchParams().get(key)
+  const [value, setValue] = useState<string | null>(fromUrl)
+  const applied = useRef<string | null>(fromUrl)
 
-  const fetchComments = useCallback(
-    async (crewId: string, identifier: string) => {
-      const myReq = ++commentRequestId.current
-      try {
-        const res = await apiFetch(
-          `/api/v1/crews/${encodeURIComponent(crewId)}/issues/${encodeURIComponent(identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`,
-        )
-        if (myReq !== commentRequestId.current) return
-        if (res.ok) setIssueComments(await res.json())
-        else setIssueComments([])
-      } catch {
-        if (myReq !== commentRequestId.current) return
-        setIssueComments([])
-      }
+  useEffect(() => {
+    if (applied.current === fromUrl) return
+    applied.current = fromUrl
+    setValue(fromUrl)
+  }, [fromUrl])
+
+  // Back / forward. The listener owns the state after a pop, so `applied` is
+  // reset with it — otherwise the effect above would immediately re-apply the
+  // value the reader just navigated away from.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const onPop = () => {
+      const next = new URLSearchParams(window.location.search).get(key)
+      applied.current = next
+      setValue(next)
+    }
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
+  }, [key])
+
+  const select = useCallback(
+    (next: string | null, opts?: { replace?: boolean }) => {
+      applied.current = next
+      setValue(next)
+      if (typeof window === "undefined") return
+      // Read the live query so the OTHER selection param survives: opening an
+      // issue inside a project must not throw away ?project=.
+      const params = new URLSearchParams(window.location.search)
+      if (next) params.set(key, next)
+      else params.delete(key)
+      const qs = params.toString()
+      const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+      if (window.location.pathname + window.location.search === url) return
+      // `replace` is for corrections rather than navigations — an id nothing
+      // matches, say. Pushing one would put the bad URL behind the good one,
+      // so Back returns to it, the correction fires again, and the reader is
+      // bounced forward every time they try to leave.
+      if (opts?.replace) window.history.replaceState(null, "", url)
+      else window.history.pushState(null, "", url)
     },
-    [workspaceId],
+    [key],
   )
 
+  return [value, select] as const
+}
+
+/**
+ * Which issue the /issues page has open.
+ *
+ * Deliberately thin. It used to also own the issue's comments and a
+ * refresh-after-update chain with two sequencing guards, because the detail
+ * pane was a dumb renderer fed from here. The detail is now
+ * `IssueDetailSurface`, which fetches its own comments, activity, relations
+ * and runs against the identifier — so this hook's whole job is the URL and
+ * a lookup, and the guards it needed went with the work they were guarding.
+ */
+export function useIssueDetail({
+  issues,
+  onIssueSelected,
+}: {
+  /** The loaded issue list, for resolving the URL's identifier to a row. */
+  issues: Mission[]
+  /** Called when the reader opens an issue — clears the task detail-context. */
+  onIssueSelected?: () => void
+}) {
+  const [selectedIdentifier, setSelectedIdentifier] = useUrlSelection("issue")
+
+  const selectedIssue = useMemo(() => {
+    if (!selectedIdentifier) return null
+    return (
+      issues.find((i) => i.identifier === selectedIdentifier) ??
+      issues.find((i) => i.id === selectedIdentifier) ??
+      null
+    )
+  }, [issues, selectedIdentifier])
+
   const handleIssueSelect = useCallback(
-    async (issue: Mission) => {
-      // Any selection change invalidates an in-flight handleIssueUpdated
-      // for the previous issue — bump the update guard too.
-      issueUpdateRequestId.current++
-      // Toggle: clicking the same issue again deselects it.
-      if (selectedIssue?.id === issue.id) {
-        commentRequestId.current++
-        setSelectedIssue(null)
-        setIssueComments([])
+    (issue: Mission) => {
+      const key = issue.identifier ?? issue.id
+      // Clicking the open issue again closes it — the board's toggle.
+      if (key === selectedIdentifier) {
+        setSelectedIdentifier(null)
         return
       }
-      setSelectedIssue(issue)
+      setSelectedIdentifier(key)
       onIssueSelected?.()
-      if (issue.crew_id && issue.identifier) {
-        await fetchComments(issue.crew_id, issue.identifier)
-      } else {
-        commentRequestId.current++
-        setIssueComments([])
-      }
     },
-    [selectedIssue?.id, onIssueSelected, fetchComments],
+    [selectedIdentifier, setSelectedIdentifier, onIssueSelected],
   )
 
   const handleIssueClose = useCallback(() => {
-    issueUpdateRequestId.current++
-    commentRequestId.current++
-    setSelectedIssue(null)
-    setIssueComments([])
-  }, [])
-
-  const handleIssueUpdated = useCallback(async () => {
-    const myUpdateReq = ++issueUpdateRequestId.current
-    await fetchIssues()
-    if (myUpdateReq !== issueUpdateRequestId.current) return
-    if (selectedIssue?.crew_id && selectedIssue?.identifier) {
-      try {
-        const res = await apiFetch(
-          `/api/v1/issues/${encodeURIComponent(selectedIssue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`,
-        )
-        if (myUpdateReq !== issueUpdateRequestId.current) return
-        if (res.ok) {
-          const fresh: Mission = await res.json()
-          if (myUpdateReq !== issueUpdateRequestId.current) return
-          setSelectedIssue(fresh)
-          if (fresh.crew_id && fresh.identifier) {
-            await fetchComments(fresh.crew_id, fresh.identifier)
-          }
-        }
-      } catch {
-        /* ignore — fetchIssues already refreshed the list */
-      }
-    }
-    if (myUpdateReq !== issueUpdateRequestId.current) return
-    await fetchProjects()
-  }, [fetchIssues, fetchProjects, fetchComments, selectedIssue?.crew_id, selectedIssue?.identifier, workspaceId])
+    setSelectedIdentifier(null)
+  }, [setSelectedIdentifier])
 
   return {
+    selectedIdentifier,
     selectedIssue,
-    issueComments,
     handleIssueSelect,
     handleIssueClose,
-    handleIssueUpdated,
   } as const
 }

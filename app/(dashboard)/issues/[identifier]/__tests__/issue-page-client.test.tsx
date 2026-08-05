@@ -23,21 +23,17 @@ vi.mock("@/hooks/use-auth", () => ({
 vi.mock("@/hooks/use-realtime", () => ({
   useRealtimeEvent: () => {},
 }))
+vi.mock("@/hooks/use-pipelines", () => ({
+  usePipelines: () => ({ pipelines: [], loading: false, refetch: vi.fn() }),
+}))
 
 // Stub the heavy children so the test stays about data-fetch wiring.
 vi.mock("@/components/features/issues/tiptap-editor", () => ({
   TiptapEditor: () => <div data-testid="tiptap" />,
 }))
-vi.mock("@/components/features/issues/activity-feed", () => ({
-  ActivityFeed: () => <div data-testid="activity-feed" />,
-}))
 vi.mock("@/components/features/activity/run-activity-timeline", () => ({
   RunActivityTimeline: () => <div data-testid="run-timeline" />,
   RUN_WORK_ENTRY_TYPES: ["exec"],
-}))
-vi.mock("@/components/features/orchestration/issue-sidebar", () => ({
-  IssueSidebar: () => <div data-testid="sidebar" />,
-  IssueSidebarMobile: () => <div data-testid="sidebar-mobile" />,
 }))
 vi.mock("@/components/features/issues/markdown-content", () => ({
   MarkdownContent: ({ children }: { children: string }) => <div>{children}</div>,
@@ -89,7 +85,7 @@ describe("<IssuePageClient> — identifier resolution (static-export regression)
         // The bug path: must never be hit.
         return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
       }
-      // comments / activity / relations / sidebar lists
+      // comments / activity / relations / runs / subtasks / roster
       return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }) as unknown as Promise<Response>
     }) as unknown as typeof fetch
   })
@@ -110,6 +106,41 @@ describe("<IssuePageClient> — identifier resolution (static-export regression)
     )
     expect(calledUrls.some((u) => u.includes("/api/v1/issues/OPS-4"))).toBe(true)
     expect(calledUrls.some((u) => u.includes("/api/v1/issues/_"))).toBe(false)
+  })
+
+  it("renders the card, not the old two-column page", async () => {
+    // The convergence, asserted at the route a link actually lands on: the
+    // deep link and the centre pane of /issues are the same component now,
+    // so the figures band and the card headings have to be here too.
+    render(<IssuePageClient />)
+    await waitFor(() => expect(screen.getByText(/Fetch current weather data/)).toBeInTheDocument(), {
+      timeout: 3000,
+    })
+    for (const heading of ["Description", "Links", "Properties", "Routine", "Project", "Labels"]) {
+      expect(screen.getAllByText(heading).length).toBeGreaterThan(0)
+    }
+    // The figures band — the thing the old page had no equivalent of.
+    expect(screen.getByText("Opened")).toBeInTheDocument()
+    expect(screen.getByText("Sub-issues")).toBeInTheDocument()
+  })
+
+  it("keeps the editors on the deep link, not just in the centre pane", async () => {
+    // The old /issues/<identifier> page could edit; a promotion that made it
+    // read-only would look like a redesign and be a regression.
+    render(<IssuePageClient />)
+    await waitFor(() => expect(screen.getByText(/Fetch current weather data/)).toBeInTheDocument(), {
+      timeout: 3000,
+    })
+    for (const name of [
+      /edit title/i,
+      /change status/i,
+      /change assignee/i,
+      /change milestone/i,
+      /add label/i,
+      /add link/i,
+    ]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument()
+    }
   })
 })
 
