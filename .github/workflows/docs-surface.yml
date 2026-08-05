@@ -6,6 +6,14 @@ on:
   push:
     branches: [main]
     paths: ['docs/**', 'scripts/docs-surface-check/**', 'scripts/docs-inventory/**', '.github/workflows/docs-surface.yml']
+  # The deployed-index comparison lives on a schedule, not on the PR. Mintlify
+  # publishes after a merge, so on a PR that adds a page the local navigation
+  # leads the served llms.txt by construction — gating on it would fail the
+  # exact change it exists to bless. Daily, "the deployed index is behind the
+  # repo" is real drift instead.
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,7 +26,18 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Verify contextual and served LLM surfaces
+      # Hermetic: contextual config, navigation integrity, description quality.
+      # No network, so it is safe to require on every pull request.
+      - name: Verify the contextual surface and navigation
+        run: go run ./scripts/docs-surface-check
+
+      # Only on the schedule / manual runs — never on a PR. See checkServed's
+      # doc comment in scripts/docs-surface-check/main.go.
+      - name: Compare the deployed LLM index
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: go run ./scripts/docs-surface-check -url https://docs.crewship.ai
-      - name: Verify strict reference inventory
-        run: go run ./cmd/gen-openapi && go run ./scripts/docs-inventory -strict
+
+      # The strict reference inventory is NOT repeated here: ci.yml's Go Lint
+      # job already runs it on every pull request with no path filter, which is
+      # strictly stronger than this workflow's docs-only trigger. Two copies
+      # would mean two places to keep in step for no added coverage.
