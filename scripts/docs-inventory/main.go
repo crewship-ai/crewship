@@ -41,7 +41,12 @@ type openAPIDocument struct {
 type openAPIOperation struct {
 	OperationID string                     `json:"operationId"`
 	Tags        []string                   `json:"tags"`
+	RequestBody *openAPIRequestBody        `json:"requestBody,omitempty"`
 	Responses   map[string]openAPIResponse `json:"responses"`
+}
+
+type openAPIRequestBody struct {
+	Content map[string]openAPIMediaType `json:"content"`
 }
 
 type openAPIResponse struct {
@@ -105,6 +110,10 @@ type apiRecord struct {
 	TestSignals            []string       `json:"test_signals,omitempty"`
 	ConcreteResponseSchema bool           `json:"concrete_response_schema"`
 	GenericResponseSchema  bool           `json:"generic_response_schema"`
+	RequestBodyPresent     bool           `json:"request_body_present"`
+	ConcreteJSONRequest    bool           `json:"concrete_json_request"`
+	GenericJSONRequest     bool           `json:"generic_json_request"`
+	NonJSONRequestMedia    []string       `json:"non_json_request_media,omitempty"`
 	Contract               contractChecks `json:"contract"`
 }
 
@@ -278,6 +287,10 @@ type summary struct {
 	APIWithTestSignals             int `json:"api_with_test_signals"`
 	APIWithConcreteResponseSchemas int `json:"api_with_concrete_response_schemas"`
 	APIGenericResponseSchemas      int `json:"api_generic_response_schemas"`
+	APIWithRequestBodies           int `json:"api_with_request_bodies"`
+	APIWithConcreteJSONRequests    int `json:"api_with_concrete_json_requests"`
+	APIGenericJSONRequests         int `json:"api_generic_json_requests"`
+	APINonJSONRequestBodies        int `json:"api_non_json_request_bodies"`
 	CLIWithTestSignals             int `json:"cli_with_test_signals"`
 }
 
@@ -347,6 +360,19 @@ func run(openAPIFile, commandsFile string) error {
 			r.API = append(r.API, rec)
 			rec.ConcreteResponseSchema = hasConcreteSuccessSchema(op.Responses)
 			rec.GenericResponseSchema = !rec.ConcreteResponseSchema && hasSuccessSchema(op.Responses)
+			rec.RequestBodyPresent = op.RequestBody != nil
+			if op.RequestBody != nil {
+				if jsonBody, ok := op.RequestBody.Content["application/json"]; ok {
+					rec.ConcreteJSONRequest = isConcreteSchema(jsonBody.Schema)
+					rec.GenericJSONRequest = !rec.ConcreteJSONRequest
+				}
+				for media := range op.RequestBody.Content {
+					if media != "application/json" {
+						rec.NonJSONRequestMedia = append(rec.NonJSONRequestMedia, media)
+					}
+				}
+				sort.Strings(rec.NonJSONRequestMedia)
+			}
 			r.API[len(r.API)-1] = rec
 		}
 	}
@@ -431,20 +457,27 @@ func hasConcreteSuccessSchema(responses map[string]openAPIResponse) bool {
 			continue
 		}
 		for _, media := range response.Content {
-			if len(media.Schema) == 0 {
-				continue
-			}
-			if _, generic := media.Schema["$ref"]; generic {
+			if isConcreteSchema(media.Schema) {
 				return true
 			}
-			if typ, ok := rawString(media.Schema["type"]); ok && typ != "object" {
-				return true
-			}
-			for _, key := range []string{"properties", "items", "additionalProperties", "oneOf", "anyOf", "allOf", "enum", "format"} {
-				if _, ok := media.Schema[key]; ok {
-					return true
-				}
-			}
+		}
+	}
+	return false
+}
+
+func isConcreteSchema(schema map[string]json.RawMessage) bool {
+	if len(schema) == 0 {
+		return false
+	}
+	if _, refSchema := schema["$ref"]; refSchema {
+		return true
+	}
+	if typ, ok := rawString(schema["type"]); ok && typ != "object" {
+		return true
+	}
+	for _, key := range []string{"properties", "items", "additionalProperties", "oneOf", "anyOf", "allOf", "enum", "format"} {
+		if _, ok := schema[key]; ok {
+			return true
 		}
 	}
 	return false
@@ -691,6 +724,18 @@ func summarize(r report) summary {
 		if rec.GenericResponseSchema {
 			s.APIGenericResponseSchemas++
 		}
+		if rec.RequestBodyPresent {
+			s.APIWithRequestBodies++
+		}
+		if rec.ConcreteJSONRequest {
+			s.APIWithConcreteJSONRequests++
+		}
+		if rec.GenericJSONRequest {
+			s.APIGenericJSONRequests++
+		}
+		if len(rec.NonJSONRequestMedia) > 0 {
+			s.APINonJSONRequestBodies++
+		}
 	}
 	for _, rec := range r.CLI {
 		if rec.Status == "documented_exact" || rec.Status == "documented_root" || rec.Status == "documented_exact_no_root" {
@@ -719,6 +764,7 @@ func markdown(r report) string {
 	fmt.Fprintf(&b, "| API operations | %d | %d exact, %d resource-level, %d missing | %d with a test signal |\n", r.Summary.APIOperations, r.Summary.APIExactDocs, r.Summary.APIResourceDocs, r.Summary.APIMissingDocs, r.Summary.APIWithTestSignals)
 	fmt.Fprintf(&b, "| CLI commands | %d | %d exact mentions, %d root pages present, %d root pages missing | %d with a test signal |\n\n", r.Summary.CLIOperations, r.Summary.CLIExactDocs, r.Summary.CLIRootDocsPresent, r.Summary.CLIRootDocsMissing, r.Summary.CLIWithTestSignals)
 	fmt.Fprintf(&b, "Response schema quality: %d API operations have a concrete 2xx schema; %d still use the generic object fallback.\n\n", r.Summary.APIWithConcreteResponseSchemas, r.Summary.APIGenericResponseSchemas)
+	fmt.Fprintf(&b, "Request schema quality: %d operations have request bodies; %d have concrete JSON schemas, %d use non-JSON media types, and %d still use a generic JSON fallback.\n\n", r.Summary.APIWithRequestBodies, r.Summary.APIWithConcreteJSONRequests, r.Summary.APINonJSONRequestBodies, r.Summary.APIGenericJSONRequests)
 
 	fmt.Fprintf(&b, "## API operations needing attention\n\n")
 	fmt.Fprintf(&b, "These are missing a resource-level API reference page or have no exact route mention. Exactness is a review signal, not a final correctness verdict.\n\n")

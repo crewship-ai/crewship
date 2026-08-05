@@ -11,6 +11,10 @@
     "api_with_test_signals": 402,
     "api_with_concrete_response_schemas": 517,
     "api_generic_response_schemas": 0,
+    "api_with_request_bodies": 222,
+    "api_with_concrete_json_requests": 219,
+    "api_generic_json_requests": 0,
+    "api_non_json_request_bodies": 3,
     "cli_with_test_signals": 709
   },
   "api": [
@@ -31,6 +35,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -76,6 +83,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -128,6 +138,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -180,6 +193,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -231,6 +247,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -278,6 +297,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -319,6 +341,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -361,6 +386,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -406,6 +434,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -450,6 +481,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -495,6 +529,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -539,6 +576,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -581,6 +621,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -626,6 +669,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -670,6 +716,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -709,6 +758,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -750,6 +802,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -793,6 +848,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -832,6 +890,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -864,6 +925,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -893,6 +957,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -922,6 +989,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -961,6 +1031,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1009,6 +1082,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1057,6 +1133,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1098,6 +1177,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1139,6 +1221,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1184,6 +1269,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1224,6 +1312,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1261,6 +1352,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1301,6 +1395,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1340,6 +1437,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1389,6 +1489,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1445,6 +1548,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1489,6 +1595,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1524,6 +1633,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1561,6 +1673,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1600,6 +1715,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1640,6 +1758,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1681,6 +1802,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1723,6 +1847,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1766,6 +1893,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1807,6 +1937,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1847,6 +1980,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1881,6 +2017,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1916,6 +2055,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1954,6 +2096,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -1992,6 +2137,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2026,6 +2174,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2057,6 +2208,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2091,6 +2245,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2129,6 +2286,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2166,6 +2326,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2210,6 +2373,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2259,6 +2425,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2295,6 +2464,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2325,6 +2497,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2359,6 +2534,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2393,6 +2571,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2468,6 +2649,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2550,6 +2734,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2589,6 +2776,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2629,6 +2819,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2693,6 +2886,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2757,6 +2953,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2821,6 +3020,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2864,6 +3066,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2896,6 +3101,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2931,6 +3139,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -2966,6 +3177,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3002,16 +3216,19 @@
       "test_signals": [
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
+        "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3026,12 +3243,12 @@
           "test_signals": [
             "cmd/crewship/cmd_chat_delete_test.go",
             "cmd/crewship/cmd_chat_read_test.go",
+            "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schemas_admin_integrations_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
             "…"
           ]
         }
@@ -3056,16 +3273,19 @@
       "test_signals": [
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
+        "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "cmd/gen-openapi/schemas_public_activity_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3080,12 +3300,12 @@
           "test_signals": [
             "cmd/crewship/cmd_chat_delete_test.go",
             "cmd/crewship/cmd_chat_read_test.go",
+            "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schemas_admin_integrations_test.go",
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "cmd/gen-openapi/schemas_public_activity_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
             "…"
           ]
         }
@@ -3110,6 +3330,7 @@
       "test_signals": [
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
+        "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "internal/api/agent_chats_delete_scope_test.go",
         "internal/api/agent_chats_delete_test.go",
@@ -3118,6 +3339,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3132,6 +3356,7 @@
           "test_signals": [
             "cmd/crewship/cmd_chat_delete_test.go",
             "cmd/crewship/cmd_chat_read_test.go",
+            "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schemas_admin_integrations_test.go",
             "internal/api/agent_chats_delete_scope_test.go",
             "internal/api/agent_chats_delete_test.go",
@@ -3158,11 +3383,18 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schemas_admin_integrations_test.go",
         "internal/api/proxy_attachments_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "non_json_request_media": [
+        "multipart/form-data"
+      ],
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3175,6 +3407,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schemas_admin_integrations_test.go",
             "internal/api/proxy_attachments_test.go"
           ]
@@ -3202,6 +3435,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3234,6 +3470,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3262,6 +3501,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3296,6 +3538,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3336,6 +3581,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3371,6 +3619,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3399,6 +3650,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3426,10 +3680,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schemas_admin_integrations_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3441,6 +3699,7 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schemas_admin_integrations_test.go"
           ]
         }
@@ -3461,6 +3720,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3489,10 +3751,17 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schemas_admin_integrations_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "non_json_request_media": [
+        "application/octet-stream"
+      ],
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3505,6 +3774,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schemas_admin_integrations_test.go"
           ]
         }
@@ -3524,6 +3794,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3554,6 +3827,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3586,6 +3862,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3616,6 +3895,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3644,6 +3926,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3673,6 +3958,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3703,6 +3991,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3736,6 +4027,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3772,6 +4066,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3804,6 +4101,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3831,6 +4131,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3858,6 +4161,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3886,6 +4192,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3915,6 +4224,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3948,6 +4260,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -3985,6 +4300,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4022,6 +4340,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4054,6 +4375,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4082,6 +4406,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4111,6 +4438,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4144,6 +4474,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4181,6 +4514,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4219,6 +4555,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4253,6 +4592,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4285,6 +4627,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4321,6 +4666,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4367,6 +4715,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4412,6 +4763,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4451,6 +4805,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4485,6 +4842,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4521,6 +4881,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4566,6 +4929,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4621,6 +4987,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4672,6 +5041,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4720,6 +5092,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4760,6 +5135,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4797,6 +5175,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4841,6 +5222,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4883,6 +5267,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4921,6 +5308,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -4960,6 +5350,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5002,6 +5395,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5051,6 +5447,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5092,6 +5491,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5136,6 +5538,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5192,6 +5597,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5233,6 +5641,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5262,6 +5673,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5297,6 +5711,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5333,6 +5750,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5366,6 +5786,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5396,6 +5819,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5427,6 +5853,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5463,6 +5892,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5497,6 +5929,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5533,6 +5968,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5575,6 +6013,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5617,6 +6058,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5656,6 +6100,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5689,6 +6136,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5730,6 +6180,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5774,6 +6227,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5811,6 +6267,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5847,6 +6306,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5882,6 +6344,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5916,6 +6381,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5946,6 +6414,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -5974,6 +6445,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6013,6 +6487,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6059,6 +6536,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6095,6 +6575,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6143,6 +6626,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6199,6 +6685,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6249,6 +6738,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6297,6 +6789,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6335,6 +6830,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6369,6 +6867,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6408,6 +6909,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6447,6 +6951,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6493,6 +7000,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6543,6 +7053,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6592,6 +7105,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6641,6 +7157,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6690,6 +7209,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6733,6 +7255,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6770,6 +7295,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6807,6 +7335,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6843,6 +7374,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6878,6 +7412,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6914,6 +7451,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6950,6 +7490,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -6985,6 +7528,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7017,6 +7563,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7049,6 +7598,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7083,6 +7635,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7125,6 +7680,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7173,6 +7731,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7214,6 +7775,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7258,6 +7822,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7299,6 +7866,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7332,6 +7902,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7414,6 +7987,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7504,6 +8080,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7583,6 +8162,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7662,6 +8244,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7741,6 +8326,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7820,6 +8408,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7865,6 +8456,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7897,6 +8491,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7929,6 +8526,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7964,6 +8564,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -7995,6 +8598,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8030,6 +8636,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8070,6 +8679,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8104,10 +8716,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schemas_admin_integrations_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8119,6 +8735,7 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schemas_admin_integrations_test.go"
           ]
         }
@@ -8140,6 +8757,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8169,6 +8789,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8199,10 +8822,17 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/gen-openapi/main_test.go",
         "cmd/gen-openapi/schemas_admin_integrations_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "non_json_request_media": [
+        "application/octet-stream"
+      ],
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8215,6 +8845,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_orchestration.go",
           "test_signals": [
+            "cmd/gen-openapi/main_test.go",
             "cmd/gen-openapi/schemas_admin_integrations_test.go"
           ]
         }
@@ -8235,6 +8866,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8267,6 +8901,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8303,6 +8940,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8335,6 +8975,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8364,6 +9007,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8393,6 +9039,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8421,6 +9070,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8449,6 +9101,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8478,6 +9133,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8515,6 +9173,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8554,6 +9215,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8590,6 +9254,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8626,6 +9293,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8657,6 +9327,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8685,6 +9358,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8714,6 +9390,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8746,6 +9425,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8781,6 +9463,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8813,6 +9498,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8841,6 +9529,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8869,6 +9560,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8898,6 +9592,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8926,6 +9623,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8958,6 +9658,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -8995,6 +9698,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9028,6 +9734,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9057,6 +9766,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9095,6 +9807,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9140,6 +9855,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9184,6 +9902,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9227,6 +9948,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9270,6 +9994,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9308,6 +10035,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9340,6 +10070,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9369,6 +10102,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9402,6 +10138,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9439,6 +10178,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9472,6 +10214,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9500,6 +10245,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9533,6 +10281,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9571,6 +10322,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9609,6 +10363,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9649,6 +10406,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9690,6 +10450,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9724,6 +10487,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9753,6 +10519,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9790,6 +10559,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9832,6 +10604,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9867,6 +10642,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9900,6 +10678,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9937,6 +10718,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9968,6 +10752,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -9995,6 +10782,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10027,6 +10817,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10060,6 +10853,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10102,6 +10898,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10148,6 +10947,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10195,6 +10997,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10235,6 +11040,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10277,6 +11085,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10326,6 +11137,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10370,6 +11184,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10409,6 +11226,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10447,6 +11267,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10484,6 +11307,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10522,6 +11348,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10567,6 +11396,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10615,6 +11447,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10663,6 +11498,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10714,6 +11552,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10756,6 +11597,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10791,6 +11635,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10838,6 +11685,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10892,6 +11742,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10940,6 +11793,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -10983,6 +11839,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11025,6 +11884,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11065,6 +11927,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11109,6 +11974,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11151,6 +12019,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11185,6 +12056,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11219,6 +12093,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11266,6 +12143,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11321,6 +12201,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11364,6 +12247,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11399,6 +12285,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11434,6 +12323,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11471,6 +12363,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11510,6 +12405,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11549,6 +12447,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11587,6 +12488,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11625,6 +12529,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11663,6 +12570,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11702,6 +12612,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11741,6 +12654,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11780,6 +12696,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11819,6 +12738,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11857,6 +12779,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11894,6 +12819,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11932,6 +12860,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -11971,6 +12902,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12009,6 +12943,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12051,6 +12988,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12092,6 +13032,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12127,6 +13070,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12162,6 +13108,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12197,6 +13146,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12242,6 +13194,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12287,6 +13242,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12323,6 +13281,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12381,6 +13342,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12428,6 +13392,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12476,6 +13443,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12519,6 +13489,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12564,6 +13537,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12602,6 +13578,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12632,6 +13611,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12675,6 +13657,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12729,6 +13714,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12775,6 +13763,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12814,6 +13805,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12852,6 +13846,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12890,6 +13887,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12926,6 +13926,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12967,6 +13970,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13006,6 +14012,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13042,6 +14051,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13081,6 +14093,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13118,6 +14133,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13151,6 +14169,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13190,6 +14211,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13232,6 +14256,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13270,6 +14297,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13313,6 +14343,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13364,6 +14397,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13403,6 +14439,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13431,6 +14470,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13464,6 +14506,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13505,6 +14550,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13544,6 +14592,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13583,6 +14634,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13635,6 +14689,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13682,6 +14739,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13723,6 +14783,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13768,6 +14831,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13820,6 +14886,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13872,6 +14941,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13916,6 +14988,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13953,6 +15028,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -13991,6 +15069,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14029,6 +15110,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14067,6 +15151,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14104,6 +15191,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14137,6 +15227,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14170,6 +15263,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14209,6 +15305,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14242,6 +15341,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14275,6 +15377,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14314,6 +15419,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14353,6 +15461,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14401,6 +15512,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14449,6 +15563,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14490,6 +15607,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14528,6 +15648,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14565,6 +15688,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14601,6 +15727,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14643,6 +15772,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14684,6 +15816,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14722,6 +15857,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14762,6 +15900,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14799,6 +15940,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14836,6 +15980,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14874,6 +16021,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14913,6 +16063,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14954,6 +16107,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -14990,6 +16146,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15030,6 +16189,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15069,6 +16231,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15107,6 +16272,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15157,6 +16325,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15202,6 +16373,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15244,6 +16418,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15296,6 +16473,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15353,6 +16533,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15404,6 +16587,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15452,6 +16638,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15500,6 +16689,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15544,6 +16736,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15585,6 +16780,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15623,6 +16821,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15667,6 +16868,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15712,6 +16916,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15749,6 +16956,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15784,6 +16994,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15829,6 +17042,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15882,6 +17098,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15928,6 +17147,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -15969,6 +17191,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16001,6 +17226,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16050,6 +17278,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16098,6 +17329,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16138,6 +17372,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16177,6 +17414,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16217,6 +17457,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16265,6 +17508,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16316,6 +17562,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16360,6 +17609,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16398,6 +17650,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16446,6 +17701,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16496,6 +17754,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16543,6 +17804,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16586,6 +17850,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16623,6 +17890,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16659,6 +17929,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16700,6 +17973,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16748,6 +18024,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16791,6 +18070,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16839,6 +18121,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16883,6 +18168,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16922,6 +18210,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -16963,6 +18254,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17007,6 +18301,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17055,6 +18352,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17095,6 +18395,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17127,6 +18430,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17159,6 +18465,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17201,6 +18510,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17251,6 +18563,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17294,6 +18609,9 @@
       ],
       "concrete_response_schema": false,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17332,6 +18650,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17376,6 +18697,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17428,6 +18752,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17472,6 +18799,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17510,6 +18840,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17548,6 +18881,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17584,6 +18920,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17618,6 +18957,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17651,6 +18993,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17684,6 +19029,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17719,6 +19067,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17755,6 +19106,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17787,6 +19141,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17816,6 +19173,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17850,6 +19210,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17886,6 +19249,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17928,6 +19294,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -17973,6 +19342,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18026,6 +19398,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18071,6 +19446,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18108,6 +19486,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18145,6 +19526,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18212,6 +19596,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18287,6 +19674,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18347,6 +19737,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18407,6 +19800,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18467,6 +19863,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18508,6 +19907,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18538,6 +19940,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18569,6 +19974,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18600,6 +20008,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18628,6 +20039,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18656,6 +20070,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18686,6 +20103,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18716,6 +20136,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18745,6 +20168,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18774,6 +20200,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18807,6 +20236,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18842,6 +20274,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18872,6 +20307,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18900,6 +20338,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18927,6 +20368,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18955,6 +20399,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -18984,6 +20431,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19012,6 +20462,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19045,6 +20498,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19082,6 +20538,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19116,6 +20575,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19147,6 +20609,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19177,6 +20642,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19214,6 +20682,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19256,6 +20727,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19293,6 +20767,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19331,6 +20808,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19364,6 +20844,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19393,6 +20876,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19421,6 +20907,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19449,6 +20938,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19478,6 +20970,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19509,6 +21004,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19540,6 +21038,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19569,6 +21070,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19598,6 +21102,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19631,6 +21138,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19664,6 +21174,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19697,6 +21210,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19730,6 +21246,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19767,6 +21286,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19810,6 +21332,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19846,6 +21371,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19878,6 +21406,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19913,6 +21444,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19944,6 +21478,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -19973,6 +21510,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20003,6 +21543,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20033,6 +21576,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20062,6 +21608,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20089,6 +21638,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20118,6 +21670,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20148,6 +21703,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20183,6 +21741,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20217,6 +21778,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20248,6 +21812,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20280,6 +21847,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20311,6 +21881,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20346,6 +21919,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20381,6 +21957,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20416,6 +21995,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20448,6 +22030,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20477,6 +22062,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20506,6 +22094,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20535,6 +22126,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20564,6 +22158,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20593,6 +22190,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20621,6 +22221,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20653,6 +22256,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20689,6 +22295,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20727,6 +22336,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20762,6 +22374,9 @@
       "status": "documented_exact",
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -20802,6 +22417,9 @@
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
