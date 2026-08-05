@@ -853,6 +853,7 @@ crewship routine watch summarize-text --run-id <id>
 | `--run-id` | | Filter to events for one run_id only |
 | `--interval` | 2s | Poll interval (Go duration format) |
 | `--since` | 5m | Lookback window on first poll (Go duration; currently informational — full window per page) |
+| `--progress` | false | Replace the raw event tail with one updating client-facing line showing step progress, cost, and elapsed time; exits when the run finishes. |
 
 Ctrl-C / SIGTERM exit cleanly.
 
@@ -936,6 +937,7 @@ crewship routine iterate summarize-text \
 | `--inputs` | | | JSON inputs passed to every run |
 | `-y`, `--yes` | | `false` | Skip the per-round save confirmation |
 | `--run-timeout` | | `10m` | Timeout for each synchronous routine run |
+| `--agent-timeout` | | `10m` | Timeout for each grader or optimizer agent call |
 | `--max-turns` | | server default | Max turns for grader/optimizer agent calls |
 
 Guardrails, by construction:

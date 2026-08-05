@@ -86,11 +86,16 @@ type commandManifest struct {
 }
 
 type commandNode struct {
-	Path     string        `json:"path"`
-	Use      string        `json:"use"`
-	Short    string        `json:"short"`
-	Aliases  []string      `json:"aliases"`
-	Commands []commandNode `json:"commands"`
+	Path     string         `json:"path"`
+	Use      string         `json:"use"`
+	Short    string         `json:"short"`
+	Aliases  []string       `json:"aliases"`
+	Flags    []flagManifest `json:"flags"`
+	Commands []commandNode  `json:"commands"`
+}
+
+type flagManifest struct {
+	Name string `json:"name"`
 }
 
 type docFile struct {
@@ -118,15 +123,18 @@ type apiRecord struct {
 }
 
 type cliRecord struct {
-	Path        string   `json:"path"`
-	Use         string   `json:"use"`
-	Short       string   `json:"short"`
-	Aliases     []string `json:"aliases,omitempty"`
-	Root        string   `json:"root"`
-	ExactDocs   []string `json:"exact_docs,omitempty"`
-	RootDocs    []string `json:"root_docs,omitempty"`
-	Status      string   `json:"status"`
-	TestSignals []string `json:"test_signals,omitempty"`
+	Path            string   `json:"path"`
+	Use             string   `json:"use"`
+	Short           string   `json:"short"`
+	Aliases         []string `json:"aliases,omitempty"`
+	Root            string   `json:"root"`
+	ExactDocs       []string `json:"exact_docs,omitempty"`
+	RootDocs        []string `json:"root_docs,omitempty"`
+	Status          string   `json:"status"`
+	TestSignals     []string `json:"test_signals,omitempty"`
+	Flags           []string `json:"flags,omitempty"`
+	DocumentedFlags []string `json:"documented_flags,omitempty"`
+	MissingFlags    []string `json:"missing_flags,omitempty"`
 }
 
 type report struct {
@@ -292,6 +300,9 @@ type summary struct {
 	APIGenericJSONRequests         int `json:"api_generic_json_requests"`
 	APINonJSONRequestBodies        int `json:"api_non_json_request_bodies"`
 	CLIWithTestSignals             int `json:"cli_with_test_signals"`
+	CLIWithFlags                   int `json:"cli_with_flags"`
+	CLIWithAllFlagsDocumented      int `json:"cli_with_all_flags_documented"`
+	CLIMissingFlagDocs             int `json:"cli_missing_flag_docs"`
 }
 
 func main() {
@@ -392,6 +403,9 @@ func run(openAPIFile, commandsFile string) error {
 			}
 			rootPage := filepath.ToSlash(filepath.Join("docs/cli", root[0]+".mdx"))
 			rec := cliRecord{Path: node.Path, Use: node.Use, Short: node.Short, Aliases: node.Aliases, Root: root[0]}
+			for _, flag := range node.Flags {
+				rec.Flags = append(rec.Flags, flag.Name)
+			}
 			rec.ExactDocs = cliDocsContainingCommand(node, docs)
 			if hasDoc(rootPage, docs) {
 				rec.RootDocs = []string{rootPage}
@@ -410,6 +424,7 @@ func run(openAPIFile, commandsFile string) error {
 				}
 			}
 			rec.TestSignals = cliTestSignals(node, tests)
+			rec.DocumentedFlags, rec.MissingFlags = cliFlagEvidence(node, rec.ExactDocs, rec.RootDocs, docs)
 			r.CLI = append(r.CLI, rec)
 			walk(node.Commands)
 		}
@@ -629,6 +644,33 @@ func cliDocsContainingCommand(node commandNode, docs []docFile) []string {
 	return docsContainingWithin("crewship "+node.Path, "docs/cli/", docs)
 }
 
+func cliFlagEvidence(node commandNode, exactDocs, rootDocs []string, docs []docFile) (documented, missing []string) {
+	if len(node.Flags) == 0 {
+		return nil, nil
+	}
+	paths := append(append([]string{}, exactDocs...), rootDocs...)
+	for _, flag := range node.Flags {
+		found := false
+		for _, path := range paths {
+			for _, doc := range docs {
+				if doc.Path == path && strings.Contains(doc.Text, "--"+flag.Name) {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if found {
+			documented = append(documented, flag.Name)
+		} else {
+			missing = append(missing, flag.Name)
+		}
+	}
+	return documented, missing
+}
+
 func appendUnique(values []string, additions ...string) []string {
 	seen := make(map[string]bool, len(values)+len(additions))
 	for _, value := range values {
@@ -751,6 +793,14 @@ func summarize(r report) summary {
 		if len(rec.TestSignals) > 0 {
 			s.CLIWithTestSignals++
 		}
+		if len(rec.Flags) > 0 {
+			s.CLIWithFlags++
+			if len(rec.MissingFlags) == 0 {
+				s.CLIWithAllFlagsDocumented++
+			} else {
+				s.CLIMissingFlagDocs++
+			}
+		}
 	}
 	return s
 }
@@ -765,6 +815,7 @@ func markdown(r report) string {
 	fmt.Fprintf(&b, "| CLI commands | %d | %d exact mentions, %d root pages present, %d root pages missing | %d with a test signal |\n\n", r.Summary.CLIOperations, r.Summary.CLIExactDocs, r.Summary.CLIRootDocsPresent, r.Summary.CLIRootDocsMissing, r.Summary.CLIWithTestSignals)
 	fmt.Fprintf(&b, "Response schema quality: %d API operations have a concrete 2xx schema; %d still use the generic object fallback.\n\n", r.Summary.APIWithConcreteResponseSchemas, r.Summary.APIGenericResponseSchemas)
 	fmt.Fprintf(&b, "Request schema quality: %d operations have request bodies; %d have concrete JSON schemas, %d use non-JSON media types, and %d still use a generic JSON fallback.\n\n", r.Summary.APIWithRequestBodies, r.Summary.APIWithConcreteJSONRequests, r.Summary.APINonJSONRequestBodies, r.Summary.APIGenericJSONRequests)
+	fmt.Fprintf(&b, "CLI flag quality: %d commands define flags; %d document all of their flags and %d still have undocumented flag(s).\n\n", r.Summary.CLIWithFlags, r.Summary.CLIWithAllFlagsDocumented, r.Summary.CLIMissingFlagDocs)
 
 	fmt.Fprintf(&b, "## API operations needing attention\n\n")
 	fmt.Fprintf(&b, "These are missing a resource-level API reference page or have no exact route mention. Exactness is a review signal, not a final correctness verdict.\n\n")
@@ -776,13 +827,14 @@ func markdown(r report) string {
 		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | %s | `%s` | %s |\n", rec.Method, rec.Path, rec.OperationID, rec.Status, joinOrDash(rec.Contract.Structural.Missing), rec.SourceFile, joinOrDash(rec.Contract.SemanticRuntime.TestSignals))
 	}
 	fmt.Fprintf(&b, "\n## CLI commands needing attention\n\n")
-	fmt.Fprintf(&b, "| Command | Use | Status | Documentation | Tests |\n|---|---|---|---|---|\n")
+	fmt.Fprintf(&b, "| Command | Use | Status | Documentation | Tests | Flag gaps |\n|---|---|---|---|---|---|\n")
 	for _, rec := range r.CLI {
-		if (rec.Status == "documented_root" || rec.Status == "documented_exact") && len(rec.TestSignals) > 0 {
+		if (rec.Status == "documented_root" || rec.Status == "documented_exact") && len(rec.TestSignals) > 0 && len(rec.MissingFlags) == 0 {
 			continue
 		}
 		docs := appendUnique(append([]string{}, rec.ExactDocs...), rec.RootDocs...)
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s | %s |\n", rec.Path, rec.Use, rec.Status, joinOrDash(docs), joinOrDash(rec.TestSignals))
+		missing := joinOrDash(rec.MissingFlags)
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s | %s | missing flags: %s |\n", rec.Path, rec.Use, rec.Status, joinOrDash(docs), joinOrDash(rec.TestSignals), missing)
 	}
 	return b.String()
 }

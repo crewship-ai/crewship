@@ -13,6 +13,8 @@ Response schema quality: 517 API operations have a concrete 2xx schema; 0 still 
 
 Request schema quality: 222 operations have request bodies; 219 have concrete JSON schemas, 3 use non-JSON media types, and 0 still use a generic JSON fallback.
 
+CLI flag quality: 342 commands define flags; 342 document all of their flags and 0 still have undocumented flag(s).
+
 ## API operations needing attention
 
 These are missing a resource-level API reference page or have no exact route mention. Exactness is a review signal, not a final correctness verdict.
@@ -22,19 +24,19 @@ These are missing a resource-level API reference page or have no exact route men
 
 ## CLI commands needing attention
 
-| Command | Use | Status | Documentation | Tests |
-|---|---|---|---|---|
-| `connector` | `connector` | `documented_exact` | docs/cli/connector.mdx, docs/cli/recipe.mdx | — |
-| `connector get` | `get <id>` | `documented_exact` | docs/cli/connector.mdx | — |
-| `connector install` | `install <id>` | `documented_exact` | docs/cli/connector.mdx | — |
-| `connector verify` | `verify <id>` | `documented_exact` | docs/cli/connector.mdx | — |
-| `logout` | `logout` | `documented_exact` | docs/cli/login.mdx, docs/cli/logout.mdx, docs/cli/overview.mdx | — |
-| `recipe` | `recipe` | `documented_exact` | docs/cli/connector.mdx, docs/cli/recipe.mdx | — |
-| `recipe get` | `get <slug>` | `documented_exact` | docs/cli/recipe.mdx | — |
-| `recipe install` | `install <slug>` | `documented_exact` | docs/cli/recipe.mdx | — |
-| `recipe preview` | `preview <slug>` | `documented_exact` | docs/cli/recipe.mdx | — |
-| `recurring` | `recurring` | `documented_exact` | docs/cli/overview.mdx, docs/cli/recurring.mdx | — |
-| `saved-view` | `saved-view` | `documented_exact` | docs/cli/overview.mdx, docs/cli/saved-view.mdx | — |
-| `self-update` | `self-update` | `documented_exact` | docs/cli/self-update.mdx | — |
-| `today` | `today` | `documented_exact` | docs/cli/me.mdx, docs/cli/today.mdx | — |
-| `tui` | `tui` | `documented_exact` | docs/cli/me.mdx, docs/cli/overview.mdx, docs/cli/shell.mdx, docs/cli/tui.mdx | — |
+| Command | Use | Status | Documentation | Tests | Flag gaps |
+|---|---|---|---|---|---|
+| `connector` | `connector` | `documented_exact` | docs/cli/connector.mdx, docs/cli/recipe.mdx | — | missing flags: — |
+| `connector get` | `get <id>` | `documented_exact` | docs/cli/connector.mdx | — | missing flags: — |
+| `connector install` | `install <id>` | `documented_exact` | docs/cli/connector.mdx | — | missing flags: — |
+| `connector verify` | `verify <id>` | `documented_exact` | docs/cli/connector.mdx | — | missing flags: — |
+| `logout` | `logout` | `documented_exact` | docs/cli/login.mdx, docs/cli/logout.mdx, docs/cli/overview.mdx | — | missing flags: — |
+| `recipe` | `recipe` | `documented_exact` | docs/cli/connector.mdx, docs/cli/recipe.mdx | — | missing flags: — |
+| `recipe get` | `get <slug>` | `documented_exact` | docs/cli/recipe.mdx | — | missing flags: — |
+| `recipe install` | `install <slug>` | `documented_exact` | docs/cli/recipe.mdx | — | missing flags: — |
+| `recipe preview` | `preview <slug>` | `documented_exact` | docs/cli/recipe.mdx | — | missing flags: — |
+| `recurring` | `recurring` | `documented_exact` | docs/cli/overview.mdx, docs/cli/recurring.mdx | — | missing flags: — |
+| `saved-view` | `saved-view` | `documented_exact` | docs/cli/overview.mdx, docs/cli/saved-view.mdx | — | missing flags: — |
+| `self-update` | `self-update` | `documented_exact` | docs/cli/self-update.mdx | — | missing flags: — |
+| `today` | `today` | `documented_exact` | docs/cli/me.mdx, docs/cli/today.mdx | — | missing flags: — |
+| `tui` | `tui` | `documented_exact` | docs/cli/me.mdx, docs/cli/overview.mdx, docs/cli/shell.mdx, docs/cli/tui.mdx | — | missing flags: — |

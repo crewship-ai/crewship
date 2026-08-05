@@ -15,7 +15,10 @@
     "api_with_concrete_json_requests": 219,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 3,
-    "cli_with_test_signals": 709
+    "cli_with_test_signals": 709,
+    "cli_with_flags": 342,
+    "cli_with_all_flags_documented": 342,
+    "cli_missing_flag_docs": 0
   },
   "api": [
     {
@@ -22468,6 +22471,22 @@
         "cmd/crewship/cmd_activity_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_open_test.go"
+      ],
+      "flags": [
+        "crew",
+        "export",
+        "lines",
+        "out",
+        "since",
+        "type"
+      ],
+      "documented_flags": [
+        "crew",
+        "export",
+        "lines",
+        "out",
+        "since",
+        "type"
       ]
     },
     {
@@ -22550,6 +22569,14 @@
         "cmd/crewship/cmd_admin_invalidate_test.go",
         "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
+      ],
+      "flags": [
+        "reason",
+        "yes"
+      ],
+      "documented_flags": [
+        "reason",
+        "yes"
       ]
     },
     {
@@ -22574,6 +22601,12 @@
         "cmd/crewship/cmd_admin_invalidate_test.go",
         "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
+      ],
+      "flags": [
+        "out"
+      ],
+      "documented_flags": [
+        "out"
       ]
     },
     {
@@ -22622,6 +22655,12 @@
         "cmd/crewship/cmd_admin_invalidate_test.go",
         "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
+      ],
+      "flags": [
+        "email"
+      ],
+      "documented_flags": [
+        "email"
       ]
     },
     {
@@ -22647,6 +22686,12 @@
         "cmd/crewship/cmd_admin_invalidate_test.go",
         "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
+      ],
+      "flags": [
+        "locked-only"
+      ],
+      "documented_flags": [
+        "locked-only"
       ]
     },
     {
@@ -22722,6 +22767,12 @@
         "cmd/crewship/cmd_admin_invalidate_test.go",
         "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
+      ],
+      "flags": [
+        "retention-days"
+      ],
+      "documented_flags": [
+        "retention-days"
       ]
     },
     {
@@ -22746,6 +22797,16 @@
         "cmd/crewship/cmd_admin_invalidate_test.go",
         "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
+      ],
+      "flags": [
+        "email",
+        "role",
+        "workspace"
+      ],
+      "documented_flags": [
+        "email",
+        "role",
+        "workspace"
       ]
     },
     {
@@ -22898,6 +22959,12 @@
         "cmd/crewship/cmd_admin_invalidate_test.go",
         "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
+      ],
+      "flags": [
+        "apply"
+      ],
+      "documented_flags": [
+        "apply"
       ]
     },
     {
@@ -22950,6 +23017,16 @@
         "cmd/crewship/cmd_admin_invalidate_test.go",
         "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
+      ],
+      "flags": [
+        "email",
+        "password",
+        "password-stdin"
+      ],
+      "documented_flags": [
+        "email",
+        "password",
+        "password-stdin"
       ]
     },
     {
@@ -23025,6 +23102,16 @@
         "cmd/crewship/cmd_admin_invalidate_test.go",
         "cmd/crewship/cmd_admin_lockout_test.go",
         "…"
+      ],
+      "flags": [
+        "active-only",
+        "email",
+        "limit"
+      ],
+      "documented_flags": [
+        "active-only",
+        "email",
+        "limit"
       ]
     },
     {
@@ -23154,6 +23241,12 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "file"
+      ],
+      "documented_flags": [
+        "file"
       ]
     },
     {
@@ -23178,6 +23271,12 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "out"
+      ],
+      "documented_flags": [
+        "out"
       ]
     },
     {
@@ -23253,6 +23352,40 @@
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "avatar-seed",
+        "avatar-style",
+        "cli-adapter",
+        "crew",
+        "lead-mode",
+        "llm-model",
+        "llm-provider",
+        "memory",
+        "name",
+        "role",
+        "role-title",
+        "slug",
+        "system-prompt",
+        "timeout",
+        "tool-profile"
+      ],
+      "documented_flags": [
+        "avatar-seed",
+        "avatar-style",
+        "cli-adapter",
+        "crew",
+        "lead-mode",
+        "llm-model",
+        "llm-provider",
+        "memory",
+        "name",
+        "role",
+        "role-title",
+        "slug",
+        "system-prompt",
+        "timeout",
+        "tool-profile"
       ]
     },
     {
@@ -23327,6 +23460,12 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -23351,6 +23490,14 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "content",
+        "from"
+      ],
+      "documented_flags": [
+        "content",
+        "from"
       ]
     },
     {
@@ -23378,6 +23525,16 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "download",
+        "filter",
+        "out"
+      ],
+      "documented_flags": [
+        "download",
+        "filter",
+        "out"
       ]
     },
     {
@@ -23429,6 +23586,12 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "filter"
+      ],
+      "documented_flags": [
+        "filter"
       ]
     },
     {
@@ -23454,6 +23617,12 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "filter"
+      ],
+      "documented_flags": [
+        "filter"
       ]
     },
     {
@@ -23481,6 +23650,12 @@
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "crew"
+      ],
+      "documented_flags": [
+        "crew"
       ]
     },
     {
@@ -23505,6 +23680,12 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "tail"
+      ],
+      "documented_flags": [
+        "tail"
       ]
     },
     {
@@ -23530,6 +23711,16 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "resolved",
+        "set",
+        "set-file"
+      ],
+      "documented_flags": [
+        "resolved",
+        "set",
+        "set-file"
       ]
     },
     {
@@ -23554,6 +23745,20 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "cred-type",
+        "credential",
+        "enabled",
+        "env-var",
+        "scope"
+      ],
+      "documented_flags": [
+        "cred-type",
+        "credential",
+        "enabled",
+        "env-var",
+        "scope"
       ]
     },
     {
@@ -23630,6 +23835,20 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "cred-type",
+        "credential",
+        "enabled",
+        "env-var",
+        "tools"
+      ],
+      "documented_flags": [
+        "cred-type",
+        "credential",
+        "enabled",
+        "env-var",
+        "tools"
       ]
     },
     {
@@ -23750,6 +23969,48 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_agent_stream_test.go",
         "…"
+      ],
+      "flags": [
+        "avatar-seed",
+        "avatar-style",
+        "cli-adapter",
+        "lead-mode",
+        "learning-reason",
+        "llm-model",
+        "llm-provider",
+        "memory",
+        "name",
+        "role",
+        "role-title",
+        "schedule-cron",
+        "schedule-enabled",
+        "schedule-prompt",
+        "self-learning",
+        "system-prompt",
+        "timeout",
+        "tool-profile",
+        "webhook-require-timestamp"
+      ],
+      "documented_flags": [
+        "avatar-seed",
+        "avatar-style",
+        "cli-adapter",
+        "lead-mode",
+        "learning-reason",
+        "llm-model",
+        "llm-provider",
+        "memory",
+        "name",
+        "role",
+        "role-title",
+        "schedule-cron",
+        "schedule-enabled",
+        "schedule-prompt",
+        "self-learning",
+        "system-prompt",
+        "timeout",
+        "tool-profile",
+        "webhook-require-timestamp"
       ]
     },
     {
@@ -23773,6 +24034,28 @@
       "test_signals": [
         "cmd/crewship/cmd_apply_cov_test.go",
         "cmd/crewship/cmd_db_repair_ledger_test.go"
+      ],
+      "flags": [
+        "dry-run",
+        "file",
+        "from-env",
+        "replace",
+        "secrets-file",
+        "skip-governance-gate",
+        "skip-test-gate",
+        "strict",
+        "yes"
+      ],
+      "documented_flags": [
+        "dry-run",
+        "file",
+        "from-env",
+        "replace",
+        "secrets-file",
+        "skip-governance-gate",
+        "skip-test-gate",
+        "strict",
+        "yes"
       ]
     },
     {
@@ -23815,6 +24098,12 @@
       "test_signals": [
         "cmd/crewship/cmd_approvals_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go"
+      ],
+      "flags": [
+        "comment"
+      ],
+      "documented_flags": [
+        "comment"
       ]
     },
     {
@@ -23832,6 +24121,12 @@
       "test_signals": [
         "cmd/crewship/cmd_approvals_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go"
+      ],
+      "flags": [
+        "reason"
+      ],
+      "documented_flags": [
+        "reason"
       ]
     },
     {
@@ -23849,6 +24144,12 @@
       "test_signals": [
         "cmd/crewship/cmd_approvals_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go"
+      ],
+      "flags": [
+        "comment"
+      ],
+      "documented_flags": [
+        "comment"
       ]
     },
     {
@@ -23890,6 +24191,14 @@
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
+      ],
+      "flags": [
+        "limit",
+        "status"
+      ],
+      "documented_flags": [
+        "limit",
+        "status"
       ]
     },
     {
@@ -23937,6 +24246,56 @@
         "cmd/crewship/cmd_ask_fanout_cov_test.go",
         "cmd/crewship/cmd_ask_fanout_test.go",
         "cmd/crewship/cmd_config_cov_test.go"
+      ],
+      "flags": [
+        "agent",
+        "agents",
+        "dry-run",
+        "effort",
+        "estimate",
+        "markdown",
+        "max-turns",
+        "no-markdown",
+        "no-stream",
+        "paste",
+        "plan",
+        "prompt",
+        "quiet",
+        "save",
+        "show-thinking",
+        "timeout",
+        "wait",
+        "with-cmd",
+        "with-file",
+        "with-git-diff",
+        "with-git-log",
+        "with-git-staged",
+        "with-git-status"
+      ],
+      "documented_flags": [
+        "agent",
+        "agents",
+        "dry-run",
+        "effort",
+        "estimate",
+        "markdown",
+        "max-turns",
+        "no-markdown",
+        "no-stream",
+        "paste",
+        "plan",
+        "prompt",
+        "quiet",
+        "save",
+        "show-thinking",
+        "timeout",
+        "wait",
+        "with-cmd",
+        "with-file",
+        "with-git-diff",
+        "with-git-log",
+        "with-git-staged",
+        "with-git-status"
       ]
     },
     {
@@ -23960,6 +24319,30 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_open_test.go",
         "cmd/crewship/cmd_pipeline_save_test.go"
+      ],
+      "flags": [
+        "action",
+        "entity-id",
+        "entity-type",
+        "lines",
+        "page",
+        "search",
+        "since",
+        "source",
+        "until",
+        "user"
+      ],
+      "documented_flags": [
+        "action",
+        "entity-id",
+        "entity-type",
+        "lines",
+        "page",
+        "search",
+        "since",
+        "source",
+        "until",
+        "user"
       ]
     },
     {
@@ -23996,6 +24379,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_auth_test.go"
+      ],
+      "flags": [
+        "clear"
+      ],
+      "documented_flags": [
+        "clear"
       ]
     },
     {
@@ -24054,6 +24443,24 @@
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
         "…"
+      ],
+      "flags": [
+        "crew",
+        "no-encrypt",
+        "output",
+        "passphrase-file",
+        "recipient",
+        "scope",
+        "use-keyring"
+      ],
+      "documented_flags": [
+        "crew",
+        "no-encrypt",
+        "output",
+        "passphrase-file",
+        "recipient",
+        "scope",
+        "use-keyring"
       ]
     },
     {
@@ -24072,6 +24479,14 @@
         "cmd/crewship/cmd_backup_admin_cov_test.go",
         "cmd/crewship/cmd_backup_cov_test.go",
         "cmd/crewship/cmd_backup_lifecycle_cov_test.go"
+      ],
+      "flags": [
+        "force",
+        "yes"
+      ],
+      "documented_flags": [
+        "force",
+        "yes"
       ]
     },
     {
@@ -24090,6 +24505,14 @@
         "cmd/crewship/cmd_backup_admin_cov_test.go",
         "cmd/crewship/cmd_backup_cov_test.go",
         "cmd/crewship/cmd_backup_lifecycle_cov_test.go"
+      ],
+      "flags": [
+        "force",
+        "out"
+      ],
+      "documented_flags": [
+        "force",
+        "out"
       ]
     },
     {
@@ -24171,6 +24594,24 @@
         "cmd/crewship/cmd_backup_admin_cov_test.go",
         "cmd/crewship/cmd_backup_cov_test.go",
         "cmd/crewship/cmd_backup_lifecycle_cov_test.go"
+      ],
+      "flags": [
+        "as-crew",
+        "as-workspace",
+        "dry-run",
+        "files-only",
+        "passphrase-file",
+        "replace",
+        "use-keyring"
+      ],
+      "documented_flags": [
+        "as-crew",
+        "as-workspace",
+        "dry-run",
+        "files-only",
+        "passphrase-file",
+        "replace",
+        "use-keyring"
       ]
     },
     {
@@ -24193,6 +24634,16 @@
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_token_cov_test.go"
+      ],
+      "flags": [
+        "dry-run",
+        "keep-days",
+        "keep-last"
+      ],
+      "documented_flags": [
+        "dry-run",
+        "keep-days",
+        "keep-last"
       ]
     },
     {
@@ -24211,6 +24662,12 @@
         "cmd/crewship/cmd_backup_admin_cov_test.go",
         "cmd/crewship/cmd_backup_cov_test.go",
         "cmd/crewship/cmd_backup_lifecycle_cov_test.go"
+      ],
+      "flags": [
+        "crew"
+      ],
+      "documented_flags": [
+        "crew"
       ]
     },
     {
@@ -24253,6 +24710,14 @@
         "cmd/crewship/cmd_backup_admin_cov_test.go",
         "cmd/crewship/cmd_backup_cov_test.go",
         "cmd/crewship/cmd_backup_lifecycle_cov_test.go"
+      ],
+      "flags": [
+        "force",
+        "yes"
+      ],
+      "documented_flags": [
+        "force",
+        "yes"
       ]
     },
     {
@@ -24319,6 +24784,18 @@
         "cmd/crewship/cmd_history_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "filter",
+        "markdown",
+        "no-markdown",
+        "since"
+      ],
+      "documented_flags": [
+        "filter",
+        "markdown",
+        "no-markdown",
+        "since"
       ]
     },
     {
@@ -24339,6 +24816,12 @@
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
         "cmd/crewship/cmd_chat_steer_test.go"
+      ],
+      "flags": [
+        "agent"
+      ],
+      "documented_flags": [
+        "agent"
       ]
     },
     {
@@ -24359,6 +24842,14 @@
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
         "cmd/crewship/cmd_chat_steer_test.go"
+      ],
+      "flags": [
+        "agent",
+        "yes"
+      ],
+      "documented_flags": [
+        "agent",
+        "yes"
       ]
     },
     {
@@ -24422,6 +24913,12 @@
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
         "cmd/crewship/cmd_chat_steer_test.go"
+      ],
+      "flags": [
+        "role"
+      ],
+      "documented_flags": [
+        "role"
       ]
     },
     {
@@ -24570,6 +25067,12 @@
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
         "cmd/crewship/cmd_chat_steer_test.go"
+      ],
+      "flags": [
+        "agent"
+      ],
+      "documented_flags": [
+        "agent"
       ]
     },
     {
@@ -24590,6 +25093,12 @@
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
         "cmd/crewship/cmd_chat_steer_test.go"
+      ],
+      "flags": [
+        "message"
+      ],
+      "documented_flags": [
+        "message"
       ]
     },
     {
@@ -24632,6 +25141,14 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "label",
+        "mission"
+      ],
+      "documented_flags": [
+        "label",
+        "mission"
       ]
     },
     {
@@ -24649,6 +25166,12 @@
       "test_signals": [
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -24666,6 +25189,12 @@
       "test_signals": [
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go"
+      ],
+      "flags": [
+        "label"
+      ],
+      "documented_flags": [
+        "label"
       ]
     },
     {
@@ -24690,6 +25219,12 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "mission"
+      ],
+      "documented_flags": [
+        "mission"
       ]
     },
     {
@@ -24729,6 +25264,26 @@
         "cmd/crewship/cmd_slash_admin_cov_test.go",
         "cmd/crewship/cmd_slash_cov_test.go",
         "cmd/crewship/cmd_slash_fastpath_test.go"
+      ],
+      "flags": [
+        "format",
+        "help",
+        "no-color",
+        "profile",
+        "server",
+        "server-allow-mismatch",
+        "verbose",
+        "workspace"
+      ],
+      "documented_flags": [
+        "format",
+        "help",
+        "no-color",
+        "profile",
+        "server",
+        "server-allow-mismatch",
+        "verbose",
+        "workspace"
       ]
     },
     {
@@ -24879,7 +25434,17 @@
       "root_docs": [
         "docs/cli/connector.mdx"
       ],
-      "status": "documented_exact"
+      "status": "documented_exact",
+      "flags": [
+        "crew",
+        "field",
+        "name"
+      ],
+      "documented_flags": [
+        "crew",
+        "field",
+        "name"
+      ]
     },
     {
       "path": "connector list",
@@ -24916,7 +25481,13 @@
       "root_docs": [
         "docs/cli/connector.mdx"
       ],
-      "status": "documented_exact"
+      "status": "documented_exact",
+      "flags": [
+        "field"
+      ],
+      "documented_flags": [
+        "field"
+      ]
     },
     {
       "path": "consolidate",
@@ -24953,6 +25524,14 @@
         "cmd/crewship/cmd_keeper_review_test.go",
         "cmd/crewship/cmd_pipeline_cov_test.go",
         "cmd/crewship/cmd_slash_fastpath_test.go"
+      ],
+      "flags": [
+        "crew",
+        "since"
+      ],
+      "documented_flags": [
+        "crew",
+        "since"
       ]
     },
     {
@@ -24990,6 +25569,12 @@
       "test_signals": [
         "cmd/crewship/cmd_conversation_cov_test.go",
         "cmd/crewship/cmd_conversation_test.go"
+      ],
+      "flags": [
+        "limit"
+      ],
+      "documented_flags": [
+        "limit"
       ]
     },
     {
@@ -25011,6 +25596,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_copy_prompt_cov_test.go"
+      ],
+      "flags": [
+        "clipboard"
+      ],
+      "documented_flags": [
+        "clipboard"
       ]
     },
     {
@@ -25033,6 +25624,16 @@
         "cmd/crewship/cmd_cost_cov_test.go",
         "cmd/crewship/cmd_cost_forecast_cov_test.go",
         "cmd/crewship/cmd_cost_test.go"
+      ],
+      "flags": [
+        "limit",
+        "range",
+        "watch"
+      ],
+      "documented_flags": [
+        "limit",
+        "range",
+        "watch"
       ]
     },
     {
@@ -25051,6 +25652,16 @@
         "cmd/crewship/cmd_cost_cov_test.go",
         "cmd/crewship/cmd_cost_forecast_cov_test.go",
         "cmd/crewship/cmd_cost_test.go"
+      ],
+      "flags": [
+        "from-history",
+        "output-ratio",
+        "prompt"
+      ],
+      "documented_flags": [
+        "from-history",
+        "output-ratio",
+        "prompt"
       ]
     },
     {
@@ -25109,6 +25720,16 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "env-var-name",
+        "priority",
+        "ttl"
+      ],
+      "documented_flags": [
+        "env-var-name",
+        "priority",
+        "ttl"
       ]
     },
     {
@@ -25133,6 +25754,12 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "limit"
+      ],
+      "documented_flags": [
+        "limit"
       ]
     },
     {
@@ -25157,6 +25784,16 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "agent",
+        "crew",
+        "slot"
+      ],
+      "documented_flags": [
+        "agent",
+        "crew",
+        "slot"
       ]
     },
     {
@@ -25184,6 +25821,16 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "agent",
+        "credential",
+        "crew"
+      ],
+      "documented_flags": [
+        "agent",
+        "credential",
+        "crew"
       ]
     },
     {
@@ -25208,6 +25855,32 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_credential_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "auth-token",
+        "crews",
+        "env-var-name",
+        "header",
+        "name",
+        "provider",
+        "scope",
+        "security-level",
+        "type",
+        "value",
+        "value-stdin"
+      ],
+      "documented_flags": [
+        "auth-token",
+        "crews",
+        "env-var-name",
+        "header",
+        "name",
+        "provider",
+        "scope",
+        "security-level",
+        "type",
+        "value",
+        "value-stdin"
       ]
     },
     {
@@ -25232,6 +25905,12 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "provider"
+      ],
+      "documented_flags": [
+        "provider"
       ]
     },
     {
@@ -25257,6 +25936,12 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -25360,6 +26045,18 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "ordinal",
+        "plain",
+        "value",
+        "value-stdin"
+      ],
+      "documented_flags": [
+        "ordinal",
+        "plain",
+        "value",
+        "value-stdin"
       ]
     },
     {
@@ -25408,6 +26105,20 @@
         "cmd/crewship/cmd_credential_assignment_cov_test.go",
         "cmd/crewship/cmd_credential_binding_test.go",
         "…"
+      ],
+      "flags": [
+        "all",
+        "cursor",
+        "limit",
+        "search",
+        "tag"
+      ],
+      "documented_flags": [
+        "all",
+        "cursor",
+        "limit",
+        "search",
+        "tag"
       ]
     },
     {
@@ -25456,6 +26167,12 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "reason"
+      ],
+      "documented_flags": [
+        "reason"
       ]
     },
     {
@@ -25480,6 +26197,14 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "disable",
+        "enable"
+      ],
+      "documented_flags": [
+        "disable",
+        "enable"
       ]
     },
     {
@@ -25504,6 +26229,22 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "auth-token",
+        "grace-seconds",
+        "header",
+        "value",
+        "value-stdin",
+        "yes"
+      ],
+      "documented_flags": [
+        "auth-token",
+        "grace-seconds",
+        "header",
+        "value",
+        "value-stdin",
+        "yes"
       ]
     },
     {
@@ -25528,6 +26269,12 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -25600,6 +26347,18 @@
         "cmd/crewship/cmd_credential_endpoint_test.go",
         "cmd/crewship/cmd_credential_field_test.go",
         "…"
+      ],
+      "flags": [
+        "provider",
+        "type",
+        "value",
+        "value-stdin"
+      ],
+      "documented_flags": [
+        "provider",
+        "type",
+        "value",
+        "value-stdin"
       ]
     },
     {
@@ -25673,6 +26432,16 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "agent",
+        "crew",
+        "slot"
+      ],
+      "documented_flags": [
+        "agent",
+        "crew",
+        "slot"
       ]
     },
     {
@@ -25698,6 +26467,22 @@
         "cmd/crewship/cmd_credential_field_test.go",
         "cmd/crewship/cmd_credential_list_paging_test.go",
         "…"
+      ],
+      "flags": [
+        "crews",
+        "name",
+        "scope",
+        "security-level",
+        "value",
+        "value-stdin"
+      ],
+      "documented_flags": [
+        "crews",
+        "name",
+        "scope",
+        "security-level",
+        "value",
+        "value-stdin"
       ]
     },
     {
@@ -25758,6 +26543,14 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "reset",
+        "style"
+      ],
+      "documented_flags": [
+        "reset",
+        "style"
       ]
     },
     {
@@ -25830,6 +26623,16 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "force",
+        "older-than",
+        "unused"
+      ],
+      "documented_flags": [
+        "force",
+        "older-than",
+        "unused"
       ]
     },
     {
@@ -25854,6 +26657,30 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "cap-add",
+        "clear",
+        "devcontainer",
+        "export",
+        "init",
+        "init-hook",
+        "mise",
+        "privileged",
+        "runtime-image",
+        "show"
+      ],
+      "documented_flags": [
+        "cap-add",
+        "clear",
+        "devcontainer",
+        "export",
+        "init",
+        "init-hook",
+        "mise",
+        "privileged",
+        "runtime-image",
+        "show"
       ]
     },
     {
@@ -25878,6 +26705,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "direction"
+      ],
+      "documented_flags": [
+        "direction"
       ]
     },
     {
@@ -25950,6 +26783,34 @@
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "allow-package-registries",
+        "allow-private-endpoints",
+        "allowed-domains",
+        "color",
+        "cpus",
+        "description",
+        "icon",
+        "memory-mb",
+        "name",
+        "network-mode",
+        "slug",
+        "ttl"
+      ],
+      "documented_flags": [
+        "allow-package-registries",
+        "allow-private-endpoints",
+        "allowed-domains",
+        "color",
+        "cpus",
+        "description",
+        "icon",
+        "memory-mb",
+        "name",
+        "network-mode",
+        "slug",
+        "ttl"
       ]
     },
     {
@@ -25999,6 +26860,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -26078,6 +26945,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -26103,6 +26976,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "out"
+      ],
+      "documented_flags": [
+        "out"
       ]
     },
     {
@@ -26127,6 +27006,16 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "filter",
+        "path",
+        "recursive"
+      ],
+      "documented_flags": [
+        "filter",
+        "path",
+        "recursive"
       ]
     },
     {
@@ -26151,6 +27040,14 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "content",
+        "file"
+      ],
+      "documented_flags": [
+        "content",
+        "file"
       ]
     },
     {
@@ -26200,6 +27097,12 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_avatar_test.go",
         "…"
+      ],
+      "flags": [
+        "runtime"
+      ],
+      "documented_flags": [
+        "runtime"
       ]
     },
     {
@@ -26225,6 +27128,14 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "set",
+        "set-file"
+      ],
+      "documented_flags": [
+        "set",
+        "set-file"
       ]
     },
     {
@@ -26348,6 +27259,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "limit"
+      ],
+      "documented_flags": [
+        "limit"
       ]
     },
     {
@@ -26375,6 +27292,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "no-watch"
+      ],
+      "documented_flags": [
+        "no-watch"
       ]
     },
     {
@@ -26400,6 +27323,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "watch"
+      ],
+      "documented_flags": [
+        "watch"
       ]
     },
     {
@@ -26424,6 +27353,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "no-watch"
+      ],
+      "documented_flags": [
+        "no-watch"
       ]
     },
     {
@@ -26496,6 +27431,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "since"
+      ],
+      "documented_flags": [
+        "since"
       ]
     },
     {
@@ -26544,6 +27485,12 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "goal"
+      ],
+      "documented_flags": [
+        "goal"
       ]
     },
     {
@@ -26568,6 +27515,32 @@
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "allow-package-registries",
+        "allow-private-endpoints",
+        "allowed-domains",
+        "color",
+        "cpus",
+        "description",
+        "icon",
+        "memory-mb",
+        "name",
+        "network-mode",
+        "ttl"
+      ],
+      "documented_flags": [
+        "allow-package-registries",
+        "allow-private-endpoints",
+        "allowed-domains",
+        "color",
+        "cpus",
+        "description",
+        "icon",
+        "memory-mb",
+        "name",
+        "network-mode",
+        "ttl"
       ]
     },
     {
@@ -26622,6 +27595,14 @@
       "test_signals": [
         "cmd/crewship/cmd_db_remote_notice_test.go",
         "cmd/crewship/cmd_db_repair_ledger_test.go"
+      ],
+      "flags": [
+        "dry-run",
+        "yes"
+      ],
+      "documented_flags": [
+        "dry-run",
+        "yes"
       ]
     },
     {
@@ -26639,6 +27620,14 @@
       "test_signals": [
         "cmd/crewship/cmd_db_remote_notice_test.go",
         "cmd/crewship/cmd_db_repair_ledger_test.go"
+      ],
+      "flags": [
+        "list",
+        "yes"
+      ],
+      "documented_flags": [
+        "list",
+        "yes"
       ]
     },
     {
@@ -26659,6 +27648,12 @@
         "cmd/crewship/cmd_diff_cov_test.go",
         "cmd/crewship/cmd_eval_baseline_cov2_test.go",
         "cmd/crewship/cmd_slash_cov_test.go"
+      ],
+      "flags": [
+        "full"
+      ],
+      "documented_flags": [
+        "full"
       ]
     },
     {
@@ -26697,6 +27692,18 @@
         "cmd/crewship/cmd_keeper_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
         "cmd/crewship/cmd_routine_governance_test.go"
+      ],
+      "flags": [
+        "crew",
+        "cron",
+        "when",
+        "yes"
+      ],
+      "documented_flags": [
+        "crew",
+        "cron",
+        "when",
+        "yes"
       ]
     },
     {
@@ -26727,6 +27734,14 @@
         "cmd/crewship/cmd_doctor_migration_expectation_test.go",
         "cmd/crewship/cmd_doctor_security_test.go",
         "cmd/crewship/cmd_doctor_test.go"
+      ],
+      "flags": [
+        "fix",
+        "json"
+      ],
+      "documented_flags": [
+        "fix",
+        "json"
       ]
     },
     {
@@ -26773,6 +27788,18 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "crew",
+        "limit",
+        "since",
+        "status"
+      ],
+      "documented_flags": [
+        "crew",
+        "limit",
+        "since",
+        "status"
       ]
     },
     {
@@ -26806,6 +27833,16 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_escalation_cov_test.go"
+      ],
+      "flags": [
+        "action",
+        "redirect-to",
+        "resolution"
+      ],
+      "documented_flags": [
+        "action",
+        "redirect-to",
+        "resolution"
       ]
     },
     {
@@ -26904,6 +27941,20 @@
         "cmd/crewship/cmd_eval_scenarios_cov_test.go",
         "cmd/crewship/cmd_eval_scenarios_test.go",
         "…"
+      ],
+      "flags": [
+        "inputs",
+        "runs",
+        "scenarios",
+        "tiers",
+        "tolerance"
+      ],
+      "documented_flags": [
+        "inputs",
+        "runs",
+        "scenarios",
+        "tiers",
+        "tolerance"
       ]
     },
     {
@@ -26952,6 +28003,18 @@
         "cmd/crewship/cmd_eval_scenarios_cov_test.go",
         "cmd/crewship/cmd_eval_scenarios_test.go",
         "…"
+      ],
+      "flags": [
+        "inputs",
+        "runs",
+        "scenarios",
+        "tiers"
+      ],
+      "documented_flags": [
+        "inputs",
+        "runs",
+        "scenarios",
+        "tiers"
       ]
     },
     {
@@ -27001,6 +28064,16 @@
         "cmd/crewship/cmd_eval_scenarios_cov_test.go",
         "cmd/crewship/cmd_eval_scenarios_test.go",
         "…"
+      ],
+      "flags": [
+        "inputs",
+        "tier-a",
+        "tier-b"
+      ],
+      "documented_flags": [
+        "inputs",
+        "tier-a",
+        "tier-b"
       ]
     },
     {
@@ -27076,6 +28149,12 @@
         "cmd/crewship/cmd_eval_scenarios_cov_test.go",
         "cmd/crewship/cmd_eval_scenarios_test.go",
         "…"
+      ],
+      "flags": [
+        "seed"
+      ],
+      "documented_flags": [
+        "seed"
       ]
     },
     {
@@ -27100,6 +28179,12 @@
         "cmd/crewship/cmd_eval_get_cov_test.go",
         "cmd/crewship/cmd_eval_scenarios_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "limit"
+      ],
+      "documented_flags": [
+        "limit"
       ]
     },
     {
@@ -27124,6 +28209,20 @@
         "cmd/crewship/cmd_eval_scenarios_cov_test.go",
         "cmd/crewship/cmd_eval_scenarios_test.go",
         "…"
+      ],
+      "flags": [
+        "fail-fast",
+        "inputs",
+        "runs",
+        "scenarios",
+        "tiers"
+      ],
+      "documented_flags": [
+        "fail-fast",
+        "inputs",
+        "runs",
+        "scenarios",
+        "tiers"
       ]
     },
     {
@@ -27149,6 +28248,22 @@
         "cmd/crewship/cmd_explain_cov_test.go",
         "cmd/crewship/cmd_explain_test.go",
         "cmd/crewship/cmd_run_id_namespace_test.go"
+      ],
+      "flags": [
+        "agent",
+        "markdown",
+        "no-markdown",
+        "quiet",
+        "save",
+        "types"
+      ],
+      "documented_flags": [
+        "agent",
+        "markdown",
+        "no-markdown",
+        "quiet",
+        "save",
+        "types"
       ]
     },
     {
@@ -27172,6 +28287,14 @@
         "cmd/crewship/cmd_export_manifest_cov_test.go",
         "cmd/crewship/cmd_export_perms_sec_test.go",
         "cmd/crewship/cmd_routine_extra_cov2_test.go"
+      ],
+      "flags": [
+        "no-journal",
+        "out"
+      ],
+      "documented_flags": [
+        "no-journal",
+        "out"
       ]
     },
     {
@@ -27191,6 +28314,16 @@
         "cmd/crewship/cmd_export_cov_test.go",
         "cmd/crewship/cmd_export_manifest_cov_test.go",
         "cmd/crewship/cmd_export_perms_sec_test.go"
+      ],
+      "flags": [
+        "no-credentials",
+        "no-skill-bodies",
+        "output"
+      ],
+      "documented_flags": [
+        "no-credentials",
+        "no-skill-bodies",
+        "output"
       ]
     },
     {
@@ -27216,6 +28349,16 @@
         "cmd/crewship/cmd_approvals_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
         "…"
+      ],
+      "flags": [
+        "no-credentials",
+        "no-skill-bodies",
+        "output"
+      ],
+      "documented_flags": [
+        "no-credentials",
+        "no-skill-bodies",
+        "output"
       ]
     },
     {
@@ -27258,6 +28401,14 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "crew",
+        "status"
+      ],
+      "documented_flags": [
+        "crew",
+        "status"
       ]
     },
     {
@@ -27276,6 +28427,16 @@
         "cmd/crewship/cmd_expose_cov_test.go",
         "cmd/crewship/cmd_expose_test.go",
         "cmd/crewship/cmd_safety_guards_test.go"
+      ],
+      "flags": [
+        "crew",
+        "reason",
+        "yes"
+      ],
+      "documented_flags": [
+        "crew",
+        "reason",
+        "yes"
       ]
     },
     {
@@ -27311,6 +28472,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_feature_flag_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -27461,6 +28628,12 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "search"
+      ],
+      "documented_flags": [
+        "search"
       ]
     },
     {
@@ -27502,6 +28675,20 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "chat",
+        "message",
+        "reason",
+        "signal",
+        "trace"
+      ],
+      "documented_flags": [
+        "chat",
+        "message",
+        "reason",
+        "signal",
+        "trace"
       ]
     },
     {
@@ -27526,6 +28713,14 @@
         "cmd/crewship/cmd_instance_cov_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "message",
+        "signal"
+      ],
+      "documented_flags": [
+        "message",
+        "signal"
       ]
     },
     {
@@ -27550,6 +28745,14 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "message",
+        "trace"
+      ],
+      "documented_flags": [
+        "message",
+        "trace"
       ]
     },
     {
@@ -27572,6 +28775,30 @@
         "cmd/crewship/cmd_hire_cov2_test.go",
         "cmd/crewship/cmd_hire_cov_test.go",
         "cmd/crewship/cmd_hire_test.go"
+      ],
+      "flags": [
+        "crew",
+        "model",
+        "parent-lead",
+        "reason",
+        "template",
+        "ttl",
+        "wait",
+        "wait-interval",
+        "wait-timeout",
+        "yes"
+      ],
+      "documented_flags": [
+        "crew",
+        "model",
+        "parent-lead",
+        "reason",
+        "template",
+        "ttl",
+        "wait",
+        "wait-interval",
+        "wait-timeout",
+        "yes"
       ]
     },
     {
@@ -27620,6 +28847,22 @@
         "cmd/crewship/cmd_history_http_test.go",
         "cmd/crewship/cmd_history_test.go",
         "cmd/crewship/cmd_keeper_history_test.go"
+      ],
+      "flags": [
+        "agent",
+        "limit",
+        "prompts",
+        "since",
+        "status",
+        "watch"
+      ],
+      "documented_flags": [
+        "agent",
+        "limit",
+        "prompts",
+        "since",
+        "status",
+        "watch"
       ]
     },
     {
@@ -27695,6 +28938,12 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "crew"
+      ],
+      "documented_flags": [
+        "crew"
       ]
     },
     {
@@ -27773,6 +29022,14 @@
         "cmd/crewship/cmd_inbox_cov_test.go",
         "cmd/crewship/cmd_inbox_foureyes_test.go",
         "cmd/crewship/cmd_workflow_cov_test.go"
+      ],
+      "flags": [
+        "all-unread",
+        "ids"
+      ],
+      "documented_flags": [
+        "all-unread",
+        "ids"
       ]
     },
     {
@@ -27791,6 +29048,16 @@
         "cmd/crewship/cmd_inbox_cov_test.go",
         "cmd/crewship/cmd_inbox_foureyes_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go"
+      ],
+      "flags": [
+        "action",
+        "all-unread",
+        "ids"
+      ],
+      "documented_flags": [
+        "action",
+        "all-unread",
+        "ids"
       ]
     },
     {
@@ -27857,6 +29124,16 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "kind",
+        "limit",
+        "state"
+      ],
+      "documented_flags": [
+        "kind",
+        "limit",
+        "state"
       ]
     },
     {
@@ -27891,6 +29168,12 @@
       "test_signals": [
         "cmd/crewship/cmd_inbox_cov_test.go",
         "cmd/crewship/cmd_inbox_foureyes_test.go"
+      ],
+      "flags": [
+        "action"
+      ],
+      "documented_flags": [
+        "action"
       ]
     },
     {
@@ -27931,6 +29214,20 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_init_cov_test.go",
         "cmd/crewship/cmd_slash_admin_cov_test.go"
+      ],
+      "flags": [
+        "email",
+        "name",
+        "password",
+        "password-stdin",
+        "server"
+      ],
+      "documented_flags": [
+        "email",
+        "name",
+        "password",
+        "password-stdin",
+        "server"
       ]
     },
     {
@@ -27952,6 +29249,16 @@
       "test_signals": [
         "cmd/crewship/cmd_inspect_cov_test.go",
         "cmd/crewship/cmd_run_id_namespace_test.go"
+      ],
+      "flags": [
+        "filter",
+        "types",
+        "watch"
+      ],
+      "documented_flags": [
+        "filter",
+        "types",
+        "watch"
       ]
     },
     {
@@ -28015,6 +29322,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_instance_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -28126,6 +29439,22 @@
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "command",
+        "display",
+        "endpoint",
+        "icon",
+        "name",
+        "transport"
+      ],
+      "documented_flags": [
+        "command",
+        "display",
+        "endpoint",
+        "icon",
+        "name",
+        "transport"
       ]
     },
     {
@@ -28171,6 +29500,20 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "cred-header",
+        "cred-type",
+        "credential",
+        "enabled",
+        "env-var-name"
+      ],
+      "documented_flags": [
+        "cred-header",
+        "cred-type",
+        "credential",
+        "enabled",
+        "env-var-name"
       ]
     },
     {
@@ -28213,6 +29556,20 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "agent",
+        "cred-header",
+        "cred-type",
+        "credential",
+        "server"
+      ],
+      "documented_flags": [
+        "agent",
+        "cred-header",
+        "cred-type",
+        "credential",
+        "server"
       ]
     },
     {
@@ -28341,6 +29698,16 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "app",
+        "toolkits",
+        "user"
+      ],
+      "documented_flags": [
+        "app",
+        "toolkits",
+        "user"
       ]
     },
     {
@@ -28383,6 +29750,12 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "user"
+      ],
+      "documented_flags": [
+        "user"
       ]
     },
     {
@@ -28569,6 +29942,14 @@
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "key",
+        "label"
+      ],
+      "documented_flags": [
+        "key",
+        "label"
       ]
     },
     {
@@ -28615,6 +29996,16 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "category",
+        "limit",
+        "search"
+      ],
+      "documented_flags": [
+        "category",
+        "limit",
+        "search"
       ]
     },
     {
@@ -28636,6 +30027,14 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "limit",
+        "search"
+      ],
+      "documented_flags": [
+        "limit",
+        "search"
       ]
     },
     {
@@ -28703,6 +30102,12 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "user"
+      ],
+      "documented_flags": [
+        "user"
       ]
     },
     {
@@ -28726,6 +30131,16 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "limit",
+        "search",
+        "toolkit"
+      ],
+      "documented_flags": [
+        "limit",
+        "search",
+        "toolkit"
       ]
     },
     {
@@ -28747,6 +30162,12 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "app"
+      ],
+      "documented_flags": [
+        "app"
       ]
     },
     {
@@ -28792,6 +30213,24 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "command",
+        "display",
+        "endpoint",
+        "icon",
+        "link-workspace-server",
+        "name",
+        "transport"
+      ],
+      "documented_flags": [
+        "command",
+        "display",
+        "endpoint",
+        "icon",
+        "link-workspace-server",
+        "name",
+        "transport"
       ]
     },
     {
@@ -28813,6 +30252,12 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -28876,6 +30321,22 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "command",
+        "display",
+        "enabled",
+        "endpoint",
+        "icon",
+        "transport"
+      ],
+      "documented_flags": [
+        "command",
+        "display",
+        "enabled",
+        "endpoint",
+        "icon",
+        "transport"
       ]
     },
     {
@@ -29006,6 +30467,12 @@
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "cmd/crewship/cmd_safety_guards_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -29177,6 +30644,14 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go"
+      ],
+      "flags": [
+        "agent",
+        "binding-id"
+      ],
+      "documented_flags": [
+        "agent",
+        "binding-id"
       ]
     },
     {
@@ -29291,6 +30766,24 @@
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "assignee",
+        "assignee-type",
+        "ids",
+        "labels",
+        "priority",
+        "project",
+        "status"
+      ],
+      "documented_flags": [
+        "assignee",
+        "assignee-type",
+        "ids",
+        "labels",
+        "priority",
+        "project",
+        "status"
       ]
     },
     {
@@ -29311,6 +30804,12 @@
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ],
+      "flags": [
+        "patch"
+      ],
+      "documented_flags": [
+        "patch"
       ]
     },
     {
@@ -29331,6 +30830,12 @@
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ],
+      "flags": [
+        "body"
+      ],
+      "documented_flags": [
+        "body"
       ]
     },
     {
@@ -29375,6 +30880,38 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "…"
+      ],
+      "flags": [
+        "assignee",
+        "assignee-type",
+        "crew",
+        "description",
+        "due-date",
+        "estimate",
+        "labels",
+        "milestone-id",
+        "parent-issue-id",
+        "priority",
+        "project-id",
+        "routine-id",
+        "sort-order",
+        "title"
+      ],
+      "documented_flags": [
+        "assignee",
+        "assignee-type",
+        "crew",
+        "description",
+        "due-date",
+        "estimate",
+        "labels",
+        "milestone-id",
+        "parent-issue-id",
+        "priority",
+        "project-id",
+        "routine-id",
+        "sort-order",
+        "title"
       ]
     },
     {
@@ -29395,6 +30932,12 @@
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -29462,6 +31005,24 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "assignee",
+        "crew",
+        "label",
+        "limit",
+        "priority",
+        "search",
+        "status"
+      ],
+      "documented_flags": [
+        "assignee",
+        "crew",
+        "label",
+        "limit",
+        "priority",
+        "search",
+        "status"
       ]
     },
     {
@@ -29482,6 +31043,12 @@
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ],
+      "flags": [
+        "type"
+      ],
+      "documented_flags": [
+        "type"
       ]
     },
     {
@@ -29525,6 +31092,16 @@
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ],
+      "flags": [
+        "action",
+        "comment",
+        "reassign"
+      ],
+      "documented_flags": [
+        "action",
+        "comment",
+        "reassign"
       ]
     },
     {
@@ -29670,6 +31247,36 @@
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ],
+      "flags": [
+        "assignee",
+        "assignee-type",
+        "description",
+        "due-date",
+        "estimate",
+        "milestone-id",
+        "parent-issue-id",
+        "priority",
+        "project-id",
+        "routine-id",
+        "sort-order",
+        "status",
+        "title"
+      ],
+      "documented_flags": [
+        "assignee",
+        "assignee-type",
+        "description",
+        "due-date",
+        "estimate",
+        "milestone-id",
+        "parent-issue-id",
+        "priority",
+        "project-id",
+        "routine-id",
+        "sort-order",
+        "status",
+        "title"
       ]
     },
     {
@@ -29698,6 +31305,36 @@
         "cmd/crewship/cmd_journal_test.go",
         "cmd/crewship/cmd_journal_verify_test.go",
         "cmd/crewship/cmd_open_test.go"
+      ],
+      "flags": [
+        "actor-type",
+        "agent",
+        "crew",
+        "exclude-type",
+        "follow",
+        "lines",
+        "mission",
+        "priority",
+        "query",
+        "severity",
+        "since",
+        "trace-id",
+        "type"
+      ],
+      "documented_flags": [
+        "actor-type",
+        "agent",
+        "crew",
+        "exclude-type",
+        "follow",
+        "lines",
+        "mission",
+        "priority",
+        "query",
+        "severity",
+        "since",
+        "trace-id",
+        "type"
       ]
     },
     {
@@ -29722,6 +31359,34 @@
         "cmd/crewship/cmd_chat_cov_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "actor-type",
+        "agent",
+        "crew",
+        "exclude-type",
+        "mission",
+        "priority",
+        "query",
+        "severity",
+        "since",
+        "trace-id",
+        "type",
+        "until"
+      ],
+      "documented_flags": [
+        "actor-type",
+        "agent",
+        "crew",
+        "exclude-type",
+        "mission",
+        "priority",
+        "query",
+        "severity",
+        "since",
+        "trace-id",
+        "type",
+        "until"
       ]
     },
     {
@@ -29776,6 +31441,14 @@
         "cmd/crewship/cmd_journal_cov_test.go",
         "cmd/crewship/cmd_journal_test.go",
         "cmd/crewship/cmd_journal_verify_test.go"
+      ],
+      "flags": [
+        "mark",
+        "reason"
+      ],
+      "documented_flags": [
+        "mark",
+        "reason"
       ]
     },
     {
@@ -29850,6 +31523,18 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_keeper_model_test.go",
         "…"
+      ],
+      "flags": [
+        "agent",
+        "credential",
+        "crew",
+        "intent"
+      ],
+      "documented_flags": [
+        "agent",
+        "credential",
+        "crew",
+        "intent"
       ]
     },
     {
@@ -30018,6 +31703,12 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_keeper_model_test.go",
         "…"
+      ],
+      "flags": [
+        "all"
+      ],
+      "documented_flags": [
+        "all"
       ]
     },
     {
@@ -30042,6 +31733,18 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_keeper_model_test.go",
         "…"
+      ],
+      "flags": [
+        "credential",
+        "model",
+        "provider",
+        "timeout"
+      ],
+      "documented_flags": [
+        "credential",
+        "model",
+        "provider",
+        "timeout"
       ]
     },
     {
@@ -30186,6 +31889,18 @@
         "cmd/crewship/cmd_keeper_foureyes_test.go",
         "cmd/crewship/cmd_keeper_hint_test.go",
         "…"
+      ],
+      "flags": [
+        "enabled",
+        "endpoint",
+        "judge-timeout",
+        "model"
+      ],
+      "documented_flags": [
+        "enabled",
+        "endpoint",
+        "judge-timeout",
+        "model"
       ]
     },
     {
@@ -30210,6 +31925,12 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_keeper_model_test.go",
         "…"
+      ],
+      "flags": [
+        "clear"
+      ],
+      "documented_flags": [
+        "clear"
       ]
     },
     {
@@ -30282,6 +32003,24 @@
         "cmd/crewship/cmd_keeper_foureyes_test.go",
         "cmd/crewship/cmd_keeper_hint_test.go",
         "…"
+      ],
+      "flags": [
+        "candidate",
+        "endpoint",
+        "explain",
+        "incumbent",
+        "limit",
+        "passes",
+        "tolerance"
+      ],
+      "documented_flags": [
+        "candidate",
+        "endpoint",
+        "explain",
+        "incumbent",
+        "limit",
+        "passes",
+        "tolerance"
       ]
     },
     {
@@ -30426,6 +32165,12 @@
         "cmd/crewship/cmd_keeper_hint_test.go",
         "cmd/crewship/cmd_keeper_history_test.go",
         "…"
+      ],
+      "flags": [
+        "endpoint"
+      ],
+      "documented_flags": [
+        "endpoint"
       ]
     },
     {
@@ -30450,6 +32195,18 @@
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_eval_test.go",
         "…"
+      ],
+      "flags": [
+        "credential",
+        "endpoint",
+        "model",
+        "provider"
+      ],
+      "documented_flags": [
+        "credential",
+        "endpoint",
+        "model",
+        "provider"
       ]
     },
     {
@@ -30546,6 +32303,16 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_keeper_model_test.go",
         "…"
+      ],
+      "flags": [
+        "credential",
+        "model",
+        "provider"
+      ],
+      "documented_flags": [
+        "credential",
+        "model",
+        "provider"
       ]
     },
     {
@@ -30642,6 +32409,26 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_keeper_model_test.go",
         "…"
+      ],
+      "flags": [
+        "consistency-samples",
+        "escalate-from",
+        "evidence",
+        "evidence-facts",
+        "hard-gate",
+        "precedent",
+        "precedent-n",
+        "prompt-budget"
+      ],
+      "documented_flags": [
+        "consistency-samples",
+        "escalate-from",
+        "evidence",
+        "evidence-facts",
+        "hard-gate",
+        "precedent",
+        "precedent-n",
+        "prompt-budget"
       ]
     },
     {
@@ -30666,6 +32453,14 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_keeper_model_test.go",
         "…"
+      ],
+      "flags": [
+        "limit",
+        "offset"
+      ],
+      "documented_flags": [
+        "limit",
+        "offset"
       ]
     },
     {
@@ -30690,6 +32485,16 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_keeper_model_test.go",
         "…"
+      ],
+      "flags": [
+        "adjudicator",
+        "decision",
+        "reason"
+      ],
+      "documented_flags": [
+        "adjudicator",
+        "decision",
+        "reason"
       ]
     },
     {
@@ -30738,6 +32543,24 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_keeper_model_test.go",
         "…"
+      ],
+      "flags": [
+        "agent",
+        "crew",
+        "failure",
+        "skill",
+        "tool",
+        "tool-args",
+        "trigger"
+      ],
+      "documented_flags": [
+        "agent",
+        "crew",
+        "failure",
+        "skill",
+        "tool",
+        "tool-args",
+        "trigger"
       ]
     },
     {
@@ -31104,6 +32927,16 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "color",
+        "group",
+        "name"
+      ],
+      "documented_flags": [
+        "color",
+        "group",
+        "name"
       ]
     },
     {
@@ -31125,6 +32958,12 @@
       "test_signals": [
         "cmd/crewship/cmd_label_cov_test.go",
         "cmd/crewship/cmd_label_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -31166,6 +33005,16 @@
       "test_signals": [
         "cmd/crewship/cmd_label_cov_test.go",
         "cmd/crewship/cmd_label_test.go"
+      ],
+      "flags": [
+        "color",
+        "group",
+        "name"
+      ],
+      "documented_flags": [
+        "color",
+        "group",
+        "name"
       ]
     },
     {
@@ -31184,6 +33033,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_lint_cov_test.go"
+      ],
+      "flags": [
+        "strict"
+      ],
+      "documented_flags": [
+        "strict"
       ]
     },
     {
@@ -31235,6 +33090,24 @@
         "cmd/crewship/cmd_login_password_stdin_test.go",
         "cmd/crewship/cmd_login_preflight_test.go",
         "cmd/crewship/cmd_login_profile_test.go"
+      ],
+      "flags": [
+        "adapter",
+        "code",
+        "email",
+        "google",
+        "pair",
+        "password-stdin",
+        "token"
+      ],
+      "documented_flags": [
+        "adapter",
+        "code",
+        "email",
+        "google",
+        "pair",
+        "password-stdin",
+        "token"
       ]
     },
     {
@@ -31271,6 +33144,14 @@
         "cmd/crewship/cmd_format_sweep_batch1_test.go",
         "cmd/crewship/cmd_logs_cov_test.go",
         "cmd/crewship/cmd_logs_notfound_test.go"
+      ],
+      "flags": [
+        "follow",
+        "lines"
+      ],
+      "documented_flags": [
+        "follow",
+        "lines"
       ]
     },
     {
@@ -31336,6 +33217,14 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "limit",
+        "since"
+      ],
+      "documented_flags": [
+        "limit",
+        "since"
       ]
     },
     {
@@ -31377,6 +33266,16 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "featured",
+        "limit",
+        "trust-tier"
+      ],
+      "documented_flags": [
+        "featured",
+        "limit",
+        "trust-tier"
       ]
     },
     {
@@ -31394,6 +33293,14 @@
       "test_signals": [
         "cmd/crewship/cmd_mcp_cov2_test.go",
         "cmd/crewship/cmd_mcp_cov_test.go"
+      ],
+      "flags": [
+        "limit",
+        "trust-tier"
+      ],
+      "documented_flags": [
+        "limit",
+        "trust-tier"
       ]
     },
     {
@@ -31435,6 +33342,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov2_test.go"
+      ],
+      "flags": [
+        "filter",
+        "limit"
+      ],
+      "documented_flags": [
+        "filter",
+        "limit"
       ]
     },
     {
@@ -31509,6 +33424,16 @@
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_test.go",
         "…"
+      ],
+      "flags": [
+        "agent",
+        "crew",
+        "out"
+      ],
+      "documented_flags": [
+        "agent",
+        "crew",
+        "out"
       ]
     },
     {
@@ -31531,6 +33456,12 @@
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_test.go",
         "cmd/crewship/cmd_project_cov_test.go"
+      ],
+      "flags": [
+        "crew"
+      ],
+      "documented_flags": [
+        "crew"
       ]
     },
     {
@@ -31552,6 +33483,16 @@
         "cmd/crewship/cmd_memory_remote_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_test.go"
+      ],
+      "flags": [
+        "crew",
+        "limit",
+        "scope"
+      ],
+      "documented_flags": [
+        "crew",
+        "limit",
+        "scope"
       ]
     },
     {
@@ -31575,6 +33516,26 @@
         "cmd/crewship/cmd_memory_versions_test.go",
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_skill_cov2_test.go"
+      ],
+      "flags": [
+        "agent",
+        "apply",
+        "crew",
+        "format",
+        "from",
+        "group",
+        "operator",
+        "with-crew"
+      ],
+      "documented_flags": [
+        "agent",
+        "apply",
+        "crew",
+        "format",
+        "from",
+        "group",
+        "operator",
+        "with-crew"
       ]
     },
     {
@@ -31596,6 +33557,14 @@
         "cmd/crewship/cmd_memory_remote_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_test.go"
+      ],
+      "flags": [
+        "format",
+        "limit"
+      ],
+      "documented_flags": [
+        "format",
+        "limit"
       ]
     },
     {
@@ -31617,6 +33586,14 @@
         "cmd/crewship/cmd_memory_remote_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_test.go"
+      ],
+      "flags": [
+        "path",
+        "scope"
+      ],
+      "documented_flags": [
+        "path",
+        "scope"
       ]
     },
     {
@@ -31638,6 +33615,18 @@
         "cmd/crewship/cmd_memory_remote_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_test.go"
+      ],
+      "flags": [
+        "blob-root",
+        "force",
+        "tier",
+        "user"
+      ],
+      "documented_flags": [
+        "blob-root",
+        "force",
+        "tier",
+        "user"
       ]
     },
     {
@@ -31659,6 +33648,18 @@
         "cmd/crewship/cmd_memory_remote_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_test.go"
+      ],
+      "flags": [
+        "format",
+        "limit",
+        "path",
+        "scope"
+      ],
+      "documented_flags": [
+        "format",
+        "limit",
+        "path",
+        "scope"
       ]
     },
     {
@@ -31705,6 +33706,14 @@
         "cmd/crewship/cmd_credential_assignment_cov_test.go",
         "cmd/crewship/cmd_credential_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "path",
+        "scope"
+      ],
+      "documented_flags": [
+        "path",
+        "scope"
       ]
     },
     {
@@ -31749,6 +33758,12 @@
         "cmd/crewship/cmd_memory_remote_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_test.go"
+      ],
+      "flags": [
+        "limit"
+      ],
+      "documented_flags": [
+        "limit"
       ]
     },
     {
@@ -31770,6 +33785,14 @@
         "cmd/crewship/cmd_memory_remote_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_test.go"
+      ],
+      "flags": [
+        "tier",
+        "yes"
+      ],
+      "documented_flags": [
+        "tier",
+        "yes"
       ]
     },
     {
@@ -31811,6 +33834,16 @@
         "cmd/crewship/cmd_backup_admin_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch2_test.go",
         "cmd/crewship/cmd_memory_health_test.go"
+      ],
+      "flags": [
+        "filter",
+        "range",
+        "series"
+      ],
+      "documented_flags": [
+        "filter",
+        "range",
+        "series"
       ]
     },
     {
@@ -31857,6 +33890,20 @@
         "cmd/crewship/cmd_mission_cov_test.go",
         "cmd/crewship/cmd_mission_mutate_cov_test.go",
         "cmd/crewship/cmd_mission_run_cov_test.go"
+      ],
+      "flags": [
+        "agent",
+        "depends-on",
+        "description",
+        "order",
+        "title"
+      ],
+      "documented_flags": [
+        "agent",
+        "depends-on",
+        "description",
+        "order",
+        "title"
       ]
     },
     {
@@ -31875,6 +33922,12 @@
         "cmd/crewship/cmd_mission_cov_test.go",
         "cmd/crewship/cmd_mission_mutate_cov_test.go",
         "cmd/crewship/cmd_mission_run_cov_test.go"
+      ],
+      "flags": [
+        "title"
+      ],
+      "documented_flags": [
+        "title"
       ]
     },
     {
@@ -31899,6 +33952,18 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "crew",
+        "description",
+        "lead",
+        "title"
+      ],
+      "documented_flags": [
+        "crew",
+        "description",
+        "lead",
+        "title"
       ]
     },
     {
@@ -31917,6 +33982,12 @@
         "cmd/crewship/cmd_mission_cov_test.go",
         "cmd/crewship/cmd_mission_mutate_cov_test.go",
         "cmd/crewship/cmd_mission_run_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -31959,6 +34030,12 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "crew"
+      ],
+      "documented_flags": [
+        "crew"
       ]
     },
     {
@@ -31977,6 +34054,12 @@
         "cmd/crewship/cmd_mission_cov_test.go",
         "cmd/crewship/cmd_mission_mutate_cov_test.go",
         "cmd/crewship/cmd_mission_run_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -32016,6 +34099,14 @@
         "cmd/crewship/cmd_mission_cov_test.go",
         "cmd/crewship/cmd_mission_mutate_cov_test.go",
         "cmd/crewship/cmd_mission_run_cov_test.go"
+      ],
+      "flags": [
+        "wait",
+        "wait-timeout"
+      ],
+      "documented_flags": [
+        "wait",
+        "wait-timeout"
       ]
     },
     {
@@ -32034,6 +34125,18 @@
         "cmd/crewship/cmd_mission_cov_test.go",
         "cmd/crewship/cmd_mission_mutate_cov_test.go",
         "cmd/crewship/cmd_mission_run_cov_test.go"
+      ],
+      "flags": [
+        "assigned-agent",
+        "description",
+        "status",
+        "title"
+      ],
+      "documented_flags": [
+        "assigned-agent",
+        "description",
+        "status",
+        "title"
       ]
     },
     {
@@ -32052,6 +34155,16 @@
         "cmd/crewship/cmd_mission_cov_test.go",
         "cmd/crewship/cmd_mission_mutate_cov_test.go",
         "cmd/crewship/cmd_mission_run_cov_test.go"
+      ],
+      "flags": [
+        "description",
+        "status",
+        "title"
+      ],
+      "documented_flags": [
+        "description",
+        "status",
+        "title"
       ]
     },
     {
@@ -32100,6 +34213,12 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "provider"
+      ],
+      "documented_flags": [
+        "provider"
       ]
     },
     {
@@ -32166,6 +34285,12 @@
       "test_signals": [
         "cmd/crewship/cmd_notification_cov_test.go",
         "cmd/crewship/cmd_safety_guards_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -32190,6 +34315,14 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "limit",
+        "unread"
+      ],
+      "documented_flags": [
+        "limit",
+        "unread"
       ]
     },
     {
@@ -32369,6 +34502,16 @@
         "cmd/crewship/cmd_mcp_cov2_test.go",
         "cmd/crewship/cmd_mcp_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "category",
+        "channel",
+        "state"
+      ],
+      "documented_flags": [
+        "category",
+        "channel",
+        "state"
       ]
     },
     {
@@ -32390,6 +34533,12 @@
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+      ],
+      "flags": [
+        "level"
+      ],
+      "documented_flags": [
+        "level"
       ]
     },
     {
@@ -32481,6 +34630,14 @@
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+      ],
+      "flags": [
+        "category",
+        "channel"
+      ],
+      "documented_flags": [
+        "category",
+        "channel"
       ]
     },
     {
@@ -32505,6 +34662,18 @@
         "cmd/crewship/cmd_mcp_cov2_test.go",
         "cmd/crewship/cmd_mcp_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "body",
+        "category",
+        "channel",
+        "title"
+      ],
+      "documented_flags": [
+        "body",
+        "category",
+        "channel",
+        "title"
       ]
     },
     {
@@ -32579,6 +34748,30 @@
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
         "…"
+      ],
+      "flags": [
+        "categories",
+        "events",
+        "field",
+        "min-priority",
+        "personal",
+        "provider",
+        "secret",
+        "to",
+        "type",
+        "url"
+      ],
+      "documented_flags": [
+        "categories",
+        "events",
+        "field",
+        "min-priority",
+        "personal",
+        "provider",
+        "secret",
+        "to",
+        "type",
+        "url"
       ]
     },
     {
@@ -32622,6 +34815,12 @@
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+      ],
+      "flags": [
+        "agent"
+      ],
+      "documented_flags": [
+        "agent"
       ]
     },
     {
@@ -32641,6 +34840,12 @@
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+      ],
+      "flags": [
+        "agent"
+      ],
+      "documented_flags": [
+        "agent"
       ]
     },
     {
@@ -32679,6 +34884,18 @@
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+      ],
+      "flags": [
+        "category",
+        "channel",
+        "limit",
+        "status"
+      ],
+      "documented_flags": [
+        "category",
+        "channel",
+        "limit",
+        "status"
       ]
     },
     {
@@ -32723,6 +34940,12 @@
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+      ],
+      "flags": [
+        "provider"
+      ],
+      "documented_flags": [
+        "provider"
       ]
     },
     {
@@ -32784,6 +35007,12 @@
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -32822,6 +35051,22 @@
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go"
+      ],
+      "flags": [
+        "field",
+        "provider",
+        "secret",
+        "to",
+        "type",
+        "url"
+      ],
+      "documented_flags": [
+        "field",
+        "provider",
+        "secret",
+        "to",
+        "type",
+        "url"
       ]
     },
     {
@@ -32923,6 +35168,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_nuke_test.go"
+      ],
+      "flags": [
+        "crew"
+      ],
+      "documented_flags": [
+        "crew"
       ]
     },
     {
@@ -32942,6 +35193,12 @@
         "cmd/crewship/cmd_agent_files_cov2_test.go",
         "cmd/crewship/cmd_nuke_test.go",
         "cmd/crewship/cmd_open_test.go"
+      ],
+      "flags": [
+        "kind"
+      ],
+      "documented_flags": [
+        "kind"
       ]
     },
     {
@@ -32987,6 +35244,12 @@
         "cmd/crewship/cmd_open_cov_test.go",
         "cmd/crewship/cmd_open_test.go",
         "…"
+      ],
+      "flags": [
+        "print-only"
+      ],
+      "documented_flags": [
+        "print-only"
       ]
     },
     {
@@ -33024,6 +35287,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_paymaster_cov_test.go"
+      ],
+      "flags": [
+        "range"
+      ],
+      "documented_flags": [
+        "range"
       ]
     },
     {
@@ -33040,6 +35309,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_paymaster_cov_test.go"
+      ],
+      "flags": [
+        "range"
+      ],
+      "documented_flags": [
+        "range"
       ]
     },
     {
@@ -33073,6 +35348,16 @@
       "test_signals": [
         "cmd/crewship/cmd_cost_cov_test.go",
         "cmd/crewship/cmd_paymaster_cov_test.go"
+      ],
+      "flags": [
+        "range",
+        "since",
+        "until"
+      ],
+      "documented_flags": [
+        "range",
+        "since",
+        "until"
       ]
     },
     {
@@ -33090,6 +35375,14 @@
       "test_signals": [
         "cmd/crewship/cmd_cost_cov_test.go",
         "cmd/crewship/cmd_paymaster_cov_test.go"
+      ],
+      "flags": [
+        "limit",
+        "range"
+      ],
+      "documented_flags": [
+        "limit",
+        "range"
       ]
     },
     {
@@ -33223,6 +35516,34 @@
         "cmd/crewship/cmd_format_sweep_batch5_test.go",
         "cmd/crewship/cmd_paymaster_cov_test.go",
         "cmd/crewship/cmd_run_cov_test.go"
+      ],
+      "flags": [
+        "agent",
+        "markdown",
+        "no-markdown",
+        "paste",
+        "prompt",
+        "quiet",
+        "with-cmd",
+        "with-file",
+        "with-git-diff",
+        "with-git-log",
+        "with-git-staged",
+        "with-git-status"
+      ],
+      "documented_flags": [
+        "agent",
+        "markdown",
+        "no-markdown",
+        "paste",
+        "prompt",
+        "quiet",
+        "with-cmd",
+        "with-file",
+        "with-git-diff",
+        "with-git-log",
+        "with-git-staged",
+        "with-git-status"
       ]
     },
     {
@@ -33266,6 +35587,12 @@
         "cmd/crewship/cmd_journal_cov_test.go",
         "cmd/crewship/cmd_journal_test.go",
         "…"
+      ],
+      "flags": [
+        "crew"
+      ],
+      "documented_flags": [
+        "crew"
       ]
     },
     {
@@ -33314,6 +35641,22 @@
         "cmd/crewship/cmd_mcp_cov2_test.go",
         "cmd/crewship/cmd_mcp_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "behavior",
+        "crew",
+        "level",
+        "max-ephemeral",
+        "reason",
+        "yes"
+      ],
+      "documented_flags": [
+        "behavior",
+        "crew",
+        "level",
+        "max-ephemeral",
+        "reason",
+        "yes"
       ]
     },
     {
@@ -33355,6 +35698,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_preferences_privacy_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -33433,6 +35782,16 @@
       "test_signals": [
         "cmd/crewship/cmd_presence_cov_test.go",
         "cmd/crewship/cmd_presence_test.go"
+      ],
+      "flags": [
+        "crew",
+        "interval",
+        "watch"
+      ],
+      "documented_flags": [
+        "crew",
+        "interval",
+        "watch"
       ]
     },
     {
@@ -33497,6 +35856,12 @@
         "cmd/crewship/cmd_instance_cov_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -33583,6 +35948,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_privacy_user_model_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -33631,6 +36002,12 @@
         "cmd/crewship/cmd_instance_cov_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -33724,6 +36101,30 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "color",
+        "description",
+        "icon",
+        "lead-id",
+        "lead-type",
+        "name",
+        "priority",
+        "start-date",
+        "status",
+        "target-date"
+      ],
+      "documented_flags": [
+        "color",
+        "description",
+        "icon",
+        "lead-id",
+        "lead-type",
+        "name",
+        "priority",
+        "start-date",
+        "status",
+        "target-date"
       ]
     },
     {
@@ -33740,6 +36141,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_project_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -33816,6 +36223,18 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_project_cov_test.go"
+      ],
+      "flags": [
+        "description",
+        "name",
+        "status",
+        "target-date"
+      ],
+      "documented_flags": [
+        "description",
+        "name",
+        "status",
+        "target-date"
       ]
     },
     {
@@ -33836,6 +36255,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_project_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -33868,6 +36293,20 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_project_cov_test.go"
+      ],
+      "flags": [
+        "description",
+        "name",
+        "position",
+        "status",
+        "target-date"
+      ],
+      "documented_flags": [
+        "description",
+        "name",
+        "position",
+        "status",
+        "target-date"
       ]
     },
     {
@@ -33900,6 +36339,32 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_project_cov_test.go"
+      ],
+      "flags": [
+        "color",
+        "description",
+        "health",
+        "icon",
+        "lead-id",
+        "lead-type",
+        "name",
+        "priority",
+        "start-date",
+        "status",
+        "target-date"
+      ],
+      "documented_flags": [
+        "color",
+        "description",
+        "health",
+        "icon",
+        "lead-id",
+        "lead-type",
+        "name",
+        "priority",
+        "start-date",
+        "status",
+        "target-date"
       ]
     },
     {
@@ -34034,6 +36499,14 @@
       "test_signals": [
         "cmd/crewship/cmd_prompt_cov_test.go",
         "cmd/crewship/cmd_prompt_test.go"
+      ],
+      "flags": [
+        "content",
+        "file"
+      ],
+      "documented_flags": [
+        "content",
+        "file"
       ]
     },
     {
@@ -34077,6 +36550,18 @@
       "test_signals": [
         "cmd/crewship/cmd_recall_cov_test.go",
         "cmd/crewship/cmd_recall_test.go"
+      ],
+      "flags": [
+        "agent",
+        "crew",
+        "limit",
+        "since"
+      ],
+      "documented_flags": [
+        "agent",
+        "crew",
+        "limit",
+        "since"
       ]
     },
     {
@@ -34097,6 +36582,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_recap_cov_test.go"
+      ],
+      "flags": [
+        "agent",
+        "bullets"
+      ],
+      "documented_flags": [
+        "agent",
+        "bullets"
       ]
     },
     {
@@ -34137,7 +36630,15 @@
       "root_docs": [
         "docs/cli/recipe.mdx"
       ],
-      "status": "documented_exact"
+      "status": "documented_exact",
+      "flags": [
+        "credential",
+        "label"
+      ],
+      "documented_flags": [
+        "credential",
+        "label"
+      ]
     },
     {
       "path": "recipe list",
@@ -34212,6 +36713,32 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "assignee",
+        "assignee-type",
+        "crew",
+        "cron",
+        "description",
+        "filter",
+        "labels",
+        "milestone",
+        "priority",
+        "project",
+        "title"
+      ],
+      "documented_flags": [
+        "assignee",
+        "assignee-type",
+        "crew",
+        "cron",
+        "description",
+        "filter",
+        "labels",
+        "milestone",
+        "priority",
+        "project",
+        "title"
       ]
     },
     {
@@ -34253,6 +36780,12 @@
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
+      ],
+      "flags": [
+        "filter"
+      ],
+      "documented_flags": [
+        "filter"
       ]
     },
     {
@@ -34269,6 +36802,34 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov2_test.go"
+      ],
+      "flags": [
+        "assignee",
+        "assignee-type",
+        "crew",
+        "cron",
+        "description",
+        "enabled",
+        "filter",
+        "labels",
+        "milestone",
+        "priority",
+        "project",
+        "title"
+      ],
+      "documented_flags": [
+        "assignee",
+        "assignee-type",
+        "crew",
+        "cron",
+        "description",
+        "enabled",
+        "filter",
+        "labels",
+        "milestone",
+        "priority",
+        "project",
+        "title"
       ]
     },
     {
@@ -34286,6 +36847,16 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_hire_test.go"
+      ],
+      "flags": [
+        "reason",
+        "ttl",
+        "yes"
+      ],
+      "documented_flags": [
+        "reason",
+        "ttl",
+        "yes"
       ]
     },
     {
@@ -34329,6 +36900,24 @@
       "test_signals": [
         "cmd/crewship/cmd_retry_cov_test.go",
         "cmd/crewship/cmd_routine_report_test.go"
+      ],
+      "flags": [
+        "continue",
+        "markdown",
+        "new-prompt",
+        "no-markdown",
+        "no-stream",
+        "quiet",
+        "save"
+      ],
+      "documented_flags": [
+        "continue",
+        "markdown",
+        "new-prompt",
+        "no-markdown",
+        "no-stream",
+        "quiet",
+        "save"
       ]
     },
     {
@@ -34438,6 +37027,16 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "against",
+        "last",
+        "limit"
+      ],
+      "documented_flags": [
+        "against",
+        "last",
+        "limit"
       ]
     },
     {
@@ -34462,6 +37061,20 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "cooldown-ms",
+        "fail-fast",
+        "inputs",
+        "runs",
+        "tier-override"
+      ],
+      "documented_flags": [
+        "cooldown-ms",
+        "fail-fast",
+        "inputs",
+        "runs",
+        "tier-override"
       ]
     },
     {
@@ -34534,6 +37147,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "amount"
+      ],
+      "documented_flags": [
+        "amount"
       ]
     },
     {
@@ -34582,6 +37201,14 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "fingerprint",
+        "limit"
+      ],
+      "documented_flags": [
+        "fingerprint",
+        "limit"
       ]
     },
     {
@@ -34654,6 +37281,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -34678,6 +37311,14 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "from",
+        "to"
+      ],
+      "documented_flags": [
+        "from",
+        "to"
       ]
     },
     {
@@ -34750,6 +37391,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "inputs"
+      ],
+      "documented_flags": [
+        "inputs"
       ]
     },
     {
@@ -34798,6 +37445,12 @@
         "cmd/crewship/cmd_keeper_hint_test.go",
         "cmd/crewship/cmd_login_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "limit"
+      ],
+      "documented_flags": [
+        "limit"
       ]
     },
     {
@@ -34822,6 +37475,14 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "include-history",
+        "no-scripts"
+      ],
+      "documented_flags": [
+        "include-history",
+        "no-scripts"
       ]
     },
     {
@@ -34846,6 +37507,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "format"
+      ],
+      "documented_flags": [
+        "format"
       ]
     },
     {
@@ -34870,6 +37537,16 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "crew",
+        "force",
+        "no-scripts"
+      ],
+      "documented_flags": [
+        "crew",
+        "force",
+        "no-scripts"
       ]
     },
     {
@@ -34894,6 +37571,16 @@
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "from",
+        "output",
+        "script"
+      ],
+      "documented_flags": [
+        "from",
+        "output",
+        "script"
       ]
     },
     {
@@ -34918,6 +37605,32 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "agent-timeout",
+        "author-crew",
+        "grader",
+        "inputs",
+        "max-turns",
+        "optimizer",
+        "rounds",
+        "rubric",
+        "run-timeout",
+        "target",
+        "yes"
+      ],
+      "documented_flags": [
+        "agent-timeout",
+        "author-crew",
+        "grader",
+        "inputs",
+        "max-turns",
+        "optimizer",
+        "rounds",
+        "rubric",
+        "run-timeout",
+        "target",
+        "yes"
       ]
     },
     {
@@ -34943,6 +37656,16 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "order",
+        "status",
+        "tag"
+      ],
+      "documented_flags": [
+        "order",
+        "status",
+        "tag"
       ]
     },
     {
@@ -34969,6 +37692,20 @@
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "client",
+        "full",
+        "json",
+        "show-outputs",
+        "slug"
+      ],
+      "documented_flags": [
+        "client",
+        "full",
+        "json",
+        "show-outputs",
+        "slug"
       ]
     },
     {
@@ -34993,6 +37730,16 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "append",
+        "increment",
+        "set"
+      ],
+      "documented_flags": [
+        "append",
+        "increment",
+        "set"
       ]
     },
     {
@@ -35089,6 +37836,18 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "json",
+        "limit",
+        "status",
+        "tag"
+      ],
+      "documented_flags": [
+        "json",
+        "limit",
+        "status",
+        "tag"
       ]
     },
     {
@@ -35137,6 +37896,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "version"
+      ],
+      "documented_flags": [
+        "version"
       ]
     },
     {
@@ -35164,6 +37929,14 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "client",
+        "out"
+      ],
+      "documented_flags": [
+        "client",
+        "out"
       ]
     },
     {
@@ -35188,6 +37961,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "client"
+      ],
+      "documented_flags": [
+        "client"
       ]
     },
     {
@@ -35212,6 +37991,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "to"
+      ],
+      "documented_flags": [
+        "to"
       ]
     },
     {
@@ -35240,6 +38025,42 @@
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "…"
+      ],
+      "flags": [
+        "batch",
+        "debounce-key",
+        "debounce-max",
+        "debounce-window",
+        "delay",
+        "idempotency-key",
+        "idempotency-ttl",
+        "inputs",
+        "invoking-crew",
+        "metadata",
+        "priority",
+        "tag",
+        "tier-override",
+        "ttl",
+        "wait",
+        "wait-timeout"
+      ],
+      "documented_flags": [
+        "batch",
+        "debounce-key",
+        "debounce-max",
+        "debounce-window",
+        "delay",
+        "idempotency-key",
+        "idempotency-ttl",
+        "inputs",
+        "invoking-crew",
+        "metadata",
+        "priority",
+        "tag",
+        "tier-override",
+        "ttl",
+        "wait",
+        "wait-timeout"
       ]
     },
     {
@@ -35267,6 +38088,12 @@
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "…"
+      ],
+      "flags": [
+        "limit"
+      ],
+      "documented_flags": [
+        "limit"
       ]
     },
     {
@@ -35291,6 +38118,24 @@
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "…"
+      ],
+      "flags": [
+        "author-agent",
+        "author-crew",
+        "change-summary",
+        "definition",
+        "description",
+        "name",
+        "sample-inputs"
+      ],
+      "documented_flags": [
+        "author-agent",
+        "author-crew",
+        "change-summary",
+        "definition",
+        "description",
+        "name",
+        "sample-inputs"
       ]
     },
     {
@@ -35340,6 +38185,38 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "catchup",
+        "cron",
+        "enabled",
+        "fail-closed",
+        "inputs",
+        "max-failures",
+        "name",
+        "pin-version",
+        "slug",
+        "timezone",
+        "wake-inputs",
+        "wake-slug",
+        "when",
+        "yes"
+      ],
+      "documented_flags": [
+        "catchup",
+        "cron",
+        "enabled",
+        "fail-closed",
+        "inputs",
+        "max-failures",
+        "name",
+        "pin-version",
+        "slug",
+        "timezone",
+        "wake-inputs",
+        "wake-slug",
+        "when",
+        "yes"
       ]
     },
     {
@@ -35364,6 +38241,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -35437,6 +38320,14 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "json",
+        "slug"
+      ],
+      "documented_flags": [
+        "json",
+        "slug"
       ]
     },
     {
@@ -35485,6 +38376,36 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "catchup",
+        "cron",
+        "enabled",
+        "fail-closed",
+        "inputs",
+        "max-failures",
+        "name",
+        "no-wake",
+        "pin-version",
+        "timezone",
+        "unpin",
+        "wake-inputs",
+        "wake-slug"
+      ],
+      "documented_flags": [
+        "catchup",
+        "cron",
+        "enabled",
+        "fail-closed",
+        "inputs",
+        "max-failures",
+        "name",
+        "no-wake",
+        "pin-version",
+        "timezone",
+        "unpin",
+        "wake-inputs",
+        "wake-slug"
       ]
     },
     {
@@ -35509,6 +38430,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "output"
+      ],
+      "documented_flags": [
+        "output"
       ]
     },
     {
@@ -35533,6 +38460,14 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "event",
+        "payload"
+      ],
+      "documented_flags": [
+        "event",
+        "payload"
       ]
     },
     {
@@ -35581,6 +38516,14 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "schedule",
+        "yes"
+      ],
+      "documented_flags": [
+        "schedule",
+        "yes"
       ]
     },
     {
@@ -35609,6 +38552,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "schedule"
+      ],
+      "documented_flags": [
+        "schedule"
       ]
     },
     {
@@ -35637,6 +38586,14 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "schedule",
+        "yes"
+      ],
+      "documented_flags": [
+        "schedule",
+        "yes"
       ]
     },
     {
@@ -35661,6 +38618,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "schedule"
+      ],
+      "documented_flags": [
+        "schedule"
       ]
     },
     {
@@ -35757,6 +38720,14 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "model",
+        "prompt"
+      ],
+      "documented_flags": [
+        "model",
+        "prompt"
       ]
     },
     {
@@ -35781,6 +38752,16 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "input",
+        "outputs",
+        "tier-override"
+      ],
+      "documented_flags": [
+        "input",
+        "outputs",
+        "tier-override"
       ]
     },
     {
@@ -35805,6 +38786,14 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "add",
+        "remove"
+      ],
+      "documented_flags": [
+        "add",
+        "remove"
       ]
     },
     {
@@ -35853,6 +38842,16 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "agents",
+        "author-crew",
+        "json"
+      ],
+      "documented_flags": [
+        "agents",
+        "author-crew",
+        "json"
       ]
     },
     {
@@ -35901,6 +38900,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "version"
+      ],
+      "documented_flags": [
+        "version"
       ]
     },
     {
@@ -35951,6 +38956,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "comment"
+      ],
+      "documented_flags": [
+        "comment"
       ]
     },
     {
@@ -35976,6 +38987,12 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "json"
+      ],
+      "documented_flags": [
+        "json"
       ]
     },
     {
@@ -36001,6 +39018,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "comment"
+      ],
+      "documented_flags": [
+        "comment"
       ]
     },
     {
@@ -36049,6 +39072,22 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "interval",
+        "json",
+        "once",
+        "progress",
+        "run-id",
+        "since"
+      ],
+      "documented_flags": [
+        "interval",
+        "json",
+        "once",
+        "progress",
+        "run-id",
+        "since"
       ]
     },
     {
@@ -36099,6 +39138,24 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "base-url",
+        "hmac-secret",
+        "inputs-template",
+        "name",
+        "pin-version",
+        "rate-limit",
+        "slug"
+      ],
+      "documented_flags": [
+        "base-url",
+        "hmac-secret",
+        "inputs-template",
+        "name",
+        "pin-version",
+        "rate-limit",
+        "slug"
       ]
     },
     {
@@ -36123,6 +39180,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -36148,6 +39211,14 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "json",
+        "slug"
+      ],
+      "documented_flags": [
+        "json",
+        "slug"
       ]
     },
     {
@@ -36172,6 +39243,12 @@
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "base-url"
+      ],
+      "documented_flags": [
+        "base-url"
       ]
     },
     {
@@ -36208,6 +39285,56 @@
         "cmd/crewship/cmd_run_insights_test.go",
         "cmd/crewship/cmd_run_metadata_test.go",
         "…"
+      ],
+      "flags": [
+        "chat",
+        "dry-run",
+        "effort",
+        "estimate",
+        "interactive",
+        "markdown",
+        "max-turns",
+        "no-markdown",
+        "no-stream",
+        "paste",
+        "plan",
+        "prompt",
+        "quiet",
+        "save",
+        "show-thinking",
+        "timeout",
+        "wait",
+        "with-cmd",
+        "with-file",
+        "with-git-diff",
+        "with-git-log",
+        "with-git-staged",
+        "with-git-status"
+      ],
+      "documented_flags": [
+        "chat",
+        "dry-run",
+        "effort",
+        "estimate",
+        "interactive",
+        "markdown",
+        "max-turns",
+        "no-markdown",
+        "no-stream",
+        "paste",
+        "plan",
+        "prompt",
+        "quiet",
+        "save",
+        "show-thinking",
+        "timeout",
+        "wait",
+        "with-cmd",
+        "with-file",
+        "with-git-diff",
+        "with-git-log",
+        "with-git-staged",
+        "with-git-status"
       ]
     },
     {
@@ -36229,6 +39356,12 @@
         "cmd/crewship/cmd_run_metadata_test.go",
         "cmd/crewship/cmd_runtimes_cov_test.go",
         "cmd/crewship/cmd_runtimes_test.go"
+      ],
+      "flags": [
+        "window"
+      ],
+      "documented_flags": [
+        "window"
       ]
     },
     {
@@ -36318,6 +39451,14 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "category",
+        "search"
+      ],
+      "documented_flags": [
+        "category",
+        "search"
       ]
     },
     {
@@ -36360,6 +39501,22 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "filter",
+        "filters",
+        "name",
+        "shared",
+        "sort",
+        "view-type"
+      ],
+      "documented_flags": [
+        "filter",
+        "filters",
+        "name",
+        "shared",
+        "sort",
+        "view-type"
       ]
     },
     {
@@ -36401,6 +39558,12 @@
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
+      ],
+      "flags": [
+        "filter"
+      ],
+      "documented_flags": [
+        "filter"
       ]
     },
     {
@@ -36417,6 +39580,24 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov2_test.go"
+      ],
+      "flags": [
+        "default",
+        "filter",
+        "filters",
+        "name",
+        "shared",
+        "sort",
+        "view-type"
+      ],
+      "documented_flags": [
+        "default",
+        "filter",
+        "filters",
+        "name",
+        "shared",
+        "sort",
+        "view-type"
       ]
     },
     {
@@ -36447,6 +39628,32 @@
         "cmd/crewship/cmd_seed_data_cov_test.go",
         "cmd/crewship/cmd_seed_data_integrations_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "nuke",
+        "password",
+        "provision-timeout",
+        "skip-issues",
+        "smoke-test",
+        "smoke-timeout",
+        "test-backup",
+        "wait-provision",
+        "with-memory",
+        "with-users",
+        "yes"
+      ],
+      "documented_flags": [
+        "nuke",
+        "password",
+        "provision-timeout",
+        "skip-issues",
+        "smoke-test",
+        "smoke-timeout",
+        "test-backup",
+        "wait-provision",
+        "with-memory",
+        "with-users",
+        "yes"
       ]
     },
     {
@@ -36460,7 +39667,23 @@
       "root_docs": [
         "docs/cli/self-update.mdx"
       ],
-      "status": "documented_exact"
+      "status": "documented_exact",
+      "flags": [
+        "check",
+        "health-timeout",
+        "health-url",
+        "port",
+        "service",
+        "systemd"
+      ],
+      "documented_flags": [
+        "check",
+        "health-timeout",
+        "health-url",
+        "port",
+        "service",
+        "systemd"
+      ]
     },
     {
       "path": "server",
@@ -36503,6 +39726,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_server_test.go"
+      ],
+      "flags": [
+        "dir"
+      ],
+      "documented_flags": [
+        "dir"
       ]
     },
     {
@@ -36627,6 +39856,12 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "warn-stale-days"
+      ],
+      "documented_flags": [
+        "warn-stale-days"
       ]
     },
     {
@@ -36645,6 +39880,12 @@
         "cmd/crewship/cmd_safety_guards_test.go",
         "cmd/crewship/cmd_session_classify_test.go",
         "cmd/crewship/cmd_session_cov_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -36666,6 +39907,26 @@
       "test_signals": [
         "cmd/crewship/cmd_setup_cov_test.go",
         "cmd/crewship/cmd_setup_test.go"
+      ],
+      "flags": [
+        "adapter",
+        "crew",
+        "language",
+        "model",
+        "telemetry",
+        "token",
+        "workspace-name",
+        "yes"
+      ],
+      "documented_flags": [
+        "adapter",
+        "crew",
+        "language",
+        "model",
+        "telemetry",
+        "token",
+        "workspace-name",
+        "yes"
       ]
     },
     {
@@ -36726,6 +39987,14 @@
         "cmd/crewship/cmd_skill_cov2_test.go",
         "cmd/crewship/cmd_skill_cov_test.go",
         "cmd/crewship/cmd_skill_proposed_cov_test.go"
+      ],
+      "flags": [
+        "to-agents",
+        "to-crew"
+      ],
+      "documented_flags": [
+        "to-agents",
+        "to-crew"
       ]
     },
     {
@@ -36750,6 +40019,18 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "model",
+        "print",
+        "prompt",
+        "slug"
+      ],
+      "documented_flags": [
+        "model",
+        "print",
+        "prompt",
+        "slug"
       ]
     },
     {
@@ -36772,6 +40053,14 @@
         "cmd/crewship/cmd_skill_cov2_test.go",
         "cmd/crewship/cmd_skill_cov_test.go",
         "cmd/crewship/cmd_skill_proposed_cov_test.go"
+      ],
+      "flags": [
+        "force",
+        "yes"
+      ],
+      "documented_flags": [
+        "force",
+        "yes"
       ]
     },
     {
@@ -36791,6 +40080,12 @@
         "cmd/crewship/cmd_skill_cov2_test.go",
         "cmd/crewship/cmd_skill_cov_test.go",
         "cmd/crewship/cmd_skill_proposed_cov_test.go"
+      ],
+      "flags": [
+        "output"
+      ],
+      "documented_flags": [
+        "output"
       ]
     },
     {
@@ -36829,6 +40124,24 @@
         "cmd/crewship/cmd_skill_cov2_test.go",
         "cmd/crewship/cmd_skill_cov_test.go",
         "cmd/crewship/cmd_skill_proposed_cov_test.go"
+      ],
+      "flags": [
+        "dry-run",
+        "file",
+        "paths",
+        "ref",
+        "repo",
+        "unsafe-license",
+        "vendor"
+      ],
+      "documented_flags": [
+        "dry-run",
+        "file",
+        "paths",
+        "ref",
+        "repo",
+        "unsafe-license",
+        "vendor"
       ]
     },
     {
@@ -36848,6 +40161,20 @@
         "cmd/crewship/cmd_skill_cov2_test.go",
         "cmd/crewship/cmd_skill_cov_test.go",
         "cmd/crewship/cmd_skill_proposed_cov_test.go"
+      ],
+      "flags": [
+        "category",
+        "description",
+        "force",
+        "license",
+        "output"
+      ],
+      "documented_flags": [
+        "category",
+        "description",
+        "force",
+        "license",
+        "output"
       ]
     },
     {
@@ -36872,6 +40199,26 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "category",
+        "installed",
+        "installed-for",
+        "maturity",
+        "runtime",
+        "search",
+        "source",
+        "vendor"
+      ],
+      "documented_flags": [
+        "category",
+        "installed",
+        "installed-for",
+        "maturity",
+        "runtime",
+        "search",
+        "source",
+        "vendor"
       ]
     },
     {
@@ -36915,6 +40262,14 @@
         "cmd/crewship/cmd_skill_authoring_cov_test.go",
         "cmd/crewship/cmd_skill_cov2_test.go",
         "…"
+      ],
+      "flags": [
+        "crew",
+        "file"
+      ],
+      "documented_flags": [
+        "crew",
+        "file"
       ]
     },
     {
@@ -36939,6 +40294,14 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "crew",
+        "format"
+      ],
+      "documented_flags": [
+        "crew",
+        "format"
       ]
     },
     {
@@ -36959,6 +40322,14 @@
         "cmd/crewship/cmd_skill_cov2_test.go",
         "cmd/crewship/cmd_skill_cov_test.go",
         "cmd/crewship/cmd_skill_proposed_cov_test.go"
+      ],
+      "flags": [
+        "crew",
+        "file"
+      ],
+      "documented_flags": [
+        "crew",
+        "file"
       ]
     },
     {
@@ -36978,6 +40349,14 @@
         "cmd/crewship/cmd_skill_cov2_test.go",
         "cmd/crewship/cmd_skill_cov_test.go",
         "cmd/crewship/cmd_skill_proposed_cov_test.go"
+      ],
+      "flags": [
+        "to-agents",
+        "to-crew"
+      ],
+      "documented_flags": [
+        "to-agents",
+        "to-crew"
       ]
     },
     {
@@ -37062,6 +40441,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_spend_test.go"
+      ],
+      "flags": [
+        "top",
+        "window"
+      ],
+      "documented_flags": [
+        "top",
+        "window"
       ]
     },
     {
@@ -37092,6 +40479,16 @@
         "cmd/crewship/cmd_start_admission_test.go",
         "cmd/crewship/cmd_start_cov_test.go",
         "cmd/crewship/cmd_start_provider_order_test.go"
+      ],
+      "flags": [
+        "config",
+        "db",
+        "no-docker"
+      ],
+      "documented_flags": [
+        "config",
+        "db",
+        "no-docker"
       ]
     },
     {
@@ -37260,6 +40657,14 @@
         "cmd/crewship/cmd_mcp_cov2_test.go",
         "cmd/crewship/cmd_mcp_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "level",
+        "ttl"
+      ],
+      "documented_flags": [
+        "level",
+        "ttl"
       ]
     },
     {
@@ -37326,6 +40731,26 @@
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
         "cmd/crewship/cmd_system_test.go"
+      ],
+      "flags": [
+        "agent",
+        "cli-adapter",
+        "credential-name",
+        "credential-value",
+        "credential-value-stdin",
+        "crew",
+        "llm-model",
+        "llm-provider"
+      ],
+      "documented_flags": [
+        "agent",
+        "cli-adapter",
+        "credential-name",
+        "credential-value",
+        "credential-value-stdin",
+        "crew",
+        "llm-model",
+        "llm-provider"
       ]
     },
     {
@@ -37375,6 +40800,12 @@
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
         "cmd/crewship/cmd_system_test.go"
+      ],
+      "flags": [
+        "out"
+      ],
+      "documented_flags": [
+        "out"
       ]
     },
     {
@@ -37537,6 +40968,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_template_cov_test.go"
+      ],
+      "flags": [
+        "name",
+        "slug"
+      ],
+      "documented_flags": [
+        "name",
+        "slug"
       ]
     },
     {
@@ -37637,6 +41076,14 @@
         "cmd/crewship/cmd_token_cov_test.go",
         "cmd/crewship/cmd_token_emit_test.go",
         "cmd/crewship/cmd_token_validate_test.go"
+      ],
+      "flags": [
+        "output-file",
+        "quiet"
+      ],
+      "documented_flags": [
+        "output-file",
+        "quiet"
       ]
     },
     {
@@ -37662,6 +41109,12 @@
         "cmd/crewship/cmd_credential_cov2_test.go",
         "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "warn-stale-days"
+      ],
+      "documented_flags": [
+        "warn-stale-days"
       ]
     },
     {
@@ -37684,6 +41137,12 @@
         "cmd/crewship/cmd_token_cov_test.go",
         "cmd/crewship/cmd_token_emit_test.go",
         "cmd/crewship/cmd_token_validate_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -37703,6 +41162,16 @@
         "cmd/crewship/cmd_token_cov_test.go",
         "cmd/crewship/cmd_token_emit_test.go",
         "cmd/crewship/cmd_token_validate_test.go"
+      ],
+      "flags": [
+        "name",
+        "output-file",
+        "quiet"
+      ],
+      "documented_flags": [
+        "name",
+        "output-file",
+        "quiet"
       ]
     },
     {
@@ -37724,6 +41193,12 @@
         "cmd/crewship/cmd_token_cov_test.go",
         "cmd/crewship/cmd_token_emit_test.go",
         "cmd/crewship/cmd_token_validate_test.go"
+      ],
+      "flags": [
+        "json"
+      ],
+      "documented_flags": [
+        "json"
       ]
     },
     {
@@ -37766,6 +41241,28 @@
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "assignee",
+        "crew",
+        "filter",
+        "labels",
+        "match-type",
+        "name",
+        "pattern",
+        "priority",
+        "project"
+      ],
+      "documented_flags": [
+        "assignee",
+        "crew",
+        "filter",
+        "labels",
+        "match-type",
+        "name",
+        "pattern",
+        "priority",
+        "project"
       ]
     },
     {
@@ -37786,6 +41283,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov2_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -37811,6 +41314,12 @@
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
+      ],
+      "flags": [
+        "filter"
+      ],
+      "documented_flags": [
+        "filter"
       ]
     },
     {
@@ -37845,6 +41354,32 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov2_test.go"
+      ],
+      "flags": [
+        "assignee",
+        "crew",
+        "enabled",
+        "filter",
+        "labels",
+        "match-type",
+        "name",
+        "pattern",
+        "position",
+        "priority",
+        "project"
+      ],
+      "documented_flags": [
+        "assignee",
+        "crew",
+        "enabled",
+        "filter",
+        "labels",
+        "match-type",
+        "name",
+        "pattern",
+        "position",
+        "priority",
+        "project"
       ]
     },
     {
@@ -37888,6 +41423,12 @@
         "cmd/crewship/cmd_skill_cov_test.go",
         "cmd/crewship/cmd_slash_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "remote"
+      ],
+      "documented_flags": [
+        "remote"
       ]
     },
     {
@@ -37914,6 +41455,18 @@
         "cmd/crewship/cmd_run_cov_test.go",
         "cmd/crewship/cmd_wait_cov_test.go",
         "cmd/crewship/cmd_wait_routine_test.go"
+      ],
+      "flags": [
+        "interval",
+        "quiet",
+        "routine",
+        "timeout"
+      ],
+      "documented_flags": [
+        "interval",
+        "quiet",
+        "routine",
+        "timeout"
       ]
     },
     {
@@ -37938,6 +41491,18 @@
         "cmd/crewship/cmd_presence_cov_test.go",
         "cmd/crewship/cmd_watch_cov_test.go",
         "cmd/crewship/watch_wrap_cov_test.go"
+      ],
+      "flags": [
+        "agent",
+        "crew",
+        "severity",
+        "type"
+      ],
+      "documented_flags": [
+        "agent",
+        "crew",
+        "severity",
+        "type"
       ]
     },
     {
@@ -37959,6 +41524,12 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_whoami_json_test.go"
+      ],
+      "flags": [
+        "json"
+      ],
+      "documented_flags": [
+        "json"
       ]
     },
     {
@@ -38006,6 +41577,12 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "file"
+      ],
+      "documented_flags": [
+        "file"
       ]
     },
     {
@@ -38028,6 +41605,12 @@
         "cmd/crewship/cmd_workflow_cov_test.go",
         "cmd/crewship/cmd_workflow_help_test.go",
         "cmd/crewship/cmd_workflow_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -38088,6 +41671,12 @@
         "cmd/crewship/cmd_workflow_cov_test.go",
         "cmd/crewship/cmd_workflow_help_test.go",
         "cmd/crewship/cmd_workflow_test.go"
+      ],
+      "flags": [
+        "file"
+      ],
+      "documented_flags": [
+        "file"
       ]
     },
     {
@@ -38146,6 +41735,16 @@
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "language",
+        "name",
+        "slug"
+      ],
+      "documented_flags": [
+        "language",
+        "name",
+        "slug"
       ]
     },
     {
@@ -38167,6 +41766,14 @@
         "cmd/crewship/cmd_workspace_member_email_test.go",
         "cmd/crewship/cmd_workspace_member_role_test.go",
         "cmd/crewship/cmd_workspace_provision_test.go"
+      ],
+      "flags": [
+        "confirm",
+        "yes"
+      ],
+      "documented_flags": [
+        "confirm",
+        "yes"
       ]
     },
     {
@@ -38213,6 +41820,12 @@
         "cmd/crewship/cmd_workspace_member_email_test.go",
         "cmd/crewship/cmd_workspace_member_role_test.go",
         "cmd/crewship/cmd_workspace_provision_test.go"
+      ],
+      "flags": [
+        "role"
+      ],
+      "documented_flags": [
+        "role"
       ]
     },
     {
@@ -38234,6 +41847,12 @@
         "cmd/crewship/cmd_workspace_member_email_test.go",
         "cmd/crewship/cmd_workspace_member_role_test.go",
         "cmd/crewship/cmd_workspace_provision_test.go"
+      ],
+      "flags": [
+        "role"
+      ],
+      "documented_flags": [
+        "role"
       ]
     },
     {
@@ -38327,6 +41946,12 @@
         "cmd/crewship/cmd_workspace_member_email_test.go",
         "cmd/crewship/cmd_workspace_member_role_test.go",
         "cmd/crewship/cmd_workspace_provision_test.go"
+      ],
+      "flags": [
+        "role"
+      ],
+      "documented_flags": [
+        "role"
       ]
     },
     {
@@ -38457,6 +42082,12 @@
         "cmd/crewship/cmd_workspace_member_email_test.go",
         "cmd/crewship/cmd_workspace_member_role_test.go",
         "cmd/crewship/cmd_workspace_provision_test.go"
+      ],
+      "flags": [
+        "role"
+      ],
+      "documented_flags": [
+        "role"
       ]
     },
     {
@@ -38502,6 +42133,12 @@
         "cmd/crewship/cmd_workspace_member_email_test.go",
         "cmd/crewship/cmd_workspace_member_role_test.go",
         "cmd/crewship/cmd_workspace_provision_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -38547,6 +42184,18 @@
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "cmd/crewship/cmd_label_cov_test.go",
         "…"
+      ],
+      "flags": [
+        "allow-privileged-credentials",
+        "language",
+        "name",
+        "slug"
+      ],
+      "documented_flags": [
+        "allow-privileged-credentials",
+        "language",
+        "name",
+        "slug"
       ]
     },
     {
