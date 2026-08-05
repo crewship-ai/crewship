@@ -56816,6 +56816,977 @@
         ]
       }
     },
+    "/api/v1/crews/{crewId}/issues/{identifier}/code-links": {
+      "get": {
+        "operationId": "get_api_v1_crews_crewId_issues_identifier_code-links",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "author": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "credential_id": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "host": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "last_sync_error": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "last_synced_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "mission_id": {
+                        "type": "string"
+                      },
+                      "number": {
+                        "type": "integer"
+                      },
+                      "owner": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "remote_closed_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "remote_created_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "remote_merged_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "remote_updated_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "repo": {
+                        "type": "string"
+                      },
+                      "source_branch": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "state": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "target_branch": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "title": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "workspace_id": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_crews_crewId_issues_identifier_code-links",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "author": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "credential_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "last_sync_error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "last_synced_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "number": {
+                      "type": "integer"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "remote_closed_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_created_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_merged_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_updated_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    },
+                    "source_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "state": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "target_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "title": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "author": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "credential_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "last_sync_error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "last_synced_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "number": {
+                      "type": "integer"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "remote_closed_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_created_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_merged_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_updated_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    },
+                    "source_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "state": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "target_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "title": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      }
+    },
+    "/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}": {
+      "delete": {
+        "operationId": "delete_api_v1_crews_crewId_issues_identifier_code-links_linkId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      }
+    },
+    "/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh": {
+      "post": {
+        "operationId": "post_api_v1_crews_crewId_issues_identifier_code-links_linkId_refresh",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "linkId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {},
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "author": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "credential_id": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "last_sync_error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "last_synced_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "mission_id": {
+                      "type": "string"
+                    },
+                    "number": {
+                      "type": "integer"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "remote_closed_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_created_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_merged_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "remote_updated_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "repo": {
+                      "type": "string"
+                    },
+                    "source_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "state": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "target_branch": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "title": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      }
+    },
     "/api/v1/crews/{crewId}/issues/{identifier}/comments": {
       "get": {
         "operationId": "get_api_v1_crews_crewId_issues_identifier_comments",

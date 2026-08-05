@@ -100,6 +100,17 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Issue Comments
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/comments", authed(wsCtx(http.HandlerFunc(issues.ListComments))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/comments", roleCreate, issues.CreateComment)
+	// Issue code links (link-first Git integration — a pasted PR/MR URL,
+	// fetched through the provider API with a stored credential). Deliberately
+	// nested under the crew/issue path like comments and relations, so it
+	// inherits the same `crews:write` route scope instead of needing a new
+	// entry in scopeForRoute.
+	codeLinks := NewCodeLinkHandler(r.db, r.hub, r.logger)
+	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/code-links", authed(wsCtx(http.HandlerFunc(codeLinks.List))))
+	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/code-links", roleCreate, codeLinks.Attach)
+	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh", roleCreate, codeLinks.Refresh)
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}", roleCreate, codeLinks.Delete)
+
 	// Issue Relations
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/relations", authed(wsCtx(http.HandlerFunc(issues.ListRelations))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/relations", roleCreate, issues.CreateRelation)

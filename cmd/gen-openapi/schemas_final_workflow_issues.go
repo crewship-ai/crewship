@@ -34,11 +34,30 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 	runInsights := obj(map[string]any{"window": str(), "totals": obj(map[string]any{"total": integer(), "succeeded": integer(), "failed": integer(), "running": integer()}), "duration": obj(map[string]any{"p50_ms": integer(), "p95_ms": integer()}), "by_trigger": arr(obj(map[string]any{"key": str(), "total": integer(), "failed": integer()})), "by_model": arr(obj(map[string]any{"key": str(), "total": integer(), "failed": integer()})), "by_crew": arr(obj(map[string]any{"id": str(), "name": str(), "total": integer(), "failed": integer()})), "top_agents": arr(obj(map[string]any{"id": str(), "name": str(), "crew_name": str(), "total": integer(), "failed": integer()})), "truncated": boolean()})
 	escalation := obj(map[string]any{"id": str(), "type": str(), "from_name": str(), "from_slug": str(), "reason": str(), "context": nullable(str()), "metadata": nullable(str()), "peer_conversation_id": nullable(str()), "status": str(), "resolution": nullable(str()), "action": nullable(str()), "redirect_to": nullable(str()), "resolved_by": nullable(str()), "resolved_at": nullable(str()), "created_at": str(), "credential_id": nullable(str()), "second_approver_required": boolean(), "second_approver_by_workspace": boolean(), "second_approver_by_tier": boolean(), "security_level_label": str()})
 	issue := ref("Issue")
+	// A pull request or merge request attached to an issue. Every fetched field
+	// is nullable on purpose: a link exists from the moment it is pasted, and
+	// stays readable when the forge is unreachable — so the row keeps the state
+	// it last had rather than vanishing, and last_sync_error says why.
+	codeLink := obj(map[string]any{
+		"id": str(), "mission_id": str(), "workspace_id": str(),
+		"provider": str(), "host": str(), "owner": str(), "repo": str(),
+		"number": integer(), "kind": str(), "url": str(),
+		"title": nullable(str()), "state": nullable(str()), "author": nullable(str()),
+		"source_branch": nullable(str()), "target_branch": nullable(str()),
+		"remote_created_at": nullable(str()), "remote_updated_at": nullable(str()),
+		"remote_merged_at": nullable(str()), "remote_closed_at": nullable(str()),
+		"credential_id": nullable(str()), "last_synced_at": nullable(str()),
+		"last_sync_error": nullable(str()),
+	})
 	return map[string]DomainSchema{
 		"GET /api/v1/recurring-issues": {Response: arr(recurringIssue)}, "POST /api/v1/recurring-issues": {Response: recurringIssue}, "PATCH /api/v1/recurring-issues/{recurringId}": {Response: recurringIssue},
 		"GET /api/v1/triage-rules": {Response: arr(triageRule)}, "POST /api/v1/triage-rules": {Response: triageRule}, "PATCH /api/v1/triage-rules/{ruleId}": {Response: triageRule}, "POST /api/v1/triage/process": {Response: obj(map[string]any{"processed": integer(), "matched": integer()})},
 		"GET /api/v1/projects/{projectId}/milestones": {Response: arr(milestone)}, "POST /api/v1/projects/{projectId}/milestones": {Response: milestone}, "PATCH /api/v1/milestones/{milestoneId}": {Response: milestone},
-		"GET /api/v1/crews/{crewId}/issues/{identifier}/relations": {Response: arr(relation)}, "POST /api/v1/crews/{crewId}/issues/{identifier}/relations": {Response: obj(map[string]any{"id": str(), "status": str()})}, "DELETE /api/v1/relations/{relationId}": {Response: obj(map[string]any{"status": str()})},
+		"GET /api/v1/crews/{crewId}/issues/{identifier}/code-links":                   {Response: arr(codeLink)},
+		"POST /api/v1/crews/{crewId}/issues/{identifier}/code-links":                  {Request: obj(map[string]any{"url": str()}), Response: codeLink},
+		"POST /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh": {Request: obj(map[string]any{}), Response: codeLink},
+		"DELETE /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}":       {Response: obj(map[string]any{"status": str()})},
+		"GET /api/v1/crews/{crewId}/issues/{identifier}/relations":                    {Response: arr(relation)}, "POST /api/v1/crews/{crewId}/issues/{identifier}/relations": {Response: obj(map[string]any{"id": str(), "status": str()})}, "DELETE /api/v1/relations/{relationId}": {Response: obj(map[string]any{"status": str()})},
 		"GET /api/v1/crews/{crewId}/issues/{identifier}/comments": {Response: arr(comment)}, "POST /api/v1/crews/{crewId}/issues/{identifier}/comments": {Response: comment}, "GET /api/v1/crews/{crewId}/issues/{identifier}/activity": {Response: arr(activity)}, "GET /api/v1/crews/{crewId}/issues/{identifier}/runs": {Response: arr(issueRun)}, "GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks": {Response: arr(issue)},
 		"POST /api/v1/crews/{crewId}/issues": {Response: ref("Issue")}, "GET /api/v1/crews/{crewId}/issues/{identifier}": {Response: ref("Issue")}, "PATCH /api/v1/crews/{crewId}/issues/{identifier}": {Response: ref("Issue")},
 		"POST /api/v1/crews/{crewId}/issues/{identifier}/review": {Response: obj(map[string]any{"status": str(), "action": str()})}, "POST /api/v1/crews/{crewId}/issues/{identifier}/start": {Response: obj(map[string]any{"status": str(), "identifier": str()})}, "POST /api/v1/crews/{crewId}/issues/{identifier}/stop": {Response: obj(map[string]any{"status": str(), "identifier": str()})}, "PATCH /api/v1/issues/bulk": {Response: obj(map[string]any{"updated": integer()})},

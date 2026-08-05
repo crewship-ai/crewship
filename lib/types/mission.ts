@@ -313,6 +313,60 @@ export interface IssueActivity {
   created_at: string
 }
 
+/**
+ * A pull request / merge request attached to an issue.
+ *
+ * `GET /api/v1/crews/{crewId}/issues/{identifier}/code-links`
+ * (internal/api/issue_code_links.go → codeLinkResponse). Every nullable field
+ * below is nullable in the table too: a row exists as soon as the link is
+ * attached, and the provider's answer fills the rest.
+ *
+ * **`title`, `author`, `source_branch` and `target_branch` are untrusted.**
+ * Whoever opened the request on the forge chose them — on a public repository,
+ * anyone. Render them as text and nothing else; see lib/code-links.ts.
+ */
+export interface IssueCodeLink {
+  id: string
+  mission_id: string
+  workspace_id: string
+  /** `GITHUB` | `GITLAB` — Crewship's own parsed value, not the forge's. */
+  provider: string
+  host: string
+  owner: string
+  repo: string
+  number: number
+  /** `PULL_REQUEST` | `MERGE_REQUEST`. */
+  kind: string
+  /** Reconstructed server-side from the parsed parts, so always http(s). */
+  url: string
+
+  /** Untrusted. Null until the first successful fetch. */
+  title: string | null
+  /** Normalised to `OPEN` | `DRAFT` | `MERGED` | `CLOSED` — but read it through
+   *  `codeLinkStateBadge`, which owns the fallback for anything else. */
+  state: string | null
+  /** Untrusted. */
+  author: string | null
+  /** Untrusted. */
+  source_branch: string | null
+  /** Untrusted. */
+  target_branch: string | null
+
+  remote_created_at: string | null
+  remote_updated_at: string | null
+  remote_merged_at: string | null
+  remote_closed_at: string | null
+
+  credential_id: string | null
+  /** When the stored state was last confirmed against the provider. */
+  last_synced_at: string | null
+  /** Why the last refresh failed. Set means the row is showing stale state. */
+  last_sync_error: string | null
+
+  created_at: string
+  updated_at: string
+}
+
 /** A comment on an issue, authored by a user or agent. */
 export interface IssueComment {
   id: string
