@@ -192,9 +192,17 @@ func (s *Server) listPipelines(ctx context.Context, rawQuery string) (int, []byt
 	if s.ipc == nil {
 		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
 	}
-	path := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines"
+	// The INTERNAL read route, not the public one.
+	//
+	// This forwarded to /api/v1/workspaces/{ws}/pipelines — public and
+	// JWT-authed — while ipcRequestJSON carries only X-Internal-Token,
+	// a header extractToken never reads. Every call answered 401, so
+	// list_routines was dead for in-container agents and an agent
+	// asked to author a routine could not see what already existed
+	// (#1763). Same handler on the far side; different door.
+	path := "/api/v1/internal/pipelines?workspace_id=" + url.QueryEscape(s.ipc.WorkspaceID)
 	if rawQuery != "" {
-		path += "?" + rawQuery
+		path += "&" + rawQuery
 	}
 	res, err := s.ipcRequestJSON(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -214,7 +222,12 @@ func (s *Server) crewCapabilities(ctx context.Context) (int, []byte) {
 	if s.ipc.CrewID == "" {
 		return http.StatusBadRequest, mustJSON(map[string]string{"error": "no crew context for capabilities"})
 	}
-	path := "/api/v1/crews/" + s.ipc.CrewID + "/capabilities?workspace_id=" + url.QueryEscape(s.ipc.WorkspaceID)
+	// Internal route, for the same reason as the list above: the public
+	// crews capabilities endpoint is JWT-authed and refuses the sidecar's
+	// credential, so discover_capabilities answered 401 and the agent
+	// authored blind (#1763).
+	path := "/api/v1/internal/crews/" + url.PathEscape(s.ipc.CrewID) +
+		"/capabilities?workspace_id=" + url.QueryEscape(s.ipc.WorkspaceID)
 	res, err := s.ipcRequestJSON(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return http.StatusBadGateway, mustJSON(map[string]string{"error": "capabilities request failed: " + err.Error()})
