@@ -205,6 +205,12 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 | `POST` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions` | Body: `{emoji}`. Idempotent under `UNIQUE(chat, message, emoji, user)`. |
 | `DELETE` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}` | Emoji is a path segment. |
 
+Reaction endpoints require an authenticated workspace member. `GET` returns
+`200 OK` with `{ "reactions": [{ "emoji": "👍", "count": 1, "mine": true }] }`; an
+unauthenticated or non-member GET returns `404`. `DELETE` takes `emoji` as a
+path parameter and returns `204 No Content`; it returns `401` when unauthenticated
+and `404` when the chat is unavailable to the caller.
+
 ### Attachments
 
 | Method | Path | Purpose |

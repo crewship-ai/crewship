@@ -54,6 +54,8 @@ CRUD over saved views. Reads return own + shared rows; writes are restricted to 
 
 List the calling user's views plus every shared view in the workspace. Defaults pinned to the top, then alphabetical by name.
 
+**Request:** No request body or query parameters.
+
 **Auth:** authenticated session + workspace context.
 
 **Response:** `200 OK` — JSON array (never `null`).
@@ -120,7 +122,7 @@ Partial update. Only the **owner** of the view can update it — `Update` reads 
 
 | Status | Condition |
 |---|---|
-| `400` | Malformed JSON body or no fields provided (`No fields to update`). |
+| `400` | Malformed JSON body or no fields provided (`No fields to update`). In `PATCH`, a JSON `null` for `sort_json` is decoded as an omitted field; it does not clear the stored value. |
 | `401` | Not authenticated. |
 | `403` | Caller is not the view owner. |
 | `404` | View id does not exist. |
@@ -128,6 +130,8 @@ Partial update. Only the **owner** of the view can update it — `Update` reads 
 ### `DELETE /api/v1/saved-views/{viewId}`
 
 Hard delete. As with `PATCH`, only the owner can delete.
+
+**Request:** No request body. The `{viewId}` path parameter identifies the saved view.
 
 **Auth:** authenticated session + ownership of the row. (No role gate beyond ownership — a user can always delete their own view.)
 

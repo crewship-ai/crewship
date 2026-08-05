@@ -32,6 +32,7 @@ workspace ID or slug.
 | POST | [`/api/v1/crews/{crewId}/apply-avatar-style`](#apply-avatar-style) | Apply an avatar style across agents |
 | GET | [`/api/v1/crews/{crewId}/container-status`](#container-status) | Get the crew's runtime container status |
 | GET | [`/api/v1/crews/{crewId}/credential-readiness`](#credential-readiness) | Report credentials whose CLI is missing from the container |
+| GET | [`/api/v1/crews/{crewId}/capabilities`](#crew-capabilities) | Return the crew's authoring capabilities bundle |
 | GET | [`/api/v1/crew-connections`](#list-connections) | List crew connections |
 | POST | [`/api/v1/crew-connections`](#create-connection) | Create a crew connection |
 | DELETE | [`/api/v1/crew-connections/{connectionId}`](#delete-connection) | Delete a crew connection |
@@ -65,7 +66,9 @@ Use `limit` (maximum 500) and `offset` for pagination.
 
 **Auth:** Session or CLI token + workspace membership
 
-**Request:** `crewId` is a required path parameter; `workspace_id` is the required workspace query parameter. No request body.
+**Request:** No path parameters or request body. Workspace context is required;
+provide it using the `workspace_id` query parameter, `{workspaceId}` path
+context where supported, or `X-Workspace-ID` as described above.
 
 **Response:** `200 OK`
 
@@ -787,6 +790,51 @@ crewship crew credential-readiness <slug-or-id>
 ```
 
 ---
+
+### Crew Capabilities
+
+```
+GET /api/v1/crews/{crewId}/capabilities
+```
+
+Returns one authoring-oriented capability bundle for the crew: resolved
+container resources, enabled crew integrations and their enabled tool names,
+agent slugs, available code runtimes, script-interpreter mappings, and the
+routine DSL JSON schema.
+
+**Auth:** authenticated workspace member
+
+**Request:** `crewId` is a required path parameter. Workspace context is
+required and may be supplied with `X-Workspace-ID` (or the equivalent
+workspace context described at the top of this page). No request body.
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "crew_123",
+  "crew_slug": "engineering",
+  "container": { "datastores": [], "tools": [] },
+  "integrations": [],
+  "agents": [],
+  "runtimes": {
+    "code": { "wired": ["cel"], "reserved_unwired": [] },
+    "script_interpreters": { ".py": "python3" }
+  },
+  "schema": { "type": "object" }
+}
+```
+
+`container.datastores` and `container.tools` are arrays and may be empty.
+Only enabled crew integrations are included; `integrations[].tools` contains
+only explicitly enabled crew-scoped tool bindings. `schema` is the nested
+routine DSL schema object, not a JSON-encoded string.
+
+| Status | Condition |
+|---|---|
+| `400` | `crewId` is missing |
+| `404` | Crew not found in the selected workspace |
+| `500` | Database or capability-resolution failure |
 
 ## Connections
 

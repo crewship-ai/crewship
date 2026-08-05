@@ -491,6 +491,8 @@ The same data backs the **Admin → Runtime → Security posture** card in the d
 
 Read or adjust `workspaces.memory_config` — currently the retention window for `memory_versions` rows, consumed by the per-workspace retention sweep.
 
+The command also accepts the alias `crewship admin memcfg`.
+
 ```bash
 crewship admin memory-config get
 crewship admin memory-config get --format json
@@ -533,6 +535,8 @@ The same data backs the **Admin → Runtime → Memory configuration** card in t
 ## `crewship admin ratelimits`
 
 Inspect and tune the instance's rate limiters at runtime — the same surface as the dashboard's **Infrastructure → Rate Limiters** tab. Every limiter that was once a hardcoded constant (the per-IP HTTP buckets, the login lockout, the notification anti-storm bucket, crew provisioning, agent webhooks) is listed and overridable without a redeploy.
+
+Aliases: `crewship admin rate-limits` and `crewship admin ratelimit`.
 
 ```bash
 crewship admin ratelimits list

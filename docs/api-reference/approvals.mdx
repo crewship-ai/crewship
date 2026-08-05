@@ -86,6 +86,13 @@ For `?status=all`, the `status` envelope key echoes back as an empty string (`""
 GET /api/v1/approvals/{id}
 ```
 
+**Auth:** Requires an authenticated request with workspace context. The optional
+`X-Workspace-ID` header selects the workspace when it is not already present in
+the request context.
+
+**Response:** `200 OK` — the full approval request object, with the same fields
+and Go field-name JSON serialization as a `rows[]` item from List.
+
 Returns the full request object (same schema as list rows).
 
 **Errors:**
@@ -94,6 +101,7 @@ Returns the full request object (same schema as list rows).
 |---|---|
 | 401 | No workspace. |
 | 404 | ID not found or belongs to another workspace. |
+| 500 | Database error while loading the request. |
 
 ---
 

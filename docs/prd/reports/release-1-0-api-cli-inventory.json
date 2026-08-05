@@ -1625,7 +1625,8 @@
       "tag": "admin",
       "source_file": "internal/api/inbox_target_role_test.go",
       "exact_docs": [
-        "docs/api-reference/keeper.mdx"
+        "docs/api-reference/keeper.mdx",
+        "docs/guides/keeper.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1836,6 +1837,7 @@
       "exact_docs": [
         "docs/api-reference/admin.mdx",
         "docs/cli/admin.mdx",
+        "docs/guides/consolidate.mdx",
         "docs/guides/memory-observability.mdx"
       ],
       "resource_docs": [
@@ -1882,6 +1884,7 @@
       "exact_docs": [
         "docs/api-reference/admin.mdx",
         "docs/cli/admin.mdx",
+        "docs/guides/consolidate.mdx",
         "docs/guides/memory-observability.mdx"
       ],
       "resource_docs": [
@@ -1926,7 +1929,8 @@
       "tag": "admin",
       "source_file": "internal/api/admin_authz_floor_test.go",
       "exact_docs": [
-        "docs/api-reference/admin.mdx"
+        "docs/api-reference/admin.mdx",
+        "docs/guides/memory-observability.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1971,7 +1975,8 @@
       "source_file": "internal/api/memory_versions_list_handler_test.go",
       "exact_docs": [
         "docs/api-reference/admin.mdx",
-        "docs/api-reference/agents.mdx"
+        "docs/api-reference/agents.mdx",
+        "docs/guides/memory-observability.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -2012,7 +2017,8 @@
       "source_file": "internal/api/router_admin.go",
       "exact_docs": [
         "docs/api-reference/admin.mdx",
-        "docs/api-reference/agents.mdx"
+        "docs/api-reference/agents.mdx",
+        "docs/guides/memory-observability.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -4817,11 +4823,8 @@
           "canonical_method_path": true,
           "auth": true,
           "request": true,
-          "response": false,
-          "statuses": true,
-          "missing": [
-            "response"
-          ]
+          "response": true,
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -5764,12 +5767,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -5835,14 +5835,10 @@
       "contract": {
         "structural": {
           "canonical_method_path": true,
-          "auth": false,
-          "request": false,
+          "auth": true,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "auth",
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -6248,12 +6244,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -6350,7 +6343,9 @@
       "tag": "consolidate",
       "source_file": "internal/api/inbox_target_role_test.go",
       "exact_docs": [
-        "docs/api-reference/consolidate.mdx"
+        "docs/api-reference/consolidate.mdx",
+        "docs/guides/inbox.mdx",
+        "docs/guides/memory-observability.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/consolidate.mdx"
@@ -6387,7 +6382,8 @@
       "operation_id": "get_api_v1_consolidate_proposed_id_diff",
       "tag": "consolidate",
       "exact_docs": [
-        "docs/api-reference/consolidate.mdx"
+        "docs/api-reference/consolidate.mdx",
+        "docs/guides/memory-observability.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/consolidate.mdx"
@@ -6405,12 +6401,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -6426,7 +6419,8 @@
       "operation_id": "get_api_v1_consolidate_proposed_id_explain",
       "tag": "consolidate",
       "exact_docs": [
-        "docs/api-reference/consolidate.mdx"
+        "docs/api-reference/consolidate.mdx",
+        "docs/guides/memory-observability.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/consolidate.mdx"
@@ -6441,12 +6435,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true
@@ -6460,7 +6451,8 @@
       "tag": "consolidate",
       "source_file": "internal/api/router_orchestration.go",
       "exact_docs": [
-        "docs/api-reference/consolidate.mdx"
+        "docs/api-reference/consolidate.mdx",
+        "docs/guides/memory-observability.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/consolidate.mdx"
@@ -8536,6 +8528,7 @@
       "operation_id": "get_api_v1_crews_crewId_capabilities",
       "tag": "crews",
       "exact_docs": [
+        "docs/api-reference/crews.mdx",
         "docs/cli/routine.mdx",
         "docs/guides/routines.mdx"
       ],
@@ -8558,10 +8551,7 @@
           "auth": true,
           "request": true,
           "response": true,
-          "statuses": false,
-          "missing": [
-            "statuses"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11073,12 +11063,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -11220,12 +11207,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -14172,12 +14156,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17036,12 +17017,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17192,12 +17170,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17556,12 +17531,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17660,12 +17632,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -17728,6 +17697,7 @@
         "docs/api-reference/skills.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/cli/skill.mdx",
+        "docs/guides/inbox.mdx",
         "docs/manifest/skill.md",
         "docs/manifest/workspace.md"
       ],
@@ -17784,7 +17754,8 @@
       "source_file": "internal/api/skills_extra_cov_test.go",
       "exact_docs": [
         "docs/api-reference/skills.mdx",
-        "docs/cli/skill.mdx"
+        "docs/cli/skill.mdx",
+        "docs/guides/inbox.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/skills.mdx"
@@ -17835,7 +17806,8 @@
       "source_file": "internal/api/inbox_target_role_test.go",
       "exact_docs": [
         "docs/api-reference/skills.mdx",
-        "docs/cli/skill.mdx"
+        "docs/cli/skill.mdx",
+        "docs/guides/inbox.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/skills.mdx"
@@ -18564,12 +18536,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -18666,12 +18635,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -18757,12 +18723,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -19405,12 +19368,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -19512,12 +19472,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,
@@ -19555,12 +19512,9 @@
         "structural": {
           "canonical_method_path": true,
           "auth": true,
-          "request": false,
+          "request": true,
           "response": true,
-          "statuses": true,
-          "missing": [
-            "request"
-          ]
+          "statuses": true
         },
         "semantic_runtime": {
           "openapi_operation": true,

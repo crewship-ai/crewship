@@ -274,26 +274,26 @@ logic here — duplicating it would just create skew opportunities.
 
 ### `ApplyUpsert` (default)
 
-1. **Routine row.** Look up `/pipelines/{slug}`:
-   - missing → `Action=Create`, POST `/pipelines/save`
+1. **Routine row.** Look up `/api/v1/workspaces/{ws}/pipelines/{slug}`:
+   - missing → `Action=Create`, POST `/api/v1/workspaces/{ws}/pipelines/save`
    - drifted (name, description, or canonical definition JSON
-     differs) → `Action=Update`, POST `/pipelines/save` again (the
+     differs) → `Action=Update`, POST `/api/v1/workspaces/{ws}/pipelines/save` again (the
      save endpoint is idempotent on slug; it bumps the version)
    - identical → `Action=Unchanged`
 
-2. **Schedules.** List `/pipeline-schedules` filtered by slug,
+2. **Schedules.** List `/api/v1/workspaces/{ws}/pipeline-schedules` filtered by slug,
    match-by-name against the declared schedules. For each:
    - declared, not on remote → `Action=Create`, POST
-     `/pipeline-schedules`
+     `/api/v1/workspaces/{ws}/pipeline-schedules`
    - declared and drifted (cron, timezone, enabled, or inputs differ)
-     → `Action=Update`, PATCH `/pipeline-schedules/{id}`
+     → `Action=Update`, PATCH `/api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}`
    - declared and identical → `Action=Unchanged`
    - on remote but no longer declared → `Action=Delete`, DELETE
-     `/pipeline-schedules/{id}` (the manifest is the source of truth)
+     `/api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}` (the manifest is the source of truth)
 
 3. **Webhook.** GET the routine's webhook (if any):
    - declared `enabled: true`, no remote → `Action=Create`, POST
-     `/pipeline-webhooks`
+     `/api/v1/workspaces/{ws}/pipeline-webhooks`
    - declared, remote drifted → `Action=Update`, which is
      delete-then-recreate (no PATCH endpoint exists)
    - declared and identical → `Action=Unchanged`
@@ -579,7 +579,7 @@ crewship routine run cost-spike-probe \
   on the run detail; group related runs (incl. replays, which inherit
   the source run's tags).
 - **Metadata** — a JSON object stored on the run and returned by
-  `GET /pipeline-runs/{id}`. Set at invoke today; mid-run mutation +
+  `GET /api/v1/workspaces/{ws}/pipeline-runs/{runId}`. Set at invoke today; mid-run mutation +
   `{{ run.metadata.X }}` templating is a follow-up.
 
 ### Replay a failed run
@@ -612,9 +612,9 @@ crewship routine bulk-replay --fingerprint <fp>   # replay the whole group after
 
 | Endpoint | CLI |
 |---|---|
-| `POST /pipelines/runs/{runId}/replay` | `routine replay <run_id>` |
-| `GET /pipelines/runs/errors` | `routine errors` |
-| `POST /pipelines/runs/bulk_replay` | `routine bulk-replay --fingerprint <fp>` |
+| `POST /api/v1/workspaces/{ws}/pipelines/runs/{runId}/replay` | `routine replay <run_id>` |
+| `GET /api/v1/workspaces/{ws}/pipelines/runs/errors` | `routine errors` |
+| `POST /api/v1/workspaces/{ws}/pipelines/runs/bulk_replay` | `routine bulk-replay --fingerprint <fp>` |
 
 ## Waitpoint callback tokens (external completion)
 
@@ -649,7 +649,7 @@ crewship routine runs my-routine --tag batch:<id>
 ```
 
 `inputs.jsonl` is one inputs object per line (or a JSON array). Endpoint:
-`POST /pipelines/{slug}/run_batch` (max 50 items/batch). The run-level
+`POST /api/v1/workspaces/{ws}/pipelines/{slug}/run_batch` (max 50 items/batch). The run-level
 `--tag` / `--metadata` apply to every run in the batch.
 
 ## Per-step prompt/model override (no version bump)
@@ -667,8 +667,8 @@ crewship routine step-override clear my-routine summarize
 ```
 
 Only non-empty fields win, so a prompt-only override leaves the authored
-model. Endpoints: `PUT|DELETE /pipelines/{slug}/steps/{stepId}/override`,
-`GET /pipelines/{slug}/overrides`.
+model. Endpoints: `PUT|DELETE /api/v1/workspaces/{ws}/pipelines/{slug}/steps/{stepId}/override`,
+`GET /api/v1/workspaces/{ws}/pipelines/{slug}/overrides`.
 
 ## Deferred dispatch: delay, ttl, debounce, priority
 
@@ -698,10 +698,10 @@ crewship routine pending cancel <id>     # cancel before it fires
   the window, `--debounce-max` caps total extension so a hot key still fires.
 - `--priority N` — higher fires first among due deferred runs.
 
-API: `POST /pipelines/{slug}/run` accepts `delay_seconds`, `ttl_seconds`,
+API: `POST /api/v1/workspaces/{ws}/pipelines/{slug}/run` accepts `delay_seconds`, `ttl_seconds`,
 `debounce_key`, `debounce_window_seconds`, `debounce_max_seconds`,
-`priority`, `idempotency_key_ttl_seconds`. `GET /pipelines/pending`,
-`POST /pipelines/pending/{id}/cancel`.
+`priority`, `idempotency_key_ttl_seconds`. `GET /api/v1/workspaces/{ws}/pipelines/pending`,
+`POST /api/v1/workspaces/{ws}/pipelines/pending/{pendingId}/cancel`.
 
 > Note: `priority` orders the **deferred** dispatch queue. Immediate runs
 > execute on arrival, so priority there is recorded but not consumed

@@ -23,7 +23,7 @@ GET /api/v1/feature-flags
 
 Returns every flag definition, ordered by `key` ascending. When the request
 carries workspace context, each flag includes the current workspace's
-override state (`override_enabled`), or `null`/omitted when no override row
+override state (`override_enabled`); the field is omitted when no override row
 exists for that flag.
 
 **Auth:** Any authenticated workspace member (`read`)
@@ -141,6 +141,8 @@ Partial update -- only provided fields are changed.
 ```
 DELETE /api/v1/feature-flags/{key}
 ```
+
+**Request:** No request body. The `{key}` path parameter is the feature-flag key.
 
 Removes the flag definition. The `ON DELETE CASCADE` on the override table
 means all per-workspace override rows are removed too.

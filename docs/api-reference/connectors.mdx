@@ -86,6 +86,8 @@ round-trip.
 
 **Auth:** Any authenticated user
 
+**Request:** `connectorId` is the required path parameter. No request body.
+
 | Path Parameter | Description |
 |---|---|
 | `connectorId` | Manifest ID |
@@ -96,6 +98,7 @@ round-trip.
 |---|---|
 | `401` | Not authenticated |
 | `404` | No connector with this ID |
+| `500` | Connector catalog lookup failed |
 
 ---
 

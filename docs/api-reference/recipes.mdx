@@ -132,7 +132,12 @@ Dry run for the install Sheet. Tells the FE which credentials the user **already
 
 Does not mutate any state.
 
-**Auth:** authenticated session + workspace context (`workspace_id` query parameter).
+**Auth:** authenticated session + workspace context (normally supplied by the
+`X-Workspace-ID` header or the authenticated session).
+
+**Request:** `slug` is the required recipe path parameter. Workspace context is
+supplied by the optional `X-Workspace-ID` header (or the authenticated session).
+No request body.
 
 **Response:** `200 OK`
 
@@ -156,6 +161,9 @@ Does not mutate any state.
 
 | Status | Condition |
 |---|---|
+| `400` | Workspace context is missing or malformed. |
+| `401` | Not authenticated. |
+| `403` | Authenticated but not a member of the requested workspace. |
 | `404` | Recipe slug not found. |
 | `500` | Credential lookup or slug resolution failed (rare — surfaces a DB-level error rather than silently treating a failed query as "missing credential" and then 409-ing mid-install). |
 

@@ -12,9 +12,9 @@ manifest CAN do is:
   (`spec.install: true`).
 - **Bind** the connector's expected runtime env-vars to the names of
   workspace credentials that satisfy them (`spec.credentials`).
-- Drift back to **uninstalled** (`spec.install: false`) where the server
-  endpoint exposes a delete verb — best-effort; if the catalog entry has
-  no DELETE handler the planner degrades to `Unchanged` with a warning.
+- Drift back to **uninstalled** (`spec.install: false`) as a best-effort
+  operation. The v1 API currently has no registered DELETE handler for
+  connector installs, so the planner degrades to `Unchanged` with a warning.
 
 This makes `Connector` an **install-only reference kind**, alongside
 `Recipe` and `CrewTemplate`. The distinction matters when authoring a
@@ -159,9 +159,10 @@ spec:
   install: false
 ```
 
-The planner issues `DELETE /api/v1/connectors/linear/install`. A
-404/405/501 from that endpoint is treated as "catalog entry doesn't
-support uninstall" and the plan item is reported as `Unchanged` with a
+The planner attempts to uninstall an installed connector, but the v1
+router currently has no DELETE registration for connector installs. The
+resulting 404/405/501 is treated as "catalog entry doesn't support
+uninstall" and the plan item is reported as `Unchanged` with a
 description flagging the manual cleanup — Apply does not fail on the
 remainder of the bundle.
 
@@ -195,7 +196,7 @@ The UI page `/connectors` wraps the same endpoints.
 | `metadata.slug` | path param `{connectorId}` | Selects the catalog entry. |
 | `spec.credentials` (map) | `{credentials: {ENV_NAME: workspace_cred_name}}` | Server resolves each `workspace_cred_name` to a credential row, decrypts its value, and binds the result to the runtime env var `ENV_NAME` on the connector's MCP/HTTP runtime. |
 | `spec.install: true` (and not installed) | — | Apply issues `POST /api/v1/connectors/{slug}/install`. |
-| `spec.install: false` (and installed) | — | Apply issues `DELETE /api/v1/connectors/{slug}/install` (best-effort). |
+| `spec.install: false` (and installed) | — | Apply attempts the inverse operation; the current v1 router has no DELETE handler, so this is reported as unchanged with a warning. |
 
 The credential map is wire-equivalent to what the
 `POST /api/v1/connectors/{id}/install` handler reads off the request

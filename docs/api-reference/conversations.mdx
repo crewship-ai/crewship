@@ -82,6 +82,11 @@ The List endpoint returns **aggregated counts**, not a per-user list. Each row c
 GET /api/v1/chats/{chatId}/messages/{messageId}/reactions
 ```
 
+**Path parameters:** `chatId` is the chat ID; `messageId` is the message ID.
+
+**Auth:** An authenticated workspace member. Chat tenancy is checked from the
+chat's workspace and the caller's membership.
+
 **Response:** `200 OK`
 
 ```json
@@ -99,8 +104,8 @@ Sorted by `count` descending then `emoji` ascending. Workspace tenancy is enforc
 
 | Status | Condition |
 |---|---|
-| 401 | Not authenticated. |
-| 404 | Chat not found, or not in a workspace the caller is a member of (same shape as "not found"). |
+| 404 | Chat not found, caller is not authenticated, or caller is not a member of the chat's workspace (same shape as "not found"). |
+| 500 | Database error while listing reactions. |
 
 ### Add reaction
 
@@ -125,9 +130,18 @@ Content-Type: application/json
 DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}
 ```
 
+**Path parameters:** `chatId` is the chat ID; `messageId` is the message ID;
+`emoji` is the reaction to remove.
+
+**Auth:** An authenticated workspace member. Chat tenancy is checked from the
+chat's workspace and the caller's membership.
+
 The emoji is **a path segment**, not a query parameter. URL-encode if it contains characters that need escaping (`👍` is multi-byte UTF-8 and works in modern HTTP clients without further encoding, but a safe-belt `encodeURIComponent` doesn't hurt).
 
 **Response:** `204 No Content` on success. Idempotent: removing a non-existent reaction returns `204`, not `404`.
+
+**Errors:** `401` not authenticated; `404` chat not found or caller is not a
+workspace member; `500` database error while removing the reaction.
 
 ---
 
