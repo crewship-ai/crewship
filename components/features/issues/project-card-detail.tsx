@@ -50,7 +50,7 @@ import {
   ProjectStatusPicker,
   type ProjectCardEdit,
 } from "@/components/features/issues/project-card-editors"
-import { getCrewIconDef, getGradientPalette } from "@/lib/entities"
+import { getCrewIconDef, iconColorProps } from "@/lib/entities"
 import { ISSUE_STATUS_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import {
   issuePriorityTone,
@@ -112,7 +112,7 @@ export function ProjectCardDetail({ project, stats, issues, actions, edit }: Pro
                   </div>
                 ) : (
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-surface-raised">
-                    <Icon className={cn("h-5 w-5", getGradientPalette(project.color).text)} />
+                    <Icon className={cn("h-5 w-5", iconColorProps(project.color).className)} style={iconColorProps(project.color).style} />
                   </div>
                 )}
                 <div className="min-w-0">

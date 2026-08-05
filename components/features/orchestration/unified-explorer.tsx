@@ -10,7 +10,7 @@ import type { IssuePriority, MissionStatus } from "@/lib/types/mission"
 import { cn } from "@/lib/utils"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { getCrewIconDef, getGradientPalette } from "@/lib/entities"
+import { getCrewIconDef, iconColorProps } from "@/lib/entities"
 import type { Mission, MissionTask, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 import {
@@ -284,7 +284,7 @@ export function UnifiedExplorer({
                           active={filterCrewId === c.id}
                           onClick={() => toggleCrew(c.id)}
                         >
-                          <CrewIconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(c.color).text)} />
+                          <CrewIconComp className={cn("h-3.5 w-3.5 shrink-0", iconColorProps(c.color).className)} style={iconColorProps(c.color).style} />
                           {c.name}
                         </FacetRow>
                       )
@@ -359,7 +359,7 @@ export function UnifiedExplorer({
                 selected={selectedProjectId === p.id}
                 onSelect={() => onProjectSelect(p.id)}
               >
-                <IconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(p.color).text)} />
+                <IconComp className={cn("h-3.5 w-3.5 shrink-0", iconColorProps(p.color).className)} style={iconColorProps(p.color).style} />
                 <span
                   className="text-foreground/80 truncate flex-1"
                   title={p.issue_count > 0 ? `${p.name} — ${progress}% complete` : p.name}

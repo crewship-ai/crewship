@@ -1,4 +1,4 @@
-import { crewColorHex, getCrewIconDef, getGradientPalette } from "@/lib/entities"
+import { crewColorHex, getCrewIconDef, getGradientPalette, iconColorProps } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 
 interface CrewIconProps {
@@ -23,6 +23,7 @@ export function CrewIcon({ icon, color, size = "md", className }: CrewIconProps)
   // inline — otherwise every hex-coloured crew silently renders in the
   // fallback palette and a workspace of five crews looks like one crew.
   const hex = crewColorHex(color)
+  const glyph = iconColorProps(color)
   const s = sizeMap[size]
   const IconComp = def.icon
 
@@ -43,10 +44,9 @@ export function CrewIcon({ icon, color, size = "md", className }: CrewIconProps)
           : undefined
       }
     >
-      <IconComp
-        className={cn(s.icon, hex ? undefined : palette.text)}
-        style={hex ? { color: hex } : undefined}
-      />
+      {/* Same decision as every other icon on the product, made in one
+          place: see iconColorProps. */}
+      <IconComp className={cn(s.icon, glyph.className)} style={glyph.style} />
     </div>
   )
 }
