@@ -201,6 +201,29 @@ describe("IssueCodeLinksCard — attaching", () => {
     await waitFor(() => expect(edit.attach).toHaveBeenCalled())
   })
 
+  // A CJK reader presses Enter to CONFIRM an IME candidate, not to submit.
+  // Without the composition guard that keystroke posts a half-composed URL and
+  // the popover answers with a parse failure for something they never finished
+  // typing — a failure message that is worse than useless, because it describes
+  // a URL that was never intended.
+  it("lets an IME candidate be confirmed without submitting", async () => {
+    const edit = editStub()
+    render(<IssueCodeLinksCard links={[]} edit={edit} />)
+    const menu = openAttach()
+    const box = within(menu).getByLabelText(/pull request url/i)
+
+    fireEvent.change(box, { target: { value: "https://github.com/acme/thin" } })
+    fireEvent.keyDown(box, { key: "Enter", isComposing: true })
+    expect(edit.attach).not.toHaveBeenCalled()
+
+    // The same key, once composition has ended, still submits.
+    fireEvent.change(box, { target: { value: "https://github.com/acme/thing/pull/7" } })
+    fireEvent.keyDown(box, { key: "Enter" })
+    await waitFor(() =>
+      expect(edit.attach).toHaveBeenCalledWith("https://github.com/acme/thing/pull/7"),
+    )
+  })
+
   it("does not post an empty box", () => {
     const edit = editStub()
     render(<IssueCodeLinksCard links={[]} edit={edit} />)

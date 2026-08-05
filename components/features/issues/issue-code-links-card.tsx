@@ -346,6 +346,10 @@ function AttachCodeLinkPicker({ edit }: { edit: CodeLinkEdit }) {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => {
+            // Enter confirms an IME candidate before it means "submit". Firing
+            // mid-composition posts a half-composed URL and answers with a
+            // parse failure for something the reader never finished typing.
+            if (e.nativeEvent.isComposing) return
             if (e.key === "Enter") void submit()
           }}
           placeholder="https://github.com/acme/thing/pull/7"
