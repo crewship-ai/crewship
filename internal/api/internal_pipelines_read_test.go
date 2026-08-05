@@ -82,21 +82,24 @@ func TestInternalPipelinesList_RequiresAWorkspace(t *testing.T) {
 
 func TestInternalCrewCapabilities_AcceptsTheSidecarToken(t *testing.T) {
 	r, wsID := newFenceRouter(t)
+	seedFenceCrews(t, r, wsID)
 	auth := map[string]string{"X-Internal-Token": fenceInternalToken}
 
-	// The crew does not exist in this fixture; what is under test is that the
-	// route is reachable with the sidecar's credential at all. A 401 here is
-	// the bug; a 404 from the handler would be a legitimate answer.
 	rr := probeInternalFence(t, r, http.MethodGet,
 		"/api/v1/internal/crews/crew-1/capabilities?workspace_id="+wsID, fenceLoopbackAddr, auth)
-	if rr.Code == http.StatusUnauthorized {
-		t.Fatalf("GET /internal/crews/{id}/capabilities: 401 — the sidecar credential was refused")
+
+	// 200, not merely "not 401". The first version accepted anything that
+	// was not an auth failure, which meant a 500 or a 403 would have passed
+	// it — and neither shows that an authenticated sidecar reaches a WORKING
+	// handler, which is the whole claim. CodeRabbit caught that.
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /internal/crews/crew-1/capabilities: status = %d, want 200 — body: %q",
+			rr.Code, rr.Body.String())
 	}
-	// The fence answers an unknown internal path with exactly this body, so
-	// it is how "route not registered" is told apart from "handler said no".
-	if rr.Code == http.StatusNotFound &&
-		strings.Contains(rr.Body.String(), `"error":"Not Found"`) {
-		t.Fatalf("route is not registered — the fence swallowed it as an unknown path")
+	// The payload is what the tool hands a model; an empty 200 would be the
+	// same silence the 401 produced, in a friendlier colour.
+	if body := rr.Body.String(); !strings.Contains(body, `"crew_id":"crew-1"`) {
+		t.Errorf("body does not describe the crew that was asked about: %q", body[:min(len(body), 200)])
 	}
 }
 
