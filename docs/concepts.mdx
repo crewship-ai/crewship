@@ -1,0 +1,39 @@
+---
+title: "Crewship concepts and glossary"
+description: "Understand which Crewship object owns work, memory, credentials, approvals, cost, and scheduling before choosing a command or manifest kind."
+icon: "book-open"
+---
+
+# Crewship concepts and glossary
+
+Crewship separates the place where work lives from the people and automations that perform it. This glossary is the shortest route from a noun in the dashboard or CLI to the reference page that defines it.
+
+## Work objects
+
+| Term | What it is | What it is not | Reference |
+|---|---|---|---|
+| **Workspace** | The top-level tenant boundary containing members, crews, skills, credentials, and automation. | Not a crew container or a single project. | [Workspace API](/api-reference/workspaces) |
+| **Crew** | A team boundary whose agents share a container, network policy, and crew memory. | Not an individual agent or merely a chat group. | [Crew guide](/guides/first-crew) |
+| **Agent** | A configured coding worker that runs tasks inside its crew. | Not a Docker container: several agents can use the crew runtime. | [Agent API](/api-reference/agents) |
+| **Lead** | An agent role allowed to coordinate peers and delegate work. | Not a human owner or a separate execution engine. | [Delegation guide](/guides/orchestration) |
+| **Mission** | A tracked unit of multi-step or multi-agent execution with observable progress. | Not an infinite loop; runs end, wait, or fail durably. | [Mission API](/api-reference/missions) |
+| **Issue** | A durable work item with status, priority, labels, and optional assignment. | Not a prompt: an issue can trigger work, but a prompt is the task input. | [Issue API](/api-reference/issues) |
+| **Routine** | A saved workflow that can be invoked by a user, cron schedule, or webhook. | Not a permanently running agent. | [Routines guide](/guides/routines) |
+| **Skill** | A reusable `SKILL.md` instruction bundle available to selected agents. | Not a model or a credential. | [Skills guide](/guides/skills) |
+| **Shared memory** | The crew-visible memory tier that peers in one crew can recall. | Not workspace memory or a general-purpose filesystem. | [Agent memory guide](/guides/agent-memory) |
+| **Project** | A grouping of related issues with delivery status and rollups. | Not a repository checkout or a crew. | [Project API](/api-reference/projects) |
+
+## Named roles and services
+
+| Term | What it is | What it is not | Reference |
+|---|---|---|---|
+| **Keeper** | The credential-governance gate that evaluates risky access and can require escalation. | Not the credential store or the sidecar proxy. | [Keeper guide](/guides/keeper) |
+| **Quartermaster** | The credential delivery and readiness layer that resolves bindings for a run. | Not an approval authority; Keeper or a human supplies governance. | [Credentials guide](/guides/credentials) |
+| **Harbormaster** | The human-in-the-loop approval queue for dangerous or gated actions. | Not an autonomous policy evaluator. | [Approvals API](/api-reference/approvals) |
+| **Lookout** | In-process safety checks for prompt injection, tool arguments, output shape, and redaction. | Not a firewall or a replacement for container isolation. | [Lookout guide](/guides/lookout) |
+| **Paymaster** | The cost ledger and budget view for model and run spending. | Not a billing provider or a hard substitute for provider quotas. | [Paymaster guide](/guides/paymaster) |
+| **Cartographer** | The checkpoint and mission-history service for restoring, forking, and inspecting progress. | Not source-control history. | [Checkpoints API](/api-reference/checkpoints) |
+
+## How the pieces fit
+
+An agent receives a task in a crew. The crew supplies the runtime and shared memory; the workspace supplies identity and global resources. A routine or issue can start the run, Keeper and Harbormaster can govern sensitive steps, Quartermaster supplies approved credentials, Paymaster records cost, and the Journal records what happened.

@@ -1,0 +1,24 @@
+name: Documentation surface
+
+on:
+  pull_request:
+    paths: ['docs/**', 'scripts/docs-surface-check/**', 'scripts/docs-inventory/**', '.github/workflows/docs-surface.yml']
+  push:
+    branches: [main]
+    paths: ['docs/**', 'scripts/docs-surface-check/**', 'scripts/docs-inventory/**', '.github/workflows/docs-surface.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  surface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Verify contextual and served LLM surfaces
+        run: go run ./scripts/docs-surface-check -url https://docs.crewship.ai
+      - name: Verify strict reference inventory
+        run: go run ./cmd/gen-openapi && go run ./scripts/docs-inventory -strict

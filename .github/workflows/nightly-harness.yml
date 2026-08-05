@@ -366,6 +366,7 @@ jobs:
         include:
           # The CLAUDE.md "core set". Each one needs a live model.
           - suite: test-memory.sh
+          - suite: test-first-projects.sh
           - suite: test-delegation.sh
           - suite: test-notifications.sh
           - suite: test-orchestration.sh

@@ -1,0 +1,37 @@
+---
+title: "Crewship use cases"
+description: "Match common engineering operations to a Crewship crew, routine, credential policy, and the command or manifest that starts them."
+icon: "briefcase-business"
+---
+
+# What would I use Crewship for?
+
+The useful question is not whether an agent can do a task once. It is whether the task has a repeatable trigger, a bounded workspace, an observable result, and a clear owner for exceptions.
+
+## Continuous dependency upgrades
+
+**Problem:** upgrades are easy to postpone, but a backlog of small changes becomes a risky batch. **Crew:** a maintenance crew opens one issue per repository, updates only allowed ranges, runs the project checks, and asks for review when a major version is involved. **Cost:** model calls plus the container runtime for each bounded run; human review remains the cost of accepting the change. **Start with:** [routine scheduling](/guides/scheduling) and `crewship routine list` using the [routine CLI reference](/cli/routine).
+
+## Incident triage
+
+**Problem:** the first responder needs a timeline, related issues, and a safe next action before changing production. **Crew:** a triage agent reads the incident inputs, searches crew memory and the Journal, drafts a diagnosis, and escalates an action that needs approval. **Cost:** one or more model runs per incident and the operator's review time; do not treat a draft as an incident command system. **Start with:** `crewship journal --crew docs-lab --lines 20` and [Harbormaster approvals](/api-reference/approvals).
+
+## PR review that actually runs the code
+
+**Problem:** a static review can miss a failing test or a changed contract. **Crew:** a review agent checks the diff, runs the relevant suite in its crew workspace, and reports file/line findings with the command that reproduced them. **Cost:** model tokens and CI/container time; it complements required human review and branch protection. **Start with:** an agent task shaped like the [good review example](/guides/writing-good-tasks#writing-a-good-task-for-an-agent).
+
+## Secret-aware integration work
+
+**Problem:** an agent needs an API or Git credential, but copying it into a prompt or repository creates an avoidable exposure. **Crew:** Quartermaster resolves an assigned credential, the sidecar injects it for the run, and Keeper can require escalation. **Cost:** the credential provider and any approval latency; Crewship does not remove provider quotas or the need to classify data. **Start with:** `crewship credential create --name demo-token --type API_KEY --value local-demo-value` and `crewship credential assign demo-token writer --env-var-name DEMO_TOKEN`, then read [Credentials](/guides/credentials).
+
+## Recurring data or content normalization
+
+**Problem:** the same deterministic cleanup must happen on a schedule, but exceptions still need a trace. **Crew:** a routine runs the transform, writes a result to shared storage, and records input/output metadata in the Journal. **Cost:** scheduled model or script execution and storage; use a plain data pipeline when no judgment is needed. **Start with:** [routine scripts and schedules](/guides/routines) and `crewship routine list`.
+
+## Repository onboarding and documentation
+
+**Problem:** a new codebase has useful conventions scattered across files and history. **Crew:** an agent maps the repository, writes a reviewed brief to shared memory, and turns discovered follow-ups into issues. **Cost:** an initial exploration run and review time; memory is not a substitute for authoritative source documentation. **Start with:** `crewship crew create --name "Docs Lab" --slug docs-lab`, `crewship agent create --name "Writer" --slug writer --crew docs-lab --role AGENT --memory`, and [First projects](/guides/first-projects).
+
+## Human-gated change workflows
+
+**Problem:** an automated workflow should prepare a change but pause before a destructive or externally visible step. **Crew:** a routine reaches a waitpoint, Harbormaster records the decision, and the run resumes or is rejected with a durable audit trail. **Cost:** the run plus the operator's decision time; if every step needs a person, a conventional ticket workflow may be simpler. **Start with:** the [waitpoint API](/api-reference/waitpoints) and [orchestration guide](/guides/orchestration).

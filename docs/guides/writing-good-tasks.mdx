@@ -1,0 +1,26 @@
+---
+title: "Writing a good task for an agent"
+description: "Turn a product goal into an agent task with the right repository context, acceptance checks, boundaries, and durable output."
+icon: "pencil-line"
+---
+
+# Writing a good task for an agent
+
+An agent can inspect its crew workspace, use assigned skills, and recall permitted agent or crew memory. It does not automatically know your unstated definition of done, a credential you did not assign, or a file that exists only on your laptop.
+
+| Weak task | Better task |
+|---|---|
+| “Fix the API.” | “In `internal/api/invoices.go`, reproduce the 500 for an empty `items` array, add a table-driven regression test, keep the RFC 7807 response shape, and report the test command and result.” |
+| “Review this PR.” | “Review PR 42. Run the Go tests covering `internal/pipeline`, inspect the diff for tenant-boundary regressions, and leave findings with file, line, impact, and a reproduction command.” |
+| “Update dependencies.” | “Upgrade only minor and patch dependencies in `go.mod`; run `go test ./...` and `go vet ./...`; do not change generated OpenAPI or unrelated formatting; summarize any blocked major upgrade.” |
+| “Use the API key in the environment.” | “Use the assigned `DEMO_TOKEN` only against the local test endpoint; never print it, commit it, or write it to a file; if the credential is absent, stop and ask for it.” |
+
+## Include five things
+
+1. **Context:** name the repository path, issue, crew memory fact, or skill that matters.
+2. **Action:** say what the agent should inspect or change, in an order that can be followed.
+3. **Constraints:** state what must not change, especially generated files, public contracts, or credentials.
+4. **Acceptance:** name executable checks and observable outcomes.
+5. **Handoff:** say where the result belongs: a file, issue comment, routine output, or Journal entry.
+
+Memory is context, not a specification. Ask the agent to verify remembered facts when they affect a change. Credentials are capabilities, not instructions; assign only what the task needs and describe safe use without asking the agent to reveal values.
