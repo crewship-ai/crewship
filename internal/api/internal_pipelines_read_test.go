@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
 // ---------------------------------------------------------------------------
@@ -111,5 +113,87 @@ func TestInternalPipelineReads_StillNeedTheToken(t *testing.T) {
 			t.Errorf("GET %s unauthenticated: status = %d, want the fence's 404 — body: %q",
 				target, rr.Code, rr.Body.String())
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tenant binding. The internal token is not always the master secret: a
+// per-crew sidecar carries one cryptographically bound to its workspace and
+// crew (#1159). A read route that takes the workspace from the QUERY and never
+// checks it against that binding lets a sidecar in workspace A enumerate
+// workspace B's routines — the isolation those tokens exist to enforce,
+// undone by the surface that reads them.
+//
+// Caught in self-review, not by CodeRabbit: it was rate-limited on this PR.
+// ---------------------------------------------------------------------------
+
+func TestInternalPipelinesList_RefusesAForeignWorkspace(t *testing.T) {
+	r, wsID := newFenceRouter(t)
+	// A sidecar bound to a DIFFERENT workspace than the one it asks about.
+	bound := internaltoken.DeriveWorkspaceToken(fenceInternalToken, "ws-somebody-else")
+	auth := map[string]string{"X-Internal-Token": bound}
+
+	rr := probeInternalFence(t, r, http.MethodGet,
+		"/api/v1/internal/pipelines?workspace_id="+wsID, fenceLoopbackAddr, auth)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("cross-tenant list: status = %d, want 403 — body: %q", rr.Code, rr.Body.String())
+	}
+}
+
+func TestInternalCrewCapabilities_RefusesAForeignWorkspace(t *testing.T) {
+	r, wsID := newFenceRouter(t)
+	bound := internaltoken.DeriveWorkspaceToken(fenceInternalToken, "ws-somebody-else")
+	auth := map[string]string{"X-Internal-Token": bound}
+
+	rr := probeInternalFence(t, r, http.MethodGet,
+		"/api/v1/internal/crews/crew-1/capabilities?workspace_id="+wsID, fenceLoopbackAddr, auth)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("cross-tenant capabilities: status = %d, want 403 — body: %q", rr.Code, rr.Body.String())
+	}
+}
+
+// seedFenceCrews puts two REAL crews in the fence workspace, so an
+// authorization test cannot be satisfied by the row simply not existing —
+// a 404 would otherwise pass for a 403 and hide the leak.
+func seedFenceCrews(t *testing.T, r *Router, wsID string) {
+	t.Helper()
+	for _, c := range []struct{ id, name, slug string }{
+		{"crew-1", "One", "one"},
+		{"crew-2", "Two", "two"},
+	} {
+		if _, err := r.db.Exec(
+			`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, ?, ?)`,
+			c.id, wsID, c.name, c.slug); err != nil {
+			t.Fatalf("seed crew %s: %v", c.id, err)
+		}
+	}
+}
+
+func TestInternalCrewCapabilities_RefusesASiblingCrew(t *testing.T) {
+	r, wsID := newFenceRouter(t)
+	seedFenceCrews(t, r, wsID)
+	// Crew-bound: the whole point of crwv1 is that this sidecar speaks for
+	// crew-1 and nothing else. Same workspace, so the workspace check alone
+	// would wave it through — which is the gap #1186 closed elsewhere.
+	bound := internaltoken.DeriveCrewToken(fenceInternalToken, wsID, "crew-1")
+	auth := map[string]string{"X-Internal-Token": bound}
+
+	rr := probeInternalFence(t, r, http.MethodGet,
+		"/api/v1/internal/crews/crew-2/capabilities?workspace_id="+wsID, fenceLoopbackAddr, auth)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("sibling-crew capabilities: status = %d, want 403 — body: %q", rr.Code, rr.Body.String())
+	}
+}
+
+func TestInternalCrewCapabilities_AllowsItsOwnCrew(t *testing.T) {
+	r, wsID := newFenceRouter(t)
+	seedFenceCrews(t, r, wsID)
+	bound := internaltoken.DeriveCrewToken(fenceInternalToken, wsID, "crew-1")
+	auth := map[string]string{"X-Internal-Token": bound}
+
+	rr := probeInternalFence(t, r, http.MethodGet,
+		"/api/v1/internal/crews/crew-1/capabilities?workspace_id="+wsID, fenceLoopbackAddr, auth)
+	if rr.Code == http.StatusForbidden {
+		t.Fatalf("a crew-bound sidecar was refused its OWN crew — body: %q", rr.Body.String())
 	}
 }

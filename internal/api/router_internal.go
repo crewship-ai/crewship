@@ -122,8 +122,14 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		// signature — it is stateless over (db, logger), the same pair
 		// router_crews.go constructs it from.
 		readAdapter := NewPipelineReadInternalAdapter(pipes, NewCrewHandler(r.db, r.logger))
-		r.mux.Handle("GET /api/v1/internal/pipelines", internalAuth(http.HandlerFunc(readAdapter.ListPipelines)))
-		r.mux.Handle("GET /api/v1/internal/crews/{crewId}/capabilities", internalAuth(http.HandlerFunc(readAdapter.CrewCapabilities)))
+		// internalWsCtx, not a hand-rolled query read: it requires
+		// workspace_id, refuses one that disagrees with the token's
+		// binding, and injects the context — the middle step being the
+		// one a hand-rolled version forgets.
+		r.mux.Handle("GET /api/v1/internal/pipelines",
+			internalAuth(internalWsCtx(http.HandlerFunc(readAdapter.ListPipelines))))
+		r.mux.Handle("GET /api/v1/internal/crews/{crewId}/capabilities",
+			internalAuth(internalWsCtx(http.HandlerFunc(readAdapter.CrewCapabilities))))
 	}
 	if r.skillGenHandler != nil {
 		skillAdapter := NewSkillInternalAdapter(r.skillGenHandler)

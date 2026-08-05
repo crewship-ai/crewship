@@ -51,18 +51,18 @@ func (h *PipelineReadInternalAdapter) ListPipelines(w http.ResponseWriter, r *ht
 		replyError(w, http.StatusInternalServerError, "pipeline read adapter not configured")
 		return
 	}
-	wsID := r.URL.Query().Get("workspace_id")
-	if wsID == "" {
-		replyError(w, http.StatusBadRequest, "workspace_id required")
-		return
-	}
-	// VIEWER: listing is a read, and the public List does not gate on
+	// The workspace is already required, checked against the token's
+	// binding, and placed in the context by internalWsCtx, which wraps
+	// this route. Reading it from the query here instead — as the first
+	// version did — skips the binding check, and a sidecar bound to one
+	// workspace could then enumerate another's routines.
+	//
+	// VIEWER: listing is a read and the public List does not gate on
 	// role. Injecting the lowest tier that satisfies any downstream
 	// check keeps the sidecar from silently acquiring authority it does
 	// not need — the same reasoning internal_routines.go gives for
-	// choosing MANAGER over OWNER on the write path.
-	ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)
-	ctx = context.WithValue(ctx, ctxRole, "VIEWER")
+	// preferring MANAGER over OWNER on the write path.
+	ctx := context.WithValue(r.Context(), ctxRole, "VIEWER")
 	h.pipes.List(w, r.WithContext(ctx))
 }
 
@@ -74,16 +74,23 @@ func (h *PipelineReadInternalAdapter) ListPipelines(w http.ResponseWriter, r *ht
 // workspace is refused there, not here, so there is one place that
 // decides it.
 func (h *PipelineReadInternalAdapter) CrewCapabilities(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.crews == nil {
+	if h == nil || h.crews == nil || h.pipes == nil {
 		replyError(w, http.StatusInternalServerError, "crew capabilities adapter not configured")
 		return
 	}
-	wsID := r.URL.Query().Get("workspace_id")
-	if wsID == "" {
-		replyError(w, http.StatusBadRequest, "workspace_id required")
+	// A crew-bound sidecar speaks for ONE crew. The workspace check that
+	// internalWsCtx already did is not enough here: crew-1 and crew-2
+	// live in the same workspace, so without this a sidecar could pull a
+	// sibling crew's whole authoring surface — its integrations, its
+	// agents, its runtimes. That is the isolation crwv1 tokens exist to
+	// provide, and #1186 closed the same hole on the write handlers.
+	//
+	// A workspace-bound or master token has no crew binding; for those
+	// the helper falls through to the crews-table workspace check.
+	crewID := r.PathValue("crewId")
+	if !assertBoundCrewWorkspaceDB(w, r, h.pipes.db, h.pipes.logger, &crewID) {
 		return
 	}
-	ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)
-	ctx = context.WithValue(ctx, ctxRole, "VIEWER")
+	ctx := context.WithValue(r.Context(), ctxRole, "VIEWER")
 	h.crews.Capabilities(w, r.WithContext(ctx))
 }
