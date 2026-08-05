@@ -127,11 +127,61 @@ describe("credential escalations", () => {
 
 describe("escalations with no inline decision", () => {
   it("explains itself rather than offering a button that 409s", () => {
-    // No escalation_type: keeper, persona and routine proposals all land here.
+    // No escalation_type and no payload kind: keeper and persona rows.
     mount(item({ kind: "escalation", payload: { request_type: "access" } }))
 
     expect(screen.queryByRole("button")).not.toBeInTheDocument()
     expect(screen.getByText(/No decision to make here/i)).toBeInTheDocument()
+  })
+})
+
+// A routine proposal used to land in that branch, and the inbox told the
+// reviewer there was nothing to decide — while the routine sat at
+// `proposed`, unable to run, with /approve and /reject waiting on the
+// server. The queue said "your move" and the item said "not here", so
+// the maker-checker loop dead-ended in the one surface built for it.
+
+describe("routine proposals", () => {
+  it("approves through the routine approve endpoint", async () => {
+    apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+    mount(item({ kind: "escalation", payload: { kind: "routine_proposal", slug: "nightly" } }))
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+
+    await waitFor(() => {
+      expect(apiFetch.mock.calls[0][0]).toContain("/pipelines/nightly/approve")
+      expect(apiFetch.mock.calls[0][1]).toMatchObject({ method: "POST" })
+    })
+  })
+
+  it("rejects through the routine reject endpoint", async () => {
+    apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+    mount(item({ kind: "escalation", payload: { kind: "routine_proposal", slug: "nightly" } }))
+    fireEvent.click(screen.getByRole("button", { name: /Reject/ }))
+
+    await waitFor(() => expect(apiFetch.mock.calls[0][0]).toContain("/pipelines/nightly/reject"))
+  })
+
+  it("says who already decided rather than reporting a bare 409", async () => {
+    // Two managers open the same proposal. The second one's click is not
+    // a failure — it is the queue having moved on.
+    apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "routine is not awaiting approval", status: "active" }),
+    })
+    mount(item({ kind: "escalation", payload: { kind: "routine_proposal", slug: "nightly" } }))
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/already decided/i)),
+    )
+  })
+
+  it("offers nothing when the payload carries no slug to act on", () => {
+    // Without a slug there is no endpoint to call, and a button that
+    // cannot work is worse than none.
+    mount(item({ kind: "escalation", payload: { kind: "routine_proposal" } }))
+    expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
   })
 })
 

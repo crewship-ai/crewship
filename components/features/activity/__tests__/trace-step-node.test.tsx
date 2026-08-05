@@ -140,3 +140,46 @@ describe("<TraceStepNode> waitpoint actions", () => {
     expect(denyBtn()).toBeInTheDocument()
   })
 })
+
+// `query` and `foreach` were missing from StepKind, so both fell
+// through KIND_VISUAL's agent_run fallback and rendered as agent
+// turns — a loop drawn as a single agent step reads as truthful,
+// which is worse than an unknown-kind node. These pin the subtitle
+// against the field names the Go DSL actually puts on the wire
+// (QueryStep.Source, ForeachStep.Items — internal/pipeline/types.go),
+// because a name we invent here renders a blank label on every real
+// run of that kind.
+function renderStep(step: Record<string, unknown>) {
+  const data = { step, status: "pending" as StepStatus, selected: false }
+  return render(<TraceStepNode {...({ data } as unknown as NodeProps)} />)
+}
+
+describe("<TraceStepNode> query subtitle", () => {
+  it("names the source the query reads", () => {
+    renderStep({ id: "digest", type: "query", query: { source: "pipeline_runs" } })
+    expect(screen.getByText("pipeline_runs")).toBeInTheDocument()
+    expect(screen.getByText("query")).toBeInTheDocument()
+  })
+
+  it("falls back to a generic label when the source is absent", () => {
+    renderStep({ id: "digest", type: "query" })
+    expect(screen.getByText("datastore")).toBeInTheDocument()
+  })
+})
+
+describe("<TraceStepNode> foreach subtitle", () => {
+  it("shows what the loop iterates over", () => {
+    renderStep({
+      id: "sbirat",
+      type: "foreach",
+      foreach: { items: "{{ steps.worklist.output }}", as: "polozka" },
+    })
+    expect(screen.getByText("over {{ steps.worklist.output }}")).toBeInTheDocument()
+    expect(screen.getByText("foreach")).toBeInTheDocument()
+  })
+
+  it("falls back to a generic label when items is absent", () => {
+    renderStep({ id: "sbirat", type: "foreach" })
+    expect(screen.getByText("loop")).toBeInTheDocument()
+  })
+})

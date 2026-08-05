@@ -14,10 +14,14 @@ export interface StatusDonutDatum {
 
 interface StatusDonutProps {
   data: StatusDonutDatum[]
+  /** Word under the total in the centre. Defaults to the mission usage. */
+  centerLabel?: string
+  /** When given, legend rows become buttons that call back with the key. */
+  onSelect?: (key: string) => void
 }
 
-/** Donut chart for mission status distribution. */
-export function StatusDonut({ data }: StatusDonutProps) {
+/** Donut chart for a status distribution — missions, routines, anything counted. */
+export function StatusDonut({ data, centerLabel = "missions", onSelect }: StatusDonutProps) {
   const total = React.useMemo(() => data.reduce((a, d) => a + d.count, 0), [data])
 
   // Build Recharts chart config dynamically from the status list.
@@ -30,7 +34,10 @@ export function StatusDonut({ data }: StatusDonutProps) {
   }, [data])
 
   return (
-    <div className="flex items-center gap-4">
+    // Stacked on a phone: at 390px the ring and a six-row legend
+    // cannot share a line, and side-by-side clipped the labels off the
+    // right edge — leaving colour dots against no words at all.
+    <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:gap-4">
       <ChartContainer config={chartConfig} className="h-[160px] w-[160px] aspect-square shrink-0">
         <PieChart>
           <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
@@ -52,7 +59,7 @@ export function StatusDonut({ data }: StatusDonutProps) {
                   return (
                     <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle">
                       <tspan x={viewBox.cx} y={viewBox.cy} className="fill-foreground text-[20px] font-semibold tabular-nums">{total}</tspan>
-                      <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 14} className="fill-muted-foreground text-[9px] uppercase tracking-wider">missions</tspan>
+                      <tspan x={viewBox.cx} y={(viewBox.cy ?? 0) + 14} className="fill-muted-foreground text-[9px] uppercase tracking-wider">{centerLabel}</tspan>
                     </text>
                   )
                 }
@@ -63,17 +70,35 @@ export function StatusDonut({ data }: StatusDonutProps) {
         </PieChart>
       </ChartContainer>
 
-      {/* Legend */}
-      <div className="flex-1 flex flex-col gap-1 text-[11px]">
-        {data.map((d) => (
-          <div key={d.key} className="flex items-center justify-between gap-2">
-            <span className="inline-flex items-center gap-1.5 text-foreground/80">
-              <span className="w-2 h-2 rounded-sm" style={{ background: d.color }} />
-              {d.label}
-            </span>
-            <span className="font-mono text-foreground/60 tabular-nums">{d.count}</span>
-          </div>
-        ))}
+      {/* Legend. A row is a button only when the caller can do
+          something with the click — a cursor that promises navigation
+          and then does nothing is worse than plain text. */}
+      <div className="flex w-full flex-1 flex-col gap-1 text-[11px]">
+        {data.map((d) => {
+          const row = (
+            <>
+              <span className="inline-flex items-center gap-1.5 text-foreground/80">
+                <span className="w-2 h-2 rounded-sm" style={{ background: d.color }} />
+                {d.label}
+              </span>
+              <span className="font-mono text-foreground/60 tabular-nums">{d.count}</span>
+            </>
+          )
+          return onSelect ? (
+            <button
+              key={d.key}
+              type="button"
+              onClick={() => onSelect(d.key)}
+              className="flex items-center justify-between gap-2 rounded px-1 -mx-1 py-0.5 text-left transition-colors hover:bg-white/[0.04]"
+            >
+              {row}
+            </button>
+          ) : (
+            <div key={d.key} className="flex items-center justify-between gap-2">
+              {row}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

@@ -75,6 +75,13 @@ export function ActivityBell() {
   // Live-run semantics win the badge tone; the count merges both feeds.
   // Amber the moment anything waits on a human approval, blue while routines
   // run, emerald preserved for agent-only activity.
+  //
+  // A tone token, not raw classes. This branch carried the raw form —
+  // `bg-warn text-white` — from the sweep that fixed eight invisible
+  // buttons; main then replaced the whole call with BarMenu's
+  // badge={{count, tone}} API, which routes the same decision through
+  // the shared kit. Keeping the local classes would have meant styling
+  // a prop that no longer exists.
   const badgeTone = awaitingApproval > 0 ? "urgent" : activeCount > 0 ? "active" : "live"
 
   const ariaLabel =
