@@ -803,6 +803,32 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/code-links?workspace_id={workspa
 { "url": "https://github.com/acme/thing/pull/7" }
 ```
 
+**Response:** `201 Created` — the stored link, the same object shape
+[List code links](#list-code-links) returns.
+
+```json
+{
+  "id": "cmsezurje0003d5e624ad",
+  "mission_id": "issue_123",
+  "provider": "GITHUB",
+  "host": "github.com",
+  "owner": "acme",
+  "repo": "thing",
+  "number": 7,
+  "kind": "pull_request",
+  "url": "https://github.com/acme/thing/pull/7",
+  "title": "Add the widget",
+  "state": "OPEN",
+  "author": "octocat",
+  "source_branch": "feat/widget",
+  "target_branch": "main",
+  "remote_merged_at": null,
+  "credential_id": "cred_abc",
+  "last_synced_at": "2026-08-04T18:31:03Z",
+  "last_sync_error": null
+}
+```
+
 The state is fetched **before** the row is written, so a `201` means the link
 was reachable. Errors are `application/problem+json` (RFC 7807) with a stable
 `type` URI under `https://crewship.ai/problems/code-link/` and a `code` member,
@@ -832,8 +858,25 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh?work
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
+**Request Body:** none. The link is addressed by the `linkId` path parameter;
+`workspace_id` is the only query parameter.
+
 Re-reads the link from its provider and returns the updated object. State is
 never polled in the background; this is the only refresh path.
+
+**Response:** `200 OK` — the refreshed link, the same object shape
+[List code links](#list-code-links) returns, with `last_synced_at` moved
+forward and `last_sync_error` cleared.
+
+| Status | `code` | Condition |
+|---|---|---|
+| `200` | — | Re-fetched; the row now reflects the provider |
+| `403` | — | Caller lacks the MANAGER floor |
+| `404` | `issue-not-found` | No such issue in this crew/workspace |
+| `404` | `link-not-found` | No such link on this issue |
+| `412` | `no-credential` | No ACTIVE credential for that provider can reach that host |
+| `429` | `rate-limited` | Provider throttled; `Retry-After` is set when known |
+| `502` | `credential-rejected` / `credential-forbidden` / `provider-unavailable` | The provider refused or did not answer |
 
 A failed refresh keeps the previously fetched state and records the reason on
 the row (`last_sync_error`), then returns the same problem document the attach
@@ -847,11 +890,19 @@ DELETE /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}?workspace_
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
+**Request Body:** none. The link is addressed by the `linkId` path parameter;
+`workspace_id` is the only query parameter.
+
 **Response:** `200 OK` with `{"status": "ok"}`
 
-| Status | Condition |
-|---|---|
-| `404` | Link not found on this issue |
+Hard delete — the row goes, the way a `mission_relation` does. Nothing about
+the pull request on the forge changes.
+
+| Status | `code` | Condition |
+|---|---|---|
+| `200` | — | Removed |
+| `403` | — | Caller lacks the MANAGER floor |
+| `404` | `link-not-found` | Link not found on this issue |
 
 ---
 

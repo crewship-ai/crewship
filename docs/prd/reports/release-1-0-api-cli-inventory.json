@@ -1,21 +1,21 @@
 {
   "summary": {
-    "api_operations": 532,
-    "api_exact_docs": 532,
+    "api_operations": 536,
+    "api_exact_docs": 536,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 726,
-    "cli_exact_docs": 726,
-    "cli_root_docs_present": 726,
+    "cli_operations": 730,
+    "cli_exact_docs": 730,
+    "cli_root_docs_present": 730,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 402,
+    "api_with_test_signals": 404,
     "api_with_concrete_response_schemas": 518,
-    "api_generic_response_schemas": 0,
-    "api_with_request_bodies": 223,
+    "api_generic_response_schemas": 4,
+    "api_with_request_bodies": 225,
     "api_with_concrete_json_requests": 220,
-    "api_generic_json_requests": 0,
+    "api_generic_json_requests": 2,
     "api_non_json_request_bodies": 3,
-    "cli_with_test_signals": 712,
+    "cli_with_test_signals": 716,
     "cli_with_flags": 343,
     "cli_with_all_flags_documented": 343,
     "cli_missing_flag_docs": 0,
@@ -2439,7 +2439,8 @@
         "cmd/crewship/cmd_admin_gdpr_test.go",
         "cmd/crewship/cmd_seed_data_users_cov_test.go",
         "internal/api/admin_authz_floor_test.go",
-        "internal/api/unauth_reachability_test.go"
+        "internal/api/unauth_reachability_test.go",
+        "internal/database/migrate_mission_code_links_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -2461,7 +2462,8 @@
             "cmd/crewship/cmd_admin_gdpr_test.go",
             "cmd/crewship/cmd_seed_data_users_cov_test.go",
             "internal/api/admin_authz_floor_test.go",
-            "internal/api/unauth_reachability_test.go"
+            "internal/api/unauth_reachability_test.go",
+            "internal/database/migrate_mission_code_links_test.go"
           ]
         }
       }
@@ -2480,6 +2482,9 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "internal/database/migrate_mission_code_links_test.go"
+      ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
       "request_body_present": false,
@@ -2495,7 +2500,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_admin.go"
+          "source_file": "internal/api/router_admin.go",
+          "test_signals": [
+            "internal/database/migrate_mission_code_links_test.go"
+          ]
         }
       }
     },
@@ -2513,6 +2521,9 @@
         "docs/api-reference/admin.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "internal/database/migrate_mission_code_links_test.go"
+      ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
       "request_body_present": false,
@@ -2528,7 +2539,10 @@
         },
         "semantic_runtime": {
           "openapi_operation": true,
-          "source_file": "internal/api/router_admin.go"
+          "source_file": "internal/api/router_admin.go",
+          "test_signals": [
+            "internal/database/migrate_mission_code_links_test.go"
+          ]
         }
       }
     },
@@ -7982,6 +7996,7 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
@@ -8078,6 +8093,7 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
@@ -8168,6 +8184,7 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
@@ -8252,6 +8269,7 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
@@ -8336,6 +8354,7 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
@@ -8420,6 +8439,7 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
@@ -9199,6 +9219,7 @@
       "exact_docs": [
         "docs/api-reference/issues.mdx",
         "docs/cli/issue.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/manifest/issue.md"
       ],
@@ -9245,6 +9266,7 @@
       "source_file": "internal/api/router_orchestration.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/manifest/issue.md"
       ],
@@ -9285,6 +9307,7 @@
       "source_file": "internal/api/router_orchestration.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/manifest/issue.md"
       ],
@@ -9325,6 +9348,7 @@
       "source_file": "internal/api/router_orchestration.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/guides/git-links.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/manifest/issue.md"
       ],
@@ -9384,6 +9408,136 @@
         },
         "semantic_runtime": {
           "openapi_operation": true
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/crews/{crewId}/issues/{identifier}/code-links",
+      "operation_id": "get_api_v1_crews_crewId_issues_identifier_code-links",
+      "tag": "crews",
+      "source_file": "internal/api/router_orchestration.go",
+      "exact_docs": [
+        "docs/api-reference/issues.mdx",
+        "docs/guides/git-links.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/crews.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_orchestration.go"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/crews/{crewId}/issues/{identifier}/code-links",
+      "operation_id": "post_api_v1_crews_crewId_issues_identifier_code-links",
+      "tag": "crews",
+      "source_file": "internal/api/router_orchestration.go",
+      "exact_docs": [
+        "docs/api-reference/issues.mdx",
+        "docs/guides/git-links.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/crews.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
+      "request_body_present": true,
+      "concrete_json_request": false,
+      "generic_json_request": true,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_orchestration.go"
+        }
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}",
+      "operation_id": "delete_api_v1_crews_crewId_issues_identifier_code-links_linkId",
+      "tag": "crews",
+      "source_file": "internal/api/router_orchestration.go",
+      "exact_docs": [
+        "docs/api-reference/issues.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/crews.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_orchestration.go"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh",
+      "operation_id": "post_api_v1_crews_crewId_issues_identifier_code-links_linkId_refresh",
+      "tag": "crews",
+      "source_file": "internal/api/router_orchestration.go",
+      "exact_docs": [
+        "docs/api-reference/issues.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/crews.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
+      "request_body_present": true,
+      "concrete_json_request": false,
+      "generic_json_request": true,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_orchestration.go"
         }
       }
     },
@@ -25769,7 +25923,8 @@
         "docs/cli/credential.mdx",
         "docs/cli/expose.mdx",
         "docs/cli/hire.mdx",
-        "docs/cli/integration.mdx"
+        "docs/cli/integration.mdx",
+        "docs/cli/issue.mdx"
       ],
       "root_docs": [
         "docs/cli/credential.mdx"
@@ -25929,7 +26084,8 @@
       "short": "Create a credential",
       "root": "credential",
       "exact_docs": [
-        "docs/cli/credential.mdx"
+        "docs/cli/credential.mdx",
+        "docs/cli/issue.mdx"
       ],
       "root_docs": [
         "docs/cli/credential.mdx"
@@ -25947,6 +26103,7 @@
         "…"
       ],
       "flags": [
+        "account-label",
         "auth-token",
         "crews",
         "env-var-name",
@@ -25960,6 +26117,7 @@
         "value-stdin"
       ],
       "documented_flags": [
+        "account-label",
         "auth-token",
         "crews",
         "env-var-name",
@@ -26559,6 +26717,7 @@
         "…"
       ],
       "flags": [
+        "account-label",
         "crews",
         "name",
         "scope",
@@ -26567,6 +26726,7 @@
         "value-stdin"
       ],
       "documented_flags": [
+        "account-label",
         "crews",
         "name",
         "scope",
@@ -31074,6 +31234,50 @@
       ]
     },
     {
+      "path": "issue link",
+      "use": "link \u003cidentifier\u003e \u003cpull-request-url\u003e",
+      "short": "Attach a pull request / merge request to an issue",
+      "root": "issue",
+      "exact_docs": [
+        "docs/cli/issue.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/issue.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_extra_cov2_test.go",
+        "cmd/crewship/cmd_issue_extra_cov_test.go",
+        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
+        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ]
+    },
+    {
+      "path": "issue links",
+      "use": "links \u003cidentifier\u003e",
+      "short": "List the pull requests linked to an issue",
+      "aliases": [
+        "code-links",
+        "prs"
+      ],
+      "root": "issue",
+      "exact_docs": [
+        "docs/cli/issue.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/issue.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_extra_cov2_test.go",
+        "cmd/crewship/cmd_issue_extra_cov_test.go",
+        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
+        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ]
+    },
+    {
       "path": "issue list",
       "use": "list",
       "short": "List issues in the workspace",
@@ -31147,6 +31351,29 @@
       "short": "List relations for an issue",
       "aliases": [
         "relates"
+      ],
+      "root": "issue",
+      "exact_docs": [
+        "docs/cli/issue.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/issue.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_extra_cov2_test.go",
+        "cmd/crewship/cmd_issue_extra_cov_test.go",
+        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
+        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ]
+    },
+    {
+      "path": "issue relink",
+      "use": "relink \u003cidentifier\u003e \u003clink-id\u003e",
+      "short": "Re-read a linked pull request's state from its provider",
+      "aliases": [
+        "refresh-link"
       ],
       "root": "issue",
       "exact_docs": [
@@ -31282,6 +31509,26 @@
       "path": "issue unbind-routine",
       "use": "unbind-routine \u003cidentifier\u003e",
       "short": "Remove the routine binding from an issue",
+      "root": "issue",
+      "exact_docs": [
+        "docs/cli/issue.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/issue.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_issue_cov_test.go",
+        "cmd/crewship/cmd_issue_extra_cov2_test.go",
+        "cmd/crewship/cmd_issue_extra_cov_test.go",
+        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
+        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+      ]
+    },
+    {
+      "path": "issue unlink",
+      "use": "unlink \u003cidentifier\u003e \u003clink-id\u003e",
+      "short": "Remove a pull-request link from an issue",
       "root": "issue",
       "exact_docs": [
         "docs/cli/issue.mdx"
