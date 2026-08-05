@@ -517,6 +517,18 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           schedules and webhooks live inside Triggers, versions have
           their own card. What went is the filing, not the machinery.
           Wait points went to Activity, where the run they belong to is. */}
+      {/* A SIBLING of the routine block, not a child of it.
+          fetchRoutine sets the error and then clears `routine`, so the
+          banner nested inside `{routine && …}` could only render in the
+          one state it never occupied. `loading` is false by then too,
+          which left a failed fetch showing an empty surface and no
+          explanation at all. */}
+      {error && !routine && (
+        <div className="m-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
       {routine && (
         <div className="flex flex-1 flex-col overflow-hidden">
           {error && (

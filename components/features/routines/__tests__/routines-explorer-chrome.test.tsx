@@ -74,3 +74,59 @@ describe("<RoutinesExplorer> chrome", () => {
     expect(screen.getByText(/draft/)).toBeInTheDocument()
   })
 })
+
+// The counts and the list disagreed.
+//
+// The buckets were computed from the live-run feed — a run parked on a
+// human is "awaiting", a running one is "running" — but `displayed`
+// still filtered on `last_invocation_status`, which reads "running"
+// for both. So Awaiting approval could show a count of 1 above a list
+// of nothing, and Running quietly included the parked one.
+//
+// The layout already had the right answer in matchesRoutineFilters;
+// the explorer had its own copy that never learned about live runs.
+// Found by CodeRabbit on the PR.
+
+describe("<RoutinesExplorer> live buckets filter the list, not just the counts", () => {
+  beforeEach(() => {
+    h.live = new Map()
+  })
+
+  it("shows the parked routine under Awaiting approval", () => {
+    h.live = new Map([["nightly", { status: "waiting" }]])
+    render(
+      <RoutinesExplorer
+        {...PROPS}
+        filters={{ ...PROPS.filters, status: "awaiting" }}
+        routines={[pipeline({ last_invocation_status: "running" })]}
+      />,
+    )
+    expect(screen.getByText("Nightly")).toBeInTheDocument()
+  })
+
+  it("keeps the parked routine OUT of Running", () => {
+    // last_invocation_status says "running" while it is parked, which
+    // is exactly why the row alone cannot answer this.
+    h.live = new Map([["nightly", { status: "waiting" }]])
+    render(
+      <RoutinesExplorer
+        {...PROPS}
+        filters={{ ...PROPS.filters, status: "running" }}
+        routines={[pipeline({ last_invocation_status: "running" })]}
+      />,
+    )
+    expect(screen.queryByText("Nightly")).not.toBeInTheDocument()
+  })
+
+  it("shows a genuinely running routine under Running", () => {
+    h.live = new Map([["nightly", { status: "running" }]])
+    render(
+      <RoutinesExplorer
+        {...PROPS}
+        filters={{ ...PROPS.filters, status: "running" }}
+        routines={[pipeline({ last_invocation_status: "completed" })]}
+      />,
+    )
+    expect(screen.getByText("Nightly")).toBeInTheDocument()
+  })
+})

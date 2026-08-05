@@ -25,6 +25,7 @@ import {
   SidebarCollapseButton,
 } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
+import { matchesRoutineFilters } from "@/lib/routine-filters"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
@@ -153,44 +154,37 @@ export function RoutinesExplorer({
     return n
   }, [filters])
 
-  // Routines visible in the sidebar list section — search + facet
-  // filters applied. Status bucket is handled by the sidebar STATUS
-  // section above the list, the rest by the Filter dropdown.
-  const displayed = useMemo(() => {
-    let filtered = routines
-    if (filters.status !== "all") {
-      if (filters.status === "never") {
-        filtered = filtered.filter((p) => p.invocation_count === 0)
-      } else {
-        filtered = filtered.filter(
-          (p) => p.last_invocation_status?.toLowerCase() === filters.status,
-        )
-      }
-    }
-    if (filters.invocations === "popular") {
-      filtered = filtered.filter((p) => p.invocation_count >= 10)
-    }
-    if (filters.invocations === "fresh") {
-      filtered = filtered.filter((p) => p.invocation_count === 0)
-    }
-    if (filters.authorAgentId) {
-      filtered = filtered.filter((p) => p.author_agent_id === filters.authorAgentId)
-    }
-    if (!filters.showEphemeral) {
-      filtered = filtered.filter((p) => !p.ephemeral)
-    }
-    if (search) {
-      const q = search.toLowerCase()
-      filtered = filtered.filter(
-        (p) =>
-          p.slug.toLowerCase().includes(q) ||
-          p.name.toLowerCase().includes(q) ||
-          (p.description ?? "").toLowerCase().includes(q) ||
-          (p.author_agent_name ?? "").toLowerCase().includes(q),
-      )
-    }
-    return filtered
-  }, [routines, search, filters])
+  // Routines visible in the list — through the SHARED matcher, which is
+  // the only thing that knows about live runs.
+  //
+  // The buckets above were computed from the live-run feed (a run parked
+  // on a human is "awaiting", a running one is "running") while this
+  // filtered on last_invocation_status, which reads "running" for both.
+  // So Awaiting approval could show a count of 1 over a list of nothing,
+  // and Running quietly included the parked one. The layout already had
+  // the right answer; this had a private copy that never learned about
+  // live runs.
+  const displayed = useMemo(
+    () =>
+      routines.filter((p) =>
+        matchesRoutineFilters(
+          {
+            slug: p.slug,
+            name: p.name,
+            description: p.description,
+            authorAgentId: p.author_agent_id,
+            authorAgentName: p.author_agent_name,
+            invocationCount: p.invocation_count,
+            lastStatus: p.last_invocation_status,
+            ephemeral: p.ephemeral,
+          },
+          filters,
+          liveBySlug,
+          search,
+        ),
+      ),
+    [routines, search, filters, liveBySlug],
+  )
 
   // 1s re-render tick ONLY while a displayed routine has a live run,
   // so the "· 0:12" elapsed segment counts up. Idle sidebar = no

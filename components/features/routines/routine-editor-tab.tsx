@@ -64,16 +64,40 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
     return () => window.removeEventListener("keydown", onKey)
   }, [expanded])
   const [format, setFormat] = useState<DslFormat>("yaml")
-  const initial = useMemo(() => {
+
+  // Canonical JSON of the STORED definition, deliberately independent
+  // of `format`.
+  //
+  // It used to depend on it, and the reset effect below keys on it — so
+  // the instant a format switch committed, the effect fired and
+  // overwrote the freshly converted buffer with the server's copy, then
+  // cleared `dirty` so Save went disabled. The conversion the switch had
+  // just performed was undone one tick later by the effect whose whole
+  // job is seeding from the server. Silent: the editor still showed a
+  // valid document, just not yours.
+  const initialJson = useMemo(() => {
     try {
-      const json = JSON.stringify(routine.definition, null, 2)
-      if (format === "json") return json
-      const converted = convertDsl(json, "json", "yaml")
-      return converted.ok ? converted.text : json
+      return JSON.stringify(routine.definition, null, 2)
     } catch {
       return "// failed to render definition"
     }
-  }, [routine.definition, format])
+  }, [routine.definition])
+
+  /** The stored definition rendered in a given format. */
+  const renderInitial = useCallback(
+    (f: DslFormat) => {
+      if (f === "json") return initialJson
+      const converted = convertDsl(initialJson, "json", "yaml")
+      return converted.ok ? converted.text : initialJson
+    },
+    [initialJson],
+  )
+
+  // Read by the reset effect WITHOUT making `format` one of its
+  // dependencies — that dependency is the bug above.
+  const formatRef = useRef<DslFormat>("yaml")
+  formatRef.current = format
+
 
   // `text` is what the editor is CONSTRUCTED from — it changes only
   // when the buffer is replaced wholesale (Format, Revert, a refetch, a
@@ -85,8 +109,8 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
   // `liveText` mirrors what is actually in the buffer, for everything
   // derived from it — validity, step spans, comment detection — none of
   // which touches the editor's construction.
-  const [text, setText] = useState(initial)
-  const [liveText, setLiveText] = useState(initial)
+  const [text, setText] = useState(() => renderInitial("yaml"))
+  const [liveText, setLiveText] = useState(() => renderInitial("yaml"))
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const saveRef = useRef<(() => void) | null>(null)
@@ -95,7 +119,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
   // setText is asynchronous — so the save path below must read this
   // ref, not the `text` state, or it validates + POSTs the PREVIOUS
   // value (typing then clicking Save silently saved stale JSON).
-  const bufferRef = useRef(initial)
+  const bufferRef = useRef(renderInitial("yaml"))
 
   // The editor is remounted on key change to force a fresh CodeMirror
   // instance after Format / Revert / refetch (FileEditor only consumes
@@ -104,16 +128,20 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
 
   // FileEditor controls its own internal state; we re-key it by the
   // routine slug so switching routines remounts with fresh content.
-  // A same-slug refetch (new `initial`) must ALSO remount — without
+  // A same-slug refetch (a new stored definition) must ALSO remount — without
   // the key bump the visible editor keeps the old buffer while
   // bufferRef already points at the new definition.
   useEffect(() => {
-    setText(initial)
-    setLiveText(initial)
-    bufferRef.current = initial
+    const seeded = renderInitial(formatRef.current)
+    setText(seeded)
+    setLiveText(seeded)
+    bufferRef.current = seeded
     setDirty(false)
     setEditorKey((k) => k + 1)
-  }, [initial, routine.slug])
+    // renderInitial changes only when the stored definition does, which
+    // is exactly when the editor should be re-seeded. `format` is read
+    // through the ref on purpose.
+  }, [renderInitial, routine.slug])
 
   const validation = useMemo(() => parseRoutineBuffer(liveText, format), [liveText, format])
 
@@ -204,9 +232,13 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
   }
 
   const handleRevert = () => {
-    setText(initial)
-    setLiveText(initial)
-    bufferRef.current = initial
+    // Revert to the stored definition IN THE FORMAT ON SCREEN. Reverting
+    // into the other format would be a second surprise on top of
+    // discarding the edit.
+    const seeded = renderInitial(format)
+    setText(seeded)
+    setLiveText(seeded)
+    bufferRef.current = seeded
     setEditorKey((k) => k + 1)
     setDirty(false)
     toast.success("Reverted")
