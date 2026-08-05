@@ -110,6 +110,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// Appearance is presentation, so it sits at the create tier rather
 	// than manage: picking an icon is not an operational act, and a
 	// MEMBER who can author a routine can reasonably label it.
+	// openapi: responses 200,400,401,403,404,500
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance", roleCreate, pipes.SetAppearance)
 	// Cross-run routine state (#1420). The DSL can only WRITE a watermark
 	// ({{ routine.state.* }} + state_write), so a bad cursor silently made every

@@ -330,6 +330,51 @@ Each routine row has `slug`, `monthly_budget_usd`, `spent_usd`, and optional
 month spend are omitted. An unavailable run-history store or list/spend
 calculation failure is `503`/`500`, respectively.
 
+### Appearance
+
+#### `PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance`
+
+**Auth:** `member` plus `create` (OWNER/ADMIN/MEMBER). Picking an icon is a
+labelling act rather than an operational one, so it sits at the create tier
+rather than `manage`.
+
+This is deliberately **not** part of `PUT .../pipelines/{slug}`. Save rewrites
+`definition_json`, recomputes `definition_hash`, can mint a new version and
+re-runs the governance risk classifier — none of which should happen because
+somebody picked a different colour. This endpoint writes two columns.
+
+**Request:** JSON body `{ "icon": "receipt", "color": "amber" }`. Both fields
+are optional and independent:
+
+| Field state | Effect |
+|---|---|
+| omitted | keeps the stored value |
+| `""` | clears the stored value |
+| non-empty | replaces the stored value (trimmed) |
+
+Values are opaque to the server: `icon` is a crew-icon name and `color` a
+gradient-palette id, both owned by the web UI's icon kit. The server validates
+length only — each is bounded at 64 characters — so the kit can gain an icon
+without the API rejecting it. An unknown value renders the fallback icon,
+which is what an unset value already does. Bodies are read up to 4 KiB.
+
+**Response:** `200 OK` with the updated routine (the same object
+`GET .../pipelines/{slug}` returns, including `icon` and `color`). If the write
+lands but the follow-up read fails, the response is still `200 OK` but carries
+only `{ "icon", "color" }` — failing here would have the caller retry a change
+that already applied. That is why the response schema is a `oneOf`.
+
+**Statuses:** `400` for an unreadable body, invalid JSON, or a value over 64
+characters; `401` unauthenticated; `403` below the create tier; `404` when the
+routine does not exist in the workspace; `500` on persistence failure.
+
+```bash
+crewship routine appearance set monthly-accounting-pack --icon receipt --color amber
+crewship routine appearance get monthly-accounting-pack
+```
+
+See [`crewship routine appearance`](/cli/routine) for the CLI equivalent.
+
 ### Deferred and replay operations
 
 #### `GET /api/v1/workspaces/{workspaceId}/pipelines/pending`

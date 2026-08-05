@@ -1,1 +1,10 @@
-schemathesis>=4.0,<5
+# Pinned exactly, not a range (#1769 review).
+#
+# This harness produces a verdict about our API contract. A floating minor can
+# change which findings appear — Schemathesis 4.x has added checks within the
+# series — so `>=4.0,<5` meant two runs of the same commit could disagree, and
+# a disagreement no one can reproduce is worse than no gate at all.
+#
+# Raising this is a deliberate act: bump the pin, run both phases against a dev
+# slot, and record in the PR what changed in the findings.
+schemathesis==4.24.3

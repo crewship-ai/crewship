@@ -1,4 +1,4 @@
-.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test cover docs-inventory lint security mutation sbom notices e2e e2e\:ui validate smoke-cli
+.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test cover docs-inventory docs-inventory\:strict lint security mutation sbom notices e2e e2e\:ui validate smoke-cli
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -134,6 +134,13 @@ cover:
 docs-inventory:
 	go run ./cmd/gen-openapi
 	go run ./scripts/docs-inventory
+
+# The same inventory, as a gate. CI runs this form so that "every operation
+# and command is documented" is a ratchet rather than a number that was true
+# on the day someone regenerated the report.
+docs-inventory\:strict:
+	go run ./cmd/gen-openapi
+	go run ./scripts/docs-inventory -strict
 
 # Regenerates internal/orchestrator/testdata/cli-fixtures/*.ndjson from the
 # REAL upstream CLI binaries — internal/orchestrator/e2e_multi_cli_test.go has

@@ -1,24 +1,25 @@
 {
   "summary": {
-    "api_operations": 531,
-    "api_exact_docs": 531,
+    "api_operations": 532,
+    "api_exact_docs": 532,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 723,
-    "cli_exact_docs": 723,
-    "cli_root_docs_present": 723,
+    "cli_operations": 726,
+    "cli_exact_docs": 726,
+    "cli_root_docs_present": 726,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 402,
-    "api_with_concrete_response_schemas": 517,
+    "api_with_concrete_response_schemas": 518,
     "api_generic_response_schemas": 0,
-    "api_with_request_bodies": 222,
-    "api_with_concrete_json_requests": 219,
+    "api_with_request_bodies": 223,
+    "api_with_concrete_json_requests": 220,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 3,
-    "cli_with_test_signals": 709,
-    "cli_with_flags": 342,
-    "cli_with_all_flags_documented": 342,
-    "cli_missing_flag_docs": 0
+    "cli_with_test_signals": 712,
+    "cli_with_flags": 343,
+    "cli_with_all_flags_documented": 343,
+    "cli_missing_flag_docs": 0,
+    "api_contract_gaps": 0
   },
   "api": [
     {
@@ -1017,7 +1018,8 @@
       "source_file": "internal/api/admin_keeper_config_profile_test.go",
       "exact_docs": [
         "docs/api-reference/keeper.mdx",
-        "docs/guides/keeper.mdx"
+        "docs/guides/keeper.mdx",
+        "docs/prd/keeper-configuration.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1068,7 +1070,8 @@
       "source_file": "internal/api/admin_keeper_config_profile_test.go",
       "exact_docs": [
         "docs/api-reference/keeper.mdx",
-        "docs/guides/keeper.mdx"
+        "docs/guides/keeper.mdx",
+        "docs/prd/keeper-configuration.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1119,7 +1122,8 @@
       "source_file": "internal/api/admin_keeper_config_profile_test.go",
       "exact_docs": [
         "docs/api-reference/keeper.mdx",
-        "docs/guides/keeper.mdx"
+        "docs/guides/keeper.mdx",
+        "docs/prd/keeper-configuration.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1169,7 +1173,8 @@
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_findings_routing_test.go",
       "exact_docs": [
-        "docs/api-reference/keeper.mdx"
+        "docs/api-reference/keeper.mdx",
+        "docs/prd/keeper-configuration.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1209,7 +1214,8 @@
       "exact_docs": [
         "docs/api-reference/keeper.mdx",
         "docs/guides/credentials.mdx",
-        "docs/guides/keeper.mdx"
+        "docs/guides/keeper.mdx",
+        "docs/prd/keeper-configuration.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1257,7 +1263,8 @@
       "exact_docs": [
         "docs/api-reference/keeper.mdx",
         "docs/guides/credentials.mdx",
-        "docs/guides/keeper.mdx"
+        "docs/guides/keeper.mdx",
+        "docs/prd/keeper-configuration.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1342,7 +1349,8 @@
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_judge_hosted_test.go",
       "exact_docs": [
-        "docs/api-reference/keeper.mdx"
+        "docs/api-reference/keeper.mdx",
+        "docs/prd/keeper-configuration.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -1384,7 +1392,8 @@
       "tag": "admin",
       "source_file": "internal/api/admin_keeper_judge_test.go",
       "exact_docs": [
-        "docs/api-reference/keeper.mdx"
+        "docs/api-reference/keeper.mdx",
+        "docs/prd/keeper-configuration.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -7973,6 +7982,7 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/routines.mdx",
@@ -7983,7 +7993,9 @@
         "docs/manifest/integration.md",
         "docs/manifest/issue.md",
         "docs/manifest/recurring_issue.md",
-        "docs/manifest/workspace.md"
+        "docs/manifest/workspace.md",
+        "docs/prd/agent-identity-signing.md",
+        "docs/prd/iteration-quickwins.md"
       ],
       "resource_docs": [
         "docs/api-reference/crews.mdx"
@@ -8066,6 +8078,7 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/routines.mdx",
@@ -8076,7 +8089,9 @@
         "docs/manifest/integration.md",
         "docs/manifest/issue.md",
         "docs/manifest/recurring_issue.md",
-        "docs/manifest/workspace.md"
+        "docs/manifest/workspace.md",
+        "docs/prd/agent-identity-signing.md",
+        "docs/prd/iteration-quickwins.md"
       ],
       "resource_docs": [
         "docs/api-reference/crews.mdx"
@@ -8153,12 +8168,14 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/routines.mdx",
         "docs/manifest/crew.md",
         "docs/manifest/integration.md",
-        "docs/manifest/issue.md"
+        "docs/manifest/issue.md",
+        "docs/prd/iteration-quickwins.md"
       ],
       "resource_docs": [
         "docs/api-reference/crews.mdx"
@@ -8235,12 +8252,14 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/routines.mdx",
         "docs/manifest/crew.md",
         "docs/manifest/integration.md",
-        "docs/manifest/issue.md"
+        "docs/manifest/issue.md",
+        "docs/prd/iteration-quickwins.md"
       ],
       "resource_docs": [
         "docs/api-reference/crews.mdx"
@@ -8317,12 +8336,14 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/routines.mdx",
         "docs/manifest/crew.md",
         "docs/manifest/integration.md",
-        "docs/manifest/issue.md"
+        "docs/manifest/issue.md",
+        "docs/prd/iteration-quickwins.md"
       ],
       "resource_docs": [
         "docs/api-reference/crews.mdx"
@@ -8399,12 +8420,14 @@
         "docs/guides/devcontainers.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/guides/keeper.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/routines.mdx",
         "docs/manifest/crew.md",
         "docs/manifest/integration.md",
-        "docs/manifest/issue.md"
+        "docs/manifest/issue.md",
+        "docs/prd/iteration-quickwins.md"
       ],
       "resource_docs": [
         "docs/api-reference/crews.mdx"
@@ -8530,7 +8553,8 @@
       "exact_docs": [
         "docs/api-reference/crews.mdx",
         "docs/cli/routine.mdx",
-        "docs/guides/routines.mdx"
+        "docs/guides/routines.mdx",
+        "docs/prd/iteration-quickwins.md"
       ],
       "resource_docs": [
         "docs/api-reference/crews.mdx"
@@ -9175,6 +9199,7 @@
       "exact_docs": [
         "docs/api-reference/issues.mdx",
         "docs/cli/issue.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/manifest/issue.md"
       ],
       "resource_docs": [
@@ -9220,6 +9245,7 @@
       "source_file": "internal/api/router_orchestration.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/manifest/issue.md"
       ],
       "resource_docs": [
@@ -9259,6 +9285,7 @@
       "source_file": "internal/api/router_orchestration.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/manifest/issue.md"
       ],
       "resource_docs": [
@@ -9298,6 +9325,7 @@
       "source_file": "internal/api/router_orchestration.go",
       "exact_docs": [
         "docs/api-reference/issues.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/manifest/issue.md"
       ],
       "resource_docs": [
@@ -10794,6 +10822,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "internal/orchestrator/delegation_subagent_test.go",
         "internal/sidecar/mcp_gateway_cov_test.go"
       ],
       "concrete_response_schema": true,
@@ -10812,6 +10841,7 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "internal/orchestrator/delegation_subagent_test.go",
             "internal/sidecar/mcp_gateway_cov_test.go"
           ]
         }
@@ -16468,6 +16498,7 @@
         "docs/api-reference/milestones.mdx",
         "docs/api-reference/projects.mdx",
         "docs/cli/project.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/manifest/milestone.md",
         "docs/manifest/project.md",
         "docs/manifest/recurring_issue.md"
@@ -16528,6 +16559,7 @@
         "docs/api-reference/milestones.mdx",
         "docs/api-reference/projects.mdx",
         "docs/cli/project.mdx",
+        "docs/guides/issue-detail.mdx",
         "docs/manifest/milestone.md",
         "docs/manifest/project.md",
         "docs/manifest/recurring_issue.md"
@@ -21381,6 +21413,38 @@
             "cmd/gen-openapi/schemas_workflow_request_audit_test.go",
             "internal/api/route_scope_invariant_test.go"
           ]
+        }
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance",
+      "operation_id": "patch_api_v1_workspaces_workspaceId_pipelines_slug_appearance",
+      "tag": "workspaces",
+      "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/workspaces.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pipelines.go"
         }
       }
     },
@@ -37005,6 +37069,88 @@
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "…"
+      ]
+    },
+    {
+      "path": "routine appearance",
+      "use": "appearance",
+      "short": "A routine's icon and colour — how it renders in lists",
+      "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_routine_backtest_test.go",
+        "cmd/crewship/cmd_routine_bench_cov_test.go",
+        "cmd/crewship/cmd_routine_bench_test.go",
+        "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
+        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_extra_cov2_test.go",
+        "cmd/crewship/cmd_routine_extra_cov_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "routine appearance get",
+      "use": "get \u003cslug\u003e",
+      "short": "Show a routine's icon and colour",
+      "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_routine_backtest_test.go",
+        "cmd/crewship/cmd_routine_bench_cov_test.go",
+        "cmd/crewship/cmd_routine_bench_test.go",
+        "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
+        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_extra_cov2_test.go",
+        "cmd/crewship/cmd_routine_extra_cov_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "routine appearance set",
+      "use": "set \u003cslug\u003e",
+      "short": "Set (or clear) a routine's icon and colour",
+      "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_routine_backtest_test.go",
+        "cmd/crewship/cmd_routine_bench_cov_test.go",
+        "cmd/crewship/cmd_routine_bench_test.go",
+        "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
+        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_extra_cov2_test.go",
+        "cmd/crewship/cmd_routine_extra_cov_test.go",
+        "…"
+      ],
+      "flags": [
+        "clear",
+        "color",
+        "icon"
+      ],
+      "documented_flags": [
+        "clear",
+        "color",
+        "icon"
       ]
     },
     {

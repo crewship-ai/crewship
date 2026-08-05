@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -67,6 +68,110 @@ func TestEndpointEvidenceStaysWithinOperationSection(t *testing.T) {
 	}
 	if !statusMarkerPresent(list) {
 		t.Fatal("HTTP response status should count as status evidence")
+	}
+}
+
+// A flag counts as documented only when the page mentions that flag, not when
+// it mentions a LONGER flag that happens to start with the same characters.
+//
+// The pair below is real: `--server` and `--server-allow-mismatch` are both
+// global flags on every crewship command, so a substring match reported the
+// whole CLI as fully flag-documented while `--server` itself was absent from
+// the page. A coverage number that cannot distinguish those two is not a
+// coverage number.
+func TestFlagEvidenceRejectsPrefixCollision(t *testing.T) {
+	node := commandNode{Flags: []flagManifest{{Name: "server"}, {Name: "profile"}}}
+	docs := []docFile{{
+		Path: "docs/cli/token.mdx",
+		Text: "Use `--server-allow-mismatch` when the host differs.\nPass `--profile` to pick a target.",
+	}}
+
+	documented, missing := cliFlagEvidence(node, []string{"docs/cli/token.mdx"}, nil, docs)
+
+	if !slices.Contains(missing, "server") {
+		t.Errorf("--server documented only via --server-allow-mismatch; got documented=%v missing=%v", documented, missing)
+	}
+	if !slices.Contains(documented, "profile") {
+		t.Errorf("--profile is mentioned verbatim and must count; got documented=%v missing=%v", documented, missing)
+	}
+}
+
+// The boundary must not be so strict that ordinary prose stops counting.
+func TestFlagEvidenceAcceptsRealMentions(t *testing.T) {
+	node := commandNode{Flags: []flagManifest{
+		{Name: "server"}, {Name: "quiet"}, {Name: "output-file"}, {Name: "format"},
+	}}
+	docs := []docFile{{
+		Path: "docs/cli/token.mdx",
+		Text: "`--server=<url>` sets the host.\nEnd of line: --quiet\n" +
+			"| `--output-file` | writes the token |\nUse --format json for scripting.",
+	}}
+
+	documented, missing := cliFlagEvidence(node, []string{"docs/cli/token.mdx"}, nil, docs)
+
+	if len(missing) != 0 {
+		t.Errorf("all four flags are mentioned verbatim; got documented=%v missing=%v", documented, missing)
+	}
+}
+
+// -strict is the whole point of the audit: without it the published
+// "531/531, 0 missing" is a snapshot that the next merge can invalidate
+// silently. Each gate must fail, and must name the offending row.
+func TestStrictGatesFailAndNameTheOffender(t *testing.T) {
+	cases := []struct {
+		name string
+		r    report
+		want string
+	}{
+		{
+			name: "undocumented API operation",
+			r:    report{API: []apiRecord{{Method: "GET", Path: "/api/v1/orphan", Status: "missing_docs"}}},
+			want: "GET /api/v1/orphan",
+		},
+		{
+			name: "missing contract evidence",
+			r: report{API: []apiRecord{{Method: "POST", Path: "/api/v1/half", Status: "documented_exact",
+				Contract: contractChecks{Structural: structuralChecks{Missing: []string{"auth", "statuses"}}}}}},
+			want: "POST /api/v1/half",
+		},
+		{
+			name: "generic response schema",
+			r: report{API: []apiRecord{{Method: "GET", Path: "/api/v1/vague", Status: "documented_exact",
+				GenericResponseSchema: true}}},
+			want: "GET /api/v1/vague",
+		},
+		{
+			name: "undocumented CLI flag",
+			r: report{CLI: []cliRecord{{Path: "crewship token create", Status: "documented_exact",
+				Flags: []string{"quiet", "output-file"}, DocumentedFlags: []string{"quiet"},
+				MissingFlags: []string{"output-file"}}}},
+			want: "--output-file",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.r.Summary = summarize(tc.r)
+			err := enforce(tc.r)
+			if err == nil {
+				t.Fatal("enforce() = nil; a documentation gap must fail the gate")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("enforce() error does not name the offender %q:\n%s", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestStrictGatesPassWhenClean(t *testing.T) {
+	r := report{
+		API: []apiRecord{{Method: "GET", Path: "/api/v1/items", Status: "documented_exact",
+			ConcreteResponseSchema: true,
+			Contract:               contractChecks{Structural: structuralChecks{CanonicalMethodPath: true, Auth: true, Request: true, Response: true, Statuses: true}}}},
+		CLI: []cliRecord{{Path: "crewship items list", Status: "documented_exact", ExactDocs: []string{"docs/cli/items.mdx"}}},
+	}
+	r.Summary = summarize(r)
+	if err := enforce(r); err != nil {
+		t.Fatalf("enforce() = %v; a fully documented report must pass", err)
 	}
 }
 

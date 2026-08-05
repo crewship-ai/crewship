@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 # Safe, opt-in live contract checks for an already-running Crewship instance.
+#
+# `-e` is deliberately ABSENT (#1769 review). Every failure path here has to
+# reach emit_summary so the run leaves a machine-readable verdict behind — a
+# contract check that dies without recording why is indistinguishable from one
+# that never ran, which is the failure mode the stage gauntlet already has.
+# Errors are therefore routed explicitly: `|| die` / `|| fail <class>` at each
+# fallible step, the schemathesis exit code captured into $rc and re-raised at
+# the end, and a trap on EXIT that writes the summary either way.
+#
+# If you add a step, guard it the same way. Turning `-e` on instead would make
+# the script exit before the trap can classify the failure.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

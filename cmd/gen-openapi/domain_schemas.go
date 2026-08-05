@@ -78,6 +78,29 @@ func executionSchemaComponents() map[string]any {
 	bulkReplayRequest := obj(map[string]any{"run_ids": arr(str()), "fingerprint": str(), "limit": integer()})
 	stateWriteRequest := obj(map[string]any{"value": str(), "schedule_id": str()})
 	waitpointApprovalRequest := obj(map[string]any{"approved": boolean(), "comment": str()})
+	// Appearance is a two-column write, so both fields are optional and an
+	// explicit "" clears the stored value while an absent field keeps it —
+	// the distinction the handler's pointer fields exist for.
+	appearanceRequest := obj(map[string]any{
+		"icon":  map[string]any{"type": "string", "maxLength": 64, "description": "Crew-icon name; \"\" clears it, omit to keep the stored value."},
+		"color": map[string]any{"type": "string", "maxLength": 64, "description": "Gradient-palette id; \"\" clears it, omit to keep the stored value."},
+	})
+	// The success body is the re-read routine. The second branch is not
+	// hypothetical: when the write lands but the re-read fails, the handler
+	// deliberately answers 200 with just the two written values rather than
+	// failing a change that already applied.
+	appearanceRoutine := obj(map[string]any{
+		"id": str(), "slug": str(), "name": str(), "description": str(), "dsl_version": str(),
+		"definition_hash": str(), "ephemeral": boolean(), "workspace_visible": boolean(),
+		"invocation_count": integer(), "last_invocation_status": str(), "last_invoked_at": timeString(),
+		"icon": str(), "color": str(), "author_crew_id": str(), "author_agent_id": str(),
+		"author_user_id": str(), "authored_via": str(), "status": str(),
+		"integrations_required": arr(str()), "created_at": timeString(), "updated_at": timeString(),
+	})
+	appearanceResponse := map[string]any{"oneOf": []any{
+		refOrString("PipelineAppearanceRoutine"),
+		obj(map[string]any{"icon": str(), "color": str()}),
+	}}
 
 	return map[string]any{
 		"RunResult": runResult, "DryRunStep": dryRunStep, "PipelineRun": pipelineRun, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
@@ -89,6 +112,8 @@ func executionSchemaComponents() map[string]any {
 		"FailureGroup": failureGroup, "FailureGroupList": obj(map[string]any{"groups": arr(refOrString("FailureGroup"))}), "RunWarning": warning, "AgentSubSpan": span,
 		"PipelineRunRequest": runRequest, "ScheduleRequest": scheduleRequest, "ReplayRequest": replayRequest, "BulkReplayRequest": bulkReplayRequest,
 		"StateWriteRequest": stateWriteRequest, "WaitpointApprovalRequest": waitpointApprovalRequest,
+		"PipelineAppearanceRequest": appearanceRequest, "PipelineAppearanceRoutine": appearanceRoutine,
+		"PipelineAppearanceResponse": appearanceResponse,
 	}
 }
 
@@ -108,6 +133,8 @@ func executionResponseSchemas() map[string]string {
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs":   "RunLogList",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors":        "FailureGroupList",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state":       "RoutineState",
+
+		"PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance": "PipelineAppearanceResponse",
 	}
 }
 
@@ -122,5 +149,6 @@ func executionRequestSchemas() map[string]string {
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay":        "ReplayRequest",
 		"PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}":          "StateWriteRequest",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve": "WaitpointApprovalRequest",
+		"PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance":         "PipelineAppearanceRequest",
 	}
 }

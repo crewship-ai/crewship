@@ -358,22 +358,130 @@ type summary struct {
 	CLIWithFlags                   int `json:"cli_with_flags"`
 	CLIWithAllFlagsDocumented      int `json:"cli_with_all_flags_documented"`
 	CLIMissingFlagDocs             int `json:"cli_missing_flag_docs"`
+	// APIContractGaps counts operations whose docs are missing at least one
+	// of the four structural markers (auth, request, response, statuses).
+	// The release audit CLAIMED this was zero; without a counter the claim
+	// could not be checked by anything but a human reading 532 rows.
+	APIContractGaps int `json:"api_contract_gaps"`
 }
 
 func main() {
 	var openAPIFile string
 	var commandsFile string
+	var strict bool
 	flag.StringVar(&openAPIFile, "openapi", openAPIPath, "generated OpenAPI document")
 	flag.StringVar(&commandsFile, "commands", "", "CLI command manifest JSON; empty runs crewship commands --format json")
+	flag.BoolVar(&strict, "strict", false, "exit non-zero when any documentation gap is present (CI gate)")
 	flag.Parse()
 
-	if err := run(openAPIFile, commandsFile); err != nil {
+	if err := run(openAPIFile, commandsFile, strict); err != nil {
 		fmt.Fprintln(os.Stderr, "docs-inventory:", err)
 		os.Exit(1)
 	}
 }
 
-func run(openAPIFile, commandsFile string) error {
+// gate is one invariant -strict enforces: a summary counter that must be
+// zero, and the name a reader would recognise it by.
+//
+// The audit that produced this tool reported 100% coverage as a point-in-time
+// snapshot with nothing holding it there, which is the same shape of defect
+// as a green check that never ran: the next PR could add an undocumented
+// route and no signal would fire. -strict turns each published number into a
+// ratchet.
+type gate struct {
+	name  string
+	count func(summary) int
+	// detail lists the offending rows, so CI says which operation to fix
+	// rather than only how many are wrong.
+	detail func(report) []string
+}
+
+func strictGates() []gate {
+	return []gate{
+		{"API operations with no documentation", func(s summary) int { return s.APIMissingDocs },
+			func(r report) []string {
+				return apiRowsWhere(r, func(rec apiRecord) bool { return rec.Status == "missing_docs" })
+			}},
+		{"API operations missing structural contract evidence", func(s summary) int { return s.APIContractGaps },
+			func(r report) []string {
+				return apiRowsWhere(r, func(rec apiRecord) bool { return len(rec.Contract.Structural.Missing) > 0 })
+			}},
+		{"API operations with a generic response schema", func(s summary) int { return s.APIGenericResponseSchemas },
+			func(r report) []string {
+				return apiRowsWhere(r, func(rec apiRecord) bool { return rec.GenericResponseSchema })
+			}},
+		{"API operations with a generic JSON request schema", func(s summary) int { return s.APIGenericJSONRequests },
+			func(r report) []string {
+				return apiRowsWhere(r, func(rec apiRecord) bool { return rec.GenericJSONRequest })
+			}},
+		{"CLI commands with no documentation page", func(s summary) int { return s.CLIRootDocsMissing },
+			func(r report) []string {
+				return cliRowsWhere(r, func(rec cliRecord) bool {
+					return rec.Status != "documented_root" && rec.Status != "documented_exact"
+				})
+			}},
+		{"CLI commands with undocumented flags", func(s summary) int { return s.CLIMissingFlagDocs },
+			func(r report) []string {
+				return cliRowsWhere(r, func(rec cliRecord) bool { return len(rec.MissingFlags) > 0 })
+			}},
+	}
+}
+
+func apiRowsWhere(r report, match func(apiRecord) bool) []string {
+	var out []string
+	for _, rec := range r.API {
+		if match(rec) {
+			out = append(out, rec.Method+" "+rec.Path)
+		}
+	}
+	return out
+}
+
+func cliRowsWhere(r report, match func(cliRecord) bool) []string {
+	var out []string
+	for _, rec := range r.CLI {
+		if match(rec) {
+			row := rec.Path
+			if len(rec.MissingFlags) > 0 {
+				row += " (--" + strings.Join(rec.MissingFlags, ", --") + ")"
+			}
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// enforce renders every violated gate, naming up to maxStrictRows offenders
+// each. It reports how many were elided rather than truncating silently — a
+// gate that hides its own scope is the thing this whole file is against.
+const maxStrictRows = 20
+
+func enforce(r report) error {
+	var b strings.Builder
+	violations := 0
+	for _, g := range strictGates() {
+		n := g.count(r.Summary)
+		if n == 0 {
+			continue
+		}
+		violations++
+		fmt.Fprintf(&b, "\n  %s: %d\n", g.name, n)
+		rows := g.detail(r)
+		for i, row := range rows {
+			if i == maxStrictRows {
+				fmt.Fprintf(&b, "    … and %d more\n", len(rows)-maxStrictRows)
+				break
+			}
+			fmt.Fprintf(&b, "    %s\n", row)
+		}
+	}
+	if violations == 0 {
+		return nil
+	}
+	return fmt.Errorf("strict mode: %d documentation gate(s) failed.%s\nDocument the rows above, then re-run 'make docs-inventory'", violations, b.String())
+}
+
+func run(openAPIFile, commandsFile string, strict bool) error {
 	openAPI, err := readOpenAPI(openAPIFile)
 	if err != nil {
 		return err
@@ -504,6 +612,14 @@ func run(openAPIFile, commandsFile string) error {
 	}
 	fmt.Printf("docs-inventory: %d API operations, %d CLI commands\n", len(r.API), len(r.CLI))
 	fmt.Printf("docs-inventory: wrote %s and %s\n", jsonReport, markdownReport)
+	// Reports are written before the gate runs: a failing CI job should still
+	// leave the regenerated inventory on disk for the operator to read.
+	if strict {
+		if err := enforce(r); err != nil {
+			return err
+		}
+		fmt.Println("docs-inventory: strict mode — every documentation gate is clean.")
+	}
 	return nil
 }
 
@@ -708,7 +824,7 @@ func cliFlagEvidence(node commandNode, exactDocs, rootDocs []string, docs []docF
 		found := false
 		for _, path := range paths {
 			for _, doc := range docs {
-				if doc.Path == path && strings.Contains(doc.Text, "--"+flag.Name) {
+				if doc.Path == path && flagMentioned(doc.Text, flag.Name) {
 					found = true
 					break
 				}
@@ -724,6 +840,47 @@ func cliFlagEvidence(node commandNode, exactDocs, rootDocs []string, docs []docF
 		}
 	}
 	return documented, missing
+}
+
+// flagMentioned reports whether text documents the flag `--name` itself,
+// rather than merely containing it as the prefix of a longer flag.
+//
+// A plain strings.Contains inflates the coverage number in exactly the case
+// this repo has: `--server` and `--server-allow-mismatch` are both global
+// flags on every command, so a page that documents only the latter satisfied
+// the former too, and "343/343 commands document all flags" could be true
+// while `--server` appeared on no page at all. The boundary is checked on
+// both sides — a longer flag name must not match a shorter one, and a match
+// inside a word (or after another dash) is not a mention.
+func flagMentioned(text, name string) bool {
+	needle := "--" + name
+	for offset := 0; offset < len(text); {
+		idx := strings.Index(text[offset:], needle)
+		if idx < 0 {
+			return false
+		}
+		start := offset + idx
+		end := start + len(needle)
+		leftOK := start == 0 || !isFlagNameByte(text[start-1])
+		rightOK := end == len(text) || !isFlagNameByte(text[end])
+		if leftOK && rightOK {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+// isFlagNameByte reports whether b can appear inside a long-flag name (or is
+// the dash that would make the surrounding token a different flag).
+func isFlagNameByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	case b == '-', b == '_':
+		return true
+	}
+	return false
 }
 
 func appendUnique(values []string, additions ...string) []string {
@@ -832,6 +989,9 @@ func summarize(r report) summary {
 		}
 		if len(rec.NonJSONRequestMedia) > 0 {
 			s.APINonJSONRequestBodies++
+		}
+		if len(rec.Contract.Structural.Missing) > 0 {
+			s.APIContractGaps++
 		}
 	}
 	for _, rec := range r.CLI {
