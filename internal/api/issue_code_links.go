@@ -221,7 +221,7 @@ func (h *CodeLinkHandler) Attach(w http.ResponseWriter, r *http.Request) {
 	}
 
 	allowPrivate := allowPrivateGitHosts(r.Context(), h.db)
-	details, err := gitlink.NewClient(allowPrivate).Fetch(r.Context(), ref, cred.token)
+	details, err := gitlink.NewClient(allowPrivate).Fetch(r.Context(), ref, cred.host, cred.token)
 	if err != nil {
 		writeFetchProblem(w, r, err)
 		return
@@ -327,7 +327,7 @@ func (h *CodeLinkHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	details, err := gitlink.NewClient(allowPrivateGitHosts(r.Context(), h.db)).Fetch(r.Context(), ref, cred.token)
+	details, err := gitlink.NewClient(allowPrivateGitHosts(r.Context(), h.db)).Fetch(r.Context(), ref, cred.host, cred.token)
 	if err != nil {
 		h.noteSyncError(r.Context(), linkID, err.Error())
 		writeFetchProblem(w, r, err)
@@ -460,6 +460,17 @@ type codeLinkCredential struct {
 	id    string
 	token string
 	name  string
+	// host is the forge this credential is FOR, taken from the record that
+	// matched — its `account_label`, or the canonical SaaS host constant the
+	// fallback matched against. It is what the fetch is addressed to.
+	//
+	// It equals the host parsed out of the pasted URL in every case (that is
+	// how the record was found), so nothing about which forge is reached
+	// changes by using it. What changes is that the address comes from a row
+	// this workspace stored rather than from the paste — an allowlist, chosen
+	// by user input, instead of user input with an allowlist checked alongside
+	// it. gitlink.Fetch refuses the pair if they ever stop agreeing.
+	host string
 }
 
 // resolveCodeLinkCredential picks the stored token used to talk to `host`.
@@ -519,14 +530,21 @@ func resolveCodeLinkCredential(
 			if derr != nil {
 				return codeLinkCredential{}, errCodeLinkCredentialUnreadable
 			}
-			return codeLinkCredential{id: id, token: token, name: name}, nil
+			// The label, lowercased — not the parsed host. For every real
+			// (ASCII) hostname the two are the same bytes; taking the stored
+			// one is what makes the request address a value this workspace
+			// wrote down rather than one the paste supplied.
+			return codeLinkCredential{
+				id: id, token: token, name: name,
+				host: strings.ToLower(strings.TrimSpace(label)),
+			}, nil
 		}
-		if fallback == nil && isCanonicalHost(provider, host) {
+		if canonical, ok := canonicalHost(provider, host); ok && fallback == nil {
 			token, derr := encryption.Decrypt(enc)
 			if derr != nil {
 				return codeLinkCredential{}, errCodeLinkCredentialUnreadable
 			}
-			fallback = &codeLinkCredential{id: id, token: token, name: name}
+			fallback = &codeLinkCredential{id: id, token: token, name: name, host: canonical}
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -538,17 +556,32 @@ func resolveCodeLinkCredential(
 	return codeLinkCredential{}, errNoCodeLinkCredential
 }
 
-// isCanonicalHost reports whether host is the provider's one public instance,
-// where "the workspace's GitHub token" is an unambiguous phrase.
-func isCanonicalHost(p gitlink.Provider, host string) bool {
+// canonicalHost reports whether host is the provider's one public instance —
+// where "the workspace's GitHub token" is an unambiguous phrase — and returns
+// the matching constant.
+//
+// It returns the literal rather than echoing the argument so that an unlabelled
+// credential produces a destination that is written in this file, not one that
+// arrived in a request body. The value is identical either way; its provenance
+// is not.
+func canonicalHost(p gitlink.Provider, host string) (string, bool) {
 	switch p {
 	case gitlink.ProviderGitHub:
-		return host == "github.com" || host == "www.github.com"
+		switch host {
+		case "github.com":
+			return "github.com", true
+		case "www.github.com":
+			return "www.github.com", true
+		}
 	case gitlink.ProviderGitLab:
-		return host == "gitlab.com" || host == "www.gitlab.com"
-	default:
-		return false
+		switch host {
+		case "gitlab.com":
+			return "gitlab.com", true
+		case "www.gitlab.com":
+			return "www.gitlab.com", true
+		}
 	}
+	return "", false
 }
 
 // replyCredentialProblem turns a resolution failure into an actionable 4xx/5xx.

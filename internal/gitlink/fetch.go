@@ -56,6 +56,12 @@ var (
 	// see the CheckRedirect hook in NewClient for why httpsafe alone does not
 	// cover this.
 	ErrCrossHostRedirect = errors.New("gitlink: the provider redirected to a different host")
+	// ErrHostMismatch — the caller asked to fetch a ref from a host other than
+	// the one the ref names. Unreachable through the API handlers, which derive
+	// one from the other; it exists so that if a future caller ever gets them
+	// out of step, the result is a refusal rather than a credential delivered
+	// to the wrong forge.
+	ErrHostMismatch = errors.New("gitlink: the vetted host is not the host this link names")
 )
 
 // maxResponseBytes caps what we read from a provider. A GitHub pull-request
@@ -197,29 +203,48 @@ func NewClient(allowPrivate bool) *Client {
 	return c
 }
 
-// Fetch reads the current state of ref using token.
+// Fetch reads the current state of ref from `host`, using token.
+//
+// # host is the destination, ref is what to ask for
+//
+// `host` is not decoration and it is not ref.Host. It is the host the CALLER
+// has already matched against its own records — in production, the
+// `account_label` of the credential that supplied `token`, or a canonical SaaS
+// host constant. The request URL is built from it, so the address this function
+// dials comes from the server's data and not from the string a user pasted.
+//
+// The two must still name the same forge, and the check below is what says so.
+// It cannot fire from the API handlers (they resolve the credential BY the
+// ref's host, so the pair is constructed equal), which is exactly why it is
+// worth having: it converts a future refactor that decouples them from a silent
+// credential-exfiltration bug into a refused request.
 //
 // The token is placed in a request HEADER and nowhere else: not in the URL
 // (it would be logged by every proxy on the path and by us), not in a query
 // parameter, and never on a command line — Crewship never shells out to `gh`
 // or `glab` for this.
-func (c *Client) Fetch(ctx context.Context, ref Ref, token string) (Details, error) {
-	endpoint := ref.APIEndpoint()
+func (c *Client) Fetch(ctx context.Context, ref Ref, host, token string) (Details, error) {
+	if host == "" || !strings.EqualFold(host, ref.Host) {
+		return Details{}, &FetchError{
+			Err:      ErrHostMismatch,
+			Provider: ref.Provider,
+			Detail:   "the link names " + ref.Host + " but the credential was matched for a different host",
+		}
+	}
+	endpoint := ref.APIEndpointFor(host)
 
 	// Layer 1: cheap, no-network reject. Catches a literal private IP, a
 	// wrong scheme, and embedded userinfo before any DNS or TCP happens.
 	//
 	// The two postures are separate branches rather than one call with a bool,
 	// and the request is built from what the check RETURNS rather than from
-	// `endpoint`. Both are for the reader first and the analyser second:
+	// `endpoint`:
 	//
-	//   - The strict default goes through httpsafe.ValidateURL — the same
-	//     entry point every other outbound-fetch site in this repo uses, and
-	//     the one CodeQL's go/request-forgery model recognises as a barrier.
+	//   - The strict default goes through httpsafe.ValidateURL — the same entry
+	//     point every other outbound-fetch site in this repo uses.
 	//     ValidateURLForEndpoint(…, false, …) is documented as byte-for-byte
 	//     identical to it, so this branch changes no behaviour; what it changes
-	//     is that the SHIPPED posture is provably sanitised rather than
-	//     sanitised-if-a-flag-happens-to-be-false.
+	//     is that the SHIPPED posture is one call, not a call plus a flag.
 	//   - The opt-in branch is the one an operator turned on to reach an
 	//     intranet forge. It is deliberately the narrower-looking path: it is
 	//     the only place private addresses become reachable at all, and
@@ -228,6 +253,15 @@ func (c *Client) Fetch(ctx context.Context, ref Ref, token string) (Details, err
 	// Passing the returned URL into http.NewRequest (rather than re-passing
 	// `endpoint`) means deleting either check would not merely be a missing
 	// guard — the request would have nothing to be built from.
+	//
+	// NOTE for anyone reading this after a CodeQL alert: neither of these is a
+	// barrier that go/request-forgery recognises. Its Go model has exactly two
+	// relevant sanitizers — an equality check against a constant, and a
+	// concatenation whose tainted operand sits after a literal path separator —
+	// and a validating function that returns a *url.URL is neither. That is not
+	// a defect in the checks; it is why the destination host itself is supplied
+	// by the caller from stored data (see APIEndpointFor), which is the thing
+	// the query is actually asking for.
 	var (
 		validated *url.URL
 		err       error

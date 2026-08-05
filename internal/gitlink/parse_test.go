@@ -202,7 +202,7 @@ func TestParse_RejectsAbsurdlyDeepOwnerPath(t *testing.T) {
 	}
 }
 
-func TestRef_APIEndpoint(t *testing.T) {
+func TestRef_APIEndpointFor(t *testing.T) {
 	tests := []struct {
 		name string
 		raw  string
@@ -237,8 +237,69 @@ func TestRef_APIEndpoint(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
-			if got := ref.APIEndpoint(); got != tt.want {
-				t.Errorf("APIEndpoint() = %q, want %q", got, tt.want)
+			// Production passes the host the CALLER vetted. Every case here
+			// passes ref.Host, which is what the resolver returns for a
+			// credential labelled with that host — so these assertions pin the
+			// endpoints unchanged by the switch to an explicit host argument.
+			if got := ref.APIEndpointFor(ref.Host); got != tt.want {
+				t.Errorf("APIEndpointFor(%q) = %q, want %q", ref.Host, got, tt.want)
+			}
+		})
+	}
+}
+
+// The endpoint's HOST comes from the argument, never from the pasted URL.
+//
+// This is the property that makes the request target come from a value the
+// server looked up (a credential's account_label, or a canonical SaaS host
+// constant) rather than from user input. If APIEndpointFor ever read r.Host
+// again, the taint path from the pasted URL to http.Client.Do reopens and
+// go/request-forgery fires again — that alert is the regression test that runs
+// in CI, and this is the one that runs in `go test`.
+func TestRef_APIEndpointFor_UsesTheSuppliedHostNotTheParsedOne(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		vetted  string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:   "github enterprise",
+			raw:    "https://ghe.acme.example/platform/gw/pull/7",
+			vetted: "ghe.acme.example",
+			want:   "https://ghe.acme.example/api/v3/repos/platform/gw/pulls/7",
+		},
+		{
+			name:   "gitlab self-managed",
+			raw:    "https://gitlab.acme.internal/acme/billing/-/merge_requests/7",
+			vetted: "gitlab.acme.internal",
+			want:   "https://gitlab.acme.internal/api/v4/projects/acme%2Fbilling/merge_requests/7",
+		},
+		{
+			// The scheme is rebuilt from a constant, not carried through from
+			// the paste, so an http:// link can only ever produce "http://" or
+			// "https://" and never a third thing.
+			name:   "http paste keeps http",
+			raw:    "http://gitlab.acme.internal/acme/billing/-/merge_requests/7",
+			vetted: "gitlab.acme.internal",
+			want:   "http://gitlab.acme.internal/api/v4/projects/acme%2Fbilling/merge_requests/7",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ref, err := Parse(tt.raw)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if got := ref.APIEndpointFor(tt.vetted); got != tt.want {
+				t.Errorf("APIEndpointFor(%q) = %q, want %q", tt.vetted, got, tt.want)
+			}
+			// Now mutate the parsed host to something the caller never vetted.
+			// The endpoint must not move.
+			ref.Host = "attacker.example"
+			if got := ref.APIEndpointFor(tt.vetted); got != tt.want {
+				t.Errorf("the parsed host leaked into the endpoint: got %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -338,6 +338,9 @@ func TestResolveCodeLinkCredential_CanonicalHostFallback(t *testing.T) {
 	if got.token != "ghp_saas" {
 		t.Errorf("token = %q, want the GITHUB one (not the GITLAB one)", got.token)
 	}
+	if got.host != "github.com" {
+		t.Errorf("host = %q, want the canonical constant github.com", got.host)
+	}
 
 	// …and the same unlabelled credential does NOT serve a self-hosted host.
 	if _, err := resolveCodeLinkCredential(context.Background(), f.db, f.wsID, f.crewID,
@@ -352,6 +355,39 @@ func TestResolveCodeLinkCredential_CanonicalHostFallback(t *testing.T) {
 	if _, err := resolveCodeLinkCredential(context.Background(), f.db, f.wsID, f.crewID,
 		gitlink.ProviderGitHub, "github.com"); err == nil {
 		t.Error("a REVOKED credential was still used")
+	}
+}
+
+// The host the fetch is addressed to comes from the credential RECORD, not
+// from the pasted URL — and it is the same host either way.
+//
+// That equality is the whole claim of the change: routing the destination
+// through stored data must not move the destination. The label is seeded in a
+// different case from the paste so the test would also catch a resolver that
+// returned the label verbatim and sent a mixed-case Host to a forge.
+func TestResolveCodeLinkCredential_ReturnsTheHostFromTheRecord(t *testing.T) {
+	f := newCodeLinkFixture(t)
+	f.seedGitCredential(t, "cred-ghe", "ghe", "GITHUB", "  GHE.Acme.Internal  ", "ghp_ghe")
+	f.seedGitCredential(t, "cred-gl", "self-managed", "GITLAB", "gitlab.acme.internal", "glpat_x")
+
+	for _, tt := range []struct {
+		name     string
+		provider gitlink.Provider
+		host     string
+	}{
+		{"labelled github enterprise", gitlink.ProviderGitHub, "ghe.acme.internal"},
+		{"labelled self-managed gitlab", gitlink.ProviderGitLab, "gitlab.acme.internal"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveCodeLinkCredential(context.Background(), f.db, f.wsID, f.crewID,
+				tt.provider, tt.host)
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if got.host != tt.host {
+				t.Errorf("host = %q, want %q — the destination must not move", got.host, tt.host)
+			}
+		})
 	}
 }
 

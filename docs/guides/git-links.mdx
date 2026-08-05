@@ -130,6 +130,13 @@ For any other host, an unlabelled credential is **not** used — sending a
 github.com token to an arbitrary pasted host is exactly the accident this rule
 prevents. Add the label and the link resolves.
 
+The matched credential does more than supply the token: **the account label is
+the address the API request is sent to.** The label and the pasted host are the
+same string — that is how the credential was found — so this changes nothing
+about which forge is reached. It means the request target comes from a record
+your workspace stored rather than from the link somebody pasted, which is why
+an unlabelled credential cannot reach a self-hosted host at all.
+
 ```bash
 crewship credential create \
   --name ghe-readonly --provider GITHUB \

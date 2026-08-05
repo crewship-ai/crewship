@@ -233,26 +233,67 @@ func parseGitLab(scheme, host string, segs []string) (Ref, error) {
 // display form for GitHub too.
 func (r Ref) ProjectPath() string { return r.Owner + "/" + r.Repo }
 
-// APIEndpoint is the provider REST URL that answers "what is the state of
-// this pull request".
+// APIEndpointFor is the provider REST URL that answers "what is the state of
+// this pull request", addressed to `host`.
+//
+// # Why the host is an argument and not r.Host
+//
+// r.Host comes from a URL somebody pasted. `host` comes from the caller's own
+// records: the `account_label` of the credential this workspace stores for that
+// forge, or — for github.com / gitlab.com only — a canonical-host constant. The
+// two are equal in every real call (the caller matched one against the other to
+// find the credential in the first place, and Fetch refuses the pair if they
+// ever disagree), so this changes no destination. What it changes is where the
+// string that names the destination COMES FROM.
+//
+// That is the difference between "the request goes somewhere we vetted" being
+// true because of a check several call frames away, and it being true because
+// there is no other value available to build the URL out of. It is also the
+// remedy `go/request-forgery` asks for in as many words — "maintain a list of
+// authorized request targets and choose from that list based on the user input
+// provided" — and the reason the alert on this file is closed rather than
+// dismissed: with the host supplied by the caller, no user-controlled value
+// reaches the authority component of the request URL at all.
+//
+// The remaining user-derived parts — owner, repo, number — are placed strictly
+// AFTER a literal path separator, and each has already been checked against
+// [validatePathSegments], so none of them can reshape the endpoint. The scheme
+// is rebuilt from a constant rather than carried through, so a paste can only
+// select between "https" and "http", never introduce a third scheme.
+//
+// # Provider layouts
 //
 // GitHub SaaS answers on api.github.com; GitHub Enterprise Server answers on
 // the SAME host under /api/v3 (this is the documented GHES layout and the
 // reason the API base cannot simply be derived by string-prefixing "api.").
 // GitLab always answers on its own host under /api/v4, SaaS included, and
 // addresses a project by its URL-encoded path.
-func (r Ref) APIEndpoint() string {
+//
+// The concatenation is written with `+` and constant separators rather than
+// fmt.Sprintf on purpose: it is the form in which the boundary between "host"
+// and "everything a user chose" is visible to a reader in one line, without
+// having to align a format string against its arguments.
+func (r Ref) APIEndpointFor(host string) string {
+	// Constant, not r.Scheme: an http:// paste selects the "http" literal
+	// rather than flowing its own string into the URL.
+	scheme := "https"
+	if r.Scheme == "http" {
+		scheme = "http"
+	}
 	switch r.Provider {
 	case ProviderGitLab:
-		return fmt.Sprintf("%s://%s/api/v4/projects/%s/merge_requests/%d",
-			r.Scheme, r.Host, url.PathEscape(r.ProjectPath()), r.Number)
+		return scheme + "://" + host +
+			"/api/v4/projects/" + url.PathEscape(r.ProjectPath()) +
+			"/merge_requests/" + strconv.Itoa(r.Number)
 	default:
-		base := fmt.Sprintf("%s://%s/api/v3", r.Scheme, r.Host)
-		if r.Host == "github.com" || r.Host == "www.github.com" {
+		base := scheme + "://" + host + "/api/v3"
+		if host == "github.com" || host == "www.github.com" {
 			base = "https://api.github.com"
 		}
-		return fmt.Sprintf("%s/repos/%s/%s/pulls/%d",
-			base, url.PathEscape(r.Owner), url.PathEscape(r.Repo), r.Number)
+		return base +
+			"/repos/" + url.PathEscape(r.Owner) +
+			"/" + url.PathEscape(r.Repo) +
+			"/pulls/" + strconv.Itoa(r.Number)
 	}
 }
 
@@ -265,7 +306,7 @@ func (r Ref) APIEndpoint() string {
 // issue that already carries https://github.com/acme/thing/pull/7 would miss
 // the duplicate check (`WHERE … host = ?`) and store the same pull request
 // twice; credential resolution would look for a credential labelled
-// "github.com:443" and find none; and APIEndpoint would send the request to
+// "github.com:443" and find none; and APIEndpointFor would send the request to
 // https://github.com:443/api/v3/… — the GitHub Enterprise layout — instead of
 // api.github.com. A non-default port is meaningful and is kept
 // (gitlab.acme.internal:8443).
