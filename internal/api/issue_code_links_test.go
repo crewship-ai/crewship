@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -391,6 +392,56 @@ func TestResolveCodeLinkCredential_ReturnsTheHostFromTheRecord(t *testing.T) {
 	}
 }
 
+// One unreadable credential must not take out a healthy labelled one.
+//
+// The candidates are scanned oldest-first, and for a canonical SaaS host the
+// first row is also a fallback candidate. If resolving that fallback decrypts
+// eagerly, a single corrupt or key-rotated row — the shape you get after an
+// ENCRYPTION_KEY change that missed one entry — aborts the whole resolution
+// with a 500, even though a correctly labelled, perfectly readable credential
+// is sitting two rows down. Attach and refresh then fail for every link on that
+// host, and the error blames the key rather than the row.
+//
+// So: the fallback's ciphertext is carried, and only decrypted if the label
+// scan finds nothing better.
+func TestResolveCodeLinkCredential_UnreadableFallbackDoesNotMaskALabelledOne(t *testing.T) {
+	f := newCodeLinkFixture(t)
+	// Ordering is created_at ASC, id ASC — "cred-a…" is scanned first.
+	f.seedGitCredential(t, "cred-a-broken", "stale-key", "GITHUB", "", "ignored")
+	if _, err := f.db.Exec(
+		`UPDATE credentials SET encrypted_value = 'not-a-ciphertext' WHERE id = 'cred-a-broken'`); err != nil {
+		t.Fatalf("corrupt the first credential: %v", err)
+	}
+	f.seedGitCredential(t, "cred-b-good", "github", "GITHUB", "github.com", "ghp_good")
+
+	got, err := resolveCodeLinkCredential(context.Background(), f.db, f.wsID, f.crewID,
+		gitlink.ProviderGitHub, "github.com")
+	if err != nil {
+		t.Fatalf("resolve: %v — one undecryptable row blocked a healthy labelled credential", err)
+	}
+	if got.token != "ghp_good" {
+		t.Errorf("token = %q, want the labelled credential's", got.token)
+	}
+}
+
+// The teeth: an unreadable credential that IS the answer still reports itself
+// as unreadable, so the test above is pinning "do not decrypt early" and not
+// "never report a decryption failure".
+func TestResolveCodeLinkCredential_UnreadableWinnerStillErrors(t *testing.T) {
+	f := newCodeLinkFixture(t)
+	f.seedGitCredential(t, "cred-only", "github", "GITHUB", "", "ignored")
+	if _, err := f.db.Exec(
+		`UPDATE credentials SET encrypted_value = 'not-a-ciphertext' WHERE id = 'cred-only'`); err != nil {
+		t.Fatalf("corrupt: %v", err)
+	}
+
+	_, err := resolveCodeLinkCredential(context.Background(), f.db, f.wsID, f.crewID,
+		gitlink.ProviderGitHub, "github.com")
+	if !errors.Is(err, errCodeLinkCredentialUnreadable) {
+		t.Fatalf("error = %v, want errCodeLinkCredentialUnreadable", err)
+	}
+}
+
 // ── provider failure modes ───────────────────────────────────────────────
 
 func TestCodeLink_Attach_ProviderFailuresAreDistinguishable(t *testing.T) {
@@ -527,15 +578,36 @@ func TestCodeLink_List_And_Delete(t *testing.T) {
 		t.Fatalf("list = %+v, want the one attached link", links)
 	}
 
-	// A link id from another issue must not be deletable through this one.
-	otherMission := seedIssue(t, f.db, f.wsID, f.crewID, f.leadID, "ENG-2", "BACKLOG")
-	_ = otherMission
 	del := httptest.NewRecorder()
 	badReq := f.req("DELETE", "")
 	badReq.SetPathValue("linkId", "does-not-exist")
 	f.h.Delete(del, badReq)
 	if del.Code != http.StatusNotFound {
 		t.Errorf("delete of an unknown link = %d, want 404", del.Code)
+	}
+
+	// A link that belongs to ANOTHER issue must not be deletable through this
+	// one. The id has to be real for this to mean anything: a 404 for an id
+	// that exists nowhere would pass with the `mission_id` predicate removed
+	// from the DELETE, which is the IDOR this is supposed to catch.
+	otherMission := seedIssue(t, f.db, f.wsID, f.crewID, f.leadID, "ENG-2", "BACKLOG")
+	if _, err := f.db.Exec(`
+		INSERT INTO mission_code_links (id, workspace_id, mission_id, provider, host, owner, repo,
+		    number, kind, url, created_at, updated_at)
+		VALUES ('lnk-other', ?, ?, 'GITHUB', 'github.com', 'acme', 'other', 9, 'pull_request',
+		    'https://github.com/acme/other/pull/9', datetime('now'), datetime('now'))`,
+		f.wsID, otherMission); err != nil {
+		t.Fatalf("seed the other issue's link: %v", err)
+	}
+	cross := httptest.NewRecorder()
+	crossReq := f.req("DELETE", "")
+	crossReq.SetPathValue("linkId", "lnk-other")
+	f.h.Delete(cross, crossReq)
+	if cross.Code != http.StatusNotFound {
+		t.Errorf("cross-issue delete = %d, want 404", cross.Code)
+	}
+	if n := f.countLinks(t); n != 2 {
+		t.Fatalf("rows = %d, want 2 — another issue's link was deleted through this one", n)
 	}
 
 	ok := httptest.NewRecorder()
@@ -545,8 +617,9 @@ func TestCodeLink_List_And_Delete(t *testing.T) {
 	if ok.Code != http.StatusOK {
 		t.Fatalf("delete = %d (%s)", ok.Code, ok.Body.String())
 	}
-	if n := f.countLinks(t); n != 0 {
-		t.Errorf("rows after delete = %d, want 0", n)
+	// One row left: the other issue's, untouched.
+	if n := f.countLinks(t); n != 1 {
+		t.Errorf("rows after delete = %d, want 1", n)
 	}
 }
 

@@ -519,7 +519,16 @@ func resolveCodeLinkCredential(
 	}
 	defer rows.Close()
 
-	var fallback *codeLinkCredential
+	// The fallback is carried as CIPHERTEXT, not as a decrypted credential.
+	//
+	// Candidates arrive oldest-first, and for a canonical SaaS host the first
+	// row is also a fallback candidate — so decrypting it on sight means one
+	// corrupt or key-rotated row (what an ENCRYPTION_KEY change that missed an
+	// entry leaves behind) aborts the whole resolution with a 500, while the
+	// correctly labelled credential that should have won is still two rows
+	// down, unread. Deferring the decrypt also skips an AES-GCM operation on
+	// every attach where a labelled credential wins, which is the common case.
+	var fallback *struct{ id, name, enc, host string }
 	for rows.Next() {
 		var id, name, label, enc string
 		if err := rows.Scan(&id, &name, &label, &enc); err != nil {
@@ -540,18 +549,18 @@ func resolveCodeLinkCredential(
 			}, nil
 		}
 		if canonical, ok := canonicalHost(provider, host); ok && fallback == nil {
-			token, derr := encryption.Decrypt(enc)
-			if derr != nil {
-				return codeLinkCredential{}, errCodeLinkCredentialUnreadable
-			}
-			fallback = &codeLinkCredential{id: id, token: token, name: name, host: canonical}
+			fallback = &struct{ id, name, enc, host string }{id: id, name: name, enc: enc, host: canonical}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return codeLinkCredential{}, err
 	}
 	if fallback != nil {
-		return *fallback, nil
+		token, derr := encryption.Decrypt(fallback.enc)
+		if derr != nil {
+			return codeLinkCredential{}, errCodeLinkCredentialUnreadable
+		}
+		return codeLinkCredential{id: fallback.id, token: token, name: fallback.name, host: fallback.host}, nil
 	}
 	return codeLinkCredential{}, errNoCodeLinkCredential
 }

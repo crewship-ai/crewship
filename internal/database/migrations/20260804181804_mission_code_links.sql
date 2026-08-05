@@ -69,8 +69,19 @@ CREATE TABLE IF NOT EXISTS mission_code_links (
     -- Who attached it. Exactly one of the two is set: a human through the
     -- public API/CLI, or an agent through the sidecar. Mirrors missions'
     -- author_agent_id / created_by_user_id pairing (v129).
-    created_by_user_id  TEXT REFERENCES users(id),
-    created_by_agent_id TEXT REFERENCES agents(id),
+    --
+    -- ON DELETE SET NULL, not the default NO ACTION. `PRAGMA foreign_keys` is
+    -- ON (database.go), and an Art. 17 erasure through
+    -- DELETE /api/v1/admin/users/{userId}/data (v107) hard-deletes the data
+    -- subject. Under NO ACTION a single attached pull request would refuse that
+    -- delete outright — a GDPR request failing on a link to a PR is not a
+    -- trade-off anyone would choose. Losing the attributed author is: the link
+    -- itself is not personal data and the row stays useful without a name.
+    -- pipelines.author_agent_id (v78) is the FK precedent; missions (v129) only
+    -- looks like one, because ALTER TABLE ADD COLUMN cannot carry an FK in
+    -- SQLite, so those columns are unconstrained.
+    created_by_user_id  TEXT REFERENCES users(id)  ON DELETE SET NULL,
+    created_by_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
 
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
