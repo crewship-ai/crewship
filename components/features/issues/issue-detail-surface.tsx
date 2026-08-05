@@ -522,6 +522,10 @@ export function IssueDetailSurface({
         <RunActivityTimeline
           workspaceId={workspaceId}
           params={{ mission_id: issue.id, entry_type: RUN_WORK_ENTRY_TYPES.join(",") }}
+          // Every other section of this page is a DetailCard; the timeline
+          // defaults to a bare rail because the routine panel and the
+          // activity bar want it that way, so this screen has to ask.
+          card
           // An un-started issue has nothing to show and should stay clean;
           // once it is moving, keep the section up even before the first
           // entry lands so there is immediate "run starting…" feedback.

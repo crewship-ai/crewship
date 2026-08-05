@@ -2,10 +2,13 @@
 
 import { useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { StatusIcon } from "@/components/features/issues/status-icon"
+import { Check } from "lucide-react"
+import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
+import { STATUS_CHIPS } from "@/components/features/issues/issues-status-chips"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
-import type { IssuePriority } from "@/lib/types/mission"
+import type { IssuePriority, MissionStatus } from "@/lib/types/mission"
 import { cn } from "@/lib/utils"
+import { useFilteredIssues } from "@/hooks/use-filtered-issues"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { getCrewIconDef, getGradientPalette } from "@/lib/entities"
 import type { Mission, MissionTask, Project } from "@/lib/types/mission"
@@ -38,8 +41,88 @@ interface UnifiedExplorerProps {
   onAgentFilter: (agentId: string | null) => void
   filterPriority?: IssuePriority | null
   onPriorityFilter?: (priority: IssuePriority | null) => void
+  /**
+   * The status multi-select, shared with `IssuesStatusChips` over the board —
+   * one piece of state, two affordances. Empty = every status.
+   */
+  filterStatuses?: MissionStatus[]
+  /** Receives the whole next selection, so toggle and clear are one prop. */
+  onStatusFilter?: (statuses: MissionStatus[]) => void
   /** Collapse toggle — rendered in the toolbar next to search. */
   onToggleCollapse?: () => void
+}
+
+const EMPTY_STATUSES: MissionStatus[] = []
+
+/**
+ * One facet of the filter: a header, an explicit reset, and its values.
+ *
+ * The reset row is what makes "drop the crew but keep the priority" a single
+ * click. Before it, the only way back to "all crews" was a button that also
+ * cleared the agent — which is how a filter panel teaches people not to trust
+ * it.
+ */
+function FacetSection({
+  label,
+  resetLabel,
+  resetActive,
+  onReset,
+  first = false,
+  children,
+}: {
+  label: string
+  resetLabel: string
+  resetActive: boolean
+  onReset: () => void
+  first?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <>
+      {!first && <div className="border-t border-white/[0.06] mt-1" />}
+      <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">
+        {label}
+      </div>
+      <button
+        type="button"
+        onClick={onReset}
+        aria-pressed={resetActive}
+        className={cn(
+          "w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06]",
+          resetActive ? "text-primary" : "text-muted-foreground/80",
+        )}
+      >
+        {resetLabel}
+      </button>
+      {children}
+    </>
+  )
+}
+
+/** One value inside a facet. Toggles itself; never touches its neighbours. */
+function FacetRow({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2",
+        active ? "text-primary" : "text-muted-foreground/80",
+      )}
+    >
+      {children}
+      {active && <Check className="h-3 w-3 shrink-0 ml-auto" />}
+    </button>
+  )
 }
 
 const dropdownAnim = {
@@ -54,6 +137,7 @@ export function UnifiedExplorer({
   crews,
   filterCrewId, onCrewFilter, filterAgentId, onAgentFilter,
   filterPriority = null, onPriorityFilter,
+  filterStatuses = EMPTY_STATUSES, onStatusFilter,
   onToggleCollapse,
 }: UnifiedExplorerProps) {
   const [projectsOpen, setProjectsOpen] = useState(true)
@@ -69,29 +153,47 @@ export function UnifiedExplorer({
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
   }, [issues])
 
-  // Active facet count for the Filter button badge. Crew / agent / priority
-  // are mutually exclusive in the dropdown (picking one clears the others),
-  // so this is 0 or 1 in practice — but counting keeps it correct if that
-  // ever changes.
+  // Active facet count for the Filter button badge. The facets AND together,
+  // so this really can be 4+ — it used to be 0 or 1 because every pick wiped
+  // the last one, which is a switch wearing a filter's clothes.
   const activeFilterCount =
-    (filterCrewId ? 1 : 0) + (filterAgentId ? 1 : 0) + (filterPriority ? 1 : 0)
+    (filterCrewId ? 1 : 0) +
+    (filterAgentId ? 1 : 0) +
+    (filterPriority ? 1 : 0) +
+    filterStatuses.length
 
-  const displayed = useMemo(() => {
-    let filtered = issues
-    if (selectedProjectId) filtered = filtered.filter((i) => i.project_id === selectedProjectId)
-    if (filterCrewId) filtered = filtered.filter((i) => i.crew_id === filterCrewId)
-    if (filterAgentId) filtered = filtered.filter((i) => i.assignee_id === filterAgentId)
-    if (search) {
-      const q = search.toLowerCase()
-      filtered = filtered.filter((i) =>
-        i.title.toLowerCase().includes(q) ||
-        (i.identifier && i.identifier.toLowerCase().includes(q)) ||
-        (i.assignee_name && i.assignee_name.toLowerCase().includes(q)) ||
-        (i.crew_name && i.crew_name.toLowerCase().includes(q))
-      )
-    }
-    return filtered
-  }, [issues, search, selectedProjectId, filterCrewId, filterAgentId])
+  // The same hook the board and the list run on. The explorer used to
+  // re-implement a subset of it — crew, agent, search, project, and neither
+  // priority nor status — so a priority picked in this very dropdown changed
+  // the board while the list beside it went on showing the rows it excluded.
+  const { visible: displayed } = useFilteredIssues({
+    issues,
+    search,
+    selectedProjectId,
+    filterProjectId: null,
+    filterCrewId,
+    filterAgentId,
+    filterStatuses,
+    filterPriority,
+  })
+
+  // Every facet toggles on its own value and touches nothing else. Clicking
+  // the active value again clears that one facet — the cheapest "undo the
+  // last thing I did" there is, and the reason each section also carries an
+  // explicit reset row.
+  const toggleCrew = (id: string) => onCrewFilter(filterCrewId === id ? null : id)
+  const toggleAgent = (id: string) => onAgentFilter(filterAgentId === id ? null : id)
+  const togglePriority = (p: IssuePriority) => onPriorityFilter?.(filterPriority === p ? null : p)
+  const toggleStatus = (s: MissionStatus) =>
+    onStatusFilter?.(
+      filterStatuses.includes(s) ? filterStatuses.filter((x) => x !== s) : [...filterStatuses, s],
+    )
+  const clearAll = () => {
+    onCrewFilter(null)
+    onAgentFilter(null)
+    onPriorityFilter?.(null)
+    onStatusFilter?.([])
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -106,8 +208,10 @@ export function UnifiedExplorer({
             placeholder="Search issues, agents…"
           />
         </div>
-        {/* Filter dropdown — SidebarFilterButton is the trigger; the popover
-            body is kept as-is. */}
+        {/* Filter dropdown — SidebarFilterButton is the trigger.
+            The facets AND together and the panel stays open after a pick:
+            combining two of them was impossible while each pick cleared the
+            others AND closed the panel. */}
         <div className="relative shrink-0">
           <SidebarFilterButton
             activeCount={activeFilterCount}
@@ -120,58 +224,111 @@ export function UnifiedExplorer({
                 <div className="fixed inset-0 z-40" onClick={() => setFilterDropdownOpen(false)} />
                 <motion.div
                   {...dropdownAnim}
-                  className="absolute right-0 top-9 z-50 bg-card border border-white/[0.1] rounded-lg shadow-xl py-1 min-w-[180px] max-h-[320px] overflow-y-auto"
+                  role="group"
+                  aria-label="Filter issues"
+                  className="absolute right-0 top-9 z-50 bg-card border border-white/[0.1] rounded-lg shadow-xl py-1 min-w-[200px] max-h-[360px] overflow-y-auto"
                 >
-                  <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">Crews</div>
-                  <button
-                    onClick={() => { onCrewFilter(null); onAgentFilter(null); setFilterDropdownOpen(false) }}
-                    className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06]", !filterCrewId && !filterAgentId ? "text-primary" : "text-muted-foreground/80")}
-                  >All crews</button>
-                  {crews.map((c) => {
-                    const crewIcon = getCrewIconDef(c.icon || "users")
-                    const CrewIconComp = crewIcon.icon
-                    return (
+                  <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/[0.06]">
+                    <span className="text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">
+                      Filters
+                    </span>
+                    {activeFilterCount > 0 && (
                       <button
-                        key={c.id}
-                        onClick={() => { onCrewFilter(c.id); onAgentFilter(null); setFilterDropdownOpen(false) }}
-                        className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterCrewId === c.id ? "text-primary" : "text-muted-foreground/80")}
+                        type="button"
+                        onClick={clearAll}
+                        className="ml-auto text-[10px] text-muted-foreground/80 hover:text-foreground"
                       >
-                        <CrewIconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(c.color).text)} />
-                        {c.name}
+                        Clear all
                       </button>
-                    )
-                  })}
+                    )}
+                  </div>
+
+                  {/* Status first: it is the facet a reader looks for here
+                      before any other, and it used to be the one facet this
+                      panel did not have. The selection is the same state the
+                      chip row over the board owns — picking Backlog here
+                      lights the Backlog chip, and the other way round. */}
+                  {onStatusFilter && (
+                    <FacetSection
+                      label="Status"
+                      resetLabel="Any status"
+                      resetActive={filterStatuses.length === 0}
+                      onReset={() => onStatusFilter([])}
+                      first
+                    >
+                      {STATUS_CHIPS.map((s) => (
+                        <FacetRow
+                          key={s}
+                          active={filterStatuses.includes(s)}
+                          onClick={() => toggleStatus(s)}
+                        >
+                          <StatusIcon status={s} className="h-3.5 w-3.5 shrink-0" />
+                          {statusLabel[s] ?? s}
+                        </FacetRow>
+                      ))}
+                    </FacetSection>
+                  )}
+
+                  <FacetSection
+                    label="Crews"
+                    resetLabel="All crews"
+                    resetActive={!filterCrewId}
+                    onReset={() => onCrewFilter(null)}
+                    first={!onStatusFilter}
+                  >
+                    {crews.map((c) => {
+                      const CrewIconComp = getCrewIconDef(c.icon || "users").icon
+                      return (
+                        <FacetRow
+                          key={c.id}
+                          active={filterCrewId === c.id}
+                          onClick={() => toggleCrew(c.id)}
+                        >
+                          <CrewIconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(c.color).text)} />
+                          {c.name}
+                        </FacetRow>
+                      )
+                    })}
+                  </FacetSection>
+
                   {agents.length > 0 && (
-                    <>
-                      <div className="border-t border-white/[0.06] mt-1" />
-                      <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">Agents</div>
+                    <FacetSection
+                      label="Agents"
+                      resetLabel="All agents"
+                      resetActive={!filterAgentId}
+                      onReset={() => onAgentFilter(null)}
+                    >
                       {agents.map((a) => (
-                        <button
+                        <FacetRow
                           key={a.id}
-                          onClick={() => { onAgentFilter(a.id); onCrewFilter(null); onPriorityFilter?.(null); setFilterDropdownOpen(false) }}
-                          className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterAgentId === a.id ? "text-primary" : "text-muted-foreground/80")}
+                          active={filterAgentId === a.id}
+                          onClick={() => toggleAgent(a.id)}
                         >
                           <AgentAvatar seed={a.id} className="h-4 w-4 rounded-full shrink-0" />
                           {a.name}
-                        </button>
+                        </FacetRow>
                       ))}
-                    </>
+                    </FacetSection>
                   )}
+
                   {onPriorityFilter && (
-                    <>
-                      <div className="border-t border-white/[0.06] mt-1" />
-                      <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">Priority</div>
+                    <FacetSection
+                      label="Priority"
+                      resetLabel="Any priority"
+                      resetActive={!filterPriority}
+                      onReset={() => onPriorityFilter(null)}
+                    >
                       {(["urgent", "high", "medium", "low", "none"] as IssuePriority[]).map((p) => (
-                        <button
+                        <FacetRow
                           key={p}
-                          onClick={() => { onPriorityFilter(p); onCrewFilter(null); onAgentFilter(null); setFilterDropdownOpen(false) }}
-                          className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterPriority === p ? "text-primary" : "text-muted-foreground/80")}
+                          active={filterPriority === p}
+                          onClick={() => togglePriority(p)}
                         >
                           <PriorityIcon priority={p} className="h-3.5 w-3.5 shrink-0" />
                           {priorityLabel[p]}
-                        </button>
+                        </FacetRow>
                       ))}
-                    </>
+                    </FacetSection>
                   )}
                 </motion.div>
               </>

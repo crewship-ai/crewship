@@ -85,6 +85,54 @@ Two of these did not work before this landed, and now do:
   patch. The handler now reads it as raw JSON and tells `null` apart from
   absent. A non-number is a `400`.
 
+## The layout
+
+Everything on the surface is a card, including **Run activity** — it used to
+render bare, a heading and a list of steps sitting on the page background in
+the middle of a stack of cards. It is now a card like the rest, with the step
+count as its subtitle and the Running / Waiting-for-approval indicator in the
+header. The timeline itself is shared with the routine run panel and the
+activity bar, which still get the bare rail; the card is opt-in.
+
+On wide viewports (`xl` and up) the **right rail follows you as you scroll**.
+A description longer than the rail used to leave an empty column beside it for
+the rest of the page. The rail is capped at the height of the viewport and
+scrolls internally if it is taller, so a long rail on a short window is still
+reachable. Below `xl` the columns stack and the rail scrolls with the page,
+exactly as before.
+
+## Finding issues: one filter, two places
+
+`/issues` filters by **crew, agent, priority and status**, and the four
+**combine** — "Engineering crew, high priority, still in Backlog" is one
+selection, not three attempts. Each pick used to clear the others, so the
+dropdown behaved like a set of switches; picking a crew left the priority
+alone, picking an agent did not, and no combination survived.
+
+| Where | What it is |
+| --- | --- |
+| **Filter** button in the explorer (left panel) | All four facets. The badge counts every active one. Stays open while you pick, so a second facet is one click away. |
+| **Status chips** over the board | The same status selection, with live counts per status, one click each. |
+
+The two are one piece of state, not two filters: picking **Backlog** in the
+dropdown lights the Backlog chip, and clearing the chip clears it in the
+dropdown. The chips are the quick, count-carrying affordance and disappear
+when an issue detail takes the centre pane; the dropdown is always reachable,
+which is why status belongs in it too.
+
+Clearing:
+
+- Click an active value again to drop **that** facet.
+- **All crews / All agents / Any priority / Any status** resets one facet and
+  leaves the others.
+- **Clear all** in the dropdown header drops everything, as does `Esc` on the
+  board.
+
+The explorer's own issue list runs the same filter as the board
+(`hooks/use-filtered-issues.ts`). It used to apply only crew and agent, so a
+priority picked in the dropdown narrowed the board while the list beside it
+went on showing the rows the filter had excluded.
+
 ## Read-only
 
 The card renders without any of the editors when the host does not pass them —
@@ -112,3 +160,7 @@ nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
 | The project equivalents | `components/features/issues/project-detail-surface.tsx`, `project-card-detail.tsx`, `project-card-editors.tsx` |
 | The URL-backed selection | `hooks/use-issue-detail.ts`, `hooks/use-project-detail.ts` |
 | Shared card primitives | `components/ui/detail` |
+| The filter dropdown + explorer list | `components/features/orchestration/unified-explorer.tsx` |
+| The status chips | `components/features/issues/issues-status-chips.tsx` |
+| The one filter both run | `hooks/use-filtered-issues.ts` |
+| The run activity timeline | `components/features/activity/run-activity-timeline.tsx` |

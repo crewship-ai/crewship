@@ -22,8 +22,14 @@ vi.mock("@/hooks/use-pipelines", () => ({
 vi.mock("@/components/features/issues/tiptap-editor", () => ({
   TiptapEditor: () => <div data-testid="tiptap" />,
 }))
+// Recorded rather than rendered: the timeline owns a journal fetch and a
+// stream, and what this file needs from it is the props the surface asks for.
+const runActivity = vi.hoisted(() => ({ props: [] as Record<string, unknown>[] }))
 vi.mock("@/components/features/activity/run-activity-timeline", () => ({
-  RunActivityTimeline: () => null,
+  RunActivityTimeline: (props: Record<string, unknown>) => {
+    runActivity.props.push(props)
+    return null
+  },
   RUN_WORK_ENTRY_TYPES: ["exec"],
 }))
 vi.mock("next/link", () => ({
@@ -236,5 +242,26 @@ describe("IssueDetailSurface — a stale response cannot smear over a newer one"
     await new Promise((r) => setTimeout(r, 20))
     expect(screen.getByText("comment on ENG-2")).toBeInTheDocument()
     expect(screen.queryByText("comment on ENG-1")).toBeNull()
+  })
+})
+
+describe("IssueDetailSurface — run activity wears the page's chrome", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    runActivity.props.length = 0
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it("asks the timeline for the card variant", async () => {
+    // Every other section of this page is a DetailCard. The timeline renders
+    // bare by default because the routine panel and the activity bar want it
+    // that way, so the issue detail has to ask.
+    const gate = gatedFetch()
+    render(<IssueDetailSurface workspaceId="ws1" identifier="ENG-1" />)
+    await gate.release("ENG-1")
+    await waitFor(() => expect(screen.getByText("Title of ENG-1")).toBeInTheDocument())
+
+    expect(runActivity.props.length).toBeGreaterThan(0)
+    expect(runActivity.props.at(-1)).toMatchObject({ card: true })
   })
 })

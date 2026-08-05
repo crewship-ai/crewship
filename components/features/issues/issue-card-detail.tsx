@@ -376,7 +376,31 @@ export function IssueCardDetail({
           {runActivity && <Appear order={4}>{runActivity}</Appear>}
         </div>
 
-        <div className="flex flex-col gap-4">
+        {/* The rail follows the reader. A description longer than the rail
+            used to end the rail halfway down the page and leave a black
+            column beside it for the rest of the scroll; the reverse case —
+            a rail longer than the body — was already handled by moving the
+            short cards to the full-width foot row.
+
+            Three parts, all of them load-bearing:
+              xl:      below it the columns stack, and a sticky column in a
+                       single-column layout fights the page scroll.
+              self-start  grid children stretch by default, and a stretched
+                       item is as tall as the row: it can never stick.
+              max-h + overflow  a rail taller than the viewport would pin its
+                       head and park its tail permanently below the fold.
+                       The 9rem allowance covers the tallest chrome above a
+                       scroll container that renders this card (top bar +
+                       two sub-bar rows + the detail's back-bar); overshoot
+                       costs a little unused height, undershoot costs
+                       reachability. */}
+        <div
+          data-testid="issue-detail-rail"
+          className={cn(
+            "flex flex-col gap-4",
+            "xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100dvh-9rem)] xl:overflow-y-auto",
+          )}
+        >
           {/* The one tinted card on the page. An issue that has run is
               first of all a thing that either worked or did not, and the
               wash says which before a word of it is read. */}

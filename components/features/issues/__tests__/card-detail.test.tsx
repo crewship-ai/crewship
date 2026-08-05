@@ -194,6 +194,46 @@ describe("IssueCardDetail", () => {
     expect(screen.getByText("exit 1")).toBeInTheDocument()
   })
 
+  it("keeps the rail in view instead of stranding it beside a long description", () => {
+    // A description longer than the rail used to end the rail halfway down
+    // and leave a black column beside it for the rest of the scroll. The
+    // reverse case (a rail longer than the body) was already fixed by moving
+    // the short cards to the full-width foot row.
+    render(
+      <IssueCardDetail
+        issue={issue({ description: "para\n\n".repeat(400) })}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        project={null}
+      />,
+    )
+    const rail = screen.getByTestId("issue-detail-rail")
+    expect(rail.className).toMatch(/\bxl:sticky\b/)
+    // Grid children stretch by default, and a stretched item can never stick.
+    expect(rail.className).toMatch(/\bxl:self-start\b/)
+    // A rail taller than the viewport would pin its head and hide its tail;
+    // capping it and letting it scroll keeps every card reachable.
+    expect(rail.className).toMatch(/\bxl:overflow-y-auto\b/)
+    // Below xl the columns stack, and a sticky column there fights the page
+    // scroll — every sticky utility must carry the breakpoint.
+    expect(rail.className).not.toMatch(/(^|\s)sticky\b/)
+  })
+
+  it("renders the run activity the host passes in", () => {
+    render(
+      <IssueCardDetail
+        issue={issue()}
+        comments={[]}
+        activities={[]}
+        relations={[]}
+        project={null}
+        runActivity={<div data-testid="run-activity-slot" />}
+      />,
+    )
+    expect(screen.getByTestId("run-activity-slot")).toBeInTheDocument()
+  })
+
   it("names the bound routine when there is one", () => {
     render(
       <IssueCardDetail

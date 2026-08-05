@@ -646,6 +646,8 @@ export function OrchestrationLayout({
                         onAgentFilter={setFilterAgentId}
                         filterPriority={filterPriority}
                         onPriorityFilter={setFilterPriority}
+                        filterStatuses={filterStatuses}
+                        onStatusFilter={setFilterStatuses}
                       />
                     </div>
                   </motion.div>
@@ -695,6 +697,14 @@ export function OrchestrationLayout({
                     onAgentFilter={setFilterAgentId}
                     filterPriority={filterPriority}
                     onPriorityFilter={setFilterPriority}
+                    // Status is the same state the chip row over the board
+                    // owns (`filterStatuses`), surfaced in the explorer too:
+                    // one filter, two affordances, rather than two filtering
+                    // surfaces that disagree. The chips carry the live counts
+                    // and are gone the moment an issue detail takes the pane;
+                    // the dropdown is always reachable.
+                    filterStatuses={filterStatuses}
+                    onStatusFilter={setFilterStatuses}
                     onToggleCollapse={() => setLeftCollapsed(true)}
                   />
                 </motion.div>

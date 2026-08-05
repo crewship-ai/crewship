@@ -108,14 +108,20 @@ export interface DetailCardProps {
   bare?: boolean
   /** One muted line under the body — what the setting means in practice. */
   footer?: React.ReactNode
+  /** Handle for tests that need to assert on the card itself, not its body. */
+  "data-testid"?: string
   children: React.ReactNode
 }
 
 export function DetailCard({
-  title, subtitle, icon: Icon, action, tone = "default", className, bare = false, footer, children,
+  title, subtitle, icon: Icon, action, tone = "default", className, bare = false, footer,
+  "data-testid": testId, children,
 }: DetailCardProps) {
   return (
-    <div className={cn("overflow-hidden rounded-xl border bg-card", TONE_BORDER[tone], className)}>
+    <div
+      data-testid={testId}
+      className={cn("overflow-hidden rounded-xl border bg-card", TONE_BORDER[tone], className)}
+    >
       {(title || action) && (
         <div className="flex items-center gap-2 border-b border-hairline px-4 py-2.5">
           {title && (
