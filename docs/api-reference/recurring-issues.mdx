@@ -41,7 +41,7 @@ The cron expression is parsed and validated **at write time** using the standard
 | `priority` | string | One of `low`, `normal`, `high`, `urgent`, or `none`. Defaults to `none` when omitted on create. |
 | `project_id` | string \| null | Optional project to file the new issue under. |
 | `milestone_id` | string \| null | Optional milestone to attach. |
-| `assignee_type` | string \| null | `agent` or `user`. |
+| `assignee_type` | string \| null | `agent` or `user` when an assignee is set. |
 | `assignee_id` | string \| null | The agent or user id. |
 | `labels_json` | string \| null | Opaque JSON array of label ids — applied verbatim to each fire. |
 | `cron_expression` | string | Standard 5-field cron expression. |
@@ -142,7 +142,7 @@ Partial update. When `cron_expression` is changed, the new value is re-parsed an
 | `priority` | string | |
 | `project_id` | string | `""` → NULL. |
 | `milestone_id` | string | `""` → NULL. |
-| `assignee_type` | string | |
+| `assignee_type` | string | `agent` or `user` when setting an assignee; validated with `assignee_id`. |
 | `assignee_id` | string | |
 | `labels_json` | string | |
 | `cron_expression` | string | Re-parsed; invalid → `400`. Forces `next_run` recompute. |
@@ -158,10 +158,13 @@ Partial update. When `cron_expression` is changed, the new value is re-parsed an
 | `401` | Not authenticated. |
 | `403` | Caller is below the `MANAGER` role. |
 | `404` | Recurring issue id not found in this workspace. |
+| `500` | Database or response-loading failure. |
 
 ### `DELETE /api/v1/recurring-issues/{recurringId}`
 
 Hard delete. The recurring template is removed; **already-fired issues are not touched** — they remain in the backlog with whatever state they've reached.
+
+**Request:** No request body. The `{recurringId}` path parameter identifies the recurring-issue template.
 
 <Warning>
   Hard delete, not soft delete — the template row is removed outright. Already-fired backlog issues survive untouched.

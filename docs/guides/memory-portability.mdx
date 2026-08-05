@@ -75,13 +75,6 @@ Export is OWNER/ADMIN only. It reads every private note an agent holds, includin
 
 ## Import
 
-<Warning>
-**Known limitation (#1741).** `--apply` writes into the memory tree from the **host** process. On deployments where that tree is owned by the container user — which is the current default, see #1623 — the server can read it but not write it, and every document is refused with *"write failed on the server"*.
-
-`crewship memory export` is unaffected and works today. Verified end to end on a dev instance: export succeeds against the same directory the import cannot write.
-</Warning>
-
-
 Import reads a source directory **on your machine**, maps it onto Crewship's tiers, shows you the plan, and only writes when you say so.
 
 ```bash
@@ -176,9 +169,32 @@ Export never follows a symlink out of the tree it was asked for. The directory b
 
 | Method | Route | Role |
 |---|---|---|
-| `GET` | `/api/v1/memory/export?crew_id=&agent_slug=` | OWNER/ADMIN |
-| `GET` | `/api/v1/memory/export?format=zip&…` | OWNER/ADMIN — the same bundle as a downloadable archive |
-| `POST` | `/api/v1/memory/import` | OWNER/ADMIN |
+| `GET` | `/api/v1/memory/export?crew_id=&agent_slug=` | OWNER/ADMIN — JSON document payload |
+| `GET` | `/api/v1/memory/export?format=zip&crew_id=…&agent_slug=…` | OWNER/ADMIN — `application/zip` OKF download |
+| `POST` | `/api/v1/memory/import` | OWNER/ADMIN — mapped documents only |
+
+Export JSON is `{ "format", "documents", "skipped" }`. Each document has
+`path`, `tier`, `scope`, `title`, `tags`, `sources`, and `body`; `scope`,
+`title`, `tags`, and `sources` may be omitted when empty. Each skipped item has
+`source` and `reason`. A missing non-zip scope returns an empty document and
+skipped array; a missing zip scope returns `404`.
+
+Import accepts `{ "crew_id", "agent_slug", "documents" }`. Each document
+uses the same fields as export, with `path`, `tier`, and `body` required. The
+request is capped at 32 MiB. A successful request returns `200` even when
+individual documents are rejected or fail:
+
+```json
+{
+  "written": ["AGENT.md"],
+  "rejected": [{ "path": "secrets.md", "kind": "secret" }],
+  "failed": [{ "path": "daily/2026-08-01.md", "reason": "write failed" }]
+}
+```
+
+`rejected` entries may also include `detail`; `failed` entries contain only
+`path` and `reason`. Empty documents are rejected with `400`, an oversized
+request with `413`, and an unknown tier or invalid target with `400`/`404`.
 
 The server reads and writes only its own memory tree. Recognising a foreign layout happens in the CLI, against files on your machine — the wire carries already-mapped documents, so no foreign directory structure ever reaches the server.
 

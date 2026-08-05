@@ -22,7 +22,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 |-------|---------|---------|
 | Core | `list` | List workspace routines |
 | Core | `get <slug>` | Show routine detail with full DSL |
-| Core | `save` | Save a new routine from a JSON file |
+| Core | `save` | Save a new routine from a JSON or YAML file |
 | Core | `run <slug>` | Invoke a routine against the live execution tier |
 | Core | `dry-run <slug>` | Preview what a routine would do without invoking agents |
 | Core | `delete <slug>` | Soft-delete a routine |
@@ -35,6 +35,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Diagnostics | `backtest <slug> --against <version>` | Replay recent successful runs against a candidate version and diff outputs (read-only) |
 | Diagnostics | `budget get/set/summary` | Monthly spend cap vs actual — budget-vs-actual view, not an enforcement gate |
 | Diagnostics | `state list/set/rm/clear <slug>` | Inspect and repair durable cross-run state (watermarks) |
+| Diagnostics | `capabilities <crew>` | Dump the schema and resources needed to author a routine for a crew |
 | Runs | `runs <slug>` | List recent runs from journal |
 | Runs | `records <slug>` | List runs from `pipeline_runs` projection (v83) |
 | Runs | `active` | List in-flight runs across the workspace |
@@ -42,6 +43,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Runs | `logs <run_id>` | Full journal trace for a run (post-mortem) |
 | Runs | `cancel <run_id>` | Cancel an in-flight run |
 | Runs | `watch <slug>` | Stream live run + step events |
+| Runs | `report <run_id>` | Build a shareable Markdown or HTML run report |
 | Runs | `tree <run_id>` | Show a run and its child runs (call_pipeline / deferred / replay) |
 | Runs | `replay <run_id>` | Re-run a prior run with its original inputs (marked `is_replay`) |
 | Runs | `metadata <run_id>` | Mutate a run's metadata scratchpad (set / increment / append) |
@@ -50,9 +52,13 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Failures | `bulk-replay` | Replay all failed runs under a fingerprint (after a fix) |
 | Deferred | `pending ...` | List or cancel deferred (delayed/debounced) routine triggers |
 | Versions | `versions <slug>` | List version history |
+| Versions | `versions show <slug> --version N` | Show one version's full DSL definition |
 | Versions | `diff <slug> --from N --to M` | Unified diff between two versions' definitions |
 | Versions | `rollback <slug> --to N` | Roll back to version N (prints a post-rollback "what changed" diff) |
 | Authoring | `validate [file.json]` | Validate DSL offline (no server call) |
+| Authoring | `init` | Scaffold a routine DSL |
+| Authoring | `schema` | Print the routine DSL JSON Schema |
+| Authoring | `step-run <slug> <step>` | Execute one step against fixtures without a full run |
 | Authoring | `tag <slug> ...` | Add or remove discovery tags on a routine definition |
 | Authoring | `step-override <slug> ...` | Override a step's prompt/model without bumping the routine version |
 | Authoring | `iterate <slug>` | Scored improvement loop: run → grade → optimize → save new version |
@@ -123,6 +129,24 @@ crewship routine save \
 
 ---
 
+## `crewship routine delete <slug>`
+
+Soft-delete a routine after a confirmation prompt. The row is preserved for
+audit, but the routine is no longer available for normal listing or invocation.
+
+```bash
+crewship routine delete my-routine
+crewship routine delete my-routine --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip confirmation. |
+
+Backed by `DELETE /api/v1/workspaces/{ws}/pipelines/{slug}`.
+
+---
+
 ## `crewship routine run <slug>`
 
 Invoke a saved routine against the live execution tier.
@@ -149,11 +173,19 @@ crewship routine run eval-extract-emails --tier-override smart
 | `--delay` | Defer the run N seconds (parked in `pending_runs`; returns `SCHEDULED`) |
 | `--ttl` | Expire a deferred run if not dispatched within N seconds |
 | `--priority` | Dispatch priority for deferred runs (higher fires first) |
+| `--idempotency-key` | Dedupe key; a duplicate within the TTL returns the original run as `DEDUPED` instead of executing again |
+| `--idempotency-ttl` | Dedupe window in seconds for `--idempotency-key` (`0` = server default, 24h) |
 | `--debounce-key` | Coalesce burst triggers sharing this key into one run |
 | `--debounce-window` | Debounce window in seconds (default 30) — fires this long after the last trigger |
 | `--debounce-max` | Max debounce extension in seconds (a continuously-retriggered key still fires by then) |
 
-Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`.
+Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`. Immediate runs
+use `COMPLETED`, `FAILED`, or `CANCELLED`; `WAITING` means the run is parked at
+an approval waitpoint and is not a failure; `DEDUPED` means the idempotency key
+returned the original run. A delayed or debounced invocation returns
+`SCHEDULED` with `pending_id`, `fire_at`, `priority`, and `coalesced` instead
+of a run id. The API uses `200` for immediate results and `202` for this
+deferred receipt.
 
 <Note>
 If the routine hits a `kind: approval` gate, `run` terminates with **`status: WAITING`** (exit 0, not a failure): it prints `paused at approval step: <id>` plus the waitpoint token and the `approve`/`reject` command hints, then releases its execution slot. Resume it with [`crewship routine waitpoints approve|reject <token>`](#crewship-routine-waitpoints). See [HITL waitpoints](/guides/routines#hitl-waitpoints).
@@ -212,6 +244,25 @@ The `--client` view lists the same files **by bare name only** — the
 internal crew id, agent-slug paths, and the `crew files get` fetch hint
 are stripped so the output is safe to forward to a customer. Backed by
 [`GET …/pipeline-runs/{runId}/files`](/api-reference/workspaces#run-window-file-changes).
+
+---
+
+## `crewship routine report <run_id>`
+
+Build a shareable report containing a run's inputs, step outcomes and outputs,
+final output, and (in the operator view) cost and duration. Markdown is the
+default; use `-f html` for a self-contained HTML page.
+
+```bash
+crewship routine report run_abc123
+crewship routine report run_abc123 -f html -o run.html
+crewship routine report run_abc123 --client
+```
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--out`, `-o` | `string` | Write the report to a file instead of stdout. |
+| `--client` | `bool` | Redact run ID, cost, duration, and per-step metadata for a customer-facing report. |
 
 ---
 
@@ -399,6 +450,10 @@ Per-routine monthly spend budget (#1422 item 3) — a cap you set out-of-band fr
 
 ### `routine budget get <slug>`
 
+Requires `crewship login` and a workspace context; the API is a member-scoped
+read. `--format json` returns the response fields exactly, including `month`,
+`spent_usd`, and (when a positive cap exists) `pct_used` and `over_budget`.
+
 ```bash
 crewship routine budget get my-routine
 ```
@@ -417,6 +472,8 @@ crewship routine budget set my-routine --amount 0    # clears the budget
 | `--amount` | ✓ | Monthly cap in USD. `0` clears an existing budget. Negative values are rejected. |
 
 Setting a budget never touches the DSL and never bumps the routine's version history — it's independent of `routine save`/`rollback`.
+The mutation requires the OWNER/ADMIN `manage` capability and returns `200 OK`
+with the same budget object as `budget get`.
 
 ### `routine budget summary`
 
@@ -425,6 +482,9 @@ crewship routine budget summary
 ```
 
 Workspace-wide roll-up: every routine with a budget set **or** spend this month (a routine with neither is excluded — a fresh workspace can have dozens of zero-cost deterministic routines, and listing all of them would be noise). Table columns: `ROUTINE BUDGET SPENT PCT STATUS` (`STATUS` shows `OVER` when spend exceeds the cap), plus a workspace total line. `--format json` returns `{month, routines: [...], total_budget_usd, total_spent_usd}`.
+This is a member-scoped read and returns `200 OK`; each routine row includes
+`slug`, `monthly_budget_usd`, `spent_usd`, and optional `pct_used`/
+`over_budget`.
 
 ---
 
@@ -504,6 +564,25 @@ Falls back with a clear message to `crewship routine runs <slug>` when the serve
 
 ---
 
+## `crewship routine runs <slug>`
+
+List recent invocations from the routine's journal history. The human table
+shows timestamp, event type, severity, run ID, and summary; structured formats
+return the complete rows.
+
+```bash
+crewship routine runs summarize-text
+crewship routine runs summarize-text --limit 100 --format json
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | `int` | `20` | Maximum number of run entries to return (1–500). |
+
+Backed by `GET /api/v1/workspaces/{ws}/pipelines/{slug}/runs`.
+
+---
+
 ## `crewship routine active`
 
 List in-flight runs across the entire workspace (not scoped to a single slug). Useful when triaging "is anything still running?" before a deploy or restart.
@@ -556,6 +635,7 @@ The `DURATION` and `COST` columns surface the per-step `duration_ms` / `cost_usd
 | `--slug` | | Routine slug the run belongs to (optional; enables full journal timeline) |
 | `--full` | `false` | Full per-run journal timeline via the run-logs endpoint (no `--slug` needed) |
 | `--json` | `false` | JSON output for scripting |
+| `--client` | `false` | Redacted client-facing summary with no run ID, mode, cost, tier, or trigger |
 
 Pair with `routine watch` for live observation and `routine logs` for post-hoc forensics.
 
@@ -595,12 +675,13 @@ The cost figure is an order-of-magnitude estimate (flat token-density heuristic,
 
 ---
 
-## `crewship routine validate [file.json]`
+## `crewship routine validate [file.json|file.yaml]`
 
 Offline DSL validation with **no server call** (by default). Reads from the file argument or stdin if absent.
 
 ```bash
 crewship routine validate routine.json
+crewship routine validate routine.yaml
 cat routine.json | crewship routine validate
 crewship routine validate routine.json --json   # machine-readable
 ```
@@ -609,7 +690,7 @@ Exit code 0 = valid, 1 = invalid. CI-friendly:
 
 ```yaml
 - name: Validate routine DSL
-  run: crewship routine validate routines/*.json
+  run: crewship routine validate routines/*.json routines/*.yaml
 ```
 
 Runs the same parse + validate + step-id-uniqueness checks the server would, **except** cross-routine cycle detection (which needs the workspace's full call graph) and slug uniqueness (which needs the DB). Beyond the schema checks, `validate` catches three authoring mistakes that used to only surface at `save` or the first run:
@@ -649,6 +730,75 @@ A typo'd `agent_slug` (or an `outcomes.grader_agent_slug`) not in the resolved s
 ```
 
 This matters most for the `capabilities | claude -p → validate → fix` authoring loop (see [Routines cookbook](/guides/routines-cookbook)): an AI author fixing every reported field in one revision converges in fewer round-trips than fixing one error, re-running, hitting the next one, and repeating. The one exception is the step-count bound (`MaxPipelineSteps`, 500) — a definition already over that limit fails immediately on its own, since walking the rest of the checks against an oversized definition isn't meaningful.
+
+## `crewship routine capabilities <crew>`
+
+Dump the authoring bundle for a crew: the routine DSL schema, agent slugs,
+container CLIs and datastores, connected integrations and enabled tools, and
+wired runtimes. The human view is a summary; JSON/YAML/NDJSON include the full
+bundle, including the schema.
+
+```bash
+crewship routine capabilities backend-team
+crewship routine capabilities backend-team --format json
+```
+
+Backed by `GET /api/v1/crews/{crewId}/capabilities`.
+
+## `crewship routine init`
+
+Scaffold an editable routine DSL locally. With no flags it prints a minimal
+one-step `agent_run` skeleton; `--script` emits a deterministic script-backed
+scaffold; `--from` clones an existing routine definition and requires the
+server. `--from` and `--script` are mutually exclusive.
+
+```bash
+crewship routine init -o routine.json
+crewship routine init --script -o routine.json
+crewship routine init --from summarize-text -o copy.json
+```
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--from` | `string` | Clone an existing routine's definition by slug. |
+| `--script` | `bool` | Scaffold a script-backed routine. |
+| `--output`, `-o` | `string` | Write to a file instead of stdout. |
+
+## `crewship routine schema`
+
+Print the published draft 2020-12 routine DSL JSON Schema, or write it to a
+file for editor autocomplete and offline authoring.
+
+```bash
+crewship routine schema
+crewship routine schema -o routine.schema.json
+```
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--output`, `-o` | `string` | Write the schema to a file instead of stdout. |
+
+## `crewship routine step-run <slug> <step>`
+
+Execute one `agent_run`, `http`, `script`, or `transform` step in isolation,
+without a DAG or persisted run record. `wait`, `notify`, `call_pipeline`, and
+`code` steps are unsupported. HTTP and script steps still perform their real
+egress/container work.
+
+```bash
+crewship routine step-run parse-invoice extract --input @sample.json
+crewship routine step-run reconcile-invoices reconcile --input @sample.json --outputs @upstream.json --tier-override fast
+```
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--input` | `string` | JSON input object, inline or `@file.json`. |
+| `--outputs` | `string` | JSON `step_id` → output fixture for upstream references, inline or `@file.json`. |
+| `--tier-override` | `string` | Agent tier override: `trivial`, `fast`, `moderate`, or `smart`; ignored for deterministic steps. |
+
+The human output includes the PASS/FAIL validation verdict and output; JSON,
+YAML, and NDJSON return the structured result. Backed by
+`POST /api/v1/workspaces/{ws}/pipelines/{slug}/step_run`.
 
 ---
 
@@ -730,6 +880,7 @@ crewship routine watch summarize-text --run-id <id>
 | `--run-id` | | Filter to events for one run_id only |
 | `--interval` | 2s | Poll interval (Go duration format) |
 | `--since` | 5m | Lookback window on first poll (Go duration; currently informational — full window per page) |
+| `--progress` | false | Replace the raw event tail with one updating client-facing line showing step progress, cost, and elapsed time; exits when the run finishes. |
 
 Ctrl-C / SIGTERM exit cleanly.
 
@@ -742,6 +893,21 @@ crewship routine versions summarize-text
 ```
 
 **Output columns:** VERSION, HEAD, PARENT, HASH, AUTHOR, CREATED, SUMMARY. The `*` marker tags the current HEAD.
+
+### `crewship routine versions show <slug> --version N`
+
+Show one immutable version's metadata and full DSL definition.
+
+```bash
+crewship routine versions show summarize-text --version 3
+crewship routine versions show summarize-text --version 3 | jq '.definition'
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--version` | ✓ | Target positive version number. |
+
+Backed by `GET /api/v1/workspaces/{ws}/pipelines/{slug}/versions/{version}`.
 
 ## `crewship routine diff <slug> --from N --to M`
 
@@ -798,6 +964,7 @@ crewship routine iterate summarize-text \
 | `--inputs` | | | JSON inputs passed to every run |
 | `-y`, `--yes` | | `false` | Skip the per-round save confirmation |
 | `--run-timeout` | | `10m` | Timeout for each synchronous routine run |
+| `--agent-timeout` | | `10m` | Timeout for each grader or optimizer agent call |
 | `--max-turns` | | server default | Max turns for grader/optimizer agent calls |
 
 Guardrails, by construction:
@@ -988,7 +1155,7 @@ List or cancel deferred routine triggers — the parked dispatches created by `r
 crewship routine pending list
 ```
 
-Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending`. **Output columns:** PENDING ID, ROUTINE, PRIORITY, DEBOUNCE KEY, FIRES AT. Nothing pending prints `No deferred triggers pending.`
+Requires login and workspace context. Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending` (`200 OK`, member-scoped), which returns at most 100 not-yet-fired rows with `id`, `pipeline_slug`, optional `debounce_key`, `priority`, and RFC3339Nano `fire_at`. **Output columns:** PENDING ID, ROUTINE, PRIORITY, DEBOUNCE KEY, FIRES AT. Nothing pending prints `No deferred triggers pending.`
 
 ### `pending cancel <pending_id>`
 
@@ -996,7 +1163,11 @@ Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending`. **Output columns:** P
 crewship routine pending cancel pend_abc123
 ```
 
-Cancels a trigger before it fires. Backed by `POST /api/v1/workspaces/{ws}/pipelines/pending/{pending_id}/cancel`.
+Cancels a trigger before it fires. Requires the `update` capability (MANAGER+).
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/pending/{pending_id}/cancel`,
+which returns `200 OK` with `{ "ok": true, "cancelled": "<pending_id>" }`.
+Missing, expired, already-fired, or already-cancelled items return `404`;
+missing database wiring returns `503`.
 
 ---
 
@@ -1012,7 +1183,7 @@ crewship routine schedules list --slug summarize-text
 crewship routine schedules list --json
 ```
 
-**Output columns:** ID, NAME, ROUTINE, CRON, TZ, ENABLED, WAKE, NEXT
+**Output columns:** ID, NAME, ROUTINE, CRON, TZ, ENABLED, FAILS, WAKE, NEXT, MISSED
 
 A schedule pinned to a specific routine version shows the pin in the ROUTINE column as `slug@vN` (e.g. `daily-digest@v3`). The `--json` output carries it as `target_pipeline_version`, plus `last_status` (`COMPLETED` | `FAILED` | `SKIPPED` | `WAITING` — `WAITING` means the run parked on an approval gate, which is healthy, not a failure).
 
@@ -1041,6 +1212,7 @@ crewship routine schedules create \
 | `--wake-inputs` | | JSON object passed to the wake probe on each tick (requires `--wake-slug`). |
 | `--fail-closed` | | Wake gate: **hold** the run when the probe errors, times out, or finishes non-`COMPLETED`, instead of failing open (requires `--wake-slug`). Default off — a broken probe fires the main run and records `last_wake_status: ERROR`. With this on, that outcome records `HELD` and no main run fires. Use it when the gate must *suppress* an autonomous run, not just save tokens. |
 | `--catchup` | | Missed-run catch-up policy for when the schedule falls overdue by more than one occurrence: `skip` / `once` (default) / `all`. See [Missed-run catch-up](/guides/routines#missed-run-catch-up). Ignored by wake-gated schedules, which always behave like `once`. |
+| `--max-failures` | `0` | Circuit breaker: consecutive failed fires before the schedule auto-disables. The CLI sends an explicitly supplied positive value; when omitted, the server default is `5`. |
 
 `create` is the only command that mints a schedule ID, and every other
 schedule command takes that ID with no prefix-matching fallback — so to
@@ -1055,11 +1227,24 @@ crewship routine schedules now "$id" --format json
 
 ### `schedules update <id>`
 
-Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --wake-slug / --wake-inputs / --no-wake / --fail-closed` to update. An existing version pin survives updates that don't mention it; `--pin-version N` re-pins, `--unpin` removes the pin so fires track head again. Likewise the wake gate is preserved unless touched: `--wake-slug` sets/replaces the probe, `--wake-inputs` replaces its inputs, and `--no-wake` removes the gate so the schedule fires on every tick again (`--no-wake` and `--wake-slug`/`--wake-inputs`/`--fail-closed` are mutually exclusive). The fail-closed policy is preserved unless mentioned: `--fail-closed` holds the run on a probe failure, `--fail-closed=false` restores fail-open.
+Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --catchup / --pin-version / --unpin / --max-failures / --wake-slug / --wake-inputs / --no-wake / --fail-closed` to update. `--max-failures` is the positive consecutive-failure threshold at which the schedule auto-disables; omitting it keeps the existing threshold. An existing version pin survives updates that don't mention it; `--pin-version N` re-pins, `--unpin` removes the pin so fires track head again. Likewise the wake gate is preserved unless touched: `--wake-slug` sets/replaces the probe, `--wake-inputs` replaces its inputs, and `--no-wake` removes the gate so the schedule fires on every tick again (`--no-wake` and `--wake-slug`/`--wake-inputs`/`--fail-closed` are mutually exclusive). The fail-closed policy is preserved unless mentioned: `--fail-closed` holds the run on a probe failure, `--fail-closed=false` restores fail-open. `--catchup` sets `skip`, `once`, or `all`; omitting it preserves the current policy.
 
 ### `schedules enable <id>` / `schedules disable <id>`
 
 Toggle without altering the cron expression.
+
+## `crewship routine schedules enable <schedule_id>`
+
+Enable a schedule. The next scheduler tick can fire it; the cron expression
+and other schedule settings are unchanged.
+
+```bash
+crewship routine schedules enable psched_abc123
+```
+
+The command takes exactly one schedule ID and has no command-specific flags.
+Human output is `Schedule <schedule-id> enabled.` With `--format json`, the
+acknowledgement contains the schedule `id` and `enabled: true`.
 
 ### `schedules now <id>`
 
@@ -1105,6 +1290,8 @@ crewship routine webhooks list --slug pr-review-structured
 
 **Output columns:** ID, NAME, ROUTINE, HMAC, FIRES, LAST STATUS, RATE/MIN, ENABLED
 
+The explicit `--json` flag is a deprecated alias for `--format json`.
+
 A version-pinned webhook shows the pin in the ROUTINE column as `slug@vN`. LAST STATUS is `COMPLETED` | `FAILED` | `DEDUPED` | `WAITING` (`WAITING` = the dispatched run parked on an approval gate — healthy, resumes on approval).
 
 ### `webhooks create`
@@ -1134,6 +1321,25 @@ crewship routine webhooks create \
 ### `webhooks url <id>`
 
 Print the public URL without re-revealing the signing secret.
+
+## `crewship routine webhooks url <webhook_id>`
+
+Print the public URL for an existing webhook without revealing its signing
+secret. The command lists webhooks in the active workspace and matches the
+exact ID.
+
+```bash
+crewship routine webhooks url wh_abc123
+crewship routine webhooks url wh_abc123 --base-url https://crewship.example.com
+```
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--base-url` | `string` | Override the public base URL. |
+
+The default base URL comes from the configured server (or
+`CREWSHIP_SERVER`); the printed value is `<base-url>/api/v1/webhooks/<escaped-token>`.
+If the ID is not found, the command exits with `webhook <id> not found`.
 
 ### `webhooks delete <id>`
 

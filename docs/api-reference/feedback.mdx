@@ -85,6 +85,15 @@ GET /api/v1/feedback?trace_id=<id>
 
 Exactly one of `message_id` or `trace_id` must be provided. Returns only rows authored by the caller — no cross-user visibility.
 
+**Query parameters:**
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `message_id` | string | one of `message_id` / `trace_id` | Return feedback for one chat message. |
+| `trace_id` | string | one of `message_id` / `trace_id` | Return feedback joined to one OTel trace. |
+
+The request has no body. Supplying both filters is rejected with `400`.
+
 **Response:** `200 OK`
 
 ```json

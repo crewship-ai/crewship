@@ -75,6 +75,14 @@ The per-IP bucket sizes — and every other tunable limiter in the system (login
 - **CLI:** `crewship admin ratelimits list | set <key> <value> | reset <key>` (see the [admin CLI reference](/cli/admin)).
 - **API:** `GET /api/v1/admin/rate-limits`, `PUT /api/v1/admin/rate-limits/{key}` (`{"value": N}`), `DELETE /api/v1/admin/rate-limits/{key}`.
 
+These admin endpoints require an authenticated workspace context and ADMIN or
+OWNER (`manage`) permission. GET has no body and returns `200` with a
+`limiters` array; PUT takes `{"value": N}` and returns `200` with the updated
+limiter; DELETE has no body and returns `200` with the reset limiter. Invalid
+JSON or out-of-range values return `400`, unknown keys return `404`, and an
+unavailable configuration store returns `503` (all admin routes return `403`
+for an insufficient role). See the [Admin API rate-limit contract](/api-reference/admin#rate-limits).
+
 Overrides persist in the instance-global `rate_limit_overrides` table and apply immediately: the per-IP HTTP buckets are retuned live (`RateLimiter.SetReqPerMin`); the other limiters read their value on next use. The registry of keys, defaults, and bounds lives in `internal/ratelimitcfg`. A value out of a limiter's `[min, max]` range is rejected (`400`); an unknown key is `404`.
 
 <Warning>

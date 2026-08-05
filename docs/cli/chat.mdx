@@ -79,6 +79,40 @@ crewship chat steer c_abc123 -m "use the staging DB, not prod"
 | --- | --- | --- |
 | `--role <member\|owner>` | `member` | Role to grant the participant. Any value other than `owner` is stored as `member`. |
 
+## `crewship chat delete <chat-id>`
+
+Delete a chat session, its messages, and read cursors. The operation is
+irreversible and requires confirmation unless `--yes` is supplied. The agent
+is resolved automatically; use `--agent` to select it explicitly.
+
+```bash
+crewship chat delete c_abc123 --yes
+crewship chat delete c_abc123 --agent atlas
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--yes` | `false` | Skip the interactive confirmation prompt. |
+| `--agent <slug-or-id>` | (auto) | Override automatic chat-to-agent resolution. |
+
+Human output is `Chat <chat-id> deleted.` Machine output is
+`{"chat_id":"<chat-id>","status":"deleted"}` with `--format json` (or the
+equivalent YAML object with `--format yaml`).
+
+## `crewship chat react remove <chat-id> <message-id> <emoji>`
+
+Remove your emoji reaction from a message. Aliases are `rm` and `delete`.
+
+```bash
+crewship chat react remove c_abc123 msg_7a3b "👍"
+crewship chat react rm c_abc123 msg_7a3b "👍"
+```
+
+The command takes exactly the chat ID, message ID, and emoji; it has no
+command-specific flags. On success it prints
+`Removed <emoji> from message <message-id>.` Repeating the operation is safe
+because reactions are idempotent per chat, message, emoji, and user.
+
 ## Examples
 
 ### Print a transcript

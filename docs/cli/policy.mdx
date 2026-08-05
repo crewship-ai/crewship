@@ -95,6 +95,7 @@ crewship policy set --crew sandbox --level strict --behavior block
 | `--level` | `string` | | Autonomy level (required). One of `strict`, `guided`, `trusted`, `full`. |
 | `--behavior` | `string` | `warn` | Behavior mode. One of `warn`, `block`. |
 | `--reason` | `string` | | Operator-supplied reason. Required when `--level=full`. |
+| `--max-ephemeral` | `int` | `-1` | Per-crew live ephemeral-agent quota, from `0` to `100`; may be set alone or with `--level`. |
 | `--yes` | `bool` | `false` | Skip the loose-transition confirmation prompt. |
 
 <Warning>

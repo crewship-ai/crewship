@@ -14,13 +14,13 @@ The backend endpoint behind this kind is:
 POST /api/v1/crew-templates/{slug}/deploy
 ```
 
-It writes the crew + all agents in a **single transaction** and rejects re-deploying onto an existing crew (HTTP 409, `errCrewSlugConflict`). There is **no** `PATCH /deploy`, **no** `DELETE /deploy`, and **no** diff-and-reapply path. Once a crew exists under the `crew_slug_override` slug, this kind has nothing left to do.
+It writes the crew + all agents in a **single transaction** and rejects re-deploying onto an existing crew (HTTP 409, `errCrewSlugConflict`). There is **no** PATCH or DELETE endpoint for this operation, and no diff-and-reapply path. Once a crew exists under the `crew_slug_override` slug, this kind has nothing left to do.
 
 As a consequence the planner emits **only two actions**:
 
 | Situation                                                          | Plan action       | What happens                            |
 |--------------------------------------------------------------------|-------------------|------------------------------------------|
-| Source template exists, override slug free, `deploy: true`         | `Create`          | POST `/deploy` with the body below       |
+| Source template exists, override slug free, `deploy: true`         | `Create`          | POST `/api/v1/crew-templates/{slug}/deploy` with the body below |
 | Override slug already names a crew                                 | `Unchanged`       | No HTTP traffic                          |
 | `deploy: false` (any state)                                        | `Unchanged`       | No HTTP traffic, warning in description  |
 | Source template missing                                            | Plan returns error | Apply aborts before any mutation        |
@@ -192,7 +192,7 @@ Plan decision table:
 
 | `spec.deploy` | Override slug occupied? | Source template present? | Action     | Notes |
 |---------------|--------------------------|--------------------------|------------|-------|
-| `true`        | no                       | yes                      | `Create`   | POST `/deploy` |
+| `true`        | no                       | yes                      | `Create`   | POST `/api/v1/crew-templates/{slug}/deploy` |
 | `true`        | yes                      | yes                      | `Unchanged` | No HTTP traffic |
 | `true`        | —                        | no                       | Plan error | Apply aborts before any mutation |
 | `false`       | no                       | yes                      | `Unchanged` | Warning: "deploy=false — no action" |

@@ -39,6 +39,8 @@ Discover the features and runtimes a crew can pin in its `devcontainer_config`.
 GET /api/v1/features/catalog?search=…
 ```
 
+**Auth:** Authenticated request. **Request:** optional `search` query parameter; no body. **Response:** JSON object with a `features` array. **Statuses:** `200 OK` on success; the catalog remains available through the documented fallback when the dynamic fetch fails.
+
 Lists devcontainer features Crewship can install. The dynamic fetcher pulls from upstream registries (`ghcr.io/devcontainers/features/*`, `ghcr.io/devcontainers-extra/features/*`, `ghcr.io/crewship-ai/features/*`); when that fails, the handler falls back to `internal/devcontainer.FallbackCatalog` so the UI is never empty.
 
 `?search=` filters by name, description, or category (server-side substring).
@@ -74,6 +76,8 @@ Unknown publishers (anything outside the three allowlisted prefixes) are rejecte
 ```
 GET /api/v1/runtimes/catalog?search=…
 ```
+
+**Auth:** Authenticated request. **Request:** optional `search` query parameter; no body. **Response:** JSON object with a `runtimes` array. **Statuses:** `200 OK` on success; the catalog uses the documented fallback when the dynamic fetch fails.
 
 Lists the mise-managed runtimes (Node, Python, Go, Terraform, kubectl, …) the workspace can pin in `devcontainer_config.mise`. Falls back to `FallbackRuntimeCatalog` when the dynamic fetcher fails.
 
@@ -117,6 +121,8 @@ Inspect, trigger, rebuild, and recycle a crew's cached image and runtime contain
 ```
 GET /api/v1/crews/{crewId}/provision
 ```
+
+**Auth:** Authenticated workspace request; `crewId` must belong to that workspace. **Request:** `crewId` path parameter; no body. **Response:** JSON provision-status object described below. **Statuses:** `200 OK`; `404 Not Found` when the crew is not in the workspace; `503 Service Unavailable` when provisioning is not configured.
 
 **Response:** `200 OK`. Always-present fields come from the `crews` row; the `step` / `total` / `message` / `steps` / `log_tail` / `started_at` / `completed_at` / `error` fields appear **only** when an in-memory job is currently running or recently finished for this crew.
 
@@ -166,6 +172,8 @@ GET /api/v1/crews/{crewId}/provision
 POST /api/v1/crews/{crewId}/provision
 ```
 
+**Auth:** Authenticated caller with the `create` role action. **Request:** `crewId` path parameter; no body. **Response:** JSON `{ "status": "started", "message": "…" }`. **Statuses:** `202 Accepted`; `400`, `403`, `404`, `409`, `429`, `500`, or `503` for the conditions listed below.
+
 Requires the `create` role action (OWNER, ADMIN, MANAGER). Returns 202 immediately and runs the pipeline in a background goroutine; poll the status endpoint for progress.
 
 **Response:** `202 Accepted`
@@ -195,6 +203,8 @@ Requires the `create` role action (OWNER, ADMIN, MANAGER). Returns 202 immediate
 POST /api/v1/crews/{crewId}/rebuild
 ```
 
+**Auth:** Authenticated caller with the `create` role action. **Request:** `crewId` path parameter; no body. **Response:** the same JSON shape as the trigger endpoint. **Statuses:** `202 Accepted`; `403`, `404`, `409`, `429`, `500`, or `503` when the corresponding provisioning condition applies.
+
 Clears the cached image marker on the crew row and triggers a fresh provision. Use when upstream features publish breaking updates under the same tag.
 
 <Warning>
@@ -208,6 +218,8 @@ Clears the cached image marker on the crew row and triggers a fresh provision. U
 ```
 POST /api/v1/crews/{crewId}/restart-agents
 ```
+
+**Auth:** Authenticated caller with the `update` role action. **Request:** `crewId` path parameter; no body. **Response:** JSON `{ "restarted": <count> }`. **Statuses:** `200 OK`; `400`, `403`, `404`, `500`, or `503` for the conditions listed below.
 
 Force-removes the crew's runtime container so the next agent exec recreates it from the current `cached_image` — without rebuilding the image. Used when an env-var change should take effect without the cost of a new image. Idempotent: when no container is running it still returns `200 OK` with `{ "restarted": 0 }`.
 
@@ -234,6 +246,8 @@ Inspect and prune the locally built `crewship-cache:*` images. This registry is 
 ```
 GET /api/v1/cache/images
 ```
+
+**Auth:** Authenticated workspace request. **Request:** no body or required query parameters. **Response:** JSON object with an `images` array. **Statuses:** `200 OK`; `500` on Docker image-list failure; `503` when Docker is not configured.
 
 **Response:** `200 OK`
 
@@ -266,6 +280,8 @@ Images orphaned from any crew (i.e. `referenced_by` is empty) are eligible for t
 ```
 DELETE /api/v1/cache/images/{tag}
 ```
+
+**Auth:** Authenticated caller with the `delete` role action (ADMIN or OWNER). **Request:** `tag` path parameter and optional `force=true` query parameter; no body. **Response:** JSON deletion result with `tag` and `status`. **Statuses:** `200 OK`; `400` for an invalid tag, `403` for insufficient role, `409` when a referenced image is not forced, `500` for Docker removal failure, or `503` when Docker is not configured.
 
 Removes a cached image. By default refuses to delete an image still referenced by a live crew (returns `409 Conflict`). Pass `?force=true` to delete anyway.
 

@@ -14,6 +14,15 @@ Routes are registered in `internal/api/router_admin.go` (domain split in May 202
   Every endpoint requires authentication, workspace context, and **OWNER** or **ADMIN** on the workspace. The `metrics` endpoint is stricter still — see its [authorisation warning](#get-apiv1adminbackupsmetrics).
 </Note>
 
+## Authentication and response contract
+
+Every request uses the authenticated workspace context; no endpoint accepts a
+workspace ID in its body. Requests without a body are marked explicitly below,
+and path-based operations take `path` as a query parameter. **Statuses:**
+successful JSON operations return `200` or `201`, successful deletion returns
+`204`, and invalid input, authentication, authorization, conflicts, and server
+failures use the status codes listed in each operation's error table.
+
 ## Endpoints
 
 | Method | Endpoint | Purpose |
@@ -230,6 +239,8 @@ Return the plaintext MANIFEST for a bundle without decrypting the payload.
 
 ### Query
 
+The request has no body. **Response:** `200 OK` with the manifest JSON.
+
 | Parameter | Required | Notes |
 |---|---|---|
 | `path` | ✓ | Absolute path. Must live under `~/.crewship/backups` and belong to the caller's workspace. |
@@ -243,6 +254,8 @@ Returns the manifest JSON as produced by `backup.Inspect` (`internal/backup/mani
 Recompute the sealed-payload SHA-256 and compare against the MANIFEST. Does not decrypt. Streams the payload from a temp file so peak heap is bounded by the zstd decoder window.
 
 ### Query
+
+The request has no body. **Response:** `200 OK` with the verification object.
 
 | Parameter | Required | Notes |
 |---|---|---|
@@ -295,6 +308,10 @@ Audit action (per deleted bundle, non-dry-run only): `backup.rotate`.
 ### GET /api/v1/admin/backups/download
 
 Stream the raw bundle bytes over HTTP for `scp`-free transfer off-box.
+
+The request has no body. **Response:** `200 OK` with an `application/zstd`
+attachment; `400` is returned for a missing or unsafe `path`, `404` for a
+bundle outside the workspace or no longer on disk, and `500` for a file error.
 
 Response headers:
 
@@ -377,6 +394,10 @@ Audit action: `backup.restore` (or `backup.restore.dry_run` for `dry_run: true`)
 ### DELETE /api/v1/admin/backups
 
 Delete a bundle from disk. Returns `204 No Content`.
+
+The request has no body. **Response:** `204 No Content`; `400` indicates a
+missing or unsafe `path`, `404` indicates a bundle outside the workspace, and
+`500` indicates a delete failure.
 
 ### Query
 

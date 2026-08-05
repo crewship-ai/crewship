@@ -81,7 +81,9 @@ Deletes the flag **definition** itself, not just this workspace's override — t
 
 ## API
 
-The CLI is a thin wrapper over six endpoints:
+The CLI is a thin wrapper over six endpoints. Each request uses the current
+authenticated workspace context; these routes do not take a `workspace_id`
+query parameter.
 
 | Verb | Path | Wrapped by |
 |------|------|------------|
@@ -97,7 +99,9 @@ Flag definition create/update (`POST` / `PATCH`) intentionally still has no CLI 
 ## Common errors
 
 - **`API error (404): Feature flag not found`** — the `<key>` you passed doesn't exist on this instance. Run `crewship feature-flag list` to see the catalog.
+- **`API error (401)`** — authenticate with `crewship login` (or configure a CLI token) and select a workspace.
 - **`API error (403): Forbidden`** — override writes and `delete` require `OWNER` / `ADMIN` (`canRole "manage"`). MEMBER and VIEWER roles can only `list`.
+- **`API error (400)`** — the override request is malformed or has no explicit boolean `enabled` value; `inherit` and `delete` also reject an empty key.
 
 ## See also
 

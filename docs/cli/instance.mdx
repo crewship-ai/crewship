@@ -97,7 +97,16 @@ Deleting these would break re-bootstrap on the next restart, so they cannot be r
 | `PUT` | `/api/v1/instance/settings/{key}` | `settings set` |
 | `DELETE` | `/api/v1/instance/settings/{key}` | `settings delete` |
 
-All four require `OWNER` / `ADMIN` (`canRole "manage"`).
+`settings list` and `settings get` require an authenticated workspace member
+with `MANAGER`, `ADMIN`, or `OWNER` role. `settings set` and `settings delete`
+require `ADMIN` or `OWNER`. The CLI supplies the workspace context from the
+current login; the API routes do not take a `workspace_id` query parameter.
+
+Without authentication the API returns `401`; an insufficient role returns
+`403`. Successful list/get/set responses are `200 OK`; delete returns `204 No
+Content` and the CLI prints its success message. Missing keys return `404`,
+invalid set input returns `400`, and protected bootstrap keys return `403` with
+`application/problem+json`.
 
 ## See also
 

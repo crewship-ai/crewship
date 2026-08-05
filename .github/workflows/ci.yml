@@ -911,6 +911,27 @@ jobs:
           fi
           echo "openapi.gen.json matches the registered routes."
 
+      # Documentation contract gate (#1769 review). The release-1.0 audit
+      # established that every API operation and CLI command is documented,
+      # with concrete request/response schemas and local auth/request/
+      # response/status evidence. Nothing HELD that: the tool only wrote a
+      # report and always exited 0, so the next PR could add an undocumented
+      # route and the numbers would silently stop being true — the same shape
+      # of defect as a green check that never ran.
+      #
+      # -strict re-derives the inventory from the tree and fails on any gap,
+      # naming the offending operations/commands. It runs after the freshness
+      # check above so a stale spec is reported as staleness rather than as a
+      # documentation gap.
+      #
+      # The tool shells out to `go run ./cmd/crewship commands --format json`
+      # for the CLI side. No daemon, no Docker, no network — but it does
+      # compile cmd/crewship, so it depends on the setup-go-embed step above
+      # having staged web/out; without it the build fails on the go:embed
+      # directive rather than on anything this gate is about.
+      - name: API and CLI documentation is complete
+        run: go run ./scripts/docs-inventory -strict
+
   # ── Full binary build (push to main only — verifies embed works) ──
   #
   # Stays push-only to conserve runner minutes. The Go job already catches

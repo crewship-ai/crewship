@@ -1,0 +1,19 @@
+---
+title: "now"
+description: "Show live workspace status from the CLI."
+icon: "activity"
+---
+
+## `crewship now`
+
+Shows running missions, idle agents, pending approvals, and host capacity.
+It fetches the workspace views concurrently and reports partial errors without
+hiding data that did load.
+
+```bash
+crewship now
+crewship now --format json
+```
+
+Requires authentication and a workspace. JSON/YAML/NDJSON output follows the
+global output format behavior.

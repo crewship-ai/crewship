@@ -10,7 +10,7 @@ Connectors are manifest-driven integrations from the built-in catalogue (`intern
 
 ## `crewship connector list`
 
-List the catalogue: id, name, category, auth mode.
+List the catalogue: id, name, category, auth mode, and description.
 
 ```bash
 crewship connector list --format json | jq '.[].id'
@@ -29,8 +29,11 @@ Probe credentials against the provider **without persisting them**. Exits non-ze
 | `--field` | `NAME=value` (repeatable) | Credential form values for the verify probe. |
 
 ```bash
-crewship connector verify slack --field SLACK_TOKEN=xoxb-… && echo ok
+crewship connector verify slack --field bot_token=xoxb-… --field team_id=T123 && echo ok
 ```
+
+Field names come from the connector manifest. Slack currently requires
+`bot_token` and `team_id`; values passed to `verify` are not persisted.
 
 ## `crewship connector install <id>`
 
@@ -43,7 +46,7 @@ Install the connector as an integration. Workspace scope by default; `--crew` in
 | `--name` | string | User-facing label (default: connector name). |
 
 ```bash
-crewship connector install slack --field SLACK_TOKEN=xoxb-… --crew backend
+crewship connector install slack --field bot_token=xoxb-… --field team_id=T123 --crew backend
 ```
 
 OAuth-mode connectors return a `next_step` + `oauth_url` — finish those in a browser; the CLI prints the URL.

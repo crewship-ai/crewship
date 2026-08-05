@@ -26,6 +26,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}`](#delete-workspace) | Soft-delete the workspace + cascade (`OWNER` only) |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members`](#list-members) | All members of the workspace |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/members`](#add-member) | Add an existing user by user ID |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/members/provision`](#provision-member) | Create or add a member by email |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}`](#remove-member) | Remove a member (not the `OWNER`) |
 | `PATCH` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}`](#change-member-role) | Change a member's role (`MANAGER+`, ladder-guarded) |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities`](#get-member-capabilities) | Resolved capability set for one member |
@@ -95,6 +96,9 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
     "created_at": "2026-04-12T09:18:22Z",
     "updated_at": "2026-05-09T14:02:11Z",
     "currentUserRole": "OWNER",
+    "currentUserCapabilities": ["*"],
+    "allow_privileged_credentials": false,
+    "run_retention_days": null,
     "_count": { "crews": 4, "agents": 12, "members": 7 },
     "_count_crews": 4,
     "_count_agents": 12,
@@ -111,6 +115,9 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
 | `logo_url` | string? | URL to workspace logo |
 | `preferred_language` | string? | Canonical language name (e.g. `"Czech"`, `"English"`) -- see [language list](#preferred_language-values) |
 | `currentUserRole` | string | Caller's role in this workspace (`OWNER` / `ADMIN` / `MANAGER` / `MEMBER` / `VIEWER`) |
+| `currentUserCapabilities` | string[] | Resolved capabilities for the caller. |
+| `allow_privileged_credentials` | boolean | Whether privileged crew sidecars may load workspace credentials. |
+| `run_retention_days` | integer? | Workspace pipeline-run retention override; `null` uses the instance default. Present on Update responses. |
 | `_count` | object | Canonical nested usage counts: `{ crews, agents, members }`. Always present (zeros included). Prefer this over the flat keys below. |
 | `_count_crews` | integer | Deprecated flat alias for `_count.crews` (omitted when `0`; retained one release for back-compat) |
 | `_count_agents` | integer | Deprecated flat alias for `_count.agents` (omitted when `0`) |
@@ -180,6 +187,8 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `name` | string | 2-100 chars |
 | `slug` | string | 2-50 chars; must remain unique across all workspaces |
 | `preferred_language` | string | Canonical name or ISO code; empty string clears the field |
+| `allow_privileged_credentials` | boolean | Explicitly allow credentials in privileged crew sidecars. |
+| `run_retention_days` | integer | Positive retention override in days. |
 
 **Response:** `200 OK` -- updated workspace object.
 
@@ -233,7 +242,7 @@ Drive it from the CLI with [`crewship workspace delete`](/cli/workspace).
 
 ## Members
 
-List the people in a workspace, add an existing user directly, or remove one. (To bring in someone who has no account yet, issue an [invitation](#invitations).)
+List the people in a workspace, add an existing user directly, provision a member by email, or remove one.
 
 ### List members
 
@@ -305,6 +314,39 @@ This takes a `user_id` and only a `user_id`. When all you have is an email addre
 <Accordion title="License limit (402 Payment Required)">
 When the workspace's license caps the member count, adding a member that would exceed it returns **`402 Payment Required`** with the limit detail in the Problem Details body. The check runs before the request body is read, so a capped workspace rejects every add regardless of payload. The same limit applies to [Create invitation](#create-invitation).
 </Accordion>
+
+### Provision member
+
+```
+POST /api/v1/workspaces/{workspaceId}/members/provision
+```
+
+Creates an account when the email is new, adds it to the workspace, and returns
+a one-time setup URL. Existing users are not given a setup URL; they must
+already control their account. The URL expires after seven days. The instance
+URL must be configured or discoverable by the server.
+
+**Auth:** `OWNER` or `ADMIN` (`canRole "manage"`).
+
+**Request body:** `email` (required), `role` (optional; defaults to `MEMBER`;
+one of `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`), and `full_name` (optional).
+
+**Response:** `201 Created`
+
+```json
+{
+  "user_id": "user_jdoe42",
+  "email": "jdoe@acme.example",
+  "role": "MEMBER",
+  "created_user": true,
+  "setup_url": "https://crewship.example/reset-password?token=…",
+  "expires_at": "2026-05-16T09:18:22Z"
+}
+```
+
+`setup_url` is an empty string for an existing account. A malformed email or
+role returns `400`; a caller below `ADMIN` returns `403`; an existing
+membership returns `409`; and a missing public instance URL returns `503`.
 
 ### Remove member
 

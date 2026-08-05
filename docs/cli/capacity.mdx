@@ -130,8 +130,11 @@ through the gate.
 |---|---|
 | `GET` | `/api/v1/runtime/capacity` |
 
-Read-only and instance-scoped. Any authenticated user can call it: someone
-whose run is being held needs to be able to see that it is held.
+Read-only and instance-scoped. The request requires authentication (`401` when
+missing) but no workspace role or admin permission. The endpoint returns
+`200 OK` with JSON; it does not accept a request body and has no mutating
+operation. The route is not workspace-filtered because the snapshot describes
+the host and all starts held by this daemon.
 
 ## See also
 

@@ -110,6 +110,8 @@ The PUT is atomic via SQLite UPSERT (`INSERT … ON CONFLICT(user_id, pref_key) 
 DELETE /api/v1/me/preferences/{key}
 ```
 
+**Request:** No request body. The `{key}` path parameter identifies the preference to delete for the authenticated user.
+
 Removes the row for `(user_id, key)`. Idempotent — deleting a non-existent key returns 204, not 404. The frontend's "reset to default" action just deletes the key.
 
 **Response:** `204 No Content`.

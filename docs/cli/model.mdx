@@ -1,0 +1,19 @@
+---
+title: "model"
+description: "Discover models available from a provider."
+icon: "cpu"
+---
+
+## `crewship model list`
+
+Lists models a provider can serve. With an active provider credential the list
+is live; otherwise Crewship returns a curated fallback where available.
+
+```bash
+crewship model list --provider anthropic
+crewship model list --provider openai --format json
+crewship model list --provider ollama
+```
+
+`--provider` is required (`anthropic`, `openai`, `google`, or `ollama`). The
+response identifies its source as live or curated.

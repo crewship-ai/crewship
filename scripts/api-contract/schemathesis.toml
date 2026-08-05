@@ -1,0 +1,19 @@
+# This file is intentionally local to scripts/api-contract.
+# The runner supplies the phase and safety filters at invocation time.
+base-url = "${CREWSHIP_BASE_URL}"
+headers = { Authorization = "Bearer ${CREWSHIP_TOKEN}", "X-Workspace-ID" = "${CREWSHIP_WORKSPACE}" }
+request-timeout = 10.0
+workers = 1
+rate-limit = "120/m"
+
+[generation]
+max-examples = 10
+database = ":memory:"
+deterministic = true
+
+[phases]
+stateful.enabled = false
+
+# Mutation-capable operations are excluded explicitly by run.sh at invocation
+# time. Keeping the filters out of this config avoids Schemathesis interpreting
+# `enabled = false` as disabling the entire operation set.

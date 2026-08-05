@@ -25,6 +25,7 @@ For the narrative tour and the manifest format, see [Guides → Workspace Manife
 | `--from-env` | `false` | Read credential values from the process environment (var name = credential's `env:` field). |
 | `--secrets-file <path>` | `""` | Load credential values from a `KEY=VALUE` file. Comments (`#`) and quoted values supported. |
 | `--skip-test-gate` | `false` | Forward `skip_test_gate: true` on routine save so apply can ship a brand-new routine without first running it. Server gates the field on OWNER/ADMIN role; MANAGER+ callers get the standard "fresh passing test_run within 5 minutes" requirement. |
+| `--skip-governance-gate` | `false` | Forward `skip_governance_gate: true` so risky routines become active instead of waiting for approval. Requires OWNER/ADMIN; use only when the governance decision is intentional and auditable. |
 | `-y`, `--yes` | `false` | Skip confirmation prompts. Required when running in a non-TTY (CI) with destructive operations. |
 
 `--strict` and `--replace` are mutually exclusive. Apply also requires an authenticated session (`crewship login`) and a workspace context — both are inherited from the current CLI profile.

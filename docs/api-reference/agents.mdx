@@ -7,7 +7,7 @@ icon: "bot"
 An **agent** is an AI coding agent with a configurable role, CLI adapter, skills, and credentials. Agents belonging to the same crew share one Linux container. These endpoints cover the full agent lifecycle: creating and configuring permanent agents, hiring short-lived ephemeral "contractors", managing their skills and credentials, driving chats and runs, inspecting workspace files, and tuning the persona and self-learning layers that shape each agent's behavior.
 
 <Note>
-  All `/api/v1/agents/*` endpoints require authentication and workspace context (the `workspace_id` query parameter). The chat-message proxy (`/api/v1/chats/{chatId}/messages`) is the exception — it resolves the workspace from the chat row and takes no `workspace_id`.
+  All `/api/v1/agents/*` endpoints require authentication and workspace context. Workspace context may be supplied as `workspace_id`, a `{workspaceId}` path value, or the `X-Workspace-ID` header; the chat-message proxy (`/api/v1/chats/{chatId}/messages`) is the exception — it resolves the workspace from the chat row and takes no workspace context parameter.
 </Note>
 
 ## Endpoints
@@ -22,6 +22,7 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | GET | [/api/v1/agents/{agentId}](#get-agent) | Get a single agent |
 | PATCH | [/api/v1/agents/{agentId}](#update-agent) | Partially update an agent |
 | DELETE | [/api/v1/agents/{agentId}](#delete-agent) | Soft-delete an agent |
+| POST | [/api/v1/agents/{agentId}/webhook-secret/rotate](#rotate-webhook-secret) | Rotate and return an agent webhook secret once |
 | POST | [/api/v1/agents/hire](#hire-agent) | Spawn a new ephemeral agent under a crew |
 | POST | [/api/v1/agents/{agentId}/rehire](#rehire-agent) | Resurrect or extend an ephemeral agent |
 | POST | [/api/v1/agents/{agentId}/approve-hire](#approve-hire) | Approve a guided-autonomy pending hire |
@@ -44,7 +45,14 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | DELETE | [/api/v1/agents/{agentId}/credentials/{assignmentId}](#remove-credential) | Remove a credential |
 | GET | [/api/v1/agents/{agentId}/chats](#list-chats) | List chat sessions |
 | POST | [/api/v1/agents/{agentId}/chats](#create-chat) | Create a new chat session |
+| PUT | [/api/v1/agents/{agentId}/chats/{chatId}/read](#mark-chat-read) | Mark a chat read |
+| DELETE | [/api/v1/agents/{agentId}/chats/{chatId}](#delete-chat) | Delete a chat session |
+| POST | [/api/v1/agents/{agentId}/chats/{chatId}/attachments](#chat-attachments) | Upload a chat attachment |
 | GET | [/api/v1/agents/{agentId}/runs](#agent-runs) | List execution history |
+| GET | [/api/v1/agents/{agentId}/credential-bindings](#credential-bindings) | List MCP credential bindings |
+| GET, POST, PATCH, DELETE | [/api/v1/agents/{agentId}/integrations](#agent-integrations) | Manage agent MCP integrations |
+| GET | [/api/v1/agents/{agentId}/integrations/resolved](#agent-integrations) | Resolve effective MCP integrations |
+| GET | [/api/v1/agents/{agentId}/notification-channels](#agent-notification-channels) | List notification channels available to an agent |
 | GET | [/api/v1/agents/{agentId}/debug](#agent-proxy-endpoints) | Debug information for a running agent |
 | GET | [/api/v1/agents/{agentId}/files](#agent-proxy-endpoints) | List files in agent workspace |
 | GET | [/api/v1/agents/{agentId}/files/download](#agent-proxy-endpoints) | Download a file |
@@ -71,6 +79,12 @@ GET /api/v1/agents/crews-status?workspace_id={workspaceId}
 
 Returns lightweight agent counts by status for toolbar/dashboard widgets.
 
+**Auth:** Authenticated session or CLI token with resolved workspace context;
+the router applies the workspace-scoped authenticated middleware.
+
+**Request:** No body. Supply workspace context with `X-Workspace-ID` (or the
+equivalent workspace context accepted by the API).
+
 **Response:** `200 OK`
 
 ```json
@@ -83,6 +97,17 @@ Returns lightweight agent counts by status for toolbar/dashboard widgets.
 }
 ```
 
+**Status:** `400` for invalid workspace context, `401` when unauthenticated,
+`403` when the caller cannot access the workspace, and `500` when the status
+query fails.
+
+#### Contract: `GET /api/v1/agents/crews-status`
+
+**Auth:** Authenticated request with workspace context. **Request:** no body;
+the workspace is supplied through the workspace context/header. **Response:**
+`200 OK` with the status-count object above. **Status:** `400`, `401`, `403`,
+or `500` as described above.
+
 The agent status buckets (`total`, `running`, `error`, `idle`) are always present — zero counts are not omitted. Any status that is not `RUNNING` or `ERROR` (including `IDLE` and `PENDING_REVIEW`) folds into the `idle` bucket; there is no `stopped` bucket. The `queued` field counts admission-queue *assignments* (not agents) currently in the `QUEUED` state — independent of the agent buckets, and `0` on servers that pre-date the queue migration (`internal/api/agents.go:111-151`).
 
 ---
@@ -94,6 +119,21 @@ GET /api/v1/agent-load?workspace_id={workspaceId}
 ```
 
 Returns agent load metrics across the workspace.
+
+**Auth:** Authenticated session or CLI token with resolved workspace context.
+
+**Request:** No body. Supply workspace context with `X-Workspace-ID` (or the
+equivalent workspace context accepted by the API).
+
+**Response:** `200 OK` — an array (never `null`) of entries with `agent_id`,
+`agent_name`, `agent_slug`, `agent_status`, `active_tasks`, `pending_tasks`,
+`completed_today`, `tokens_used_today`, and `token_budget`. Active tasks include
+`IN_PROGRESS`; pending tasks include `PENDING` and `BLOCKED`; token usage and
+completed counts are calculated over the current UTC day/24-hour reporting
+window used by the handler.
+
+**Status:** `400` for invalid workspace context, `401` when unauthenticated,
+and `403` when the caller cannot access the workspace.
 
 ---
 
@@ -375,6 +415,9 @@ DELETE /api/v1/agents/{agentId}?workspace_id={workspaceId}
 
 Soft-deletes the agent (sets `deleted_at`).
 
+**Request:** No body; `agentId` is a required path parameter and workspace
+context scopes the lookup.
+
 <Warning>
   This is a destructive operation. Same per-agent edit gate as Update (`canEditAgent` in `internal/api/agents_query.go:266`, defined at `internal/api/rbac.go:151`). `OWNER` / `ADMIN` delete any agent; `MANAGER` deletes only agents they created or agents in crews where they hold per-crew `ADMIN`/`OWNER`.
 </Warning>
@@ -384,6 +427,31 @@ Soft-deletes the agent (sets `deleted_at`).
 ```json
 { "success": true }
 ```
+
+### Rotate Webhook Secret
+
+```
+POST /api/v1/agents/{agentId}/webhook-secret/rotate
+```
+
+Uses the same per-agent edit gate as Update. The new signing secret is
+returned exactly once; Crewship stores only its protected form and does not
+provide a read endpoint.
+
+**Response:** `200 OK`
+
+```json
+{
+  "webhook_secret": "whsec_…",
+  "rotated_at": "2026-06-04T12:00:00Z"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `403` | Caller lacks edit rights for this agent. |
+| `404` | Agent not found in this workspace. |
+| `500` | Secret storage is not configured or failed. |
 
 ---
 
@@ -593,6 +661,11 @@ Returns the resolved persona — agent layer if a file is present,
 crew default otherwise, synthesised default if neither layer is
 configured.
 
+**Auth:** Authenticated workspace member.
+
+**Request:** No body; `agentId` is required and workspace context scopes the
+agent lookup.
+
 **Response:** `200 OK`
 
 ```json
@@ -611,6 +684,10 @@ configured.
 | `layer` | `string` | `agent` or `crew` — which layer the response came from. The synthesised default is reported as `crew` with `from_default = true`. |
 | `from_default` | `bool` | `true` when no file exists on either layer and the synthesised "You are the {role}…" stub was returned |
 | `cap_bytes` | `integer` | Max accepted size on `PUT` / `POST suggest` (`memory.PersonaCapBytes` = 1500 bytes) |
+
+**Status:** `400` for invalid request/workspace context, `401` when
+unauthenticated, `403` when access is denied, and `500` when persona storage
+cannot be read.
 
 ### Set Persona
 
@@ -655,7 +732,15 @@ DELETE /api/v1/agents/{agentId}/persona
   Removes the agent layer file. The next `GET` falls through to the crew layer (or the synthesised default).
 </Warning>
 
+**Auth:** Authenticated caller with the operator edit permission used by the
+persona mutation routes.
+
+**Request:** No body; `agentId` is required.
+
 **Response:** `204 No Content`
+
+**Status:** `401` unauthenticated, `403` when the caller lacks the mutation
+permission, and `500` when the persona cannot be reset.
 
 ### Get Persona History
 
@@ -770,6 +855,11 @@ Returns the current flag plus the audit triple (who flipped it, when,
 why). Any authenticated workspace member can read — the value is
 non-secret diagnostic state.
 
+**Auth:** Authenticated workspace member. **Request:** no body; `agentId` is a
+required path parameter. **Status:** `400` for invalid request context, `401`
+when unauthenticated, `403` when access is denied, and `500` for a read
+failure.
+
 **Response:** `200 OK`
 
 ```json
@@ -835,6 +925,9 @@ Crews preview panel — one round-trip instead of four parallel fetches
 across approvals, assignments, escalations, and peer messages. UI is
 the primary consumer; operators can poll the endpoint for an at-a-glance
 load check.
+
+**Auth:** Authenticated workspace member. **Request:** no body; `agentId` is a
+required path parameter and workspace context scopes the lookup.
 
 **Response:** `200 OK`
 
@@ -908,6 +1001,11 @@ Returns the agent's peer-card index (no card content — fetch via the
 single-card endpoint below). Workspace-scoped; agents in other
 workspaces return `404`.
 
+**Auth:** Authenticated workspace member.
+
+**Request:** No body; `agentId` is required and workspace context scopes the
+lookup.
+
 **Response:** `200 OK`
 
 ```json
@@ -940,6 +1038,11 @@ GET /api/v1/agents/{agentId}/peers/{userId}
 Returns one card's full content (markdown). Writes a `read` row to
 `peer_card_audit`.
 
+**Auth:** Authenticated workspace member.
+
+**Request:** No body; `agentId` and `userId` are required path parameters and
+workspace context scopes the lookup.
+
 **Response:** `200 OK`
 
 ```json
@@ -968,11 +1071,63 @@ DELETE /api/v1/agents/{agentId}/peers/{userId}
   Removes the card from disk and the `peer_cards` row, then writes a `delete` audit row. Idempotent — deleting a non-existent card returns `204` rather than `404` so an operator script can retry safely.
 </Warning>
 
+**Auth:** Authenticated caller with the self/mutation permission used by this
+route.
+
+**Request:** No body; `agentId` and `userId` are required path parameters.
+
 **Response:** `204 No Content`
 
 <Note>
   The GDPR cascade endpoint [`DELETE /api/v1/admin/users/{userId}/data`](/api-reference/admin#delete-api-v1-admin-users-userid-data) deletes peer cards across **all** agents in the workspace for a single user — that's the right path for a full SAR. This per-agent endpoint is for the narrower "clean up just this agent's notes about this user" case.
 </Note>
+
+### Related admin user routes
+
+These workspace-admin routes are listed here because the GDPR cross-reference
+above uses the same admin-user path prefix.
+
+#### List workspace users
+
+```
+GET /api/v1/admin/users
+```
+
+**Auth:** Authenticated workspace `OWNER` or `ADMIN` (`manage` role).
+
+**Request / parameters:** No request body. Workspace context is supplied by the
+authenticated request; there are no path or query parameters.
+
+**Response:** `200 OK` with a JSON array of workspace members and their user,
+workspace, and role fields.
+
+| Status | Condition |
+|---|---|
+| `401` | Missing authentication or workspace context |
+| `403` | Caller is not an `OWNER` or `ADMIN` |
+| `500` | User query failed |
+
+#### Export one user's data
+
+```
+GET /api/v1/admin/users/{userId}/data
+```
+
+**Auth:** Authenticated workspace `OWNER` or `ADMIN` (`manage` role).
+
+**Request / parameters:** No request body. `userId` is the required path
+parameter for the data subject; the request is scoped to the authenticated
+workspace.
+
+**Response:** `200 OK` with the GDPR export bundle for that user, including
+peer cards, memory versions, inbox items, user models, and an audit `action_id`.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing workspace context or `userId` |
+| `401` | Missing authentication |
+| `403` | Caller is not an `OWNER` or `ADMIN` |
+| `500` | Export audit, query, or data-read failure |
 
 ---
 
@@ -1025,6 +1180,17 @@ The `?v=` parameter carries a content hash and is ignored by the server; it
 exists so the response can be cached immutably and still refresh when the
 image actually changes.
 
+**Auth:** Authenticated workspace member.
+
+**Request:** No body. `agentId` is required; `v` is an optional cache-busting
+query value and workspace context is required.
+
+**Response:** `200 OK` with an SVG body (`image/svg+xml`).
+
+**Status:** `400` for invalid request/workspace context, `401` when
+unauthenticated, `403` when the caller cannot access the workspace, and `404`
+when the agent or stored avatar is not found.
+
 Responses are served with `Content-Security-Policy: default-src 'none';
 sandbox` and `X-Content-Type-Options: nosniff`, so the SVG cannot load
 subresources or execute script even if opened directly.
@@ -1040,6 +1206,13 @@ PUT /api/v1/agents/{agentId}/avatar
 ```
 
 Requires the same per-agent edit rights as `PATCH /api/v1/agents/{agentId}`.
+
+**Auth:** Authenticated caller with the same per-agent edit rights as
+`PATCH /api/v1/agents/{agentId}`.
+
+**Request:** JSON object with required string field `svg`.
+
+**Response:** `200 OK` with the stored avatar representation.
 
 The SVG is validated against an allowlist of inert drawing, gradient and
 metadata elements. Anything capable of loading or executing something —
@@ -1068,6 +1241,16 @@ DELETE /api/v1/agents/{agentId}/avatar
 Returns `204`. The agent reverts to generate-from-seed — which also means
 the next generator upgrade will change its face again. Returns `404` for an
 agent that does not exist in this workspace, and `403` without edit rights.
+
+**Auth:** Authenticated caller with per-agent edit rights.
+
+**Request:** No body; `agentId` is required. Workspace context is resolved by
+the authenticated route.
+
+**Response:** `204 No Content` on success.
+
+**Status:** `401` unauthenticated, `403` insufficient edit rights, and `404`
+when the agent is not found.
 
 ### When a stored render is dropped automatically
 
@@ -1238,6 +1421,14 @@ GET /api/v1/agents/{agentId}/chats?workspace_id={workspaceId}
 
 **Response:** `200 OK` -- array of chat session objects.
 
+**Auth:** Authenticated workspace member.
+
+**Request:** No body; `agentId` is required and workspace context scopes the
+list.
+
+**Status:** `400` for invalid request/workspace context, `401` when
+unauthenticated, and `403` when the caller cannot access the workspace.
+
 ### Create Chat
 
 ```
@@ -1247,6 +1438,142 @@ POST /api/v1/agents/{agentId}/chats?workspace_id={workspaceId}
 Creates a new interactive chat session with the agent.
 
 **Response:** `201 Created`
+
+The optional request body is `{ "session_id": "…", "origin": "UI" }`.
+`origin` may be `UI`, `CLI`, `WEBHOOK`, `CRON`, or `AGENT`; unknown values are
+stored as empty. The response is `{ "id": "<chatId>" }`.
+
+**Auth:** Authenticated caller permitted to create a chat for the agent.
+
+**Request:** Optional JSON object with `session_id` and `origin`. `origin` is
+one of `UI`, `CLI`, `WEBHOOK`, `CRON`, or `AGENT`.
+
+**Status:** `200` or `201` with the created chat id; `400` invalid JSON or
+origin, `401` unauthenticated, `403` denied, `404` agent not found, and `409`
+when the requested session conflicts.
+
+### Mark Chat Read
+
+```
+PUT /api/v1/agents/{agentId}/chats/{chatId}/read
+```
+
+Advances the caller's read cursor and clears the paired agent-replied inbox
+notification. Returns `200 OK` with `{ "success": true }`; a chat that is
+not nested under the supplied agent or workspace returns `404`.
+
+**Auth:** Authenticated chat participant/caller with access to the chat.
+
+**Request:** Empty JSON object (`{}`); `agentId` and `chatId` are required
+path parameters.
+
+**Response:** `200 OK` with the chat read-cursor payload (`chat_id` and
+`last_read_at`).
+
+**Status:** `401` unauthenticated, `403` denied, and `404` when the chat is
+not nested under the supplied agent and workspace.
+
+### Delete Chat
+
+```
+DELETE /api/v1/agents/{agentId}/chats/{chatId}
+```
+
+The chat creator may delete their own chat; an agent editor may delete any
+chat for that agent. Chats with assignments cannot be deleted (`409`). A
+successful deletion returns `204 No Content`.
+
+**Auth:** The chat creator may delete their own chat; an agent editor may
+delete any chat for that agent.
+
+**Request:** No body; `agentId` and `chatId` are required path parameters.
+
+**Response:** `204 No Content` on deletion (the handler may also return the
+documented JSON deletion result).
+
+**Status:** `401` unauthenticated, `403` denied, `404` for an unknown or
+mis-nested chat, `409` when assignments prevent deletion, and `500` for
+cleanup failure.
+
+### Chat Attachments
+
+```
+POST /api/v1/agents/{agentId}/chats/{chatId}/attachments
+```
+
+Uploads an attachment for the chat through the sidecar. The multipart/form
+data field is `file`; the agent and chat must belong to the caller's
+workspace. The endpoint returns the sidecar's attachment metadata and uses
+`400` for an invalid upload, `404` for an unknown or mis-nested chat, and
+`502` when the sidecar cannot be reached.
+
+**Auth:** Authenticated caller with create/write access to the agent chat.
+
+**Request:** `multipart/form-data` with required binary `file` field; no JSON
+body.
+
+**Response:** `200 OK` or `201 Created` with attachment metadata.
+
+**Status:** `400` invalid upload, `401` unauthenticated, `403` denied, `404`
+unknown or mis-nested agent/chat, and `502` sidecar failure.
+
+### Credential Bindings
+
+```
+GET /api/v1/agents/{agentId}/credential-bindings?workspace_id={workspaceId}
+```
+
+Lists the agent's MCP server bindings. Each item includes `id`, `agent_id`,
+`mcp_server_id`, `mcp_server_scope` (`workspace` or `crew`), optional
+credential/type/header fields, `enabled`, optional `config_override_json`,
+timestamps, server names, and optional `credential_name`. Returns `404` when
+the agent is not in the workspace.
+
+### Agent Integrations
+
+```
+GET    /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
+POST   /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
+PATCH  /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={workspaceId}
+DELETE /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={workspaceId}
+GET    /api/v1/agents/{agentId}/integrations/resolved?workspace_id={workspaceId}
+```
+
+These are the agent MCP-binding routes. `POST` requires `mcp_server_id` and
+`mcp_server_scope` (`workspace` or `crew`); writes require MANAGER+ and reads
+require workspace membership. The resolved route returns the effective
+workspace → crew → agent integration cascade.
+
+**Auth:** Authenticated workspace member.
+
+**Request:** No body; `agentId` is required and workspace context scopes the
+resolution.
+
+**Response:** `200 OK` with an `integrations` array containing the effective
+workspace/crew configuration.
+
+**Status:** `400` for invalid request/workspace context, `401` when
+unauthenticated, `403` when denied, and `404` when the agent is not found.
+
+### Agent Notification Channels
+
+```
+GET /api/v1/agents/{agentId}/notification-channels?workspace_id={workspaceId}
+```
+
+Returns `{ "channels": [...] }`, where each channel contains `id`, `type`,
+optional `provider`, and `enabled`. It is readable by any workspace member;
+unknown or cross-workspace agents return `404`.
+
+**Auth:** Any authenticated workspace member.
+
+**Request:** No body; `agentId` is required and workspace context is required.
+
+**Response:** `200 OK` with `{ "channels": [...] }`.
+
+**Status:** `400` when `agentId` is missing or request context is invalid,
+`401` when workspace context is missing, `403` when access is denied, and
+`500` when the channel lookup fails.
 
 ---
 
@@ -1327,6 +1654,34 @@ Fetches recent git commits from the agent's container workspace. Proxied through
 ---
 
 ## Chat Messages
+
+## Related crew routes
+
+This page links the agent lifecycle to the crew that owns it. The canonical
+crew reference has the full schemas; these endpoint-local notes preserve the
+request contract for the route references used on this page.
+
+### Get Crew
+
+```
+GET /api/v1/crews/{crewId}?workspace_id={workspaceId}
+```
+
+**Auth:** Session or CLI token plus workspace membership. **Request:** no
+body; `crewId` is required and `workspace_id` supplies workspace context.
+**Response:** `200 OK` with the full crew object. **Status:** `404` when the
+crew is missing or outside the workspace.
+
+### Delete Crew
+
+```
+DELETE /api/v1/crews/{crewId}?workspace_id={workspaceId}
+```
+
+**Auth:** Session or CLI token plus `OWNER` or `ADMIN` role. **Request:** no
+body; `crewId` is required and `workspace_id` supplies workspace context.
+**Response:** `200 OK` with `{ "success": true }`. **Status:** `403` for an
+insufficient role and `404` when the crew is not found.
 
 ```
 GET /api/v1/chats/{chatId}/messages

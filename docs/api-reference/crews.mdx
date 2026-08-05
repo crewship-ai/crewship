@@ -6,13 +6,16 @@ icon: "users"
 
 Crews are isolated agent teams, each with its own container resources, network policy, and members. A crew bundles the runtime sandbox (memory/CPU/TTL, runtime image, devcontainer/mise config), the egress posture (`free` vs `restricted` with an allowed-domain list), an autonomy policy, an optional shared persona, and cross-crew connections that gate agent-to-agent messaging.
 
-All crew endpoints require authentication and workspace context (the `workspace_id` query parameter).
+All crew endpoints require authentication and workspace context. The workspace
+may be supplied as `workspace_id` (query), `{workspaceId}` (path), or the
+`X-Workspace-ID` header; query/path values take precedence and may be a
+workspace ID or slug.
 
 ## Endpoints
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | [`/api/v1/crews`](#list-crews) | List crews in a workspace |
+| GET | [`/api/v1/crews`](#list-crews) | List a paginated set of crews in a workspace |
 | POST | [`/api/v1/crews`](#create-crew) | Create a crew |
 | GET | [`/api/v1/crews/{crewId}`](#get-crew) | Get a single crew |
 | PATCH / PUT | [`/api/v1/crews/{crewId}`](#update-crew) | Update a crew |
@@ -29,12 +32,16 @@ All crew endpoints require authentication and workspace context (the `workspace_
 | POST | [`/api/v1/crews/{crewId}/apply-avatar-style`](#apply-avatar-style) | Apply an avatar style across agents |
 | GET | [`/api/v1/crews/{crewId}/container-status`](#container-status) | Get the crew's runtime container status |
 | GET | [`/api/v1/crews/{crewId}/credential-readiness`](#credential-readiness) | Report credentials whose CLI is missing from the container |
+| GET | [`/api/v1/crews/{crewId}/capabilities`](#crew-capabilities) | Return the crew's authoring capabilities bundle |
 | GET | [`/api/v1/crew-connections`](#list-connections) | List crew connections |
 | POST | [`/api/v1/crew-connections`](#create-connection) | Create a crew connection |
 | DELETE | [`/api/v1/crew-connections/{connectionId}`](#delete-connection) | Delete a crew connection |
 | GET | [`/api/v1/crews/{crewId}/files`](#crew-files-proxy) | List files in the crew workspace |
 | GET | [`/api/v1/crews/{crewId}/files/download`](#crew-files-proxy) | Download a file |
 | PUT | [`/api/v1/crews/{crewId}/files/save`](#crew-files-proxy) | Save/upload a file |
+| DELETE | [`/api/v1/crews/{crewId}/files/delete`](#delete-a-crew-file) | Delete a file |
+| GET | [`/api/v1/crews/{crewId}/git-diff`](#crew-git-diff) | Read the crew's base-branch diff |
+| GET | [`/api/v1/crews/{crewId}/services`](#live-service-inventory) | List live sidecar services |
 | GET | [`/api/v1/crews/{crewId}/assignments`](#crew-assignments) | List task assignments |
 | GET | [`/api/v1/crews/{crewId}/peer-conversations`](#crew-peer-conversations) | List peer conversations |
 | GET | [`/api/v1/crews/{crewId}/standup`](#crew-standup) | Get the crew standup summary |
@@ -54,9 +61,14 @@ Create, read, update, and soft-delete crews and their container/network configur
 GET /api/v1/crews?workspace_id={workspaceId}
 ```
 
-Returns all crews in the workspace, ordered by creation date descending.
+Returns up to 100 crews in the workspace, ordered by `created_at DESC, id DESC`.
+Use `limit` (maximum 500) and `offset` for pagination.
 
 **Auth:** Session or CLI token + workspace membership
+
+**Request:** No path parameters or request body. Workspace context is required;
+provide it using the `workspace_id` query parameter, `{workspaceId}` path
+context where supported, or `X-Workspace-ID` as described above.
 
 **Response:** `200 OK`
 
@@ -105,7 +117,10 @@ Returns all crews in the workspace, ordered by creation date descending.
 | `container_cpus` | number | Container CPU limit |
 | `container_ttl_hours` | integer? | Container idle TTL in hours. `null` = never configured, so the server default (4 hours) applies; `0` = never stop |
 | `network_mode` | string | `"free"` or `"restricted"` |
+| `network_mode_enforced` | boolean | Whether the current container provider enforces `network_mode`. |
+| `network_mode_unenforced_reason` | string | Provider explanation when enforcement is unavailable; omitted when enforced. |
 | `allowed_domains` | string[] | Allowed domains (restricted mode only) |
+| `allow_private_endpoints` | boolean | Whether private/LAN model endpoints are allowed; metadata and link-local addresses remain blocked. |
 | `mcp_config_json` | string? | Raw MCP server config JSON |
 | `escalation_config` | string? | Escalation policy config JSON |
 | `runtime_image` | string? | Custom runtime image (e.g., `ghcr.io/org/runtime:1.0`) |
@@ -222,6 +237,8 @@ GET /api/v1/crews/{crewId}?workspace_id={workspaceId}
 
 **Auth:** Session or CLI token + workspace membership
 
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
 | Path Parameter | Description |
 |---|---|
 | `crewId` | Crew ID |
@@ -296,6 +313,8 @@ DELETE /api/v1/crews/{crewId}?workspace_id={workspaceId}
 
 **Auth:** Session or CLI token + `OWNER` or `ADMIN` role
 
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
 **Response:** `200 OK`
 
 ```json
@@ -320,6 +339,8 @@ Manage the per-crew membership roster and optional per-crew role overrides that 
 ```
 GET /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
 ```
+
+**Request:** `crewId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
 
 **Response:** `200 OK` -- array of member objects.
 
@@ -400,6 +421,8 @@ DELETE /api/v1/crews/{crewId}/members/{memberId}?workspace_id={workspaceId}
 
 **Auth:** `OWNER` or `ADMIN` role
 
+**Request:** `crewId` and `memberId` are required path parameters; `workspace_id` is the workspace query parameter. No request body.
+
 **Response:** `200 OK`
 
 ```json
@@ -431,6 +454,8 @@ default).
 ```
 GET /api/v1/crews/{crewId}/persona
 ```
+
+**Request:** `crewId` is a required path parameter. No request body.
 
 **Response:** `200 OK`
 
@@ -475,6 +500,8 @@ to the crew-layer path so the history endpoint can replay the chain.
 ```
 DELETE /api/v1/crews/{crewId}/persona
 ```
+
+**Request:** `crewId` is a required path parameter. No request body.
 
 Removes the crew layer file. Subsequent reads return empty content
 and agents fall back to their per-role synthesised default.
@@ -615,6 +642,8 @@ recreated with the new policy on the next agent run).
 
 **Auth:** any workspace member
 
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
 **Response:** `200 OK`
 
 ```json
@@ -701,6 +730,8 @@ and never triggers a rebuild — adding a feature changes what runs inside the
 container, so it stays a separate, user-confirmed action
 ([Update Crew](#update-crew) or `crewship crew config`).
 
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
 Credentials are matched using the same three-way grant rule as the rest of the
 credentials surface: workspace-scoped, crew-scoped via `credential_crews`, or
 assigned to one of this crew's agents (with any lease still live). Revoked and
@@ -760,6 +791,51 @@ crewship crew credential-readiness <slug-or-id>
 
 ---
 
+### Crew Capabilities
+
+```
+GET /api/v1/crews/{crewId}/capabilities
+```
+
+Returns one authoring-oriented capability bundle for the crew: resolved
+container resources, enabled crew integrations and their enabled tool names,
+agent slugs, available code runtimes, script-interpreter mappings, and the
+routine DSL JSON schema.
+
+**Auth:** authenticated workspace member
+
+**Request:** `crewId` is a required path parameter. Workspace context is
+required and may be supplied with `X-Workspace-ID` (or the equivalent
+workspace context described at the top of this page). No request body.
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "crew_123",
+  "crew_slug": "engineering",
+  "container": { "datastores": [], "tools": [] },
+  "integrations": [],
+  "agents": [],
+  "runtimes": {
+    "code": { "wired": ["cel"], "reserved_unwired": [] },
+    "script_interpreters": { ".py": "python3" }
+  },
+  "schema": { "type": "object" }
+}
+```
+
+`container.datastores` and `container.tools` are arrays and may be empty.
+Only enabled crew integrations are included; `integrations[].tools` contains
+only explicitly enabled crew-scoped tool bindings. `schema` is the nested
+routine DSL schema object, not a JSON-encoded string.
+
+| Status | Condition |
+|---|---|
+| `400` | `crewId` is missing |
+| `404` | Crew not found in the selected workspace |
+| `500` | Database or capability-resolution failure |
+
 ## Connections
 
 Crew connections ("crew links" in the UI) define which crews can reach each other. A link is what
@@ -776,6 +852,8 @@ Links to a soft-deleted crew are never listed and are removed when the crew is d
 ```
 GET /api/v1/crew-connections?workspace_id={workspaceId}
 ```
+
+**Request:** `workspace_id` is the required workspace query parameter. No request body.
 
 **Response:** `200 OK` -- array of connection objects:
 
@@ -848,6 +926,8 @@ DELETE /api/v1/crew-connections/{connectionId}?workspace_id={workspaceId}
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
+**Request:** `connectionId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
+
 **Response:** `204 No Content`
 
 | Status | Condition |
@@ -866,6 +946,89 @@ File operations are proxied through the crewshipd sidecar to the crew's containe
 | `GET /api/v1/crews/{crewId}/files/download?path=...` | GET | Download a file |
 | `PUT /api/v1/crews/{crewId}/files/save` | PUT | Save/upload a file |
 
+### Delete a Crew File
+
+`DELETE /api/v1/crews/{crewId}/files/delete?path={path}`
+
+**Auth:** Authenticated workspace member with the `create` capability. The
+crew must belong to the selected workspace.
+
+**Request:** No body. The required `path` query parameter is a relative file
+path under the crew's shared/output tree. Absolute paths and traversal are
+rejected.
+
+**Response:** `200 OK` with the sidecar response:
+
+```json
+{ "status": "deleted", "path": "shared/probe.sh" }
+```
+
+Deletion is idempotent: a missing file still returns success.
+
+**Statuses:** `400` missing or invalid `path`; `401` unauthenticated; `403`
+insufficient role/capability; `404` crew not found in the workspace; `500`
+storage/delete failure; `502` sidecar unavailable. A missing storage provider
+may return `503` from the sidecar.
+
+## Crew Git Diff
+
+### Crew Git Diff
+
+`GET /api/v1/crews/{crewId}/git-diff?agent_slug={agentSlug}`
+
+Returns the crew container's base-branch diff, the same change set used by the
+dashboard's Changes tab. `agent_slug` is optional and selects the agent
+workspace when the crew has multiple agent workspaces.
+
+**Auth:** Authenticated workspace member with the `read` capability. The crew
+must belong to the selected workspace.
+
+**Request:** No body. Optional `agent_slug` query parameter.
+
+**Response:** `200 OK` with the decoded git-diff object from crewshipd. If the
+workspace is not a repository, the response is `{ "is_repo": false }`.
+
+**Statuses:** `401` unauthenticated; `403` insufficient role/capability; `404`
+crew not found in the workspace; `500` crew lookup failure; `502` crewshipd
+unavailable or diff computation failure.
+
+## Live Service Inventory
+
+### Live Service Inventory
+
+`GET /api/v1/crews/{crewId}/services`
+
+Returns the live sidecar containers, not the stored `services_json` configuration
+snapshot.
+
+**Auth:** Authenticated workspace member with the `read` capability. The crew
+must belong to the selected workspace.
+
+**Request:** No body or query parameters.
+
+**Response:** `200 OK`:
+
+```json
+{
+  "services": [
+    {
+      "name": "postgres",
+      "image": "postgres:16",
+      "type": "postgres",
+      "status": "running",
+      "ports": ["5432/tcp"]
+    }
+  ]
+}
+```
+
+`type` is one of `postgres`, `redis`, `mysql`, `mongodb`, or `other`. A
+provider without live service-list capability returns `200` with an empty
+`services` array.
+
+**Statuses:** `401` unauthenticated; `403` insufficient role/capability; `404`
+crew not found in the workspace; `500` crew lookup or service-list failure.
+
 ---
 
 ## Crew Assignments
@@ -873,6 +1036,8 @@ File operations are proxied through the crewshipd sidecar to the crew's containe
 ```
 GET /api/v1/crews/{crewId}/assignments?workspace_id={workspaceId}
 ```
+
+**Request:** `crewId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
 
 List task assignments for a crew.
 
@@ -886,7 +1051,17 @@ List task assignments for a crew.
 GET /api/v1/crews/{crewId}/peer-conversations?workspace_id={workspaceId}
 ```
 
+**Request:** `crewId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
+
 List peer-to-peer conversations between agents in a crew.
+
+**Response:** `200 OK` with an object containing `conversations` (array) and `count` (integer).
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid crew or workspace context |
+| `401` | Missing authentication |
+| `403` | Caller is not allowed to read the crew |
 
 ---
 
@@ -896,7 +1071,18 @@ List peer-to-peer conversations between agents in a crew.
 GET /api/v1/crews/{crewId}/standup?workspace_id={workspaceId}
 ```
 
+**Request:** `crewId` is a required path parameter; optional query parameters are `crew_id` and `since`. No request body.
+
 Get standup summary for a crew.
+
+**Response:** `200 OK` with `crew_id`, `date`, `summary`, and `items` fields.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid query or crew context |
+| `401` | Missing authentication |
+| `403` | Caller is not allowed to read the crew |
+| `404` | Crew not found |
 
 ---
 
@@ -908,11 +1094,36 @@ Get standup summary for a crew.
 GET /api/v1/crews/{crewId}/escalations?workspace_id={workspaceId}
 ```
 
+**Auth:** Authenticated workspace member; `workspace_id` must identify the
+caller’s workspace.
+
+**Path / query parameters:** `crewId` is the crew ID; `workspace_id` is the
+required workspace ID. Returns the crew’s escalation records.
+
+**Response:** `200 OK` with an array of escalation objects.
+
+| Status | Condition |
+|---|---|
+| `401` | Missing authentication or workspace context |
+| `500` | Database query or row scan failed |
+
 ### Resolve Escalation
 
 ```
 PATCH /api/v1/escalations/{escalationId}/resolve?workspace_id={workspaceId}
 ```
+
+**Request:** `escalationId` is a required path parameter, `workspace_id` selects the workspace, and the JSON body is the escalation decision (`action` and optional resolution details).
+
+**Response:** `200 OK` with the resolved escalation `id`, `status`, and `action`.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid decision body |
+| `401` | Missing authentication |
+| `403` | Insufficient role |
+| `404` | Escalation not found |
+| `409` | Escalation cannot be resolved in its current state |
 
 ### Pending Escalation Count
 
@@ -920,7 +1131,43 @@ PATCH /api/v1/escalations/{escalationId}/resolve?workspace_id={workspaceId}
 GET /api/v1/escalations/pending-count?workspace_id={workspaceId}
 ```
 
+**Request:** `workspace_id` is the workspace context. No request body.
+
 Returns count of pending escalations across the workspace.
+
+**Response:** `200 OK` with `{ "count": integer }`.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid workspace context |
+| `401` | Missing authentication |
+| `403` | Caller is not allowed to read escalations |
+| `500` | Count query failed |
+
+### Purge Crew Escalations
+
+```
+DELETE /api/v1/crews/{crewId}/escalations?workspace_id={workspaceId}
+```
+
+**Auth:** Authenticated workspace `OWNER` or `ADMIN` (`manage` role).
+
+**Path / query parameters:** `crewId` is the crew ID; `workspace_id` is the
+required workspace ID. The request has no body. The operation permanently
+deletes all escalation rows for that crew in that workspace.
+
+**Response:** `200 OK`
+
+```json
+{ "deleted": 2 }
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `crewId` |
+| `401` | Missing workspace context or authentication |
+| `403` | Caller is not an `OWNER` or `ADMIN` |
+| `500` | Database purge failed |
 
 ---
 

@@ -340,7 +340,7 @@ fails verification.
 ### Legitimate mutation vs. tampering: entry priority
 
 One committed field is *meant* to change after write. An OWNER/ADMIN can mark an
-entry `high`, `pin` or `permanent` (`PATCH /api/v1/journal/{id}/priority`) — a
+entry `high`, `pin` or `permanent` (`POST /api/v1/journal/{id}/priority`) — a
 load-bearing marker, since `permanent` entries are never compacted and pins land
 in the curated `pins.md`.
 

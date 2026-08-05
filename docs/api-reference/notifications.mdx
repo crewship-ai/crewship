@@ -10,6 +10,14 @@ Per-user activity feed. Other handlers create rows by calling the internal `Crea
   All endpoints below require an authenticated session **and** workspace context — the routes are wrapped in the `RequireWorkspace` middleware, so a `workspace_id` (query param, `{workspaceId}` path value, or `X-Workspace-ID` header) must be present and the caller must be a member, or the request fails at the middleware (`400` when absent, `403` when not a member). Data scoping is nonetheless strictly per-user: every query filters on `user_id = <session user>`, and a row belonging to another user is indistinguishable from one that doesn't exist (`404`).
 </Note>
 
+Every endpoint also returns `401 Unauthorized` when there is no authenticated
+user. Successful responses are `200 OK` except delete, which is `204 No
+Content`; database/query failures are `500`. These endpoints do not accept a
+request body. The workspace middleware returns `400 Bad Request` when
+`workspace_id` is missing and `403 Forbidden` when the authenticated user is
+not a member; the notification handlers then scope every operation to the
+authenticated user's ID.
+
 ## Endpoints
 
 | Method | Endpoint | Purpose |
@@ -39,13 +47,24 @@ Per-user activity feed. Other handlers create rows by calling the internal `Crea
 
 Paginated list, newest first.
 
+**Request:** no body.
+
 | Query param | Type | Default | Notes |
 |---|---|---|---|
 | `limit` | int | `50` | Capped at `100` server-side. |
-| `offset` | int | `0` | |
+| `offset` | int | `0` | Negative values become `0`. |
 | `read` | `"true"` \| `"false"` | (unset = all) | Filter by read state. |
 
 Returns `200` with a JSON array (possibly empty — never `null`).
+Unparseable or non-positive `limit` values use the default; values above 100
+are clamped to 100. Values other than `true` or `false` for `read` are
+ignored and return both read states.
+An omitted or unrecognised `read` value applies no read-state filter. The
+`offset` is zero-based and negative pagination values are normalised by the
+server.
+
+**Statuses:** `200 OK`; `400`/`403` from workspace resolution; `401` without
+authentication; `500` for a query or row-scan failure.
 
 ```bash
 curl -H "Cookie: <session>" \
@@ -73,29 +92,60 @@ curl -H "Cookie: <session>" \
 
 Unread count, cheap. Used to drive the navbar badge.
 
+**Request:** no body.
+
 ```json
 { "unread": 7 }
 ```
+Returns `200 OK`; the count is scoped to the authenticated user.
+
+The count is scoped to the authenticated user in the current workspace; it
+does not include notifications belonging to other users.
+
+**Statuses:** `200 OK`; `400`/`403` from workspace resolution; `401` without
+authentication; `500` for a database failure.
 
 ## `POST /api/v1/notifications/{notificationId}/read`
 
 Mark a single notification read. Idempotent — re-reading an already-read notification still returns `200`. Returns `404` only when the notification does not exist (or belongs to a different user, which is indistinguishable on purpose).
 
+**Request:** no body.
+
 ```json
 { "status": "ok" }
 ```
+Returns `200 OK` and is idempotent for an already-read notification.
+
+The response is always the same for a notification that is already read. A
+notification owned by another user is treated as not found.
+
+**Statuses:** `200 OK`; `400`/`403` from workspace resolution; `401` without
+authentication; `404` when the notification is absent or belongs to another
+user; `500` for a database failure.
 
 ## `POST /api/v1/notifications/read-all`
 
 Mark every currently-unread notification read for the calling user. Returns the row count.
 
+**Request:** no body.
+
 ```json
 { "updated": 23 }
 ```
+Returns `200 OK`; `updated` may be zero.
+
+**Statuses:** `200 OK`; `400`/`403` from workspace resolution; `401` without
+authentication; `500` for a database failure.
 
 ## `DELETE /api/v1/notifications/{notificationId}`
 
 Hard delete. Returns `204 No Content` on success, `404` when the row doesn't exist or doesn't belong to the calling user.
+
+**Request:** no body.
+
+**Statuses:** `204 No Content`; `400`/`403` from workspace resolution; `401`
+without authentication; `404` when the notification is absent or belongs to
+another user; `500` for a database failure.
 
 ## WebSocket event
 

@@ -97,6 +97,10 @@ GET /api/v1/consolidate/proposed/{id}/diff
 
 **Auth:** `MEMBER` or higher (matches Explain -- no write authority needed to preview).
 
+**Request:** `id` is the required proposal path parameter. Workspace context is
+supplied by the optional `X-Workspace-ID` header (or the authenticated session).
+No request body.
+
 Returns a 3-line-context unified diff between the current canonical `learned-YYYY-MM-DD.md` and the file an approve of `{id}` would land on disk. The post-merge half of the diff is byte-identical to what `POST /api/v1/consolidate/proposed/{id}/approve` would write (modulo the per-instant `Approved at HH:MM:SS` line, which races the wall clock between preview and approve by definition). That equality is the load-bearing UX promise -- a reviewer can read the diff, click approve, and trust that the committed bytes match what they saw.
 
 ```bash
@@ -146,6 +150,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 |---|---|
 | 400 | Missing `{id}` path param. |
 | 401 | Not authenticated, or no workspace context. |
+| 403 | Authenticated but not a member of the requested workspace. |
 | 404 | Unknown `{id}`, or proposal belongs to a different workspace (same 404 -- no existence leak). |
 | 410 | Proposal row exists but the `.proposed/proposal-*.md` file is missing on disk (deleted out-of-band; recoverable by re-running the consolidator). |
 | 413 | Proposal markdown or canonical file exceeds the 8 MB read cap (DoS guard). |
@@ -267,6 +272,10 @@ GET /api/v1/consolidate/proposed/{id}/explain
 
 **Auth:** `MEMBER` or higher inside the workspace -- read-only, no write authority needed to review what was proposed.
 
+**Request:** `id` is the required proposal path parameter. Workspace context is
+supplied by the optional `X-Workspace-ID` header (or the authenticated session).
+No request body.
+
 Returns the full proposal row plus the evidence the summarizer LLM looked at, so the HITL review UI can show "why this rule, given which journal entries". Cross-workspace probes return 404 (no existence leak). The endpoint is safe to call on already-decided proposals; `status`, `decided_at`, and `decided_by_user_id` carry the resolution. `scores` is the per-rule `ScoreResult` map populated by the proposal writer once scoring is wired -- proposals from before that landed return a literal `{}` so clients can blindly `Unmarshal` without nil-checks.
 
 ```bash
@@ -322,6 +331,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 |---|---|
 | 400 | Missing `{id}` path param. |
 | 401 | No workspace context. |
+| 403 | Authenticated but not a member of the requested workspace. |
 | 404 | Unknown `{id}`, or proposal belongs to a different workspace (same 404 -- no existence leak). |
 | 500 | DB query failure. |
 

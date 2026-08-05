@@ -7,7 +7,11 @@ icon: "brain"
 The Memory API exposes the read surfaces over an agent's episodic and markdown memory: a health snapshot that scores how usable the memory is, a hybrid recall search that fuses two retrieval engines, and the version audit trail for canonical memory files. The mutating restore endpoint lives on the [Admin reference](/api-reference/admin) because it requires OWNER/ADMIN.
 
 <Note>
-  Every endpoint requires authentication and workspace context. `workspace_id` is always pulled from the session — never accepted as a query parameter or body field — and `crew_id`, when set, is validated against the caller's workspace (cross-tenant lookups return `404`).
+  Every endpoint requires authentication and workspace context. `workspace_id` is
+  accepted only by the workspace middleware (query parameter, path context, or
+  `X-Workspace-ID`); it is never part of a memory operation's payload. `crew_id`,
+  when set, is validated against the caller's workspace (cross-tenant lookups
+  return `404`).
 </Note>
 
 ## Endpoints
@@ -18,6 +22,80 @@ The Memory API exposes the read surfaces over an agent's episodic and markdown m
 | POST | [`/api/v1/memory/search/hybrid`](#hybrid-search) | Fused FTS5 + episodic memory recall |
 | GET | [`/api/v1/memory/versions`](#get-apiv1memoryversions) | Audit chain for one canonical memory path |
 | GET | [`/api/v1/memory/versions/{sha}`](#get-apiv1memoryversionssha) | Raw blob bytes for one historical version |
+| GET | [`/api/v1/memory/export`](#get-apiv1memoryexport) | Export mapped memory documents or an OKF ZIP |
+| POST | [`/api/v1/memory/import`](#post-apiv1memoryimport) | Import mapped memory documents |
+
+Export and import require `OWNER` or `ADMIN` (the route's `manage` role). The
+workspace is selected by the authenticated session's workspace context;
+`workspace_id` is not part of either operation's request payload. Both require
+`crew_id`; an empty `agent_slug` addresses crew-shared memory.
+
+## Memory portability
+
+### `GET /api/v1/memory/export`
+
+**Request:** no body. Required query parameter `crew_id` identifies a crew in
+the caller's workspace; optional `agent_slug` selects an agent within that
+crew. With no `format` (or any value other than `zip`), the response is
+`200 OK`, `application/json`:
+
+```json
+{
+  "format": "crewship",
+  "documents": [{"path": "AGENT.md", "tier": "agent", "body": "# Notes\n"}],
+  "skipped": [{"source": "links/other.md", "reason": "symlink"}]
+}
+```
+
+`documents` and `skipped` are always arrays. Document fields are `path`,
+`tier`, and `body`, with `scope`, `title`, `tags`, and `sources` omitted when
+empty. Each skipped entry has `source` and `reason`.
+
+With `format=zip`, a non-empty scope returns `200 OK` with
+`Content-Type: application/zip`, `Content-Disposition: attachment`, and a
+`Content-Length`; the body is the OKF ZIP bundle, not JSON.
+
+| Status | Condition |
+|---|---|
+| `200` | JSON export, or a non-empty ZIP export. |
+| `400` | Missing `crew_id`. |
+| `401` | No authenticated workspace context. |
+| `404` | Crew/agent is not in the caller's workspace, or `format=zip` selects an empty scope. |
+| `500` | Database, memory-tree, or bundle construction failure. |
+| `503` | Storage base path is not configured. |
+
+### `POST /api/v1/memory/import`
+
+**Request:** `application/json`, capped at 32 MiB:
+
+```json
+{"crew_id":"crew_123","agent_slug":"alex","documents":[{"path":"AGENT.md","tier":"agent","body":"# Notes\n"}]}
+```
+
+`crew_id`, `agent_slug`, and `documents` are request fields; every document
+requires `path`, `tier`, and `body`. The operation is per-document rather than
+transactional. `200 OK` returns:
+
+```json
+{
+  "written": ["AGENT.md"],
+  "rejected": [{"path": "secrets.md", "kind": "secret", "detail": "..."}],
+  "failed": [{"path": "daily/today.md", "reason": "write failed"}]
+}
+```
+
+`detail` is omitted when empty; a successful response can contain rejected or
+failed documents. Prompt-injection findings are reported in `rejected` with
+`kind: "prompt_injection"`.
+
+| Status | Condition |
+|---|---|
+| `200` | Request processed; inspect `written`, `rejected`, and `failed`. |
+| `400` | Invalid JSON, no documents, invalid target, or unknown tier. |
+| `401` | No authenticated workspace context. |
+| `404` | Crew or agent is not in the caller's workspace. |
+| `413` | Request exceeds 32 MiB. |
+| `500` | Database, write-policy, or memory-tree failure. |
 
 ---
 

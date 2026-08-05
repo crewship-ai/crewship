@@ -1,0 +1,644 @@
+---
+title: "Pipelines"
+description: "Workspace-scoped pipeline and run API."
+icon: "workflow"
+---
+
+Pipelines are persisted, versioned workflow definitions. All routes below use the
+`/api/v1` prefix. Workspace routes require a session/JWT and a workspace the
+caller belongs to; mutation role checks are listed below. Errors use the API's
+Problem Details shape (`error` is the human-readable message).
+
+## Route inventory
+
+| Method | Path | Access | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines` | member | List; `status`, `author_crew_id`, `tag`, `order` (`popularity`, `recent`, `name`), `limit`, `include_ephemeral=1`, `include_hidden=1` |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | member | Get definition |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | delete | Soft-delete |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/save` | create | Create/update a definition |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/test_run` | create | Validate an unsaved definition and mint `save_token` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run` | create | Execute a saved, active pipeline |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch` | create | Execute multiple input items |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run` | create | Static WouldExecute preview; no agent invocation |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run` | create | Execute one step against a fixture |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve` | create | Approve a proposed definition |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject` | create | Reject (soft-delete) a proposed definition |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable` | manage | Disable a pipeline and stop new runs |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable` | manage | Re-enable a disabled pipeline |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs` | member | Journal-backed run entries |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records` | member | Typed run-record projection |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/runs/active` | member | In-flight runs on this replica |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel` | manage | Cancel a run |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs` | member | Workspace run list |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}` | member | One run |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree` | member | Run tree |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs` | member | Run logs |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/files` | member | Files captured for the run |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes` | member | Git changes for the run |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata` | update | Replace run metadata |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal` | update | Deliver a signal to a waiting step |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions` | member | Version list |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}` | member | One immutable version |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff?from=N&to=M` | member | Unified definition diff |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback` | manage | Move head to a prior version |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/export` | member | Export portable JSON bundle |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/import` | create | Import a bundle; requires `author_crew_id` |
+| PUT | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags` | create | Add tags with `{ "tags": ["..."] }` |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag}` | create | Remove one tag |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/overrides` | member | List step overrides |
+| PUT | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override` | create | Set `{ "prompt": "...", "model_override": "..." }` |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override` | create | Delete an override |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints` | member | List pending durable waitpoints |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve` | create | Approve a pending waitpoint |
+| POST | `/api/v1/waitpoint-tokens/{token}` | token | Public waitpoint completion callback |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/pending` | member | List deferred triggers not yet fired |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel` | update | Cancel a deferred trigger |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | member | Monthly spend report |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | manage | Set or clear the monthly spend cap |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/budget-summary` | member | Workspace monthly budget roll-up |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | member | List cron schedules (see [Routines](/api-reference/routines)) |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | create | Create a cron schedule (see [Schedules](/api-reference/schedules)) |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | manage | Update a schedule (see [Schedules](/api-reference/schedules)) |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | manage | Soft-delete a schedule |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run` | create | Force-fire a schedule now |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | create | Create a webhook trigger (see [Routines](/api-reference/routines)) |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | List webhook triggers |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` | manage | Delete a webhook trigger |
+| POST | `/api/v1/webhooks/{token}` | token | Public webhook dispatch; no workspace session |
+
+`create`, `manage`, and `delete` are the server's role-action gates (normally
+MANAGER+, OWNER/ADMIN, and OWNER/ADMIN respectively). A missing pipeline is
+`404`; malformed JSON or invalid input is `400`; insufficient role is `403`;
+an unavailable runner/store is `503`.
+
+## Core endpoint contract
+
+All paths in this page require the `/api/v1` prefix. `member` means an
+authenticated session or CLI token with membership in `{workspaceId}`;
+`create`, `manage`, and `delete` are the role/capability gates described above.
+Requests are JSON unless the operation is a `GET` or `DELETE` with no body.
+Successful responses are JSON and use the status shown by the operation; an
+empty successful delete uses `204 No Content`. Invalid JSON, missing required
+path/body values, or invalid query values return `400`; missing or
+soft-deleted resources return `404`; authorization failures return `401` or
+`403`; unavailable runner/storage dependencies return `503`; unexpected
+handler/database failures return `500`.
+
+The route-specific request and response contracts are:
+
+| Operation family | Request | Success response/status |
+|---|---|---|
+| List/get/version/export/diff/state reads | Query values documented beside the operation; no body | JSON resource/array/object, `200` |
+| Save/import | Definition or portable bundle; `slug`/`definition` or `author_crew_id` as applicable | Pipeline/version object, `200` or `201` |
+| Run/run-batch/dry-run/step-run | Run payload in [Run payload](#run-payload); step-run adds a fixture | Run result, per-item results, preview, or step result, `200`/`202` |
+| Governance, cancel, replay, signal, waitpoint approve | Optional operation-specific JSON body | Updated resource or `{ "ok": true, ... }`, `200` |
+| Tags/overrides/budget/state writes | JSON body described by the operation | Updated object, `200` |
+| Schedule/webhook administration | See [Routines](/api-reference/routines) | Schedule/webhook object or empty delete, `200`/`201`/`204` |
+
+The public `POST /api/v1/webhooks/{token}` route is the exception to session
+authentication: the high-entropy token authenticates dispatch, and an
+configured signing secret adds HMAC verification. Accepted dispatches return
+`202`; invalid signatures return `401`, rate limits return `429`, and an
+inactive target returns `409`.
+
+## Run payload
+
+`run` and `dry_run` accept:
+
+```json
+{
+  "inputs": {"customer_id": "cus_123"},
+  "tier_override": "trivial",
+  "triggered_via": "manual",
+  "triggered_by_id": "button-1",
+  "tags": ["production"],
+  "metadata": {"request_id": "req_1"},
+  "delay_seconds": 30,
+  "ttl_seconds": 3600,
+  "debounce_key": "customer:cus_123",
+  "debounce_window_seconds": 60,
+  "debounce_max_seconds": 300,
+  "priority": 10,
+  "idempotency_key_ttl_seconds": 86400
+}
+```
+
+`tier_override` is `trivial`, `fast`, `moderate`, or `smart`; an unknown value
+is treated as no override. `triggered_via` accepts `manual`, `schedule`,
+`webhook`, `call_pipeline`, or `issue`; other values fall back to `manual`.
+Omit it for the default `manual`. `run` returns the
+run result (including `run_id`, `status`, `output`, `step_outputs`,
+`duration_ms`, and `cost_usd`). An `Idempotency-Key` header deduplicates runs.
+
+`run_batch` takes `{ "items": [{ "inputs": {}, "tags": [], "metadata": {} }],
+"tags": [], "tier_override": "fast" }` and returns per-item `index`, `run_id`,
+`status`, or `error`.
+
+`inputs`, `tags`, and `metadata` are optional. `delay_seconds`, `ttl_seconds`,
+`debounce_window_seconds`, and `debounce_max_seconds` must be between `0` and
+`2,592,000` seconds when deferred dispatch is used; invalid values return
+`400`. `priority` is carried to the pending queue. The `Idempotency-Key` header
+deduplicates a run (the optional `idempotency_key_ttl_seconds` body field sets
+the deduplication window; `0` uses the server default). `run_batch` requires a
+non-empty `items` array and accepts at most 100 items; violations return `400`.
+
+### Run statuses and responses
+
+`POST .../pipelines/{slug}/run` requires `member` plus `create` (normally
+MANAGER+), and returns `200 OK` with a run result for an immediate execution.
+The immediate result includes `run_id`, `pipeline_id`, `pipeline_slug`,
+`status`, `output`, `step_outputs`, `duration_ms`, and `cost_usd` (plus
+failure/wait fields when applicable). A deferred request (`delay_seconds > 0`
+or a non-empty `debounce_key`) returns `202 Accepted` with `{ "status":
+"SCHEDULED", "pending_id", "fire_at", "coalesced", "priority" }` and does
+not yet have a run ID.
+The run status values are:
+
+| Status | Meaning |
+|---|---|
+| `COMPLETED` | The routine finished successfully. |
+| `FAILED` | Execution or validation failed; inspect `error_message` and `failed_at_step`. |
+| `CANCELLED` | The run was cancelled by an operator. |
+| `WAITING` | The run is parked at a human approval waitpoint; this is not a failure. |
+| `DEDUPED` | An idempotency key matched an existing run; `run_id` identifies the original. |
+| `DRY_RUN_OK` | A `dry_run` or `test_run` preview completed; no agent was invoked. This is not returned by the normal `run` endpoint. |
+
+`SCHEDULED` responses use `202 Accepted` and contain `pending_id`, RFC3339Nano
+`fire_at`, `priority`, and `coalesced`. `WAITING` responses also contain the
+current step and waitpoint token. `DEDUPED` may still refer to an in-flight
+original. `--wait`/polling follows `WAITING` and `DEDUPED` until the persisted
+run reaches a terminal status. Persisted run records additionally use
+`queued`, `running`, `completed`, `failed`, `cancelled`, `interrupted`,
+`dry_run`, and `waiting` (lowercase); `interrupted` marks boot recovery.
+
+## Save and validation
+
+```json
+{
+  "slug": "nightly-report",
+  "name": "Nightly report",
+  "description": "...",
+  "definition": {"steps": []},
+  "author_crew_id": "crew_123",
+  "save_token": "...",
+  "change_summary": "..."
+}
+```
+
+`slug` and `definition` are required. Call `test_run` first with
+`{ "definition": {...}, "author_crew_id": "crew_123", "sample_inputs": {} }`;
+the successful response contains an HMAC-bound `save_token`. The legacy
+`last_test_run_at`/`last_test_run_passed` fields are not proof by themselves.
+`skip_test_gate` and `skip_governance_gate` are OWNER/ADMIN-only. Risky saves
+may have status `proposed` until approved; only `active` pipelines run.
+
+## Replay, failures, budgets, and state
+
+| Method | Path | Body / query |
+|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/runs/errors` | `limit` query; failure groups |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay` | `{ "pinned_version": 3 }` optional |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay` | `{ "run_ids": [], "fingerprint": "...", "limit": 50 }`; `run_ids` or `fingerprint` required |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | Monthly spend report |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget` | `{ "monthly_budget_usd": 25 }`; `0` clears, negative is `400` |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/budget-summary` | Workspace monthly roll-up |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/state` | Optional `schedule_id`; absent means all buckets |
+| PUT | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}` | `{ "value": "...", "schedule_id": "..." }` |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}` | Optional `schedule_id`; missing key is `404` |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/state` | Optional `schedule_id`; clears one bucket |
+
+Budget and state writes require `manage`; state keys are limited to 128
+characters. The budget response reports `month`, `spent_usd`, `has_budget`,
+`pct_used`, and `over_budget` where applicable.
+
+## Audited operation reference
+
+The following details are the wire contract for the remaining pipeline
+operations. Every endpoint is prefixed with `/api/v1`. `member` means an
+authenticated session with membership in `{workspaceId}`. A request from an
+unauthenticated caller returns `401`; a caller without workspace membership
+returns `403`. Problem responses use the API error shape with an `error`
+message. Unless an endpoint says otherwise, an unexpected database/store
+failure is `500`.
+
+### Run changes
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes`
+
+**Auth:** `member` plus the `read` role capability (normally any workspace
+member). The run must belong to the workspace; a missing or foreign run is
+`404` (`Run not found`). The handler resolves the run's
+`invoking_crew_id`, falling back to the pipeline's `author_crew_id`, and
+re-checks that crew's workspace before contacting the crew container.
+
+**Response:** `200 OK`. If no crew/repository can be resolved, the response is
+`{ "is_repo": false }`. Otherwise the response is the decoded crew git-diff
+object (the proxy forwards that object without reshaping it). Failure to reach
+the crew proxy is `502`; an internal run/crew lookup failure is `500`. A
+malformed proxy response degrades to `{ "is_repo": false }` with `200`.
+
+### Run logs
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs?limit=N`
+
+**Auth:** `member` plus `read`. `runId` is required (`400`). The run is
+workspace-scoped and a missing/foreign run returns `404`. `limit` defaults to
+`200`; a positive value from `1` through `1000` is honored, while an absent,
+non-numeric, zero, negative, or larger value leaves the default in place.
+
+**Response:** `200 OK` with an oldest-first JSON array. Each entry is
+`{ "ts": "RFC3339", "level": "info", "message": "...", "type": "..." }`;
+`type` is omitted when empty and an empty severity is returned as `info`.
+Journal lookup, row scan, or iteration failures return `500`.
+
+### Run metadata
+
+#### `PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata`
+
+**Auth:** `member` plus the `update` capability (MANAGER+). `runId` is
+required (`400`). The JSON body must contain at least one non-empty operation
+map:
+
+```json
+{
+  "set": {"customer_id": "cus_123"},
+  "increment": {"attempts": 1},
+  "append": {"events": {"kind": "retry"}}
+}
+```
+
+`set` replaces a key; `increment` adds numerically (missing keys start at
+zero); `append` pushes onto an array (missing arrays start empty). Invalid JSON
+or no operation maps is `400`. A missing/foreign run is `404`; an unavailable
+run store is `503`; an update failure is `500`.
+
+**Response:** `200 OK` — `{ "metadata": { ...merged metadata... } }`.
+
+#### `POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal`
+
+**Auth:** `member` plus `update` (MANAGER+). The body is
+`{ "event_type": "approval", "payload": "..." }`; `event_type` is required.
+Invalid JSON, a missing `event_type`, or a missing `runId` is `400`. A missing
+run store or signal registry is `503`; a missing/foreign run is `404`. If the
+run is not waiting for that event, the response is `404`. Durable delivery
+records the signal before best-effort in-memory delivery and resumes a parked
+run.
+
+**Response:** `200 OK` — `{ "ok": true, "delivered": true }`. A durable
+delivery write failure is `500`.
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree`
+
+**Auth:** `member`. `runId` is required (`400`); a missing/foreign run is
+`404`; an unavailable run store is `503`; tree loading failure is `500`.
+
+**Response:** `200 OK` — `{ "nodes": [...] }`, where each node contains
+`id`, optional `parent_id`, `pipeline_slug`, `status`, `triggered_via`, and
+`cost_usd`. Nodes are a flat parent-linked run plus descendant list, including
+`call_pipeline`, deferred, and replay descendants.
+
+### Pipeline budgets
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget`
+
+**Auth:** `member`. A missing/soft-deleted pipeline is `404`; an unavailable
+run-history store is `503`; pipeline lookup or monthly-spend calculation
+failure is `500`.
+
+**Response:** `200 OK` —
+`{ "slug", "has_budget", "monthly_budget_usd", "month": "YYYY-MM", "spent_usd", "pct_used"?, "over_budget"? }`.
+`pct_used` and `over_budget` are omitted when no positive budget is set.
+Spend is for the current calendar month.
+
+#### `PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget`
+
+**Auth:** `member` plus `manage` (OWNER/ADMIN). Body:
+`{ "monthly_budget_usd": 25 }`. `0` clears the cap; negative values are
+`400`. Invalid JSON/body read failures are `400`. A missing pipeline is `404`,
+an unavailable run-history store is `503`, and persistence or spend
+calculation failures are `500`.
+
+**Response:** `200 OK` with the same budget object as `GET`.
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipelines/budget-summary`
+
+**Auth:** `member`. The response is `200 OK` with
+`{ "month": "YYYY-MM", "routines": [...], "total_budget_usd", "total_spent_usd" }`.
+Each routine row has `slug`, `monthly_budget_usd`, `spent_usd`, and optional
+`pct_used`/`over_budget`. Routines with neither a positive budget nor current
+month spend are omitted. An unavailable run-history store or list/spend
+calculation failure is `503`/`500`, respectively.
+
+### Appearance
+
+#### `PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance`
+
+**Auth:** `member` plus `create` (OWNER/ADMIN/MEMBER). Picking an icon is a
+labelling act rather than an operational one, so it sits at the create tier
+rather than `manage`.
+
+This is deliberately **not** part of `PUT .../pipelines/{slug}`. Save rewrites
+`definition_json`, recomputes `definition_hash`, can mint a new version and
+re-runs the governance risk classifier — none of which should happen because
+somebody picked a different colour. This endpoint writes two columns.
+
+**Request:** JSON body `{ "icon": "receipt", "color": "amber" }`. Both fields
+are optional and independent:
+
+| Field state | Effect |
+|---|---|
+| omitted | keeps the stored value |
+| `""` | clears the stored value |
+| non-empty | replaces the stored value (trimmed) |
+
+Values are opaque to the server: `icon` is a crew-icon name and `color` a
+gradient-palette id, both owned by the web UI's icon kit. The server validates
+length only — each is bounded at 64 characters — so the kit can gain an icon
+without the API rejecting it. An unknown value renders the fallback icon,
+which is what an unset value already does. Bodies are read up to 4 KiB.
+
+**Response:** `200 OK` with the updated routine (the same object
+`GET .../pipelines/{slug}` returns, including `icon` and `color`). If the write
+lands but the follow-up read fails, the response is still `200 OK` but carries
+only `{ "icon", "color" }` — failing here would have the caller retry a change
+that already applied. That is why the response schema is a `oneOf`.
+
+**Statuses:** `400` for an unreadable body, invalid JSON, or a value over 64
+characters; `401` unauthenticated; `403` below the create tier; `404` when the
+routine does not exist in the workspace; `500` on persistence failure.
+
+```bash
+crewship routine appearance set monthly-accounting-pack --icon receipt --color amber
+crewship routine appearance get monthly-accounting-pack
+```
+
+See [`crewship routine appearance`](/cli/routine) for the CLI equivalent.
+
+### Deferred and replay operations
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipelines/pending`
+
+**Auth:** `member`. `200 OK` returns an array (never `null`) of at most 100
+pending deferred triggers. Each item contains `id`, `pipeline_slug`, optional
+`debounce_key`, `priority`, and RFC3339Nano `fire_at`. An unavailable database
+is `503`; listing failure is `500`.
+
+#### `POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel`
+
+**Auth:** `member` plus `update` (MANAGER+). `pendingId` is required (`400`).
+An unavailable database is `503`; a missing, already-fired, expired, or
+already-cancelled item is `404`; cancellation failure is `500`.
+
+**Response:** `200 OK` — `{ "ok": true, "cancelled": "<pendingId>" }`.
+
+#### `POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay`
+
+**Auth:** `member` plus `create` (MANAGER+). Body is optional; when present it
+is `{ "pinned_version": 3 }`. The replay uses the source run's original
+inputs, metadata, and tags, marks the new run as a replay, and uses HEAD unless
+`pinned_version` is supplied. Invalid JSON or a missing `runId` is `400`.
+
+**Response:** `200 OK` with the newly-created run result. A missing/foreign
+source run is `404`; a deleted source pipeline is `404`; an unavailable run
+store is `503`; an execution concurrency limit is `429`; a pinned version that
+does not exist is `409`; other lookup/execution failures are `500`.
+The response is the ordinary `RunResult` object: `run_id`, `pipeline_id`,
+`pipeline_slug`, `status`, `output`, `step_outputs`, `duration_ms`, and
+`cost_usd`, with `failed_at_step`/`error_message` for failures and
+`waitpoint_token`/`current_step` when the replay parks at a waitpoint. The new
+run is marked as a replay of `runId`; its inputs, metadata, and tags come from
+the source run. An omitted `pinned_version` uses the current head version.
+
+**Statuses:** `200 OK`; `400` for invalid input; `401` without authentication;
+`403` without membership/create permission; `404` for a missing source;
+`409` for an invalid pinned version; `429` at the concurrency limit; `503` for
+an unavailable run store; `500` for other failures.
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipelines/runs/errors?limit=N`
+
+**Auth:** `member`. `limit` is passed to the failure-group query; the default
+is `50`, and the store normalizes non-positive or greater-than-`200` values to
+`50`. The response excludes runs whose pipeline was soft-deleted and groups
+failed runs by `error_fingerprint`, newest group first.
+
+**Response:** `200 OK` — `{ "groups": [...] }`. Each group contains
+`fingerprint`, `count`, `pipeline_slug`, `failed_at_step`, `sample_error`, and
+`run_ids`. `run_ids` is a newest-first sample capped at `100` per group; it is
+the input for `bulk_replay`, not necessarily the complete group. An unavailable
+run store is `503`; failure-group lookup is `500`.
+
+#### `POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay`
+
+**Auth:** `member` plus `create` (MANAGER+). Body must select runs by
+`run_ids` or `fingerprint`; optional `limit` defaults to `50` and is clamped
+to `50` when absent, non-positive, or greater than `100`:
+
+```json
+{ "run_ids": ["run_1", "run_2"], "fingerprint": "fp_...", "limit": 25 }
+```
+
+When both selectors are supplied, IDs are retained and fingerprint IDs are
+appended, then the combined list is truncated to `limit`. The handler defaults
+`limit` to `50` when it is absent, non-positive, or greater than `100`.
+No selected IDs is `400`; invalid JSON is `400`; an unavailable run store or
+failure loading fingerprint groups is `503`/`500`. Individual replay failures
+are reported per item rather than failing the whole request. The fingerprint
+selector expands from the newest sampled IDs returned by the failure-group
+store, so a group larger than the sample cannot replay every historical run in
+one request.
+
+**Statuses:** `200 OK`; `400` for invalid selectors or JSON; `401` without
+authentication; `403` without membership; `503` for an unavailable run store;
+`500` for failure-group lookup.
+
+**Response:** `200 OK` —
+`{ "requested": N, "replayed": N, "results": [{ "source_run_id", "new_run_id"?, "status"?, "error"? }] }`.
+
+**Statuses:** `200 OK`; `400` for invalid selectors or JSON; `401` without
+authentication; `403` without membership/create permission; `503` for an
+unavailable run store; `500` for selector or replay failures.
+
+### Version diff
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff?from=N&to=M`
+
+**Auth:** `member`. Both positive integer query parameters are required
+(`400`). A missing pipeline, `from` version, or `to` version is `404`;
+pipeline/version lookup failures or diff generation failure are `500`.
+
+**Response:** `200 OK` —
+`{ "slug", "from_version", "to_version", "from_hash", "to_hash", "identical", "unified_diff" }`.
+Definitions are pretty-printed before diffing. `unified_diff` is empty when
+the hashes are identical.
+
+### Governance
+
+`POST .../pipelines/{slug}/approve` and `POST .../pipelines/{slug}/reject`
+take no request body and require `create` (MANAGER+). Approve changes a
+`proposed` pipeline to `active` and returns `200` —
+`{ "slug", "status": "active" }`. Reject soft-deletes the proposed pipeline
+and returns `200` with the resulting status. A pipeline that is not in the
+expected state returns `409`; a missing pipeline is `404`; other store failures
+are `500`.
+
+`POST .../pipelines/{slug}/disable` and `/enable` take no request body and
+require `manage` (OWNER/ADMIN). Disable returns `200` with
+`{ "slug", "status": "disabled", "cancelled_runs": N }`; enable returns
+`200` with `{ "slug", "status": "active" }`. They return `404` for a
+missing pipeline and `500` for persistence failures. A disabled or proposed
+pipeline cannot be run; the run endpoint reports `409` with its current status.
+
+### Schedules and public waitpoint completion
+
+Schedule administration is also available through the pipeline API. Create
+uses `POST .../pipeline-schedules` with a JSON body containing `cron_expr` and
+either `target_pipeline_slug` or `target_pipeline_id`; it returns `201` with
+the schedule object. `PATCH .../pipeline-schedules/{scheduleId}` merges the
+supplied fields into the existing schedule and returns `200` with the schedule
+object. Both return `400` for
+invalid JSON, missing targets, or invalid cron/timezone data; missing schedules
+or targets are `404`; backend failures are `500` and an unwired schedule store
+is `503`. Update requires `manage`; create requires `create`. See
+[Schedules](/api-reference/schedules) for the request fields and complete
+schedule representation.
+
+`DELETE .../pipeline-schedules/{scheduleId}` requires `manage`, returns `204`
+on success, and soft-deletes the schedule. `POST .../pipeline-schedules/{scheduleId}/run`
+requires `create`, takes no body, and force-fires the stored schedule inputs
+without changing its cron cadence. It returns the normal run result (`200`),
+or `404` for a missing/foreign schedule or target, `409` for a missing pinned
+version, `429` for the concurrency limit, `500` for execution/storage errors,
+and `503` when the schedule store or runner is unavailable.
+
+The public `POST /api/v1/waitpoint-tokens/{token}` callback has no workspace
+session requirement; the high-entropy token authenticates it. Its optional
+body is `{ "approved": true, "payload": <any JSON> }`; `approved` defaults to
+`true`. It returns `200` — `{ "ok": true, "approved": true|false }`, `400` for
+an empty token or invalid JSON, `409` when the waitpoint was already decided or
+expired, `500` for completion failure, and `503` when the waitpoint backend is
+unavailable.
+
+### Step overrides
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/overrides`
+
+**Auth:** `member`. A missing pipeline is `404`; pipeline or override lookup
+failure is `500`.
+
+**Statuses:** `200 OK`; `401` without authentication; `403` without
+membership; `404` for a missing pipeline or key; `503` for an unavailable state
+store; `500` for lookup failure.
+
+**Response:** `200 OK` — `{ "overrides": [...] }`, with each row containing
+`step_id` and optional `prompt` and `model_override`.
+
+#### `PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override`
+
+**Auth:** `member` plus `update` (MANAGER+). `stepId` is required (`400`).
+Body is `{ "prompt": "...", "model_override": "..." }`; at least one of the
+two non-empty fields is required (`400`). Invalid JSON is `400`. A missing
+pipeline or step in the current definition is `404`; an invalid stored
+definition is `500`; save failure is `500`.
+
+**Response:** `200 OK` — `{ "ok": true, "step_id": "<stepId>" }`.
+
+#### `DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override`
+
+**Auth:** `member` plus `update` (MANAGER+). The response is `200 OK` with
+`{ "ok": true, "step_id": "<stepId>" }`. A missing pipeline is `404`; delete
+failure is `500`. The endpoint is idempotent for an absent override.
+
+### Pipeline state
+
+#### `GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state?schedule_id=S`
+
+**Auth:** `member`. Without `schedule_id`, all schedule buckets are returned;
+with it, only that bucket is returned. An empty value selects the shared
+manual/webhook bucket. `200 OK` returns
+`{ "slug": "...", "buckets": [{ "schedule_id", "entries": [{ "key", "value", "updated_at" }] }] }`.
+A missing pipeline is `404`; an unavailable state store is `503`; lookup
+failure is `500`.
+
+#### `PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}`
+
+**Auth:** `member` plus `manage` (OWNER/ADMIN). Body is
+`{ "value": "...", "schedule_id": "..." }`; omitted `schedule_id` means the
+manual/webhook bucket. Empty keys or keys longer than 128 characters are
+`400`; invalid JSON is `400`. A missing pipeline is `404`; an unavailable
+state store is `503`; write failure is `500`.
+
+**Response:** `200 OK` —
+`{ "slug", "schedule_id", "key", "value" }`.
+
+**Statuses:** `200 OK`; `400` for invalid JSON or key; `401` without
+authentication; `403` without manage permission; `404` for a missing pipeline;
+`503` for an unavailable state store; `500` for write failure.
+
+#### `DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}?schedule_id=S`
+
+**Auth:** `member` plus `manage` (OWNER/ADMIN). Empty `key` is `400`. The
+response is `200 OK` — `{ "slug", "schedule_id", "key", "deleted": true }`.
+An absent key in the selected bucket is `404`; a missing pipeline is `404`;
+an unavailable state store is `503`; delete failure is `500`.
+
+**Statuses:** `200 OK`; `400` for an empty key; `401` without authentication;
+`403` without manage permission; `404` for a missing pipeline or key; `503` for
+an unavailable state store; `500` for delete failure.
+
+#### `DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state?schedule_id=S`
+
+**Auth:** `member` plus `manage` (OWNER/ADMIN). The operation clears only the
+selected bucket (empty `schedule_id` selects manual/webhook state). `200 OK`
+returns `{ "slug", "schedule_id", "removed": N }`. A missing pipeline is
+`404`; an unavailable state store is `503`; clear failure is `500`.
+
+**Statuses:** `200 OK`; `401` without authentication; `403` without manage
+permission; `404` for a missing pipeline; `503` for an unavailable state store;
+`500` for clear failure.
+
+### Single-step execution
+
+#### `POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run`
+
+**Auth:** `member` plus `create` (MANAGER+). This executes one `agent_run`,
+`http`, `script`, or `transform` step against a fixture; it does not traverse
+the DAG or create a pipeline run record. The JSON body is:
+
+```json
+{
+  "step_id": "extract",
+  "inputs": {"document": "..."},
+  "step_outputs": {"download": "fixture output"},
+  "tier_override": "fast"
+}
+```
+
+`step_id` is required (`400`); invalid JSON is `400`; a missing pipeline or
+step is `404`; a non-supported step type is `400`; a non-active pipeline is
+`409`; an unwired runner is `503`; model resolution failure is `500`; step
+execution failure is `502`.
+
+**Response:** `200 OK` with `step_id`, `step_type`, `output`, `valid`, optional
+`validation_reason`, `cost_usd`, `tokens_in`, `tokens_out`, `duration_ms`,
+`simulated: true`, and optional `warnings`. Agent steps additionally include
+`adapter`, `model`, and `rendered_prompt`. Unseeded upstream output references
+are reported in `warnings`.
+
+### Pipeline tags
+
+#### `PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags`
+
+**Auth:** `member` plus `create` at the route and `update` in the handler
+(MANAGER+). Body is `{ "tags": ["tag-a", "tag-b"] }`; an empty list or
+invalid JSON is `400`. A missing pipeline is `404`; exceeding the tag-store
+limit is `400`; other lookup/store failures are `500`.
+
+**Response:** `200 OK` — `{ "tags": ["..."] }` with the routine's complete
+tag set after the add.
+
+#### `DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag}`
+
+**Auth:** `member` plus `create` at the route (MANAGER+). `200 OK` returns
+`{ "ok": true }`. A missing pipeline is `404`; tag removal failure is `500`.
+Removing an absent tag is otherwise successful.

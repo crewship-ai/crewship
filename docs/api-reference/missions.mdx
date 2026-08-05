@@ -247,6 +247,8 @@ DELETE /api/v1/crews/{crewId}/missions/{missionId}?workspace_id={workspaceId}
   Only missions in `PLANNING` or `CANCELLED` status can be deleted (hard delete).
 </Warning>
 
+**Request:** `crewId` and `missionId` are required path parameters; `workspace_id` selects the workspace. No request body.
+
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
 **Response:** `204 No Content`
@@ -298,6 +300,8 @@ POST /api/v1/crews/{crewId}/missions/{missionId}/restart?workspace_id={workspace
 
 Restarts a `COMPLETED`, `FAILED`, or `CANCELLED` mission. Resets non-COMPLETED tasks (PENDING if dependencies allow, BLOCKED otherwise), increments their `iteration`, clears errors, and moves the mission back to `PLANNING` (call `start` afterwards to dispatch). (`internal/api/task_state.go:14`)
 
+**Request:** `crewId` and `missionId` are required path parameters; `workspace_id` selects the workspace. No request body.
+
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
 **Response:** `200 OK`
@@ -319,6 +323,8 @@ POST /api/v1/crews/{crewId}/missions/{missionId}/resume?workspace_id={workspaceI
 
 Resumes a `FAILED` mission from the point of failure. The handler atomically claims the mission into `RESUMING`, resets the FAILED/AWAITING_APPROVAL tasks plus their downstream dependents, validates the DAG, and re-engages the MissionEngine. COMPLETED tasks are preserved. (`internal/api/task_state.go:103`)
 
+**Request:** `crewId` and `missionId` are required path parameters; `workspace_id` selects the workspace. No request body.
+
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
 **Response:** `200 OK`
@@ -336,6 +342,8 @@ POST /api/v1/crews/{crewId}/missions/{missionId}/clone?workspace_id={workspaceId
 ```
 
 Creates a copy of the mission with all its tasks, resetting statuses to `PLANNING`/`PENDING` (or `BLOCKED` if the cloned task carries dependencies).
+
+**Request:** `crewId` and `missionId` are required path parameters; `workspace_id` selects the workspace. No request body.
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
@@ -383,6 +391,8 @@ Tasks can only be added to missions in `PLANNING` or `IN_PROGRESS` state. If any
 ```
 PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}?workspace_id={workspaceId}
 ```
+
+**Auth:** Authenticated workspace caller with the mission write permission (`OWNER`, `ADMIN`, or `MANAGER`). **Request:** `crewId`, `missionId`, and `taskId` path parameters, optional `workspace_id`, and a JSON body containing any of the optional fields below. **Response:** the updated task object. **Statuses:** `200 OK`; `400` for an invalid transition or body, `403` for insufficient role, `404` when the mission or task is not in the workspace, and `500` for a persistence failure.
 
 **Request Body:** All fields optional. (`internal/api/task_handler.go:160` — `updateTaskRequest`)
 
@@ -505,6 +515,8 @@ Workspace-wide aggregates for dashboards.
 ```
 GET /api/v1/mission-metrics?workspace_id={workspaceId}
 ```
+
+**Auth:** Authenticated workspace request. **Request:** required `workspace_id` query parameter; no body. **Response:** JSON aggregate metrics object. **Statuses:** `200 OK`; `400` for missing or invalid workspace context, `401` when unauthenticated, and `500` for an aggregation failure.
 
 Aggregated mission metrics for the workspace. `total_missions` and `active_missions` are lifetime counts; the `*_24h` fields cover the trailing 24 hours.
 

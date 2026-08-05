@@ -50,6 +50,8 @@ Manage the ordered rule set. Rules evaluate in `position` order; first match win
 
 List every rule in the workspace, ordered by `position ASC, created_at ASC`.
 
+**Request:** No request body or query parameters.
+
 **Auth:** authenticated session + workspace context.
 
 **Response:** `200 OK` — JSON array (never `null`).
@@ -143,6 +145,8 @@ When **both** `pattern` and `match_type` are present and `match_type` is `regex`
 
 Hard delete. Higher role bar than create / update because the rule is the source of truth for downstream automation.
 
+**Request:** No request body. The `{ruleId}` path parameter identifies the rule to delete.
+
 <Warning>
   Hard delete — the rule row is removed outright (no soft delete). The higher role bar reflects that the rule drives downstream automation.
 </Warning>
@@ -165,7 +169,9 @@ One-shot endpoint that applies the rule set to the current backlog.
 
 ### `POST /api/v1/triage/process`
 
-Run all enabled rules against every **unassigned BACKLOG issue** in the workspace and apply the first-match update to each. Idempotent: re-running on a backlog where everything matched already does nothing — once an issue has an `assignee_id`, the rule loader's `WHERE assignee_id IS NULL` excludes it.
+Run all enabled rules against every **unassigned BACKLOG issue** in the workspace and apply the first-match update to each. Issues are selected with `assignee_id IS NULL`; a rerun therefore skips issues that received an assignee, but an issue matched by a rule that does not set `assignee_id` can be processed again.
+
+**Request:** JSON object `{}`; no path or query parameters.
 
 **Auth:** authenticated session + workspace context + `OWNER`, `ADMIN`, or `MANAGER` role (`requireRole("create")`).
 

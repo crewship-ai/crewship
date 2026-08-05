@@ -27,10 +27,10 @@ The audit watcher (PR #403) closes gap 1 — a host-side fsnotify watcher rooted
 
 | Surface | Endpoint | Use it when |
 |---|---|---|
-| Aggregate stats | [`GET /admin/memory/stats`](/api-reference/admin#get-apiv1adminmemorystats) | "How big is memory in this workspace right now?" |
-| Row-level list | [`GET /admin/memory/versions`](/api-reference/admin#get-apiv1adminmemoryversions) | "Which rows? Filter by tier / agent / path / time window." |
-| Single-row content | [`GET /admin/memory/versions/{id}/content`](/api-reference/admin#get-apiv1adminmemoryversionsidcontent) | "Show me the actual bytes — I need to see what the scrubber saw." |
-| Retention config | [`GET` / `PATCH /admin/memory/config`](/api-reference/admin#get-apiv1adminmemoryconfig) | "How long are we keeping versions for this workspace?" |
+| Aggregate stats | [`GET /api/v1/admin/memory/stats`](/api-reference/admin#get-apiv1adminmemorystats) | "How big is memory in this workspace right now?" |
+| Row-level list | [`GET /api/v1/admin/memory/versions`](/api-reference/admin#get-apiv1adminmemoryversions) | "Which rows? Filter by tier / agent / path / time window." |
+| Single-row content | [`GET /api/v1/admin/memory/versions/{id}/content`](/api-reference/admin#get-apiv1adminmemoryversionsidcontent) | "Show me the actual bytes — I need to see what the scrubber saw." |
+| Retention config | [`GET /api/v1/admin/memory/config` / `PATCH /api/v1/admin/memory/config`](/api-reference/admin#get-apiv1adminmemoryconfig) | "How long are we keeping versions for this workspace?" |
 
 All four require workspace context and the `manage` role. Field shapes, query parameters, and error codes live in [the Admin API reference](/api-reference/admin) — this guide does not duplicate them.
 
@@ -54,13 +54,13 @@ The consolidator can be configured to propose `learned-YYYY-MM-DD.md` updates in
     Surface them in the journal stream or query `memory_proposals` directly (no public list endpoint yet; track via `memory.consolidation_proposed` events).
   </Step>
   <Step title="Preview the diff">
-    [`GET /consolidate/proposed/{id}/diff`](/api-reference/consolidate#preview-proposal-diff) returns a 3-line-context unified diff between the current canonical file and what an approve would write. The post-merge half of the diff is byte-identical to what `/approve` will commit, modulo the per-instant `Approved at HH:MM:SS` line. That equality is the load-bearing UX promise — what you read is what gets written.
+    [`GET /api/v1/consolidate/proposed/{id}/diff`](/api-reference/consolidate#preview-proposal-diff) returns a 3-line-context unified diff between the current canonical file and what an approve would write. The post-merge half of the diff is byte-identical to what `/approve` will commit, modulo the per-instant `Approved at HH:MM:SS` line. That equality is the load-bearing UX promise — what you read is what gets written.
   </Step>
   <Step title="Read the rationale">
-    `GET /consolidate/proposed/{id}/explain` returns the source journal entries the consolidator extracted the rule from.
+    `GET /api/v1/consolidate/proposed/{id}/explain` returns the source journal entries the consolidator extracted the rule from.
   </Step>
   <Step title="Approve or reject">
-    `POST /consolidate/proposed/{id}/approve` writes the merged file and emits `memory.consolidated`. `POST .../reject` flips the proposal row to `status='rejected'` (with `decided_at` / `decided_by_user_id` populated), resolves the inbox item, and logs the reason at notice level — there is no `memory.*` event for rejection; the audit trail is the row state plus the log line.
+    `POST /api/v1/consolidate/proposed/{id}/approve` writes the merged file and emits `memory.consolidated`. `POST /api/v1/consolidate/proposed/{id}/reject` flips the proposal row to `status='rejected'` (with `decided_at` / `decided_by_user_id` populated), resolves the inbox item, and logs the reason at notice level — there is no `memory.*` event for rejection; the audit trail is the row state plus the log line.
   </Step>
 </Steps>
 
@@ -103,23 +103,23 @@ The change takes effect on the next daily sweep tick (03:00 UTC). It does **not*
 
 ### "I want to verify the scrubber caught a PII leak"
 
-1. Use `GET /admin/memory/versions` filtered by `agent_slug` and a tight `since` window to find the row.
-2. Fetch the content via `GET /admin/memory/versions/{id}/content`. The body is the post-scrubber bytes — what's actually on disk. If the PII is still there, the scrubber didn't match it; that's a scrubber-config bug, not a memory bug.
+1. Use `GET /api/v1/admin/memory/versions` filtered by `agent_slug` and a tight `since` window to find the row.
+2. Fetch the content via `GET /api/v1/admin/memory/versions/{id}/content`. The body is the post-scrubber bytes — what's actually on disk. If the PII is still there, the scrubber didn't match it; that's a scrubber-config bug, not a memory bug.
 3. Cross-reference with the `memory.updated` (or `memory.write_rejected` if it was an IPC-mediated write that the scrubber blocked) journal entry to see the timeline.
 
 The content endpoint refuses to follow symlinks (`EvalSymlinks` rejects payload_refs outside the configured blob root), caps reads at 10 MB (both the row's claimed bytes AND the on-disk read), verifies the on-disk SHA matches the row, and sanitises CRLF in response headers. A symlink to an off-root file returns 500 (`payload path violates blob root boundary`), not 200; a tampered file whose SHA no longer matches returns 500 (`blob integrity check failed`); a row whose blob is missing on disk returns 410.
 
 ### "I want tighter retention for a dev sandbox"
 
-`PATCH /admin/memory/config` with a low `versions_retention_days` (14 or 7). The next daily sweep at 03:00 UTC trims. Re-check the next morning with `GET /admin/memory/stats` — the row count for that workspace should drop. Confirm via the `memory.versions_swept` journal entry, which carries `rows_deleted`.
+`PATCH /api/v1/admin/memory/config` with a low `versions_retention_days` (14 or 7). The next daily sweep at 03:00 UTC trims. Re-check the next morning with `GET /api/v1/admin/memory/stats` — the row count for that workspace should drop. Confirm via the `memory.versions_swept` journal entry, which carries `rows_deleted`.
 
 ### "I want to see what the consolidator would write before approving"
 
-`GET /consolidate/proposed/{id}/diff`. Read the diff. If you're happy, `POST /consolidate/proposed/{id}/approve`. The committed bytes will match the post-merge half of the diff modulo the `Approved at` timestamp line. If you're not happy, `POST .../reject` with a `reason` body — that reason lands in the journal entry for post-hoc review.
+`GET /api/v1/consolidate/proposed/{id}/diff`. Read the diff. If you're happy, `POST /api/v1/consolidate/proposed/{id}/approve`. The committed bytes will match the post-merge half of the diff modulo the `Approved at` timestamp line. If you're not happy, `POST /api/v1/consolidate/proposed/{id}/reject` with a `reason` body — that reason lands in the journal entry for post-hoc review.
 
 ### "I want to know which agent is writing the most memory"
 
-`GET /admin/memory/stats` returns a `by_agent` array that's already pre-aggregated by slug — that's the right starting point. If you need row-level detail behind a high-count slug, follow up with `GET /admin/memory/versions?agent_slug=<slug>&limit=200` and inspect by `bytes` client-side. The versions endpoint orders newest-first and does not accept an `order` query parameter; if you need a different ordering, sort client-side after pagination.
+`GET /api/v1/admin/memory/stats` returns a `by_agent` array that's already pre-aggregated by slug — that's the right starting point. If you need row-level detail behind a high-count slug, follow up with `GET /api/v1/admin/memory/versions?agent_slug=<slug>&limit=200` and inspect by `bytes` client-side. The versions endpoint orders newest-first and does not accept an `order` query parameter; if you need a different ordering, sort client-side after pagination.
 
 ## Gotchas
 

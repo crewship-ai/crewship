@@ -205,6 +205,12 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 | `POST` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions` | Body: `{emoji}`. Idempotent under `UNIQUE(chat, message, emoji, user)`. |
 | `DELETE` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}` | Emoji is a path segment. |
 
+Reaction endpoints require an authenticated workspace member. `GET` returns
+`200 OK` with `{ "reactions": [{ "emoji": "👍", "count": 1, "mine": true }] }`; an
+unauthenticated or non-member GET returns `404`. `DELETE` takes `emoji` as a
+path parameter and returns `204 No Content`; it returns `401` when unauthenticated
+and `404` when the chat is unavailable to the caller.
+
 ### Attachments
 
 | Method | Path | Purpose |
@@ -213,11 +219,23 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 
 ### Participants
 
+#### GET /api/v1/chats/{chatId}/participants
+
+**Auth:** Authenticated workspace caller. **Request:** `chatId` path parameter; no body. **Response:** `200 OK` with `{ "participants": [{ "user_id", "email", "full_name", "role", "joined_at" }] }`. **Statuses:** `200 OK`; `404 Not Found` for an unknown or cross-workspace chat.
+
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/v1/chats/{chatId}/participants` | List participants: `{participants:[{user_id, email, full_name, role, joined_at}]}`. |
 | `POST` | `/api/v1/chats/{chatId}/participants` | Body `{user_id, role?}` (`role` = `member` \| `owner`, default `member`). `role` is an informational label only — it does **not** grant manage-participants rights (see below). Promotes the chat to `visibility='group'` and seeds the creator as an `owner` row. Returns `204`. |
 | `DELETE` | `/api/v1/chats/{chatId}/participants/{userId}` | Remove a participant. Returns `204`. |
+
+#### POST /api/v1/chats/{chatId}/participants
+
+**Auth:** Authenticated chat owner or workspace `OWNER`/`ADMIN`. **Request:** `chatId` path parameter and JSON `{ "user_id": "…", "role": "member" | "owner" }`; `role` is optional. **Response:** no body. **Statuses:** `204 No Content`; `400` for a non-member target or an attempt to remove the owner, `403` for an unauthorised manager, and `404` for an unknown or cross-workspace chat.
+
+#### DELETE /api/v1/chats/{chatId}/participants/{userId}
+
+**Auth:** Authenticated chat owner or workspace `OWNER`/`ADMIN`. **Request:** `chatId` and `userId` path parameters; no body. **Response:** no body. **Statuses:** `204 No Content`; `400` when removing the chat owner, `403` for an unauthorised manager, and `404` for an unknown or cross-workspace chat.
 
 Access and tenancy rules:
 
@@ -234,6 +252,10 @@ Sometimes you want to redirect an agent that is already mid-turn — "actually, 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/chats/{chatId}/steer` | Queue a steering message. Body: `{message}`. Returns `{queued, in_flight}`. Scoped via `chats.workspace_id`, so cross-tenant returns `404`. |
+
+#### POST /api/v1/chats/{chatId}/steer
+
+**Auth:** Authenticated caller allowed to operate the chat. **Request:** `chatId` path parameter and JSON `{ "message": "…" }`. **Response:** JSON `{ "queued": <bool>, "in_flight": <bool> }`. **Statuses:** `202 Accepted`; `400` for a missing message, `401` without authentication, `404` for an unknown or cross-workspace chat, `422` for a steering rejection, or `503` when the chat bridge is unavailable.
 
 The CLI parity is `crewship chat steer`:
 

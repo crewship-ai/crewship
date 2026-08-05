@@ -1,0 +1,76 @@
+---
+title: "Routine Webhook Commands"
+description: "Manage event-driven webhook triggers attached to routines."
+icon: "webhook"
+---
+
+# crewship routine webhooks
+
+Webhook commands are nested under `routine` (also available through the
+`pipeline` alias):
+
+```bash
+crewship routine webhooks <subcommand> [flags]
+```
+
+Webhooks are token-addressed triggers. An external sender POSTs the request
+body to `/api/v1/webhooks/{token}`; the body is delivered as the routine's
+`event` input. A configured HMAC secret requires the sender to provide
+`X-Crewship-Signature: sha256=<hex HMAC of the raw body>`.
+
+## Subcommands
+
+| Command | API behavior |
+|---|---|
+| `list` | `GET /api/v1/workspaces/{workspace}/pipeline-webhooks`; human output is `ID NAME ROUTINE HMAC FIRES LAST STATUS RATE/MIN ENABLED`. |
+| `create` | `POST /api/v1/workspaces/{workspace}/pipeline-webhooks`; prints the public URL and reveals the signing secret only in the successful create response. |
+| `url <webhook_id>` | Lists webhooks, finds the exact ID, and prints the public URL without revealing the secret. |
+| `delete <webhook_id>` | `DELETE /api/v1/workspaces/{workspace}/pipeline-webhooks/{webhook_id}` after confirmation. Existing senders receive 404 after deletion. |
+
+### `list`
+
+```bash
+crewship routine webhooks list [--slug <routine-slug>]
+crewship routine webhooks list --format json
+```
+
+`--slug` filters locally to webhooks targeting that routine. `--json` is a
+deprecated alias for `--format json`. Machine output redacts the token and
+does not include the signing secret; use `url` when the public URL is needed.
+
+### `create`
+
+```bash
+crewship routine webhooks create \
+  --slug pr-review \
+  --name github-pr \
+  --hmac-secret "$(openssl rand -hex 32)" \
+  --rate-limit 30 \
+  --inputs-template '{"source":"github"}' \
+  --pin-version 3
+```
+
+| Flag | Default | Behavior |
+|---|---|---|
+| `--slug` | required | Target routine slug. |
+| `--name` | `<slug> webhook` | Human-readable name. |
+| `--hmac-secret` | empty | Enables signature verification when set. |
+| `--rate-limit` | `60` | Maximum fires per minute for this webhook. |
+| `--inputs-template` | empty | JSON object merged with the request body to form routine inputs. |
+| `--base-url` | server URL | Overrides the public base URL printed in the response. |
+| `--pin-version` | `0` | Positive routine version to execute on every fire instead of head. A deleted pinned version causes the fire to fail with 409. |
+
+The default human response prints the webhook ID, public URL, and rate limit.
+If an HMAC secret was configured, it is printed once; save it immediately.
+With `--format json|yaml|ndjson`, the create response includes the full API row
+and `public_url`, including the secret returned by the server.
+
+### `url` and `delete`
+
+`url` accepts only the exact webhook ID and has one flag, `--base-url`, which
+overrides the server URL. `delete` accepts `--yes` to skip its interactive
+confirmation prompt. Both commands require authentication and a workspace.
+
+All webhook commands honor the global `-f/--format` where the command emits a
+machine-readable response; `list` additionally supports `table|json|yaml|ndjson`
+and `--json`.

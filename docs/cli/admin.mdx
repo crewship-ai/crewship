@@ -42,6 +42,24 @@ crewship admin <subcommand> [flags]
 | `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
 | `ratelimits list/set/reset` | Inspect and tune the instance's rate limiters at runtime (per-IP HTTP buckets, login lockout, notifications, provisioning, agent webhooks). **HTTP-backed — needs a running server + login.** |
 
+## `crewship admin reencrypt`
+
+Re-encrypt stored secret envelopes to the server's current master-key version.
+This is the server-side step after configuring a new key version; the command
+requires authentication, an active workspace, and a running server.
+
+```bash
+crewship admin reencrypt
+crewship admin reencrypt --format json | jq .failed
+```
+
+The operation is idempotent: envelopes already at the current version are
+skipped. Human output reports the target `key_version`, totals for
+`Re-encrypted`, `Skipped`, and `Failed`, followed by per-table/per-column
+counts when present. JSON output contains `key_version`, `reencrypted`,
+`skipped`, `failed`, and `columns`. A non-zero exit means at least one value
+could not be decrypted with the configured keys; do not retire the old key.
+
 ---
 
 ## `crewship admin reset-password`
@@ -473,6 +491,8 @@ The same data backs the **Admin → Runtime → Security posture** card in the d
 
 Read or adjust `workspaces.memory_config` — currently the retention window for `memory_versions` rows, consumed by the per-workspace retention sweep.
 
+The command also accepts the alias `crewship admin memcfg`.
+
 ```bash
 crewship admin memory-config get
 crewship admin memory-config get --format json
@@ -515,6 +535,8 @@ The same data backs the **Admin → Runtime → Memory configuration** card in t
 ## `crewship admin ratelimits`
 
 Inspect and tune the instance's rate limiters at runtime — the same surface as the dashboard's **Infrastructure → Rate Limiters** tab. Every limiter that was once a hardcoded constant (the per-IP HTTP buckets, the login lockout, the notification anti-storm bucket, crew provisioning, agent webhooks) is listed and overridable without a redeploy.
+
+Aliases: `crewship admin rate-limits` and `crewship admin ratelimit`.
 
 ```bash
 crewship admin ratelimits list
