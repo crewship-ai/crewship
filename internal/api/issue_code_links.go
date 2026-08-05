@@ -473,6 +473,17 @@ type codeLinkCredential struct {
 	host string
 }
 
+// codeLinkCandidate is a credential row that has NOT been decrypted yet. It is
+// a distinct type from codeLinkCredential on purpose: the difference between
+// the two is exactly "is `enc` still ciphertext", and holding a candidate makes
+// it impossible to hand a caller something it thinks is a token.
+type codeLinkCandidate struct {
+	id   string
+	name string
+	enc  string
+	host string
+}
+
 // resolveCodeLinkCredential picks the stored token used to talk to `host`.
 //
 // It invents no new secret store: the candidates are ordinary rows in
@@ -528,7 +539,7 @@ func resolveCodeLinkCredential(
 	// correctly labelled credential that should have won is still two rows
 	// down, unread. Deferring the decrypt also skips an AES-GCM operation on
 	// every attach where a labelled credential wins, which is the common case.
-	var fallback *struct{ id, name, enc, host string }
+	var fallback *codeLinkCandidate
 	for rows.Next() {
 		var id, name, label, enc string
 		if err := rows.Scan(&id, &name, &label, &enc); err != nil {
@@ -549,7 +560,7 @@ func resolveCodeLinkCredential(
 			}, nil
 		}
 		if canonical, ok := canonicalHost(provider, host); ok && fallback == nil {
-			fallback = &struct{ id, name, enc, host string }{id: id, name: name, enc: enc, host: canonical}
+			fallback = &codeLinkCandidate{id: id, name: name, enc: enc, host: canonical}
 		}
 	}
 	if err := rows.Err(); err != nil {
