@@ -118,6 +118,31 @@ If either remains empty and `CREWSHIP_SKIP_SIDECAR != 1`, `config.Load` returns 
 | `GET` | `/api/v1/features/catalog` | feature/runtime catalog handler | Dynamic devcontainer + mise catalog for UI (3-tier cache). |
 | `GET` | `/api/v1/runtimes/catalog` | runtime catalog handler | Curated base-image + mise runtime list (the `cmd_features.go` / `cmd_runtimes.go` CLI commands hit these same endpoints). |
 
+### REST contract
+
+All routes in this section require an authenticated request. Crew routes also
+require workspace context and resolve `crewId` within that workspace.
+
+#### GET /api/v1/crews/{crewId}/provision
+
+**Auth:** Authenticated workspace request. **Request:** `crewId` path parameter; no body. **Response:** `200 OK` with the current status, cached image tag, and config hash. **Statuses:** `200 OK` or `404 Not Found` when the crew is not in the caller's workspace.
+
+#### POST /api/v1/crews/{crewId}/provision
+
+**Auth:** Authenticated workspace caller with the provisioning write permission. **Request:** `crewId` path parameter; no body. **Response:** `202 Accepted` when the asynchronous job is queued. **Statuses:** `202 Accepted`, or `400`, `403`, `404`, `409`, `429`, `500`, or `503` for the validation, permission, workspace, duplicate-job, rate-limit, server, or Docker-configuration conditions described in the provisioning reference.
+
+#### POST /api/v1/crews/{crewId}/rebuild
+
+**Auth:** Authenticated workspace caller with the provisioning write permission. **Request:** `crewId` path parameter; no body. **Response:** `202 Accepted` when the cache marker is cleared and re-provisioning is queued. **Statuses:** `202 Accepted`, or `403`, `404`, `409`, `429`, `500`, or `503` for the corresponding conditions.
+
+#### GET /api/v1/features/catalog
+
+**Auth:** Authenticated request. **Request:** optional `search` query parameter; no body. **Response:** `200 OK` with a `features` array. **Statuses:** `200 OK`; the handler uses its catalog fallback when the dynamic fetch fails.
+
+#### GET /api/v1/runtimes/catalog
+
+**Auth:** Authenticated request. **Request:** optional `search` query parameter; no body. **Response:** `200 OK` with a `runtimes` array. **Statuses:** `200 OK`; the handler uses its catalog fallback when the dynamic fetch fails.
+
 All endpoints require a workspace-authenticated user. `ProvisionTrigger` returns `503 Service Unavailable` if the Docker client is not configured on the server.
 
 ## CLI flags

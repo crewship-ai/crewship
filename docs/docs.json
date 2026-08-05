@@ -235,7 +235,9 @@
               "cli/session",
               "cli/token",
               "cli/me",
-              "cli/admin"
+              "cli/admin",
+              "cli/logout",
+              "cli/whoami"
             ]
           },
           {
@@ -246,6 +248,7 @@
               "cli/agent",
               "cli/ask",
               "cli/chat",
+              "cli/conversation",
               "cli/feedback",
               "cli/run",
               "cli/resume",
@@ -256,6 +259,8 @@
               "cli/recall",
               "cli/recap",
               "cli/inspect"
+              ,"cli/model",
+              "cli/rehire"
             ]
           },
           {
@@ -275,7 +280,10 @@
             "expanded": false,
             "pages": [
               "cli/mission",
-              "cli/routine"
+              "cli/routine",
+              "cli/pipeline",
+              "cli/webhook",
+              "cli/waitpoint"
             ]
           },
           {
@@ -313,6 +321,7 @@
               "cli/inbox",
               "cli/notification",
               "cli/notify",
+              "cli/notifychannel",
               "cli/digest"
             ]
           },
@@ -358,7 +367,8 @@
               "cli/hire",
               "cli/persona",
               "cli/hooks",
-              "cli/checkpoint"
+              "cli/checkpoint",
+              "cli/keeper"
             ]
           },
           {
@@ -377,9 +387,11 @@
               "cli/runtimes",
               "cli/eval",
               "cli/consolidate",
+              "cli/self-update",
               "cli/credential",
               "cli/seed",
               "cli/nuke"
+              ,"cli/db"
             ]
           },
           {
@@ -388,6 +400,8 @@
             "expanded": false,
             "pages": [
               "cli/diff",
+              "cli/now",
+              "cli/today",
               "cli/explain",
               "cli/expose",
               "cli/lint",
@@ -418,8 +432,14 @@
               "api-reference/crews",
               "api-reference/agents",
               "api-reference/runs",
+              "api-reference/pipelines",
+              "api-reference/routines",
+              "api-reference/schedules",
+              "api-reference/waitpoints",
               "api-reference/missions",
               "api-reference/issues",
+              "api-reference/projects",
+              "api-reference/labels",
               "api-reference/milestones",
               "api-reference/recurring-issues",
               "api-reference/saved-views",
@@ -434,15 +454,18 @@
               "api-reference/preferences",
               "api-reference/privacy",
               "api-reference/notifications",
+              "api-reference/notification-channels",
               "api-reference/inbox",
               "api-reference/webhooks",
               "api-reference/websocket",
               "api-reference/admin",
+              "api-reference/keeper",
               "api-reference/feature-flags",
               "api-reference/instance-settings",
               "api-reference/policies",
               "api-reference/backup",
               "api-reference/provisioning",
+              "api-reference/runtime",
               "api-reference/port-expose",
               "api-reference/journal",
               "api-reference/paymaster",

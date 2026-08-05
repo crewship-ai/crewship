@@ -31,9 +31,9 @@ Implementation: `internal/api/workflow_templates_handler.go`. Backed by the `wor
 | `id` | string (CUID) | |
 | `name` | string | Workspace-unique. The DB has a `UNIQUE(workspace_id, name)` index — collisions on `POST`/`PATCH` surface as `409`. |
 | `description` | string \| null | |
-| `template_json` | string | JSON-encoded stage array. See [Stage shape](#stage-shape). Stored canonicalised — the server re-marshals it on every write so byte-identical manifests round-trip cleanly. |
-| `icon` | string \| null | Emoji shortcode or single Unicode glyph the frontend renders next to the template name. |
-| `color` | string \| null | Hex string like `#3B82F6`. Validated against `^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`. |
+| `template_json` | string | JSON-encoded stage array. See [Stage shape](#stage-shape). The server validates and re-marshals it on every write, so reads use canonical JSON formatting. |
+| `icon` | string \| null | Optional icon value returned to the client. |
+| `color` | string \| null | Optional template color. On update, a non-empty value must be a 3- or 6-digit hex string such as `#3B82F6`. |
 | `is_builtin` | bool | Server-controlled. `true` for the seed-time templates; user-created rows are always `false`. Callers cannot mark their own rows as built-in. |
 | `created_at` | RFC3339 | |
 | `updated_at` | RFC3339 | |
@@ -65,6 +65,8 @@ CRUD over templates. Built-in rows are server-controlled and surface first on Li
 ### `GET /api/v1/workflow-templates`
 
 List every template visible to the current workspace. Built-in rows surface first (`is_builtin DESC`), then user-created rows by `created_at ASC`.
+
+**Request:** No request body or query parameters.
 
 **Auth:** authenticated session + workspace context.
 
@@ -98,15 +100,15 @@ Create a new user-owned template.
 |---|---|---|---|
 | `name` | string | Yes | Workspace-unique. |
 | `description` | string \| null | No | |
-| `template_json` | string | Yes | Stage array (see [Stage shape](#stage-shape)). The handler canonicalises this — what the GET reads back is byte-equal regardless of the whitespace you posted. |
+| `template_json` | string | Yes | Stage array (see [Stage shape](#stage-shape)). The handler validates and canonicalizes this value before storing it. |
 | `icon` | string \| null | No | |
-| `color` | string \| null | No | Hex string. |
+| `color` | string \| null | No | Optional template color. The create handler stores this value without applying the update handler's top-level hex validation. |
 
 **Response:** `201 Created` with the full template object.
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `name`, missing/invalid `template_json` (any stage rule above), or invalid color. |
+| `400` | Invalid JSON, missing `name`, missing/invalid `template_json` (any stage rule above). |
 | `401` | Not authenticated. |
 | `403` | Caller is below the `MANAGER` role. |
 | `409` | A template with the same `name` already exists in this workspace. |
@@ -116,6 +118,8 @@ Broadcasts `workflow_template.created` on the workspace WS channel with `{"id": 
 ### `GET /api/v1/workflow-templates/{id}`
 
 Fetch a single template by id, scoped to the calling workspace.
+
+**Request:** No request body. The `{id}` path parameter identifies the workflow template.
 
 **Auth:** authenticated session + workspace context.
 
@@ -155,10 +159,13 @@ Broadcasts `workflow_template.updated` on the workspace WS channel with `{"id": 
 
 ### `DELETE /api/v1/workflow-templates/{id}`
 
-Hard delete. Templates are reference data — crews that still point at the deleted template fall back to the runtime default lifecycle at next render rather than failing.
+Hard delete. The template row is removed outright; the handler does not
+soft-delete it.
+
+**Request:** No request body. The `{id}` path parameter identifies the workflow template to delete.
 
 <Warning>
-  Hard delete (no soft delete). Crews still pointing at the removed template fall back to the runtime default lifecycle on next render rather than failing.
+  Hard delete (no soft delete).
 </Warning>
 
 **Auth:** authenticated session + workspace context + `requireRole("create")`.

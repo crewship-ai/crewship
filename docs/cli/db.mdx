@@ -1,0 +1,56 @@
+---
+title: "db"
+description: "Local SQLite database maintenance commands."
+icon: "database"
+---
+
+`crewship db` operates on the local SQLite database in the configured data
+directory. It does not perform maintenance on a remote server selected with
+`--server`, a profile, or `CREWSHIP_SERVER`; it prints a notice when those
+settings point elsewhere.
+
+Stop `crewshipd` before commands that write or replace the database. The
+commands are host-side operations and do not require an API session.
+
+## `crewship db migration-status`
+
+Reads the local migration ledger and reports the applied schema version plus
+outstanding post-deployment migrations. It is read-only and can run while the
+server is stopped.
+
+```bash
+crewship db migration-status
+```
+
+## `crewship db repair-ledger`
+
+Repairs a migration version collision after a migration was renumbered. It
+moves ledger version numbers only; it does not change table data or schema.
+
+```bash
+crewship db repair-ledger --dry-run   # inspect the plan
+crewship db repair-ledger             # show plan and confirm before writing
+crewship db repair-ledger --yes       # skip confirmation
+```
+
+`--dry-run` is read-only and may be used while the server is running. Applying
+the repair refuses to proceed while a local server is detected. The command
+fails closed when the ledger names a migration unknown to the current binary;
+that case requires a newer binary or a snapshot restore.
+
+## `crewship db restore-snapshot`
+
+Restores a pre-migration snapshot created beside the local database. Before an
+actual restore, the current database is copied to a reversible
+`.before-restore-*` file. Stop the server first.
+
+```bash
+crewship db restore-snapshot --list        # list snapshots only
+crewship db restore-snapshot               # restore newest, with confirmation
+crewship db restore-snapshot snapshot.bak  # restore a named snapshot
+crewship db restore-snapshot --yes         # skip confirmation
+```
+
+Restoring is the database half of a downgrade: run the matching older binary
+afterwards. A remote `--server` target does not change which local file this
+command operates on.

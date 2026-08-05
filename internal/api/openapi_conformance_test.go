@@ -82,13 +82,14 @@ func loadGeneratedSpec(t *testing.T) map[string]map[string]bool {
 
 // registeredPublicRoutes reports the router's route table in spec shape,
 // applying the same two exclusions cmd/gen-openapi applies: the
-// /exposed/{token...} reverse-proxy mount (no fixed method or response shape)
-// and the sidecar-only /api/v1/internal/* surface (deliberately absent from a
-// publicly served spec).
+// /exposed/{token...} reverse-proxy mount (no fixed method or response shape),
+// the sidecar-only /api/v1/internal/* surface, and NextAuth compatibility
+// plumbing under /api/auth/* (deliberately absent from a publicly served spec).
 func registeredPublicRoutes(r *Router) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
 	for path, methods := range r.mux.Routes() {
-		if strings.HasPrefix(path, "/exposed/") || strings.HasPrefix(path, "/api/v1/internal/") {
+		if strings.HasPrefix(path, "/exposed/") || strings.HasPrefix(path, "/api/v1/internal/") ||
+			strings.HasPrefix(path, "/api/auth/") {
 			continue
 		}
 		key := specWildcard.ReplaceAllString(path, "{$1}")
@@ -100,6 +101,91 @@ func registeredPublicRoutes(r *Router) map[string]map[string]bool {
 		}
 	}
 	return out
+}
+
+func TestOpenAPISpec_AuthWorkspaceAndResponseContracts(t *testing.T) {
+	raw, err := os.ReadFile("openapi.gen.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths      map[string]map[string]map[string]json.RawMessage `json:"paths"`
+		Components struct {
+			SecuritySchemes map[string]json.RawMessage `json:"securitySchemes"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := doc.Paths["/api/auth/signin"]; ok {
+		t.Fatal("NextAuth signin redirect must not be advertised as a JSON API operation")
+	}
+	for _, name := range []string{"bearerAuth", "sessionCookie", "secureSessionCookie"} {
+		if _, ok := doc.Components.SecuritySchemes[name]; !ok {
+			t.Errorf("missing security scheme %q", name)
+		}
+	}
+
+	operation := func(path, method string) map[string]json.RawMessage {
+		t.Helper()
+		op, ok := doc.Paths[path][strings.ToLower(method)]
+		if !ok {
+			t.Fatalf("missing %s %s", method, path)
+		}
+		return op
+	}
+	var secured []map[string][]string
+	if err := json.Unmarshal(operation("/api/v1/agents", "GET")["security"], &secured); err != nil || len(secured) != 3 {
+		t.Fatalf("workspace route security = %s; want bearer-or-session", operation("/api/v1/agents", "GET")["security"])
+	}
+	var params []struct {
+		Name string `json:"name"`
+		In   string `json:"in"`
+	}
+	if err := json.Unmarshal(operation("/api/v1/agents", "GET")["parameters"], &params); err != nil {
+		t.Fatal(err)
+	}
+	foundWorkspaceHeader := false
+	for _, p := range params {
+		if p.Name == "X-Workspace-ID" && p.In == "header" {
+			foundWorkspaceHeader = true
+		}
+	}
+	if !foundWorkspaceHeader {
+		t.Fatal("workspace route is missing the middleware's X-Workspace-ID fallback header")
+	}
+	if got := string(operation("/api/v1/workspaces", "GET")["parameters"]); got != "" && got != "null" {
+		t.Errorf("workspace listing unexpectedly advertises workspace header: %s", got)
+	}
+	if got := string(operation("/api/v1/system/setup-status", "GET")["security"]); got != "[]" {
+		t.Errorf("public setup status security = %s, want []", got)
+	}
+
+	contentTypes := func(path, method string) map[string]json.RawMessage {
+		var response map[string]json.RawMessage
+		if err := json.Unmarshal(operation(path, method)["responses"], &response); err != nil {
+			t.Fatal(err)
+		}
+		var okResponse map[string]json.RawMessage
+		if err := json.Unmarshal(response["200"], &okResponse); err != nil {
+			t.Fatal(err)
+		}
+		var content map[string]json.RawMessage
+		if err := json.Unmarshal(okResponse["content"], &content); err != nil {
+			t.Fatal(err)
+		}
+		return content
+	}
+	for path, want := range map[string]string{
+		"/api/v1/journal/stream":          "text/event-stream",
+		"/api/v1/memory/export":           "application/zip",
+		"/api/v1/admin/backups/download":  "application/zstd",
+		"/api/v1/agents/{agentId}/avatar": "image/svg+xml",
+	} {
+		if _, ok := contentTypes(path, "GET")[want]; !ok {
+			t.Errorf("%s response does not advertise %s", path, want)
+		}
+	}
 }
 
 func sortedKeys(m map[string]bool) []string {

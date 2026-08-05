@@ -23,11 +23,11 @@ crewship privacy <group> <subcommand> [flags]
 
 | Command | Description |
 |---------|-------------|
-| `peer-consent get` | Show whether you've opted out of peer cards. |
+| `peer-consent get` (`consent get`) | Show whether you've opted out of peer cards. |
 | `peer-consent set <on\|off>` | Opt out of (`on`) or back into (`off`) peer cards. |
-| `peer-cards list` | List every peer card stored about you. |
+| `peer-cards list` (`cards list`) | List every peer card stored about you. |
 | `peer-cards delete` | Delete every peer card stored about you. |
-| `user-model list` | Show every fact stored in the operator model about you. |
+| `user-model list` (`operator-model list`, `about-me list`) | Show every fact stored in the operator model about you. |
 | `user-model forget <field>` | Forget one field and keep the rest. |
 | `user-model delete` | Forget the whole operator model. |
 
@@ -78,7 +78,7 @@ also run `peer-consent set on`.
 
 ---
 
-## `crewship privacy user-model`
+## `crewship privacy user-model` (aliases: `operator-model`, `about-me`)
 
 The **operator model** is a short profile every agent in your crew reads at
 the start of a session: your role, what you own, and the working preferences
@@ -89,7 +89,7 @@ for a mood or a personality read. See
 for what is recorded and how the refusals are enforced.
 
 ```bash
-crewship privacy user-model list             # every field stored about you
+crewship privacy user-model list             # aliases: ls, show, get
 crewship privacy user-model list -f json     # includes the raw file content
 crewship privacy user-model forget timezone  # this one is wrong; keep the rest
 crewship privacy user-model delete -y        # forget all of it

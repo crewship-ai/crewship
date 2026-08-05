@@ -1,0 +1,83 @@
+---
+title: "Routines"
+description: "Scheduling and governance operations for saved pipelines."
+icon: "repeat"
+---
+
+Routines are the product name for saved pipelines. The API paths intentionally
+use `pipelines`; this page documents routine-specific controls.
+
+All workspace routes require an authenticated session or CLI token and
+membership in `{workspaceId}`. Error responses use the API Problem Details
+shape with an `error` message. An unauthenticated request is `401`; a caller
+outside the workspace is `403`.
+
+## Governance
+
+Each governance operation is a `POST` with an empty request body. The response
+is the updated routine object (`200 OK`). A missing or soft-deleted routine is
+`404`; a routine in the wrong lifecycle state is `409`; malformed JSON is
+`400`; the role gate is `403`.
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve` | `create` (MANAGER+) | Empty JSON body | Updated routine, status `active` | `200`, `400`, `403`, `404`, `409`, `500` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject` | `create` (MANAGER+) | Empty JSON body | Updated routine; proposal is soft-deleted | `200`, `400`, `403`, `404`, `409`, `500` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable` | `manage` (OWNER/ADMIN) | Empty JSON body | Updated routine, status `disabled` | `200`, `400`, `403`, `404`, `409`, `500` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable` | `manage` (OWNER/ADMIN) | Empty JSON body | Updated routine, status `active` | `200`, `400`, `403`, `404`, `409`, `500` |
+
+Approval/rejection are valid only for `proposed` routines. Disable cancels
+in-flight runs; only `active` routines can run.
+
+## Schedules
+
+See the dedicated [Schedules API reference](/api-reference/schedules) for the
+complete request fields, response fields, merge semantics, and status branches.
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | member | No body | JSON array of schedule objects | `200`, `500`, `503` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | `create` or `routine.create` capability | Schedule object; `cron_expr` and one target (`target_pipeline_slug` or `target_pipeline_id`) required | Created schedule object | `201`, `400`, `403`, `500`, `503` |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` (OWNER/ADMIN) | Schedule update; omitted fields are retained | Updated schedule object | `200`, `400`, `401`, `403`, `404`, `500`, `503` |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` (OWNER/ADMIN) | No body | Empty response | `204`, `400`, `403`, `404`, `500`, `503` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run` | `create` (MANAGER+) | No body | Run result object | `200`, `400`, `403`, `404`, `409`, `429`, `500`, `503` |
+
+The create request accepts `target_pipeline_slug` or `target_pipeline_id` and
+requires `cron_expr`:
+
+```json
+{
+  "name": "Every night",
+  "target_pipeline_slug": "nightly-report",
+  "target_pipeline_version": 4,
+  "cron_expr": "0 2 * * *",
+  "timezone": "Europe/Prague",
+  "inputs": {},
+  "enabled": true,
+  "catchup_policy": "once",
+  "max_consecutive_failures": 5,
+  "wake_pipeline_slug": "is-ready",
+  "wake_inputs": {},
+  "wake_fail_closed": true
+}
+```
+
+`catchup_policy` is `once`, `all`, or `skip`. A wake pipeline must be a
+different routine whose DSL declares `agentless: true`. Invalid cron, timezone,
+target, wake references, or JSON is `400`. The schedule representation
+includes `next_run_at`, `last_run_at`, `last_status`, `last_run_id`, failure
+breaker counters, and wake telemetry. A circuit-breaker disable sets
+`disabled_reason` to `circuit_breaker`.
+
+## Webhooks
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | No body | JSON array of webhook objects | `200`, `500`, `503` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | `create` (MANAGER+) | JSON webhook configuration; target pipeline and event settings are required | Created webhook including its dispatch token | `201`, `400`, `403`, `500`, `503` |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` | `manage` (OWNER/ADMIN) | No body | Empty response | `204`, `400`, `403`, `404`, `500`, `503` |
+| POST | `/api/v1/webhooks/{token}` | Token in path; no session required | JSON payload (non-JSON is accepted as raw input); optional HMAC headers when configured | Accepted dispatch with `run_id`/status | `202`, `401`, `404`, `409`, `429`, `500`, `503` |
+
+The public dispatch token is the authentication mechanism. When a signing
+secret is configured, the request must also carry a valid HMAC signature.
+Dispatch is asynchronous and returns `202`; an inactive routine returns `409`.

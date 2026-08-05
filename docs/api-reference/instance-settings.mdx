@@ -27,13 +27,13 @@ back as `***`, even on the same request that set them (write-only on read):
 ## List Settings
 
 ```
-GET /api/v1/instance/settings?workspace_id={workspaceId}
+GET /api/v1/instance/settings
 ```
 
 Returns every setting row, ordered by `key` ascending. Sensitive values are
 redacted.
 
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role (`create` tier)
+**Auth:** Authenticated workspace member with `OWNER`, `ADMIN`, or `MANAGER` role (`create` tier)
 
 **Response:** `200 OK`
 
@@ -57,12 +57,12 @@ redacted.
 ## Get Setting
 
 ```
-GET /api/v1/instance/settings/{key}?workspace_id={workspaceId}
+GET /api/v1/instance/settings/{key}
 ```
 
 Returns one key/value pair, redacting the value if sensitive.
 
-**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+**Auth:** Authenticated workspace member with `OWNER`, `ADMIN`, or `MANAGER` role
 
 | Path Parameter | Description |
 |---|---|
@@ -73,6 +73,8 @@ Returns one key/value pair, redacting the value if sensitive.
 | Status | Condition |
 |---|---|
 | `400` | Missing `key` |
+| `401` | Missing authentication |
+| `403` | Role is below `MANAGER` |
 | `404` | Setting not found |
 
 ---
@@ -80,7 +82,7 @@ Returns one key/value pair, redacting the value if sensitive.
 ## Set Setting
 
 ```
-PUT /api/v1/instance/settings/{key}?workspace_id={workspaceId}
+PUT /api/v1/instance/settings/{key}
 ```
 
 Upserts a value for `key`. An empty string is a valid value (e.g. clearing a
@@ -107,7 +109,9 @@ banner); only an absent `value` field is rejected.
 | Status | Condition |
 |---|---|
 | `400` | Missing `key`, invalid JSON, or missing `value` field |
+| `401` | Missing authentication |
 | `403` | Insufficient role |
+| `500` | Database failure |
 
 **WebSocket event:** `instance_setting.updated`
 
@@ -116,7 +120,7 @@ banner); only an absent `value` field is rejected.
 ## Delete Setting
 
 ```
-DELETE /api/v1/instance/settings/{key}?workspace_id={workspaceId}
+DELETE /api/v1/instance/settings/{key}
 ```
 
 Removes a key. Protected bootstrap markers cannot be deleted -- the guard
@@ -130,7 +134,15 @@ exist (a probing client cannot tell whether the marker was ever set).
 | Status | Condition |
 |---|---|
 | `400` | Missing `key` |
+| `401` | Missing authentication |
 | `403` | Key is on the protected allowlist (`application/problem+json`) |
 | `404` | Setting not found |
+| `500` | Database failure |
 
 **WebSocket event:** `instance_setting.deleted`
+
+All routes require an authenticated request with workspace context; the
+workspace selects authorization but does not filter the instance-global rows,
+and `workspace_id` is not a query parameter. `GET` requires `MANAGER`,
+`ADMIN`, or `OWNER`; `PUT` and `DELETE` require `ADMIN` or `OWNER`. The API
+returns `401` for missing authentication and `403` for an insufficient role.

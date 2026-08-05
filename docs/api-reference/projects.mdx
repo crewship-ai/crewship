@@ -1,0 +1,140 @@
+---
+title: "Projects"
+description: "Manage workspace-scoped projects and their issue rollups."
+icon: "folder"
+---
+
+Projects group issues across crews. They belong to the current workspace, and
+all reads are workspace-scoped. The project list includes computed issue
+counts; the stats endpoint provides status, assignee, label, and crew
+breakdowns.
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/v1/projects` | List projects |
+| POST | `/api/v1/projects` | Create a project |
+| GET | `/api/v1/projects/{projectId}` | Get a project |
+| PATCH | `/api/v1/projects/{projectId}` | Partially update a project |
+| DELETE | `/api/v1/projects/{projectId}` | Delete a project and unlink its issues |
+| GET | `/api/v1/projects/{projectId}/stats` | Get issue breakdowns |
+
+Create/update mutations require the `create` role; delete requires `manage`.
+Read routes require an authenticated workspace member.
+
+## Project shape
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Project identifier. |
+| `workspace_id` | string | Owning workspace. |
+| `name` | string | Display name. Required on create. |
+| `slug` | string | Generated from `name`; updating `name` regenerates it. |
+| `description` | string \| null | Optional description. |
+| `icon` | string \| null | Optional icon value. |
+| `color` | string | Color value; defaults to `blue` on create. |
+| `status` | string | Status; defaults to `backlog` on create. |
+| `priority` | string | Priority; defaults to `none` on create. |
+| `health` | string | Health value; defaults to `on_track` on create. |
+| `lead_type` | string \| null | `user` or `agent` when `lead_id` is set. |
+| `lead_id` | string \| null | Workspace-local user or agent ID. |
+| `lead_name` | string \| null | Resolved lead display name. |
+| `start_date` | string \| null | Stored date value. |
+| `target_date` | string \| null | Stored target date value. |
+| `issue_count` | integer | Issues with `mission_type = 'issue'`. |
+| `done_count` | integer | Issues whose status is `DONE`, `COMPLETED`, or `REVIEW`. |
+| `progress` | integer | Integer percentage, `done_count * 100 / issue_count`; `0` when empty. |
+| `created_at`, `updated_at` | string | RFC 3339 timestamps. |
+
+### List projects
+
+```
+GET /api/v1/projects?status=backlog,in_progress&sort=updated_at
+```
+
+**Request:** Optional `status` and `sort` query parameters; no request body.
+
+`status` optionally filters by a comma-separated list. `sort` accepts
+`created_at` or `updated_at`; any other value (including omission) sorts by
+`name ASC`. The response is a JSON array, never `null`.
+
+### Create a project
+
+```
+POST /api/v1/projects
+```
+
+**Request:** JSON body with required `name`; optional fields are `description`, `icon`, `color`, `status`, `priority`, `lead_type`, `lead_id`, `start_date`, and `target_date`.
+
+Accepted fields are `name` (required), `description`, `icon`, `color`,
+`status`, `priority`, `lead_type`, `lead_id`, `start_date`, and `target_date`.
+The lead pair is validated against the current workspace. Returns `201
+Created` with the full project shape. Missing `name` or malformed JSON returns
+`400`; an invalid or cross-workspace lead also returns `400`.
+
+### Get a project
+
+```
+GET /api/v1/projects/{projectId}
+```
+
+**Request:** `projectId` is a required path parameter. No request body.
+
+Returns `200 OK` with the full project shape, or `404` when the project is not
+in the current workspace.
+
+### Update a project
+
+```
+PATCH /api/v1/projects/{projectId}
+```
+
+**Request:** `projectId` is a required path parameter and the JSON body contains one or more accepted project fields. Computed fields and timestamps are not patchable.
+
+All project fields except `id`, `workspace_id`, computed fields, and timestamps
+are accepted as optional patch fields. Supplying no accepted field returns
+`400`. A changed `name` also updates `slug`; lead changes must remain a valid
+workspace-local `user`/`agent` pair. Returns the updated project.
+
+### Delete a project
+
+```
+DELETE /api/v1/projects/{projectId}
+```
+
+**Request:** `projectId` is a required path parameter. No request body.
+
+Unlinks associated issues by setting `project_id` to `NULL`, then hard-deletes
+the project. Returns `204 No Content`; an unknown or cross-workspace project
+returns `404`.
+
+### Project stats
+
+```
+GET /api/v1/projects/{projectId}/stats
+```
+
+**Request:** `projectId` is a required path parameter. No request body.
+
+Returns `200 OK`:
+
+```json
+{
+  "total_issues": 12,
+  "completed_issues": 5,
+  "by_status": { "IN_PROGRESS": 7, "DONE": 5 },
+  "by_assignee": [
+    { "agent_id": "agt_123", "agent_name": "Alice", "total": 4, "completed": 2 }
+  ],
+  "by_label": [
+    { "label_name": "Bug", "color": "#EF4444", "count": 3 }
+  ],
+  "crews": ["engineering"]
+}
+```
+
+`by_assignee`, `by_label`, and `crews` are arrays (empty when there are no
+matching issues). An unknown or cross-workspace project returns `404`.
+
+See also [Milestones](/api-reference/milestones) and [Labels](/api-reference/labels).

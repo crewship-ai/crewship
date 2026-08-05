@@ -1,0 +1,29 @@
+---
+title: "conversation"
+description: "Search an agent's indexed conversation history from the CLI."
+icon: "message-circle"
+---
+
+## `crewship conversation search`
+
+Search one agent's recorded chat sessions by keyword, ranked by BM25. The
+alias `crewship conv search` is also supported.
+
+```bash
+crewship conversation search backend-bot "deploy pipeline"
+crewship conversation search agent_123 "rate limit" --limit 50
+crewship conversation search backend-bot "auth" --format json
+```
+
+Arguments and flags:
+
+| Argument / flag | Description |
+| --- | --- |
+| `<agent-slug-or-id>` | Agent whose conversations are searched; the server verifies workspace membership. |
+| `<query>` | Required search text; remaining arguments are joined with spaces. |
+| `--limit` | Maximum hits, default `20`, accepted range `1–100`. |
+| `--format` | `json`, `yaml`, or `ndjson` for machine-readable output. |
+
+Only conversations recorded after conversation search was introduced are
+indexed. For the API contract and isolation model, see
+[Conversation Search](/guides/conversation-search).

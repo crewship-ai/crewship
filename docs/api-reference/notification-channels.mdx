@@ -1,0 +1,305 @@
+---
+title: "Outbound notifications"
+description: "API reference for notification channels, agent pairing, and workspace notification templates."
+icon: "bell"
+---
+
+Outbound notification endpoints manage destinations, which agents may send to
+them, and the wording Crewship generates for a workspace.
+
+## Authentication and scope
+
+Every endpoint requires an authenticated session and workspace context. A
+workspace-scoped channel is managed by `ADMIN` or `OWNER`. A personal channel
+is managed only by its owner. Channel-side agent pairing uses the same rule.
+
+Template endpoints are workspace-wide and require `ADMIN` or `OWNER`.
+
+Secrets and destination addresses are not returned by the agent-pairing API.
+Agent access is default-deny: an agent can send only after a human grants the
+specific `(channel, agent)` pairing.
+
+All routes require authentication and workspace context. Missing workspace
+context is `400`; no authenticated user is `401`; a non-member is `403`.
+Handler/database failures are `500` unless a route below specifies another
+status.
+
+## Channel contracts
+
+### `GET /api/v1/notification-channels`
+
+Returns `200 OK` with an object containing a `channels` array. The default
+scope includes all workspace channels and the authenticated user's personal
+channels. `?scope=all` is an admin overview that also includes other members'
+personal channels, but redacts their destination fields. Secrets are never
+returned.
+
+### `POST /api/v1/notification-channels`
+
+Creates a channel and returns `201 Created`. Workspace channels require
+`ADMIN` or `OWNER`; `personal: true` lets any member create a channel owned by
+the authenticated user. The server ignores any client-supplied owner.
+
+```json
+{
+  "type": "webhook",
+  "url": "https://hooks.example.com/crewship",
+  "secret": "optional-signing-secret",
+  "events": ["failed"],
+  "provider": "",
+  "fields": {},
+  "personal": false,
+  "categories": ["routines.failed"],
+  "min_priority": "low"
+}
+```
+
+`type` is `email`, `webhook`, or `shoutrrr`. Email uses `to`; shoutrrr uses
+`provider` plus provider-specific `fields` (or the compatibility
+`shoutrrr_url`). `events` defaults to `["run.failed"]` and accepts
+`completed`, `failed`, or `all`; an empty `categories` list means every
+category; `min_priority` defaults to `low`. The response includes `secret`
+only on this create response. For a webhook it is the HMAC secret; for
+shoutrrr it is the composed service URL.
+
+### `PATCH /api/v1/notification-channels/{id}`
+
+**Auth:** authenticated workspace member; workspace channels require `ADMIN`
+or `OWNER`, personal channels require their owner.
+
+Updates only supplied settings and returns `200 OK` with
+`{ "updated": "nch_01..." }`. Optional fields are `enabled` (boolean),
+`categories` (array; empty means every category), `min_priority` (`low`,
+`medium`, `high`, or `urgent`), and `events` (legacy `completed`, `failed`, or
+`all`). Workspace channels require `ADMIN` or `OWNER`; personal channels
+require their owner. Invalid input is `400`; an unavailable channel is `404`.
+
+### `POST /api/v1/notification-channels/{id}/test`
+
+Sends a synthetic `run.completed` event and returns `200 OK` with
+`{ "ok": true, "channel_id": "nch_01..." }`. A delivery failure returns
+`502`; authorization follows the PATCH rule.
+
+### `DELETE /api/v1/notification-channels/{id}`
+
+Deletes the channel and returns `200 OK` with `{ "deleted": "nch_01..." }`.
+Missing or unauthorized channels return `404` or `403` respectively.
+
+### `POST /api/v1/notification-channels/test`
+
+**Auth:** authenticated workspace member with workspace context.
+
+Tests an unsaved draft without persisting it. The body accepts the delivery
+fields needed to compose a channel (`type`, `url`/`to`, or `provider` plus
+`fields`, with optional `secret`) and the response is `200 OK` with
+`{ "ok": true }`. Invalid drafts return `400`; a provider or mailer failure
+returns `502`.
+
+`type` must be `email`, `webhook`, or `shoutrrr`. Email drafts require `to`,
+webhook drafts require `url`, and shoutrrr drafts require a known provider and
+all provider fields (or a composed `shoutrrr_url`).
+
+## Agent pairing
+
+### `GET /api/v1/notification-channels/{id}/agents`
+
+**Auth:** authenticated workspace member; channel access follows the channel
+owner/manage permission.
+
+Lists agents allowed to send to the channel.
+
+```json
+{
+  "agents": [
+    {
+      "id": "pair_01...",
+      "workspace_id": "ws_01...",
+      "channel_id": "nch_01...",
+      "agent_id": "agt_01...",
+      "agent_name": "Release bot",
+      "agent_slug": "release-bot",
+      "granted_by": "usr_01...",
+      "created_at": "2026-08-04T12:00:00Z"
+    }
+  ]
+}
+```
+
+### `POST /api/v1/notification-channels/{id}/agents`
+
+**Auth:** authenticated workspace member with manage permission for the
+channel (`ADMIN`/`OWNER` for workspace channels, owner for personal channels).
+
+Allows an agent from the current workspace to send to the channel.
+
+Request:
+
+```json
+{ "agent_id": "agt_01..." }
+```
+
+The operation is idempotent. Response:
+
+```json
+{ "channel_id": "nch_01...", "agent_id": "agt_01...", "allowed": true }
+```
+
+### `DELETE /api/v1/notification-channels/{id}/agents/{agentId}`
+
+Revokes the pairing. Response:
+
+```json
+{ "channel_id": "nch_01...", "agent_id": "agt_01...", "allowed": false }
+```
+
+Returns `404` when the agent was not paired with the channel.
+
+Invalid path or JSON input is `400`; an unauthorized personal channel is
+`403`; a pairing-store failure is `500`.
+
+## Provider registry
+
+### `GET /api/v1/notification-providers`
+
+**Auth:** any authenticated workspace member. **Request:** no body.
+**Response:** `200 OK`:
+
+```json
+{
+  "providers": [{
+    "provider": "slack",
+    "scheme": "slack",
+    "label": "Slack",
+    "blurb": "...",
+    "category": "chat",
+    "fields": [{"key": "webhook_url", "label": "Webhook URL", "type": "url", "required": true}],
+    "enabled": true
+  }],
+  "categories": [{"key": "chat", "label": "Chat"}]
+}
+```
+
+The server owns the supported-provider list and field metadata. A settings
+read failure returns `500`.
+
+### `PATCH /api/v1/notification-providers/{provider}`
+
+**Auth:** `ADMIN` or `OWNER`. **Request:** JSON `{ "enabled": true }`.
+**Response:** `200 OK` with `{ "provider": "slack", "enabled": true }`.
+Unknown providers return `404`; invalid JSON returns `400`; a settings write
+failure returns `500`. Disabling a provider blocks new channel creation but
+does not delete or disable existing channels.
+
+## Notification templates
+
+Templates change the wording of notifications generated by Crewship. They do
+not rewrite text authored by a routine `notify` step or by an agent.
+
+### `GET /api/v1/notification-templates`
+
+Lists workspace overrides. An empty `channel_id` applies to every channel.
+
+```json
+{
+  "templates": [
+    {
+      "category": "routines.failed",
+      "channel_id": "nch_01...",
+      "title": "[failed] {{ source.title }}",
+      "body": "{{ source.body }}"
+    }
+  ]
+}
+```
+
+**Auth:** `ADMIN` or `OWNER`. **Request:** no body. **Response:** `200 OK`
+with `{ "templates": [...] }`; `400` when workspace context is missing, `401`
+without authentication, `403` for a non-member or insufficient role, and
+`500` for the template query.
+
+### `PUT /api/v1/notification-templates`
+
+Creates or replaces one category/channel override.
+
+```json
+{
+  "category": "routines.failed",
+  "channel_id": "",
+  "title": "[failed] {{ source.title }}",
+  "body": "{{ source.body }}"
+}
+```
+
+Returns the saved template with `200 OK`. Empty title and body remove the
+override. Categories and template references are validated on write; invalid
+input returns `400`.
+
+**Auth:** `ADMIN` or `OWNER`. **Request:** JSON `{ "category", "channel_id",
+"title", "body" }`. **Response:** `200 OK` with the saved template;
+`400` for invalid JSON, category, or template reference; `401` without
+authentication; `403` for a non-member or insufficient role; and `500` for a
+persistence failure.
+
+Supported references are `{{ vars.<fact> }}`, `{{ source.title }}`,
+`{{ source.body }}`, `{{ source.category }}`, and `{{ source.kind }}`. Missing
+facts render as empty; if a rendered title or body is empty, Crewship keeps the
+producer's original wording.
+
+### `DELETE /api/v1/notification-templates`
+
+Removes an override. `category` is required; `channel_id` is optional.
+
+```text
+DELETE /api/v1/notification-templates?category=routines.failed&channel_id=nch_01...
+```
+
+Returns `204 No Content`. Deleting an override that does not exist is
+intentionally idempotent.
+
+**Auth:** `ADMIN` or `OWNER`. **Request:** required `category` and optional
+`channel_id` query parameters; no body. **Statuses:** `204 No Content`, `400`
+when `category` or workspace context is missing, `401` without authentication,
+`403` for a non-member or insufficient role, or `500` for a delete failure.
+
+## Delivery log
+
+### `GET /api/v1/notification-deliveries`
+
+Lists outbound delivery attempts for the current workspace. This endpoint is
+restricted to `ADMIN` and `OWNER` because the log spans every recipient.
+
+| Query parameter | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `status` | string | all | `pending`, `sent`, `failed`, `dropped_pref`, or `dropped_rate` |
+| `channel_id` | string | all | Restrict to one channel |
+| `category` | string | all | Restrict to one notification category |
+| `limit` | integer | `100` | Values above `500` or non-positive values use the default |
+
+Response:
+
+```json
+{
+  "deliveries": [
+    {
+      "id": "del_01...",
+      "workspace_id": "ws_01...",
+      "channel_id": "nch_01...",
+      "user_id": "usr_01...",
+      "category": "routines.failed",
+      "dedup_key": "routines.failed:run_01...",
+      "source_kind": "routine",
+      "source_id": "run_01...",
+      "title": "Nightly failed",
+      "status": "failed",
+      "error": "provider rejected the request",
+      "attempts": 1,
+      "created_at": "2026-08-04T12:00:00Z",
+      "updated_at": "2026-08-04T12:00:01Z"
+    }
+  ]
+}
+```
+
+`error` is omitted when there is no recorded error. The result is ordered
+newest first and is always an object containing a `deliveries` array, including
+when no rows match.

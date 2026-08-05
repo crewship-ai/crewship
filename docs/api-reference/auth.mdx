@@ -578,6 +578,8 @@ Drive it from the CLI with [`crewship auth passwd`](/cli/auth).
 Upload (or replace) your own avatar. **Auth required.** `multipart/form-data`
 with a single `file` field.
 
+**Request:** multipart body with required `file`; **response:** profile object.
+
 - Max **2 MB**; the content type is sniffed from the bytes and must be
   **PNG, JPEG, or WebP** (a mismatched or unsupported type is a `400`).
 - The image header is decoded (`image.DecodeConfig`) to reject a file that
@@ -604,12 +606,18 @@ Clear your avatar back to initials. **Auth required.** Removes the stored
 file (if any) and sets `avatar_url` to `null`. **Response:** `200 OK` — the
 profile object.
 
+**Request:** no body. **Status:** `200` success; `401` not authenticated; `500`
+storage/delete failure.
+
 ### `GET /api/v1/users/{id}/avatar`
 
 Stream a user's avatar bytes with the correct `Content-Type`. **Auth
 required** — any signed-in user may fetch a member's avatar (rosters render
 each other); an unauthenticated request is `401`. `404` when the user has no
 uploaded avatar. This is the URL `avatar_url` points at after an upload.
+
+**Request:** no body. **Response:** raw avatar bytes. **Status:** `200` success;
+`401` unauthenticated; `404` no avatar.
 
 Drive avatars from the CLI with [`crewship auth avatar`](/cli/auth).
 

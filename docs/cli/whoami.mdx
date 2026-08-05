@@ -1,0 +1,18 @@
+---
+title: "whoami"
+description: "Display the authenticated CLI identity and active workspace."
+icon: "user"
+---
+
+## `crewship whoami`
+
+Shows the current user, server, active workspace and role. It also reports how
+many workspaces are available.
+
+```bash
+crewship whoami
+crewship whoami --format json
+```
+
+Requires authentication. JSON output is intended for scripts; supported
+formats are `table` and `json`.

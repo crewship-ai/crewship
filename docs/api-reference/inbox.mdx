@@ -12,6 +12,14 @@ The inbox is the unified human-in-the-loop surface for the workspace. Rows are w
   All endpoints require an authenticated session and a workspace context.
 </Note>
 
+## Authentication and scope
+
+The request has no authentication payload: send the session cookie or bearer
+token established by the normal API login flow. The server derives both
+`user_id` and `workspace_id` from that context. List, count, get, patch, and
+bulk operations apply the visibility model below; purge additionally requires
+the workspace `OWNER` or `ADMIN` role.
+
 ## Endpoints
 
 | Method | Endpoint | Purpose |
@@ -125,6 +133,10 @@ The response inlines both row count and unread count so the bell badge renders f
 
 ### `GET /api/v1/inbox/count`
 
+**Request:** no body. **Response:** `200 OK` with `unread_count`; `401` is
+returned without authenticated workspace context and `500` on a database
+failure.
+
 Bell-badge endpoint. Same visibility predicate as List, cheaper payload — no JSON parse, no payload column read.
 
 ```json
@@ -153,6 +165,10 @@ as one `rows[]` entry from List).
 Flip an item between `unread` / `read` / `resolved`. Source-managed kinds are restricted to `read` — see the conflict rule below.
 
 ### `PATCH /api/v1/inbox/{id}`
+
+**Response:** `200 OK` with the updated item state. `400` indicates an invalid
+state or body, `401` missing workspace context, `404` an invisible item, and
+`409` a source-managed item that must be resolved through its source endpoint.
 
 Flip an item's state. The body is JSON:
 

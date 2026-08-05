@@ -133,7 +133,7 @@ spec:
 
 Drop the `workspace_override:` line entirely and re-apply. The plan
 emits one `ActionDelete` against
-`DELETE /api/v1/feature-flags/<key>/override`. The flag definition
+`DELETE /api/v1/feature-flags/{key}/override`. The flag definition
 itself is untouched.
 
 ```yaml

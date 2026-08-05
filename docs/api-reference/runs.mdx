@@ -38,7 +38,7 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 | `agent_id` | string | Filter by agent. |
 | `trigger` | string | Filter by `payload.trigger_type` on the `run.started` entry (e.g. `USER`, `WEBHOOK`, `CRON`). |
 | `tag` | string | Match a single tag inside `payload.metadata.tags` array on the `run.started` entry. |
-| `page` | integer | 1-based page index, default `1`. Out-of-range values clamp to `1`. |
+| `page` | integer | 1-based page index, default `1`. Values below `1` become `1`; values above the server's maximum page are capped. |
 | `limit` | integer | Page size, 1-100, default `50`. Out-of-range values fall back to the default. |
 
 **Response:** `200 OK`
@@ -100,8 +100,9 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 
 | Status | Condition |
 |---|---|
-| 400 | Invalid `status` value (must be one of the five enum values), or no `workspace_id` resolved for the session (the `RequireWorkspace` middleware rejects before the handler runs). |
+| 400 | Invalid `status` value (must be one of the five enum values). |
 | 401 | Not authenticated. |
+| 401 | Authenticated request has no resolved workspace context. |
 | 403 | Authenticated, but not a member of the resolved workspace. |
 | 500 | DB error. |
 
@@ -153,8 +154,9 @@ crew rollup and a display-named top-agents leaderboard (one workspace-scoped
 
 | Status | Condition |
 |---|---|
-| `400` | `window` is not one of `24h` / `7d` / `30d`, or no `workspace_id` resolved (`RequireWorkspace` rejects before the handler runs). |
+| `400` | `window` is not one of `24h` / `7d` / `30d`. |
 | `401` | Not authenticated. |
+| `401` | Authenticated request has no resolved workspace context. |
 | `403` | Authenticated, but not a member of the resolved workspace. |
 | `500` | Journal aggregate query failed. |
 
@@ -198,12 +200,14 @@ Returns a single run by trace id. The response shape is identical to one element
 }
 ```
 
-The handler does not have a direct `journal.GetRunByID` primitive yet -- it scans up to 10 pages of `journal.ListRuns` (1000 rows) looking for the trace id. The typical lookup is page 1 (recent runs); the deeper scan keeps older runs resolvable without a contract change.
+The handler uses the workspace-scoped indexed `journal.GetRunByID` lookup. A
+trace ID from another workspace is treated as not found.
 
 | Status | Condition |
 |---|---|
-| `400` | Empty `id` path segment, or no `workspace_id` resolved for the session (the `RequireWorkspace` middleware rejects before the handler runs). |
+| `400` | Empty `id` path segment. |
 | `401` | Not authenticated. |
+| `401` | Authenticated request has no resolved workspace context. |
 | `403` | Authenticated, but not a member of the resolved workspace. |
 | `404` | No run with that id in the caller's workspace (cross-workspace probes are masked as 404 -- the journal store filter never matches a foreign workspace's trace id). |
 | `500` | Journal page query failed, or enrichment returned an empty slice for a found row (data integrity issue). |

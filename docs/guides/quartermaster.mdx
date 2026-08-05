@@ -43,6 +43,13 @@ Reads the mission's journal, extracts a trajectory, and computes a `seed_signatu
 
 Workspace-scoped: the mission must belong to the caller's workspace. `OWNER` or `ADMIN` role required.
 
+The API requires an authenticated session or CLI token with workspace context.
+Replay and regression return `401` when no workspace is available, `403` when
+the caller is not `OWNER` or `ADMIN`, `400` for malformed or incomplete JSON,
+`404` when a referenced mission is not in the caller's workspace, and `500` for
+an internal lookup, token, or database failure. Successful queue requests are
+`202 Accepted` with JSON `{ "run_id": "...", "status": "queued" }`.
+
 <Info>
 The handler returns **202 Accepted** immediately; the actual extract+compute+emit runs in a 10-minute goroutine. Poll via `crewship eval runs` or `GET /api/v1/eval/runs`.
 </Info>
@@ -75,6 +82,11 @@ GET /api/v1/eval/runs?limit=50
 ```
 
 Returns newest-first, workspace-scoped. Limit 1-200, default 50.
+
+The list request is authenticated and workspace-scoped but has no additional
+role requirement. A malformed, non-positive, or out-of-range `limit` falls
+back to `50`; it is not a `400`. Success is `200 OK` and returns `rows`,
+`count`, and `limit`. Missing workspace is `401`; a database failure is `500`.
 
 ```json
 {

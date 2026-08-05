@@ -1,0 +1,19 @@
+---
+title: "rehire"
+description: "Extend or resurrect an ephemeral agent."
+icon: "user-plus"
+---
+
+## `crewship rehire`
+
+Resets the TTL and clears the ghost state of an ephemeral agent. Existing
+memory files are preserved. Rehiring a live ephemeral agent extends its TTL.
+
+```bash
+crewship rehire backend-bot --reason "continue release work"
+crewship rehire backend-bot --reason "extend" --ttl 120 --yes
+```
+
+`--reason` is required for the history trail. `--ttl` sets the optional TTL in
+minutes. The command requires authentication and workspace context and asks
+for confirmation before changing the agent.

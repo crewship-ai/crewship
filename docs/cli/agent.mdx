@@ -20,6 +20,7 @@ crewship agent <subcommand> [flags]
 | `get` | Show agent details |
 | `create` | Create a new agent |
 | `update` | Update an agent |
+| `rotate-webhook-secret` | Mint a new webhook signing secret (shown once) |
 | `delete` | Delete an agent |
 | `runs` | List runs for an agent |
 | `chats` | List recent chats for an agent (alias: `sessions`) |
@@ -28,6 +29,7 @@ crewship agent <subcommand> [flags]
 | `debug` | Show agent debug info (container state, env, crewshipd status) |
 | `skills` | List skills assigned to an agent |
 | `credentials` | List credentials assigned to an agent |
+| `channels` | List notification channels the agent may send to |
 | `avatar` | Inspect, set, or clear an agent's stored avatar |
 | `mcp` | Show or set MCP server configuration for an agent |
 | `files` | List files in the agent's working directory, or download a single file |
@@ -137,6 +139,19 @@ mixed with other field updates in the same invocation — run it on its own:
 `crewship agent update <id> --self-learning[=false] --learning-reason "…"`.
 </Note>
 
+## `crewship agent rotate-webhook-secret`
+
+Mint a new webhook signing secret for an agent. The new secret is printed only
+once; the previous secret stops validating immediately.
+
+```bash
+crewship agent rotate-webhook-secret viktor
+```
+
+Backed by `POST /api/v1/agents/{id}/webhook-secret/rotate`. Table output shows
+the secret once; `--format json` or `--format yaml` returns `webhook_secret`
+and `rotated_at`.
+
 ---
 
 ## `crewship agent delete`
@@ -210,7 +225,7 @@ crewship agent debug <slug-or-id>
 List skills assigned to an agent.
 
 ```bash
-crewship agent skills <slug-or-id>
+crewship agent skills <agent>
 ```
 
 **Output columns:** SKILL ID, NAME, CATEGORY, ENABLED
@@ -375,6 +390,21 @@ crewship agent chats viktor --format json | jq '.[] | select(.status=="ACTIVE")'
 **Output columns:** CHAT ID, TITLE, STATUS, MSGS, STARTED, ENDED.
 
 Backed by `GET /api/v1/agents/{id}/chats`.
+
+---
+
+## `crewship agent channels`
+
+List the notification channels an agent is allowed to post to. An empty list is
+normal because channel access is default-deny.
+
+```bash
+crewship agent channels viktor
+```
+
+**Output columns:** CHANNEL, TYPE, PROVIDER, ENABLED
+
+Backed by `GET /api/v1/agents/{id}/notification-channels`.
 
 ---
 

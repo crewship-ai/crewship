@@ -1,0 +1,55 @@
+---
+title: "Waitpoints"
+description: "Human and external completion of paused routine steps."
+icon: "pause"
+---
+
+Waitpoints are durable approval/external-completion pauses created by a routine
+`wait` step. Tokens are opaque capabilities; do not expose them in logs.
+
+## List pending waitpoints
+
+```http
+GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints
+```
+
+Requires workspace authentication and membership. The response is an array
+(maximum 200) of objects containing `token`, `pipeline_run_id`, `step_id`,
+`kind`, `prompt`, `timeout_at`, `created_at`, and `callback_url`;
+`invoking_crew_id` is omitted when empty. `callback_url` is the public
+token-authenticated completion endpoint. A database failure is `500`.
+
+## Approve or deny from the inbox
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve
+Content-Type: application/json
+
+{"approved": true, "comment": "Reviewed"}
+```
+
+The body is optional; absent `approved` means `false` on this authenticated
+route. `comment` is optional and is stored as the decision payload. This is an
+`update`/MANAGER+ operation. A successful response is
+`{"ok":true,"approved":true|false}` and resumes the parked run for either
+decision. Missing tokens are `400`; malformed JSON is `400`; an
+expired/already-decided token is `409`; an unauthorized caller is `401` or
+`403`; an unavailable waitpoint store is `503`; and completion failures are
+`500`.
+
+## Complete from an external service
+
+```http
+POST /api/v1/waitpoint-tokens/{token}
+Content-Type: application/json
+
+{"approved": true, "payload": {"ticket": "INC-42"}}
+```
+
+This route has no JWT: the high-entropy token is the authentication. The body
+is optional and `approved` defaults to `true` (unlike the authenticated approve
+route). `payload` accepts any JSON and is stored for the resumed step. It
+returns `{"ok":true,"approved":true|false}`; an empty token is `400`, an
+already-decided or expired token is `409`, malformed JSON is `400`, an
+unavailable or non-completing waitpoint store is `503`, and other completion
+failures are `500`.

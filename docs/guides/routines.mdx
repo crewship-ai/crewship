@@ -693,7 +693,7 @@ credentials (public endpoints keep working). Injection schemes: `bearer`
 }
 ```
 
-Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (external signal via `POST /pipeline-runs/{id}/signal`). Both `approval` and `event` survive a process restart: a top-level run parks (`status: WAITING`) with durable state — `pipeline_waitpoints` for approval, `pipeline_signal_waits` for event (migration v154, #1409) — and at boot the parked run is resumed from that state. For `event` specifically, a signal delivered while the process was down (or a hair before the step even reached the wait) is not lost: the signal endpoint records the delivery durably before attempting any in-process wake, and the resumed step reads it straight back out (see [Durability and restart recovery](#durability-and-restart-recovery)).
+Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (external signal via `POST /api/v1/workspaces/{ws}/pipeline-runs/{runId}/signal`). Both `approval` and `event` survive a process restart: a top-level run parks (`status: WAITING`) with durable state — `pipeline_waitpoints` for approval, `pipeline_signal_waits` for event (migration v154, #1409) — and at boot the parked run is resumed from that state. For `event` specifically, a signal delivered while the process was down (or a hair before the step even reached the wait) is not lost: the signal endpoint records the delivery durably before attempting any in-process wake, and the resumed step reads it straight back out (see [Durability and restart recovery](#durability-and-restart-recovery)).
 
 **Async, non-blocking.** Hitting a `kind: approval` gate does **not** hold a goroutine or fail the run. A foreground `crewship routine run` returns promptly with `status: WAITING` (exit 0) and a waitpoint token, and **releases its execution slot** while it waits. Approving **or** rejecting resumes the run from the gate (already-completed steps are restored/skipped); a rejection resolves the run to `FAILED` cleanly rather than stranding it. Parked approvals whose `timeout_sec` elapsed are reconciled at the next boot scan.
 
@@ -1720,7 +1720,7 @@ summarize-text   —        $3.40   —
 2026-07 total: $37.99 spent of $70.00 budgeted
 ```
 
-The routine detail page shows the same meter (spent-vs-cap bar) when a budget is set, and the workspace roll-up appears on the routines list page. API: `GET/PATCH /pipelines/{slug}/budget`, `GET /pipelines/budget-summary` — see the [CLI reference](/cli/routine#crewship-routine-budget) for the full flag/response shape.
+The routine detail page shows the same meter (spent-vs-cap bar) when a budget is set, and the workspace roll-up appears on the routines list page. API: `GET/PATCH /api/v1/workspaces/{ws}/pipelines/{slug}/budget`, `GET /api/v1/workspaces/{ws}/pipelines/budget-summary` — see the [CLI reference](/cli/routine#crewship-routine-budget) for the full flag/response shape.
 
 ### Run tags & metadata
 
@@ -1732,7 +1732,7 @@ crewship routine run cost-spike-probe \
   --metadata '{"source":"manual","ticket":"OPS-42"}'
 ```
 
-**Tags** are workspace-scoped labels (max 10/run, lowercased) surfaced on the run detail and usable as a filter (`crewship routine runs <slug> --tag prod`); replays inherit the source run's tags. **Metadata** is a free-form JSON object stored on the run and returned by `GET /pipeline-runs/{id}` — set at invoke time today (mid-run mutation and `{{ run.metadata.X }}` templating are a follow-up).
+**Tags** are workspace-scoped labels (max 10/run, lowercased) surfaced on the run detail and usable as a filter (`crewship routine runs <slug> --tag prod`); replays inherit the source run's tags. **Metadata** is a free-form JSON object stored on the run and returned by `GET /api/v1/workspaces/{ws}/pipeline-runs/{runId}` — set at invoke time today (mid-run mutation and `{{ run.metadata.X }}` templating are a follow-up).
 
 ### Replay & error fingerprinting
 
