@@ -22,14 +22,27 @@ import (
 )
 
 type createAssignmentBody struct {
-	TargetSlug   string                    `json:"target_slug"`
-	Task         string                    `json:"task"`
-	CrewID       string                    `json:"crew_id"`
-	WorkspaceID  string                    `json:"workspace_id"`
-	ChatID       string                    `json:"chat_id"`
-	MissionID    string                    `json:"mission_id,omitempty"` // optional — mission this assignment belongs to; threaded into journal entries so Cartographer checkpoints can anchor on per-mission journal cursors.
-	CrewMembers  []orchestrator.CrewMember `json:"-"`                    // populated internally for mission dispatches
-	LeadPlanning bool                      `json:"-"`                    // when true, run as LEAD with sidecar
+	TargetSlug  string `json:"target_slug"`
+	Task        string `json:"task"`
+	CrewID      string `json:"crew_id"`
+	WorkspaceID string `json:"workspace_id"`
+	ChatID      string `json:"chat_id"`
+	MissionID   string `json:"mission_id,omitempty"` // optional — mission this assignment belongs to; threaded into journal entries so Cartographer checkpoints can anchor on per-mission journal cursors.
+	// ActorAgentID is the agent that actually made the call, as resolved by the
+	// sidecar from its per-agent bearer token (#1754). It is NOT the agent's own
+	// claim about itself: the sidecar derives it from a token it minted, the
+	// agent never sees this body, and crewshipd re-proves the id names a live
+	// agent in the bound workspace before using it.
+	//
+	// It matters because a crew shares ONE sidecar, whose IPC chat_id is the
+	// agent that booted it. Attributing every dispatch to that chat's agent was
+	// harmless while only leads could dispatch; with sub-agent delegation it
+	// would file a sub-agent's dispatch under its lead — and then the depth cap
+	// would measure the LEAD's position in the tree, i.e. 1, on every hop
+	// forever. Empty (a legacy sidecar) falls back to the chat's agent.
+	ActorAgentID string                    `json:"actor_agent_id,omitempty"`
+	CrewMembers  []orchestrator.CrewMember `json:"-"` // populated internally for mission dispatches
+	LeadPlanning bool                      `json:"-"` // when true, run as LEAD with sidecar
 	// Creator attribution ([4], #810) — copied from the mission's v129
 	// columns by the mission engine so the run record + journal attribute
 	// the work to the reporter, not just the executor. Empty for a sidecar
@@ -99,6 +112,59 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "lookup assigner crew for connection check", err)
 		return
 	}
+
+	// The ACTING agent (#1754). A crew shares one sidecar, so the chat's agent
+	// is only ever the one that booted it; the sidecar resolves who actually
+	// called from the per-agent bearer token and forwards that id here. Prove it
+	// names a live agent in the bound workspace before it becomes the dispatch's
+	// identity — a forwarded id that does not resolve is refused rather than
+	// silently downgraded to the boot agent, because the downgrade is exactly
+	// the depth-laundering shape the cap exists to stop.
+	if body.ActorAgentID != "" {
+		var actorCrewID string
+		err := h.db.QueryRowContext(r.Context(),
+			`SELECT COALESCE(crew_id,'') FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			body.ActorAgentID, body.WorkspaceID).Scan(&actorCrewID)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			h.logger.Warn("assignment actor does not resolve in this workspace",
+				"actor_agent_id", body.ActorAgentID, "workspace_id", body.WorkspaceID)
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "acting agent not found in this workspace",
+			})
+			return
+		case err != nil:
+			replyInternalError(w, h.logger, "lookup acting agent for assignment", err)
+			return
+		}
+		assignedByID = body.ActorAgentID
+		if actorCrewID != "" {
+			assignerCrewID = actorCrewID
+		}
+	}
+
+	// Delegation caps (#1754) — before anything is written, and before the
+	// target lookup, so a refusal costs one indexed read rather than a row plus
+	// a container. scope is what the new assignment will be STORED with: the
+	// next hop is measured from a depth this server derived.
+	scope, delegationLim, capErr := enforceDelegationCaps(r.Context(), h.db, assignedByID, body.WorkspaceID, body.ChatID)
+	if capErr != nil {
+		var refusal *delegationRefusal
+		if errors.As(capErr, &refusal) {
+			h.logger.Info("assignment refused by delegation cap",
+				"actor_agent_id", assignedByID,
+				"chat_id", body.ChatID,
+				"depth", scope.Depth,
+				"reason", refusal.Error(),
+			)
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": refusal.Error()})
+			return
+		}
+		// Fail closed: the cap could not read its own state, so nothing has
+		// established this dispatch is inside it.
+		replyInternalError(w, h.logger, "evaluate delegation caps", capErr)
+		return
+	}
 	if assignerCrewID != body.CrewID {
 		connected, connErr := AreCrewsConnected(r.Context(), h.db, assignerCrewID, body.CrewID)
 		if connErr != nil {
@@ -139,12 +205,48 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Create assignment record in PENDING state (group_id = chat_id for mission linkage)
 	assignmentID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
-	`, assignmentID, body.WorkspaceID, body.ChatID, assignedByID, target.ID, body.Task, body.ChatID, now)
+	// depth/parent_assignment_id come from the scope resolved above, never from
+	// the request — see delegation_limits.go. A root dispatch stores NULL for
+	// the parent so the fan-out count for a lead's chat keeps working off the
+	// in-flight predicate rather than a self-referential chain.
+	var parentVal any
+	if scope.ParentID != "" {
+		parentVal = scope.ParentID
+	}
+	// The fan-out headroom is re-proved INSIDE the insert (fanoutGuard). The
+	// check above produced the readable refusal; this is the one that holds
+	// when a run fires ten /assign calls at once, which is the whole scenario
+	// the cap exists for. Same shape as claimCrewSlot: predicate + write in one
+	// statement, so SQLite serialises the racers instead of admitting them all.
+	guardSQL, guardArgs := fanoutGuard(scope, assignedByID, body.ChatID, delegationLim.MaxFanout)
+	insertArgs := append([]any{
+		assignmentID, body.WorkspaceID, body.ChatID, assignedByID, target.ID,
+		body.Task, body.ChatID, scope.Depth, parentVal, now,
+	}, guardArgs...)
+	res, err := h.db.ExecContext(r.Context(), `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, created_at)
+		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?
+		 WHERE `+guardSQL, insertArgs...)
 	if err != nil {
 		replyInternalError(w, h.logger, "create assignment", err)
+		return
+	}
+	if n, raErr := res.RowsAffected(); raErr != nil {
+		replyInternalError(w, h.logger, "create assignment rows affected", raErr)
+		return
+	} else if n == 0 {
+		// Lost the fan-out race: between the check and the write, concurrent
+		// dispatches from this same run filled the budget. Answer with the same
+		// refusal the pre-check would have written.
+		h.logger.Info("assignment refused by delegation fan-out cap at insert",
+			"actor_agent_id", assignedByID, "chat_id", body.ChatID, "parent_assignment_id", scope.ParentID)
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": fmt.Sprintf(
+				"delegation refused: this run is at its limit of %d concurrent sub-agent task(s) "+
+					"(fan-out limit, instance setting %s). Wait for one to finish and read it with "+
+					"/results/<assignment_id>, or do the remaining work yourself.",
+				delegationLim.MaxFanout, SettingDelegationMaxFanout),
+		})
 		return
 	}
 
