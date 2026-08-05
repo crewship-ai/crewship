@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type config struct {
@@ -106,6 +107,19 @@ func checkServed(baseURL string, declared int) (int, error) {
 	return served, nil
 }
 
+// navigationPages returns every page id docs.json declares.
+//
+// It reads the STRUCTURE — the string entries of a `pages` array — rather than
+// guessing which of the file's strings look like a page. The guess it replaces
+// (contains "/", or one of a handful of known prefixes and literals) silently
+// dropped every top-level page whose id carries neither: `philosophy`,
+// `production-checklist` and `architecture` were declared, never counted, and
+// so never checked for existence on disk. A heuristic that decides what to
+// verify will always have that failure mode — it cannot report the pages it
+// did not recognise.
+//
+// Nested groups keep their own `pages`, so the walk recurses through anything
+// it finds rather than assuming a depth.
 func navigationPages(raw json.RawMessage) []string {
 	var value any
 	if json.Unmarshal(raw, &value) != nil {
@@ -116,16 +130,24 @@ func navigationPages(raw json.RawMessage) []string {
 	walk = func(v any) {
 		switch x := v.(type) {
 		case map[string]any:
-			for _, child := range x {
+			for key, child := range x {
+				if key == "pages" {
+					if entries, ok := child.([]any); ok {
+						for _, entry := range entries {
+							if page, ok := entry.(string); ok {
+								seen[page] = true
+								continue
+							}
+							walk(entry) // a nested group, not a page id
+						}
+						continue
+					}
+				}
 				walk(child)
 			}
 		case []any:
 			for _, child := range x {
 				walk(child)
-			}
-		case string:
-			if strings.Contains(x, "/") || strings.HasPrefix(x, "cli") || strings.HasPrefix(x, "guides") || strings.HasPrefix(x, "api-reference") || strings.HasPrefix(x, "manifest") || x == "index" || x == "quickstart" || x == "concepts" {
-				seen[x] = true
 			}
 		}
 	}
@@ -138,8 +160,14 @@ func navigationPages(raw json.RawMessage) []string {
 	return pages
 }
 
+// docsClient bounds the deployed-index requests. http.DefaultClient has no
+// deadline, so a server that accepts the connection and then stalls would hang
+// the scheduled job until the GitHub Actions timeout kills it — a drift check
+// that never reports is worse than one that fails.
+var docsClient = &http.Client{Timeout: 30 * time.Second}
+
 func fetch(url string) (string, error) {
-	resp, err := http.Get(url)
+	resp, err := docsClient.Get(url)
 	if err != nil {
 		return "", err
 	}

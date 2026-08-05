@@ -22,7 +22,14 @@ jobs:
   surface:
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false — this job runs code from the pull request
+      # (`go run ./scripts/...`), and checkout otherwise leaves the workflow
+      # token in the local git config where that code can read it. `contents:
+      # read` bounds what the token can do, not who can exfiltrate it. Every
+      # other workflow in this repo checks out the same way.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod

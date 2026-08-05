@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,52 @@ func TestServedCheckMakesNoRequestWithoutURL(t *testing.T) {
 	}
 	if reached {
 		t.Fatal("checkServed made an HTTP request with no URL configured; the repository-side gate must stay hermetic")
+	}
+}
+
+// navigationPages must read the structure, not guess which strings look like a
+// page. The predicate it replaced required a "/" or one of a few known
+// prefixes, so `philosophy`, `production-checklist` and `architecture` — all
+// declared at the top level of the real docs.json — were never counted and
+// therefore never checked for existence. The count went 279 → 282 on the real
+// file when this was fixed.
+func TestNavigationPagesReadsStructureNotStringShape(t *testing.T) {
+	nav := []byte(`{
+	  "tabs": [
+	    {
+	      "tab": "Docs",
+	      "icon": "book-open",
+	      "groups": [
+	        {
+	          "group": "Get Started",
+	          "pages": ["index", "quickstart", "philosophy", "production-checklist", "architecture"]
+	        },
+	        {
+	          "group": "Guides",
+	          "pages": [
+	            "guides/first-projects",
+	            {"group": "Nested", "pages": ["guides/deep/one"]}
+	          ]
+	        }
+	      ]
+	    }
+	  ]
+	}`)
+
+	got := navigationPages(nav)
+	want := []string{
+		"architecture", "guides/deep/one", "guides/first-projects", "index",
+		"philosophy", "production-checklist", "quickstart",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("navigationPages() = %v\nwant %v", got, want)
+	}
+	// Group labels, tab names and icons live outside `pages` and must not be
+	// mistaken for page ids — that is the other half of a shape-based guess.
+	for _, notAPage := range []string{"Docs", "book-open", "Get Started", "Guides", "Nested"} {
+		if slices.Contains(got, notAPage) {
+			t.Errorf("%q is navigation chrome, not a page id, but it was collected", notAPage)
+		}
 	}
 }
 
