@@ -8,12 +8,26 @@ icon: "pencil-line"
 
 An agent can inspect its crew workspace, use assigned skills, and recall permitted agent or crew memory. It does not automatically know your unstated definition of done, a credential you did not assign, or a file that exists only on your laptop.
 
+## What the agent already has—and what it does not
+
+The exact context depends on the crew and adapter, but a task normally starts with:
+
+- the repository and files mounted into the crew workspace;
+- the agent's assigned skills and their `SKILL.md` instructions;
+- memory the agent is allowed to recall, plus crew-shared memory when the task runs in that crew;
+- the task's issue, prompt, or routine inputs; and
+- only the credentials and tool capabilities granted to that agent or crew.
+
+It does not start with another crew's memory, an unassigned credential, an unstated issue attachment, a human's local filesystem, or permission to change production because the prompt sounds urgent. If one of those is required, say which reference should be attached or which capability must be granted. Do not paste a secret as a workaround.
+
 | Weak task | Better task |
 |---|---|
 | “Fix the API.” | “In `internal/api/invoices.go`, reproduce the 500 for an empty `items` array, add a table-driven regression test, keep the RFC 7807 response shape, and report the test command and result.” |
 | “Review this PR.” | “Review PR 42. Run the Go tests covering `internal/pipeline`, inspect the diff for tenant-boundary regressions, and leave findings with file, line, impact, and a reproduction command.” |
 | “Update dependencies.” | “Upgrade only minor and patch dependencies in `go.mod`; run `go test ./...` and `go vet ./...`; do not change generated OpenAPI or unrelated formatting; summarize any blocked major upgrade.” |
 | “Use the API key in the environment.” | “Use the assigned `DEMO_TOKEN` only against the local test endpoint; never print it, commit it, or write it to a file; if the credential is absent, stop and ask for it.” |
+
+The same distinction applies to memory. “Remember the deployment convention” is incomplete if there are several conventions; “store the reviewed staging deploy convention in crew-shared memory, cite the source file, and say when it should be re-checked” gives the agent a durable fact with a freshness boundary.
 
 ## Include five things
 
@@ -22,5 +36,20 @@ An agent can inspect its crew workspace, use assigned skills, and recall permitt
 3. **Constraints:** state what must not change, especially generated files, public contracts, or credentials.
 4. **Acceptance:** name executable checks and observable outcomes.
 5. **Handoff:** say where the result belongs: a file, issue comment, routine output, or Journal entry.
+
+## A Crewship-shaped task frame
+
+```text
+Context: [issue/repository path/crew memory or skill]
+Goal: [one observable result]
+Inspect first: [files, issue, or prior run]
+Allowed capabilities: [tools and credential slot, if any]
+Constraints: [files, systems, secrets, and behaviours not to change]
+Acceptance: [tests or other checks, plus the expected result]
+Handoff: [file, issue comment, routine output, or Journal detail]
+If blocked: [ask a named human or create a waitpoint; do not guess]
+```
+
+For a lead, add the delegation boundary: which part may be assigned to a peer, what evidence the peer must return, and what the lead will verify before reporting completion. For a routine, add the retry and waitpoint behaviour so a rerun does not silently duplicate an external action.
 
 Memory is context, not a specification. Ask the agent to verify remembered facts when they affect a change. Credentials are capabilities, not instructions; assign only what the task needs and describe safe use without asking the agent to reveal values.

@@ -37,3 +37,30 @@ Crewship separates the place where work lives from the people and automations th
 ## How the pieces fit
 
 An agent receives a task in a crew. The crew supplies the runtime and shared memory; the workspace supplies identity and global resources. A routine or issue can start the run, Keeper and Harbormaster can govern sensitive steps, Quartermaster supplies approved credentials, Paymaster records cost, and the Journal records what happened.
+
+## The boundaries that matter in practice
+
+### Workspace, crew, and project
+
+Use a **workspace** for tenant-wide ownership: members, credentials, global skills, and policy. Use a **crew** for an execution boundary: its agents share a container, network posture, and crew memory. Use a **project** when the question is delivery status across related issues. A project can contain work assigned to several crews; it does not grant those crews access to each other's containers or memory.
+
+### Agent, lead, and mission
+
+An **agent** is the worker that receives a prompt and uses tools. A **lead** is still an agent, but its role permits coordination and delegation; it is not automatically a manager with unrestricted authority. A **mission** is the durable execution record around multi-step work. If work pauses at a waitpoint, the mission remains inspectable; it does not require an agent process to stay alive indefinitely.
+
+### Routine, issue, and skill
+
+An **issue** describes work and its lifecycle. A **routine** describes repeatable execution and its triggers. Either can lead to an agent run, but they answer different questions: “what needs doing?” versus “how and when should it run?” A **skill** supplies reusable instructions to an eligible agent; it is not a routine trigger and it does not itself execute.
+
+### The named services in one run
+
+The named roles are easier to remember as a sequence:
+
+1. **Lookout** checks the execution boundary and tool-shaped inputs in process.
+2. **Quartermaster** resolves which credential binding can be delivered to the run.
+3. **Keeper** evaluates whether that access is allowed, denied, or needs escalation.
+4. **Harbormaster** holds the human decision when policy requires one.
+5. **Paymaster** records model usage and cost as the run proceeds.
+6. **Cartographer** records checkpoints and recoverable mission structure.
+
+None of these roles is the agent. They are control-plane services around agent work, which is why a failed agent response and a denied credential request appear as different kinds of events in the Journal.
