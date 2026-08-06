@@ -34,7 +34,32 @@ crewship system info
 crewship system info --format json   # machine-readable: {"runtime": {...}, "license": {...}}
 ```
 
-**Runtime output:** Available, Runtime name, Version, Socket path.
+**Runtime output:** Available, Runtime name, Version, Socket path — and, when
+more than one runtime answered, a **`Detected:`** inventory with the one being
+driven marked `(in use)`.
+
+```
+Container Runtime
+  Available:  true
+  Runtime:    orbstack
+  Version:    29.4.0
+  Socket:     /var/run/docker.sock
+  Detected:
+    orbstack   29.4.0     /var/run/docker.sock  (in use)
+    colima     29.5.2     /Users/u/.colima/default/docker.sock
+    rancher    29.5.3     /Users/u/.rd/docker.sock
+    apple      1.2.0
+  Not selectable by name — Crewship drives the first socket that answers.
+  Point DOCKER_HOST at another one, or stop the daemon that wins.
+```
+
+<Note>
+Installed and **in use** are different facts, and the inventory is the only
+place that tells them apart. There is no setting that names a runtime:
+`container.provider` accepts `docker`, `apple` or `auto` only, so the two ways
+to change which one is driven are to point `DOCKER_HOST` at the socket you want,
+or to stop the daemon that currently wins the probe order.
+</Note>
 
 **License output:** Edition, Max crews, Max agents/crew, Max members, Licensee.
 
@@ -42,6 +67,40 @@ With `--format json|yaml|ndjson` the command emits a structured payload
 (`runtime` + optional `license` key; `license` is omitted when the endpoint
 is unavailable). The same applies to `system keeper`, `system stats`, and
 `system onboarding status`.
+
+The `runtime` object carries the endpoint's full inventory — `runtimes[]` with
+**`in_use`** per entry, and **`install_links`**, the map of every runtime
+Crewship can drive to where you get it:
+
+```bash
+crewship system info -f json | jq '.runtime.runtimes[] | select(.in_use)'
+crewship system info -f json | jq -r '.runtime.install_links | to_entries[] | "\(.key)\t\(.value)"'
+```
+
+`runtime` / `version` / `socket` are **empty when runtimes are installed but
+none is in use** — the server booted without a container provider
+(`crewship start --no-docker`). The human output says so rather than printing
+blanks. When nothing answered at all, `system info` names what it probed and
+prints the install links instead of empty fields.
+
+<Note>
+Host detail (runtime name, version, socket) is **ADMIN-gated**: the server sends
+it only to an ADMIN or OWNER of the workspace on the request, and answers
+everyone else with a bare `{"available": true}` ([#865](https://github.com/crewship-ai/crewship/issues/865)).
+With no workspace selected, or a role below ADMIN in the selected one, the
+command says that rather than rendering the redaction as "no runtime detected".
+Select a workspace you administer (`crewship workspace use <slug>`) or pass
+`--workspace`.
+</Note>
+
+<Warning>
+**containerd and nerdctl are not runtimes Crewship can use**, and neither
+`system info` nor [`doctor`](/cli/doctor) names them. containerd serves its own
+gRPC API over HTTP/2 while Crewship's client speaks the Docker REST API over
+HTTP/1.1, so no version of either can answer a probe. If you are on a containerd
+host, run Docker Engine, `podman system service`, or switch Rancher Desktop's
+container engine to dockerd (moby) — restarting containerd cannot help.
+</Warning>
 
 ---
 
