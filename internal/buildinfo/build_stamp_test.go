@@ -39,9 +39,15 @@ func nestedWorktree(t *testing.T) (string, string) {
 
 	git := func(dir string, args ...string) string {
 		t.Helper()
+		// Identity, signing and hooks are all pinned rather than inherited: the
+		// fixture must not depend on (or be broken by) whatever the machine
+		// running the tests has in its global git config. core.hooksPath in
+		// particular would otherwise let a contributor's pre-commit hook run —
+		// and fail, or hang — inside a unit test.
 		full := append([]string{
 			"-c", "user.name=test", "-c", "user.email=test@example.com",
-			"-c", "commit.gpgsign=false", "-C", dir,
+			"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
+			"-C", dir,
 		}, args...)
 		out, err := exec.Command("git", full...).CombinedOutput()
 		if err != nil {
