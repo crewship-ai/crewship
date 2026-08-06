@@ -29,6 +29,28 @@ type ingressCredential struct {
 	token string
 }
 
+// roleAllows is the independent authorization contract for route-level role
+// gates. Do not derive these expectations from canRole or
+// requireRoleScopeMW: weakening the production primitive must make this test
+// fail rather than moving the expected result with the implementation.
+//
+// A change here is a deliberate authorization-contract change and must be
+// reviewed alongside testdata/route-roles.txt.
+var roleAllows = map[string]map[string]bool{
+	roleManage: {"OWNER": true, "ADMIN": true, "MANAGER": false, "MEMBER": false},
+	roleCreate: {"OWNER": true, "ADMIN": true, "MANAGER": true, "MEMBER": false},
+}
+
+// These route roles intentionally do not have a route-level role matrix:
+// their handlers perform the authorization decision using the resource being
+// addressed or a capability, so a generic OWNER/ADMIN/MEMBER expectation
+// would be false precision. They are still required to be named here so a new
+// role cannot silently fall through the test.
+var roleBehaviorExcluded = map[string]string{
+	roleSelf:   "handler authorizes access to the current user's resource",
+	roleInline: "handler authorizes by resource or capability",
+}
+
 // TestIngressAuthorizationMatrix exercises the ingress chokepoint, not the
 // business handlers. Every recorded mutation route and every workspace-bound
 // read route is mounted in a synthetic ServeMux with the exact production
@@ -36,8 +58,8 @@ type ingressCredential struct {
 // sentinel, so this matrix cannot launch an agent, stream a journal, or leave
 // background work behind.
 //
-// Four identities × three real credential forms are used:
-// OWNER, ADMIN, MEMBER, and a user belonging only to another workspace;
+// Five identities × three real credential forms are used:
+// OWNER, ADMIN, MANAGER, MEMBER, and a user belonging only to another workspace;
 // session JWT, unrestricted CLI token, and wildcard-scoped CLI token. A
 // foreign identity must stop at RequireWorkspace with 403. In-workspace
 // identities may be denied later by the declared role, but must never fail
@@ -47,10 +69,12 @@ func TestIngressAuthorizationMatrix(t *testing.T) {
 	owner := seedTestUser(t, db)
 	wsA := seedTestWorkspace(t, db, owner)
 	admin := "ingress-admin"
+	manager := "ingress-manager"
 	member := "ingress-member"
 	foreign := "ingress-foreign"
 	wsB := "ingress-workspace-b"
 	adminToken := seedRoleMemberToken(t, db, wsA, admin, "ADMIN", "ingress-admin")
+	managerToken := seedRoleMemberToken(t, db, wsA, manager, "MANAGER", "ingress-manager")
 	memberToken := seedRoleMemberToken(t, db, wsA, member, "MEMBER", "ingress-member")
 	mustExec(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, ?, ?)`, foreign, foreign+"@example.com", "Foreign")
 	mustExec(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?, ?, ?)`, wsB, "Ingress B", "ingress-b")
@@ -77,6 +101,11 @@ func TestIngressAuthorizationMatrix(t *testing.T) {
 			{"session", issueIngressSession(t, store, validator, admin, "admin")},
 			{"cli-unscoped", adminToken},
 			{"cli-scoped", mintIngressScopedToken(t, db, admin, "admin", "*")},
+		}},
+		{name: "MANAGER", user: manager, role: "MANAGER", creds: []ingressCredential{
+			{"session", issueIngressSession(t, store, validator, manager, "manager")},
+			{"cli-unscoped", managerToken},
+			{"cli-scoped", mintIngressScopedToken(t, db, manager, "manager", "*")},
 		}},
 		{name: "MEMBER", user: member, role: "MEMBER", creds: []ingressCredential{
 			{"session", issueIngressSession(t, store, validator, member, "member")},
@@ -113,13 +142,17 @@ func TestIngressAuthorizationMatrix(t *testing.T) {
 						t.Fatalf("%s with foreign %s returned %d, want RequireWorkspace 403", route.key, credential.name, rr.Code)
 					}
 					if identity.name != "FOREIGN" {
-						wantForbidden := false
-						switch route.requiredRole {
-						case roleCreate:
-							wantForbidden = !canRole(identity.role, "create")
-						case roleManage:
-							wantForbidden = !canRole(identity.role, "manage")
+						allowed, enforced := roleAllows[route.requiredRole][identity.role]
+						if route.requiredRole != "" && !enforced && roleBehaviorExcluded[route.requiredRole] == "" {
+							t.Fatalf("%s declares untested route role %q; add an independent expectation or an explicit exclusion", route.key, route.requiredRole)
 						}
+						if !enforced {
+							// roleSelf and roleInline are intentionally excluded;
+							// their handler-specific checks cannot be asserted by
+							// this generic ingress sentinel.
+							return
+						}
+						wantForbidden := !allowed
 						if wantForbidden && rr.Code != http.StatusForbidden {
 							t.Fatalf("%s with %s role returned %d, want declared %s gate 403", route.key, identity.role, rr.Code, route.requiredRole)
 						}
