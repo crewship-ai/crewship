@@ -645,7 +645,7 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 	sort.Slice(r.CLI, func(i, j int) bool { return r.CLI[i].Path < r.CLI[j].Path })
 	r.Env = inventoryEnvironmentVariables(sources, docs)
 	r.Manifest = inventoryManifestKinds(sources, docs)
-	r.Reverse = inventoryDocsToCode(openAPI, manifest, docs, sources)
+	r.Reverse = inventoryDocsToCode(openAPI, manifest, docs, r.Env, r.Manifest)
 	r.Summary = summarize(r)
 
 	if err := os.MkdirAll(reportDir, 0o755); err != nil {
@@ -884,13 +884,14 @@ func readSourceSignals() ([]docFile, []docFile, error) {
 	var sources, tests []docFile
 	// Do not walk the repository root: node_modules and generated assets make
 	// that needlessly expensive. These are the source roots that can contain
-	// API or CLI registrations/tests.
-	for _, root := range []string{"internal", "cmd", "scripts", "tools", "web"} {
+	// API or CLI registrations/tests, plus installer/service source that owns
+	// documented environment variables.
+	for _, root := range []string{"internal", "cmd", "scripts", "tools", "web", "packaging"} {
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-			if info.IsDir() || !strings.HasSuffix(path, ".go") {
+			if info.IsDir() || !isInventorySourceFile(path) {
 				return nil
 			}
 			data, err := os.ReadFile(path)
@@ -901,9 +902,9 @@ func readSourceSignals() ([]docFile, []docFile, error) {
 			if strings.HasSuffix(path, "_test.go") {
 				tests = append(tests, file)
 			}
-			// Keep every production Go source here: API source lookup is a
-			// consumer of this list, and the documentation inventory also
-			// derives environment variables and manifest kinds from it.
+			// Keep every non-test source here: API source lookup is a consumer of
+			// this list, and the inventory derives environment variables and
+			// manifest kinds from it.
 			if !strings.HasSuffix(path, "_test.go") {
 				sources = append(sources, file)
 			}
@@ -916,6 +917,13 @@ func readSourceSignals() ([]docFile, []docFile, error) {
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Path < sources[j].Path })
 	sort.Slice(tests, func(i, j int) bool { return tests[i].Path < tests[j].Path })
 	return sources, tests, nil
+}
+
+func isInventorySourceFile(name string) bool {
+	if strings.HasSuffix(name, ".go") {
+		return true
+	}
+	return name == "scripts/install.sh" || name == "packaging/crewship.env.example"
 }
 
 func sourceFor(path string, sources []docFile) string {

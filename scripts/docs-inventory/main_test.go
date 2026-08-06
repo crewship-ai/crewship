@@ -216,7 +216,7 @@ func TestDocsToCodeNamesUnknownCommand(t *testing.T) {
 		openAPIDocument{Paths: map[string]map[string]json.RawMessage{"/api/v1/items": {}}},
 		commandManifest{Commands: []commandNode{{Path: "items", Flags: []flagManifest{{Name: "format"}}}}},
 		[]docFile{{Path: "docs/guides/items.mdx", Text: "`crewship totally-made-up-commails --format json`\n"}},
-		nil,
+		nil, nil,
 	)
 	if checks.MissingCommands != 1 || len(checks.Missing) != 1 {
 		t.Fatalf("unknown command was not surfaced: %+v", checks)
@@ -231,7 +231,7 @@ func TestDocsToCodeAcceptsCommandAliasesAndVariableAPIPaths(t *testing.T) {
 		openAPIDocument{Paths: map[string]map[string]json.RawMessage{"/api/v1/items/{itemId}": {}}},
 		commandManifest{Commands: []commandNode{{Path: "routine", Aliases: []string{"pipeline"}, Commands: []commandNode{{Path: "routine list"}}}}},
 		[]docFile{{Path: "docs/guides/items.mdx", Text: "`crewship pipeline list`\nGET /api/v1/items/demo\n"}},
-		nil,
+		nil, nil,
 	)
 	if checks.MissingCommands != 0 || checks.MissingAPIPaths != 0 {
 		t.Fatalf("valid alias or variable API path was rejected: %+v", checks)
@@ -243,7 +243,7 @@ func TestDocsToCodeExplicitIgnoreConvention(t *testing.T) {
 		openAPIDocument{Paths: map[string]map[string]json.RawMessage{}},
 		commandManifest{},
 		[]docFile{{Path: "docs/architecture.mdx", Text: "<!-- docs-inventory: ignore --> `crewship illustrative-command` /api/v1/retired\n"}},
-		nil,
+		nil, nil,
 	)
 	if len(checks.Missing) != 0 {
 		t.Fatalf("explicit docs-inventory ignore marker did not suppress illustrative symbols: %+v", checks.Missing)

@@ -4,6 +4,7 @@ description: "Local AI security gatekeeper for credential access control with L1
 icon: "shield-check"
 ---
 
+<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
 # Keeper
 
 Keeper is Crewship's AI-powered security gatekeeper that evaluates credential access requests from agents. It runs a local LLM (via Ollama) to decide whether an agent should be allowed to access a credential, without sending sensitive data to external services.

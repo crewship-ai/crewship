@@ -4,6 +4,7 @@ description: "Manage crews -- isolated agent teams with their own containers, ne
 icon: "users"
 ---
 
+<!-- docs-inventory: ignore-api /api/v1/activity reason=historical-removed-route -->
 Crews are isolated agent teams, each with its own container resources, network policy, and members. A crew bundles the runtime sandbox (memory/CPU/TTL, runtime image, devcontainer/mise config), the egress posture (`free` vs `restricted` with an allowed-domain list), an autonomy policy, an optional shared persona, and cross-crew connections that gate agent-to-agent messaging.
 
 All crew endpoints require authentication and workspace context. The workspace

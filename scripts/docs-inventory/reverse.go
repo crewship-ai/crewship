@@ -43,10 +43,12 @@ func (r reverseChecks) missingRows(kind string) []string {
 }
 
 var (
-	docCommandPattern = regexp.MustCompile(`\bcrewship\s+(.+)`)
-	docAPIPathPattern = regexp.MustCompile(`/api/v1/[A-Za-z0-9_{}$./:~+-]+`)
-	docFlagPattern    = regexp.MustCompile(`--[A-Za-z][A-Za-z0-9-]*`)
-	docKindPattern    = regexp.MustCompile(`\bkind:\s*([A-Z][A-Za-z0-9_-]*)\b`)
+	docCommandPattern  = regexp.MustCompile("(?:^|[\\s`$>])crewship\\s+(.+)")
+	docAPIPathPattern  = regexp.MustCompile(`/api/v1/[A-Za-z0-9_{}$./:~+-]+`)
+	docFlagPattern     = regexp.MustCompile(`--[A-Za-z][A-Za-z0-9-]*`)
+	docKindPattern     = regexp.MustCompile(`\bkind:\s*([A-Z][A-Za-z0-9_-]*)\b`)
+	docIgnoreAPIPrefix = regexp.MustCompile(`docs-inventory: ignore-api-prefix\s+([^\s]+)`)
+	docIgnoreAPI       = regexp.MustCompile(`docs-inventory: ignore-api\s+([^\s]+)`)
 )
 
 // inventoryDocsToCode scans executable-looking documentation contexts:
@@ -54,36 +56,33 @@ var (
 // product name is not a command invocation. A line containing
 // "<!-- docs-inventory: ignore -->" is an explicit exception for placeholders
 // or illustrative commands that intentionally are not product surfaces.
-func inventoryDocsToCode(openAPI openAPIDocument, manifest commandManifest, docs []docFile, sources []docFile) reverseChecks {
+func inventoryDocsToCode(openAPI openAPIDocument, manifest commandManifest, docs []docFile, environment, manifestKinds []surfaceRecord) reverseChecks {
 	commands, flags := commandInventory(manifest)
 	apiPaths := make(map[string]bool, len(openAPI.Paths))
 	for route := range openAPI.Paths {
 		apiPaths[normalizeRoutePath(route)] = true
 	}
-	envs := make(map[string]bool)
-	for _, source := range sources {
-		for _, name := range envNamePattern.FindAllString(source.Text, -1) {
-			if !strings.HasSuffix(name, "_") {
-				envs[name] = true
-			}
-		}
+	envs := make(map[string]bool, len(environment))
+	for _, record := range environment {
+		envs[record.Name] = true
 	}
-	kinds := make(map[string]bool)
-	for _, source := range sources {
-		for _, match := range manifestKindsPattern.FindAllStringSubmatch(source.Text, -1) {
-			for _, name := range strings.Split(match[1], ",") {
-				name = strings.TrimSpace(name)
-				if name != "" {
-					kinds[name] = true
-				}
-			}
-		}
+	kinds := make(map[string]bool, len(manifestKinds))
+	for _, record := range manifestKinds {
+		kinds[record.Name] = true
 	}
 
 	var result reverseChecks
 	for _, doc := range docs {
 		inFence := false
 		lines := strings.Split(strings.ReplaceAll(doc.Text, "\r\n", "\n"), "\n")
+		var ignoredAPIPrefixes []string
+		var ignoredAPIPaths []string
+		for _, match := range docIgnoreAPIPrefix.FindAllStringSubmatch(doc.Text, -1) {
+			ignoredAPIPrefixes = append(ignoredAPIPrefixes, match[1])
+		}
+		for _, match := range docIgnoreAPI.FindAllStringSubmatch(doc.Text, -1) {
+			ignoredAPIPaths = append(ignoredAPIPaths, match[1])
+		}
 		for lineNo, line := range lines {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "```") {
@@ -99,6 +98,22 @@ func inventoryDocsToCode(openAPI openAPIDocument, manifest commandManifest, docs
 			}
 
 			for _, raw := range docAPIPathPattern.FindAllString(line, -1) {
+				ignored := false
+				for _, prefix := range ignoredAPIPrefixes {
+					if strings.HasPrefix(raw, prefix) || strings.HasPrefix(normalizeRoutePath(raw), normalizeRoutePath(prefix)) {
+						ignored = true
+						break
+					}
+				}
+				for _, ignoredPath := range ignoredAPIPaths {
+					if normalizeRoutePath(raw) == normalizeRoutePath(ignoredPath) {
+						ignored = true
+						break
+					}
+				}
+				if ignored {
+					continue
+				}
 				if !concreteDocAPIPath(raw, apiPaths) {
 					continue
 				}
