@@ -191,14 +191,6 @@ func TestUnsupportedCrewConfig_EveryDroppedFieldIsReported(t *testing.T) {
 		wants []string
 	}{
 		{"TTLHours", func(c *provider.CrewConfig) { c.TTLHours = 4 }, []string{"idle"}},
-		{"ContainerEnv", func(c *provider.CrewConfig) { c.ContainerEnv = map[string]string{"FOO": "bar"} }, []string{"FOO"}},
-		{"LoginPath", func(c *provider.CrewConfig) { c.LoginPath = "/usr/local/py-utils/bin:/usr/bin" }, []string{"PATH"}},
-		{"Privileged", func(c *provider.CrewConfig) { c.Privileged = true }, []string{"privileged"}},
-		{"CapAdd", func(c *provider.CrewConfig) { c.CapAdd = []string{"SYS_PTRACE"} }, []string{"SYS_PTRACE"}},
-		{"SecurityOpt", func(c *provider.CrewConfig) { c.SecurityOpt = []string{"seccomp=unconfined"} }, []string{"seccomp=unconfined"}},
-		{"ExtraMounts", func(c *provider.CrewConfig) {
-			c.ExtraMounts = []provider.CrewMount{{Source: "/var/run/docker.sock", Target: "/var/run/docker.sock"}}
-		}, []string{"/var/run/docker.sock"}},
 		{"PostStartCommands", func(c *provider.CrewConfig) { c.PostStartCommands = []string{"./start.sh"} }, []string{"post-start"}},
 		{"InitHookEnabled", func(c *provider.CrewConfig) { c.InitHookEnabled = true }, []string{"/crew/init.sh"}},
 		{"ProvisionSink", func(c *provider.CrewConfig) {

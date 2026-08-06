@@ -163,7 +163,9 @@ func TestEnsureCrewRuntime_DroppedCapabilitiesAreLoggedNotSilent(t *testing.T) {
 	}
 	// CachedImage is deliberately absent: the provider runs the crew's
 	// provisioned image now, so reporting it as dropped would be false (#1779).
-	for _, want := range []string{"ContainerEnv", "TTLHours"} {
+	// ContainerEnv is deliberately absent: the provider passes every entry as
+	// --env now, so reporting it as dropped would be false (#1779).
+	for _, want := range []string{"TTLHours"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log must name the dropped field %q; log:\n%s", want, out)
 		}

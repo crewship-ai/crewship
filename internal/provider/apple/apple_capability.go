@@ -99,12 +99,11 @@ func (p *Provider) UnsupportedCrewConfig(cfg provider.CrewConfig) provider.CrewC
 	// the provider default (crewImage in apple.go). Reporting them as dropped
 	// would understate the provider, and a capability report that lies in the
 	// cautious direction still changes what every reader does with it.
-	if len(cfg.ContainerEnv) > 0 {
-		s.Degraded = append(s.Degraded, provider.DroppedField{
-			Field: "ContainerEnv", Value: sortedKeys(cfg.ContainerEnv),
-			Detail: "devcontainer containerEnv variables are not set on the container; only CREWSHIP_CREW_ID is",
-		})
-	}
+	// ContainerEnv is honoured now: buildCreateArgs passes every entry as
+	// --env. It was reported as dropped while `container create` had supported
+	// --env all along, and the claim was measurably false for a provisioned
+	// crew whose image already carried them as ENV — a report that understates
+	// a provider still changes what every reader does with it (#1690).
 	if strings.TrimSpace(cfg.LoginPath) != "" {
 		s.Degraded = append(s.Degraded, provider.DroppedField{
 			Field: "LoginPath", Value: cfg.LoginPath,

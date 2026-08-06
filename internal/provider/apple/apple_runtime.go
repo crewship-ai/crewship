@@ -173,6 +173,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		crewPath:       crewPath,
 		sidecarPath:    p.cfg.SidecarBinaryPath,
 		entrypointPath: p.cfg.EntrypointPath,
+		containerEnv:   team.ContainerEnv,
 	})
 	if err != nil {
 		return "", err
