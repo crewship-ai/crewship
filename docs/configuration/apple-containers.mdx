@@ -1,0 +1,184 @@
+---
+title: "Apple Containers on macOS"
+description: "Running Crewship crews on Apple's container runtime: prerequisites, how provisioning builds instead of commits, build performance, and what this provider does not apply."
+icon: "cpu"
+---
+
+# Apple Containers on macOS
+
+Crewship runs crews on two container runtimes:
+
+- **The Docker API.** Docker Engine, Docker Desktop, Podman, OrbStack, Colima and
+  Rancher Desktop (in dockerd mode) all speak the same API, so they are one
+  provider with one code path. Detection picks whichever is answering — see
+  [Providers → Docker Provider](/configuration/providers#docker-provider).
+- **Apple Containers.** A separate provider that shells out to Apple's
+  `container` CLI, because there is no Go SDK for it.
+
+This page is the reference for the second one: what you need, what changes, and
+what it does not do. Everything below was verified live on macOS 26 with
+`container` 1.2.0.
+
+## Prerequisites
+
+1. **macOS 26 (Tahoe) or newer.** Not a soft floor. The provider assumes the
+   networking model where every container gets its own routed IPv4 address, and
+   an older host can have the CLI installed and its system service answering
+   while providing none of it. Detection checks the OS version and rejects an
+   older host outright, so `auto` falls through as though the runtime were
+   absent.
+2. **Apple's `container` CLI on `PATH`.**
+3. **The system service running** — `container system start`. `crewship doctor`
+   and `crewship start` both name this fix when they find the CLI installed but
+   not running.
+
+## Selecting the runtime
+
+```yaml
+container:
+  provider: "apple"   # "docker" | "apple" | "auto"
+```
+
+Or `CREWSHIP_CONTAINER_PROVIDER=apple`. An unrecognised value fails startup.
+
+| Value | Behaviour |
+|---|---|
+| `docker` | The Docker API only. |
+| `apple` | Apple Containers only. |
+| `auto` | Tries Docker first, falls back to Apple Containers. |
+
+`auto` preferring Docker is a security decision, not a preference: several crew
+isolation controls exist on the Docker path only (see [Limits](#limits-stated-plainly)).
+Set `apple` explicitly if you want this runtime on a host that also has Docker.
+
+## Provisioning builds the image, it does not commit one
+
+On Docker, provisioning runs every step inside a temporary container and ends in
+`docker commit`. Apple's runtime has no such verb:
+
+```
+$ container commit --help
+Error: Plugin 'container-commit' not found.
+```
+
+So on this provider Crewship **builds** the image instead. `container build` is
+real BuildKit — the `# syntax=docker/dockerfile:1` frontend resolves and
+`RUN --mount=type=cache` takes effect — so the same generated Dockerfile works,
+cache mounts and all.
+
+This is automatic. There is no flag to find: whenever the Apple provider is
+active and the `container` CLI is on `PATH`, the build-only provisioner is
+wired. (If the CLI is missing, the server logs a warning at startup and crews
+cannot be provisioned at all.)
+
+Two things are worth knowing about the result:
+
+- **It is the same image, by the same name.** The build path computes the same
+  config hash and tags the same `crewship-cache:{hash[:12]}`, so a machine that
+  later gains Docker finds what it already has instead of rebuilding.
+- **The provisioning steps are not a reimplementation.** They are the same
+  functions the commit path calls, handed a recorder that writes Dockerfile
+  `RUN` layers instead of executing. Adding a step to one adds it to the other.
+
+One step cannot come along: capturing a login shell's `PATH` out of the finished
+container, because a build has no container to read from. That step is
+best-effort by contract, and the runtime falls back to prepending the well-known
+devcontainer `bin` directories.
+
+## Build performance
+
+A cold provision of a four-feature crew takes **about three minutes** (measured
+3m19s: image deleted, builder recreated, BuildKit cache empty).
+
+Two things get it there, both worth knowing because they change state on your
+machine.
+
+**The builder is resized to fit the host.** Apple creates its BuildKit builder
+with 2 CPUs and 2048 MB whatever the machine, and every feature's `apt-get
+install` or `npm ci` is squeezed through that. Crewship gives it half the host
+instead — capped at **8 CPUs / 8 GB** so a build does not make the desktop
+unusable, and never below Apple's own defaults so a small host is not made worse
+off.
+
+The sizing has to happen when the builder is created: `container build` accepts
+`--cpus`/`--memory` and silently ignores them once the builder is up. So an
+undersized builder is deleted and recreated — once per server process — and a
+big-enough one is left alone so its layer cache survives.
+
+**A finished build that never exits is not waited on.** `container build` has
+been observed exporting the image, writing the tag, and then sitting at 0% CPU
+indefinitely. Crewship watches the build's own output for BuildKit's export
+step, and once that reports `DONE` and the output goes quiet it stops waiting.
+The image store is then the authority on whether the work got done — the tag,
+not the exit status, decides success.
+
+## What the crew's image is actually made of
+
+Every build records, per devcontainer feature, the ref as written, the digest it
+resolved to, and the feature's own version:
+
+```
+crewship crew provision status <crew>
+```
+
+`=` marks a pinned ref, `~` a floating one. This is not Apple-specific, but it
+is the answer to "what is in this image" that a build-based provision makes
+easy to ask. See [Crew manifest → Pinning features](/manifest/crew#pinning-features)
+for what floats, why, and how to stop it.
+
+## Limits, stated plainly
+
+**Less isolation than the Docker provider.** Docker crews get `CapDrop: ALL`,
+`no-new-privileges`, `noexec` mounts, memory-swap/shm limits and a restart
+policy. None of those are applied here, and Apple's CLI has no flag for several
+of them.
+
+What *is* applied: a read-only rootfs, an init process for reaping, the
+container running as UID 1001, four process rlimits (`core=0`, `nofile`,
+`nproc`, `fsize`) that every `container exec` inherits, an in-memory `/secrets`
+mount for file-delivered credentials, and the `crewship-sidecar` egress fence
+that makes `network_mode: restricted` real. There is no `--pids-limit`
+equivalent, so `nproc` is the only fork backstop — though each crew is its own
+VM, so a fork bomb cannot reach a sibling or the host.
+
+**Crew settings this provider does not act on.** None of these blocks a crew —
+it starts either way — and none is dropped in silence: each is logged at `WARN`
+when the crew starts, naming the setting and what was lost, and streamed into
+the chat as a status line. A crew that sets none of them sees nothing.
+
+| Crew setting | Behaviour on Apple Containers |
+|---|---|
+| `container_ttl_hours` | No idle auto-stop is scheduled; the container runs until it is stopped explicitly. |
+| Captured login `PATH` | Not set on the container, so feature/pipx tool directories are off `PATH` for a non-login exec. |
+| Feature `privileged` | The container is not created privileged; features that need it (docker-in-docker) will not work. |
+| Feature `capAdd` | No additional Linux capabilities are granted; features requiring them fail at runtime. |
+| Feature `securityOpt` | Not applied to the container. |
+| Feature mounts | Not attached; only `/workspace`, `/output`, `/crew` and the delivery mounts are bound. |
+| `postStartCommand` hooks | Not executed on create or restart. |
+| `/crew/init.sh` init hook | Not executed on container start. |
+| Provisioning progress sink | Container-preparation steps are not emitted, so a crew's *start* is absent from the run journal and the provisioning progress UI. Capacity holds are still reported. |
+| Sidecar `services:` | Not started; the agent cannot reach them by name. |
+
+<Note>
+  `network_mode: restricted` **is** enforced here, and is deliberately not in
+  the table above. The fence is the in-container `crewship-sidecar` proxy, which
+  reaches the container through a read-only bind mount that this provider
+  creates — and refuses to create a container without. It is reported as
+  unenforced in exactly one case: a deployment with no sidecar binary configured
+  at all.
+</Note>
+
+The runtime's own gaps — no `ContainerStats`, `ExecResize` is a no-op, integer
+CPU counts only, and the `/secrets` mount mode that Apple's `--mount` parser
+forces — are listed in
+[Providers → Apple Containers Limitations](/configuration/providers#apple-containers-limitations).
+
+## Code of record
+
+| Concern | File |
+|---|---|
+| Runtime detection + macOS version gate | `internal/provider/apple/detect.go` |
+| `container create` argument vector | `internal/provider/apple/apple_create_args.go` |
+| What the provider does not apply | `internal/provider/apple/apple_capability.go` |
+| Build-only provisioning path | `internal/devcontainer/provisioner_build.go` |
+| `container build` engine + builder sizing | `internal/devcontainer/imagebuilder_apple.go` |
