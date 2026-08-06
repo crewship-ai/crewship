@@ -225,6 +225,27 @@ func TestRepositoryDocsHaveNoBrokenProseLinks(t *testing.T) {
 	}
 }
 
+// Two spellings of a live page that a naive path join turns into a false
+// positive: the site root, which Mintlify serves from `index`, and a trailing
+// slash. Both are legal to write, and a gate that reddens on a working link is
+// a gate that gets argued with rather than obeyed.
+func TestBrokenProseLinksAcceptsRootAndTrailingSlash(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/index.mdx", "# Home\n")
+	writeDocsPage(t, root, "docs/guides/routines.mdx", "# Routines\n")
+	writeDocsPage(t, root, "docs/concepts.mdx", ""+
+		"[home](/) [home again](/#top)\n"+
+		"[routines](/guides/routines/)\n")
+
+	dead, _, err := brokenProseLinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dead) != 0 {
+		t.Fatalf("brokenProseLinks() = %+v, want none — these all resolve to a real page", dead)
+	}
+}
+
 func writeDocsPage(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))

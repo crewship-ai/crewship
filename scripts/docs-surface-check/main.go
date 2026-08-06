@@ -302,12 +302,20 @@ func internalLinks(body string) []string {
 	return targets
 }
 
-// pageOf strips the fragment and query from a link target, leaving the page.
+// pageOf reduces a link target to the page id it addresses: fragment and query
+// dropped, trailing slash trimmed, and the site root resolved to `index`, which
+// is the page Mintlify serves there. Both spellings are legal to write, and a
+// gate that reddens on a working link gets argued with rather than obeyed.
 func pageOf(target string) string {
-	if i := strings.IndexAny(target, "#?"); i >= 0 {
-		return target[:i]
+	page := target
+	if i := strings.IndexAny(page, "#?"); i >= 0 {
+		page = page[:i]
 	}
-	return target
+	page = strings.TrimSuffix(page, "/")
+	if page == "" {
+		return "/index"
+	}
+	return page
 }
 
 func descriptionQuality(root string) (total, good, bad int) {
