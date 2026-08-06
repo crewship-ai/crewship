@@ -210,7 +210,6 @@ func TestAppleBuilder_KeepsWaitingWhileTheImageIsAbsent(t *testing.T) {
 		bin:         bin,
 		logger:      slog.Default(),
 		idleTimeout: 600 * time.Millisecond,
-		settleDelay: 100 * time.Millisecond,
 	}
 
 	err := b.Build(context.Background(), dir, "crewship-cache:absent", nil)
@@ -300,44 +299,12 @@ exit 0
 	return bin, recordPath
 }
 
-// Probing the image store during the wedge does not work: a stuck
-// `container build` blocks `container image inspect` too — the apiserver
-// serialises — so the probe answered "no image" for a build whose image was
-// already there, and the run waited out the full idle timeout anyway (measured
-// 2026-08-06: export finished 12:56:23, watchdog gave up 13:04:54).
-//
-// The build's own output is the reliable signal. BuildKit announces the export,
-// and once that step reports DONE the image is written; anything after is the
-// CLI failing to exit.
-func TestAppleBuilder_StopsShortlyAfterTheExportCompletes(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "container")
-	script := "#!/bin/sh\n" +
-		"echo '#18 exporting to oci image format'\n" +
-		"echo '#18 sending tarball 26.3s done'\n" +
-		"echo '#18 DONE 61.3s'\n" +
-		"sleep 30\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	b := &AppleContainerBuilder{
-		bin:         bin,
-		logger:      slog.Default(),
-		idleTimeout: time.Hour,              // the long fallback must NOT be what fires
-		settleDelay: 200 * time.Millisecond, // grace after the export
-	}
-
-	start := time.Now()
-	err := b.Build(context.Background(), dir, "crewship-cache:exported", nil)
-	elapsed := time.Since(start)
-
-	if err != nil {
-		t.Fatalf("a build that finished its export must succeed, got %v", err)
-	}
-	if elapsed > 10*time.Second {
-		t.Errorf("waited %s — the export marker was not acted on", elapsed)
-	}
-}
+// TestAppleBuilder_StopsShortlyAfterTheExportCompletes removed: it pinned an
+// early kill on the export marker, and that behaviour destroys the build. The
+// CLI registers the image into the runtime's store AFTER the marker, so killing
+// there leaves no image at all — see
+// TestAppleBuilder_DoesNotKillAfterTheExportMarker, written against the live
+// failure it caused (#1779).
 
 // Without an export the build never produced anything, so silence is a failure
 // and only the long fallback may end it.
@@ -352,10 +319,51 @@ func TestAppleBuilder_SilenceBeforeAnyExportIsStillAFailure(t *testing.T) {
 		bin:         bin,
 		logger:      slog.Default(),
 		idleTimeout: 600 * time.Millisecond,
-		settleDelay: 100 * time.Millisecond,
 	}
 
 	if err := b.Build(context.Background(), dir, "crewship-cache:noexport", nil); err == nil {
 		t.Fatal("silence with no export must remain a failure")
+	}
+}
+
+// The export marker is NOT the end of the build.
+//
+// This builder used to kill the CLI as soon as BuildKit printed its export
+// DONE, on the theory that anything after was the CLI failing to exit. It is
+// not: the CLI then registers the image into the runtime's store, and killing
+// it there aborts that write. Measured live — a build killed 16.8s after the
+// export marker produced NO image at all, and the provisioning that followed
+// failed with "never appeared in the image store" while the store stayed empty
+// for minutes afterwards.
+//
+// A build that is still working must be left alone. Only the long idle timeout
+// may end one, because only prolonged silence distinguishes a wedge from work
+// (#1779).
+func TestAppleBuilder_DoesNotKillAfterTheExportMarker(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	done := filepath.Join(dir, "finished")
+	// Announces the export, stays quiet while it "registers the image", then
+	// exits cleanly — the shape of every healthy build.
+	script := "#!/bin/sh\n" +
+		"echo '#18 exporting to oci image format'\n" +
+		"echo '#18 DONE 61.3s'\n" +
+		"sleep 1\n" +
+		"touch " + done + "\n" +
+		"exit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := &AppleContainerBuilder{
+		bin:         bin,
+		logger:      slog.Default(),
+		idleTimeout: time.Hour, // must not be what ends this
+	}
+
+	if err := b.Build(context.Background(), dir, "crewship-cache:exporting", nil); err != nil {
+		t.Fatalf("a build still doing its work must not be failed: %v", err)
+	}
+	if _, err := os.Stat(done); err != nil {
+		t.Error("the CLI was killed before it finished — the image write is what happens here")
 	}
 }

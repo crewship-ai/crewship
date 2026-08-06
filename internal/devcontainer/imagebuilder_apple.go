@@ -35,9 +35,6 @@ type AppleContainerBuilder struct {
 	logger *slog.Logger
 	// idleTimeout kills a build that stops emitting progress. See Build.
 	idleTimeout time.Duration
-	// settleDelay is how long a build must be quiet before its finished image
-	// is trusted. See Build.
-	settleDelay time.Duration
 	// cpus and memoryMB size the builder container. Zero = leave it to the CLI.
 	cpus     int
 	memoryMB int
@@ -143,15 +140,6 @@ func builderShare(hostCPUs, hostMemMB int) (cpus, memMB int) {
 // customer stares at a spinner forever".
 const defaultBuildIdleTimeout = 5 * time.Minute
 
-// defaultBuildSettleDelay is how long a build must be silent before a present
-// image tag is taken as proof that it finished.
-//
-// Short because the tag is strong evidence on its own — BuildKit writes it once
-// the export completes — and the delay only guards against reading a tag left
-// by an earlier build while this one is still mid-export. Waiting out the full
-// idle timeout instead cost 5m36s on a 1m53s build.
-const defaultBuildSettleDelay = 15 * time.Second
-
 // NewAppleContainerBuilder probes for Apple's `container` CLI on PATH.
 //
 // Unlike the Docker builder there is no daemon to pin: `container` talks to the
@@ -171,7 +159,6 @@ func NewAppleContainerBuilder(logger *slog.Logger) *AppleContainerBuilder {
 		bin:         bin,
 		logger:      logger,
 		idleTimeout: defaultBuildIdleTimeout,
-		settleDelay: defaultBuildSettleDelay,
 		cpus:        cpus,
 		memoryMB:    memMB,
 	}
@@ -235,15 +222,8 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 	if idle <= 0 {
 		idle = defaultBuildIdleTimeout
 	}
-	settle := b.settleDelay
-	if settle <= 0 {
-		settle = defaultBuildSettleDelay
-	}
 	watchdogDone := make(chan struct{})
-	var wedged, finished, exported atomic.Bool
-	// exportStep is the BuildKit step number that announced the export, so its
-	// DONE line can be told apart from every other step's.
-	var exportStep atomic.Value
+	var wedged atomic.Bool
 	kill := func() {
 		// Negative pid = the whole process group. Killing only the CLI leaves
 		// its helpers holding the write end of the pipe.
@@ -254,7 +234,7 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 		}
 	}
 	go func() {
-		tick := settle / 2
+		tick := idle / 4
 		if tick <= 0 {
 			tick = time.Second
 		}
@@ -266,22 +246,18 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 				return
 			case <-ticker.C:
 				quiet := time.Since(time.Unix(0, lastOutput.Load()))
-				// BuildKit announces the export and reports it DONE once the
-				// image is written. Anything after that is the CLI failing to
-				// exit, so a short grace is enough.
+				// Only prolonged silence ends a build. The export marker is
+				// NOT the end: after BuildKit reports the export DONE the CLI
+				// still registers the image into the runtime's store, and
+				// killing it there aborts that write. Measured live — a build
+				// killed 16.8s after the marker produced no image at all, and
+				// provisioning then failed on a store that stayed empty.
 				//
-				// Deliberately NOT a probe of the image store: a wedged
-				// `container build` blocks `container image inspect` as well —
-				// the apiserver serialises — so asking answered "no image" for
-				// a build whose image was already there, and the run waited out
-				// the full idle timeout anyway.
-				if exported.Load() && quiet >= settle {
-					finished.Store(true)
-					b.logger.Info("export finished and the build went quiet — not waiting for it to exit",
-						"tag", tag, "quiet_for", quiet.String())
-					kill()
-					return
-				}
+				// Probing the store during the silence does not work either: a
+				// wedged `container build` blocks `container image inspect`
+				// too, because the apiserver serialises. So there is no cheap
+				// signal that separates "working" from "wedged" — only time,
+				// and the tag check afterwards.
 				if quiet >= idle {
 					wedged.Store(true)
 					b.logger.Warn("container build went silent before producing an image — killing it",
@@ -298,12 +274,6 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 	for scanner.Scan() {
 		lastOutput.Store(time.Now().UnixNano())
 		line := scanner.Text()
-		if step, ok := exportAnnouncement(line); ok {
-			exportStep.Store(step)
-		}
-		if step, _ := exportStep.Load().(string); step != "" && strings.HasPrefix(line, "#"+step+" DONE") {
-			exported.Store(true)
-		}
 		if onLog != nil {
 			onLog(line)
 		}
@@ -312,10 +282,6 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 	close(watchdogDone)
 
 	if err := cmd.Wait(); err != nil {
-		if finished.Load() {
-			// Killed on purpose, with the image already built.
-			return nil
-		}
 		if wedged.Load() {
 			return fmt.Errorf("container build for %s stopped responding after %s of silence: %w", tag, idle, err)
 		}
@@ -359,17 +325,4 @@ func hostMemoryMB() int {
 		return 0
 	}
 	return int(bytes / (1024 * 1024))
-}
-
-// exportAnnouncement reports the BuildKit step number of an
-// "#N exporting to oci image format" line.
-func exportAnnouncement(line string) (string, bool) {
-	if !strings.Contains(line, "exporting to oci image format") {
-		return "", false
-	}
-	f := strings.Fields(line)
-	if len(f) == 0 || !strings.HasPrefix(f[0], "#") {
-		return "", false
-	}
-	return strings.TrimPrefix(f[0], "#"), true
 }

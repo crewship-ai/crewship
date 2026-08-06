@@ -177,7 +177,10 @@ type Provisioner struct {
 	installer  *Installer
 	downloader *FeatureDownloader
 	builder    ImageBuilder
-	logger     *slog.Logger
+	// imageWaitTimeout / imageWaitInterval bound waitForImage. Zero = defaults.
+	imageWaitTimeout  time.Duration
+	imageWaitInterval time.Duration
+	logger            *slog.Logger
 
 	// digestResolver caches remote manifest digests used by ensureImage. Shared
 	// helper (see internal/dockerutil) so the runtime Provider uses identical

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // recordingBuilder captures what the provisioner asked to be built.
@@ -321,4 +322,119 @@ func decodeRunScript(t *testing.T, runLine string) string {
 		t.Fatalf("expected [sh -c script], got %v", argv)
 	}
 	return argv[2]
+}
+
+// A build that reports success and leaves no image is not a success. Seen for
+// real: BuildKit exported and tagged, the provisioner logged "provisioned image
+// by build", and the tag was absent from the store minutes later — the runtime's
+// image state had wedged and everything written after it was lost. The crew was
+// then recorded as provisioned against an image nothing could start.
+//
+// The tag was already consulted when Build FAILED (a wedged CLI may still have
+// produced its image). The opposite case went unchecked, which is the one that
+// lies in the dangerous direction: it marks a crew ready (#1779).
+func TestProvisionByBuild_FailsWhenTheImageIsNotInTheStore(t *testing.T) {
+	b := &probingBuilder{recordingBuilder: recordingBuilder{available: true}, exists: false}
+	p := NewBuildOnlyProvisioner(b, nil, slog.Default())
+	// The store is given a grace period (see waitForImage); shorten it rather
+	// than sit through the real one.
+	p.imageWaitTimeout = 200 * time.Millisecond
+	p.imageWaitInterval = 10 * time.Millisecond
+
+	_, err := p.ProvisionByBuild(context.Background(), "debian:12", &Config{Image: "debian:12"}, "")
+	if err == nil {
+		t.Fatal("a build whose image is absent afterwards must not report success")
+	}
+	if !strings.Contains(err.Error(), "never appeared in the image store") {
+		t.Errorf("error should say the image is missing, got %q", err)
+	}
+}
+
+func TestProvisionByBuild_PassesWhenTheImageIsPresent(t *testing.T) {
+	b := &probingBuilder{recordingBuilder: recordingBuilder{available: true}, exists: true}
+	p := NewBuildOnlyProvisioner(b, nil, slog.Default())
+
+	if _, err := p.ProvisionByBuild(context.Background(), "debian:12", &Config{Image: "debian:12"}, ""); err != nil {
+		t.Fatalf("a build whose image is present must succeed: %v", err)
+	}
+}
+
+// A builder that cannot answer must not block provisioning: the probe is
+// corroboration, and turning "I could not check" into a failure would make
+// every non-probing builder unusable.
+func TestProvisionByBuild_UnprobableBuilderStillPasses(t *testing.T) {
+	b := &recordingBuilder{available: true}
+	p := NewBuildOnlyProvisioner(b, nil, slog.Default())
+
+	if _, err := p.ProvisionByBuild(context.Background(), "debian:12", &Config{Image: "debian:12"}, ""); err != nil {
+		t.Fatalf("a builder with no ImageExists must still provision: %v", err)
+	}
+}
+
+type probingBuilder struct {
+	recordingBuilder
+	exists bool
+	probes int
+}
+
+func (b *probingBuilder) ImageExists(_ context.Context, _ string) (bool, error) {
+	b.probes++
+	return b.exists, nil
+}
+
+// The post-build check and the build watchdog were in conflict. The watchdog
+// kills the CLI as soon as BuildKit reports its export DONE, but the runtime is
+// still committing the image to its store at that moment — so asking once,
+// immediately, found nothing and failed a build that had in fact succeeded.
+// Observed live: three crews failed with "not in the image store" and every one
+// of the images was present seconds later.
+//
+// The tag is therefore waited for, not sampled (#1779).
+func TestProvisionByBuild_WaitsForTheImageToAppear(t *testing.T) {
+	b := &lateProbingBuilder{
+		recordingBuilder: recordingBuilder{available: true},
+		appearsAfter:     2, // absent on the first two probes, present on the third
+	}
+	p := NewBuildOnlyProvisioner(b, nil, slog.Default())
+	p.imageWaitTimeout = 5 * time.Second
+	p.imageWaitInterval = 10 * time.Millisecond
+
+	if _, err := p.ProvisionByBuild(context.Background(), "debian:12", &Config{Image: "debian:12"}, ""); err != nil {
+		t.Fatalf("an image that lands a moment later must still count: %v", err)
+	}
+	if b.probes < 3 {
+		t.Errorf("expected the probe to be retried, got %d attempts", b.probes)
+	}
+}
+
+// It must still give up: an image that never appears is a real failure, and
+// waiting forever would put the crew back to the hang this all started from.
+func TestProvisionByBuild_GivesUpWhenTheImageNeverAppears(t *testing.T) {
+	b := &lateProbingBuilder{
+		recordingBuilder: recordingBuilder{available: true},
+		appearsAfter:     1 << 30, // never
+	}
+	p := NewBuildOnlyProvisioner(b, nil, slog.Default())
+	p.imageWaitTimeout = 200 * time.Millisecond
+	p.imageWaitInterval = 10 * time.Millisecond
+
+	start := time.Now()
+	_, err := p.ProvisionByBuild(context.Background(), "debian:12", &Config{Image: "debian:12"}, "")
+	if err == nil {
+		t.Fatal("an image that never appears must fail")
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Errorf("waited %s — the bound did not apply", time.Since(start))
+	}
+}
+
+type lateProbingBuilder struct {
+	recordingBuilder
+	appearsAfter int
+	probes       int
+}
+
+func (b *lateProbingBuilder) ImageExists(_ context.Context, _ string) (bool, error) {
+	b.probes++
+	return b.probes > b.appearsAfter, nil
 }

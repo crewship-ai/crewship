@@ -236,6 +236,25 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	emitEvt(ProvisionEvent{Step: ProvStepImageBuildDone, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(buildStart)})
 	p.invalidateImageListCache()
 
+	// A build that reports success and leaves no image is not a success.
+	// Observed for real: BuildKit exported and tagged, this logged "provisioned
+	// image by build", and the tag was gone from the store minutes later — the
+	// runtime's image state had wedged and every write after it was lost. The
+	// crew was recorded as provisioned against an image nothing could start.
+	//
+	// The tag is already consulted when Build FAILS, because a wedged CLI may
+	// still have produced its image. This is the mirror, and it is the case
+	// that lies in the dangerous direction: it marks a crew ready.
+	//
+	// Corroboration, not a gate: a builder that cannot answer is not a reason
+	// to fail, or no non-probing builder could ever provision.
+	if prober, ok := p.builder.(ImageProber); ok {
+		if !p.waitForImage(ctx, prober, tag) {
+			return fail(ProvStepImageBuildDone,
+				fmt.Errorf("build reported success but %s never appeared in the image store", tag))
+		}
+	}
+
 	p.logger.Info("provisioned image by build",
 		"tag", tag,
 		"features", len(resolvedFeatures),
@@ -396,3 +415,51 @@ func tarTree(src, dst string) (err error) {
 }
 
 func joinPath(parts ...string) string { return strings.Join(parts, "/") }
+
+// Default bounds for waitForImage. Overridable in tests.
+const (
+	defaultImageWaitTimeout  = 30 * time.Second
+	defaultImageWaitInterval = 500 * time.Millisecond
+)
+
+// waitForImage reports whether tag shows up in the store within the bound.
+//
+// Sampling once does not work, and the reason is a conflict between two things
+// this file already does. The build watchdog kills the CLI the moment BuildKit
+// reports its export DONE — but the runtime is still committing the image at
+// that point, so an immediate probe finds nothing. Live, that failed three
+// crews whose images were all present seconds later.
+//
+// Bounded rather than patient: an image that never lands is a real failure, and
+// waiting indefinitely would restore the hang this whole path exists to end. A
+// probe that errors is treated as "cannot tell" and does not consume the
+// verdict — the check corroborates, it does not gate.
+func (p *Provisioner) waitForImage(ctx context.Context, prober ImageProber, tag string) bool {
+	timeout := p.imageWaitTimeout
+	if timeout <= 0 {
+		timeout = defaultImageWaitTimeout
+	}
+	interval := p.imageWaitInterval
+	if interval <= 0 {
+		interval = defaultImageWaitInterval
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		exists, err := prober.ImageExists(ctx, tag)
+		if err != nil {
+			return true // cannot tell; do not fail a build on a broken probe
+		}
+		if exists {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return true // shutting down; not the build's fault
+		case <-time.After(interval):
+		}
+	}
+}
