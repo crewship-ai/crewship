@@ -164,8 +164,10 @@ exit 0`)
 	if err != nil {
 		t.Fatalf("ExecInspect: %v", err)
 	}
-	if !running || code != 0 {
-		t.Errorf("inspect = (running=%v, code=%d), want running with code 0", running, code)
+	// An in-flight exec has no exit code yet, so it reports the fail-closed
+	// sentinel rather than 0 (see execRunningExitCode).
+	if !running || code != execRunningExitCode {
+		t.Errorf("inspect = (running=%v, code=%d), want running with code %d", running, code, execRunningExitCode)
 	}
 
 	if _, err := io.WriteString(res.Conn, "ping\n"); err != nil {

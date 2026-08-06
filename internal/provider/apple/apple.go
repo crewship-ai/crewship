@@ -90,6 +90,12 @@ type execEntry struct {
 	cmd      *exec.Cmd
 	done     chan struct{}
 	exitCode int
+	// finishedAt is when the process exited, and gates collection: a caller
+	// inspects an exec after it ran, so an entry swept the moment it completed
+	// answered "not found" for work that had succeeded. Written before done is
+	// closed and read only after observing it, so the channel close carries the
+	// happens-before — no extra lock.
+	finishedAt time.Time
 }
 
 // containerJSON is the structure returned by `container inspect`.
