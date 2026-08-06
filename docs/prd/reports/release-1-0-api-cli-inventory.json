@@ -24,11 +24,11 @@
     "environment_variables_missing": 0,
     "manifest_kinds": 20,
     "manifest_kinds_missing": 0,
-    "docs_commands_missing": 1,
-    "docs_api_paths_missing": 1,
-    "docs_environment_variables_missing": 2,
-    "docs_manifest_kinds_missing": 3,
-    "docs_flags_missing": 6
+    "docs_commands_missing": 0,
+    "docs_api_paths_missing": 0,
+    "docs_environment_variables_missing": 0,
+    "docs_manifest_kinds_missing": 0,
+    "docs_flags_missing": 0
   },
   "api": [
     {
@@ -2655,6 +2655,7 @@
         "docs/cli/hire.mdx",
         "docs/cli/me.mdx",
         "docs/cli/persona.mdx",
+        "docs/cli/resume.mdx",
         "docs/cli/routine.mdx",
         "docs/cli/run.mdx",
         "docs/cli/wait.mdx",
@@ -2740,6 +2741,7 @@
         "docs/cli/hire.mdx",
         "docs/cli/me.mdx",
         "docs/cli/persona.mdx",
+        "docs/cli/resume.mdx",
         "docs/cli/routine.mdx",
         "docs/cli/run.mdx",
         "docs/cli/wait.mdx",
@@ -2905,6 +2907,7 @@
         "docs/api-reference/skills.mdx",
         "docs/api-reference/webhooks.mdx",
         "docs/cli/chat.mdx",
+        "docs/cli/resume.mdx",
         "docs/guides/autonomy-and-self-learning.mdx",
         "docs/guides/chat-sessions.mdx",
         "docs/guides/ephemeral-agents.mdx",
@@ -2972,6 +2975,7 @@
         "docs/api-reference/skills.mdx",
         "docs/api-reference/webhooks.mdx",
         "docs/cli/chat.mdx",
+        "docs/cli/resume.mdx",
         "docs/guides/autonomy-and-self-learning.mdx",
         "docs/guides/chat-sessions.mdx",
         "docs/guides/ephemeral-agents.mdx",
@@ -3039,6 +3043,7 @@
         "docs/api-reference/skills.mdx",
         "docs/api-reference/webhooks.mdx",
         "docs/cli/chat.mdx",
+        "docs/cli/resume.mdx",
         "docs/guides/autonomy-and-self-learning.mdx",
         "docs/guides/chat-sessions.mdx",
         "docs/guides/ephemeral-agents.mdx",
@@ -3250,6 +3255,7 @@
         "docs/api-reference/agents.mdx",
         "docs/api-reference/conversations.mdx",
         "docs/cli/chat.mdx",
+        "docs/cli/resume.mdx",
         "docs/guides/chat-sessions.mdx"
       ],
       "resource_docs": [
@@ -3307,6 +3313,7 @@
         "docs/api-reference/agents.mdx",
         "docs/api-reference/conversations.mdx",
         "docs/cli/chat.mdx",
+        "docs/cli/resume.mdx",
         "docs/guides/chat-sessions.mdx"
       ],
       "resource_docs": [
@@ -3364,6 +3371,7 @@
         "docs/api-reference/agents.mdx",
         "docs/api-reference/conversations.mdx",
         "docs/cli/chat.mdx",
+        "docs/cli/resume.mdx",
         "docs/guides/chat-sessions.mdx"
       ],
       "resource_docs": [
@@ -44184,95 +44192,15 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3873,
-    "api_path_references": 1974,
-    "environment_references": 403,
-    "manifest_kind_references": 212,
-    "flag_references": 1811,
-    "missing_commands": 1,
-    "missing_api_paths": 1,
-    "missing_environment_variables": 2,
-    "missing_manifest_kinds": 3,
-    "missing_flags": 6,
-    "missing": [
-      {
-        "kind": "API path",
-        "symbol": "/api/v1/chats/{id}",
-        "doc": "docs/cli/resume.mdx",
-        "line": 18
-      },
-      {
-        "kind": "flag",
-        "symbol": "--username",
-        "doc": "docs/guides/credentials.mdx",
-        "line": 81
-      },
-      {
-        "kind": "environment variable",
-        "symbol": "CREWSHIP_AUX_CURATOR_MODEL",
-        "doc": "docs/guides/paymaster.mdx",
-        "line": 208
-      },
-      {
-        "kind": "environment variable",
-        "symbol": "CREWSHIP_AUX_CURATOR_PROVIDER",
-        "doc": "docs/guides/paymaster.mdx",
-        "line": 208
-      },
-      {
-        "kind": "flag",
-        "symbol": "--split-dir",
-        "doc": "docs/manifest/README.md",
-        "line": 124
-      },
-      {
-        "kind": "flag",
-        "symbol": "--crew-only",
-        "doc": "docs/manifest/README.md",
-        "line": 126
-      },
-      {
-        "kind": "manifest kind",
-        "symbol": "ApprovalPolicy",
-        "doc": "docs/manifest/README.md",
-        "line": 167
-      },
-      {
-        "kind": "manifest kind",
-        "symbol": "Credential",
-        "doc": "docs/manifest/connector.md",
-        "line": 68
-      },
-      {
-        "kind": "manifest kind",
-        "symbol": "Credential",
-        "doc": "docs/manifest/connector.md",
-        "line": 119
-      },
-      {
-        "kind": "flag",
-        "symbol": "--split-dir",
-        "doc": "docs/manifest/workspace.md",
-        "line": 219
-      },
-      {
-        "kind": "command",
-        "symbol": "crewship restore",
-        "doc": "docs/prd/agent-isolation-findings-2026-08-01.md",
-        "line": 87
-      },
-      {
-        "kind": "flag",
-        "symbol": "--wire",
-        "doc": "docs/prd/keeper-configuration.md",
-        "line": 475
-      },
-      {
-        "kind": "flag",
-        "symbol": "--wire",
-        "doc": "docs/prd/keeper-configuration.md",
-        "line": 563
-      }
-    ]
+    "command_references": 3852,
+    "api_path_references": 1965,
+    "environment_references": 390,
+    "manifest_kind_references": 209,
+    "flag_references": 1799,
+    "missing_commands": 0,
+    "missing_api_paths": 0,
+    "missing_environment_variables": 0,
+    "missing_manifest_kinds": 0,
+    "missing_flags": 0
   }
 }

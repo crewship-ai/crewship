@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -51,6 +52,26 @@ var (
 	docIgnoreAPI       = regexp.MustCompile(`docs-inventory: ignore-api\s+([^\s]+)`)
 )
 
+// reverseGateApplies reports whether a documentation file makes claims this
+// gate is entitled to hold it to.
+//
+// docs/prd/** is excluded, and the reason is not convenience. A PRD is a design
+// document: it argues for behaviour that does NOT exist yet, and naming the
+// flag it proposes is the whole point. `docs/prd/keeper-configuration.md`
+// proposes `--wire`; `agent-isolation-findings-2026-08-01.md` writes "the first
+// `crewship restore`" as shorthand while reasoning about disaster recovery.
+// Gating those means every future design document reds the build on the day it
+// is written, which teaches people to route around the gate — the failure mode
+// this whole inventory exists to prevent.
+//
+// The per-line `<!-- docs-inventory: ignore -->` escape stays for the user-
+// facing tree, where an unbacked reference IS a defect and each exception
+// should cost a visible annotation. Whole-directory exclusion is reserved for
+// directories whose genre makes the check meaningless.
+func reverseGateApplies(path string) bool {
+	return !strings.HasPrefix(filepath.ToSlash(path), "docs/prd/")
+}
+
 // inventoryDocsToCode scans executable-looking documentation contexts:
 // fenced code blocks and inline code spans. Ordinary prose mentioning the
 // product name is not a command invocation. A line containing
@@ -73,6 +94,9 @@ func inventoryDocsToCode(openAPI openAPIDocument, manifest commandManifest, docs
 
 	var result reverseChecks
 	for _, doc := range docs {
+		if !reverseGateApplies(doc.Path) {
+			continue
+		}
 		inFence := false
 		lines := strings.Split(strings.ReplaceAll(doc.Text, "\r\n", "\n"), "\n")
 		var ignoredAPIPrefixes []string

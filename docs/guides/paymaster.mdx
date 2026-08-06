@@ -205,7 +205,7 @@ CREWSHIP_AUX_<SLOT>_MODEL
 CREWSHIP_AUX_<SLOT>_TIMEOUT     # Go duration, e.g. 5s; bad value is ignored, deadline preserved
 ```
 
-Example: `CREWSHIP_AUX_CURATOR_MODEL=llama3.1 CREWSHIP_AUX_CURATOR_PROVIDER=ollama`.
+Example: `CREWSHIP_AUX_CURATOR_MODEL=llama3.1 CREWSHIP_AUX_CURATOR_PROVIDER=ollama`. {/* docs-inventory: ignore — <SLOT> is substituted at runtime (internal/keepercfg/aux.go), so the composed name is never a literal in Go source */}
 
 Delegated **worker** sub-agents (a lead handing a bounded sub-task to a crew member) rarely need the top model tier. Set `CREWSHIP_SUBAGENT_MODEL` to route them to a cheaper model; the lead planner keeps its own configured model. Unset = each agent uses its own model (no downgrade), so this is a pure opt-in.
 
