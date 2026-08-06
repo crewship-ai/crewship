@@ -23,7 +23,12 @@
     "environment_variables": 96,
     "environment_variables_missing": 0,
     "manifest_kinds": 20,
-    "manifest_kinds_missing": 0
+    "manifest_kinds_missing": 0,
+    "docs_commands_missing": 15,
+    "docs_api_paths_missing": 153,
+    "docs_environment_variables_missing": 10,
+    "docs_manifest_kinds_missing": 3,
+    "docs_flags_missing": 6
   },
   "api": [
     {
@@ -23459,13 +23464,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_cov_test.go",
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
         "cmd/crewship/cmd_agent_files_cov_test.go",
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "…"
       ]
     },
@@ -23482,6 +23487,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23489,7 +23495,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -23506,6 +23511,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23513,13 +23519,12 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
     {
       "path": "agent avatar set",
-      "use": "set \u003cslug-or-id\u003e -f \u003cfile.svg\u003e",
+      "use": "set \u003cslug-or-id\u003e --file \u003cfile.svg\u003e",
       "short": "Store a rendered avatar SVG for an agent",
       "root": "agent",
       "exact_docs": [
@@ -23530,6 +23535,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23537,7 +23543,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -23560,6 +23565,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23567,7 +23573,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -23590,6 +23595,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23597,7 +23603,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -23617,6 +23622,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23624,7 +23630,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -23642,13 +23647,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
         "cmd/crewship/cmd_agent_files_cov_test.go",
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "…"
       ],
       "flags": [
@@ -23699,6 +23704,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23706,7 +23712,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -23724,6 +23729,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23731,7 +23737,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -23749,6 +23754,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23756,7 +23762,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -23779,6 +23784,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23786,7 +23792,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -23814,6 +23819,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23821,7 +23827,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -23850,6 +23855,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23857,7 +23863,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -23875,6 +23880,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23882,7 +23888,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -23906,6 +23911,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23913,7 +23919,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -23940,13 +23945,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
         "cmd/crewship/cmd_agent_files_cov_test.go",
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "…"
       ],
       "flags": [
@@ -23969,6 +23974,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -23976,7 +23982,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -24000,6 +24005,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24007,7 +24013,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -24034,6 +24039,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24041,7 +24047,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -24072,6 +24077,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24079,7 +24085,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -24100,6 +24105,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24107,7 +24113,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -24124,6 +24129,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24131,7 +24137,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -24162,6 +24167,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24169,7 +24175,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -24186,6 +24191,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24193,7 +24199,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -24210,6 +24215,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24217,7 +24223,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -24234,6 +24239,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24241,7 +24247,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ]
     },
@@ -24258,6 +24263,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_agent_avatar_help_test.go",
         "cmd/crewship/cmd_agent_channels_test.go",
         "cmd/crewship/cmd_agent_cov_test.go",
         "cmd/crewship/cmd_agent_files_cov2_test.go",
@@ -24265,7 +24271,6 @@
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_agent_stream_test.go",
         "…"
       ],
       "flags": [
@@ -44153,5 +44158,1141 @@
       ],
       "status": "documented"
     }
-  ]
+  ],
+  "docs_to_code": {
+    "command_references": 3921,
+    "api_path_references": 2126,
+    "environment_references": 405,
+    "manifest_kind_references": 212,
+    "flag_references": 1825,
+    "missing_commands": 15,
+    "missing_api_paths": 153,
+    "missing_environment_variables": 10,
+    "missing_manifest_kinds": 3,
+    "missing_flags": 6,
+    "missing": [
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/skill-review",
+        "doc": "docs/api-reference/admin.mdx",
+        "line": 44
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/behavior",
+        "doc": "docs/api-reference/admin.mdx",
+        "line": 45
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/memory-health",
+        "doc": "docs/api-reference/admin.mdx",
+        "line": 46
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/negative-learning",
+        "doc": "docs/api-reference/admin.mdx",
+        "line": 47
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/skill-review",
+        "doc": "docs/api-reference/admin.mdx",
+        "line": 1172
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/behavior",
+        "doc": "docs/api-reference/admin.mdx",
+        "line": 1221
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/memory-health",
+        "doc": "docs/api-reference/admin.mdx",
+        "line": 1256
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/negative-learning",
+        "doc": "docs/api-reference/admin.mdx",
+        "line": 1305
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/auth/google/redirect",
+        "doc": "docs/api-reference/auth.mdx",
+        "line": 21
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/auth/google/callback",
+        "doc": "docs/api-reference/auth.mdx",
+        "line": 22
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/auth/google/redirect",
+        "doc": "docs/api-reference/auth.mdx",
+        "line": 171
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/auth/google/callback",
+        "doc": "docs/api-reference/auth.mdx",
+        "line": 185
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-messages",
+        "doc": "docs/api-reference/conversations.mdx",
+        "line": 198
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-messages",
+        "doc": "docs/api-reference/conversations.mdx",
+        "line": 199
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-files/{crewId}",
+        "doc": "docs/api-reference/conversations.mdx",
+        "line": 200
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-files/{crewId}",
+        "doc": "docs/api-reference/conversations.mdx",
+        "line": 201
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/activity",
+        "doc": "docs/api-reference/crews.mdx",
+        "line": 1176
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 3
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 23
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/journal/emit",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 24
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 25
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 27
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/chats",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 29
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crews",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 34
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crews",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 35
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 36
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents/hire",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 37
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-connections",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 38
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/test_run",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 39
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/save",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 40
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/run",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 41
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 42
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crews/{crewId}/capabilities",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 43
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/routines/schedules",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 44
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/skills/generate",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 45
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/skills/author",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 46
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/runs",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 47
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-messages",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 49
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-messages",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 50
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/assignments",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 53
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/queries",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 55
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/standup",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 56
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/escalations",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 57
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/report-confidence",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 59
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/missions",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 60
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/issues",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 63
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/issues",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 65
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/request",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 69
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/execute",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 71
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/skill-review",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 72
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/behavior",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 73
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/memory-health",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 74
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/negative-learning",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 75
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/mcp-tool-calls",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 76
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/port-expose",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 77
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 102
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 104
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/request",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 114
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 114
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1//internal/credentials",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 114
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/./internal/credentials",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 114
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 157
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/journal/emit",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 163
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 169
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials/{credentialId}",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 170
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 171
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials/{credentialId}/rotate",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 172
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/chats",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 180
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/chats/{chatId}/resolve",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 181
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/chats/{chatId}/message-count",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 182
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/chats/{chatId}/title",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 183
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents/{agentId}/resolve",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 189
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crews",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 190
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crews",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 191
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 192
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents/hire",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 193
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-connections",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 194
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/test_run",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 204
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/save",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 205
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/run",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 206
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 207
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crews/{crewId}/capabilities",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 208
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/routines/schedules",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 209
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/skills/generate",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 210
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/skills/author",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 211
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/runs",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 225
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/runs/{runId}",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 226
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/journal/emit",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 228
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-messages",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 234
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-messages",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 235
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-files/{crewId}",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 236
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/crew-files/{crewId}",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 237
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/assignments",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 243
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/assignments/{assignmentId}",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 244
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/queries",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 245
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/standup",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 246
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/escalations",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 247
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/escalations/{escalationId}/wait",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 248
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/report-confidence",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 249
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/missions",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 255
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/missions/{missionId}",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 256
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/missions/{missionId}/start",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 257
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/issues",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 258
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/issues/{identifier}",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 259
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/issues",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 260
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/issues/{identifier}",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 261
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/issues/{identifier}/comments",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 262
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/issues/{identifier}/relations",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 263
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/request",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 269
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/request/{requestId}",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 270
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/execute",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 271
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/skill-review",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 277
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/behavior",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 278
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/memory-health",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 279
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/negative-learning",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 280
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/mcp-tool-calls",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 286
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/port-expose",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 292
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 305
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents/hire",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 378
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/save",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 403
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/routines/schedules",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 433
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/skills/generate",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 434
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 435
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials/{credentialId}/rotate",
+        "doc": "docs/api-reference/internal.mdx",
+        "line": 436
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/activity",
+        "doc": "docs/api-reference/overview.mdx",
+        "line": 280
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/api-reference/paymaster.mdx",
+        "line": 22
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/api-reference/paymaster.mdx",
+        "line": 259
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/port-expose",
+        "doc": "docs/api-reference/port-expose.mdx",
+        "line": 18
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/port-expose",
+        "doc": "docs/api-reference/port-expose.mdx",
+        "line": 53
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents/{agentId}/webhook-secret",
+        "doc": "docs/api-reference/webhooks.mdx",
+        "line": 215
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/test_run",
+        "doc": "docs/api-reference/workspaces.mdx",
+        "line": 749
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship binary",
+        "doc": "docs/architecture.mdx",
+        "line": 21
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship binary",
+        "doc": "docs/architecture.mdx",
+        "line": 54
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/execute",
+        "doc": "docs/architecture.mdx",
+        "line": 236
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/activity",
+        "doc": "docs/cli/activity.mdx",
+        "line": 9
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials",
+        "doc": "docs/cli/admin.mdx",
+        "line": 243
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents/hire",
+        "doc": "docs/cli/hire.mdx",
+        "line": 217
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/auth/google/redirect",
+        "doc": "docs/cli/login.mdx",
+        "line": 18
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/auth/google/redirect",
+        "doc": "docs/cli/login.mdx",
+        "line": 50
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/chats/{id}",
+        "doc": "docs/cli/resume.mdx",
+        "line": 18
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship v0.1.0-beta.1",
+        "doc": "docs/cli/version.mdx",
+        "line": 28
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship v0.1.0-beta.1",
+        "doc": "docs/cli/version.mdx",
+        "line": 57
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship executable}/crewship-sidecar",
+        "doc": "docs/configuration/devcontainers.mdx",
+        "line": 94
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship executable}/../libexec/crewship-sidecar",
+        "doc": "docs/configuration/devcontainers.mdx",
+        "line": 95
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship executable}/../libexec/crewship/crewship-sidecar",
+        "doc": "docs/configuration/devcontainers.mdx",
+        "line": 96
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship executable}/entrypoint.sh",
+        "doc": "docs/configuration/devcontainers.mdx",
+        "line": 100
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship executable}/../libexec/entrypoint.sh",
+        "doc": "docs/configuration/devcontainers.mdx",
+        "line": 101
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship executable}/../libexec/crewship/entrypoint.sh",
+        "doc": "docs/configuration/devcontainers.mdx",
+        "line": 102
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/configuration/environment.mdx",
+        "line": 224
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_INSTALL_DIR",
+        "doc": "docs/configuration/environment.mdx",
+        "line": 352
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_SKIP_VERIFY",
+        "doc": "docs/configuration/environment.mdx",
+        "line": 353
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/auth/google/redirect",
+        "doc": "docs/guides/auth.mdx",
+        "line": 70
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_LOGIN_PASSWORD",
+        "doc": "docs/guides/auth.mdx",
+        "line": 219
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_LOGIN_PASSWORD",
+        "doc": "docs/guides/auth.mdx",
+        "line": 222
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/auth/google/redirect",
+        "doc": "docs/guides/auth.mdx",
+        "line": 399
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/auth/google/callback",
+        "doc": "docs/guides/auth.mdx",
+        "line": 400
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/guides/cli-adapters.mdx",
+        "line": 283
+      },
+      {
+        "kind": "flag",
+        "symbol": "--username",
+        "doc": "docs/guides/credentials.mdx",
+        "line": 80
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/credentials/{id}",
+        "doc": "docs/guides/credentials.mdx",
+        "line": 930
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship /var/lib/crewship",
+        "doc": "docs/guides/encryption-at-rest.mdx",
+        "line": 132
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship /var/lib/crewship",
+        "doc": "docs/guides/encryption-at-rest.mdx",
+        "line": 179
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/agents/hire",
+        "doc": "docs/guides/ephemeral-agents.mdx",
+        "line": 204
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_INSTALL_DIR",
+        "doc": "docs/guides/install.mdx",
+        "line": 114
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_SKIP_VERIFY",
+        "doc": "docs/guides/install.mdx",
+        "line": 118
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_ARGS",
+        "doc": "docs/guides/install.mdx",
+        "line": 162
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/request",
+        "doc": "docs/guides/keeper.mdx",
+        "line": 22
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/guides/paymaster.mdx",
+        "line": 112
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_AUX_CURATOR_MODEL",
+        "doc": "docs/guides/paymaster.mdx",
+        "line": 207
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_AUX_CURATOR_PROVIDER",
+        "doc": "docs/guides/paymaster.mdx",
+        "line": 207
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/guides/paymaster.mdx",
+        "line": 296
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/cost/record",
+        "doc": "docs/guides/paymaster.mdx",
+        "line": 325
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/save",
+        "doc": "docs/guides/routines.mdx",
+        "line": 1141
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/pipelines/test_run",
+        "doc": "docs/guides/routines.mdx",
+        "line": 1141
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship v0.1.0-beta.2",
+        "doc": "docs/guides/upgrades.mdx",
+        "line": 206
+      },
+      {
+        "kind": "environment variable",
+        "symbol": "CREWSHIP_ARGS",
+        "doc": "docs/guides/upgrades.mdx",
+        "line": 277
+      },
+      {
+        "kind": "flag",
+        "symbol": "--split-dir",
+        "doc": "docs/manifest/README.md",
+        "line": 124
+      },
+      {
+        "kind": "flag",
+        "symbol": "--crew-only",
+        "doc": "docs/manifest/README.md",
+        "line": 126
+      },
+      {
+        "kind": "manifest kind",
+        "symbol": "ApprovalPolicy",
+        "doc": "docs/manifest/README.md",
+        "line": 167
+      },
+      {
+        "kind": "manifest kind",
+        "symbol": "Credential",
+        "doc": "docs/manifest/connector.md",
+        "line": 68
+      },
+      {
+        "kind": "manifest kind",
+        "symbol": "Credential",
+        "doc": "docs/manifest/connector.md",
+        "line": 119
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship milestone",
+        "doc": "docs/manifest/milestone.md",
+        "line": 98
+      },
+      {
+        "kind": "flag",
+        "symbol": "--split-dir",
+        "doc": "docs/manifest/workspace.md",
+        "line": 219
+      },
+      {
+        "kind": "command",
+        "symbol": "crewship restore",
+        "doc": "docs/prd/agent-isolation-findings-2026-08-01.md",
+        "line": 87
+      },
+      {
+        "kind": "flag",
+        "symbol": "--wire",
+        "doc": "docs/prd/keeper-configuration.md",
+        "line": 475
+      },
+      {
+        "kind": "flag",
+        "symbol": "--wire",
+        "doc": "docs/prd/keeper-configuration.md",
+        "line": 563
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/memory/search/hybrid",
+        "doc": "docs/security/threat-model.mdx",
+        "line": 598
+      },
+      {
+        "kind": "API path",
+        "symbol": "/api/v1/internal/keeper/{skill-review",
+        "doc": "docs/security/threat-model.mdx",
+        "line": 649
+      }
+    ]
+  }
 }

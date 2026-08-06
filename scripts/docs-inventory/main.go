@@ -83,7 +83,8 @@ type semanticChecks struct {
 }
 
 type commandManifest struct {
-	Commands []commandNode `json:"commands"`
+	Commands    []commandNode  `json:"commands"`
+	GlobalFlags []flagManifest `json:"global_flags"`
 }
 
 type commandNode struct {
@@ -144,6 +145,7 @@ type report struct {
 	CLI      []cliRecord     `json:"cli"`
 	Env      []surfaceRecord `json:"environment_variables,omitempty"`
 	Manifest []surfaceRecord `json:"manifest_kinds,omitempty"`
+	Reverse  reverseChecks   `json:"docs_to_code"`
 }
 
 type surfaceRecord struct {
@@ -377,6 +379,11 @@ type summary struct {
 	EnvironmentVariablesMissing int `json:"environment_variables_missing"`
 	ManifestKinds               int `json:"manifest_kinds"`
 	ManifestKindsMissing        int `json:"manifest_kinds_missing"`
+	DocsCommandsMissing         int `json:"docs_commands_missing"`
+	DocsAPIPathsMissing         int `json:"docs_api_paths_missing"`
+	DocsEnvMissing              int `json:"docs_environment_variables_missing"`
+	DocsKindsMissing            int `json:"docs_manifest_kinds_missing"`
+	DocsFlagsMissing            int `json:"docs_flags_missing"`
 }
 
 func main() {
@@ -446,6 +453,16 @@ func strictGates() []gate {
 			func(r report) []string {
 				return surfaceRowsWhere(r.Manifest, func(rec surfaceRecord) bool { return rec.Status == "missing_docs" })
 			}},
+		{"docs command references missing from the CLI manifest", func(s summary) int { return s.DocsCommandsMissing },
+			func(r report) []string { return r.Reverse.missingRows("command") }},
+		{"docs API paths missing from the OpenAPI inventory", func(s summary) int { return s.DocsAPIPathsMissing },
+			func(r report) []string { return r.Reverse.missingRows("API path") }},
+		{"docs environment variables missing from the source inventory", func(s summary) int { return s.DocsEnvMissing },
+			func(r report) []string { return r.Reverse.missingRows("environment variable") }},
+		{"docs manifest kinds missing from the source inventory", func(s summary) int { return s.DocsKindsMissing },
+			func(r report) []string { return r.Reverse.missingRows("manifest kind") }},
+		{"docs flags missing from the CLI manifest", func(s summary) int { return s.DocsFlagsMissing },
+			func(r report) []string { return r.Reverse.missingRows("flag") }},
 	}
 }
 
@@ -628,6 +645,7 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 	sort.Slice(r.CLI, func(i, j int) bool { return r.CLI[i].Path < r.CLI[j].Path })
 	r.Env = inventoryEnvironmentVariables(sources, docs)
 	r.Manifest = inventoryManifestKinds(sources, docs)
+	r.Reverse = inventoryDocsToCode(openAPI, manifest, docs, sources)
 	r.Summary = summarize(r)
 
 	if err := os.MkdirAll(reportDir, 0o755); err != nil {
@@ -1085,6 +1103,11 @@ func summarize(r report) summary {
 	s := summary{APIOperations: len(r.API), CLIOperations: len(r.CLI)}
 	s.EnvironmentVariables = len(r.Env)
 	s.ManifestKinds = len(r.Manifest)
+	s.DocsCommandsMissing = r.Reverse.MissingCommands
+	s.DocsAPIPathsMissing = r.Reverse.MissingAPIPaths
+	s.DocsEnvMissing = r.Reverse.MissingEnv
+	s.DocsKindsMissing = r.Reverse.MissingKinds
+	s.DocsFlagsMissing = r.Reverse.MissingFlags
 	for _, rec := range r.Env {
 		if rec.Status == "missing_docs" {
 			s.EnvironmentVariablesMissing++
@@ -1167,6 +1190,7 @@ func markdown(r report) string {
 	fmt.Fprintf(&b, "Request schema quality: %d operations have request bodies; %d have concrete JSON schemas, %d use non-JSON media types, and %d still use a generic JSON fallback.\n\n", r.Summary.APIWithRequestBodies, r.Summary.APIWithConcreteJSONRequests, r.Summary.APINonJSONRequestBodies, r.Summary.APIGenericJSONRequests)
 	fmt.Fprintf(&b, "CLI flag quality: %d commands define flags; %d document all of their flags and %d still have undocumented flag(s).\n\n", r.Summary.CLIWithFlags, r.Summary.CLIWithAllFlagsDocumented, r.Summary.CLIMissingFlagDocs)
 	fmt.Fprintf(&b, "Environment variables: %d discovered, %d missing documentation. Manifest kinds: %d discovered, %d missing documentation.\n\n", r.Summary.EnvironmentVariables, r.Summary.EnvironmentVariablesMissing, r.Summary.ManifestKinds, r.Summary.ManifestKindsMissing)
+	fmt.Fprintf(&b, "Docs → code references: %d commands, %d API paths, %d environment variables, %d manifest kinds, and %d flags; missing symbols: %d, %d, %d, %d, and %d respectively.\n\n", r.Reverse.CommandReferences, r.Reverse.APIPathReferences, r.Reverse.EnvReferences, r.Reverse.KindReferences, r.Reverse.FlagReferences, r.Reverse.MissingCommands, r.Reverse.MissingAPIPaths, r.Reverse.MissingEnv, r.Reverse.MissingKinds, r.Reverse.MissingFlags)
 
 	fmt.Fprintf(&b, "## API operations needing attention\n\n")
 	fmt.Fprintf(&b, "These are missing a resource-level API reference page or have no exact route mention. Exactness is a review signal, not a final correctness verdict.\n\n")
