@@ -75,7 +75,20 @@ WHERE A VALUE MAY COME FROM. Every value MUST be one of:
 NEVER infer a value from what the ` + speakerSubject + ` did rather than said, from what the ` + speakerAssistant + ` said about them, from what an ` + speakerOther + ` said about them, from their name, or from general world knowledge.
 
 For each fact you must return the exact span of ` + speakerSubject + ` text that states it, copied character for character. The span is checked against the transcript. If you cannot copy a span that states the fact, the fact does not go in.
+`)
 
+	if p.AllowShortCompleteSentence {
+		// Suspenders for the belt Verify holds (#1700): the gate now
+		// admits a short span when it is a whole sentence the subject
+		// wrote, so the prompt says so — a model that does not know this
+		// pads the span with the agent's words, which the origin check
+		// then refuses.
+		b.WriteString(`
+A span may be SHORT if it is a whole sentence the ` + speakerSubject + ` wrote: "UTC+1." and "Weekdays." are valid spans. Copy the whole sentence, not a piece of one — a cut like "I run" is refused. Never extend a span into what the ` + speakerAssistant + ` said, and never quote a bare answer ("Yes.", "Ok.") whose meaning is in the question rather than in the answer.
+`)
+	}
+
+	b.WriteString(`
 NEVER manufacture pattern language from a single occurrence. A single mention can support a fact, but not a trend, habit, or preference unless the text states that directly.
 
 Do NOT record how the person seems, feels, or comes across (frustrated, enthusiastic, impatient, stressed, confident, curious, blunt). Do not record what they are working on today, what mood a session had, or anything that will be stale in a week. Those are not fields below, and entries using them are rejected.
