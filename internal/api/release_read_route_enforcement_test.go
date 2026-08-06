@@ -8,18 +8,20 @@ import (
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
-// TestEveryReadRouteEnforcesWorkspaceScope is the runtime companion to
-// TestEveryReadRouteDeclaresItsWorkspaceScope. The declaration scan proves a
-// GET is behind the workspace chokepoint; this table drives the read probes
-// through the real router with a member of workspace A naming workspace B's
-// row. A predicate removed from a handler therefore fails with the route and
-// operation that leaked, rather than leaving a declaration-only green test.
+// TestReadFenceProbesEnforceWorkspaceScope is the runtime companion to
+// TestEveryReadRouteDeclaresItsWorkspaceScope. The declaration scan covers the
+// full read registration table; this test drives the 59 seeded GET probes in
+// the fence table through the real router with a member of workspace A naming
+// workspace B's row. A predicate removed from a covered handler therefore
+// fails with the route and operation that leaked, rather than leaving a
+// declaration-only green test. It intentionally does not claim that every
+// read registration has a seeded behavioral probe.
 //
 // The probe table is deliberately shared with the broader cross-workspace
 // fence. Each resource kind owns its seed, positive control, and route table;
 // this test selects every GET probe from that table and never invents IDs or
 // calls handlers directly.
-func TestEveryReadRouteEnforcesWorkspaceScope(t *testing.T) {
+func TestReadFenceProbesEnforceWorkspaceScope(t *testing.T) {
 	ensureEncryptionKey(t)
 	db := setupTestDB(t)
 	attacker := fenceSeedTenant(t, db, "read-a")

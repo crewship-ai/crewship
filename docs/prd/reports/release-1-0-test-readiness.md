@@ -47,4 +47,11 @@ The ingress matrix is now an explicit synthetic-`ServeHTTP` test in
 `internal/api/ingress_matrix_test.go`. It mounts the production auth,
 workspace, role, and scope middleware around a sentinel handler, so it covers
 the complete recorded route surface without starting background work in a
-business handler.
+business handler. Its independent role contract is
+`internal/api/testdata/route-roles.txt`, and its behavior assertion uses
+`canRole` to require 403 below each declared tier.
+
+The behavioral read test is named `TestReadFenceProbesEnforceWorkspaceScope`:
+it covers 59 seeded GET probes from the fence table. The separate declaration
+test enumerates the full read registration table; the behavioral probe test
+does not claim that every registration has a seeded fixture.

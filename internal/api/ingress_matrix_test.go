@@ -112,6 +112,21 @@ func TestIngressAuthorizationMatrix(t *testing.T) {
 					if identity.name == "FOREIGN" && rr.Code != http.StatusForbidden {
 						t.Fatalf("%s with foreign %s returned %d, want RequireWorkspace 403", route.key, credential.name, rr.Code)
 					}
+					if identity.name != "FOREIGN" {
+						wantForbidden := false
+						switch route.requiredRole {
+						case roleCreate:
+							wantForbidden = !canRole(identity.role, "create")
+						case roleManage:
+							wantForbidden = !canRole(identity.role, "manage")
+						}
+						if wantForbidden && rr.Code != http.StatusForbidden {
+							t.Fatalf("%s with %s role returned %d, want declared %s gate 403", route.key, identity.role, rr.Code, route.requiredRole)
+						}
+						if !wantForbidden && rr.Code == http.StatusForbidden {
+							t.Fatalf("%s with %s role returned 403, but declared %s permits it", route.key, identity.role, route.requiredRole)
+						}
+					}
 				})
 			}
 		}
@@ -119,10 +134,11 @@ func TestIngressAuthorizationMatrix(t *testing.T) {
 }
 
 type syntheticIngressRoute struct {
-	key     string
-	method  string
-	path    string
-	handler http.Handler
+	key          string
+	method       string
+	path         string
+	requiredRole string
+	handler      http.Handler
 }
 
 func syntheticIngressRoutes(t *testing.T, r *Router, workspaceID string) []syntheticIngressRoute {
@@ -132,7 +148,7 @@ func syntheticIngressRoutes(t *testing.T, r *Router, workspaceID string) []synth
 	mux := http.NewServeMux()
 	routes := make([]syntheticIngressRoute, 0, len(r.mutationRoutes))
 	seen := map[string]bool{}
-	add := func(method, pattern string, handler http.Handler) {
+	add := func(method, pattern, requiredRole string, handler http.Handler) {
 		key := method + " " + pattern
 		if seen[key] {
 			return
@@ -140,24 +156,24 @@ func syntheticIngressRoutes(t *testing.T, r *Router, workspaceID string) []synth
 		seen[key] = true
 		path := ingressConcretePath(pattern, workspaceID)
 		mux.Handle(method+" "+path, handler)
-		routes = append(routes, syntheticIngressRoute{key: key, method: method, path: path, handler: mux})
+		routes = append(routes, syntheticIngressRoute{key: key, method: method, path: path, requiredRole: requiredRole, handler: mux})
 	}
 
 	for _, route := range r.mutationRoutes {
 		h := r.authMw.RequireAuth(r.authMw.RequireWorkspace(
 			r.requireRoleScopeMW(route.Role, route.Scope, sentinel),
 		))
-		add(route.Method, route.Pattern, h)
+		add(route.Method, route.Pattern, route.Role, h)
 	}
 	for _, route := range scanReadRoutes(t) {
 		if route.adminWrapped {
-			add(route.verb, route.path, r.authMw.RequireAuth(r.authMw.RequireWorkspace(
+			add(route.verb, route.path, roleManage, r.authMw.RequireAuth(r.authMw.RequireWorkspace(
 				r.requireRoleScopeMW(roleManage, scopeSelf, sentinel),
 			)))
 			continue
 		}
 		if strings.Contains(route.tail, "wsCtx(") {
-			add(route.verb, route.path, r.authMw.RequireAuth(r.authMw.RequireWorkspace(sentinel)))
+			add(route.verb, route.path, "", r.authMw.RequireAuth(r.authMw.RequireWorkspace(sentinel)))
 		}
 	}
 	return routes
