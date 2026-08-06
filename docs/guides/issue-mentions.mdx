@@ -1,6 +1,6 @@
 ---
 title: "Mentioning an agent in an issue"
-description: "@mention an agent in an issue comment: the picker, how the mention is stored, and what has to be true before it triggers work."
+description: "@mention an agent in an issue comment: the picker, how the mention is stored, what wakes the agent, and the limits that bound it."
 icon: "at-sign"
 ---
 
@@ -9,13 +9,9 @@ icon: "at-sign"
 You bring an agent into a discussion the way you bring in a colleague: type
 `@`, pick it, and it is named in the comment.
 
-<Note>
-**The trigger is not built yet.** Today a mention is *recorded* — it is stored
-in the comment body in a form the backend can parse, and it renders as a chip
-wherever the comment is shown. Nothing dispatches work off it. This page
-documents the format so the two halves land compatible, and marks clearly what
-is still missing.
-</Note>
+**Mentioning an agent wakes it.** The mentioned agent is given a task naming
+the issue and quoting the comment, and it runs — the same way it would if you
+had assigned it work. A mention does *not* change the issue's assignee.
 
 ## Using it
 
@@ -87,50 +83,119 @@ which is the feature. Whether that mention is allowed to make the agent work
 is an authorization question, and it belongs to the trigger, not to the
 syntax.
 
-## What the backend still has to do
+## What happens when you post the comment
 
-None of this exists in `internal/api` today. To meet the format:
+Every step below runs after the comment is committed, so a mention that cannot
+be recorded never turns a posted comment into an error.
 
-1. **Parse on write.** In the comment create handler, extract ids with the Go
-   equivalent of the client's parser:
+1. **The body is parsed**, not scanned — `internal/mentions` walks the comment
+   as CommonMark and reads only real link nodes.
+
+   <Warning>
+   Do **not** substitute a regular expression over the raw body, and in
+   particular not this one, which earlier revisions of this page prescribed:
 
    ```go
+   // WRONG — fires on documentation.
    var mentionRe = regexp.MustCompile(`\[@[^\]\n]{0,80}\]\(crewship:agent/([A-Za-z0-9_-]{1,64})\)`)
    ```
 
-2. **Resolve inside the comment's workspace**, and drop ids that do not
-   resolve. A mention of a foreign-workspace agent is a probe, not a mention,
-   and must not produce a row or a notification.
+   It contradicts the "parsed, not scanned" property in the table above. A
+   regex cannot see that a token sits inside a code span or a fenced block, so
+   this very page — which prints well-formed mentions as examples — would
+   dispatch agent runs if a comment quoted it. `internal/mentions` parses the
+   body as CommonMark and reads only real link nodes, so code contains no
+   mentions structurally rather than by rule. Replacing the parser with that
+   regexp fails 15 of the package's tests, 14 of them in the fires-on-docs
+   direction — and, end to end, three of `internal/api`'s: a comment quoting
+   this page's examples creates rows, activity entries and agent runs.
+   </Warning>
 
-3. **Persist the resolved set** (a `mission_comment_mentions` join or a column
-   on `mission_comments`) rather than re-parsing on every read.
+2. **Each id is resolved inside the comment's own workspace.** An id that names
+   no agent there is dropped and leaves nothing behind — no row, no activity,
+   no notification, no run. A mention of an agent in a *different* workspace is
+   a probe, not a typo, and is treated the same way.
 
-4. **Log a `mentioned` activity** per resolved mention, with `details` set to
-   the agent id. The history list already renders it — see below.
+3. **The resolved set is stored** in `mission_comment_mentions`, one row per
+   (comment, agent), so nothing ever re-parses a comment on read. Naming the
+   same agent three times in one comment is one row, one activity entry and one
+   run. The row also records what the trigger did — `dispatched`, `refused`
+   (a limit said no, with the refusal verbatim), `skipped`, or `failed` — so a
+   mention that did not wake its agent is answerable rather than mysterious.
 
-5. **Dispatch the trigger** under the same authorization an "assign this agent"
-   action would take, not merely because the token parsed.
+4. **A `mentioned` activity is written** to the issue's History, with the agent
+   id in `details`.
+
+5. **The agent is dispatched**, through the same endpoint an agent-to-agent
+   assignment goes through. It inherits that endpoint's authorization and its
+   limits; see below.
+
+### What bounds it
+
+A mention is a way to start an agent run, so it is bounded by the same two
+numbers every other dispatch is — not by a mention-only rule:
+
+| Bound | What it means |
+| --- | --- |
+| `delegation.max_depth` | How many hops a chain may travel. An agent whose own run is already at the limit cannot mention its way to another one, so `A mentions B, B's reply mentions C…` terminates. A mention written by a **person** is a root: it does not inherit a depth, and mentioning a busy agent is never refused for being "too deep". |
+| `delegation.max_fanout` | How many runs one dispatcher may have in flight. On a mention this counts the mentioned agent's concurrent mention-runs on that issue, so repeatedly mentioning one agent queues rather than multiplies. |
+
+Both are instance settings (`crewship instance settings set delegation.max_depth 3`).
+When one refuses, the mention is still recorded and still appears in History —
+the refusal is stored on the row, naming the setting an operator would change.
+
+Two more rules the dispatch inherits from the assign path:
+
+- **Crews must be connected.** Mentioning an agent in a crew that is not
+  connected to the issue's crew records the mention and dispatches nothing.
+- **An agent does not mention itself awake.** A self-mention is recorded and
+  skipped.
+
+### Being notified
+
+A mention delivers on the **`issues.comment`** notification category — the same
+toggle as any other comment on the issue, because a mention only ever arrives
+inside one. Muting issue comments mutes mentions with them; there is no
+separate switch to forget to turn on.
 
 ### The history row
 
 The issue's History tab renders **"X mentioned @Y"** when an activity with
 `action` in `mentioned` / `mention` / `agent_mentioned` / `comment_mentioned`
 arrives. It reads the target out of `details` in whichever shape it finds — a
-bare agent id, a whole mention token, or `{"agent_id":"…"}` — so the first
-backend implementation does not have to guess.
+bare agent id, a whole mention token, or `{"agent_id":"…"}`. The backend writes
+the **bare agent id**.
 
-**Today nothing emits any of those.** The kinds `logActivity` writes are
-`created`, `status_changed`, `assignee_changed`, `priority_changed`,
-`review_approved` and `review_changes_requested`. Until one of the mention
-kinds is added the row is simply never reached; an activity kind the renderer
-does not recognise still renders in its generic form, so an unknown future
-kind never disappears from the feed.
+## Which comments are scanned
+
+All three doors a comment can arrive through, because a mention typed by a
+person and one written by an agent are the same wire format:
+
+| Door | Endpoint |
+| --- | --- |
+| A person commenting | `POST /api/v1/crews/{crewId}/issues/{identifier}/comments` |
+| An agent commenting | `POST /api/v1/internal/issues/{identifier}/comments` |
+| An agent's inline comment on a status change | `PATCH /api/v1/internal/issues/{identifier}` |
+
+No new HTTP route was added for mentions — the trigger hangs off comment
+writes that already existed — so API↔CLI parity is satisfied by reuse:
+
+```bash
+crewship issue comment ENG-42 --body 'over to you [@robin](crewship:agent/<agentId>)'
+```
+
+Everything on this page happens on that call. `crewship issue get ENG-42`
+renders the comment and the activity that follows it.
 
 ## Where the code is
 
 | Piece | File |
 | --- | --- |
 | Wire format, parser, picker query | `lib/mentions.ts` |
+| The Go parser (CommonMark, code-safe) | `internal/mentions/mentions.go` |
+| Resolve, persist, audit, dispatch | `internal/api/issue_mentions.go` |
+| The limits the dispatch inherits | `internal/api/delegation_limits.go` |
+| The stored set | `mission_comment_mentions` (migration `20260806172731`) |
 | The chip, and the roster it resolves against | `components/features/issues/mention-chip.tsx` |
 | Rendering mentions inside a comment body | `components/features/issues/markdown-content.tsx` |
 | The composer and its `@` picker | `components/features/issues/comment-composer.tsx` |

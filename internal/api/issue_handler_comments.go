@@ -118,6 +118,33 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:  now,
 	}
 
+	// @mentions (#1768 item 3) — the HUMAN door. Both doors have to parse or
+	// the feature half-works: a mention typed by a person and one written by an
+	// agent are the same wire format and must behave the same.
+	//
+	// After the comment is committed, deliberately: the comment is the thing
+	// the user asked for, and a mention that could not be recorded must not
+	// turn a posted comment into a 500.
+	// crew_id is read off the mission rather than off the path, so the crew the
+	// connection rule is judged against is the issue's own — the path value is
+	// caller-supplied and resolveMissionID only proves the two agree today.
+	var issueTitle, issueCrewID string
+	_ = h.db.QueryRowContext(r.Context(),
+		`SELECT title, COALESCE(crew_id,'') FROM missions WHERE id = ?`, missionID).
+		Scan(&issueTitle, &issueCrewID)
+	h.mentionRecorder().record(r.Context(), mentionContext{
+		WorkspaceID: wsID,
+		MissionID:   missionID,
+		Identifier:  ident,
+		IssueTitle:  issueTitle,
+		IssueCrewID: issueCrewID,
+		CommentID:   id,
+		CommentBody: req.Body,
+		AuthorType:  "user",
+		AuthorID:    user.ID,
+		AuthorName:  user.Name,
+	})
+
 	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID})
 
 	writeJSON(w, http.StatusCreated, resp)

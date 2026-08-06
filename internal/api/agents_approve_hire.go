@@ -94,7 +94,17 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	if ephemeral != 1 {
+	// #1768 widened this: a PERSISTENT agent can now be PENDING_REVIEW too,
+	// when POST /api/v1/internal/agents staged it under a guided/trusted
+	// crew's autonomy gate. Those rows need the same release, and it is the
+	// same transition (PENDING_REVIEW → IDLE against the same chatbridge
+	// guard), so they take this path rather than a second endpoint.
+	//
+	// The ephemeral check therefore keys off the STATUS, not the row kind: a
+	// permanent agent that is not pending review still gets the old 409 with
+	// the old message, because for that row approve-hire genuinely is
+	// meaningless.
+	if ephemeral != 1 && curStatus != "PENDING_REVIEW" {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error":  "approve-hire is only valid on ephemeral agents",
 			"reason": "permanent agents do not require hire approval",
@@ -329,11 +339,19 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 // every pending hire row for the agent, not just the newest.
 func findHireApprovalRow(ctx context.Context, q harbormaster.DBTX, workspaceID, agentID string) (string, string, error) {
 	var approvalID, status string
+	// Two kinds, one decision point. kind=autonomy_gate rows are the #1768
+	// equivalent for a PERSISTENT agent staged by POST
+	// /api/v1/internal/agents: same PENDING_REVIEW sentinel, same
+	// waitpoint, so approve-hire must win the same row rather than flip the
+	// agent and leave a pending approval describing a decision that already
+	// happened. The two never coexist for one agent — a row is either
+	// ephemeral-hired or internally created.
 	err := q.QueryRowContext(ctx, `
 		SELECT id, status FROM approvals_queue
-		WHERE workspace_id = ? AND agent_id = ? AND kind = ?
+		WHERE workspace_id = ? AND agent_id = ? AND kind IN (?, ?)
 		ORDER BY created_at DESC LIMIT 1`,
-		workspaceID, agentID, string(harbormaster.KindEphemeralHire)).Scan(&approvalID, &status)
+		workspaceID, agentID,
+		string(harbormaster.KindEphemeralHire), string(harbormaster.KindAutonomyGate)).Scan(&approvalID, &status)
 	return approvalID, status, err
 }
 

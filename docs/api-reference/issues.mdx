@@ -36,6 +36,10 @@ Issues are crew-scoped tracker items: each carries a human-readable identifier (
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/code-links`](#attach-a-code-link) | Attach a pull request / merge request |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh`](#refresh-a-code-link) | Re-fetch a link's state |
 | `DELETE` | [`/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}`](#delete-a-code-link) | Remove a link |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/attachments`](#list-attachments) | List attached files |
+| `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/attachments`](#upload-an-attachment) | Attach a file |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}`](#download-an-attachment) | Download an attached file |
+| `DELETE` | [`/api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}`](#delete-an-attachment) | Remove an attached file |
 | `GET` | [`/api/v1/labels`](#list-labels) | List workspace labels |
 | `POST` | [`/api/v1/labels`](#create-label) | Create a label |
 | `PATCH` | [`/api/v1/labels/{labelId}`](#update-label) | Update a label |
@@ -546,7 +550,18 @@ Returns the activity log for an issue (status changes, assignments, reviews). Li
 ]
 ```
 
-**Activity Actions:** `status_changed`, `assignee_changed`, `priority_changed`, `review_approved`, `review_changes_requested`
+**Activity Actions:** `created`, `status_changed`, `assignee_changed`, `priority_changed`, `description_changed`, `parent_changed`, `relation_added`, `code_link_added`, `code_link_removed`, `review_approved`, `review_changes_requested`, `task_completed`, `task_failed`
+
+`description_changed` records that the description was rewritten, never the
+text itself — `details` carries only lengths (`description updated (128 → 342
+chars)`). An issue description is unbounded user input, and an audit row is
+not a revision store; if you need the previous text, read the issue history
+in your own tooling before you PATCH.
+
+Every action above also writes a **Crew Journal** entry, which is what
+notifications are routed from — including the ones an agent produces through
+the internal API. A client that reads the activity list sees the same events
+a Slack/ntfy subscriber does.
 
 ---
 
@@ -903,6 +918,168 @@ the pull request on the forge changes.
 | `200` | — | Removed |
 | `403` | — | Caller lacks the MANAGER floor |
 | `404` | `link-not-found` | Link not found on this issue |
+
+---
+
+## Attachments
+
+Attach files to an issue — a crash log, a screenshot, a repro bundle, a diff.
+Everything an agent working the issue needs to see and, before this surface
+existed, had to be pasted into a comment.
+
+Three properties are worth knowing before you use it:
+
+- **The type is decided by the file's extension, against an allowlist.** The
+  request's own `Content-Type` is discarded. That header is chosen by whoever is
+  uploading, and honouring it is how a stored file becomes stored XSS served from
+  your own origin. Allowed today: `.txt` `.log` `.md` `.csv` `.tsv` `.json`
+  `.yaml` `.yml` `.toml` `.xml` `.diff` `.patch` `.png` `.jpg` `.jpeg` `.gif`
+  `.webp` `.avif` `.pdf` `.zip` `.gz` `.tgz`. `.html`, `.svg` and anything
+  executable are absent deliberately, not by oversight.
+- **Files are stored by content.** Two issues carrying identical bytes share one
+  stored copy, and attaching the same file to the same issue twice is the same
+  attachment — the second call returns `200` with the existing record rather than
+  `201` or `409`, so a retry is safe.
+- **The uploaded filename is a label, never a path.** The stored location is
+  derived entirely from the SHA-256 digest, so a filename of
+  `../../../etc/passwd` is recorded as `passwd` and the bytes land where every
+  other attachment's do.
+
+Agents reach the same files through the sidecar — see
+[Attachments an agent can read](/guides/issue-attachments#what-an-agent-sees).
+
+### List attachments
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/attachments?workspace_id={workspaceId}
+```
+
+**Auth:** any workspace member (session or CLI token). The workspace is taken
+from the authenticated session, so an issue in another workspace is a `404`.
+
+**Request:** `workspace_id` is the required workspace query parameter. No request
+body.
+
+**Response:** `200 OK` — newest first.
+
+```json
+[
+  {
+    "id": "cmsf1a2b30001d5e6aa11",
+    "workspace_id": "ws_abc",
+    "owner_type": "issue",
+    "owner_id": "issue_123",
+    "filename": "crash.log",
+    "content_type": "text/plain; charset=utf-8",
+    "size_bytes": 20481,
+    "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "uploaded_by_user_id": "user_1",
+    "uploaded_by_agent_id": null,
+    "uploaded_by_name": "Ada Lovelace",
+    "created_at": "2026-08-06T19:22:41Z"
+  }
+]
+```
+
+`sha256` is part of the contract: it lets a client verify what it downloaded, and
+lets an agent decide it has already read this exact file. The on-disk storage key
+is deliberately not exposed.
+
+| Status | Condition |
+|---|---|
+| `200` | Listed (possibly empty) |
+| `400` | No workspace resolved for the caller |
+| `404` | Issue not found in this workspace |
+
+### Upload an attachment
+
+```
+POST /api/v1/crews/{crewId}/issues/{identifier}/attachments?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:** `multipart/form-data` with one part.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `file` | file | Yes | The file. Maximum 25 MiB. Its extension must be on the allowlist above |
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $CREWSHIP_TOKEN" \
+  -F "file=@./crash.log" \
+  "https://crewship.example.com/api/v1/crews/crew_1/issues/ENG-4/attachments?workspace_id=ws_abc"
+```
+
+**Response:** `201 Created` — the stored record, the same object shape
+[List attachments](#list-attachments) returns.
+
+`200 OK` instead of `201` means these exact bytes were already attached to this
+issue: no second record was created, no second timeline entry was written, and
+the returned object is the one that already existed.
+
+| Status | Condition |
+|---|---|
+| `201` | Attached |
+| `200` | Already attached — the same bytes, the same issue |
+| `400` | Malformed multipart form, missing `file` part, or a filename that sanitises to nothing |
+| `403` | Caller lacks the MANAGER floor |
+| `404` | Issue not found in this workspace |
+| `413` | Larger than 25 MiB |
+| `415` | Extension not on the allowlist — the response lists what is allowed |
+| `503` | This instance has no storage provider configured |
+
+### Download an attachment
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}?workspace_id={workspaceId}
+```
+
+**Auth:** any workspace member.
+
+**Request:** `workspace_id` is the required workspace query parameter. The file is
+addressed by the `attachmentId` path parameter. No request body.
+
+**Response:** `200 OK` — the raw bytes, with three headers that matter:
+
+| Header | Value |
+|---|---|
+| `Content-Type` | The type Crewship resolved from the extension, never the uploader's |
+| `X-Content-Type-Options` | `nosniff` |
+| `Content-Disposition` | `attachment; filename="crash.log"` |
+
+An attachment belonging to a different issue — even one in the same workspace —
+is a `404` through this issue's URL, not a `403`.
+
+| Status | Condition |
+|---|---|
+| `200` | The file |
+| `404` | Not found on this issue, or its stored bytes are missing (for example after a metadata-only restore) |
+| `503` | This instance has no storage provider configured |
+
+### Delete an attachment
+
+```
+DELETE /api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:** none. The file is addressed by the `attachmentId` path
+parameter; `workspace_id` is the only query parameter.
+
+**Response:** `200 OK` with `{"status": "ok"}`
+
+Hard delete of the record, and of the stored bytes — but the bytes only when no
+other issue, comment or chat in this workspace still references them. Removing a
+file from one issue never removes it from another that carries the same file.
+
+| Status | Condition |
+|---|---|
+| `200` | Removed |
+| `403` | Caller lacks the MANAGER floor |
+| `404` | Not found on this issue |
 
 ---
 

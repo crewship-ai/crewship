@@ -539,13 +539,18 @@ func TestCovIICreateCrew(t *testing.T) {
 		}
 	})
 
-	t.Run("happy path → 201", func(t *testing.T) {
+	t.Run("happy path → 202 held", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"name": "Bravo", "icon": "x", "color": "#fff"})
 		req := httptest.NewRequest(http.MethodPost, "/x?workspace_id="+wsID, bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 		h.CreateCrew(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
+		// #1768 contract change: an agent-driven create through the internal
+		// API is now policy-gated. This handler is built with no policy
+		// resolver, so the gate falls back to its conservative guided
+		// default: the row IS written (asserted below) but held inert for
+		// operator approval, which answers 202 Accepted rather than 201.
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("code=%d want 202; body=%s", rec.Code, rec.Body.String())
 		}
 		var n int
 		if err := db.QueryRow("SELECT COUNT(*) FROM crews WHERE slug='bravo' AND workspace_id=?", wsID).Scan(&n); err != nil {
@@ -602,13 +607,18 @@ func TestCovIICreateAgent(t *testing.T) {
 		}
 	})
 
-	t.Run("happy path → 201, slug suffixed with crew", func(t *testing.T) {
+	t.Run("happy path → 202 held, slug suffixed with crew", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"name": "Nora", "crew_id": "crewA"})
 		req := httptest.NewRequest(http.MethodPost, "/x?workspace_id="+wsID, bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 		h.CreateAgent(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
+		// #1768 contract change: an agent-driven create through the internal
+		// API is now policy-gated. This handler is built with no policy
+		// resolver, so the gate falls back to its conservative guided
+		// default: the row IS written (asserted below) but held inert for
+		// operator approval, which answers 202 Accepted rather than 201.
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("code=%d want 202; body=%s", rec.Code, rec.Body.String())
 		}
 		var n int
 		if err := db.QueryRow("SELECT COUNT(*) FROM agents WHERE slug='nora-crew' AND workspace_id=?", wsID).Scan(&n); err != nil {
@@ -900,7 +910,7 @@ func TestCovIIMissionCreate(t *testing.T) {
 		}
 	})
 
-	t.Run("happy path with tasks → 201", func(t *testing.T) {
+	t.Run("happy path with tasks → 202 held", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"title": "Ship it", "lead_agent_id": "lead1", "crew_id": "crewM", "workspace_id": wsID,
 			"tasks": []map[string]any{
@@ -911,8 +921,11 @@ func TestCovIIMissionCreate(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/x", bytes.NewReader(body))
 		rec := httptest.NewRecorder()
 		h.Create(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
+		// #1768 contract change: mission_create is policy-gated; with no
+		// resolver wired the conservative guided default holds the mission
+		// (rows still written, Start refuses until approved) → 202.
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("code=%d want 202; body=%s", rec.Code, rec.Body.String())
 		}
 		var nm, nt int
 		if err := db.QueryRow("SELECT COUNT(*) FROM missions WHERE title='Ship it'").Scan(&nm); err != nil {

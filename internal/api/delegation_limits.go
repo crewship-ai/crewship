@@ -29,13 +29,39 @@ package api
 // agent bypasses it by sending {"depth":0} — which is to say it is not a
 // control, and this file exists to not be that.
 //
-// WHICH DOOR THIS COVERS. One: AssignmentHandler.Create, the endpoint behind
-// the sidecar's /assign. The other ways an agent can cause work to run —
-// /mission/create (the mission engine dispatches its task list through
-// DispatchAssignment, which does not pass through here) and /spawn (an
-// ephemeral hire, gated instead by the crew's autonomy_level) — are NOT capped
-// by this. Stated rather than implied, because a cap that is believed to cover
-// more than it does is worse than a missing one.
+// WHICH DOORS THIS COVERS. Two, and they share one insert
+// (insertCappedAssignment in assignments_run.go) so they cannot drift:
+//
+//   - AssignmentHandler.Create, the endpoint behind the sidecar's /assign;
+//   - AssignmentHandler.DispatchMention, the @mention trigger on an issue
+//     comment (#1768 item 3). A mention is a dispatch — the mentioned agent
+//     runs — so it is bounded by the same two numbers rather than by a
+//     mention-specific cap. An agent that can be mentioned can mention back,
+//     and a chain of comments is a delegation tree wearing different clothes.
+//
+// The other ways an agent can cause work to run — /mission/create (the mission
+// engine dispatches its task list through DispatchAssignment, which does not
+// pass through here) and /spawn (an ephemeral hire, gated instead by the
+// crew's autonomy_level) — are NOT capped by this. Stated rather than implied,
+// because a cap that is believed to cover more than it does is worse than a
+// missing one.
+//
+// /mission/create has since grown its own control on its own door, which is
+// what that paragraph was asking for: mission_limits.go bounds one plan's task
+// list and a crew's live agent-created missions. It is deliberately NOT this
+// cap — a mission's tasks are one authored plan, not delegation hops, and
+// routing DispatchAssignment through insertCappedAssignment would have counted
+// them as hops. The two files bound the same resource through different doors;
+// neither covers the other's.
+//
+// THE HUMAN CALLER. A mention written by a PERSON has no assignment row of its
+// own, so it is a root: depth 1, no parent. That is not a hole — a human
+// comment is not a delegation hop, and reading a depth off whatever the
+// mentioned agent happened to be running would refuse mentions of busy agents
+// with a message about delegation. The fan-out cap still applies, counted
+// against the agent the row is filed under (see dispatchCaller.FanoutSubjectID
+// below), so "mention the same agent on the same issue forever" is bounded by
+// the same number an agent's /assign fan-out is.
 
 import (
 	"context"
@@ -100,6 +126,33 @@ func DelegationLimits(ctx context.Context, db *sql.DB) delegationLimits {
 	}
 }
 
+// dispatchCaller is who is dispatching, in the two senses the caps need.
+//
+// They are the same agent for /assign and differ only for a human-authored
+// mention, which is why they are named apart rather than passed as one id that
+// silently means two things:
+//
+//   - ActorAgentID is whose position in the tree this dispatch inherits. It is
+//     the agent the SERVER resolved (a per-agent bearer token for /assign, the
+//     comment's author_id for a mention), never a field in a request body.
+//     Empty means "not an agent" — a human — which resolveDelegationScope
+//     already answers as a root.
+//   - FanoutSubjectID is the agents.id the row is stored under
+//     (assignments.assigned_by_id) and therefore the id a ROOT dispatch's
+//     fan-out is counted against. It must never be empty: the column is NOT
+//     NULL with a foreign key to agents, and an empty subject would make
+//     countDelegationSiblings count zero forever, i.e. no fan-out cap at all.
+type dispatchCaller struct {
+	ActorAgentID    string
+	FanoutSubjectID string
+}
+
+// agentCaller is the /assign shape, where one agent is both the position in
+// the tree and the row's owner.
+func agentCaller(agentID string) dispatchCaller {
+	return dispatchCaller{ActorAgentID: agentID, FanoutSubjectID: agentID}
+}
+
 // delegationScope is one /assign call's server-derived position in the tree.
 //
 // ParentID is the assignment the caller was executing, empty when the caller is
@@ -162,7 +215,7 @@ func resolveDelegationScope(ctx context.Context, db *sql.DB, actorAgentID, works
 //     turns, so only IN-FLIGHT dispatches count. Counting its lifetime output
 //     would silently retire a lead after N tasks, which is a different (and
 //     wrong) product decision wearing a safety cap's clothes.
-func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationScope, actorAgentID, chatID string) (int, error) {
+func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationScope, fanoutSubjectID, chatID string) (int, error) {
 	if db == nil {
 		return 0, nil
 	}
@@ -179,7 +232,7 @@ func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationSc
 			 WHERE assigned_by_id = ?
 			   AND chat_id = ?
 			   AND parent_assignment_id IS NULL
-			   AND status IN ('PENDING','QUEUED','RUNNING')`, actorAgentID, chatID).Scan(&n)
+			   AND status IN ('PENDING','QUEUED','RUNNING')`, fanoutSubjectID, chatID).Scan(&n)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("count delegation siblings: %w", err)
@@ -199,7 +252,7 @@ func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationSc
 //
 // The predicate must stay identical to countDelegationSiblings' two branches;
 // they answer the same question at two moments.
-func fanoutGuard(scope delegationScope, actorAgentID, chatID string, maxFanout int) (string, []any) {
+func fanoutGuard(scope delegationScope, fanoutSubjectID, chatID string, maxFanout int) (string, []any) {
 	if scope.ParentID != "" {
 		return `(SELECT COUNT(*) FROM assignments WHERE parent_assignment_id = ?) < ?`,
 			[]any{scope.ParentID, maxFanout}
@@ -207,7 +260,7 @@ func fanoutGuard(scope delegationScope, actorAgentID, chatID string, maxFanout i
 	return `(SELECT COUNT(*) FROM assignments
 	          WHERE assigned_by_id = ? AND chat_id = ? AND parent_assignment_id IS NULL
 	            AND status IN ('PENDING','QUEUED','RUNNING')) < ?`,
-		[]any{actorAgentID, chatID, maxFanout}
+		[]any{fanoutSubjectID, chatID, maxFanout}
 }
 
 // delegationRefusal is a cap saying no, in words the agent can act on.
@@ -233,11 +286,12 @@ func (e *delegationRefusal) Error() string { return e.msg }
 func enforceDelegationCaps(
 	ctx context.Context,
 	db *sql.DB,
-	actorAgentID, workspaceID, chatID string,
+	caller dispatchCaller,
+	workspaceID, chatID string,
 ) (delegationScope, delegationLimits, error) {
 	lim := DelegationLimits(ctx, db)
 
-	scope, err := resolveDelegationScope(ctx, db, actorAgentID, workspaceID)
+	scope, err := resolveDelegationScope(ctx, db, caller.ActorAgentID, workspaceID)
 	if err != nil {
 		return delegationScope{}, lim, err
 	}
@@ -256,7 +310,7 @@ func enforceDelegationCaps(
 			scope.Depth-1, lim.MaxDepth, SettingDelegationMaxDepth)}
 	}
 
-	used, err := countDelegationSiblings(ctx, db, scope, actorAgentID, chatID)
+	used, err := countDelegationSiblings(ctx, db, scope, caller.FanoutSubjectID, chatID)
 	if err != nil {
 		return delegationScope{}, lim, err
 	}
@@ -273,4 +327,74 @@ func enforceDelegationCaps(
 	}
 
 	return scope, lim, nil
+}
+
+// cappedAssignment is one row insertCappedAssignment writes. Everything the
+// caps care about — depth, parent, the fan-out subject — is deliberately NOT
+// in here: it arrives as the scope/limits enforceDelegationCaps derived, so a
+// caller cannot hand this function a position it chose for itself.
+type cappedAssignment struct {
+	WorkspaceID  string
+	ChatID       string
+	AssignedByID string
+	TargetID     string
+	Task         string
+	GroupID      string
+	CreatedAt    string
+}
+
+// insertCappedAssignment writes the PENDING assignment row with the fan-out
+// headroom re-proved AT INSERT TIME, and is the only place either dispatch
+// door inserts one.
+//
+// The pre-check in enforceDelegationCaps produced the readable refusal; this
+// is the one that holds when a run fires ten dispatches at once, which is the
+// whole scenario the cap exists for. Same shape as claimCrewSlot: predicate +
+// write in one statement, so SQLite serialises the racers instead of admitting
+// them all.
+//
+// depth/parent_assignment_id come from the scope the caller was GIVEN by
+// enforceDelegationCaps, never from a request — see the file header. A root
+// dispatch stores NULL for the parent so the fan-out count for a lead's chat
+// keeps working off the in-flight predicate rather than a self-referential
+// chain.
+//
+// A lost race returns a *delegationRefusal, so both callers answer it the same
+// way instead of one of them treating "no row written" as success.
+func insertCappedAssignment(
+	ctx context.Context,
+	db *sql.DB,
+	scope delegationScope,
+	lim delegationLimits,
+	a cappedAssignment,
+) (string, error) {
+	assignmentID := generateCUID()
+	var parentVal any
+	if scope.ParentID != "" {
+		parentVal = scope.ParentID
+	}
+	guardSQL, guardArgs := fanoutGuard(scope, a.AssignedByID, a.ChatID, lim.MaxFanout)
+	insertArgs := append([]any{
+		assignmentID, a.WorkspaceID, a.ChatID, a.AssignedByID, a.TargetID,
+		a.Task, a.GroupID, scope.Depth, parentVal, a.CreatedAt,
+	}, guardArgs...)
+	res, err := db.ExecContext(ctx, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, created_at)
+		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?
+		 WHERE `+guardSQL, insertArgs...)
+	if err != nil {
+		return "", err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("create assignment rows affected: %w", err)
+	}
+	if n == 0 {
+		return "", &delegationRefusal{msg: fmt.Sprintf(
+			"delegation refused: this run is at its limit of %d concurrent sub-agent task(s) "+
+				"(fan-out limit, instance setting %s). Wait for one to finish and read it with "+
+				"/results/<assignment_id>, or do the remaining work yourself.",
+			lim.MaxFanout, SettingDelegationMaxFanout)}
+	}
+	return assignmentID, nil
 }

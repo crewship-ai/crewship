@@ -147,25 +147,18 @@ func scrubSecretKeys(m map[string]any) {
 	}
 }
 
-// handleAssignAgentCredential proxies POST /agent-credentials to the crewshipd internal API.
-// Used by LEAD agents to assign a credential to a newly created agent.
-func (s *Server) handleAssignAgentCredential(w http.ResponseWriter, r *http.Request) {
-	if s.ipc == nil {
-		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
-		return
-	}
-	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/agent-credentials?workspace_id="+s.ipc.WorkspaceID)
-}
-
-// handleCreateCrewConnection proxies POST /crew-connections to the crewshipd internal API.
-// Used by LEAD agents to connect a new crew to existing ones.
-func (s *Server) handleCreateCrewConnection(w http.ResponseWriter, r *http.Request) {
-	if s.ipc == nil {
-		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
-		return
-	}
-	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/crew-connections?workspace_id="+s.ipc.WorkspaceID)
-}
+// handleAssignAgentCredential (POST /agent-credentials) and
+// handleCreateCrewConnection (POST /crew-connections) lived here and were
+// deleted in #1768. Their doc comments described LEAD-agent capabilities that
+// the product never actually had: neither target existed on crewshipd
+// (/api/v1/internal/agent-credentials is registered nowhere;
+// /api/v1/internal/crew-connections is GET-only), so both always came back
+// 502 "invalid response" after proxyToAPIFiltered failed to JSON-decode the
+// mux's 404/405 text body. Nothing regressed by removing them — there was no
+// working behaviour to preserve. If crew-to-crew linking or agent↔credential
+// assignment is wanted from an agent, it needs a backend handler WITH an
+// authorization gate first; re-adding the proxy alone just recreates a
+// convincing-looking route to nowhere.
 
 // handleCreateCrew proxies POST /crew/create to the crewshipd internal API.
 // Allows LEAD agents to create new crews in the workspace.

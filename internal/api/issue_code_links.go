@@ -37,6 +37,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/gitlink"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -63,11 +64,32 @@ type CodeLinkHandler struct {
 	db     *sql.DB
 	hub    *ws.Hub
 	logger *slog.Logger
+	// journal makes attach/detach notifiable. Missing until #1768 F1 for the
+	// same reason InternalIssueHandler's was: this handler wrote the
+	// mission_activity row and stopped, and notifications route per journal
+	// entry type. Defaults to noopEmitter; see SetJournal.
+	journal journal.Emitter
 }
 
 // NewCodeLinkHandler wires the handler.
 func NewCodeLinkHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *CodeLinkHandler {
-	return &CodeLinkHandler{db: db, hub: hub, logger: logger}
+	return &CodeLinkHandler{db: db, hub: hub, logger: logger, journal: noopEmitter{}}
+}
+
+// SetJournal wires a journal emitter after construction — same contract as
+// IssueHandler.SetJournal, nil included.
+func (h *CodeLinkHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
+}
+
+// events builds the shared issue-event emitter from the fields this handler
+// already holds.
+func (h *CodeLinkHandler) events() issueEvents {
+	return issueEvents{db: h.db, hub: h.hub, logger: h.logger, journal: h.journal}
 }
 
 // codeLinkResponse is the wire shape of one link.
@@ -263,8 +285,7 @@ func (h *CodeLinkHandler) Attach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.logActivity(r.Context(), missionID, userID, "code_link_added", ref.URL)
-	broadcastWorkspaceEvent(h.hub, wsID, "issue.updated", map[string]string{"id": missionID})
+	h.recordLinkEvent(r.Context(), missionID, wsID, userID, actionCodeLinkAdded, ref.URL)
 
 	link, err := h.loadOne(r.Context(), id, wsID)
 	if err != nil {
@@ -391,8 +412,7 @@ func (h *CodeLinkHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if u := UserFromContext(r.Context()); u != nil {
 		userID = u.ID
 	}
-	h.logActivity(r.Context(), missionID, userID, "code_link_removed", r.PathValue("linkId"))
-	broadcastWorkspaceEvent(h.hub, wsID, "issue.updated", map[string]string{"id": missionID})
+	h.recordLinkEvent(r.Context(), missionID, wsID, userID, actionCodeLinkRemoved, r.PathValue("linkId"))
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -429,20 +449,27 @@ func (h *CodeLinkHandler) noteSyncError(ctx context.Context, linkID, detail stri
 	}
 }
 
-// logActivity mirrors the issue handlers' mission_activity trail so attaching
-// and removing a link show up on the issue timeline like every other change.
-func (h *CodeLinkHandler) logActivity(ctx context.Context, missionID, userID, action, details string) {
+// recordLinkEvent records an attach/detach on the issue timeline, in the
+// journal and on the hub, through the one shared emitter (issue_events.go).
+//
+// This handler used to carry its own logActivity with a THIRD signature
+// (missionID, userID, action, details) that derived the actor type itself and
+// never touched the journal. The actor derivation is the only part worth
+// keeping and it lives here: these routes are browser-authenticated, so a
+// missing user means an internal/system caller, not an agent — the issue
+// handlers' actorType/actorID pair would be guesswork at this call site.
+func (h *CodeLinkHandler) recordLinkEvent(ctx context.Context, missionID, wsID, userID string, action issueAction, details string) {
 	actorType, actorID := "user", userID
 	if actorID == "" {
 		actorType, actorID = "system", ""
 	}
-	if _, err := h.db.ExecContext(ctx,
-		`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		generateCUID(), missionID, actorType, actorID, action, details,
-		time.Now().UTC().Format(time.RFC3339)); err != nil {
-		h.logger.Error("insert code link activity", "action", action, "mission_id", missionID, "error", err)
-	}
+	h.events().record(ctx, wsID, map[string]string{"id": missionID}, issueEvent{
+		MissionID: missionID,
+		ActorType: actorType,
+		ActorID:   actorID,
+		Action:    action,
+		Details:   details,
+	})
 }
 
 // ── credential resolution ────────────────────────────────────────────────

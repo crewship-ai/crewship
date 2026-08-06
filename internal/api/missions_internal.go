@@ -11,7 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -22,6 +25,11 @@ type InternalMissionHandler struct {
 	hub           *ws.Hub
 	missionEngine *orchestrator.MissionEngine
 	logger        *slog.Logger
+	// policyResolver + journal drive the #1768 autonomy gate on Create /
+	// Start. nil resolver → the conservative guided default (mission is
+	// staged, not waved through) — see gateInternalAction.
+	policyResolver *policy.Resolver
+	journal        journal.Emitter
 }
 
 // NewInternalMissionHandler creates an InternalMissionHandler for sidecar-facing mission endpoints.
@@ -29,8 +37,41 @@ func NewInternalMissionHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.Mission
 	return &InternalMissionHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
 
+// SetAutonomyGate wires the shared per-crew autonomy resolver and the journal
+// emitter the #1768 hold records through.
+func (h *InternalMissionHandler) SetAutonomyGate(r *policy.Resolver, j journal.Emitter) {
+	h.policyResolver = r
+	h.journal = j
+}
+
 // Create handles POST /api/v1/internal/missions
 // Creates a mission and optionally its tasks in one call.
+//
+// #1768 — gated on policy.ActionMissionCreate, and bounded by the mission caps
+// in mission_limits.go. The two are different questions and are answered in
+// that order: the policy decides WHETHER this crew may plan, the caps decide
+// HOW MUCH one call may set in motion. The caps exist because the delegation
+// depth/fan-out cap that bounds /assign explicitly does NOT reach missions
+// (delegation_limits.go:32) — nothing downstream re-bounds what a mission
+// dispatches once it starts, so the bound has to be on the task list here.
+//
+//	strict   → the mission row is written in PLANNING as before, but a hold
+//	           is recorded and Start refuses to move it to IN_PROGRESS until
+//	           an operator approves. A mission that cannot start dispatches
+//	           nothing — that is the inert state, and it is why strict gets
+//	           Approve rather than Reject here (a strict crew that cannot
+//	           plan work at all would be a usability cliff strict has
+//	           nowhere else).
+//	guided   → starts freely, with a non-blocking inbox notice. Planning is
+//	           ordinary work: no principal is created, the crew is fixed by
+//	           the token binding, and every task dispatches to an agent that
+//	           was already allowed to run — so nothing here widens what the
+//	           caller could already do, and what it may spend is bounded by
+//	           mission.max_tasks and mission.max_active_per_crew rather than
+//	           by a hold. See policy.ActionMissionCreate for what those caps
+//	           still do not cover.
+//	trusted  → journal-only, starts freely.
+//	full     → journal-only, starts freely.
 func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title            string  `json:"title"`
@@ -71,6 +112,40 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 	// workspace-bound token's crew must resolve to the bound workspace
 	// (PR-F24 foreign-ID closure).
 	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &req.CrewID) {
+		return
+	}
+	// Runs after the crew-binding check so the policy consulted belongs to a
+	// crew the caller has been proven to own.
+	gate, ok := gateInternalAction(w, r, h.policyResolver, h.logger, req.CrewID,
+		policy.ActionMissionCreate, "Mission creation")
+	if !ok {
+		return
+	}
+
+	// Mission caps (mission_limits.go) — the numeric bound the autonomy
+	// decision above assumed existed. Policy decides WHETHER this crew may
+	// plan; the caps decide HOW MUCH. Order matters in that direction: a
+	// strict crew that is rejected outright should hear about its autonomy
+	// level, not about a task count.
+	//
+	// Before the per-task workspace validation below, which costs one query
+	// per task — a runaway list must not buy itself thousands of reads on the
+	// way to being refused.
+	capLim, capErr := enforceMissionCaps(r.Context(), h.db, req.CrewID, len(req.Tasks))
+	if capErr != nil {
+		var refusal *missionRefusal
+		if errors.As(capErr, &refusal) {
+			h.logger.Info("mission refused by instance cap",
+				"crew_id", req.CrewID, "lead_agent_id", req.LeadAgentID,
+				"task_count", len(req.Tasks), "setting", refusal.Setting,
+				"reason", refusal.Error())
+			writeMissionCapRefusal(w, req.CrewID, refusal)
+			return
+		}
+		// Fail closed: the cap could not read its own state, so nothing has
+		// established that this creation is inside it.
+		h.logger.Error("evaluate mission caps", "crew_id", req.CrewID, "error", capErr)
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -123,14 +198,47 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 	}
 	defer tx.Rollback()
 
-	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, description, status, plan, workflow_template, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'PLANNING', ?, ?, ?, ?)`,
+	// The crew's mission budget is re-proved INSIDE the INSERT, not just by the
+	// pre-check above: a loop firing /mission/create concurrently is the exact
+	// shape the budget exists for, and a read-then-write check admits all of
+	// them. Same predicate+write-in-one-statement shape as
+	// insertCappedAssignment.
+	//
+	// authored_via is stamped here (v108 provenance, same 'agent_tool_call'
+	// value the internal issue door uses) because it is what the budget
+	// counts — see missionAuthoredViaAgent.
+	guardSQL, guardArgs := activeMissionGuard(req.CrewID, capLim.MaxActivePerCrew)
+	insertArgs := append([]any{
 		id, req.WorkspaceID, req.CrewID, req.LeadAgentID, traceID,
-		req.Title, req.Description, req.Plan, req.WorkflowTemplate, now, now)
+		req.Title, req.Description, req.Plan, req.WorkflowTemplate, now, now,
+	}, guardArgs...)
+	res, err := tx.ExecContext(r.Context(), `
+		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, description, status, plan, workflow_template, authored_via, created_at, updated_at)
+		SELECT ?, ?, ?, ?, ?, ?, ?, 'PLANNING', ?, ?, '`+missionAuthoredViaAgent+`', ?, ?
+		 WHERE `+guardSQL, insertArgs...)
 	if err != nil {
 		h.logger.Error("create mission", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to create mission")
+		return
+	}
+	if affected, aerr := res.RowsAffected(); aerr != nil {
+		h.logger.Error("create mission rows affected", "error", aerr)
+		replyError(w, http.StatusInternalServerError, "internal error")
+		return
+	} else if affected == 0 {
+		// Lost the race to a concurrent creation that took the last slot.
+		// Answered exactly like the pre-check refusal so a caller cannot read
+		// "no row written" as success.
+		h.logger.Info("mission refused by instance cap at insert",
+			"crew_id", req.CrewID, "setting", SettingMissionMaxActivePerCrew)
+		writeMissionCapRefusal(w, req.CrewID, &missionRefusal{
+			Setting: SettingMissionMaxActivePerCrew,
+			Limit:   capLim.MaxActivePerCrew,
+			msg: fmt.Sprintf(
+				"mission refused: this crew is at its limit of %d agent-created mission(s) still "+
+					"running (instance setting %s). Finish or close one before planning another.",
+				capLim.MaxActivePerCrew, SettingMissionMaxActivePerCrew),
+		})
 		return
 	}
 
@@ -170,14 +278,72 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	httpStatus := http.StatusCreated
+	approvalID := ""
+	if gate.held() {
+		aid, herr := writeAutonomyHold(r.Context(), h.db, h.logger, h.journal, gate, autonomyHold{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.LeadAgentID,
+			MissionID:   id,
+			Target:      autonomyTargetMission,
+			TargetID:    id,
+			InboxKind:   inbox.KindWaitpoint,
+			Title:       "Mission created by agent: " + req.Title,
+			BodyMD: fmt.Sprintf(
+				"An agent in a `%s` crew planned the mission **%s** with %d task(s).\n\n"+
+					"It stays in `PLANNING` and cannot be started until approved.",
+				gate.Level, req.Title, len(req.Tasks)),
+			Reason:      "agent created mission " + req.Title,
+			RequestedBy: req.LeadAgentID,
+		})
+		if herr != nil {
+			// Without the hold there is nothing for Start to consult, so the
+			// mission would be startable — i.e. ungated. Undo it.
+			h.logger.Error("internal create mission: autonomy hold failed — compensating delete",
+				"mission_id", id, "error", herr)
+			if _, derr := h.db.ExecContext(r.Context(),
+				`DELETE FROM missions WHERE id = ? AND workspace_id = ?`, id, req.WorkspaceID); derr != nil {
+				h.logger.Error("internal create mission: compensating delete failed",
+					"mission_id", id, "error", derr)
+			}
+			replyError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		approvalID = aid
+		httpStatus = http.StatusAccepted
+	} else if gate.wantsInbox() {
+		// guided → AutoLogInbox. The mission is already live and startable;
+		// this is after-the-fact visibility, and it is the whole of what the
+		// guided cell buys now that it no longer blocks. A failed write is a
+		// missed notice, not a broken mission (writeAutonomyNotice swallows).
+		writeAutonomyNotice(r.Context(), h.db, h.logger, gate, req.WorkspaceID,
+			inbox.KindMessage, id,
+			"Mission created by agent: "+req.Title,
+			fmt.Sprintf("An agent planned the mission **%s** with %d task(s). "+
+				"It can be started without further approval at `autonomy_level=%s`.",
+				req.Title, len(req.Tasks), gate.Level))
+	}
+
+	audit := gate.auditFields()
+	audit["title"] = req.Title
+	audit["crew_id"] = req.CrewID
+	audit["task_count"] = len(req.Tasks)
+	audit["pending_review"] = gate.held()
+	WriteAuditLog(r.Context(), h.db, h.journal, "mission.created", "MISSION", id, "", req.WorkspaceID, audit)
+
 	broadcastChannelEvent(h.hub, "crew", req.CrewID, "mission.created",
 		map[string]string{"id": id, "title": req.Title})
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"id":       id,
-		"trace_id": traceID,
-		"status":   "PLANNING",
-		"tasks":    taskIDs,
+	writeJSON(w, httpStatus, map[string]interface{}{
+		"id":             id,
+		"trace_id":       traceID,
+		"status":         "PLANNING",
+		"tasks":          taskIDs,
+		"decision":       string(gate.Decision),
+		"autonomy_level": string(gate.Level),
+		"pending_review": gate.held(),
+		"approval_id":    approvalID,
 	})
 }
 
@@ -234,6 +400,31 @@ func (h *InternalMissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	if currentStatus != "PLANNING" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": fmt.Sprintf("cannot start mission in %s state, must be PLANNING", currentStatus),
+		})
+		return
+	}
+
+	// #1768 — this is where the mission_create hold bites. A mission created
+	// under strict/guided autonomy carries an approvals_queue row; until an
+	// operator approves it, PLANNING never becomes IN_PROGRESS and the
+	// MissionEngine is never handed the mission, so nothing it planned runs.
+	//
+	// autonomyGateApproved is fail-closed on purpose: pending, denied,
+	// cancelled and TIMED-OUT rows all answer false. A check phrased as "no
+	// pending row blocks me" would have let harbormaster's timeout sweeper
+	// turn an unattended hold into a green light.
+	approved, hasHold, gerr := autonomyGateApproved(r.Context(), h.db, wsID, missionID)
+	if gerr != nil {
+		h.logger.Error("mission start: read autonomy hold", "mission_id", missionID, "error", gerr)
+		replyError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if hasHold && !approved {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":      "Mission start rejected by policy",
+			"reason":     "the mission was created under an autonomy hold and has not been approved",
+			"mission_id": missionID,
+			"remedy":     "an OWNER/ADMIN must approve it (`crewship approvals approve <id>` or the /approvals page)",
 		})
 		return
 	}

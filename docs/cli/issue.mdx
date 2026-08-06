@@ -40,6 +40,10 @@ crewship issue <subcommand> [flags]
 | `link` | Attach a pull request / merge request to an issue |
 | `relink` | Re-read a linked pull request's state from its provider (alias: `refresh-link`) |
 | `unlink` | Remove a pull-request link from an issue |
+| `attachments` | List the files attached to an issue (alias: `files`) |
+| `attach` | Attach a local file to an issue |
+| `attachment` | Download one attached file (alias: `download`) |
+| `detach` | Remove an attached file from an issue (alias: `unattach`) |
 | `bind-routine` | Bind a routine slug to an issue (sets `routine_id`) |
 | `unbind-routine` | Clear the routine binding on an issue |
 | `bulk update` | Apply the same patch to up to 100 issues in one round-trip |
@@ -413,6 +417,75 @@ Remove a link by its **link ID** (the first column of `issue links`).
 ```bash
 crewship issue unlink BE-42 cmsezurje0003d5e624ad
 ```
+
+---
+
+## `crewship issue attach`
+
+Attach a local file to an issue. Wraps
+`POST /api/v1/crews/{crewId}/issues/{ident}/attachments`.
+
+```bash
+crewship issue attach BE-42 ./crash.log
+crewship issue attach BE-42 ~/Desktop/screenshot.png
+```
+
+The type is decided by the file's **extension**, against an allowlist — never by
+what the client claims, because a server that trusted a client-supplied content
+type would store and later serve markup from its own origin. Allowed: `.txt`
+`.log` `.md` `.csv` `.tsv` `.json` `.yaml` `.yml` `.toml` `.xml` `.diff`
+`.patch` `.png` `.jpg` `.jpeg` `.gif` `.webp` `.avif` `.pdf` `.zip` `.gz`
+`.tgz`. Anything else is refused with a `415` that lists the set.
+
+Maximum 25 MiB; a larger file is refused locally, naming its size, before
+anything is uploaded. Attaching the same bytes twice is the same attachment, so
+a retry is safe and does not add a second timeline entry.
+
+The agent working the issue can read what you attach — see
+[Issue attachments](/guides/issue-attachments).
+
+## `crewship issue attachments`
+
+List an issue's attached files. Alias: `files`.
+
+```bash
+crewship issue attachments BE-42
+```
+
+**Output columns:** ID, FILENAME, TYPE, SIZE, BY (`(agent)` when an agent
+attached it), ADDED. Filenames are printed with control bytes stripped — they
+are chosen by whoever uploaded the file.
+
+## `crewship issue attachment`
+
+Download one attachment by its **attachment ID** (the first column of `issue
+attachments`). Alias: `download`.
+
+```bash
+crewship issue attachment BE-42 cmsf1a2b30001d5e6aa11 | less
+crewship issue attachment BE-42 cmsf1a2b30001d5e6aa11 -o ./crash.log
+```
+
+| Flag | Short | Description |
+|---|---|---|
+| `--output-file` | `-o` | Write the file to this path instead of stdout |
+
+Without `-o` the bytes go to stdout, so the command composes with a pager or a
+pipeline. The server's stored filename is never used to choose a local
+destination: it is a value someone else typed, and letting it name a path is how
+a download writes somewhere you did not ask for.
+
+## `crewship issue detach`
+
+Remove an attachment by its attachment ID. Alias: `unattach`.
+
+```bash
+crewship issue detach BE-42 cmsf1a2b30001d5e6aa11
+```
+
+The stored bytes go too — but only if no other issue, comment or chat in the
+workspace still references the same file. Attachments are stored by content, so
+two issues carrying an identical file share one copy.
 
 ---
 

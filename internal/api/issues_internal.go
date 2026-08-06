@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/untrusted"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -20,26 +21,65 @@ type InternalIssueHandler struct {
 	db     *sql.DB
 	hub    *ws.Hub
 	logger *slog.Logger
+	// journal is what makes an agent's issue change NOTIFIABLE. It was
+	// missing until #1768 F1: notifications route per journal entry type
+	// (internal/notifyroute), so a handler that wrote only the
+	// mission_activity row produced a timeline entry nobody could subscribe
+	// to. Defaults to noopEmitter so tests that construct the handler
+	// directly keep working.
+	journal journal.Emitter
+	// mentionDispatch is the @mention trigger's dispatch door, shared with the
+	// human comment path (issue_handler_comments.go). Both doors must parse or
+	// the feature half-works. nil = record and audit, dispatch nothing.
+	mentionDispatch mentionDispatcher
 }
 
 // NewInternalIssueHandler creates a new InternalIssueHandler.
 func NewInternalIssueHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *InternalIssueHandler {
-	return &InternalIssueHandler{db: db, hub: hub, logger: logger}
+	return &InternalIssueHandler{db: db, hub: hub, logger: logger, journal: noopEmitter{}}
 }
 
-// logActivity mirrors IssueHandler.logActivity's mission_activity insert so
-// agent-driven changes leave the same audit trail humans do. Best-effort:
-// errors are logged, never returned — the mutation itself already landed.
-// (No journal emit here; the internal handler has no journal wired, and the
-// activity row is what the issue UI's feed reads.)
-func (h *InternalIssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
-	actID := generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := h.db.ExecContext(ctx,
-		`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		actID, missionID, actorType, actorID, action, details, now); err != nil {
-		h.logger.Error("insert mission activity", "action", action, "mission_id", missionID, "error", err)
+// SetJournal wires a journal emitter after construction, mirroring
+// IssueHandler.SetJournal — same contract, including nil collapsing to the
+// noop emitter rather than being stored as a nil interface.
+func (h *InternalIssueHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
 	}
+	h.journal = j
+}
+
+// events builds the shared emitter from the fields this handler already
+// holds. Built per call so SetJournal after construction is picked up.
+func (h *InternalIssueHandler) events() issueEvents {
+	return issueEvents{db: h.db, hub: h.hub, logger: h.logger, journal: h.journal}
+}
+
+// SetMentionDispatcher wires the @mention trigger's dispatch door. Mirrors
+// IssueHandler.SetMentionDispatcher, including nil being supported.
+func (h *InternalIssueHandler) SetMentionDispatcher(d mentionDispatcher) {
+	h.mentionDispatch = d
+}
+
+// mentionRecorder builds the shared mention write path. Per call, so a
+// dispatcher wired after construction is picked up.
+func (h *InternalIssueHandler) mentionRecorder() mentionRecorder {
+	return mentionRecorder{db: h.db, logger: h.logger, events: h.events(), dispatcher: h.mentionDispatch}
+}
+
+// logActivity is the compatibility shim for the call sites that still pass
+// a bare action string (issues_internal_relations.go). It records the audit
+// row and the journal entry but does not broadcast — those call sites own
+// their own broadcast.
+func (h *InternalIssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
+	h.events().log(ctx, issueEvent{
+		MissionID: missionID,
+		ActorType: actorType,
+		ActorID:   actorID,
+		Action:    issueAction(action),
+		Details:   details,
+	})
 }
 
 // List handles GET /api/v1/internal/issues
@@ -611,6 +651,9 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	}
 
 	hasComment := req.Comment != nil && *req.Comment != ""
+	// Set inside the transaction, read after it commits, by the @mention
+	// trigger. Empty means no inline comment was written, so nothing to parse.
+	var inlineCommentID string
 
 	// The column update, the label replacement and the comment go in ONE
 	// transaction, the same shape Create already uses. Label replacement is
@@ -652,10 +695,16 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		// agent here.
 		if hasComment {
 			now := time.Now().UTC().Format(time.RFC3339)
+			// The id is hoisted out of the transaction because the @mention
+			// trigger runs AFTER the commit and needs to name the row it is
+			// recording mentions for. A PATCH's inline comment is a third
+			// comment door (#1768 item 3) — it carries agent-authored prose
+			// exactly like CreateComment does, so it must parse too.
+			inlineCommentID = generateCUID()
 			if _, err := tx.ExecContext(r.Context(), `
 				INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at)
 				VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				generateCUID(), missionID, req.AgentID, *req.Comment, now, now); err != nil {
+				inlineCommentID, missionID, req.AgentID, *req.Comment, now, now); err != nil {
 				internalError(w, r, h.logger, "insert internal comment", err)
 				return
 			}
@@ -693,26 +742,57 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Audit trail: mirror the human handlers' logActivity rows so agent-driven
-	// changes are just as visible in the activity feed. Best-effort and after
-	// the commit — the mutation has already landed, and a failed activity row
-	// must not roll it back.
+	// Audit trail: the same rows, the same journal entries and the same
+	// broadcast the human handlers produce. Best-effort and after the commit —
+	// the mutation has already landed, and a failed activity row must not roll
+	// it back.
+	//
+	// Collected first and handed to record() in one call so the batch produces
+	// exactly ONE issue.updated broadcast, not one per changed field. A
+	// label-only or comment-only PATCH collects no events and still
+	// broadcasts — the board changed even when no field did.
+	var evs []issueEvent
+	ev := func(action issueAction, details string) {
+		evs = append(evs, issueEvent{
+			MissionID: missionID, ActorType: actorType, ActorID: actorID,
+			Action: action, Details: details,
+		})
+	}
 	if !ub.Empty() {
 		if statusChanged {
-			h.logActivity(r.Context(), missionID, actorType, actorID,
-				"status_changed", currentStatus+" → "+req.Status)
+			ev(actionStatusChanged, currentStatus+" → "+req.Status)
 		}
 		if req.Priority != "" {
-			h.logActivity(r.Context(), missionID, actorType, actorID,
-				"priority_changed", req.Priority)
+			ev(actionPriorityChanged, req.Priority)
 		}
 		if assigneeChanged {
-			h.logActivity(r.Context(), missionID, actorType, actorID,
-				"assignee_changed", "assignee_id: "+*req.AssigneeID)
+			ev(actionAssigneeChanged, "assignee_id: "+*req.AssigneeID)
 		}
 	}
+	h.events().record(r.Context(), req.WorkspaceID,
+		map[string]string{"id": missionID, "identifier": ident}, evs...)
 
-	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
+	// @mentions in the inline comment. After the commit and after the audit
+	// batch, for the same reason both of those are after the mutation: the
+	// PATCH has already landed and been answered, and a mention that could not
+	// be recorded must not undo it.
+	if inlineCommentID != "" {
+		var issueTitle, authorName string
+		_ = h.db.QueryRowContext(r.Context(), `SELECT title FROM missions WHERE id = ?`, missionID).Scan(&issueTitle)
+		_ = h.db.QueryRowContext(r.Context(), `SELECT name FROM agents WHERE id = ?`, req.AgentID).Scan(&authorName)
+		h.mentionRecorder().record(r.Context(), mentionContext{
+			WorkspaceID: req.WorkspaceID,
+			MissionID:   missionID,
+			Identifier:  ident,
+			IssueTitle:  issueTitle,
+			IssueCrewID: crewID,
+			CommentID:   inlineCommentID,
+			CommentBody: *req.Comment,
+			AuthorType:  "agent",
+			AuthorID:    req.AgentID,
+			AuthorName:  authorName,
+		})
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -747,10 +827,10 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var missionID, crewID string
+	var missionID, crewID, issueTitle string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, crew_id FROM missions WHERE identifier = ? AND workspace_id = ?`,
-		ident, req.WorkspaceID).Scan(&missionID, &crewID)
+		`SELECT id, crew_id, title FROM missions WHERE identifier = ? AND workspace_id = ?`,
+		ident, req.WorkspaceID).Scan(&missionID, &crewID, &issueTitle)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -779,6 +859,26 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		internalError(w, r, h.logger, "insert comment", err)
 		return
 	}
+
+	// @mentions (#1768 item 3) — the AGENT door. Same wire format, same
+	// resolution, same caps as the human one; the difference is that an agent
+	// author carries a position in the delegation tree, so a mention chain
+	// (A mentions B, B's reply mentions C) is bounded by the depth cap read
+	// off the assignment row A is executing. See issue_mentions.go.
+	var authorName string
+	_ = h.db.QueryRowContext(r.Context(), `SELECT name FROM agents WHERE id = ?`, authorID).Scan(&authorName)
+	h.mentionRecorder().record(r.Context(), mentionContext{
+		WorkspaceID: req.WorkspaceID,
+		MissionID:   missionID,
+		Identifier:  ident,
+		IssueTitle:  issueTitle,
+		IssueCrewID: crewID,
+		CommentID:   commentID,
+		CommentBody: req.Body,
+		AuthorType:  authorType,
+		AuthorID:    authorID,
+		AuthorName:  authorName,
+	})
 
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 

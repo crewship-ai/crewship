@@ -533,15 +533,20 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodGet && r.URL.Path == "/credentials":
 				s.handleListCredentials(w, r)
 				return
-			case r.Method == http.MethodPost && r.URL.Path == "/agent-credentials":
-				s.handleAssignAgentCredential(w, r)
-				return
 			case r.Method == http.MethodGet && r.URL.Path == "/crew-connections":
 				s.handleListCrewConnections(w, r)
 				return
-			case r.Method == http.MethodPost && r.URL.Path == "/crew-connections":
-				s.handleCreateCrewConnection(w, r)
-				return
+			// POST /agent-credentials and POST /crew-connections used to be
+			// registered here. Both forwarded to an internal endpoint that does
+			// not exist: /api/v1/internal/agent-credentials is registered
+			// nowhere, and /api/v1/internal/crew-connections is GET-only
+			// (router_internal.go:157), so the mux answered 404 / 405 with a
+			// text body that proxyToAPIFiltered could not decode as JSON — the
+			// agent got a 502 "invalid response" every time. They were dead on
+			// arrival, not merely unused (#1768). Removed rather than left as
+			// guardNone rows, because an unauthenticated route that LOOKS like
+			// it grants credential assignment is a standing invitation for
+			// someone to "fix" it by adding the backend half without the gate.
 			case r.Method == http.MethodPost && r.URL.Path == "/issue/create":
 				s.handleIssueCreate(w, r)
 				return
@@ -558,6 +563,20 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/link"):
 				s.handleIssueLink(w, r)
+				return
+			// Attachment verbs (issue_attachments.go). The single-attachment
+			// arm is matched on Contains("/attachments/") and must come BEFORE
+			// the collection arm: "/issue/ENG-4/attachments/att_1" also has the
+			// "/issue/" prefix, and the PATCH/GET prefix arms further down would
+			// otherwise swallow it as a plain issue read.
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/issue/") && strings.Contains(r.URL.Path, "/attachments/"):
+				s.handleIssueAttachmentRead(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/attachments"):
+				s.handleIssueAttachmentsList(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/attachments"):
+				s.handleIssueAttach(w, r)
 				return
 			case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/issue/"):
 				s.handleIssueUpdate(w, r)

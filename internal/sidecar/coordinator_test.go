@@ -47,24 +47,12 @@ func coordHandlerCases() []coordHandlerCase {
 			wantQuery:  "workspace_id=ws-1",
 			wantMethod: http.MethodGet,
 		},
-		{
-			name:       "AssignAgentCredential",
-			handler:    func(s *Server) http.HandlerFunc { return s.handleAssignAgentCredential },
-			method:     http.MethodPost,
-			body:       `{"agent_id":"a1","credential_id":"c1"}`,
-			wantPath:   "/api/v1/internal/agent-credentials",
-			wantQuery:  "workspace_id=ws-1",
-			wantMethod: http.MethodPost,
-		},
-		{
-			name:       "CreateCrewConnection",
-			handler:    func(s *Server) http.HandlerFunc { return s.handleCreateCrewConnection },
-			method:     http.MethodPost,
-			body:       `{"from_crew_id":"a","to_crew_id":"b"}`,
-			wantPath:   "/api/v1/internal/crew-connections",
-			wantQuery:  "workspace_id=ws-1",
-			wantMethod: http.MethodPost,
-		},
+		// The AssignAgentCredential and CreateCrewConnection cases were removed
+		// with their handlers in #1768. They asserted the sidecar forwarded to
+		// /api/v1/internal/{agent-credentials,crew-connections} — which it did,
+		// faithfully, to endpoints crewshipd never registered. A forward test
+		// that mocks the upstream will pass against a route that does not
+		// exist in production; that is exactly how these two survived.
 		{
 			name:       "CreateCrew",
 			handler:    func(s *Server) http.HandlerFunc { return s.handleCreateCrew },

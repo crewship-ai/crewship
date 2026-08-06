@@ -494,6 +494,41 @@ chain). A `depth` field in the request body is read by nothing.
   depth from the request body. Do not model new controls on it.
 </Warning>
 
+## Mission limits
+
+The delegation limits above bound `/assign`. They do **not** bound a mission:
+the mission engine dispatches its task list through its own path, so a mission
+an agent authored is not a delegation hop and is not counted as one. Missions
+are bounded by their own two numbers, on the agent door
+(`POST /mission/create`):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `mission.max_tasks` | `16` | Tasks one agent-created mission may carry. `0` allows task-less missions only — every task then has to arrive through `/assign`, where the delegation limits apply. |
+| `mission.max_active_per_crew` | `6` | Agent-created missions one crew may have in a non-terminal state at once. `0` switches agent-driven mission creation off. |
+
+Both are instance settings, read live — a change applies to the next call:
+
+```bash
+crewship instance settings set mission.max_tasks 24
+crewship instance settings get mission.max_active_per_crew
+```
+
+Past either limit, `/mission/create` answers **403** with a body naming the
+`setting` an operator would change, and no mission or task row is written.
+
+<Note>
+  The second number is the one that bounds recursion. A mission created with no
+  tasks makes the engine run its lead as a planning turn, and a planning turn
+  can create another mission — so a per-mission task cap on its own would bound
+  nothing. The crew's live-mission budget does, because every mission an agent
+  creates lands in the crew its token is bound to.
+</Note>
+
+Missions **you** create through the dashboard or the JWT API are not capped and
+are not counted against the agents' budget: an operator planning work is making
+a decision, not fanning out unattended.
+
 ## Sidecar API for Orchestration
 
 Any crew agent can reach the sidecar proxy at `localhost:9119`; the orchestration
@@ -506,7 +541,7 @@ routes are:
 | `/query` | POST | Ask a crew member a quick question |
 | `/standup` | GET | Get crew standup summary |
 | `/escalate` | POST | Escalate an issue to humans |
-| `/mission/create` | POST | Create a multi-task mission |
+| `/mission/create` | POST | Create a multi-task mission (subject to the mission limits above) |
 | `/mission/{id}` | GET | Check mission status |
 | `/mission/{id}/start` | POST | Start a mission |
 | `/mission/templates` | GET | List available workflow templates |
@@ -525,6 +560,9 @@ file descriptor 3 — never on a command line), the `GET`s included.
 | `/issue/{identifier}` | PATCH | Update status, priority, assignee, labels, estimate, due date |
 | `/issue/{identifier}/comment` | POST | Comment on the issue, recorded as the calling agent |
 | `/issue/{identifier}/link` | POST | Relate two issues, or make one a sub-issue of another |
+| `/issue/{identifier}/attachments` | GET | List the files attached to the issue (metadata only) |
+| `/issue/{identifier}/attachments/{id}` | GET | Read one attachment — text arrives fenced, everything else base64 |
+| `/issue/{identifier}/attachments` | POST | Attach a file the agent produced (`filename` + `content_base64`, max 6 MiB) |
 
 Identifiers are the human-readable ones (`ENG-42`), not row ids.
 

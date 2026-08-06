@@ -11,6 +11,8 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/policy"
 )
 
 // nilIfEmpty returns nil for empty strings, otherwise a pointer to the string.
@@ -58,10 +60,37 @@ func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 
 // CreateCrew handles POST /api/v1/internal/crews?workspace_id=...
 // Allows LEAD agents (via sidecar) to create a new crew in the workspace.
+//
+// #1768 — gated on policy.ActionCrewCreate against the CALLING crew's
+// autonomy_level. This was the sharpest hole in that issue: the INSERT below
+// never set autonomy_level, and crews.autonomy_level carries DEFAULT 'guided'
+// (migration v101), so an agent in a strict crew could create a guided one,
+// create an agent inside it, and act there — a complete autonomy escape.
+//
+// Two things close it. The gate refuses outright at strict; and at every
+// level the new crew's autonomy_level is now written explicitly instead of
+// inherited from the column default:
+//
+//	held (guided/trusted) → pinned to 'strict'. A strict crew rejects
+//	                        agent_create and routine_schedule_create, so the
+//	                        new crew cannot be populated or scheduled until
+//	                        an operator approves — that is what makes it
+//	                        inert. Approving restores the creating crew's
+//	                        own level (never more permissive than the
+//	                        parent).
+//	full                  → inherits the creating crew's level directly.
 func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
 		replyError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+
+	// The subject is the CALLING crew (from the token binding) — a crew
+	// being created has no policy of its own yet.
+	gate, ok := gateInternalAction(w, r, h.policyResolver, h.logger, "",
+		policy.ActionCrewCreate, "Crew creation")
+	if !ok {
 		return
 	}
 
@@ -116,27 +145,107 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 		color = &body.Color
 	}
 
+	// Written explicitly, never left to the v101 column default — see the
+	// handler docstring. A held crew is pinned to strict; an allowed one
+	// inherits the creating crew's level.
+	newLevel := string(gate.Level)
+	if gate.held() {
+		newLevel = string(policy.AutonomyStrict)
+	}
+	if newLevel == "" {
+		newLevel = string(policy.AutonomyGuided)
+	}
+
 	_, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO crews (id, workspace_id, name, slug, description, icon, color, network_mode, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, wsID, body.Name, body.Slug, body.Description, icon, color, database.DefaultCrewNetworkMode, now, now)
+		INSERT INTO crews (id, workspace_id, name, slug, description, icon, color, network_mode, autonomy_level, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, wsID, body.Name, body.Slug, body.Description, icon, color, database.DefaultCrewNetworkMode, newLevel, now, now)
 	if err != nil {
 		h.logger.Error("internal create crew", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to create crew")
 		return
 	}
 
-	h.logger.Info("crew created via coordinator", "crew_id", crewID, "name", body.Name, "workspace", wsID)
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"id":           crewID,
-		"name":         body.Name,
-		"slug":         body.Slug,
-		"workspace_id": wsID,
+	status := http.StatusCreated
+	approvalID := ""
+	if gate.held() {
+		id, herr := writeAutonomyHold(r.Context(), h.db, h.logger, h.journal, gate, autonomyHold{
+			WorkspaceID:  wsID,
+			CrewID:       crewID,
+			Target:       autonomyTargetCrew,
+			TargetID:     crewID,
+			ReleaseValue: string(gate.Level),
+			InboxKind:    inbox.KindWaitpoint,
+			Title:        "Crew created by agent: " + body.Name,
+			BodyMD: fmt.Sprintf(
+				"An agent in a `%s` crew created the crew **%s** (`%s`).\n\n"+
+					"It is pinned to `autonomy_level=strict` until you decide, so no agent "+
+					"or schedule can be created inside it. Approving restores `%s`.",
+				gate.Level, body.Name, body.Slug, gate.Level),
+			Reason: "agent created crew " + body.Slug,
+		})
+		if herr != nil {
+			// A sentinel with no release path is a bricked crew. Undo the
+			// INSERT and fail loudly so the caller can retry — same
+			// compensating-delete rationale as agents_hire.go.
+			h.logger.Error("internal create crew: autonomy hold failed — compensating delete",
+				"crew_id", crewID, "error", herr)
+			if _, derr := h.db.ExecContext(r.Context(),
+				`DELETE FROM crews WHERE id = ? AND workspace_id = ?`, crewID, wsID); derr != nil {
+				h.logger.Error("internal create crew: compensating delete failed",
+					"crew_id", crewID, "error", derr)
+			}
+			replyError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		approvalID = id
+		status = http.StatusAccepted
+	} else if gate.wantsInbox() {
+		writeAutonomyNotice(r.Context(), h.db, h.logger, gate, wsID, inbox.KindMessage, crewID,
+			"Crew created by agent: "+body.Name,
+			fmt.Sprintf("An agent created the crew **%s** (`%s`) at `autonomy_level=%s`.",
+				body.Name, body.Slug, newLevel))
+	}
+
+	audit := gate.auditFields()
+	audit["name"] = body.Name
+	audit["slug"] = body.Slug
+	audit["autonomy_level_assigned"] = newLevel
+	audit["pending_review"] = gate.held()
+	WriteAuditLog(r.Context(), h.db, h.journal, "crew.created", "CREW", crewID, "", wsID, audit)
+
+	h.logger.Info("crew created via coordinator", "crew_id", crewID, "name", body.Name, "workspace", wsID,
+		"decision", string(gate.Decision), "autonomy_level", newLevel)
+	writeJSON(w, status, map[string]interface{}{
+		"id":             crewID,
+		"name":           body.Name,
+		"slug":           body.Slug,
+		"workspace_id":   wsID,
+		"autonomy_level": newLevel,
+		"decision":       string(gate.Decision),
+		"pending_review": gate.held(),
+		"approval_id":    approvalID,
 	})
 }
 
 // CreateAgent handles POST /api/v1/internal/agents?workspace_id=...
 // Allows LEAD agents (via sidecar) to create a new agent within a crew.
+//
+// #1768 — gated on policy.ActionAgentCreate. A persistent agent differs from
+// an ephemeral hire on every axis that made ActionEphemeralSpawn tolerable at
+// trusted: no TTL, no template, no max_ephemeral_agents quota, and the
+// caller-supplied system_prompt below is persona authorship reached through
+// an INSERT rather than the UPDATE that policy.ActionPersonaDirectWrite
+// refuses at every level.
+//
+//	strict          → 403.
+//	guided/trusted  → the row is created with status='PENDING_REVIEW'. The
+//	                  chatbridge refuses to start an agent in that state
+//	                  (internal/chatbridge/bridge.go — the guard is NOT
+//	                  ephemeral-scoped), so the agent exists but cannot serve
+//	                  a single message until an operator approves. That is
+//	                  the same sentinel the guided hire flow uses.
+//	full            → live immediately, with a non-blocking inbox notice.
 func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
@@ -174,6 +283,14 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// for workspace-bound/master-token callers (unaffected, still
 	// workspace-wide by design).
 	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
+		return
+	}
+	// Runs after the crew-binding check above so the policy we resolve is
+	// the one for a crew the caller has been proven to own — otherwise a
+	// caller could name a permissive sibling and be judged by its level.
+	gate, ok := gateInternalAction(w, r, h.policyResolver, h.logger, body.CrewID,
+		policy.ActionAgentCreate, "Agent creation")
+	if !ok {
 		return
 	}
 	if body.Slug == "" {
@@ -229,14 +346,23 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	webhookSecret := storedWebhookSecret
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// The status sentinel — see the handler docstring. Explicit rather than
+	// leaning on the agents.status DEFAULT 'IDLE', because the whole point
+	// is that a held agent must NOT be idle-and-serviceable.
+	initialStatus := "IDLE"
+	if gate.held() {
+		initialStatus = "PENDING_REVIEW"
+	}
+
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO agents (id, workspace_id, crew_id, name, slug, description, role_title, agent_role,
-			cli_adapter, llm_provider, llm_model, tool_profile, system_prompt_legacy,
+			cli_adapter, llm_provider, llm_model, tool_profile, system_prompt_legacy, status,
 			timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		agentID, wsID, body.CrewID, body.Name, body.Slug, body.Description,
 		body.RoleTitle, body.AgentRole,
 		body.CLIAdapter, nilIfEmpty(body.LLMProvider), nilIfEmpty(body.LLMModel), body.ToolProfile, body.SystemPrompt,
+		initialStatus,
 		1800, true, webhookSecret, now, now)
 	if err != nil {
 		h.logger.Error("internal create agent", "error", err)
@@ -244,16 +370,74 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto-assign workspace AI credentials so the new agent can run immediately.
+	status := http.StatusCreated
+	approvalID := ""
+	if gate.held() {
+		id, herr := writeAutonomyHold(r.Context(), h.db, h.logger, h.journal, gate, autonomyHold{
+			WorkspaceID: wsID,
+			CrewID:      body.CrewID,
+			AgentID:     agentID,
+			Target:      autonomyTargetAgent,
+			TargetID:    agentID,
+			// KindWaitpoint with SourceID=agent_id is the shape
+			// ApproveHire's inbox.ResolveBySourceTx already clears, so the
+			// legacy `crewship hire approve <id>` path resolves this row
+			// too — one waitpoint, two decide surfaces.
+			InboxKind: inbox.KindWaitpoint,
+			Title:     "Agent created by agent: " + body.Name,
+			BodyMD: fmt.Sprintf(
+				"An agent in a `%s` crew created the persistent agent **%s** (`%s`) "+
+					"with a system prompt it wrote itself.\n\n"+
+					"The row is `PENDING_REVIEW` and cannot serve a message until approved.",
+				gate.Level, body.Name, body.Slug),
+			Reason: "agent created persistent agent " + body.Slug,
+		})
+		if herr != nil {
+			h.logger.Error("internal create agent: autonomy hold failed — compensating delete",
+				"agent_id", agentID, "error", herr)
+			if _, derr := h.db.ExecContext(r.Context(),
+				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`, agentID, wsID); derr != nil {
+				h.logger.Error("internal create agent: compensating delete failed",
+					"agent_id", agentID, "error", derr)
+			}
+			replyError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		approvalID = id
+		status = http.StatusAccepted
+	} else if gate.wantsInbox() {
+		writeAutonomyNotice(r.Context(), h.db, h.logger, gate, wsID, inbox.KindMessage, agentID,
+			"Agent created by agent: "+body.Name,
+			fmt.Sprintf("An agent created the persistent agent **%s** (`%s`) in crew `%s`.",
+				body.Name, body.Slug, body.CrewID))
+	}
+
+	// Auto-assign workspace AI credentials so the new agent can run once it
+	// is live. Done after the hold is durable so a failed hold (which
+	// compensating-deletes the agent above) cannot strand an
+	// agent_credentials row pointing at a deleted agent.
 	autoAssignCredentials(r.Context(), h.db, h.logger, h.journal, wsID, agentID, now)
 
-	h.logger.Info("agent created via coordinator", "agent_id", agentID, "name", body.Name, "crew_id", body.CrewID)
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"id":           agentID,
-		"name":         body.Name,
-		"slug":         body.Slug,
-		"crew_id":      body.CrewID,
-		"workspace_id": wsID,
+	audit := gate.auditFields()
+	audit["name"] = body.Name
+	audit["slug"] = body.Slug
+	audit["crew_id"] = body.CrewID
+	audit["initial_status"] = initialStatus
+	audit["pending_review"] = gate.held()
+	WriteAuditLog(r.Context(), h.db, h.journal, "agent.created", "AGENT", agentID, "", wsID, audit)
+
+	h.logger.Info("agent created via coordinator", "agent_id", agentID, "name", body.Name,
+		"crew_id", body.CrewID, "decision", string(gate.Decision), "status", initialStatus)
+	writeJSON(w, status, map[string]interface{}{
+		"id":             agentID,
+		"name":           body.Name,
+		"slug":           body.Slug,
+		"crew_id":        body.CrewID,
+		"workspace_id":   wsID,
+		"status":         initialStatus,
+		"decision":       string(gate.Decision),
+		"pending_review": gate.held(),
+		"approval_id":    approvalID,
 	})
 }
 

@@ -86,7 +86,6 @@ var BackupTables = []string{
 	"crews",
 	"chats",
 	"workspace_files",
-	"chat_attachments",
 	"journal_entries",
 	// journal_entry_priorities (v166) FKs journal_entries(id), so it must land
 	// AFTER its parent. It carries the append-only ledger of operator pin/
@@ -191,6 +190,12 @@ var BackupTables = []string{
 	"mission_tasks",
 	"mission_activity",
 	"mission_comments",
+	// mission_comment_mentions FKs into missions, mission_comments, agents and
+	// assignments — all four are dumped ABOVE this line, which is what makes
+	// this position FK-safe. It must stay after "mission_comments" in
+	// particular: the parent comment is the row a mention is meaningless
+	// without, and PRAGMA foreign_keys is ON during restore.
+	"mission_comment_mentions",
 	"mission_labels",
 	"mission_proposals",
 	"mission_relations",
@@ -198,6 +203,15 @@ var BackupTables = []string{
 	// ON DELETE SET NULL) — both are dumped above, so this position is
 	// FK-safe. Direct workspace_id column, so the generic filter applies.
 	"mission_code_links",
+	// attachments replaces chat_attachments (dropped in
+	// 20260806194500_attachments.sql) and holds every attached file's metadata
+	// for all three owner kinds. Its exclusive-arc FKs reach missions (147),
+	// mission_comments (193) and chats (87), plus users (82) and agents (152) —
+	// every one of them is dumped ABOVE this line, which is what makes this
+	// position FK-safe with PRAGMA foreign_keys ON during restore. It cannot sit
+	// at depth 1 beside chats, where chat_attachments used to: missions and
+	// mission_comments come later, so an issue attachment would fail its FK.
+	"attachments",
 	"skill_invocations",
 	"workflow_states",
 	"captain_chats",

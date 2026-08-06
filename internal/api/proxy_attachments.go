@@ -2,13 +2,16 @@ package api
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // AgentChatAttachment handles file uploads attached to a specific chat
@@ -132,6 +135,33 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Record the metadata row (#1768 item 7).
+	//
+	// Until now this endpoint wrote bytes and nothing else: a chat attachment had
+	// no recorded size, checksum, MIME type or uploader, could not be listed and
+	// could not be deleted through any API. The docs claimed otherwise and were
+	// corrected on this branch. This is the other half of that correction.
+	//
+	// The BLOB LOCATION is deliberately unchanged. It stays at
+	// <crewID>/<agentSlug>/attachments/<chatId>/<filename>, because that path is
+	// the agent-visible contract — the file appears in the container at
+	// /output/<agentSlug>/... and prompts, tools and users already reference it
+	// there. Moving it to the content-addressed layout the issue attachments use
+	// would break every one of those for no user-visible gain. `storage_key`
+	// exists on the row precisely so the two layouts can differ; it is the
+	// authority on where a given attachment lives.
+	//
+	// One consequence, named rather than discovered later: because these blobs
+	// are not content-addressed, they are outside the refcounted-unlink and
+	// reclaim machinery. reclaimAttachmentBlobs walks only
+	// attachments/<workspace>/ and will not touch them. Deleting a chat
+	// attachment's bytes is the crew-files surface's job, as it is today.
+	//
+	// Best-effort, after the bytes have landed: the upload is the thing the
+	// caller asked for, and a failed bookkeeping row must not turn a stored file
+	// into an error.
+	h.recordChatAttachment(r, workspaceID, chatID, filename, fullPath, body)
+
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"filename": filename,
 		"size":     len(body),
@@ -140,4 +170,51 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 		// agent can read the attachment without guessing.
 		"agent_path": "/output/" + slug.String + "/" + relPath,
 	})
+}
+
+// recordChatAttachment writes the metadata row for a chat attachment.
+//
+// It mirrors the issue path's rules where they are about the DATA — the
+// filename is already a sanitised basename by the time it gets here, the
+// content type is resolved from the extension against the shared allowlist, and
+// the digest is computed over the bytes that were actually stored — and departs
+// from it only on the blob location, which is the caller's (see the call site).
+//
+// An extension outside the allowlist does NOT refuse the upload. The bytes are
+// already stored, the endpoint has shipped for releases with no type restriction
+// at all, and turning an established chat feature into a 415 as a side effect of
+// adding metadata would be a breaking change smuggled into a bookkeeping one.
+// The row records what the file actually is (application/octet-stream for an
+// unrecognised extension) rather than pretending it was refused. Tightening the
+// chat surface is its own change, with its own release note.
+func (h *ProxyHandler) recordChatAttachment(r *http.Request, workspaceID, chatID, filename, storageKey string, body []byte) {
+	contentType, err := resolveAttachmentType(filename)
+	if err != nil {
+		contentType = "application/octet-stream"
+	}
+	sum := sha256.Sum256(body)
+	var userID string
+	if u := UserFromContext(r.Context()); u != nil {
+		userID = u.ID
+	}
+	_, err = h.db.ExecContext(r.Context(), `
+		INSERT INTO attachments
+			(id, workspace_id, owner_type, chat_id, filename, content_type, size_bytes,
+			 sha256, storage_key, uploaded_by_user_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		generateCUID(), workspaceID, string(attachmentOwnerChat), chatID, filename, contentType,
+		len(body), hex.EncodeToString(sum[:]), storageKey, nullIfEmpty(userID),
+		time.Now().UTC().Format(time.RFC3339))
+	if err == nil {
+		return
+	}
+	if strings.Contains(strings.ToUpper(err.Error()), "UNIQUE") {
+		// The same bytes were already attached to this chat. The partial unique
+		// index is doing its job; re-uploading a file is not an error and the
+		// bytes on disk are byte-identical to what is already recorded.
+		return
+	}
+	if h.logger != nil {
+		h.logger.Error("record chat attachment", "chat_id", chatID, "error", err)
+	}
 }

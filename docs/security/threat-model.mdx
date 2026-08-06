@@ -622,7 +622,8 @@ statement, deliberately kept honest here:
 
 - `/query`, `/escalate` and the agent-attribution routes (the whole issue
   surface — `/issue/create`, `/issues`, `/issue/<id>` GET and PATCH,
-  `/issue/<id>/comment`, `/issue/<id>/link` — plus `/expose-port`,
+  `/issue/<id>/comment`, `/issue/<id>/link`, `/issue/<id>/attachments` GET
+  and POST, `/issue/<id>/attachments/<id>` GET — plus `/expose-port`,
   `/keeper/*`, `/pipelines/save`, `/pipelines/<slug>/run`, `/mcp/routines`,
   `/connections/<crew>/message`, `/report-confidence`) resolve the acting
   agent **inside the handler** and fail closed there. They are not behind a

@@ -188,8 +188,8 @@ The `POST` create/rotate routes are registered only when the public `CredentialH
 |---|---|---|
 | `GET` | `/api/v1/internal/agents/{agentId}/resolve` | Resolve agent slug/ID to its full record. |
 | `GET` | `/api/v1/internal/crews` | List crews (sidecar discovery). |
-| `POST` | `/api/v1/internal/crews` | Create a crew programmatically. |
-| `POST` | `/api/v1/internal/agents` | Create an agent programmatically. |
+| `POST` | `/api/v1/internal/crews` | Create a crew programmatically. Gated on the caller's crew `autonomy_level` — see [Autonomy gate](#autonomy-gate-on-agent-driven-creation). |
+| `POST` | `/api/v1/internal/agents` | Create an agent programmatically. Gated on the caller's crew `autonomy_level` — see [Autonomy gate](#autonomy-gate-on-agent-driven-creation). |
 | `POST` | `/api/v1/internal/agents/hire` | LEAD-initiated ephemeral hire — sidecar `/spawn` proxies here. See [Ephemeral hire](#ephemeral-hire). |
 | `GET` | `/api/v1/internal/crew-connections` | List crew connections. |
 
@@ -252,13 +252,13 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/internal/missions` | Create a mission. |
+| `POST` | `/api/v1/internal/missions` | Create a mission. Gated on the crew's `autonomy_level`; a held mission cannot be started. See [Autonomy gate](#autonomy-gate-on-agent-driven-creation). Also bounded by two instance settings: `mission.max_tasks` (default `16`) limits the task list of one mission, and `mission.max_active_per_crew` (default `6`) limits how many agent-created missions a crew may have in a non-terminal state. Past either, the response is `403` with `{"error","reason","crew_id","setting","limit"}` — `setting` names the key an operator would change — and no row is written. Missions created through the JWT API are neither capped nor counted. |
 | `GET` | `/api/v1/internal/missions/{missionId}` | Get mission details. |
 | `POST` | `/api/v1/internal/missions/{missionId}/start` | Transition mission to running. |
 | `GET` | `/api/v1/internal/issues` | List issues. Optional filters: `status` (comma-separated), `assignee_id`, `mission_type`, and `q` — a free-text search over title and description, with `%` and `_` escaped so they match literally. A crew-bound (`crwv1`) token constrains the listing to its own crew even when `crew_id` is omitted. |
 | `GET` | `/api/v1/internal/issues/{identifier}` | Get a specific issue. |
 | `POST` | `/api/v1/internal/issues` | Create issue. `author_agent_id` (validated against the crew/workspace) is persisted as the creator with `authored_via = agent_tool_call`; optional `author_chat_id` / `author_run_id` record provenance. If `assignee_id` is set, `assignee_type` must be `user` or `agent` and the assignee must belong to `workspace_id` — otherwise `400` (`assignee_type must be 'user' or 'agent' when assignee_id is set` / `assignee_id does not exist in this workspace`). |
-| `PATCH` | `/api/v1/internal/issues/{identifier}` | Update an issue: `status`, `priority`, `assignee_type`/`assignee_id`, `labels`, `estimate`, `due_date`, plus an optional `comment`. Writes a `mission_activity` audit row attributed to `agent_id` (or `system` when absent). A `comment` requires `agent_id`. `assignee_id` is validated against `workspace_id` (`400` when it names another tenant's user/agent); `labels` is a full replacement whose insert is workspace-scoped, so a foreign label id attaches nothing. An empty-string `assignee_id` / `due_date` clears the field. `title`, `description`, `project_id`, `milestone_id`, `routine_id`, `sort_order` and `parent_issue_id` are **not** accepted here. |
+| `PATCH` | `/api/v1/internal/issues/{identifier}` | Update an issue: `status`, `priority`, `assignee_type`/`assignee_id`, `labels`, `estimate`, `due_date`, plus an optional `comment`. Writes a `mission_activity` audit row **and a Crew Journal entry** attributed to `agent_id` (or `system` when absent) — the journal entry is what notification routing keys off, so an agent's change is subscribable exactly like a human's. A `comment` requires `agent_id`. `assignee_id` is validated against `workspace_id` (`400` when it names another tenant's user/agent); `labels` is a full replacement whose insert is workspace-scoped, so a foreign label id attaches nothing. An empty-string `assignee_id` / `due_date` clears the field. `title`, `description`, `project_id`, `milestone_id`, `routine_id`, `sort_order` and `parent_issue_id` are **not** accepted here. |
 | `POST` | `/api/v1/internal/issues/{identifier}/comments` | Comment on issue. Requires `agent_id` — unattributed comments are rejected with `400`. |
 | `POST` | `/api/v1/internal/issues/{identifier}/relations` | Relate two issues. Body: `target_identifier`, `relation_type` ∈ `blocks` \| `blocked_by` \| `relates_to` \| `duplicate_of` \| `sub_issue_of`. `blocked_by` is normalised to a swapped `blocks` row; `sub_issue_of` writes `parent_issue_id` on the issue named in the path instead of a `mission_relations` row. The path issue is crew-gated like every other mutation; the target only has to live in the bound workspace, and a foreign-tenant target is a `404` rather than a `403` so the endpoint is not an existence oracle. Duplicate relation → `409`. |
 
@@ -426,7 +426,7 @@ The trusted endpoint the sidecar forwards to when an agent emits a new pipeline 
 Four internal routes mirror public handlers so the sidecar's slash-action surface (and, where noted, autonomous agent tool calls) have a trusted backend to proxy into. Each adapter reads `workspace_id` from the `?workspace_id=` query parameter and injects a role into the request context before dispatching to the shared public handler. They follow a **dual-path** model (PRD-SLASH-CAPABILITIES-2026 §6.5):
 
 - **User-initiated** (`X-Caller-User-Id` header present): the adapter gates on the caller's per-action capability (`routine.create`, `skill.create`, `credential.create`, `credential.rotate`) and stamps the real user id for audit attribution.
-- **Autonomous-agent** (`X-Caller-User-Id` absent): falls through the capability gate (the autonomy gate runs upstream), relying on the injected role to clear the public handler's pre-existing role check.
+- **Autonomous-agent** (`X-Caller-User-Id` absent): skips the capability gate — a capability belongs to a user and this path has none — and is instead gated on the calling crew's `autonomy_level`. See [Autonomy gate on agent-driven creation](#autonomy-gate-on-agent-driven-creation).
 
 | Route | Public handler | Injected role | `X-Caller-User-Id` | Capability |
 |---|---|---|---|---|
@@ -439,12 +439,50 @@ Four internal routes mirror public handlers so the sidecar's slash-action surfac
 
 **Request / response shapes** match the underlying public endpoints:
 
-- `routines/schedules` → body is the schedule shape (`name`, `target_pipeline_slug` or `target_pipeline_id`, `cron_expr`, `timezone`, `inputs`, `enabled`); `cron_expr` is required. Returns `201 Created` with the schedule object. (`internal/api/internal_routines.go:76`, `internal/api/pipeline_schedules.go:82`)
-- `skills/generate` → body `{ "slug", "prompt", "model"? }` (`slug` + `prompt` required). The adapter stamps `workspace_id` as the `{workspaceId}` path value the public handler expects. Returns `200 OK` with `{ "skill_id", "slug", "content", "scan_status", ... }`. Needs an Anthropic `API_KEY` credential in the workspace (`412` otherwise). (`internal/api/internal_skills.go:49`, `internal/api/skills_generate.go:94`)
+- `routines/schedules` → body is the schedule shape (`name`, `target_pipeline_slug` or `target_pipeline_id`, `cron_expr`, `timezone`, `inputs`, `enabled`); `cron_expr` is required. Returns `201 Created` with the schedule object; below `full` the schedule is created enabled and leaves a non-blocking inbox notice. Returns `403` at `strict`. (A `202 Accepted` with `enabled: false` is still possible when the policy resolver is unwired — the gate fails closed, and a supplied `enabled: true` is overridden on that path.) See [Autonomy gate on agent-driven creation](#autonomy-gate-on-agent-driven-creation). (`internal/api/internal_routines.go:76`, `internal/api/pipeline_schedules.go:82`)
+- `skills/generate` → body `{ "slug", "prompt", "model"? }` (`slug` + `prompt` required). The adapter stamps `workspace_id` as the `{workspaceId}` path value the public handler expects. Returns `200 OK` with `{ "skill_id", "slug", "content", "scan_status", ... }` at `full` autonomy; below that the generated document is staged for review and the response is `202 Accepted` with `{ "file_name", "slug", "scan_status", "pending_review": true }`. Needs an Anthropic `API_KEY` credential in the workspace (`412` otherwise). (`internal/api/internal_skills.go:49`, `internal/api/skills_generate.go:94`)
 - `credentials` (create) → same body as [Create Credential](/api-reference/credentials#create-credential). Returns `201 Created`. (`internal/api/internal_credentials_mutate.go:49`)
 - `credentials/{credentialId}/rotate` → same body as [Rotate Credential](/api-reference/credentials#rotate-credential) (`value` required, `grace_seconds` optional). `credentialId` is read from the path. Returns `200 OK` with the rotation object. (`internal/api/internal_credentials_mutate.go:76`)
 
 Common errors across all four: `400` (missing `workspace_id` query param or body validation), `401` (credentials only: missing `X-Caller-User-Id`), `403` (capability denied), `500` (adapter not configured).
+
+## Autonomy gate on agent-driven creation
+
+Six internal routes let an agent create something that keeps acting after the request ends. Each one now consults the calling crew's `autonomy_level` (see [Policies](/api-reference/policies)) before writing, using the same decision matrix `POST /api/v1/agents/hire` already follows.
+
+Two rows block below `full` and two do not, and the split is deliberate. `crew_create` and `agent_create` bring a **durable principal** into existence — something that will act again tomorrow, and in the agent's case with a `system_prompt` the agent itself wrote. `mission_create` and `routine_schedule_create` create no principal, so below `strict` they proceed and leave a notice instead. Note this is **oversight, not the security boundary**: what stops an agent escaping a restrictive policy is that `strict` refuses outright and that a created crew inherits its creator's `autonomy_level` rather than the schema default.
+
+| Route | Policy action | `strict` | `guided` | `trusted` | `full` |
+|---|---|---|---|---|---|
+| `POST /api/v1/internal/crews` | `crew_create` | `403` | held | held | live |
+| `POST /api/v1/internal/agents` | `agent_create` | `403` | held | held | live |
+| `POST /api/v1/internal/routines/schedules` | `routine_schedule_create` | `403` | live | live | live |
+| `POST /api/v1/internal/missions` | `mission_create` | held | live | live | live |
+| `POST /api/v1/internal/skills/generate` | `skill_create` | staged | staged | staged | live |
+| `POST /api/v1/internal/skills/author` | `skill_create` | staged | staged | staged | staged |
+
+**Refused (`403`)** returns a structured body — `error`, `reason`, `crew_id`, `autonomy_level`, `policy_action` — so the CLI can name the `crewship policy set` that would unblock it.
+
+**Held (`202 Accepted`)** means the row *is* written but is inert until an operator approves it. The response carries `decision`, `autonomy_level`, `pending_review: true` and `approval_id`. What "inert" means per route:
+
+| Route | Sentinel | Released by |
+|---|---|---|
+| crew | the new crew is pinned to `autonomy_level=strict`, so `agent_create` and `routine_schedule_create` inside it are themselves refused | approval restores the *creating* crew's level |
+| agent | `status = PENDING_REVIEW`; the chat bridge refuses to start the agent | approval flips it to `IDLE` — also reachable via `POST /api/v1/agents/{agentId}/approve-hire` |
+| schedule | `enabled = 0`; the scheduler only picks up `enabled = 1` rows | approval enables it — also `PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` |
+| mission | stays `PLANNING`; `POST /api/v1/internal/missions/{missionId}/start` answers `403` | approval lets `start` proceed |
+
+<Note>
+The **schedule** row is no longer reached by any autonomy level — `strict` refuses and everything below it proceeds. It is documented because the machinery is still live in two cases: a pending row written by an instance that ran an earlier build, and the fail-closed fallback when the policy resolver is unwired (which holds even the actions `guided` now allows). The **mission** row applies at `strict` only.
+</Note>
+
+Holds land on the standard approvals queue as `kind=autonomy_gate`, decidable with `crewship approvals approve|deny <id>` or `POST /api/v1/approvals/{id}/decide`, and are mirrored as a blocking, ADMIN-addressed inbox waitpoint. **Denying leaves the artefact inert rather than deleting it**, and so does letting the approval time out — the gate fails closed.
+
+**Staged** is the skill variant: the SKILL.md is written to the crew's `.proposed` directory behind a blocking review item and never reaches the live skills registry until `crewship skill proposed approve` promotes it. A crew-less (workspace-bound token) caller has no `.proposed` directory to stage into, so `skills/generate` refuses with `403` for that caller instead.
+
+At `full` autonomy the creation proceeds immediately and leaves a **non-blocking** inbox notice — full autonomy is still autonomous, but a new crew, agent or cron entry is exactly the change an operator wants to see having happened.
+
+Every arm — refused, held, or allowed — writes an audit entry carrying `decision`, `autonomy_level` and `policy_action`.
 
 ## Related
 

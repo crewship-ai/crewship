@@ -147,7 +147,13 @@ workspace member; `500` database error while removing the reaction.
 
 ## Chat attachments
 
-Files attached by an operator to a chat session. Stored in `chat_attachments` (the per-chat link row) with the binary written to the storage provider; the agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`.
+Files attached by an operator to a chat session. The binary is written to the storage provider and the agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`.
+
+Each upload also records a row in `attachments` (`owner_type = 'chat'`) carrying the filename, resolved content type, size, SHA-256 and uploader. Before #1768 no row was written at all and the file on disk was the entire state; the dead `chat_attachments` table it was supposed to use was dropped in the same change.
+
+<Note>
+The row is metadata only — there is no listing, download or delete endpoint for a chat attachment yet, and the blob is **not** content-addressed the way an issue attachment's is: it stays at `<crewID>/<agentSlug>/attachments/<chatId>/<filename>` because that path is the agent-visible contract. `storage_key` on the row is the authority on where any given attachment lives. See [Issue attachments](/guides/issue-attachments) for the surface that is complete.
+</Note>
 
 ### Upload attachment
 

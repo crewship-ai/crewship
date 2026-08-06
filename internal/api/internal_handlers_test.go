@@ -783,7 +783,12 @@ func TestInternalCreateCrew(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, body)
 		w := httptest.NewRecorder()
 		h.CreateCrew(w, req)
-		if w.Code != http.StatusCreated {
+		// #1768 contract change: an agent-driven create through the internal
+		// API is now policy-gated. This handler is built with no policy
+		// resolver, so the gate falls back to its conservative guided
+		// default: the row IS written (asserted below) but held inert for
+		// operator approval, which answers 202 Accepted rather than 201.
+		if w.Code != http.StatusAccepted {
 			t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 		}
 	})
@@ -842,7 +847,12 @@ func TestInternalCreateAgent(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, body)
 		w := httptest.NewRecorder()
 		h.CreateAgent(w, req)
-		if w.Code != http.StatusCreated {
+		// #1768 contract change: an agent-driven create through the internal
+		// API is now policy-gated. This handler is built with no policy
+		// resolver, so the gate falls back to its conservative guided
+		// default: the row IS written (asserted below) but held inert for
+		// operator approval, which answers 202 Accepted rather than 201.
+		if w.Code != http.StatusAccepted {
 			t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 		}
 	})
@@ -903,8 +913,13 @@ func TestInternalCreateAgent_CrewBoundToken_RejectsSiblingCrew(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, body).WithContext(boundCtx(ownCrew))
 		w := httptest.NewRecorder()
 		h.CreateAgent(w, req)
-		if w.Code != http.StatusCreated {
-			t.Fatalf("status = %d, want 201; body=%s", w.Code, w.Body.String())
+		// #1768 contract change: an agent-driven create through the internal
+		// API is now policy-gated. This handler is built with no policy
+		// resolver, so the gate falls back to its conservative guided
+		// default: the row IS written (asserted below) but held inert for
+		// operator approval, which answers 202 Accepted rather than 201.
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("status = %d, want 202; body=%s", w.Code, w.Body.String())
 		}
 	})
 
@@ -925,8 +940,13 @@ func TestInternalCreateAgent_CrewBoundToken_RejectsSiblingCrew(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, body)
 		w := httptest.NewRecorder()
 		h.CreateAgent(w, req)
-		if w.Code != http.StatusCreated {
-			t.Fatalf("status = %d, want 201 (unbound caller stays workspace-wide); body=%s", w.Code, w.Body.String())
+		// #1768 contract change: an agent-driven create through the internal
+		// API is now policy-gated. This handler is built with no policy
+		// resolver, so the gate falls back to its conservative guided
+		// default: the row IS written (asserted below) but held inert for
+		// operator approval, which answers 202 Accepted rather than 201.
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("status = %d, want 202 (unbound caller stays workspace-wide, and is still gated); body=%s", w.Code, w.Body.String())
 		}
 	})
 }
@@ -1068,7 +1088,11 @@ func TestInternalMissions_Create(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 		w := httptest.NewRecorder()
 		h.Create(w, req)
-		if w.Code != http.StatusCreated {
+		// #1768 contract change: mission_create is policy-gated. With no
+		// resolver wired the gate uses its conservative guided default, so
+		// the mission row is written in PLANNING but held — 202, and Start
+		// refuses until an operator approves.
+		if w.Code != http.StatusAccepted {
 			t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 		}
 	})
@@ -1078,7 +1102,11 @@ func TestInternalMissions_Create(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 		w := httptest.NewRecorder()
 		h.Create(w, req)
-		if w.Code != http.StatusCreated {
+		// #1768 contract change: mission_create is policy-gated. With no
+		// resolver wired the gate uses its conservative guided default, so
+		// the mission row is written in PLANNING but held — 202, and Start
+		// refuses until an operator approves.
+		if w.Code != http.StatusAccepted {
 			t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 		}
 	})
@@ -1118,8 +1146,12 @@ func TestInternalMissions_Create(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 		w := httptest.NewRecorder()
 		h.Create(w, req)
-		if w.Code != http.StatusCreated {
-			t.Fatalf("valid in-workspace task agent should 201, got %d: %s", w.Code, w.Body.String())
+		// #1768 contract change: mission_create is policy-gated. With no
+		// resolver wired the gate uses its conservative guided default, so
+		// the mission row is written in PLANNING but held — 202, and Start
+		// refuses until an operator approves.
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("valid in-workspace task agent should be accepted-and-held (202), got %d: %s", w.Code, w.Body.String())
 		}
 	})
 

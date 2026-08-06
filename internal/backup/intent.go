@@ -73,8 +73,17 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"keeper_governance_settings": IntentInclude,
 
 	// === Files & memory (round-trip) ==========================
+	// attachments is the single table behind every attached file — issue,
+	// issue comment and chat — replacing the never-written chat_attachments
+	// (dropped by 20260806194500_attachments.sql, and gone from this map with
+	// it). It round-trips the METADATA only: the blob itself lives under the
+	// storage root at attachments/<workspace>/<sha[0:2]>/<sha>, which the file
+	// half of a bundle carries, and the row is what makes a restored blob
+	// findable again. A restored row whose blob is missing degrades to a 404 on
+	// download rather than to a corrupt read — the sha256 column is what lets a
+	// verify pass say which of the two happened.
+	"attachments":             IntentInclude,
 	"chat_branches":           IntentInclude,
-	"chat_attachments":        IntentInclude,
 	"chat_participants":       IntentInclude,
 	"chat_read_cursors":       IntentInclude,
 	"message_reactions":       IntentInclude,
@@ -230,12 +239,21 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// authorises on it, so a stale id costs a re-resolve, not a leak.
 	"mission_code_links": IntentInclude,
 	"mission_comments":   IntentInclude,
-	"mission_labels":     IntentInclude,
-	"mission_proposals":  IntentInclude,
-	"mission_relations":  IntentInclude,
-	"mission_tasks":      IntentInclude,
-	"peer_card_audit":    IntentExcludeOperational, // audit trail
-	"peer_cards":         IntentInclude,
+	// mission_comment_mentions is the RESOLVED @mention set of a comment —
+	// which agents a comment named, in order, and what the dispatch trigger
+	// did about each. It rides with mission_comments: the bodies round-trip,
+	// and re-deriving the set on restore would mean re-parsing every comment
+	// (and, worse, would silently invent mentions for agent ids that resolve
+	// differently in the restored instance). The dispatch columns are history,
+	// not live state — a restored 'refused' row records that a cap said no at
+	// the time, which is exactly the fact an operator reads it for.
+	"mission_comment_mentions": IntentInclude,
+	"mission_labels":           IntentInclude,
+	"mission_proposals":        IntentInclude,
+	"mission_relations":        IntentInclude,
+	"mission_tasks":            IntentInclude,
+	"peer_card_audit":          IntentExcludeOperational, // audit trail
+	"peer_cards":               IntentInclude,
 	// pending_runs holds deferred/debounced triggers waiting to fire
 	// (delay/ttl/priority). A pending row is a scheduled future run —
 	// durable, like a waitpoint; dropping it on restore loses queued work.

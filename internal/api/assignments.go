@@ -336,11 +336,14 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 // NOTE (#1754): this path is NOT subject to the delegation caps. The row
 // already exists — the mission engine created it from a task list — so there is
 // no dispatch decision to refuse here, and it stores depth 0 by column default.
-// A mission an agent authored via /mission/create therefore fans out uncapped,
-// and its tasks read as roots when their agents delegate. Capping the mission
-// path means capping task-list creation, which is a different control on a
-// different door; the caps' own doc comment says so rather than implying
-// coverage this function does not have.
+// Its tasks therefore read as roots when their agents delegate.
+//
+// Capping the mission path means capping task-list creation, which is a
+// different control on a different door — and #1768 built it there:
+// mission_limits.go bounds an agent-created plan's task list and how many such
+// missions a crew may have live. This function stays uncapped on purpose. What
+// remains true here is the depth: a mission task starts a fresh delegation
+// tree rather than continuing the authoring agent's.
 func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestrator.DispatchRequest) error {
 	var target targetAgentInfo
 	err := h.db.QueryRowContext(ctx, `
