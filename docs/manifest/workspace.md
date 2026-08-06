@@ -216,7 +216,7 @@ servers.
 | `crewship apply --file workspace.yaml --dry-run` | Plan only — no mutations. |
 | `crewship apply --file workspace.yaml --replace --yes` | Destructive: delete existing, recreate fresh. |
 | `crewship export workspace` | Emit the entire workspace as a single `kind: Workspace` document. |
-| `crewship export workspace --split-dir ./out/` | Export, one file per kind. |
+| `crewship export workspace --output ws.yaml` | Export to a file instead of stdout. |
 
 ## Apply behavior
 

@@ -4,6 +4,8 @@ description: "Email/password signup, Google sign-in, device pairing for the CLI,
 icon: "lock"
 ---
 
+<!-- docs-inventory: ignore-api /api/v1/auth/google/redirect reason=historical-removed-route -->
+<!-- docs-inventory: ignore-api /api/v1/auth/google/callback reason=historical-removed-route -->
 # Authentication
 
 Authentication surface in Crewship is split across several flows. The interactive web flow is `/api/auth/*` (NextAuth-compatible -- see [Internal API](/api-reference/internal)); everything covered on this page is the `/api/v1/auth/*` surface that wraps email/password signup, Google sign-in, CLI pairing, active session listing/revocation, long-lived CLI tokens, and password recovery.
