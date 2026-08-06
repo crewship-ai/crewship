@@ -250,38 +250,34 @@ Declare sidecar containers that run alongside the agent on the crew bridge netwo
 spec:
   devcontainer:
     image: mcr.microsoft.com/devcontainers/python:3.12
-    # The agent assembles its connection strings at runtime from
-    # the injected credential (POSTGRES_PASSWORD comes in via the
-    # agent's env_refs below). DATABASE_HOST/PORT/USER/NAME are
-    # literals here; manifest devcontainer.env does NOT expand
-    # ${VAR} substitution — runtime code does.
+    # The agent assembles its connection strings at runtime from the
+    # injected credential (POSTGRES_PASSWORD and REDIS_PASSWORD arrive
+    # in the agent's env — see auto-managed credentials below).
+    # DATABASE_HOST/PORT/USER/NAME are literals here; manifest
+    # devcontainer.env does NOT expand ${VAR} substitution — runtime
+    # code does.
     env:
       DATABASE_HOST: postgres
       DATABASE_PORT: "5432"
       DATABASE_USER: postgres
       DATABASE_NAME: app
-      REDIS_URL: redis://redis:6379
-
-  credentials:
-    - env: POSTGRES_PASSWORD
-      provider: NONE
-      type: GENERIC_SECRET
+      REDIS_HOST: redis
 
   services:
     - name: redis
       image: redis:7-alpine
       ports: ["6379"]
+      # A password-protected Redis answers NOAUTH, not PONG — which
+      # still proves it is up and enforcing auth.
       healthcheck:
-        test: ["CMD", "redis-cli", "ping"]
+        test: ["CMD-SHELL", "redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'"]
         interval: 5s
         retries: 5
 
     - name: postgres
       image: postgres:16
       env:
-        POSTGRES_DB: app
-        POSTGRES_USER: postgres
-      env_refs: [POSTGRES_PASSWORD]    # injected from the credential vault
+        POSTGRES_DB: app          # POSTGRES_USER comes from the catalog
       ports: ["5432"]
       volumes:
         - name: pg-data
@@ -292,6 +288,15 @@ spec:
         retries: 10
         start_period: 10s
 ```
+
+<Note>
+No `credentials:` block, and no `env_refs` for the passwords: both images
+are in the auto-managed catalog, so apply generates `POSTGRES_PASSWORD` and
+`REDIS_PASSWORD`, boots each sidecar with its own secret and adds both to
+every agent in the crew. Declaring one of those names in `credentials:` as
+well is **rejected at validate time** — the manual row and the generated one
+would race for the same workspace credential (#1712).
+</Note>
 
 What the provisioner does for each service:
 
@@ -315,9 +320,9 @@ Volumes are **always named volumes**. The validator rejects bind-mount paths so 
 
 ### Auto-managed service credentials
 
-Instead of hand-declaring a `GENERIC_SECRET` credential and wiring `env_refs`
-(the pattern above), a service can ask Crewship to **generate and manage the
-secret** itself:
+Rather than hand-declaring a `GENERIC_SECRET` credential and wiring
+`env_refs`, a service asks Crewship to **generate and manage the secret**
+itself — which is what the crew above relies on:
 
 ```yaml
 services:

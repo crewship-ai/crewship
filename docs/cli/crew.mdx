@@ -311,6 +311,12 @@ crewship crew delete backend-team --yes
 Deleting a crew removes its agents and runtime context. `--yes` bypasses the prompt — use it only in scripts.
 </Warning>
 
+The crew's agents are retired with it, which frees **their** slugs as well as
+the crew's: re-applying the manifest that created them works straight away.
+Before v1.x the agents survived their crew and kept holding their slugs, so the
+re-apply answered `409 Agent slug already taken in this workspace` until each
+one was deleted by hand (#1712).
+
 ---
 
 ## `crewship crew status`
