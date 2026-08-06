@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -177,6 +178,58 @@ func (h *CrewHandler) restartCrewContainer(ctx context.Context, crewID string) {
 	h.logger.Info("crew container stopped after network policy change", "crew_id", crewID, "status", resp.StatusCode)
 }
 
+// crewContainerIsRunning asks crewshipd whether this crew's container is up
+// right now. Used by the resize path to decide whether the change it just
+// stored is pending on a recreate (#1681).
+//
+// Best-effort, and deliberately biased toward silence: no IPC socket, an
+// unreachable crewshipd, a non-200 or an undecodable body all answer false.
+// Every one of those means this process cannot see a container runtime — and
+// crewshipd is the thing that owns the containers, so "I cannot reach it" and
+// "nothing is running" are the same answer in practice. Inventing a warning
+// there would put a stale-limits notice on an instance that has no limits to
+// be stale.
+//
+// Bounded at 3s: it runs inside a PATCH, before the response is written, and a
+// slow daemon must not turn a crew edit into a hung request.
+func (h *CrewHandler) crewContainerIsRunning(ctx context.Context, crewID string) bool {
+	if h.socketPath == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", h.socketPath)
+			},
+		},
+	}
+	reqURL := fmt.Sprintf("http://crewshipd/crews/%s/container/status", url.PathEscape(crewID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		h.logger.Debug("crew container status via IPC (may not be running)", "crew_id", crewID, "error", err)
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var status struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&status); err != nil {
+		return false
+	}
+	return status.Status == "running"
+}
+
 // ContainerStatus proxies a crew's container status from crewshipd over the
 // IPC unix socket. It backs the dashboard's restart-progress feedback after a
 // network-policy change (which stops the container so it gets recreated with
@@ -200,13 +253,22 @@ func (h *CrewHandler) ContainerStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Scope to the caller's workspace — never leak another workspace's crew.
-	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
-	if err != nil {
-		replyInternalError(w, h.logger, "container status: crew lookup", err)
+	//
+	// The crew's CONFIGURED container limits come out of the same read: they
+	// are what the effective limits crewshipd reports are compared against
+	// (#1681), and a second query for them could answer about a different
+	// version of the row.
+	var configuredMemoryMB int
+	var configuredCPUs float64
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT container_memory_mb, container_cpus FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		crewID, workspaceID).Scan(&configuredMemoryMB, &configuredCPUs)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
-	if !found {
-		replyError(w, http.StatusNotFound, "Crew not found")
+	if err != nil {
+		replyInternalError(w, h.logger, "container status: crew lookup", err)
 		return
 	}
 
@@ -246,6 +308,9 @@ func (h *CrewHandler) ContainerStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	// Always stamp the caller's crew ID — never trust the IPC-supplied value.
 	ipcResp["crew_id"] = crewID
+	// What the crew is configured for, and where the running container
+	// disagrees (#1681). See crew_container_drift.go.
+	crewContainerDrift(ipcResp, configuredMemoryMB, configuredCPUs)
 	writeJSON(w, http.StatusOK, ipcResp)
 }
 

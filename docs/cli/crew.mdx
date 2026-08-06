@@ -292,6 +292,25 @@ crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
 | `--allow-package-registries` | `bool` | `false` | Append the common package registries (npm, pip, cargo, go, apt, Docker Hub) to the crew's allowed domains. When passed alone it unions onto the crew's existing domains rather than replacing them. |
 | `--allow-private-endpoints` | `bool` | `false` | Allow agents to reach a private/LAN model endpoint (RFC1918/loopback). Link-local and cloud-metadata addresses stay blocked. Subject to the instance ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS`. |
 
+<Note>
+**`--memory-mb` and `--cpus` reach a running container only when it is
+recreated.** They are cgroup limits, fixed when the container is created, so a
+crew that is already up keeps the old ones while `crewship crew get` reports
+the new ones. When the crew is running, the update says so:
+
+```
+✓ Crew updated successfully.
+! container_memory_mb changed, but this crew's container is already running and keeps the
+  limits it was created with until it is recreated. `crewship crew container-status backend`
+  reports the gap; an idle-TTL stop or `crewship crew restart-agents backend` closes it.
+```
+
+A **stopped** crew needs no action and gets no notice: a container whose limits
+no longer match its crew is rebuilt, not restarted, the next time the crew
+wakes. `crewship crew container-status` shows the configured and effective
+figures side by side — see [`Limits:`](#limits-is-this-container-running-today-s-crew-configuration).
+</Note>
+
 ---
 
 ## `crewship crew delete`
@@ -726,6 +745,37 @@ Three things follow from that line, and none of them is an emergency:
 
 No `Config:` line at all means the provider does not report it — the Apple
 container provider does not today. Absence is "unknown", not "current".
+
+### `Limits:` — is this container running today's *crew* configuration?
+
+The same shape of gap, one level down. `Config:` asks whether the container is
+older than the build; `Limits:` asks whether it is older than **this crew's own
+settings**. `container_memory_mb` and `container_cpus` are cgroup limits, and a
+cgroup limit is set when the container is created — it cannot be changed on a
+running one. So `crewship crew update <slug> --memory-mb 8192` stores the new
+figure, `crewship crew get` reports it, and the container keeps the old one:
+
+```
+Container: running
+Limits:    configured, not yet in effect
+           container_memory_mb: 8192 configured, container running with 4096
+           Container limits are applied when the container is created and cannot be changed
+           on a running one. The crew picks these up the next time it is recreated: an
+           idle-TTL stop, or `crewship crew restart-agents <crew>`.
+```
+
+The two numbers come from different places on purpose: the configured one is
+the crews row, the effective one is read off the running container itself. No
+line at all means they agree, or that the provider reported no limits to
+compare — an absent limit is not a limit of zero.
+
+A stopped crew fixes itself here too: a container whose limits no longer match
+its crew is rebuilt rather than restarted the next time the crew is woken. A
+running one is never torn down for a resize — unlike a network-policy change,
+where the stale policy is a live exposure, a stale memory limit is not, and
+killing a run to apply it would cost more than it saves. `crewship crew update`
+says so on the spot when the crew is running, so the gap does not have to be
+discovered here.
 
 ---
 

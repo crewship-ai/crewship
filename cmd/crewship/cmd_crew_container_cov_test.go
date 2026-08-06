@@ -95,6 +95,58 @@ func TestCrewContainerStatusRunE_SaysNothingWhenContractUnknown(t *testing.T) {
 	}
 }
 
+// #1681: a crew whose memory or CPU limit was edited keeps the OLD cgroup
+// limit until its container is recreated, and `crew get` reports the
+// configured figure either way. This command is where the two are shown side
+// by side — the report has to name both numbers and the remedy, or the
+// operator is left knowing only what they asked for.
+func TestCrewContainerStatusRunE_ReportsConfiguredVsEffectiveLimits(t *testing.T) {
+	stub := covSetupCli4(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli4+"/container-status", clitest.JSONResponse(200, map[string]any{
+		"crew_id": covCrewIDCli4, "status": "running",
+		"configured_memory_mb": 8192, "configured_cpus": 2.0,
+		"effective_memory_mb": 4096, "effective_cpus": 2.0,
+		"config_drift": []map[string]any{
+			{"field": "container_memory_mb", "configured": 8192, "effective": 4096},
+		},
+	}))
+
+	c := covFreshCmd(crewContainerStatusCmd, nil)
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{covCrewIDCli4}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "container_memory_mb") {
+		t.Errorf("the drifted field is not named: %q", out)
+	}
+	if !strings.Contains(out, "8192") || !strings.Contains(out, "4096") {
+		t.Errorf("both the configured and the effective figure have to appear: %q", out)
+	}
+	if !strings.Contains(out, "restart-agents") {
+		t.Errorf("the remedy is not named, so the report is not actionable: %q", out)
+	}
+}
+
+// The quiet path: limits that agree print nothing about drift. A command that
+// narrates every matching field trains its reader to skip the output.
+func TestCrewContainerStatusRunE_SilentWhenLimitsAgree(t *testing.T) {
+	stub := covSetupCli4(t)
+	stub.OnGet("/api/v1/crews/"+covCrewIDCli4+"/container-status", clitest.JSONResponse(200, map[string]any{
+		"crew_id": covCrewIDCli4, "status": "running",
+		"configured_memory_mb": 8192, "configured_cpus": 2.0,
+		"effective_memory_mb": 8192, "effective_cpus": 2.0,
+	}))
+
+	c := covFreshCmd(crewContainerStatusCmd, nil)
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{covCrewIDCli4}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(out, "Limits:") {
+		t.Errorf("a limits warning was printed for a container that matches its crew: %q", out)
+	}
+}
+
 func TestCrewContainerStatusRunE_ServerError(t *testing.T) {
 	stub := covSetupCli4(t)
 	stub.OnGet("/api/v1/crews/"+covCrewIDCli4+"/container-status", clitest.ErrorResponse(404, "Crew not found"))

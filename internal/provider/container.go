@@ -216,6 +216,25 @@ type ContainerStatus struct {
 	// Providers that do not track it leave it empty, which every surface
 	// renders as "no opinion" rather than as "current".
 	RuntimeContract string
+
+	// MemoryMB and CPUs are the limits THIS CONTAINER was created with, read
+	// off the container itself — the effective values, as opposed to the
+	// configured ones the crews row carries (#1681).
+	//
+	// A crew's memory or CPU limit can be edited at any time, and both are
+	// applied at ContainerCreate and nowhere else, so a running container keeps
+	// the figures it was born with until it is recreated while `crew get`
+	// reports the new ones. Whoever holds the crew's configuration can compare
+	// the two and say so; nothing else can, and nothing else should try —
+	// re-deriving the intended value at the comparison point is a second
+	// reconstruction free to disagree with the builder, which is exactly what
+	// #1642's canonical digest refused to introduce here.
+	//
+	// Zero means the container declares no limit, or the provider does not
+	// report one. Never rendered as "0 MiB" — an absent number is not a small
+	// one, and treating it as one would invent drift out of silence.
+	MemoryMB int
+	CPUs     float64
 }
 
 // The RuntimeContract vocabulary. Declared beside the field rather than in the

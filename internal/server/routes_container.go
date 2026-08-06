@@ -78,6 +78,17 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 	if status.RuntimeContract != "" {
 		payload["runtime_contract"] = status.RuntimeContract
 	}
+	// The limits this container was actually created with (#1681). Omitted on
+	// the same rule as the contract verdict: a container that declares no
+	// limit, or a provider that does not track them, says nothing rather than
+	// zero — the workspace API compares these against the crews row, and a
+	// zero would read there as "running under no memory at all".
+	if status.MemoryMB > 0 {
+		payload["effective_memory_mb"] = status.MemoryMB
+	}
+	if status.CPUs > 0 {
+		payload["effective_cpus"] = status.CPUs
+	}
 	writeJSON(w, http.StatusOK, payload)
 }
 

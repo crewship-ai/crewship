@@ -47,6 +47,16 @@ var crewContainerStatusCmd = &cobra.Command{
 			// RuntimeContract is absent when the provider has no opinion, and
 			// absent is not "current" — nothing is printed in that case.
 			RuntimeContract string `json:"runtime_contract"`
+			// ConfigDrift names the per-crew settings the RUNNING container
+			// does not carry — its memory / CPU limits, which are applied at
+			// container create and nowhere else (#1681). Empty whenever the
+			// container matches its crew, and whenever the provider reported
+			// no limits to compare against.
+			ConfigDrift []struct {
+				Field      string  `json:"field"`
+				Configured float64 `json:"configured"`
+				Effective  float64 `json:"effective"`
+			} `json:"config_drift"`
 		}
 		if err := cli.ReadJSON(resp, &status); err != nil {
 			return err
@@ -72,8 +82,31 @@ var crewContainerStatusCmd = &cobra.Command{
 			fmt.Printf("           and nowhere else. It picks them up the next time the container is recreated: an\n")
 			fmt.Printf("           idle-TTL stop, or `crewship crew restart-agents %s`.\n", sanitizeTerminal(args[0]))
 		}
+		// The same shape of gap, one level down: not "this container is older
+		// than the build" but "this container is older than THIS CREW'S
+		// configuration". A memory or CPU edit is written to the row, reported
+		// by `crew get`, and applied to the cgroup only at create time — so
+		// until the container is recreated the crew runs under the old
+		// figure, and this is the surface that says so (#1681).
+		if len(status.ConfigDrift) > 0 {
+			fmt.Printf("%sLimits:%s    %sconfigured, not yet in effect%s\n", cli.Bold, cli.Reset, cli.Yellow, cli.Reset)
+			for _, d := range status.ConfigDrift {
+				fmt.Printf("           %s: %s configured, container running with %s\n",
+					sanitizeTerminal(d.Field), formatLimit(d.Configured), formatLimit(d.Effective))
+			}
+			fmt.Printf("           Container limits are applied when the container is created and cannot be changed\n")
+			fmt.Printf("           on a running one. The crew picks these up the next time it is recreated: an\n")
+			fmt.Printf("           idle-TTL stop, or `crewship crew restart-agents %s`.\n", sanitizeTerminal(args[0]))
+		}
 		return nil
 	},
+}
+
+// formatLimit renders a limit figure the way it was written: 8192 rather than
+// 8192.000000, and 1.5 rather than 2, because container_cpus is fractional and
+// rounding it in the report would make a real drift look like a display bug.
+func formatLimit(v float64) string {
+	return fmt.Sprintf("%g", v)
 }
 
 // containerStatusColor maps a container state to a terminal colour.

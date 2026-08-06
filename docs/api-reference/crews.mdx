@@ -293,6 +293,22 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
   Changing `network_mode`, `allowed_domains`, or `services_json` triggers a container restart so the docker provider picks up the new policy / sidecar set on the next agent run. Changing `runtime_image`, `devcontainer_config`, or `mise_config` invalidates `cached_image` + `config_hash` to force a rebuild.
 </Note>
 
+<Note>
+  **`container_memory_mb` / `container_cpus` do not restart the container, and
+  do not reach a running one.** They are cgroup limits, fixed when the container
+  is created — a running crew keeps the limits it was created with while this
+  response, and every later `GET`, reports the new ones. The container is
+  deliberately not stopped for them: unlike a stale network policy, a stale
+  memory limit is not a live exposure, and killing whatever the crew is
+  executing costs more than the delay does.
+
+  When the crew's container is running, the response carries a `warnings` entry
+  saying so. A stopped one is rebuilt with the new limits on its next wake and
+  gets no warning, because nothing is pending on the operator.
+  [`GET /container-status`](#container-status) reports the configured and
+  effective figures side by side.
+</Note>
+
 | Status | Condition |
 |---|---|
 | `400` | Invalid field values (name/slug length, slug format, `network_mode`, domain entry, `container_ttl_hours` negative, `max_ephemeral_agents` outside 0-100, MCP JSON missing `mcpServers`, escalation thresholds out of range, oversize or invalid `devcontainer_config`/`mise_config`/`services_json`, `runtime_image` not found) |
@@ -311,6 +327,13 @@ DELETE /api/v1/crews/{crewId}?workspace_id={workspaceId}
 <Warning>
   Soft-deletes the crew (sets `deleted_at`) and cascade-deletes its missions, mission tasks, and crew members so identifier prefixes can be reused. The slug is rewritten to `{slug}_deleted_{id}` on next Create reuse.
 </Warning>
+
+<Note>
+  The crew's **agents** are soft-deleted with it, which releases their slugs
+  too: re-applying the manifest that created them succeeds without a manual
+  `DELETE /api/v1/agents/{agentId}` first. Each agent's slug is rewritten to
+  `{slug}_deleted_{id}` when a new agent claims it, exactly as the crew's is.
+</Note>
 
 **Auth:** Session or CLI token + `OWNER` or `ADMIN` role
 
@@ -652,7 +675,14 @@ recreated with the new policy on the next agent run).
   "crew_id": "ccrew0123456789abcdefghij",
   "status": "running",
   "uptime": "2026-07-13T00:00:00Z",
-  "runtime_contract": "current"
+  "runtime_contract": "current",
+  "configured_memory_mb": 8192,
+  "configured_cpus": 2,
+  "effective_memory_mb": 4096,
+  "effective_cpus": 2,
+  "config_drift": [
+    { "field": "container_memory_mb", "configured": 8192, "effective": 4096 }
+  ]
 }
 ```
 
@@ -664,6 +694,26 @@ recreated with the new policy on the next agent run).
 | `status` | string | `running`, `creating`, `stopped`, `error`, `not_configured`, or `unknown` |
 | `uptime` | string? | RFC 3339 container start time (present when running) |
 | `runtime_contract` | string? | `current` or `stale` — whether this container was created with the container configuration the running server applies today. **Absent** when the provider does not track it; absent is not `current` |
+| `configured_memory_mb` | int | The crew's configured memory limit (the `crews` row) |
+| `configured_cpus` | number | The crew's configured CPU limit |
+| `effective_memory_mb` | int? | The memory limit the RUNNING container was created with, read off the container. **Absent** when the container declares none or the provider does not report it — absent is not `0` |
+| `effective_cpus` | number? | Same, for CPUs |
+| `config_drift` | array? | One `{field, configured, effective}` entry per limit the container disagrees with. **Absent** when they agree, or when there was nothing to compare |
+
+<Note>
+**Why `config_drift` exists.** `runtime_contract` asks whether this container is
+older than the BUILD; `config_drift` asks whether it is older than this CREW's
+own settings. `container_memory_mb` and `container_cpus` are cgroup limits,
+fixed at container-create and unchangeable on a running container, so
+[updating a crew](#update-crew) moves the row and this endpoint's `configured_*`
+fields while `effective_*` stays where it was.
+
+Same response as for a stale runtime contract, for the same reasons: a
+**stopped** container whose limits no longer match its crew is rebuilt on the
+next wake, and a **running** one is reported rather than killed. `PATCH
+/api/v1/crews/{crewId}` warns on the spot when it resizes a crew that is
+currently running.
+</Note>
 
 <Note>
 **Why `runtime_contract` exists.** A crew container is created once and reused
