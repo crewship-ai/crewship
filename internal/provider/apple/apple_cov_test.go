@@ -233,25 +233,30 @@ func TestEnsureImage(t *testing.T) {
 			body:    `echo 'garbage'; exit 0`,
 			wantErr: "parse image list",
 		},
+		// Fixtures carry the shape `container image list --format json` really
+		// returns — the name in descriptor annotations, no top-level
+		// "reference". The old fixtures invented that field, which is why the
+		// provider's decoder could read every entry as "" and nobody noticed
+		// (#1779).
 		{
 			name: "exact reference present",
 			ref:  "img:1",
 			body: `
-if [ "$2" = "list" ]; then echo '[{"reference":"img:1"}]'; fi
+if [ "$2" = "list" ]; then echo '[{"id":"sha256:x","configuration":{"descriptor":{"annotations":{"com.apple.containerization.image.name":"img:1"}}}}]'; fi
 exit 0`,
 		},
 		{
 			name: "docker.io library prefix match",
 			ref:  "alpine:3",
 			body: `
-if [ "$2" = "list" ]; then echo '[{"reference":"docker.io/library/alpine:3"}]'; fi
+if [ "$2" = "list" ]; then echo '[{"id":"sha256:x","configuration":{"descriptor":{"annotations":{"com.apple.containerization.image.name":"docker.io/library/alpine:3"}}}}]'; fi
 exit 0`,
 		},
 		{
 			name: "missing image gets pulled",
 			ref:  "img:2",
 			body: `
-if [ "$2" = "list" ]; then echo '[{"reference":"other:1"}]'; fi
+if [ "$2" = "list" ]; then echo '[{"id":"sha256:x","configuration":{"descriptor":{"annotations":{"com.apple.containerization.image.name":"other:1"}}}}]'; fi
 exit 0`,
 			wantPull: true,
 		},
@@ -299,7 +304,7 @@ func TestFindContainer(t *testing.T) {
 	}{
 		{
 			name:   "found by configuration id",
-			body:   `echo '[{"status":"running","configuration":{"id":"crew-a"}},{"status":"stopped","configuration":{"id":"crew-b"}}]'`,
+			body:   `echo '[{"status":{"state":"running"},"configuration":{"id":"crew-a"}},{"status":{"state":"stopped"},"configuration":{"id":"crew-b"}}]'`,
 			lookup: "crew-b",
 			wantID: "crew-b",
 		},
@@ -355,13 +360,13 @@ func TestInspectContainer(t *testing.T) {
 	}{
 		{
 			name:       "array result",
-			body:       `echo '[{"status":"running","configuration":{"id":"abc"}}]'`,
+			body:       `echo '[{"status":{"state":"running"},"configuration":{"id":"abc"}}]'`,
 			wantStatus: "running",
 			wantID:     "abc",
 		},
 		{
 			name:       "single object result",
-			body:       `echo '{"status":"stopped","configuration":{"id":"xyz"}}'`,
+			body:       `echo '{"status":{"state":"stopped"},"configuration":{"id":"xyz"}}'`,
 			wantStatus: "stopped",
 			wantID:     "xyz",
 		},
@@ -397,7 +402,7 @@ func TestInspectContainer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("inspectContainer: %v", err)
 			}
-			if got.Status != tt.wantStatus || got.Configuration.ID != tt.wantID {
+			if got.State() != tt.wantStatus || got.Configuration.ID != tt.wantID {
 				t.Errorf("got status=%q id=%q, want status=%q id=%q",
 					got.Status, got.Configuration.ID, tt.wantStatus, tt.wantID)
 			}
@@ -473,7 +478,7 @@ func TestContainerStatusStates(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.cliStatus, func(t *testing.T) {
 			installFakeContainer(t,
-				`echo '[{"status":"`+tt.cliStatus+`","configuration":{"id":"cid-1"}}]'`)
+				`echo '[{"status":{"state":"`+tt.cliStatus+`"},"configuration":{"id":"cid-1"}}]'`)
 			p := newTestProvider(Config{})
 
 			st, err := p.ContainerStatus(context.Background(), "cid-1")

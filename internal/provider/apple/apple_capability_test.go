@@ -191,8 +191,6 @@ func TestUnsupportedCrewConfig_EveryDroppedFieldIsReported(t *testing.T) {
 		wants []string
 	}{
 		{"TTLHours", func(c *provider.CrewConfig) { c.TTLHours = 4 }, []string{"idle"}},
-		{"Image", func(c *provider.CrewConfig) { c.Image = "ghcr.io/acme/dev:1" }, []string{"ghcr.io/acme/dev:1"}},
-		{"CachedImage", func(c *provider.CrewConfig) { c.CachedImage = "crewship-cache:abc123" }, []string{"crewship-cache:abc123"}},
 		{"ContainerEnv", func(c *provider.CrewConfig) { c.ContainerEnv = map[string]string{"FOO": "bar"} }, []string{"FOO"}},
 		{"LoginPath", func(c *provider.CrewConfig) { c.LoginPath = "/usr/local/py-utils/bin:/usr/bin" }, []string{"PATH"}},
 		{"Privileged", func(c *provider.CrewConfig) { c.Privileged = true }, []string{"privileged"}},

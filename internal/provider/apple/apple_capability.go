@@ -95,20 +95,10 @@ func (p *Provider) UnsupportedCrewConfig(cfg provider.CrewConfig) provider.CrewC
 			Detail: "no idle auto-stop is scheduled; the container runs until it is stopped explicitly",
 		})
 	}
-	// Image / CachedImage: create always uses the provider's configured
-	// RuntimeImage. A crew whose tools were baked into a provisioned image
-	// therefore runs without them, which is the exit-127 "no `claude` in the
-	// base image" failure by another route.
-	for _, f := range []struct{ name, val string }{{"Image", cfg.Image}, {"CachedImage", cfg.CachedImage}} {
-		if f.val == "" || f.val == p.cfg.RuntimeImage {
-			continue
-		}
-		s.Degraded = append(s.Degraded, provider.DroppedField{
-			Field: f.name, Value: f.val,
-			Detail: fmt.Sprintf("the container is created from the provider's configured runtime image %q instead; "+
-				"tools provisioned into the requested image will be missing at exec time", p.cfg.RuntimeImage),
-		})
-	}
+	// Image / CachedImage are honoured now: create uses CachedImage > Image >
+	// the provider default (crewImage in apple.go). Reporting them as dropped
+	// would understate the provider, and a capability report that lies in the
+	// cautious direction still changes what every reader does with it.
 	if len(cfg.ContainerEnv) > 0 {
 		s.Degraded = append(s.Degraded, provider.DroppedField{
 			Field: "ContainerEnv", Value: sortedKeys(cfg.ContainerEnv),

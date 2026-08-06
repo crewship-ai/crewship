@@ -25,7 +25,7 @@ case "$1" in
     exit 0;;
   create) echo 'cid-raw'; exit 0;;
   start) exit 0;;
-  inspect) echo '[{"status":"running","configuration":{"id":"real-id"},"networks":[{"ipv4Gateway":"192.168.67.1"}]}]'; exit 0;;
+  inspect) echo '[{"status":{"state":"running","networks":[{"ipv4Gateway":"192.168.67.1"}]},"configuration":{"id":"real-id"}}]'; exit 0;;
 esac
 exit 0`
 
@@ -60,7 +60,7 @@ exit 0`)
 func TestEnsureCrewRuntimeExistingRunning(t *testing.T) {
 	fake := installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"running","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
+  list) echo '[{"status":{"state":"running"},"configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
 esac
 exit 0`)
 	p := newTestProvider(Config{OutputBasePath: t.TempDir()})
@@ -93,7 +93,7 @@ func TestEnsureCrewRuntimeStartsStoppedContainer(t *testing.T) {
 	// In Apple Containers configuration.id IS the container name.
 	fake := installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
+  list) echo '[{"status":{"state":"stopped"},"configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
   start) exit 0;;
 esac
 exit 0`)
@@ -128,7 +128,7 @@ func TestEnsureCrewRuntimeStartStoppedFails(t *testing.T) {
 
 	installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
+  list) echo '[{"status":{"state":"stopped"},"configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
   start) exit 1;;
 esac
 exit 0`)
@@ -144,14 +144,14 @@ func TestEnsureCrewRuntimeBindsMissingRecreates(t *testing.T) {
 	// Bind-mount dirs do NOT exist -> stopped container is rm'd and recreated.
 	fake := installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
+  list) echo '[{"status":{"state":"stopped"},"configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
   rm) exit 0;;
   image)
     if [ "$2" = "list" ]; then echo '[{"reference":"img:1"}]'; fi
     exit 0;;
   create) echo 'new-cid'; exit 0;;
   start) exit 0;;
-  inspect) echo '[{"status":"running","configuration":{"id":"new-cid"},"networks":[]}]'; exit 0;;
+  inspect) echo '[{"status":{"state":"running","networks":[]},"configuration":{"id":"new-cid"}}]'; exit 0;;
 esac
 exit 0`)
 	p := newTestProvider(Config{RuntimeImage: "img:1", OutputBasePath: t.TempDir()})
@@ -340,7 +340,7 @@ func TestEnsureCrewRuntimeCreateRaceRecovered(t *testing.T) {
 case "$1" in
   list)
     if [ -f "$DIR/created" ]; then
-      echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'
+      echo '[{"status":{"state":"stopped"},"configuration":{"id":"crewship-team-eng-crew1"}}]'
     else
       echo '[]'
     fi
@@ -374,7 +374,7 @@ func TestEnsureCrewRuntimeCreateRaceStartFails(t *testing.T) {
 case "$1" in
   list)
     if [ -f "$DIR/created" ]; then
-      echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'
+      echo '[{"status":{"state":"stopped"},"configuration":{"id":"crewship-team-eng-crew1"}}]'
     else
       echo '[]'
     fi
@@ -515,13 +515,10 @@ func TestRemoveCrewVolumes(t *testing.T) {
 	}
 }
 
-func TestCopyToContainerUnsupported(t *testing.T) {
-	p := newTestProvider(Config{})
-	err := p.CopyToContainer(context.Background(), "cid", "/dst", strings.NewReader("x"))
-	if err == nil || !strings.Contains(err.Error(), "not supported") {
-		t.Fatalf("err = %v, want not supported", err)
-	}
-}
+// TestCopyToContainerUnsupported removed: CopyToContainer is implemented on
+// this provider now (apple_runtime.go). It was the last thing keeping agents
+// from running on macOS — the orchestrator writes .mcp.json through it — and a
+// test asserting the stub would now be pinning a bug (#1779).
 
 func TestCloseStopsGCExecs(t *testing.T) {
 	p := newTestProvider(Config{})

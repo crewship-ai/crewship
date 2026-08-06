@@ -359,7 +359,35 @@ func runOrBatch(ctx context.Context, container provider.ContainerProvider, name 
 	if err != nil {
 		return err
 	}
-	io.Copy(io.Discard, result.Reader)
-	result.Reader.Close()
+	// Read the output BEFORE inspecting: the exec is asynchronous and the exit
+	// code is only final once the stream ends. The output is also what makes a
+	// failure diagnosable, so it is carried into the error rather than dropped.
+	out, readErr := io.ReadAll(result.Reader)
+	_ = result.Reader.Close()
+	if readErr != nil {
+		return fmt.Errorf("%s: reading output: %w", name, readErr)
+	}
+
+	// Exit codes used to be ignored entirely — every preflight step reported
+	// success whatever happened, so a write that never landed was logged as
+	// done and only surfaced later as a puzzling error from the agent itself
+	// ("MCP config file not found"). A step that failed has to fail here (#1779).
+	_, code, inspectErr := container.ExecInspect(ctx, result.ExecID)
+	if inspectErr != nil {
+		return fmt.Errorf("%s: %w", name, inspectErr)
+	}
+	if code != 0 {
+		return fmt.Errorf("%s: exited %d: %s", name, code, strings.TrimSpace(truncateOutput(string(out))))
+	}
 	return nil
+}
+
+// truncateOutput caps step output carried into an error. Enough to explain the
+// failure, not enough to bury the log in a stack of base64.
+func truncateOutput(s string) string {
+	const max = 2000
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "… (truncated)"
 }

@@ -76,7 +76,7 @@ func TestEnsureCrewRuntime_RestrictedEgressIsEnforcedAndSaysNothing(t *testing.T
 func TestEnsureCrewRuntime_UnfenceableEgressIsStillReported(t *testing.T) {
 	installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"running","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
+  list) echo '[{"status":{"state":"running"},"configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
 esac
 exit 0`)
 	p, logs := newLoggingTestProvider(Config{OutputBasePath: t.TempDir(), RuntimeImage: "img:1"})
@@ -121,7 +121,7 @@ func TestEnsureCrewRuntime_NoConfigIsRefused(t *testing.T) {
 	t.Run("warm reuse", func(t *testing.T) {
 		installFakeContainer(t, `
 case "$1" in
-  list) echo '[{"status":"running","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
+  list) echo '[{"status":{"state":"running"},"configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
 esac
 exit 0`)
 		p := newTestProvider(Config{OutputBasePath: t.TempDir(), RuntimeImage: "img:1"})
@@ -161,7 +161,9 @@ func TestEnsureCrewRuntime_DroppedCapabilitiesAreLoggedNotSilent(t *testing.T) {
 	if !strings.Contains(out, "level=WARN") {
 		t.Fatalf("dropped fields must be logged at WARN, not swallowed; log:\n%s", out)
 	}
-	for _, want := range []string{"CachedImage", "ContainerEnv", "TTLHours"} {
+	// CachedImage is deliberately absent: the provider runs the crew's
+	// provisioned image now, so reporting it as dropped would be false (#1779).
+	for _, want := range []string{"ContainerEnv", "TTLHours"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log must name the dropped field %q; log:\n%s", want, out)
 		}

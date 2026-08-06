@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"syscall"
+	"time"
 )
 
 var _ provider.ContainerProvider = (*Provider)(nil)
@@ -78,6 +80,10 @@ type Provider struct {
 	execSeq atomic.Int64
 	execs   map[string]*execEntry
 	done    chan struct{}
+	// mounts records each container's bind mounts (container path → host path)
+	// so CopyToContainer can write through them; see hostPathFor.
+	mountsMu sync.RWMutex
+	mounts   map[string]map[string]string
 }
 
 type execEntry struct {
@@ -89,24 +95,50 @@ type execEntry struct {
 // containerJSON is the structure returned by `container inspect`.
 // Apple Container CLI uses nested "configuration" and "networks" array.
 type containerJSON struct {
-	Status        string `json:"status"` // "running", "stopped", "created"
+	// Both the lifecycle state and the networks live INSIDE status in the CLI
+	// payload. Declaring `status` as a string and `networks` at the top level
+	// meant inspect failed to decode at all — and where it was tolerated, the
+	// gateway address it exists to read came back empty, so HostAddress was
+	// never learned from a real container (#1779).
+	Status struct {
+		State    string `json:"state"` // "running", "stopped", "created"
+		Networks []struct {
+			IPv4Address string `json:"ipv4Address"` // e.g. "192.168.67.4/24"
+			IPv4Gateway string `json:"ipv4Gateway"` // e.g. "192.168.67.1"
+			Hostname    string `json:"hostname"`
+		} `json:"networks"`
+	} `json:"status"`
 	Configuration struct {
 		ID    string `json:"id"`
 		Image struct {
 			Reference string `json:"reference"`
 		} `json:"image"`
 	} `json:"configuration"`
-	Networks []struct {
-		IPv4Address string `json:"ipv4Address"` // e.g. "192.168.67.4/24"
-		IPv4Gateway string `json:"ipv4Gateway"` // e.g. "192.168.67.1"
-		Hostname    string `json:"hostname"`
-	} `json:"networks"`
+}
+
+// State is the container's lifecycle state, or "" when the payload carried none.
+func (c containerJSON) State() string { return c.Status.State }
+
+// GatewayIP is the first network's IPv4 gateway — the address the host is
+// reachable at from inside the container. Empty when unknown.
+func (c containerJSON) GatewayIP() string {
+	if len(c.Status.Networks) == 0 {
+		return ""
+	}
+	return c.Status.Networks[0].IPv4Gateway
 }
 
 // containerListEntry is one item from `container list --all --format json`.
 // The Apple Container CLI nests the container ID inside "configuration".
 type containerListEntry struct {
-	Status        string `json:"status"`
+	// Status is an OBJECT in the CLI payload — networks, startedDate and the
+	// actual lifecycle under `state`. It was declared as a string, so decoding
+	// the whole list failed with a type error and findContainer reported "not
+	// found" for a container that was plainly running; EnsureCrewRuntime then
+	// tried to create it again and got "container already exists" (#1779).
+	Status struct {
+		State string `json:"state"`
+	} `json:"status"`
 	Configuration struct {
 		ID    string `json:"id"`
 		Image struct {
@@ -114,6 +146,10 @@ type containerListEntry struct {
 		} `json:"image"`
 	} `json:"configuration"`
 }
+
+// State is the container's lifecycle state ("running", "stopped", …), or "" if
+// the payload carried none.
+func (e containerListEntry) State() string { return e.Status.State }
 
 // New creates an Apple Container Provider. It verifies the `container` CLI
 // is available and the system service is running.
@@ -191,32 +227,66 @@ func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 	return nil
 }
 
+// parseImageListNames extracts every name the local image store knows.
+//
+// `container image list --format json` carries no top-level "reference": the
+// name lives in the descriptor annotations and `id` is the digest. Decoding
+// into {Reference string} read every entry as "", so no local image was ever
+// recognised and ensureImage always fell through to a pull — invisible while
+// the only image came from a registry, fatal once a crew ran its own
+// provisioned image, which exists locally and nowhere else (#1779).
+//
+// Both the fully qualified name and its docker.io/library-stripped form are
+// recorded, so `alpine:3.20` matches an entry annotated
+// `docker.io/library/alpine:3.20`.
+func parseImageListNames(raw []byte) (map[string]bool, error) {
+	var images []struct {
+		Configuration struct {
+			Descriptor struct {
+				Annotations map[string]string `json:"annotations"`
+			} `json:"descriptor"`
+		} `json:"configuration"`
+	}
+	if err := json.Unmarshal(raw, &images); err != nil {
+		return nil, fmt.Errorf("parse image list: %w", err)
+	}
+
+	names := make(map[string]bool, len(images)*2)
+	for _, img := range images {
+		for _, key := range []string{
+			"com.apple.containerization.image.name",
+			"io.containerd.image.name",
+		} {
+			n := strings.TrimSpace(img.Configuration.Descriptor.Annotations[key])
+			if n == "" {
+				continue
+			}
+			names[n] = true
+			names[strings.TrimPrefix(n, "docker.io/library/")] = true
+		}
+	}
+	return names, nil
+}
+
+// ensureImage makes ref available locally, pulling only when it is not already
+// in the store. A crew's provisioned image is built on this host and is in no
+// registry, so a pull is not a fallback for it — it is a guaranteed failure.
 func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	out, err := runCLI(ctx, "image", "list", "--format", "json")
 	if err != nil {
 		return fmt.Errorf("list images: %w", err)
 	}
-
-	var images []struct {
-		Reference string `json:"reference"`
+	names, err := parseImageListNames(out)
+	if err != nil {
+		return err
 	}
-	if err := json.Unmarshal(out, &images); err != nil {
-		return fmt.Errorf("parse image list: %w", err)
-	}
-	for _, img := range images {
-		if img.Reference == ref {
-			return nil
-		}
-		// Match without docker.io/library/ prefix normalization
-		if strings.TrimPrefix(img.Reference, "docker.io/library/") == ref {
-			return nil
-		}
+	if names[ref] || names[strings.TrimPrefix(ref, "docker.io/library/")] {
+		return nil
 	}
 
 	p.logger.Info("pulling agent runtime image", "image", ref)
 	// Apple Container CLI uses --scheme auto which picks HTTP for localhost
-	_, err = runCLI(ctx, "image", "pull", ref)
-	if err != nil {
+	if _, err = runCLI(ctx, "image", "pull", ref); err != nil {
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
 	p.logger.Info("agent runtime image pulled", "image", ref)
@@ -317,7 +387,7 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 	}
 
 	var state string
-	switch strings.ToLower(info.Status) {
+	switch strings.ToLower(info.State()) {
 	case "running":
 		state = "running"
 	case "created", "starting":
@@ -336,16 +406,77 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 
 // ContainerStats is not supported on Apple Containers and always returns an error.
 
+// defaultCLITimeout bounds a single `container` invocation.
+//
+// Apple's CLI can wedge: a `container create` was observed sitting at 6+
+// minutes with an argument vector that completes in seconds by hand, and the
+// image builder showed the same shape after finishing its work. runCLI passed
+// the caller's context straight through, and most callers have no deadline —
+// so one wedged call took the whole crew start with it, indefinitely.
+//
+// Generous rather than tight: creating a container from a multi-GB devcontainer
+// image genuinely takes tens of seconds, and unpacking one for the first time
+// can take minutes. The point is not to be strict, it is that there is a
+// ceiling at all — an operator can act on "timed out after 5m", never on a
+// spinner (#1779).
+const defaultCLITimeout = 5 * time.Minute
+
 func runCLI(ctx context.Context, args ...string) ([]byte, error) {
+	return runCLIWithin(ctx, defaultCLITimeout, args...)
+}
+
+// runCLIWithin runs one `container` invocation under its own deadline.
+//
+// On timeout the whole process group is signalled, not just the CLI: Apple's
+// CLI spawns helpers, and killing the parent alone leaves them holding their
+// pipes — which is exactly how the build side stayed stuck after its own
+// watchdog fired.
+func runCLIWithin(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	if timeout <= 0 {
+		timeout = defaultCLITimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, "container", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
+			return syscall.Kill(-pgid, syscall.SIGKILL)
+		}
+		return cmd.Process.Kill()
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return stdout.Bytes(), fmt.Errorf("container %s: timed out after %s (stderr: %s)",
+				strings.Join(args, " "), timeout, stderr.String())
+		}
 		return stdout.Bytes(), fmt.Errorf("container %s: %w (stderr: %s)", strings.Join(args, " "), err, stderr.String())
 	}
 	return stdout.Bytes(), nil
 }
 
 // gcExecs periodically cleans up finished exec entries.
+
+// crewImage picks the image a crew's container is created from:
+// CachedImage > Image > the provider default.
+//
+// This provider used to run p.cfg.RuntimeImage unconditionally, which meant
+// provisioning built a crew an image with its devcontainer features baked in
+// and then never ran it — on macOS the mise toolchains, github-cli and python
+// a crew asked for were all installed into an image nothing started (#1779).
+// Same chain as the Docker provider (docker_container.go), so "which image is
+// my crew running" has one answer per crew rather than one per provider.
+func (p *Provider) crewImage(team provider.CrewConfig) string {
+	if team.CachedImage != "" {
+		return team.CachedImage
+	}
+	if team.Image != "" {
+		return team.Image
+	}
+	return p.cfg.RuntimeImage
+}

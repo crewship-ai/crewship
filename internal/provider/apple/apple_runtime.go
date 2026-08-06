@@ -8,8 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"archive/tar"
+	"errors"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/safepath"
+	"path"
 )
 
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
@@ -54,7 +57,15 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// Check if container already exists
 	existing, err := p.findContainer(ctx, containerName)
 	if err == nil && existing != nil {
-		if existing.Status == "running" {
+		if existing.State() == "running" {
+			// Reuse returns before the create block, so the mounts have to be
+			// registered here as well — after a server restart the map is
+			// empty and every write would fall back to the broken CLI copy.
+			p.rememberBindMounts(existing.Configuration.ID, map[string]string{
+				"/crew":      filepath.Join(p.cfg.OutputBasePath, "crews", team.ID),
+				"/workspace": filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID),
+				"/output":    filepath.Join(p.cfg.OutputBasePath, team.ID),
+			})
 			return existing.Configuration.ID, nil
 		}
 		// Verify bind-mount directories still exist (macOS /tmp is wiped on reboot).
@@ -113,7 +124,8 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 	defer releaseSlot()
 
-	if err := p.ensureImage(ctx, p.cfg.RuntimeImage); err != nil {
+	image := p.crewImage(team)
+	if err := p.ensureImage(ctx, image); err != nil {
 		return "", fmt.Errorf("ensure image: %w", err)
 	}
 
@@ -151,7 +163,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 	args, err := buildCreateArgs(createArgsInput{
 		containerName:  containerName,
-		image:          p.cfg.RuntimeImage,
+		image:          image,
 		network:        p.cfg.Network,
 		cpus:           cpuInt,
 		memoryMB:       memoryMB,
@@ -172,7 +184,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		if strings.Contains(err.Error(), "already exists") {
 			existing, findErr := p.findContainer(ctx, containerName)
 			if findErr == nil && existing != nil {
-				if existing.Status != "running" {
+				if existing.State() != "running" {
 					if _, startErr := runCLI(ctx, "start", existing.Configuration.ID); startErr != nil {
 						return "", fmt.Errorf("start existing container after race: %w", startErr)
 					}
@@ -199,8 +211,8 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		containerID = info.Configuration.ID
 		// Discover host IP from gateway if not already known
 		p.mu.Lock()
-		if p.hostIP == "" && len(info.Networks) > 0 && info.Networks[0].IPv4Gateway != "" {
-			p.hostIP = info.Networks[0].IPv4Gateway
+		if p.hostIP == "" && info.GatewayIP() != "" {
+			p.hostIP = info.GatewayIP()
 		}
 		p.mu.Unlock()
 	}
@@ -209,6 +221,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		"crew_id", team.ID,
 		"container_id", provider.ShortID(containerID),
 	)
+
+	// Record the mounts so CopyToContainer can write through them rather than
+	// through `container cp`, which is a silent no-op into a mounted path.
+	p.rememberBindMounts(containerID, map[string]string{
+		"/crew":      crewPath,
+		"/workspace": workspacePath,
+		"/output":    outputPath,
+	})
 
 	return containerID, nil
 }
@@ -229,9 +249,154 @@ func (p *Provider) RemoveCrewVolumes(_ context.Context, id, slug string) error {
 
 // pipeReadWriteCloser wraps separate read/write pipes into a single io.ReadWriteCloser.
 
-func (p *Provider) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
-	return fmt.Errorf("CopyToContainer not supported on Apple Containers provider")
+// CopyToContainer unpacks a tar archive into dstPath inside the container.
+//
+// This was a stub, and that is what kept agents from running on macOS even
+// after the container itself started: the orchestrator writes
+// /crew/agents/<slug>/.mcp.json through this call, the write failed, and
+// claude-code exited 1 with "MCP config file not found" (#1779).
+//
+// The contract's tar comes from Docker's API shape. Apple's CLI takes no tar —
+// `container cp <src> <container>:<dst>` moves paths — so the archive is
+// staged on the host and its entries copied in. The staging directory is
+// removed on every exit path: it can hold rendered MCP config with credential
+// references in it.
+func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error {
+	staging, err := os.MkdirTemp("", "crewship-cp-*")
+	if err != nil {
+		return fmt.Errorf("staging dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+
+	entries, err := unpackTarInto(staging, content)
+	if err != nil {
+		return err
+	}
+
+	// Prefer the host side of a bind mount. `container cp` into a mounted path
+	// is a silent no-op on 1.2.0 — exit 0, destination echoed, nothing copied —
+	// and /crew, /workspace and /output are mounts this provider creates, so
+	// their host paths are known and a plain write is both simpler and
+	// checkable. The CLI stays the fallback for anything unmounted.
+	if hostDir, ok := p.hostPathFor(containerID, dstPath); ok {
+		for _, name := range entries {
+			dst := filepath.Join(hostDir, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+				return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
+			}
+			data, err := os.ReadFile(filepath.Join(staging, name)) // #nosec G304 — staging path
+			if err != nil {
+				return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
+			}
+			if err := os.WriteFile(dst, data, 0o600); err != nil {
+				return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
+			}
+			// The agent runs as 1001:1001 and must be able to read it.
+			if err := os.Chown(dst, agentUID, agentGID); err != nil {
+				p.logger.Warn("could not chown copied file to the agent user", "path", dst, "error", err)
+			}
+		}
+		return nil
+	}
+
+	for _, name := range entries {
+		src := filepath.Join(staging, name)
+		dst := containerID + ":" + path.Join(dstPath, name)
+		if _, err := runCLI(ctx, "cp", src, dst); err != nil {
+			return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
+		}
+	}
+	return nil
 }
+
+// agentUID/agentGID are the uid:gid the crew container runs as.
+const (
+	agentUID = 1001
+	agentGID = 1001
+)
+
+// rememberBindMounts records a container's container-path → host-path mounts so
+// CopyToContainer can write through them.
+func (p *Provider) rememberBindMounts(containerID string, mounts map[string]string) {
+	p.mountsMu.Lock()
+	defer p.mountsMu.Unlock()
+	if p.mounts == nil {
+		p.mounts = make(map[string]map[string]string)
+	}
+	p.mounts[containerID] = mounts
+}
+
+// hostPathFor maps a container path to its host side, or reports false when it
+// is not inside a known bind mount.
+func (p *Provider) hostPathFor(containerID, containerPath string) (string, bool) {
+	p.mountsMu.RLock()
+	defer p.mountsMu.RUnlock()
+
+	clean := path.Clean(containerPath)
+	for cPath, hPath := range p.mounts[containerID] {
+		cPath = path.Clean(cPath)
+		if clean == cPath {
+			return hPath, true
+		}
+		if strings.HasPrefix(clean, cPath+"/") {
+			return filepath.Join(hPath, filepath.FromSlash(strings.TrimPrefix(clean, cPath+"/"))), true
+		}
+	}
+	return "", false
+}
+
+// unpackTarInto writes the archive's regular files under root and returns
+// their names, refusing any entry that would land outside it.
+//
+// The archive is rendered from operator-supplied config, so a `../` or
+// absolute entry is a path-traversal attempt against the host — the staging
+// directory is the boundary and it is enforced here rather than trusted.
+func unpackTarInto(root string, content io.Reader) ([]string, error) {
+	var names []string
+	tr := tar.NewReader(content)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading archive: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue // directories are created by the copy; nothing else travels
+		}
+		clean := path.Clean("/" + hdr.Name)[1:] // strips ../ and any leading /
+		if clean == "" || clean != hdr.Name {
+			return nil, fmt.Errorf("refusing archive entry %q: escapes the destination", hdr.Name)
+		}
+		target := filepath.Join(root, filepath.FromSlash(clean))
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return nil, fmt.Errorf("staging %s: %w", clean, err)
+		}
+		mode := os.FileMode(hdr.Mode).Perm() // #nosec G115 — tar mode is bounded
+		if mode == 0 {
+			mode = 0o600
+		}
+		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode) // #nosec G304 — target is under root
+		if err != nil {
+			return nil, fmt.Errorf("staging %s: %w", clean, err)
+		}
+		// Bounded copy: an archive is not a reason to fill the host disk.
+		if _, err := io.Copy(f, io.LimitReader(tr, maxCopyEntryBytes)); err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("staging %s: %w", clean, err)
+		}
+		if err := f.Close(); err != nil {
+			return nil, fmt.Errorf("staging %s: %w", clean, err)
+		}
+		names = append(names, clean)
+	}
+	return names, nil
+}
+
+// maxCopyEntryBytes caps a single staged file. Config files are kilobytes;
+// this is only here so a malformed archive cannot fill the disk.
+const maxCopyEntryBytes = 32 << 20
 
 // Close stops the background gc goroutine and releases resources.
 func (p *Provider) Close() error {
