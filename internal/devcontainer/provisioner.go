@@ -230,6 +230,10 @@ type ProvisionResult struct {
 	CachedImage  string                 // e.g. "crewship-cache:a1b2c3d4e5f6"
 	ConfigHash   string                 // full SHA-256 hex digest
 	Requirements AggregatedRequirements // runtime requirements bubbled up from features
+	// Features records what the build actually installed — ref, resolved
+	// digest and feature version — so a crew's image can be audited rather
+	// than guessed at. See provenance.go.
+	Features []FeatureRecord
 }
 
 // AggregatedRequirements contains runtime requirements bubbled up from the
@@ -595,6 +599,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		CachedImage:  tag,
 		ConfigHash:   hash,
 		Requirements: requirements,
+		Features:     featureRecords(resolvedFeatures),
 	}, nil
 }
 

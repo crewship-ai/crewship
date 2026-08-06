@@ -1,0 +1,24 @@
+-- What a crew's provisioned image is actually made of (#1779).
+--
+-- The devcontainer config records what the operator ASKED for, and that is not
+-- the same thing. `ghcr.io/devcontainers/features/common-utils:2` builds some
+-- 2.x; the tag keeps moving upstream. So the config alone cannot answer "what
+-- is in this image", which is the question a versioned container is supposed to
+-- be able to answer.
+--
+-- It is worse than merely unanswerable. configHash is computed from the ref as
+-- the operator wrote it, so when upstream publishes a new 2.x the hash is
+-- unchanged, the cached image is reused, and nothing anywhere says the crew is
+-- running the older one. Recording the digest each ref resolved to turns that
+-- silence into something an operator, the API and the Builder popover can all
+-- read — and is what a pinned manifest can later be generated from.
+--
+-- JSON rather than a table: this is a snapshot of one build, read and written
+-- whole, never queried across crews. A row per feature would buy joins nobody
+-- needs and a migration every time the record grows a field.
+--
+-- NULL means "built before this existed" — deliberately distinct from '[]',
+-- which means "built, and it uses no features". The UI must not claim a crew
+-- has no features when the truth is that nobody was recording.
+
+ALTER TABLE crews ADD COLUMN resolved_features TEXT;

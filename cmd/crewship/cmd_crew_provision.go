@@ -25,6 +25,19 @@ type provisionStatusResponse struct {
 	Steps                []string `json:"steps,omitempty"`
 	LogTail              []string `json:"log_tail,omitempty"`
 	AgentsPendingRestart int      `json:"agents_pending_restart,omitempty"`
+	// ResolvedFeatures is what the image is actually made of. Absent (nil) for
+	// a crew provisioned before this was recorded — a different answer from an
+	// empty list, and reported differently.
+	ResolvedFeatures []resolvedFeature `json:"resolved_features"`
+}
+
+// resolvedFeature mirrors devcontainer.FeatureRecord over the wire.
+type resolvedFeature struct {
+	Ref     string `json:"ref"`
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Digest  string `json:"digest"`
+	Pinned  bool   `json:"pinned"`
 }
 
 var crewProvisionCmd = &cobra.Command{
@@ -138,6 +151,13 @@ var crewProvisionStatusCmd = &cobra.Command{
 		}
 		if err := f.AutoDetail(result, pairs); err != nil {
 			return err
+		}
+		// Machine formats already carry resolved_features in the serialized
+		// result; only the human table needs it rendered.
+		switch f.Format {
+		case "json", "yaml", "ndjson", "quiet":
+		default:
+			printResolvedFeatures(result.ResolvedFeatures)
 		}
 		// Build log tail (#829): the BuildKit stderr that explains a failed
 		// build. Machine formats already carry log_tail in the serialized
@@ -381,4 +401,49 @@ func init() {
 	crewCmd.AddCommand(crewProvisionCmd)
 	crewCmd.AddCommand(crewRebuildCmd)
 	crewCmd.AddCommand(crewRestartAgentsCmd)
+}
+
+// printResolvedFeatures reports what the provisioned image actually contains.
+//
+// The devcontainer config says what was ASKED for; a ref like
+// `common-utils:2` builds some 2.x and the tag keeps moving. This is the answer
+// to "what am I running", and it flags the refs that can still drift — the
+// build cache is keyed on the ref as written, so a moved tag is reused in
+// silence (#1779).
+func printResolvedFeatures(feats []resolvedFeature) {
+	fmt.Println()
+	if feats == nil {
+		fmt.Println("Features:      (not recorded — provisioned before version tracking)")
+		return
+	}
+	if len(feats) == 0 {
+		fmt.Println("Features:      none")
+		return
+	}
+	floating := 0
+	fmt.Println("Features:")
+	for _, ft := range feats {
+		mark := "~" // floating: this ref can resolve elsewhere tomorrow
+		if ft.Pinned {
+			mark = "="
+		} else {
+			floating++
+		}
+		version := ft.Version
+		if version == "" {
+			version = "?"
+		}
+		digest := ft.Digest
+		if digest == "" {
+			digest = "(unknown)"
+		} else if len(digest) > 20 {
+			digest = digest[:20] + "…"
+		}
+		fmt.Printf("  %s %-16s %-10s %s\n", mark, ft.ID, version, digest)
+	}
+	if floating > 0 {
+		fmt.Printf("\n  %d of %d refs are floating (~). Pin them with @sha256:… to make\n", floating, len(feats))
+		fmt.Println("  rebuilds reproducible — a moved tag is reused silently, because the")
+		fmt.Println("  cache key is the ref you wrote, not what it resolved to.")
+	}
 }

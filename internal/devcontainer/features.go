@@ -39,6 +39,9 @@ type ResolvedFeature struct {
 	Ref      string
 	Dir      string // local path to extracted feature
 	Metadata FeatureMetadata
+	// Digest is the OCI digest Ref resolved to, recorded so a crew's image can
+	// be audited after the fact. Empty when the cache predates provenance.
+	Digest string
 }
 
 // FeatureMetadata mirrors the devcontainer-feature.json schema.
@@ -291,6 +294,7 @@ func (d *FeatureDownloader) resolveFromCache(ref, dir string) (*ResolvedFeature,
 		Ref:      ref,
 		Dir:      dir,
 		Metadata: meta,
+		Digest:   readFeatureDigest(dir),
 	}, nil
 }
 
@@ -324,6 +328,11 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 	img, err := remote.Image(parsed, remote.WithContext(ctx))
 	if err != nil {
 		return fmt.Errorf("fetching image %q: %w", ref, err)
+	}
+
+	if dg, derr := img.Digest(); derr == nil {
+		// Recorded into the extracted directory below, once it exists.
+		defer func() { _ = writeFeatureDigest(destDir, dg.String()) }()
 	}
 
 	layers, err := img.Layers()

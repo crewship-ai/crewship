@@ -7,6 +7,7 @@ import {
   AlertTriangle, Check, Circle, Loader2, Package, Play, RotateCcw, Terminal, X,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   useProvisioningStatus,
@@ -254,7 +255,7 @@ function ProvisioningRow({
       {crew.featureIds.length > 0 && crew.status !== "running" && !recentCompleted && (
         <div className="flex items-center gap-1 ml-4 mt-1.5 flex-wrap">
           {crew.featureIds.map((fid) => (
-            <FeatureChip key={fid} featureRef={fid} />
+            <FeatureChip key={fid} featureRef={fid} resolved={crew.resolvedFeatures?.[fid]} />
           ))}
         </div>
       )}
@@ -537,13 +538,55 @@ function formatProvisionDuration(ms: number): string {
  * when we don't have a brand icon for it.
  */
 
-function FeatureChip({ featureRef }: { featureRef: string }) {
+/** What a build actually resolved a feature ref to. */
+export interface ResolvedFeatureInfo {
+  version?: string
+  digest?: string
+  /** True when the ref itself names a digest — the only form that cannot drift. */
+  pinned: boolean
+}
+
+function FeatureChip({
+  featureRef,
+  resolved,
+}: {
+  featureRef: string
+  resolved?: ResolvedFeatureInfo
+}) {
   // Extract the leaf name: ghcr.io/.../features/<name>:<v> → <name>
-  const m = featureRef.match(/\/features\/([^:]+)/)
+  const m = featureRef.match(/\/features\/([^:@]+)/)
   const slug = (m?.[1] ?? featureRef).toLowerCase()
+
+  // A floating ref is the quiet hazard: the cache key is the ref as written,
+  // so when upstream moves the tag the old image is reused and nothing says
+  // so. Say it here, where the operator is already looking at the crew.
+  const floating = resolved != null && !resolved.pinned
+  const title = resolved
+    ? [
+        featureRef,
+        resolved.version ? `version ${resolved.version}` : null,
+        resolved.digest ? resolved.digest : null,
+        floating ? "floating ref — a rebuild can change this" : "pinned",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : featureRef
+
   return (
-    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground border border-border/50">
+    <span
+      data-testid="feature-chip"
+      title={title}
+      className={cn(
+        "text-[10px] px-1.5 py-0.5 rounded border",
+        floating
+          ? "bg-warn/10 text-warn border-warn/30"
+          : "bg-muted/60 text-muted-foreground border-border/50",
+      )}
+    >
       {slug}
+      {resolved?.version && (
+        <span className="ml-1 opacity-70 tabular-nums">{resolved.version}</span>
+      )}
     </span>
   )
 }

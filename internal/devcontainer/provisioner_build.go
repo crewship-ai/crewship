@@ -246,6 +246,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 		CachedImage:  tag,
 		ConfigHash:   hash,
 		Requirements: requirements,
+		Features:     featureRecords(resolvedFeatures),
 	}, nil
 }
 
