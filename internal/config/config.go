@@ -129,7 +129,7 @@ type ContainerConfig struct {
 
 // StorageConfig holds file storage settings for agent outputs and logs.
 type StorageConfig struct {
-	Provider string `yaml:"provider"` // "localfs" | "s3"
+	Provider string `yaml:"provider"` // "localfs" (s3 on the v0.2 roadmap; see validStorageProviders)
 	BasePath string `yaml:"base_path"`
 	LogPath  string `yaml:"log_path"`
 	// MemoryRoot is the parent directory for workspace-tier memory.
@@ -354,9 +354,17 @@ func Load(path string) (*Config, error) {
 
 var (
 	validContainerProviders = map[string]bool{"docker": true, "apple": true, "auto": true}
-	validStorageProviders   = map[string]bool{"localfs": true, "s3": true}
-	validStateProviders     = map[string]bool{"bbolt": true}
-	validContainerRuntimes  = map[string]bool{
+	// localfs is the only storage provider that exists. `s3` used to be
+	// accepted here while internal/provider/ contained no s3 implementation
+	// and cmd_start.go's switch had no case for it, so setting it started a
+	// server with deps.Storage == nil behind one WARN line (#1768 item 7).
+	// Nothing dereferenced it yet; attachments would be the first thing that
+	// does. Accepting a value the binary cannot honour is worse than refusing
+	// it, because the operator who set it believes their files are on S3.
+	// Re-add the entry in the same commit that wires the provider, not before.
+	validStorageProviders  = map[string]bool{"localfs": true}
+	validStateProviders    = map[string]bool{"bbolt": true}
+	validContainerRuntimes = map[string]bool{
 		"runc": true, "runsc": true, "kata-runtime": true, "sysbox-runc": true,
 	}
 )
@@ -374,7 +382,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("container.provider must be 'docker', 'apple', or 'auto', got %q", c.Container.Provider)
 	}
 	if !validStorageProviders[c.Storage.Provider] {
-		return fmt.Errorf("storage.provider must be 'localfs' or 's3', got %q", c.Storage.Provider)
+		return fmt.Errorf("storage.provider must be 'localfs', got %q", c.Storage.Provider)
 	}
 	if !validStateProviders[c.State.Provider] {
 		return fmt.Errorf("state.provider must be 'bbolt', got %q", c.State.Provider)

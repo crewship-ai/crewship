@@ -49,7 +49,7 @@ All Crewship configuration can be set via environment variables. These override 
 |----------|---------|-------------|
 | `CREWSHIP_DATA_DIR` | `~/.crewship` | Root directory for `crewship.db`, output, chats, logs, skills, and workspace memory. Resolved by `database.DefaultDataDir` — every admin / backup / doctor / start path flows through it. |
 | `DATABASE_URL` | (unset) | Direct DSN override for `crewship admin` only. Bypasses `CREWSHIP_DATA_DIR` resolution. Use when running admin commands against a SQLite file outside the standard data-dir tree. |
-| `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Storage backend: `localfs` or `s3` |
+| `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Storage backend. `localfs` is the only implemented provider; any other value is refused at startup rather than accepted and ignored. |
 | `CREWSHIP_STORAGE_BASE_PATH` | `/var/lib/crewship` | Base path for local file storage |
 | `CREWSHIP_LOG_PATH` | `/var/log/crewship` | Path for log files |
 
@@ -378,7 +378,7 @@ The config is validated at startup (`Config.Validate`). These constraints are en
 | `server.port` | 1-65535 |
 | `ipc.socket_path` | Non-empty |
 | `container.provider` | `docker`, `apple`, or `auto` |
-| `storage.provider` | `localfs` or `s3` |
+| `storage.provider` | `localfs` |
 | `state.provider` | `bbolt` |
 | `container.default_runtime` | `runc`, `runsc`, `kata-runtime`, or `sysbox-runc` (if set) |
 | `auth.nextjs_url` | Non-empty |
