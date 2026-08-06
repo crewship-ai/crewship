@@ -19,6 +19,18 @@ func (p *Provider) ContainerStats(_ context.Context, _ string) (*provider.Contai
 func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	args := []string{"exec"}
 
+	// -i is required for the CLI to attach our stdin. Without it `sh` (no
+	// operands) reads its commands from a stream already at EOF: it runs
+	// nothing and exits 0. That is how the merged preflight batch — which
+	// delivers its script over stdin so credentials never reach argv — silently
+	// executed nothing on macOS while reporting success, and the run then died
+	// on a missing .mcp.json three layers later (#1779). Verified on 1.2.0:
+	// without -i a piped `exit 7` script produced no output and exit 0; with
+	// -i it printed and exited 7.
+	if cfg.Stdin != nil {
+		args = append(args, "-i")
+	}
+
 	for _, env := range cfg.Env {
 		args = append(args, "--env", env)
 	}
