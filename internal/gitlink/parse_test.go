@@ -310,6 +310,49 @@ func TestRef_APIEndpointFor_UsesTheSuppliedHostNotTheParsedOne(t *testing.T) {
 			vetted: "gitlab.acme.internal",
 			want:   "http://gitlab.acme.internal/api/v4/projects/acme%2Fbilling/merge_requests/7",
 		},
+		// The vetted host arrives from a credential's account_label, which is
+		// operator-typed. Fetch admits it with strings.EqualFold against
+		// ref.Host and then passes it through UNCHANGED, so every SaaS branch
+		// below has to survive whatever case that operator used. DNS is
+		// case-insensitive, so these are the same hosts — but an exact ==
+		// comparison does not know that, and each miss lands somewhere wrong.
+		{
+			name:   "mixed-case github.com still resolves to the api subdomain",
+			raw:    "https://github.com/crewship-ai/crewship/pull/7",
+			vetted: "GitHub.com",
+			want:   "https://api.github.com/repos/crewship-ai/crewship/pulls/7",
+		},
+		{
+			// The worst of the set: missing this branch does not fail, it
+			// silently builds the GitHub ENTERPRISE layout (/api/v3) against
+			// the SaaS host, which answers 404 for every link.
+			name:   "upper-case github.com does not fall through to the Enterprise layout",
+			raw:    "https://github.com/crewship-ai/crewship/pull/7",
+			vetted: "GITHUB.COM",
+			want:   "https://api.github.com/repos/crewship-ai/crewship/pulls/7",
+		},
+		{
+			name:   "mixed-case www.gitlab.com still resolves to the bare SaaS host",
+			raw:    "https://www.gitlab.com/acme/billing/-/merge_requests/7",
+			vetted: "WWW.GitLab.com",
+			want:   "https://gitlab.com/api/v4/projects/acme%2Fbilling/merge_requests/7",
+		},
+		{
+			name:   "mixed-case www.github.com still resolves to the api subdomain",
+			raw:    "https://www.github.com/crewship-ai/crewship/pull/7",
+			vetted: "WWW.GITHUB.COM",
+			want:   "https://api.github.com/repos/crewship-ai/crewship/pulls/7",
+		},
+		{
+			// The guard on the canonicalisation: a self-hosted host must keep
+			// its own name. Lower-casing it is safe (DNS is case-insensitive);
+			// rewriting it to a SaaS host would send an intranet merge request,
+			// with its credential, to gitlab.com.
+			name:   "a mixed-case self-hosted host is lower-cased, never rewritten",
+			raw:    "https://GitLab.ACME.internal/acme/billing/-/merge_requests/7",
+			vetted: "GitLab.ACME.internal",
+			want:   "https://gitlab.acme.internal/api/v4/projects/acme%2Fbilling/merge_requests/7",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

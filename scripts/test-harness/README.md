@@ -180,14 +180,20 @@ Two CI-specific notes worth keeping:
    them — nothing is written to either forge. With neither variable set the
    whole file SKIPs and exits 0 without contacting anything.
 
-   Two things that make it SKIP rather than fail, both worth knowing before you
-   read a green run as coverage: the resolved CLI must be new enough to have
-   `credential create --account-label` and `issue link` (#1758), and the
-   workspace must not already hold an **older** ACTIVE credential for that
-   provider labelled with the forge host — that one would win credential
-   resolution. `crewship credential list/get` do not expose `account_label`, so
-   the second condition is stated, not checked; the good-path failure message
-   names it.
+   Two preconditions, both worth knowing before you read a run as coverage —
+   and they do **not** behave the same way when unmet.
+
+   The resolved CLI must be new enough to have `credential create
+   --account-label` and `issue link` (#1758). Without either, the suite SKIPs.
+
+   The workspace must not already hold an **older** ACTIVE credential for that
+   provider labelled with the forge host — that one wins credential resolution,
+   and the suite then **FAILS**, it does not skip. `crewship credential
+   list/get` do not expose `account_label`, so this condition is stated rather
+   than checked; the good-path failure message names it as the likely cause.
+   Exposing `account_label` on those commands would let the suite check its own
+   precondition, and would answer "which credential will this link resolve to?"
+   for operators too — worth doing, not done here.
 
 ## Run
 

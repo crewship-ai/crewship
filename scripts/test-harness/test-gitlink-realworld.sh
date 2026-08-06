@@ -240,6 +240,15 @@ if ! have jq; then
   finish
 fi
 
+# preflight FIRST, before anything invokes $CREWSHIP. The two probes below run
+# the binary and read its output; if the binary is missing or not executable
+# the command fails, grep matches nothing, and the suite skips claiming a
+# version skew that does not exist. preflight separates "no binary" from
+# "wrong binary" on purpose and prints the build instructions for the former.
+preflight
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+
 # The resolved CLI has to be new enough to have the surface under test. Both
 # gaps are silent otherwise: an old `credential create` rejects
 # --account-label with "unknown flag" (which reads as a broken harness), and an
@@ -256,10 +265,6 @@ if ! "$CREWSHIP" issue --help 2>&1 | grep -qE '^[[:space:]]+link[[:space:]]'; th
   finish
 fi
 
-preflight
-trap cleanup EXIT
-trap 'cleanup; exit 130' INT TERM
-
 CREW="${GITLINK_CREW:-$(cs crew list --format json 2>/dev/null | jq -r '(if type=="array" then . else [] end) | .[0].slug // empty')}"
 if [[ -z "$CREW" ]]; then
   skip "the whole real-forge gitlink suite" "no crew in this workspace to hang an issue off"
@@ -267,7 +272,14 @@ if [[ -z "$CREW" ]]; then
 fi
 info "crew: $CREW"
 
-ISSUE="$(cs issue create --crew "$CREW" --title "gitlink real-forge harness $NONCE" 2>&1 \
+# The identifier is recovered by grepping the CLI's success text — `issue
+# create` has no --format json — so the TITLE must not be able to look like an
+# identifier. `nonce GL` yields GL-<6 of A-Z0-9>, and roughly one run in 1600
+# draws six digits: "GL-481207" matches the same pattern, is echoed back inside
+# the title, and `head -n1` would take it instead of the real issue. Swapping
+# the separator makes the collision unrepresentable rather than unlikely.
+_issue_title="gitlink real-forge harness ${NONCE//-/_}"
+ISSUE="$(cs issue create --crew "$CREW" --title "$_issue_title" 2>&1 \
   | grep -oE '[A-Z][A-Z0-9]*-[0-9]+' | head -n1)"
 if [[ -z "$ISSUE" ]]; then
   _fail "create the throwaway issue" "crewship issue create --crew $CREW produced no identifier"
