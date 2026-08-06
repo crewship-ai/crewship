@@ -820,21 +820,33 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	// What the build actually installed, so the image can be audited rather
 	// than inferred from the config (#1779). Stored as '[]' when a crew uses no
 	// features — distinct from NULL, which means "built before this existed".
-	var featJSON sql.NullString
-	if featBytes, marshalErr := json.Marshal(result.Features); marshalErr != nil {
-		// NULL then means "unknown", which is honest — better than recording
-		// '[]' and claiming the image has no features.
-		h.logger.Warn("marshal resolved_features failed, storing NULL",
-			"crew_id", crewID, "error", marshalErr)
-	} else {
-		featJSON = sql.NullString{String: string(featBytes), Valid: true}
+	// resolved_features is written only when this run actually resolved some.
+	// A cache hit resolves nothing — it built nothing — and writing that as
+	// JSON `null` would erase the digests an earlier build recorded, after
+	// which the CLI reports the crew as "not recorded" and the audit trail the
+	// column exists for is gone (#1779).
+	setFeatures := ""
+	updateArgs := []any{result.CachedImage, result.ConfigHash, reqJSON}
+	if len(result.Features) > 0 {
+		featBytes, marshalErr := json.Marshal(result.Features)
+		if marshalErr != nil {
+			// Leave the column alone rather than blanking it: "unknown" is
+			// better recorded as the previous answer than as no answer.
+			h.logger.Warn("marshal resolved_features failed, leaving the column untouched",
+				"crew_id", crewID, "error", marshalErr)
+		} else {
+			setFeatures = "resolved_features = ?, "
+			updateArgs = append(updateArgs, string(featBytes))
+		}
 	}
+	updateArgs = append(updateArgs, crewID, workspaceID)
 
 	_, err = h.db.ExecContext(updateCtx,
-		`UPDATE crews SET cached_image = ?, config_hash = ?, cached_requirements = ?,
-		        resolved_features = ?, updated_at = datetime('now')
+		`UPDATE crews SET cached_image = ?, config_hash = ?, cached_requirements = ?, `+
+			setFeatures+
+			`updated_at = datetime('now')
 		 WHERE id = ? AND workspace_id = ?`,
-		result.CachedImage, result.ConfigHash, reqJSON, featJSON, crewID, workspaceID,
+		updateArgs...,
 	)
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("update db: %w", err))

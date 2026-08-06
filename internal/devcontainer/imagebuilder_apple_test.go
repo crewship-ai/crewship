@@ -367,3 +367,40 @@ func TestAppleBuilder_DoesNotKillAfterTheExportMarker(t *testing.T) {
 		t.Error("the CLI was killed before it finished — the image write is what happens here")
 	}
 }
+
+// builderCPUMem parses `container builder status`, and this branch has already
+// paid three times for a decoder written against an imagined shape. This is the
+// last hand-rolled parse still shipping without a captured sample, and its
+// failure mode is expensive: a mis-parse reads as (0,0), ensureBuilderSized
+// concludes the builder is undersized, and deletes it — throwing away the
+// BuildKit layer cache on every server start and turning every provision cold.
+//
+// The fixture below is verbatim `container builder status` from 1.2.0.
+func TestBuilderCPUMem_ParsesTheRealStatusOutput(t *testing.T) {
+	raw, err := os.ReadFile("testdata/builder_status.txt")
+	if err != nil {
+		t.Skipf("no captured builder status to check against: %v", err)
+	}
+	cpus, memMB := parseBuilderCPUMem(string(raw))
+	if cpus <= 0 || memMB <= 0 {
+		t.Fatalf("real output parsed as (%d, %d) — a zero here deletes the builder and its cache:\n%s", cpus, memMB, raw)
+	}
+}
+
+// An unrecognised rendering must NOT read as "undersized". Reporting zero is
+// how a future CLI release would silently destroy the layer cache.
+func TestBuilderCPUMem_UnknownShapeDoesNotReadAsUndersized(t *testing.T) {
+	for _, out := range []string{
+		"",
+		"ID  IMAGE  STATE\nbuildkit  img  running\n",
+		"ID IMAGE STATE CPUS MEMORY\nbuildkit img running 2 2GiB\n",
+	} {
+		cpus, memMB := parseBuilderCPUMem(out)
+		if cpus == 0 && memMB == 0 {
+			continue // "cannot tell" is fine; the caller must treat it as such
+		}
+		if cpus < 0 || memMB < 0 {
+			t.Errorf("negative sizing from %q: (%d, %d)", out, cpus, memMB)
+		}
+	}
+}

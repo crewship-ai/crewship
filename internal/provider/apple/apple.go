@@ -700,8 +700,38 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 // spinner (#1779).
 const defaultCLITimeout = 5 * time.Minute
 
+// heavyCLITimeout bounds the operations that move real data: creating a
+// container unpacks the image's root filesystem into a fresh VM disk, and
+// pulling fetches it.
+//
+// Measured, not guessed — a mistake this file has already paid for twice. A
+// `container create` from a provisioned devcontainer image on an M-series Mac
+// took 454s, and the 5-minute generic bound killed it mid-work, failing a crew
+// whose container was being built correctly. Twenty minutes leaves room for a
+// slower host and a larger image while still ending a genuine wedge (#1779).
+const heavyCLITimeout = 20 * time.Minute
+
+// heavyCLIOps are the subcommands that get heavyCLITimeout. Keyed on the first
+// argument, which is the subcommand runCLI is always called with.
+var heavyCLIOps = map[string]bool{
+	"create": true,
+	"run":    true,
+	"start":  true,
+	"pull":   true,
+	"build":  true,
+	"cp":     true,
+}
+
 func runCLI(ctx context.Context, args ...string) ([]byte, error) {
-	return runCLIWithin(ctx, defaultCLITimeout, args...)
+	timeout := defaultCLITimeout
+	if len(args) > 0 && heavyCLIOps[args[0]] {
+		timeout = heavyCLITimeout
+	}
+	// `image pull` and `builder start` carry their verb second.
+	if len(args) > 1 && heavyCLIOps[args[1]] {
+		timeout = heavyCLITimeout
+	}
+	return runCLIWithin(ctx, timeout, args...)
 }
 
 // runCLIWithin runs one `container` invocation under its own deadline.

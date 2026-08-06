@@ -306,6 +306,9 @@ func (p *Provisioner) SetImageBuilder(b ImageBuilder) { p.builder = b }
 const (
 	miseStepLabel   = "Installing language runtimes"
 	commitStepLabel = "Committing image"
+	// buildStepLabel is the commit path's counterpart on runtimes that build
+	// the image instead of committing a container (#1779).
+	buildStepLabel = "Building image"
 )
 
 func pullStepLabel(baseImage string) string {

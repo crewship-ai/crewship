@@ -197,6 +197,66 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 		cfg.NormalizedPostStartCommands()...,
 	)
 
+	// Cache hit. The commit path checks this before doing any work; the build
+	// dispatch used to jump over that check entirely, so an unchanged crew on
+	// macOS rebuilt the identical tag every time — about six minutes for a
+	// no-op, where the Docker path returns at once (#1779).
+	if prober, ok := p.builder.(ImageProber); ok {
+		if exists, probeErr := prober.ImageExists(ctx, tag); probeErr == nil && exists {
+			p.logger.Info("using cached image", "tag", tag)
+			emitEvt(ProvisionEvent{Step: ProvStepCacheHit, Status: ProvStatusCompleted, Tag: tag})
+			emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
+			return &ProvisionResult{
+				CachedImage:  tag,
+				ConfigHash:   hash,
+				Requirements: requirements,
+				Features:     featureRecords(resolvedFeatures),
+			}, nil
+		}
+	}
+	// The plan and the per-step progress are what drive the Builder popover's
+	// checklist and the CLI's live output. The commit path emits both; this one
+	// emitted neither, so a macOS user clicking Build watched an empty popover
+	// for the whole build — the surface this work exists to make usable (#1779).
+	plan := make([]string, 0, 3+len(resolvedFeatures))
+	plan = append(plan, pullStepLabel(baseImage))
+	for _, f := range resolvedFeatures {
+		if f != nil {
+			plan = append(plan, featureStepLabel(f.Metadata.ID))
+		}
+	}
+	if miseConfig != "" {
+		plan = append(plan, miseStepLabel)
+	}
+	plan = append(plan, buildStepLabel)
+	total := len(plan)
+	if o.onPlan != nil {
+		dup := make([]string, len(plan))
+		copy(dup, plan)
+		o.onPlan(dup)
+	}
+	step := 0
+	emit := func(message string) {
+		step++
+		if o.onProgress != nil {
+			o.onProgress(step, total, message)
+		}
+	}
+
+	// The build runs the features as layers, so their steps are reported up
+	// front rather than one-by-one as they install: BuildKit interleaves and
+	// caches them, and pretending otherwise would show a checklist that does
+	// not match what is happening.
+	emit(pullStepLabel(baseImage))
+	for _, f := range resolvedFeatures {
+		if f != nil {
+			emit(featureStepLabel(f.Metadata.ID))
+		}
+	}
+	if miseConfig != "" {
+		emit(miseStepLabel)
+	}
+
 	rec := &dockerfileRecorder{}
 	if err := p.recordProvisionSteps(ctx, rec, resolvedFeatures, cfg, miseConfig, requirements.ContainerEnv); err != nil {
 		return fail(ProvStepImageBuildStart, err)
@@ -208,6 +268,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	}
 	defer func() { _ = os.RemoveAll(contextDir) }()
 
+	emit(buildStepLabel)
 	buildStart := time.Now()
 	emitEvt(ProvisionEvent{
 		Step:   ProvStepImageBuildStart,

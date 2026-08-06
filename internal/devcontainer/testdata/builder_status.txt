@@ -1,0 +1,2 @@
+ID        IMAGE                                                STATE    IP               CPUS  MEMORY
+buildkit  ghcr.io/apple/container-builder-shim/builder:0.13.0  running  192.168.65.2/24  5     8192 MB

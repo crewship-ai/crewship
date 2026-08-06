@@ -402,7 +402,7 @@ func runOrBatch(ctx context.Context, container provider.ContainerProvider, name 
 	// success whatever happened, so a write that never landed was logged as
 	// done and only surfaced later as a puzzling error from the agent itself
 	// ("MCP config file not found"). A step that failed has to fail here (#1779).
-	_, code, inspectErr := container.ExecInspect(ctx, result.ExecID)
+	code, inspectErr := provider.WaitExecExit(ctx, container, result.ExecID, execProbeTimeout)
 	if inspectErr != nil {
 		return fmt.Errorf("%s: %w", name, inspectErr)
 	}

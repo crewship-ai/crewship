@@ -16,9 +16,15 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+// execProbeTimeout bounds waiting for a short probe exec to report its status.
+// Generous for a `command -v`, short enough that a wedged runtime cannot hold a
+// run open.
+const execProbeTimeout = 30 * time.Second
 
 func mcpStdioDomains(servers []MCPServerConfig) []string {
 	seen := make(map[string]bool)
@@ -136,7 +142,10 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 		}
 		io.Copy(io.Discard, checkResult.Reader)
 		checkResult.Reader.Close()
-		_, tmuxExitCode, inspectErr := o.container.ExecInspect(ctx, checkResult.ExecID)
+		// Wait for the probe to actually exit before reading its status: the
+		// result is CACHED for the container's lifetime, so one inspect/EOF
+		// race would mark tmux missing forever (#1779).
+		tmuxExitCode, inspectErr := provider.WaitExecExit(ctx, o.container, checkResult.ExecID, execProbeTimeout)
 		if inspectErr != nil {
 			return nil, fmt.Errorf("tmux check inspect: %w", inspectErr)
 		}

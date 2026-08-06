@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"path/filepath"
@@ -48,21 +49,38 @@ func (b *AppleContainerBuilder) builderCPUMem(ctx context.Context) (cpus, memMB 
 	if err != nil {
 		return 0, 0
 	}
+	return parseBuilderCPUMem(string(out))
+}
+
+// parseBuilderCPUMem reads the CPU and memory columns out of
+// `container builder status`. Reports (0, 0) for anything it does not
+// recognise, which callers must treat as "cannot tell" — see ensureBuilderSized.
+//
+// Pure and fixture-tested on purpose. Three defects on this branch came from
+// decoders written against an imagined payload, and this one's failure mode is
+// expensive: read as (0, 0) and treated as "undersized", it deletes the builder
+// and its whole layer cache (#1779).
+func parseBuilderCPUMem(out string) (cpus, memMB int) {
 	// ID  IMAGE  STATE  IP  CPUS  MEMORY
-	// buildkit  …  running  …  2  2048 MB
-	for _, line := range strings.Split(string(out), "\n") {
+	// buildkit  …  running  …  5  8192 MB
+	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 || f[0] == "ID" {
 			continue
 		}
 		for i := 0; i+1 < len(f); i++ {
-			if strings.EqualFold(f[i+1], "MB") {
-				memMB, _ = strconv.Atoi(f[i])
-				if i > 0 {
-					cpus, _ = strconv.Atoi(f[i-1])
-				}
-				return cpus, memMB
+			if !strings.EqualFold(f[i+1], "MB") {
+				continue
 			}
+			mem, memErr := strconv.Atoi(f[i])
+			if memErr != nil || i == 0 {
+				return 0, 0
+			}
+			cpu, cpuErr := strconv.Atoi(f[i-1])
+			if cpuErr != nil {
+				return 0, 0
+			}
+			return cpu, mem
 		}
 	}
 	return 0, 0
@@ -85,6 +103,15 @@ func (b *AppleContainerBuilder) ensureBuilderSized(ctx context.Context) {
 		return
 	}
 	haveCPUs, haveMemMB := b.builderCPUMem(ctx)
+	// (0, 0) means the status could not be read, NOT that the builder is tiny.
+	// Treating it as undersized would delete the builder and its layer cache
+	// every start — the expensive way to be wrong about an unrecognised CLI
+	// rendering, and exactly the failure this parser must not cause.
+	if haveCPUs == 0 && haveMemMB == 0 {
+		b.logger.Warn("could not read the builder's size — leaving it alone",
+			"want_cpus", b.cpus, "want_memory_mb", b.memoryMB)
+		return
+	}
 	if haveCPUs >= b.cpus && haveMemMB >= b.memoryMB {
 		return
 	}
@@ -139,6 +166,10 @@ func builderShare(hostCPUs, hostMemMB int) (cpus, memMB int) {
 // 0% CPU. Five minutes is comfortably past the former and far short of "a
 // customer stares at a spinner forever".
 const defaultBuildIdleTimeout = 5 * time.Minute
+
+// imageProbeTimeout bounds one `container image inspect`. A query, so short:
+// its whole job is to answer or get out of the way.
+const imageProbeTimeout = 20 * time.Second
 
 // NewAppleContainerBuilder probes for Apple's `container` CLI on PATH.
 //
@@ -279,6 +310,17 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 		}
 		b.logger.Debug("container build", "line", line)
 	}
+	// A scanner error — an over-long line, most plausibly — ends the read
+	// while the CLI is still writing. Retiring the watchdog here would leave
+	// nothing able to kill it, the pipe would fill, and cmd.Wait() would block
+	// until the outer provisioning context expired half an hour later with
+	// nothing in the log naming the cause. Drain the rest instead, so the
+	// process can finish and the watchdog stays armed until it does.
+	if scanErr := scanner.Err(); scanErr != nil {
+		b.logger.Warn("build log stream ended early; draining the rest",
+			"tag", tag, "error", scanErr)
+		_, _ = io.Copy(io.Discard, stdout)
+	}
 	close(watchdogDone)
 
 	if err := cmd.Wait(); err != nil {
@@ -301,6 +343,12 @@ func (b *AppleContainerBuilder) ImageExists(ctx context.Context, tag string) (bo
 	if !b.Available() {
 		return false, fmt.Errorf("devcontainer: Apple `container` CLI not available")
 	}
+	// Bounded on its own. waitForImage loops against a deadline, but a single
+	// unbounded call defeats it entirely: a wedged apiserver blocks `image
+	// inspect` — observed today during a build wedge — so the deadline would
+	// never be re-evaluated and provisioning would stall past its own budget.
+	ctx, cancel := context.WithTimeout(ctx, imageProbeTimeout)
+	defer cancel()
 	// #nosec G204 — bin is PATH-resolved; tag is an internally built cache tag.
 	cmd := exec.CommandContext(ctx, b.bin, "image", "inspect", tag)
 	if err := cmd.Run(); err != nil {

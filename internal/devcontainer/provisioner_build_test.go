@@ -438,3 +438,55 @@ func (b *lateProbingBuilder) ImageExists(_ context.Context, _ string) (bool, err
 	b.probes++
 	return b.probes > b.appearsAfter, nil
 }
+
+// The build-only dispatch sits above Provision's cache short-circuit, so the
+// macOS path had no cache lookup at all and rebuilt the identical tag every
+// time — measured at ~6 minutes for a crew that had not changed, where the
+// Docker path returns immediately. The dispatch comment even claimed the cache
+// lookup was shared; it was not (#1779).
+func TestProvisionByBuild_ReusesAnImageThatIsAlreadyBuilt(t *testing.T) {
+	b := &probingBuilder{recordingBuilder: recordingBuilder{available: true}, exists: true}
+	p := NewBuildOnlyProvisioner(b, nil, slog.Default())
+
+	res, err := p.ProvisionByBuild(context.Background(), "debian:12", &Config{Image: "debian:12"}, "")
+	if err != nil {
+		t.Fatalf("ProvisionByBuild: %v", err)
+	}
+	if b.calls != 0 {
+		t.Errorf("an image already in the store must not be rebuilt, got %d builds", b.calls)
+	}
+	if res.CachedImage == "" {
+		t.Error("a cache hit must still report the image it reused")
+	}
+}
+
+// A tag that is absent must still build — the short-circuit is a cache, not a
+// gate.
+func TestProvisionByBuild_BuildsWhenTheImageIsAbsent(t *testing.T) {
+	b := &appearingBuilder{recordingBuilder: recordingBuilder{available: true}}
+	p := NewBuildOnlyProvisioner(b, nil, slog.Default())
+
+	if _, err := p.ProvisionByBuild(context.Background(), "debian:12", &Config{Image: "debian:12"}, ""); err != nil {
+		t.Fatalf("ProvisionByBuild: %v", err)
+	}
+	if b.calls != 1 {
+		t.Errorf("expected exactly one build, got %d", b.calls)
+	}
+}
+
+// appearingBuilder reports the tag absent until it has built it, which is what
+// a real store does.
+type appearingBuilder struct {
+	recordingBuilder
+	built bool
+}
+
+func (b *appearingBuilder) Build(ctx context.Context, dir, tag string, onLog func(string)) error {
+	err := b.recordingBuilder.Build(ctx, dir, tag, onLog)
+	b.built = true
+	return err
+}
+
+func (b *appearingBuilder) ImageExists(_ context.Context, _ string) (bool, error) {
+	return b.built, nil
+}

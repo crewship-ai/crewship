@@ -64,3 +64,36 @@ func TestRunCLIWithin_PassesThroughOnSuccess(t *testing.T) {
 		t.Errorf("output = %q, want ok", out)
 	}
 }
+
+// The generic 5-minute bound was measured against the wrong thing. A
+// `container create` from a provisioned devcontainer image took 454s on an
+// M-series Mac — unpacking the image's root filesystem into a fresh VM disk is
+// real work, not a wedge — and the bound killed it, failing a crew whose
+// container was being built correctly.
+//
+// This is the third bound on this branch set without measuring the legitimate
+// case first, so it is pinned here rather than left to a comment (#1779).
+func TestRunCLI_HeavyOperationsGetALongerBound(t *testing.T) {
+	for _, op := range []string{"create", "run", "start", "pull", "build", "cp"} {
+		if !heavyCLIOps[op] {
+			t.Errorf("%q moves real data and must not share the short bound", op)
+		}
+	}
+	if heavyCLITimeout <= defaultCLITimeout {
+		t.Errorf("heavy bound %s must exceed the generic %s", heavyCLITimeout, defaultCLITimeout)
+	}
+	// 454s measured; the bound has to clear it with room for a slower host.
+	if heavyCLITimeout < 10*time.Minute {
+		t.Errorf("heavy bound %s is under the measured 454s create with no headroom", heavyCLITimeout)
+	}
+}
+
+// Queries stay short: a wedged `image list` must not hold a crew start for
+// twenty minutes.
+func TestRunCLI_QueriesKeepTheShortBound(t *testing.T) {
+	for _, op := range []string{"list", "inspect", "status", "delete"} {
+		if heavyCLIOps[op] {
+			t.Errorf("%q is a query and must keep the short bound", op)
+		}
+	}
+}
