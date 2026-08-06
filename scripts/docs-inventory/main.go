@@ -139,15 +139,25 @@ type cliRecord struct {
 }
 
 type report struct {
-	Summary summary     `json:"summary"`
-	API     []apiRecord `json:"api"`
-	CLI     []cliRecord `json:"cli"`
+	Summary  summary         `json:"summary"`
+	API      []apiRecord     `json:"api"`
+	CLI      []cliRecord     `json:"cli"`
+	Env      []surfaceRecord `json:"environment_variables,omitempty"`
+	Manifest []surfaceRecord `json:"manifest_kinds,omitempty"`
+}
+
+type surfaceRecord struct {
+	Name   string   `json:"name"`
+	Docs   []string `json:"docs,omitempty"`
+	Status string   `json:"status"`
 }
 
 var endpointPattern = regexp.MustCompile(`(?i)\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s+(/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?)`)
 var endpointHeadingPattern = regexp.MustCompile(`(?i)^#{1,6}\s+.*\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE)\s+(/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?)`)
 var pathPattern = regexp.MustCompile(`/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?`)
 var statusPattern = regexp.MustCompile(`(?i)\bstatus(?:es)?\s*:`)
+var envNamePattern = regexp.MustCompile(`\bCREWSHIP_[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*\b`)
+var manifestKindsPattern = regexp.MustCompile(`expected one of: ([A-Za-z0-9_, ]+)`)
 var httpStatusPattern = regexp.MustCompile(`(?i)(?:` + "`" + `)?[1-5][0-9]{2}(?:` + "`" + `)?(?:\s+[a-z][a-z -]+)?`)
 
 type endpointEvidence struct {
@@ -362,7 +372,11 @@ type summary struct {
 	// of the four structural markers (auth, request, response, statuses).
 	// The release audit CLAIMED this was zero; without a counter the claim
 	// could not be checked by anything but a human reading 532 rows.
-	APIContractGaps int `json:"api_contract_gaps"`
+	APIContractGaps             int `json:"api_contract_gaps"`
+	EnvironmentVariables        int `json:"environment_variables"`
+	EnvironmentVariablesMissing int `json:"environment_variables_missing"`
+	ManifestKinds               int `json:"manifest_kinds"`
+	ManifestKindsMissing        int `json:"manifest_kinds_missing"`
 }
 
 func main() {
@@ -424,7 +438,25 @@ func strictGates() []gate {
 			func(r report) []string {
 				return cliRowsWhere(r, func(rec cliRecord) bool { return len(rec.MissingFlags) > 0 })
 			}},
+		{"environment variables with no documentation", func(s summary) int { return s.EnvironmentVariablesMissing },
+			func(r report) []string {
+				return surfaceRowsWhere(r.Env, func(rec surfaceRecord) bool { return rec.Status == "missing_docs" })
+			}},
+		{"manifest kinds with no documentation", func(s summary) int { return s.ManifestKindsMissing },
+			func(r report) []string {
+				return surfaceRowsWhere(r.Manifest, func(rec surfaceRecord) bool { return rec.Status == "missing_docs" })
+			}},
 	}
+}
+
+func surfaceRowsWhere(records []surfaceRecord, match func(surfaceRecord) bool) []string {
+	var out []string
+	for _, rec := range records {
+		if match(rec) {
+			out = append(out, rec.Name)
+		}
+	}
+	return out
 }
 
 func apiRowsWhere(r report, match func(apiRecord) bool) []string {
@@ -594,6 +626,8 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 	}
 	walk(manifest.Commands)
 	sort.Slice(r.CLI, func(i, j int) bool { return r.CLI[i].Path < r.CLI[j].Path })
+	r.Env = inventoryEnvironmentVariables(sources, docs)
+	r.Manifest = inventoryManifestKinds(sources, docs)
 	r.Summary = summarize(r)
 
 	if err := os.MkdirAll(reportDir, 0o755); err != nil {
@@ -621,6 +655,92 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 		fmt.Println("docs-inventory: strict mode — every documentation gate is clean.")
 	}
 	return nil
+}
+
+func inventoryEnvironmentVariables(sources, docs []docFile) []surfaceRecord {
+	seen := map[string]bool{}
+	for _, source := range sources {
+		for _, name := range envNamePattern.FindAllString(source.Text, -1) {
+			if !strings.HasSuffix(name, "_") {
+				seen[name] = true
+			}
+		}
+	}
+	var names []string
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	result := make([]surfaceRecord, 0, len(names))
+	for _, name := range names {
+		rec := surfaceRecord{Name: name, Docs: docsContainingToken(name, docs), Status: "missing_docs"}
+		if len(rec.Docs) > 0 {
+			rec.Status = "documented"
+		}
+		result = append(result, rec)
+	}
+	return result
+}
+
+func inventoryManifestKinds(sources, docs []docFile) []surfaceRecord {
+	seen := map[string]bool{}
+	for _, source := range sources {
+		for _, match := range manifestKindsPattern.FindAllStringSubmatch(source.Text, -1) {
+			for _, name := range strings.Split(match[1], ",") {
+				name = strings.TrimSpace(name)
+				if name != "" {
+					seen[name] = true
+				}
+			}
+		}
+	}
+	var names []string
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	result := make([]surfaceRecord, 0, len(names))
+	for _, name := range names {
+		rec := surfaceRecord{Name: name, Docs: docsContainingToken(name, docs), Status: "missing_docs"}
+		if len(rec.Docs) > 0 {
+			rec.Status = "documented"
+		}
+		result = append(result, rec)
+	}
+	return result
+}
+
+func docsContainingToken(needle string, docs []docFile) []string {
+	var result []string
+	for _, doc := range docs {
+		if tokenMentioned(doc.Text, needle) {
+			result = append(result, doc.Path)
+		}
+	}
+	return result
+}
+
+func tokenMentioned(text, needle string) bool {
+	if needle == "" {
+		return false
+	}
+	for offset := 0; offset < len(text); {
+		idx := strings.Index(text[offset:], needle)
+		if idx < 0 {
+			return false
+		}
+		start := offset + idx
+		end := start + len(needle)
+		if (start == 0 || !isTokenByte(text[start-1])) && (end == len(text) || !isTokenByte(text[end])) {
+			return true
+		}
+		offset = start + 1
+	}
+	return false
+}
+
+func isTokenByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-'
 }
 
 func hasSuccessSchema(responses map[string]openAPIResponse) bool {
@@ -763,7 +883,10 @@ func readSourceSignals() ([]docFile, []docFile, error) {
 			if strings.HasSuffix(path, "_test.go") {
 				tests = append(tests, file)
 			}
-			if strings.HasPrefix(filepath.ToSlash(path), "internal/api/") {
+			// Keep every production Go source here: API source lookup is a
+			// consumer of this list, and the documentation inventory also
+			// derives environment variables and manifest kinds from it.
+			if !strings.HasSuffix(path, "_test.go") {
 				sources = append(sources, file)
 			}
 			return nil
@@ -960,6 +1083,18 @@ func apiResource(path string) string {
 
 func summarize(r report) summary {
 	s := summary{APIOperations: len(r.API), CLIOperations: len(r.CLI)}
+	s.EnvironmentVariables = len(r.Env)
+	s.ManifestKinds = len(r.Manifest)
+	for _, rec := range r.Env {
+		if rec.Status == "missing_docs" {
+			s.EnvironmentVariablesMissing++
+		}
+	}
+	for _, rec := range r.Manifest {
+		if rec.Status == "missing_docs" {
+			s.ManifestKindsMissing++
+		}
+	}
 	for _, rec := range r.API {
 		switch rec.Status {
 		case "documented_exact":
@@ -1031,6 +1166,7 @@ func markdown(r report) string {
 	fmt.Fprintf(&b, "Response schema quality: %d API operations have a concrete 2xx schema; %d still use the generic object fallback.\n\n", r.Summary.APIWithConcreteResponseSchemas, r.Summary.APIGenericResponseSchemas)
 	fmt.Fprintf(&b, "Request schema quality: %d operations have request bodies; %d have concrete JSON schemas, %d use non-JSON media types, and %d still use a generic JSON fallback.\n\n", r.Summary.APIWithRequestBodies, r.Summary.APIWithConcreteJSONRequests, r.Summary.APINonJSONRequestBodies, r.Summary.APIGenericJSONRequests)
 	fmt.Fprintf(&b, "CLI flag quality: %d commands define flags; %d document all of their flags and %d still have undocumented flag(s).\n\n", r.Summary.CLIWithFlags, r.Summary.CLIWithAllFlagsDocumented, r.Summary.CLIMissingFlagDocs)
+	fmt.Fprintf(&b, "Environment variables: %d discovered, %d missing documentation. Manifest kinds: %d discovered, %d missing documentation.\n\n", r.Summary.EnvironmentVariables, r.Summary.EnvironmentVariablesMissing, r.Summary.ManifestKinds, r.Summary.ManifestKindsMissing)
 
 	fmt.Fprintf(&b, "## API operations needing attention\n\n")
 	fmt.Fprintf(&b, "These are missing a resource-level API reference page or have no exact route mention. Exactness is a review signal, not a final correctness verdict.\n\n")

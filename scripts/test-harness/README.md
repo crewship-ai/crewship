@@ -197,6 +197,7 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 
 | Suite | Validates |
 |---|---|
+| `test-first-projects.sh` | Executes every command printed by `docs/guides/first-projects.mdx`: creates a crew and agent, writes shared output, assigns a credential, recalls crew memory, scaffolds and validates a routine, and reads the Journal. Requires a seeded instance and a provider credential for the agent-backed rungs. |
 | `test-memory.sh` | agent recalls a nonce fact in a **fresh session**; a **crew-tier** fact is readable by a peer in the same crew; it does **not** leak cross-crew; **pins** are always available; `memory search`/`status` corroborate. `--soak N` re-checks durability over N minutes. |
 | `test-delegation.sh` | a **lead delegates** a subtask to a peer and reports the result back (corroborated by a new peer chat session); a lead **hires an ephemeral** specialist (or it lands as an approval waitpoint under guided autonomy). |
 | `test-crew-links.sh` | a **crew link** is real: the graph lists no links to deleted crews, a lead's sidecar reports the crews it can reach, delegation **across** a live link lands in the other crew, and the same delegation is **refused** once the link is removed (then restored). |

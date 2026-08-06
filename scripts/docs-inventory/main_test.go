@@ -147,6 +147,16 @@ func TestStrictGatesFailAndNameTheOffender(t *testing.T) {
 				MissingFlags: []string{"output-file"}}}},
 			want: "--output-file",
 		},
+		{
+			name: "undocumented environment variable",
+			r:    report{Env: []surfaceRecord{{Name: "CREWSHIP_NEW_SETTING", Status: "missing_docs"}}},
+			want: "CREWSHIP_NEW_SETTING",
+		},
+		{
+			name: "undocumented manifest kind",
+			r:    report{Manifest: []surfaceRecord{{Name: "NewKind", Status: "missing_docs"}}},
+			want: "NewKind",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,6 +169,15 @@ func TestStrictGatesFailAndNameTheOffender(t *testing.T) {
 				t.Errorf("enforce() error does not name the offender %q:\n%s", tc.want, err)
 			}
 		})
+	}
+}
+
+func TestTokenMentionedRejectsSubstringCollision(t *testing.T) {
+	if tokenMentioned("CREWSHIP_SERVER_NAME", "CREWSHIP_SERVER") {
+		t.Fatal("a longer environment variable must not satisfy the shorter name")
+	}
+	if !tokenMentioned("set `CREWSHIP_SERVER` before starting", "CREWSHIP_SERVER") {
+		t.Fatal("an exact token must count")
 	}
 }
 
