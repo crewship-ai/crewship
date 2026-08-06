@@ -284,13 +284,13 @@ crewship agent avatar show my-agent -o avatar.svg
 Store an SVG as the agent's avatar.
 
 ```bash
-crewship agent avatar set my-agent -f avatar.svg
-cat avatar.svg | crewship agent avatar set my-agent -f -
+crewship agent avatar set my-agent --file avatar.svg
+cat avatar.svg | crewship agent avatar set my-agent --file -
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--file`, `-f` | `string` | | SVG file to store, or `-` to read from stdin. **Required.** |
+| `--file` | `string` | | SVG file to store, or `-` to read from stdin. **Required.** |
 
 The server validates the SVG against an allowlist of inert drawing elements;
 anything that could load or execute something (scripts, event handlers,

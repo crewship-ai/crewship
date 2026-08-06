@@ -76,3 +76,20 @@ func TestResolvedFormat_ConfigFormatRespected(t *testing.T) {
 		t.Errorf("resolvedFormat = %q, want yaml from config", got)
 	}
 }
+
+func TestResolvedFormat_ChangedLocalFormatWinsOnErrorPath(t *testing.T) {
+	guardCLIState(t)
+	oldFormat, oldCfg := flagFormat, cliCfg
+	defer func() { flagFormat, cliCfg = oldFormat, oldCfg }()
+
+	flagFormat = "table"
+	cliCfg = &cli.CLIConfig{}
+	cmd := &cobra.Command{Use: "memory-search"}
+	cmd.Flags().String("format", "text", "")
+	if err := cmd.Flags().Set("format", "json"); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolvedFormat(cmd); got != "json" {
+		t.Fatalf("resolvedFormat = %q, want changed local format json", got)
+	}
+}
