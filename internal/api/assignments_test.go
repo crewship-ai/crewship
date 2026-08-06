@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 // execOrFatal is a helper that fails the test if a DB exec fails.
@@ -458,5 +459,111 @@ func TestAssignmentCreate_TargetNotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+// TestAssignmentCreate_HeldTargetIsNotRun closes the OTHER half of the
+// PENDING_REVIEW sentinel (#1768).
+//
+// internal_status.go stages an agent-created agent as PENDING_REVIEW and says
+// it "cannot serve a single message until an operator approves". Only
+// chatbridge honoured that; /assign never read agents.status, so a lead could
+// hand work to a held agent and it ran — a pre-existing hole that the agent
+// creation gate newly made reachable, since the agent whose prompt another
+// agent wrote is exactly the one being held.
+//
+// The assertion is on the ROW and the run, not on the status column, and the
+// mutation is the approval: flip the target to IDLE and the identical request
+// is accepted.
+func TestAssignmentCreate_HeldTargetIsNotRun(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crewH', ?, 'C', 'c')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug, status) VALUES ('leadH', 'crewH', ?, 'Lead', 'leadh', 'IDLE')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug, status) VALUES ('heldH', 'crewH', ?, 'Held', 'heldh', 'PENDING_REVIEW')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('chatH', 'leadH', ?, 'CHAT', 'ACTIVE')`, wsID)
+
+	h := NewAssignmentHandler(db, nil, nil, "token", logger)
+	t.Cleanup(h.WaitDispatches)
+
+	post := func() *httptest.ResponseRecorder {
+		body := bytes.NewBufferString(`{"target_slug":"heldh","task":"do the thing","crew_id":"crewH",` +
+			`"workspace_id":"` + wsID + `","chat_id":"chatH"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/assignments", body)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.Create(w, req)
+		h.WaitDispatches()
+		return w
+	}
+
+	w := post()
+	if w.Code == http.StatusCreated {
+		t.Fatalf("Create returned 201 for a PENDING_REVIEW target — the held agent was given work")
+	}
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d; body=%s", w.Code, http.StatusConflict, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "PENDING_REVIEW") {
+		t.Errorf("refusal %q does not name the status that held the agent", w.Body.String())
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM assignments WHERE assigned_to_id = 'heldH'`).Scan(&n); err != nil {
+		t.Fatalf("count assignments: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("assignments to the held agent = %d, want 0", n)
+	}
+
+	// MUTATION: approve it and the identical request is accepted.
+	execOrFatal(t, db, `UPDATE agents SET status = 'IDLE' WHERE id = 'heldH'`)
+	if w := post(); w.Code != http.StatusCreated {
+		t.Errorf("status after approval = %d, want 201; body=%s — the guard refuses unconditionally",
+			w.Code, w.Body.String())
+	}
+}
+
+// TestDispatchAssignment_HeldTargetIsRefused covers the third door into
+// runAssignment: the mission engine's task list.
+//
+// This file's NOTE says DispatchAssignment carries no dispatch decision because
+// the row already exists. That is true of the delegation CAPS and false of the
+// hold — a plan can name an agent an operator has not approved, and the
+// approval is the only thing standing between that agent's self-written system
+// prompt and a container. The error marks the mission task FAILED, which is the
+// loud outcome; a skipped task would read as a mission that finished.
+func TestDispatchAssignment_HeldTargetIsRefused(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crewM', ?, 'C', 'cm')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug, status) VALUES ('heldM', 'crewM', ?, 'Held', 'heldm', 'PENDING_REVIEW')`, wsID)
+
+	h := NewAssignmentHandler(db, nil, nil, "token", logger)
+	t.Cleanup(h.WaitDispatches)
+
+	err := h.DispatchAssignment(context.Background(), orchestrator.DispatchRequest{
+		AssignmentID: "asg-held",
+		AgentID:      "heldM",
+		AgentSlug:    "heldm",
+		CrewID:       "crewM",
+		WorkspaceID:  wsID,
+		ChatID:       "chatM",
+		Task:         "do the thing",
+	})
+	if err == nil {
+		t.Fatal("DispatchAssignment ran a PENDING_REVIEW agent")
+	}
+	if !strings.Contains(err.Error(), "PENDING_REVIEW") {
+		t.Errorf("error = %q, want the hold named so the failed task says why", err)
 	}
 }

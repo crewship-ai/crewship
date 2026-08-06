@@ -184,7 +184,8 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var target targetAgentInfo
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt_legacy,''),
-		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug
+		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug,
+		       COALESCE(a.status,'')
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id
 		WHERE a.slug = ? AND a.crew_id = ? AND a.deleted_at IS NULL
@@ -192,6 +193,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		&target.ID, &target.Slug, &target.Name, &target.RoleTitle,
 		&target.SystemPrompt, &target.CLIAdapter, &target.LLMModel,
 		&target.ToolProfile, &target.TimeoutSeconds, &target.MemoryEnabled, &target.CrewSlug,
+		&target.Status,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -202,17 +204,32 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A staged agent is not assignable. This is the pre-existing half of the
+	// PENDING_REVIEW hole (see refuseHeldAgent): the sentinel was honoured only
+	// by chatbridge, so a lead could hand work straight to an agent an operator
+	// has not approved — including one another agent created for itself.
+	//
+	// 409, not 403: the target is not forbidden to this caller, it is in a state
+	// that cannot accept work yet, and the answer changes the moment somebody
+	// approves it. Same code ApproveHire returns for the mirror-image conflict.
+	if held := refuseHeldAgent(target.Slug, target.Status); held != nil {
+		h.logger.Info("assignment refused: target agent is held",
+			"actor_agent_id", assignedByID, "target", target.Slug, "status", target.Status)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": held.Error()})
+		return
+	}
+
 	// Create assignment record in PENDING state (group_id = chat_id for mission linkage)
 	now := time.Now().UTC().Format(time.RFC3339)
-	assignmentID, err := insertCappedAssignment(r.Context(), h.db, scope, delegationLim, cappedAssignment{
-		WorkspaceID:  body.WorkspaceID,
-		ChatID:       body.ChatID,
-		AssignedByID: assignedByID,
-		TargetID:     target.ID,
-		Task:         body.Task,
-		GroupID:      body.ChatID,
-		CreatedAt:    now,
-	})
+	assignmentID, err := insertCappedAssignment(r.Context(), h.db, scope, delegationLim,
+		agentCaller(assignedByID), cappedAssignment{
+			WorkspaceID: body.WorkspaceID,
+			ChatID:      body.ChatID,
+			TargetID:    target.ID,
+			Task:        body.Task,
+			GroupID:     body.ChatID,
+			CreatedAt:   now,
+		})
 	if err != nil {
 		var refusal *delegationRefusal
 		if errors.As(err, &refusal) {

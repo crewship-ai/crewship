@@ -77,6 +77,12 @@ the agent door carries the file as base64 inside a JSON body, so the bytes are
 buffered three times over on the request path of a process that also holds the
 crew's credentials. The human door is multipart and streams.
 
+The workspace is never the caller's to choose. The sidecar fills it in from its
+own IPC identity, and the server checks it against the workspace the internal
+token is cryptographically bound to — a mismatch is a `403`, on the read verbs and
+the attach verb alike. An agent naming another tenant's issue identifier gets a
+refusal, not that tenant's file.
+
 ## Why the content is fenced
 
 An uploaded file is attacker-controlled input. On a self-hosted instance anyone
@@ -135,12 +141,21 @@ Consequences worth knowing:
   workspace" undecidable, and would turn write-time de-duplication into an
   existence oracle — upload a file, observe whether the store already had it, and
   you have learned that some other tenant holds those exact bytes.
-- **Attaching the same file to the same issue twice is one attachment.** The
-  second call returns `200` with the existing record, not `201` and not `409`.
-  Retries are safe and do not add a second timeline entry.
+- **Attaching the same file to the same issue twice is one attachment.** "The
+  same file" means the same bytes *under the same name*: the second call returns
+  `200` with the existing record, not `201` and not `409`. Retries are safe and do
+  not add a second timeline entry.
+- **The same bytes under a different name are a different attachment.**
+  `crash-before-fix.log` and `crash-after-fix.log` can be byte-identical and mean
+  opposite things, so both are attached, both get `201`, both appear on the
+  timeline — and they share one copy on disk.
 - **Deletion is reference-counted.** Removing an attachment deletes its record,
-  and deletes the stored bytes only when no other issue, comment or chat in the
-  workspace still references them.
+  and deletes the stored bytes only when no other record *stored at the same
+  content-addressed path* still references them. Chat attachments are counted out
+  deliberately: their blobs are not content-addressed (see
+  [chat sessions](/guides/chat-sessions)), so a chat file that happens to hash the
+  same is a different file in a different place and must not keep an issue
+  attachment's bytes alive after you delete it.
 
 <Warning>
 **Bulk deletes leave reclaimable bytes.** When an issue is hard-deleted (a
@@ -149,11 +164,21 @@ wiped, SQLite removes the attachment records by cascade without the application
 seeing it — so the reference count never runs and the stored bytes stay on disk.
 They are unreachable, not exposed: nothing points at them any more.
 
-Deleting an issue through `crewship issue delete` reclaims them. The crew-wipe
-and workspace-wipe paths do not yet; their bytes are reclaimed the next time a
-reclaim pass runs over that workspace. The pass is derived purely from the
-database — a stored file is garbage if and only if no record names its digest —
-so it is idempotent and safe to run at any time.
+Deleting an issue through `crewship issue delete` reclaims them: it reads the
+digests the issue is carrying *before* the delete and unlinks exactly those. The
+crew-wipe and workspace-wipe paths do not yet; their bytes are reclaimed the next
+time a reclaim pass runs over that workspace.
+
+The pass checks each stored file individually against the database while holding
+that file's own lock — the same lock an upload holds across writing its bytes and
+recording them — so it cannot delete a file belonging to an upload that is one
+statement from committing. It is idempotent and safe to run at any time on **one**
+server. It is not safe to run two Crewship servers against one storage root: the
+lock is in-process, nothing in the store arbitrates between processes, and that is
+a limitation of the whole attachment design rather than of the reclaim pass.
+
+Files in the blob tree that are not named like a digest are never removed, and a
+half-written temp file is removed only after it has sat untouched for an hour.
 </Warning>
 
 ## Audit trail

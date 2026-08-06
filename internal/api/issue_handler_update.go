@@ -357,6 +357,22 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
 
+	// The digests this delete is ABOUT to orphan, read while the rows still
+	// exist (#1768 item 7). After the DELETE they are gone — SQLite cascades
+	// them without the application seeing it — so this is the only moment the
+	// application can learn what it is orphaning. A failure here is not fatal:
+	// the sweep below is the fallback, and the delete itself must not depend on
+	// the storage bookkeeping succeeding.
+	var orphaned []string
+	var orphanErr error
+	if h.storagePath != "" {
+		orphaned, orphanErr = attachmentDigestsOfIssue(r.Context(), h.db, wsID, crewID, ident)
+		if orphanErr != nil {
+			h.logger.Warn("read attachment digests before issue delete",
+				"identifier", ident, "workspace_id", wsID, "error", orphanErr)
+		}
+	}
+
 	// Only allow deletion of BACKLOG or CANCELLED issues
 	res, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ? AND status IN ('BACKLOG', 'CANCELLED')`,
@@ -395,17 +411,31 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// bytes of every file attached to the issue stay on disk, unreachable and
 	// unaccounted for.
 	//
-	// The sweep is derived purely from the table — a blob is garbage iff no row
-	// names its sha256 — so it is safe to run here even though this handler has
-	// no idea what the issue was carrying, and it will not touch a blob another
-	// issue still shares. It is deliberately best-effort and AFTER the response
-	// decision: the delete the user asked for has already committed, and a
-	// filesystem hiccup must not turn it into a 500.
+	// It reclaims the DIGESTS READ ABOVE rather than sweeping the workspace. The
+	// two differ in what they can get wrong: reclaiming a known set asks "does
+	// anything still reference this specific blob" and deletes only on a zero
+	// answer, while a sweep deletes on absence and therefore has to be defended
+	// against every upload in flight. The sweep is now defended (see
+	// reclaimAttachmentBlobs), but a delete of one issue has no business walking
+	// every blob in the tenant to find three files.
+	//
+	// The sweep is the fallback for the one case the targeted path cannot cover:
+	// the digest read failed, so we do not know what was orphaned.
+	//
+	// Deliberately best-effort and AFTER the response decision: the delete the
+	// user asked for has already committed, and a filesystem hiccup must not turn
+	// it into a 500.
 	if h.storagePath != "" {
-		if n, rerr := reclaimAttachmentBlobs(r.Context(), h.db, h.storagePath, wsID); rerr != nil {
-			h.logger.Warn("reclaim attachment blobs after issue delete",
-				"identifier", ident, "workspace_id", wsID, "error", rerr)
-		} else if n > 0 {
+		if orphanErr != nil {
+			if n, rerr := reclaimAttachmentBlobs(r.Context(), h.db, h.storagePath, wsID); rerr != nil {
+				h.logger.Warn("reclaim attachment blobs after issue delete",
+					"identifier", ident, "workspace_id", wsID, "error", rerr)
+			} else if n > 0 {
+				h.logger.Info("reclaimed attachment blobs after issue delete (workspace sweep)",
+					"identifier", ident, "workspace_id", wsID, "blobs", n)
+			}
+		} else if n := reclaimAttachmentDigests(
+			r.Context(), h.db, h.logger, h.storagePath, wsID, orphaned); n > 0 {
 			h.logger.Info("reclaimed attachment blobs after issue delete",
 				"identifier", ident, "workspace_id", wsID, "blobs", n)
 		}

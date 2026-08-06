@@ -209,9 +209,18 @@ func (h *ProxyHandler) recordChatAttachment(r *http.Request, workspaceID, chatID
 		return
 	}
 	if strings.Contains(strings.ToUpper(err.Error()), "UNIQUE") {
-		// The same bytes were already attached to this chat. The partial unique
-		// index is doing its job; re-uploading a file is not an error and the
-		// bytes on disk are byte-identical to what is already recorded.
+		// The same FILE — same bytes, same name — was already attached to this
+		// chat. The partial unique index is doing its job; re-uploading a file is
+		// not an error and the bytes on disk are byte-identical to what is
+		// already recorded.
+		//
+		// The name is part of that key since
+		// 20260806214500_attachments_dedupe_filename.sql, and on this surface it
+		// has to be: a chat blob's path CONTAINS the filename, so two
+		// differently-named uploads of identical bytes are two files on disk. The
+		// old (chat_id, sha256) key recorded one row for them and left the second
+		// file with no row at all — the exact gap this call site was added to
+		// close.
 		return
 	}
 	if h.logger != nil {

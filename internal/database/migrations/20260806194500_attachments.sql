@@ -112,13 +112,29 @@
 -- attached twice to one owner" a single row at the DATA level, so the refcount
 -- cannot be inflated by a client that retries an upload.
 --
+-- TWO CORRECTIONS to that paragraph landed before this migration shipped; they
+-- are recorded here rather than silently diverging from it:
+--
+--   * the refcount is over (workspace, sha256, content-addressed storage_key),
+--     not over the digest alone. A chat row carries the same digest for a blob
+--     that lives somewhere else entirely, and counting it pinned an issue
+--     attachment's bytes forever;
+--   * the de-duplication key gains `filename` in
+--     20260806214500_attachments_dedupe_filename.sql. Two byte-identical files a
+--     user named apart are two attachments; the retry this key exists to
+--     collapse is same-owner, same-bytes AND same-name.
+--
 -- Rows removed by FK CASCADE (an issue hard-deleted, a workspace wiped) do NOT
 -- run that refcount — SQLite deletes them without the application seeing it, so
--- their blobs stay on disk until a reclaim pass runs. reclaimOrphanBlobs in
--- internal/api/attachments.go is that pass and is driven purely by this table
--- (a blob is garbage iff no row names its sha256), which is why it is safe to
--- run at any time. The issue-delete handler calls it; the crew/workspace wipe
--- paths do not yet, and that is written down in the guide rather than implied.
+-- their blobs stay on disk until a reclaim pass runs. reclaimAttachmentBlobs in
+-- internal/api/attachments.go is that pass. It is NOT "safe to run at any time"
+-- for free, as this header first claimed: "a blob is garbage iff no row names
+-- it" holds of a quiesced store and not of a live one, because an upload writes
+-- the blob and inserts the row as two steps. The pass therefore checks each file
+-- under the same (workspace, digest) lock the upload holds across both steps.
+-- The issue-delete handler does not use the sweep at all: it reads the digests it
+-- is about to orphan and unlinks exactly those. The crew/workspace wipe paths
+-- reclaim nothing yet, and that is written down in the guide rather than implied.
 --
 -- created_at uses the ISO T-form DEFAULT, not `datetime('now')` — v144
 -- converted every legacy space-form DEFAULT because ' ' sorts before 'T' and a

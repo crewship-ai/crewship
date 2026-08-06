@@ -164,12 +164,17 @@ func (h *AttachmentHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Upload accepts a multipart form with one "file" field and attaches it.
 //
-// Uploading the same bytes to the same issue twice returns the EXISTING row with
-// 200 rather than creating a second one or answering 409. It is not an error —
-// the caller asked for "this file is attached to this issue" and after the call
-// it is. A 409 would make every retried or double-clicked upload look like a
-// failure, and a second row would double a refcount that decides whether the
-// blob may ever be unlinked.
+// Uploading the same FILE — the same bytes under the same name — to the same
+// issue twice returns the EXISTING row with 200 rather than creating a second
+// one or answering 409. It is not an error: the caller asked for "this file is
+// attached to this issue" and after the call it is. A 409 would make every
+// retried or double-clicked upload look like a failure, and a second row would
+// double a refcount that decides whether the blob may ever be unlinked.
+//
+// The same bytes under a DIFFERENT name are a different attachment and get a
+// 201. crash-before-fix.log and crash-after-fix.log can be byte-identical and
+// mean opposite things; collapsing them silently answered 200 with the wrong
+// filename and left no trace that the second file was ever offered.
 func (h *AttachmentHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, "create") {
 		return
@@ -267,14 +272,28 @@ func (h *AttachmentHandler) attachBytes(
 		return attachmentResponse{}, false, err
 	}
 
+	// The blob write and the row insert are ONE critical section, keyed by
+	// (workspace, digest) — see attachments.go. Between them the blob is on disk
+	// with nothing naming it, which is exactly what the reclaim sweep calls
+	// garbage; holding the lock is what stops a concurrent sweep from deleting
+	// the bytes of a row that is one statement from committing.
+	sha := attachmentDigest(data)
+	defer lockAttachmentBlob(wsID, sha)()
+
 	// The blob is written BEFORE the row. The other order would put a row in the
 	// table describing bytes that are not on disk yet, and a crash in between
 	// would leave a listed attachment that 404s on download. This order's
 	// failure mode is a blob with no row — invisible, and reclaimable by
 	// reclaimAttachmentBlobs.
-	sha, key, err := storeAttachmentBlob(h.storagePath, wsID, data)
+	storedSHA, key, err := storeAttachmentBlob(h.storagePath, wsID, data)
 	if err != nil {
 		return attachmentResponse{}, false, err
+	}
+	if storedSHA != sha {
+		// Unreachable unless the two digests are computed differently, which
+		// would mean the lock guards a different key than the file. Refuse rather
+		// than write a row the sweep cannot reason about.
+		return attachmentResponse{}, false, fmt.Errorf("attachment digest mismatch")
 	}
 
 	id := generateCUID()
@@ -288,9 +307,16 @@ func (h *AttachmentHandler) attachBytes(
 		sha, key, nullIfEmpty(userID), nullIfEmpty(agentID), now)
 	if err != nil {
 		if strings.Contains(strings.ToUpper(err.Error()), "UNIQUE") {
-			// The partial UNIQUE index fired: these exact bytes are already on
-			// this issue. Return the row that is already there.
-			existing, loadErr := h.loadByDigest(r, missionID, wsID, sha)
+			// The partial UNIQUE index fired: this exact FILE — same bytes, same
+			// name — is already on this issue. Return the row that is there.
+			//
+			// Matching on the name as well as the digest is what makes the answer
+			// true. The index used to be (mission_id, sha256), so attaching
+			// crash-before-fix.log and crash-after-fix.log with identical bytes
+			// returned 200 carrying the FIRST file's name and wrote no activity
+			// row: the user believed both were attached and the second name was
+			// never recorded anywhere.
+			existing, loadErr := h.loadByDigest(r, missionID, wsID, sha, filename)
 			if loadErr != nil {
 				return attachmentResponse{}, false, loadErr
 			}
@@ -444,10 +470,14 @@ func (h *AttachmentHandler) loadScoped(r *http.Request, id, missionID, wsID stri
 		id, missionID, wsID))
 }
 
-func (h *AttachmentHandler) loadByDigest(r *http.Request, missionID, wsID, sha string) (attachmentResponse, error) {
+// loadByDigest reads the row a duplicate INSERT collided with. Its predicate is
+// the UNIQUE index's own key — (mission, digest, filename) — because a lookup
+// narrower than the constraint returns some OTHER row and the caller reports it
+// as the file the user just uploaded.
+func (h *AttachmentHandler) loadByDigest(r *http.Request, missionID, wsID, sha, filename string) (attachmentResponse, error) {
 	return scanAttachment(h.db.QueryRowContext(r.Context(),
-		attachmentSelect+` WHERE a.mission_id = ? AND a.workspace_id = ? AND a.sha256 = ?`,
-		missionID, wsID, sha))
+		attachmentSelect+` WHERE a.mission_id = ? AND a.workspace_id = ? AND a.sha256 = ? AND a.filename = ?`,
+		missionID, wsID, sha, filename))
 }
 
 // replyNotFoundOr500 maps a row/blob lookup failure onto a response. Anything

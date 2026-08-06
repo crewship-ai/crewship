@@ -136,6 +136,72 @@ type targetAgentInfo struct {
 	TimeoutSeconds int
 	MemoryEnabled  bool
 	CrewSlug       string
+	// Status is agents.status at dispatch time, carried so every door can
+	// apply refuseHeldAgent to the row it just read rather than re-querying
+	// (and rather than forgetting). Empty means the door did not select it;
+	// see refuseHeldAgent for why that stays permissive.
+	Status string
+}
+
+// ── The held-agent gate ────────────────────────────────────────────────────
+//
+// agentHeldError is a target that EXISTS but has been staged for an operator's
+// decision and must not be run. Deliberately not a *delegationRefusal: no cap
+// was hit, and no instance setting would change the answer — a person has to
+// approve the agent. The two are answered the same way by a mention (recorded
+// as `refused`), and differently by /assign (409 conflict rather than 403).
+type agentHeldError struct{ msg string }
+
+func (e *agentHeldError) Error() string { return e.msg }
+
+// dispatchRefused marks it as a DECISION rather than a failure, so
+// issue_mentions.go's dispatchOne can record "a gate said no" without
+// enumerating gate types. *delegationRefusal carries the same marker.
+func (e *agentHeldError) dispatchRefused() {}
+
+// dispatchRefusal is the set of errors that mean "a gate declined this
+// dispatch", as opposed to "the dispatch broke". A refusal is recorded and
+// reported verbatim to whoever asked; a failure is logged as a bug.
+type dispatchRefusal interface {
+	error
+	dispatchRefused()
+}
+
+// refuseHeldAgent decides whether an agents.status value means "created, but
+// inert until an operator says otherwise".
+//
+// EXACTLY ONE status is refusable: PENDING_REVIEW. It is the sentinel both
+// staging paths write — the guided ephemeral hire (agents_hire.go) and the
+// #1768 autonomy gate on agent creation (internal_status.go) — and the only
+// one chatbridge treats as blocking. Every other value (IDLE, RUNNING, ERROR,
+// …) is a LIFECYCLE state, not a decision: refusing on RUNNING would mean an
+// agent could never be given a second task, and refusing on ERROR would turn
+// one failed run into a permanent brick. An unknown or empty status stays
+// permissive for the same reason chatbridge's guard does — a status nobody has
+// decided about must not silently become a deny.
+//
+// This does NOT break the legitimate ephemeral hire. A hire only lands in
+// PENDING_REVIEW under guided autonomy, where waiting is the point: the CLI
+// polls exactly this transition (`crewship hire --wait`, cmd_hire.go), and
+// ApproveHire flips the row to IDLE before the hired agent is meant to work. A
+// hire that lands IDLE (trusted/full) never sees this function say no.
+//
+// Why it exists at all: internal_status.go stages an agent CREATED BY ANOTHER
+// AGENT, with a system prompt that agent wrote, and documents the row as unable
+// to "serve a single message until an operator approves". That was true only of
+// chatbridge — /assign and the @mention trigger both start an agent through
+// runAssignment, which never read agents.status. "Created but inert beats
+// refused" is the load-bearing claim of the gate design; this is the half that
+// makes it true.
+func refuseHeldAgent(slug, status string) error {
+	if status != chatbridge.AgentStatusPendingReview {
+		return nil
+	}
+	return &agentHeldError{msg: fmt.Sprintf(
+		"agent %s is PENDING_REVIEW: it was created or hired by an agent and is held until an "+
+			"operator approves it, so it cannot be given work. Approve it from the inbox "+
+			"(or with `crewship hire approve <agent-id>`) and ask again — do this task "+
+			"yourself or report the block in the meantime.", slug)}
 }
 
 // loadAgentCredentials queries and decrypts all credentials for an agent.
@@ -348,7 +414,8 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 	var target targetAgentInfo
 	err := h.db.QueryRowContext(ctx, `
 		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt_legacy,''),
-		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug
+		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug,
+		       COALESCE(a.status,'')
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ? AND a.deleted_at IS NULL
@@ -356,9 +423,23 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		&target.ID, &target.Slug, &target.Name, &target.RoleTitle,
 		&target.SystemPrompt, &target.CLIAdapter, &target.LLMModel,
 		&target.ToolProfile, &target.TimeoutSeconds, &target.MemoryEnabled, &target.CrewSlug,
+		&target.Status,
 	)
 	if err != nil {
 		return fmt.Errorf("lookup agent %s: %w", req.AgentID, err)
+	}
+
+	// The third door into runAssignment, and the one this file's own NOTE says
+	// carries no dispatch decision. That is true of the CAPS; it is not true of
+	// the hold. A mission's task list can name a held agent — the same agent
+	// another agent just created — so the sentinel has to be honoured here too.
+	// The error marks the mission task FAILED with this sentence
+	// (mission_tasks.go's updateTaskStatus), which is the loud outcome: a
+	// silently skipped task reads as a mission that finished.
+	if held := refuseHeldAgent(target.Slug, target.Status); held != nil {
+		h.logger.Info("mission dispatch refused: target agent is held",
+			"assignment_id", req.AssignmentID, "agent_id", req.AgentID, "status", target.Status)
+		return held
 	}
 
 	// Inject trace context into task for observability

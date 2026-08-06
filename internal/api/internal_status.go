@@ -239,13 +239,24 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 // refuses at every level.
 //
 //	strict          → 403.
-//	guided/trusted  → the row is created with status='PENDING_REVIEW'. The
-//	                  chatbridge refuses to start an agent in that state
+//	guided/trusted  → the row is created with status='PENDING_REVIEW', the same
+//	                  sentinel the guided hire flow uses. Four doors honour it:
+//	                  chatbridge refuses to start the agent for a chat message
 //	                  (internal/chatbridge/bridge.go — the guard is NOT
-//	                  ephemeral-scoped), so the agent exists but cannot serve
-//	                  a single message until an operator approves. That is
-//	                  the same sentinel the guided hire flow uses.
+//	                  ephemeral-scoped), and the three that reach runAssignment
+//	                  refuse to dispatch to it (assignments_run.go's /assign,
+//	                  issue_mentions.go's @mention, assignments.go's mission
+//	                  task; the shared predicate is refuseHeldAgent).
 //	full            → live immediately, with a non-blocking inbox notice.
+//
+// "Created but inert beats refused" is the claim this gate rests on, and it is
+// only as true as the list above. It was NOT true when this shipped: the
+// sentinel was read by chatbridge alone, so mentioning the staged agent — or
+// /assign-ing it — ran it, system prompt and all. What is still outside the
+// list, and outside this PR: /query (peer questions, query_handler.go), the
+// webhook trigger, and a routine's agent step all resolve an agent and run it
+// without consulting agents.status. None is reachable by naming the agent in a
+// comment, but none of them checks either.
 func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
@@ -379,16 +390,24 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			AgentID:     agentID,
 			Target:      autonomyTargetAgent,
 			TargetID:    agentID,
-			// KindWaitpoint with SourceID=agent_id is the shape
-			// ApproveHire's inbox.ResolveBySourceTx already clears, so the
-			// legacy `crewship hire approve <id>` path resolves this row
-			// too — one waitpoint, two decide surfaces.
+			// A blocking waitpoint, because this needs a decision rather
+			// than a read. ONE decide surface answers it:
+			// POST /api/v1/approvals/{id}/decide (OWNER/ADMIN), which
+			// resolves the inbox row through applyAutonomyGateDecisionTx.
+			// It briefly had two — approve-hire's findHireApprovalRow also
+			// matched kind=autonomy_gate — and that second door has since
+			// been closed back to ephemeral hires only, where it belongs: a
+			// persistent agent an agent created is not a hire, and deciding
+			// it through the hire endpoint answered an approvals row with
+			// the wrong vocabulary.
 			InboxKind: inbox.KindWaitpoint,
 			Title:     "Agent created by agent: " + body.Name,
 			BodyMD: fmt.Sprintf(
 				"An agent in a `%s` crew created the persistent agent **%s** (`%s`) "+
 					"with a system prompt it wrote itself.\n\n"+
-					"The row is `PENDING_REVIEW` and cannot serve a message until approved.",
+					"The row is `PENDING_REVIEW`: until you approve it, it will not answer a "+
+					"chat message, take an assignment, be woken by an @mention, or run a "+
+					"mission task.",
 				gate.Level, body.Name, body.Slug),
 			Reason: "agent created persistent agent " + body.Slug,
 		})

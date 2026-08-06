@@ -32,15 +32,40 @@ package api
 // shared blob would create).
 //
 // Deletion is refcounted at delete time: the row goes, then the blob is
-// unlinked only if no row in the same workspace still names that sha256. The
-// partial UNIQUE indexes make "the same bytes twice on one owner" a single row,
-// so a client that retries an upload cannot inflate the count.
+// unlinked only if no row in the same workspace still names that sha256 AND
+// lives at the content-addressed key. The partial UNIQUE indexes make "the same
+// bytes under the same name on one owner" a single row, so a client that retries
+// an upload cannot inflate the count.
+//
+// The storage_key half of that predicate is not belt-and-braces. A chat
+// attachment's blob is NOT content-addressed — it stays at
+// <crew>/<agent>/attachments/<chat>/<filename>, which is the agent-visible
+// contract — so a chat row can carry the same digest while naming an entirely
+// different file. Counting by digest alone let that unrelated file pin an issue
+// attachment's bytes forever: the user deleted the file, the API said ok, and the
+// bytes stayed. The refcount is a question about ONE blob, so it is asked about
+// the key, not about the hash.
 //
 // Rows removed by FK CASCADE never reach this code — SQLite deletes them with
-// no application involvement — so their blobs would stay on disk. reclaimBlobs
-// is the sweep for that case, and it is derived purely from the table: a blob is
-// garbage iff no row names its sha256, which is why running it is always safe
-// and never needs to be scheduled against anything.
+// no application involvement — so their blobs would stay on disk.
+// reclaimAttachmentBlobs is the sweep for that case.
+//
+// ── Why the sweep takes a lock ──────────────────────────────────────────────
+//
+// "A blob is garbage iff no row names it" is true of a QUIESCED store and false
+// of a live one: an upload writes the blob and inserts the row as two steps, and
+// in between the blob is exactly indistinguishable from garbage. A sweep that
+// deletes by absence therefore deletes files belonging to uploads that are one
+// statement from committing — the row lands, the bytes are gone, and the
+// attachment 404s for the rest of its life.
+//
+// So the write of a blob and the insert of its row are one critical section,
+// keyed by (workspace, digest), and both the refcounted unlink and the sweep
+// take the same key before they remove anything. What that buys, stated
+// exactly: within ONE crewshipd process, no reclaim can observe the gap. It buys
+// nothing across processes — two servers on one storage root still race, and the
+// fix for that is a lease in the store, not a mutex. See reclaimAttachmentBlobs
+// for what remains racy even in-process.
 
 import (
 	"context"
@@ -49,12 +74,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"mime"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -207,6 +235,13 @@ func resolveAttachmentType(filename string) (string, error) {
 
 // ── Blob paths ─────────────────────────────────────────────────────────────
 
+// attachmentDigest is the content address of a byte slice, spelled once so the
+// key a caller LOCKS is provably the key the blob is written under.
+func attachmentDigest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 // attachmentStorageKey is the storage-root-relative key for a blob. It is a
 // pure function of (workspace, sha256) — nothing the uploader chose appears in
 // it. The key is stored on the row so a future layout change is a migration
@@ -226,12 +261,60 @@ func attachmentBlobPath(root, workspaceID, sha string) (string, error) {
 	if len(sha) != 64 {
 		return "", fmt.Errorf("attachment digest is not a sha256")
 	}
-	for _, c := range sha {
-		if !strings.ContainsRune("0123456789abcdef", c) {
-			return "", fmt.Errorf("attachment digest is not lowercase hex")
-		}
+	if !isAttachmentDigest(sha) {
+		return "", fmt.Errorf("attachment digest is not lowercase hex")
 	}
 	return safepath.JoinUnder(root, "attachments", workspaceID, sha[:2], sha)
+}
+
+// isAttachmentDigest reports whether s is a lowercase-hex sha256.
+//
+// The sweep uses it to decide whether a filename in the blob tree is one of
+// OURS. A file that is not named like a digest cannot be matched against the
+// table at all, and deleting it because we could not identify it is how a sweep
+// removes something an operator put there.
+func isAttachmentDigest(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return false
+		}
+	}
+	return true
+}
+
+// ── The (workspace, digest) critical section ───────────────────────────────
+
+// attachmentBlobLockStripes is the number of mutexes the blob lock is spread
+// over. Striping rather than a map keyed by digest: a map grows one entry per
+// distinct digest the process ever sees and never shrinks, which is a slow leak
+// on a busy instance. Two unrelated digests sharing a stripe cost a little
+// contention on a path that is already doing filesystem IO; nothing else.
+const attachmentBlobLockStripes = 256
+
+var attachmentBlobLocks [attachmentBlobLockStripes]sync.Mutex
+
+// lockAttachmentBlob enters the critical section for one (workspace, digest) and
+// returns the release. Callers use it as `defer lockAttachmentBlob(ws, sha)()`
+// or hold the returned func when the section is not the whole scope.
+//
+// It is held across "write the blob + insert the row" on the write path, and
+// across "count the rows + remove the blob" on both delete paths. Those are the
+// only two sections that exist, and they are the two that must not interleave.
+func lockAttachmentBlob(workspaceID, sha string) (unlock func()) {
+	m := &attachmentBlobLocks[attachmentBlobStripe(workspaceID, sha)]
+	m.Lock()
+	return m.Unlock
+}
+
+func attachmentBlobStripe(workspaceID, sha string) uint32 {
+	h := fnv.New32a()
+	_, _ = io.WriteString(h, workspaceID)
+	_, _ = io.WriteString(h, "/")
+	_, _ = io.WriteString(h, sha)
+	return h.Sum32() % attachmentBlobLockStripes
 }
 
 // ── Writing a blob ─────────────────────────────────────────────────────────
@@ -243,6 +326,12 @@ func attachmentBlobPath(root, workspaceID, sha string) (string, error) {
 // are already there by definition — the path IS their hash — so re-writing them
 // buys nothing and, worse, would put a window in which the file is truncated
 // while another request is reading it.
+//
+// It does NOT take the blob lock, and that is deliberate: the section that must
+// be atomic is "write the blob AND insert the row", which only the caller can
+// bound. attachBytes holds lockAttachmentBlob across both. A version that locked
+// here would look safe and protect nothing — the gap the sweep sees opens after
+// this function returns.
 func storeAttachmentBlob(root, workspaceID string, data []byte) (sha, key string, err error) {
 	sum := sha256.Sum256(data)
 	sha = hex.EncodeToString(sum[:])
@@ -310,6 +399,33 @@ func readAttachmentBlob(root, workspaceID, sha string) ([]byte, error) {
 
 // ── Refcounted deletion ────────────────────────────────────────────────────
 
+// attachmentContentAddressedPredicate is the SQL half of "this row names THIS
+// blob", spelled once because both the refcount and the sweep must ask the same
+// question or the two disagree about what is garbage.
+//
+// It reconstructs attachmentStorageKey in SQL and compares it to the stored key,
+// so a row whose blob lives anywhere else — today a chat attachment, tomorrow
+// any producer that keeps its own layout — is not counted as a reference to the
+// content-addressed file. `storage_key` is the authority on where a row's bytes
+// are; the digest alone never was.
+const attachmentContentAddressedPredicate = `storage_key = 'attachments/' || workspace_id || '/' || substr(sha256, 1, 2) || '/' || sha256`
+
+// attachmentBlobIsUnreferenced reports whether the content-addressed blob for
+// (workspace, digest) has no row naming it.
+//
+// The caller must hold lockAttachmentBlob for the same key: the answer is only
+// meaningful for as long as no upload can commit a row behind it.
+func attachmentBlobIsUnreferenced(ctx context.Context, db *sql.DB, workspaceID, sha string) (bool, error) {
+	var refs int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM attachments WHERE workspace_id = ? AND sha256 = ? AND `+
+			attachmentContentAddressedPredicate,
+		workspaceID, sha).Scan(&refs); err != nil {
+		return false, err
+	}
+	return refs == 0, nil
+}
+
 // unlinkAttachmentBlobIfUnreferenced removes a blob when no row in the same
 // workspace still names it.
 //
@@ -317,6 +433,11 @@ func readAttachmentBlob(root, workspaceID, sha string) ([]byte, error) {
 // calls this. A crash between the two leaves a blob with no row — reclaimable,
 // invisible, harmless. The other order would leave a row whose blob is gone,
 // which is a 404 on a file the UI still lists.
+//
+// The count and the removal happen under the blob's lock, so an upload that is
+// between its blob write and its INSERT cannot be mistaken for an absent
+// reference. Without that, deleting the last row naming a digest while someone
+// re-uploads the same bytes elsewhere deletes the file out from under them.
 //
 // Best-effort by design: the deletion the user asked for has already been
 // committed, and a failed unlink must not be reported as a failed delete.
@@ -326,10 +447,14 @@ func unlinkAttachmentBlobIfUnreferenced(
 	if root == "" {
 		return
 	}
-	var refs int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM attachments WHERE workspace_id = ? AND sha256 = ?`,
-		workspaceID, sha).Scan(&refs); err != nil {
+	abs, err := attachmentBlobPath(root, workspaceID, sha)
+	if err != nil {
+		return
+	}
+	defer lockAttachmentBlob(workspaceID, sha)()
+
+	unreferenced, err := attachmentBlobIsUnreferenced(ctx, db, workspaceID, sha)
+	if err != nil {
 		// Fail CLOSED on the blob: an unknown refcount means we cannot prove the
 		// blob is unreferenced, and keeping bytes we could have deleted is a
 		// reclaimable waste, while deleting bytes another row still points at is
@@ -339,11 +464,7 @@ func unlinkAttachmentBlobIfUnreferenced(
 		}
 		return
 	}
-	if refs > 0 {
-		return
-	}
-	abs, err := attachmentBlobPath(root, workspaceID, sha)
-	if err != nil {
+	if !unreferenced {
 		return
 	}
 	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) && logger != nil {
@@ -351,21 +472,132 @@ func unlinkAttachmentBlobIfUnreferenced(
 	}
 }
 
+// reclaimAttachmentDigests unlinks each of a known set of digests whose rows
+// have just gone, and returns how many blobs it removed.
+//
+// This is what a caller uses when it KNOWS what it orphaned — the issue-delete
+// handler reads the digests before the cascade takes the rows. It is a loop over
+// the same refcounted unlink the ordinary delete uses, which is the point:
+// nothing here deletes a file because it failed to find a reference, only
+// because it asked about a specific digest and got zero.
+func reclaimAttachmentDigests(
+	ctx context.Context, db *sql.DB, logger *slog.Logger, root, workspaceID string, shas []string,
+) int {
+	if root == "" {
+		return 0
+	}
+	var removed int
+	for _, sha := range shas {
+		abs, err := attachmentBlobPath(root, workspaceID, sha)
+		if err != nil {
+			continue
+		}
+		before := blobExists(abs)
+		unlinkAttachmentBlobIfUnreferenced(ctx, db, logger, root, workspaceID, sha)
+		if before && !blobExists(abs) {
+			removed++
+		}
+	}
+	return removed
+}
+
+// blobExists is the "did that actually go" check reclaimAttachmentDigests counts
+// with. It is deliberately not an error-reporting stat: a blob that cannot be
+// stat'd is reported as absent, which under-counts rather than claiming a
+// removal that did not happen.
+func blobExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// attachmentDigestsOfIssue returns the digests of every attachment a hard-delete
+// of one issue is about to orphan — the issue's own, plus its comments'.
+//
+// Read BEFORE the DELETE, because after it the rows are gone: SQLite cascades
+// them without the application ever seeing them, which is the whole reason this
+// exists. Comment attachments have no producer yet; they are included because
+// the arc and its cascade are already in the schema, and a sweep that quietly
+// skipped them would be wrong the day the route lands rather than the day
+// someone remembers it.
+func attachmentDigestsOfIssue(
+	ctx context.Context, db *sql.DB, workspaceID, crewID, identifier string,
+) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT DISTINCT a.sha256
+		FROM attachments a
+		JOIN missions m ON m.id = COALESCE(
+			a.mission_id,
+			(SELECT c.mission_id FROM mission_comments c WHERE c.id = a.comment_id))
+		WHERE a.workspace_id = ? AND m.identifier = ? AND m.crew_id = ? AND m.workspace_id = ?`,
+		workspaceID, identifier, crewID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var sha string
+		if err := rows.Scan(&sha); err != nil {
+			return nil, err
+		}
+		out = append(out, sha)
+	}
+	return out, rows.Err()
+}
+
+// attachmentTempReclaimAge is how long a .tmp-* file must have sat untouched
+// before the sweep treats it as the leftover of a crashed write.
+//
+// The digest-named files are protected by the blob lock; a temp file cannot be,
+// because its name carries no digest and the sweep has no way to work out which
+// key its writer holds. The age floor is what stands in for the lock there. One
+// hour is far longer than any upload can take — the request itself is capped at
+// 25 MiB and the write is a single buffered os.File — and short enough that a
+// crashed write is not a permanent leak.
+const attachmentTempReclaimAge = time.Hour
+
 // reclaimAttachmentBlobs deletes every blob in one workspace that no row names.
 //
-// This is the sweep for rows the application never saw go: an issue
-// hard-deleted, a crew wiped, a workspace removed. SQLite cascades those without
-// running any Go, so the refcount above is never consulted and the blobs remain.
-//
-// It is derived entirely from the table — a blob is garbage iff no row names its
-// sha256 — which makes it idempotent, safe to run at any moment, and impossible
-// to get wrong by running it at the wrong time. It returns the number of blobs
-// removed so a caller can log something truthful.
+// This is the sweep for rows the application never saw go: a crew wiped, a
+// workspace removed, a restore that carried blobs without their rows. SQLite
+// cascades those without running any Go, so the refcount above is never
+// consulted and the blobs remain. It returns the number of blobs removed so a
+// caller can log something truthful.
 //
 // The workspace directory is walked rather than the table: the question is
 // "which files on disk are unreferenced", and only the filesystem can enumerate
 // those. A missing directory is not an error — a workspace with no attachments
 // has nothing to reclaim.
+//
+// ── What makes it safe, and what is still not ──────────────────────────────
+//
+// It used to snapshot the live digests and then delete every file absent from
+// the snapshot. That races every upload by construction: between the uploader's
+// blob write and its INSERT the file is indistinguishable from garbage, so the
+// sweep deleted blobs belonging to rows that committed a moment later — listed
+// in the UI, 404 forever. Narrowing the sweep would have made that rarer, not
+// wrong-free.
+//
+// So there is no snapshot. Each candidate is checked individually while holding
+// its own (workspace, digest) lock — the same lock the upload holds across write
+// AND insert — so within this process the sweep cannot see the gap. Files that
+// are not named like a digest are left alone entirely; .tmp-* files, which
+// cannot be locked because their name says nothing about which key is being
+// written, are removed only when older than attachmentTempReclaimAge.
+//
+// Still racy, plainly:
+//
+//   - ACROSS PROCESSES. Two crewshipd instances on one storage root do not share
+//     these mutexes, and nothing in the store arbitrates. A second writer is out
+//     of scope for the whole attachment design today (the blob path assumes a
+//     local filesystem), and closing it needs a lease in the storage layer.
+//   - A .tmp-* file whose write stalls longer than the age floor is still
+//     removable, which fails that one upload with a rename error rather than
+//     corrupting anything.
+//
+// A per-file query error is not fatal to the sweep: that file is skipped
+// (fail-closed, the blob stays) and the first such error is returned so the
+// caller logs a truthful "reclaimed n, with errors".
 func reclaimAttachmentBlobs(ctx context.Context, db *sql.DB, root, workspaceID string) (int, error) {
 	if root == "" || workspaceID == "" {
 		return 0, nil
@@ -378,25 +610,8 @@ func reclaimAttachmentBlobs(ctx context.Context, db *sql.DB, root, workspaceID s
 		return 0, nil
 	}
 
-	live := map[string]struct{}{}
-	rows, err := db.QueryContext(ctx,
-		`SELECT DISTINCT sha256 FROM attachments WHERE workspace_id = ?`, workspaceID)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var sha string
-		if err := rows.Scan(&sha); err != nil {
-			return 0, err
-		}
-		live[sha] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-
 	var removed int
+	var firstErr error
 	walkErr := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			// A directory that vanished under us (a concurrent reclaim) is not a
@@ -409,16 +624,46 @@ func reclaimAttachmentBlobs(ctx context.Context, db *sql.DB, root, workspaceID s
 		if d.IsDir() {
 			return nil
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		name := d.Name()
-		if _, still := live[name]; still {
+
+		if strings.HasPrefix(name, ".tmp-") {
+			info, statErr := d.Info()
+			if statErr != nil || time.Since(info.ModTime()) < attachmentTempReclaimAge {
+				return nil
+			}
+			if os.Remove(path) == nil {
+				removed++
+			}
 			return nil
 		}
-		// A leftover .tmp-* from an interrupted write is garbage by the same
-		// definition — it names no digest at all.
-		if err := os.Remove(path); err == nil {
+		if !isAttachmentDigest(name) {
+			// Not a file this store wrote. Deleting something we cannot identify
+			// is how a sweep removes an operator's file.
+			return nil
+		}
+
+		unlock := lockAttachmentBlob(workspaceID, name)
+		defer unlock()
+		unreferenced, qErr := attachmentBlobIsUnreferenced(ctx, db, workspaceID, name)
+		if qErr != nil {
+			if firstErr == nil {
+				firstErr = qErr
+			}
+			return nil
+		}
+		if !unreferenced {
+			return nil
+		}
+		if os.Remove(path) == nil {
 			removed++
 		}
 		return nil
 	})
-	return removed, walkErr
+	if walkErr != nil {
+		return removed, walkErr
+	}
+	return removed, firstErr
 }

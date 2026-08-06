@@ -284,6 +284,22 @@ func (h *InternalAttachmentHandler) Attach(w http.ResponseWriter, r *http.Reques
 		writeProblem(w, r, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
+	// The workspace arrives in the BODY, which requireInternal never parses — it
+	// pins the query and injects the bound workspace there, which is what makes
+	// the read routes below tenant-safe for free. A body-carried one is proven
+	// here or not at all, exactly as every sibling internal write does
+	// (issues_internal.go, missions_internal.go, keeper_request.go, …).
+	//
+	// Without it a holder of workspace A's internal token could name workspace B
+	// and B's issue identifier: the blob landed in B's storage tree, the row in
+	// B's table, and an `attachment_added` entry on B's issue timeline — which
+	// notifies B's users. The agent_id check below does not catch it, because it
+	// validates the id against the ATTACKER-SUPPLIED workspace. That the sidecar
+	// happens to build its scope from IPC identity is a property of one caller,
+	// not of this door.
+	if !assertInternalTokenWorkspace(w, r, req.WorkspaceID) {
+		return
+	}
 	if strings.TrimSpace(req.Filename) == "" {
 		writeProblem(w, r, http.StatusBadRequest, "filename is required")
 		return
@@ -351,7 +367,13 @@ func (h *InternalAttachmentHandler) Attach(w http.ResponseWriter, r *http.Reques
 // internal issue route uses — see InternalIssueHandler.Get) and resolves the
 // identifier inside it.
 //
-// The workspace is supplied by the SIDECAR from its IPC identity, not by the
+// The QUERY is the safe place to read it from, and that is not incidental:
+// requireInternal refuses a query workspace_id that disagrees with the token's
+// binding and injects the bound one when it is omitted, so these two read routes
+// are pinned by the middleware before the handler runs. It is the reason the
+// tenancy fix on Attach is one assert on the body and not three on the query.
+//
+// Above that, the sidecar supplies it from its IPC identity rather than from the
 // agent: issueScopeQuery in internal/sidecar sets it from s.ipc.WorkspaceID and
 // the allowlisted forward drops any workspace_id the agent sent. An identifier
 // that belongs to another tenant therefore resolves to nothing, and answers 404

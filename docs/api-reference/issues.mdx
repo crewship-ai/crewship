@@ -939,7 +939,10 @@ Three properties are worth knowing before you use it:
 - **Files are stored by content.** Two issues carrying identical bytes share one
   stored copy, and attaching the same file to the same issue twice is the same
   attachment — the second call returns `200` with the existing record rather than
-  `201` or `409`, so a retry is safe.
+  `201` or `409`, so a retry is safe. "The same file" means the same bytes *under
+  the same name*: `crash-before-fix.log` and `crash-after-fix.log` can be
+  byte-identical and mean opposite things, so both are attached and both get
+  `201`, sharing one stored copy.
 - **The uploaded filename is a label, never a path.** The stored location is
   derived entirely from the SHA-256 digest, so a filename of
   `../../../etc/passwd` is recorded as `passwd` and the bytes land where every
@@ -1015,14 +1018,16 @@ curl -X POST \
 **Response:** `201 Created` — the stored record, the same object shape
 [List attachments](#list-attachments) returns.
 
-`200 OK` instead of `201` means these exact bytes were already attached to this
-issue: no second record was created, no second timeline entry was written, and
-the returned object is the one that already existed.
+`200 OK` instead of `201` means this exact file — these bytes, under this
+filename — was already attached to this issue: no second record was created, no
+second timeline entry was written, and the returned object is the one that
+already existed. The same bytes under a different filename are a different
+attachment and get `201`.
 
 | Status | Condition |
 |---|---|
 | `201` | Attached |
-| `200` | Already attached — the same bytes, the same issue |
+| `200` | Already attached — the same bytes under the same filename, on the same issue |
 | `400` | Malformed multipart form, missing `file` part, or a filename that sanitises to nothing |
 | `403` | Caller lacks the MANAGER floor |
 | `404` | Issue not found in this workspace |

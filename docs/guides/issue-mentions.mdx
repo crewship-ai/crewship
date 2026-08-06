@@ -130,6 +130,12 @@ be recorded never turns a posted comment into an error.
    assignment goes through. It inherits that endpoint's authorization and its
    limits; see below.
 
+   The brief it is handed says who mentioned it and on which issue, and every
+   one of those values — the comment, your display name, the issue's title and
+   identifier — sits inside an `<untrusted>` block. Display names and issue
+   titles are written by whoever wanted to write them, so the woken agent is
+   told to read them and never to obey them.
+
 ### What bounds it
 
 A mention is a way to start an agent run, so it is bounded by the same two
@@ -144,12 +150,31 @@ Both are instance settings (`crewship instance settings set delegation.max_depth
 When one refuses, the mention is still recorded and still appears in History —
 the refusal is stored on the row, naming the setting an operator would change.
 
+A person's mention is counted only against the runs *mentions* started for that
+agent on that issue. Work the agent hands to *other* agents while leading the
+issue is a different budget, so a busy lead does not become unmentionable.
+
 Two more rules the dispatch inherits from the assign path:
 
 - **Crews must be connected.** Mentioning an agent in a crew that is not
   connected to the issue's crew records the mention and dispatches nothing.
 - **An agent does not mention itself awake.** A self-mention is recorded and
   skipped.
+
+And one that is not a limit but a hold:
+
+- **An agent awaiting approval is not woken.** An agent created or hired *by an
+  agent* under guided autonomy sits at `PENDING_REVIEW` until a person approves
+  it. Mentioning it records the mention and starts nothing — the same answer
+  `/assign` and a mission task give, and the same answer it gives a chat
+  message. Approve it from the inbox and mention it again.
+
+### When nothing runs, you are told
+
+A refused or failed mention is not silent. The join row keeps the reason, and
+the person who wrote the comment gets an inbox item — *"@Robin was not woken by
+your mention on ENG-42"* — carrying the refusal verbatim. Nothing is queued
+behind it: re-mention once the reason no longer holds.
 
 ### Being notified
 

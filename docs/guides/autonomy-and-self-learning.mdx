@@ -61,7 +61,7 @@ Note that this is an **oversight** decision, not a security one. The autonomy es
 **Held (`202 Accepted`)** means the row is written but inert until an operator decides:
 
 - a held **crew** is pinned to `autonomy_level=strict`, so nothing can be created inside it; approving restores the *creating* crew's level, never higher
-- a held **agent** is `status=PENDING_REVIEW`; the chat bridge refuses to start it
+- a held **agent** is `status=PENDING_REVIEW`; nothing starts it — not a chat message, not `/assign`, not an `@mention` on an issue, not a mission task
 - a held **mission** stays `PLANNING` and cannot be started
 
 Holds land on the approvals queue and are mirrored as a blocking, ADMIN-addressed inbox waitpoint:
@@ -71,6 +71,8 @@ crewship approvals list
 crewship approvals approve <id>     # releases the sentinel
 crewship approvals deny <id>        # leaves it inert — nothing is deleted
 ```
+
+The approvals queue is the **only** door, and `crewship approvals approve` requires OWNER or ADMIN — which is why the waitpoint is addressed to ADMIN rather than to MANAGER. In particular, `crewship hire approve` does **not** release a held agent: that command decides *ephemeral* hires an operator asked for with `crewship hire`, a MANAGER-tier action. An agent-created agent arrives with a system prompt another agent wrote, so releasing it is an OWNER/ADMIN decision. Pointing `hire approve` at one answers `409` and prints the `crewship approvals approve <id>` that does work.
 
 **Denying does not delete anything, and neither does a lapsed hold.** The seven-day timeout leaves the artefact inert rather than turning into a green light — the gate fails closed. So does an unwired policy resolver: if the gate is not wired, everything holds.
 

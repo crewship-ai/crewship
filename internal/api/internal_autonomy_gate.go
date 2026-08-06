@@ -361,6 +361,24 @@ func writeAutonomyNotice(
 // crew stays strict, a held mission stays unstartable. That keeps the deny
 // path from needing a destructive counterpart (which would have to decide
 // whether to delete rows an operator may still want to inspect).
+//
+// A denied hold writes NO second marker on the target — in particular no
+// agents.expired_at, the way applyEphemeralHireDecisionTx's deny arm does.
+// That was reconsidered when the #1768 widening let approve-hire resurrect a
+// denied agent, and kept: expired_at is the EPHEMERAL ghost marker. It
+// reorders the roster (agents_query.go), frees a crew's hire quota
+// (agents_hire.go) and is the one field `crewship rehire` resets — so
+// stamping it on a persistent agent would file a refused creation as a
+// lapsed hire and offer `rehire` as the way back, which for an agent the
+// gate staged means nothing.
+//
+// The refusal is durable structurally instead: the approvals_queue row is
+// the ONLY door to this function, harbormaster.DecideTx CASes it out of
+// `pending` in the same transaction, and no other surface flips a gate-held
+// artefact. TestApproveHire_CannotResurrectATerminalAutonomyHold and
+// TestAutonomyGate_Decide_IsTerminal hold that from both sides. If a second
+// release door is ever added, it must key off the approvals row too — or
+// this decision has to be revisited, not worked around.
 func applyAutonomyGateDecisionTx(
 	ctx context.Context,
 	tx harbormaster.DBTX,
@@ -388,9 +406,18 @@ func applyAutonomyGateDecisionTx(
 			// Same conditional UPDATE ApproveHire uses, for the same
 			// reason: two operators deciding at once must not both think
 			// they were the one who released it.
+			//
+			// The expired_at / deleted_at guards match it too, and they are
+			// the fail-closed direction rather than decoration: this arm is
+			// the ONLY door that releases a gate-held agent (approve-hire
+			// refuses permanent rows outright), so if anything ever ghosts
+			// or soft-deletes one, a late approve must leave it dead
+			// instead of resurrecting it. A no-op here is safe by
+			// construction — the sentinel simply stays.
 			_, err = tx.ExecContext(ctx, `
 				UPDATE agents SET status = 'IDLE', updated_at = ?
-				WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'`,
+				WHERE id = ? AND workspace_id = ? AND status = 'PENDING_REVIEW'
+				  AND expired_at IS NULL AND deleted_at IS NULL`,
 				now, targetID, workspaceID)
 		case autonomyTargetSchedule:
 			// Since the #1768 rebalance no autonomy LEVEL holds a schedule —

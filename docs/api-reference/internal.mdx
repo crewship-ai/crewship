@@ -468,7 +468,7 @@ Two rows block below `full` and two do not, and the split is deliberate. `crew_c
 | Route | Sentinel | Released by |
 |---|---|---|
 | crew | the new crew is pinned to `autonomy_level=strict`, so `agent_create` and `routine_schedule_create` inside it are themselves refused | approval restores the *creating* crew's level |
-| agent | `status = PENDING_REVIEW`; the chat bridge refuses to start the agent | approval flips it to `IDLE` — also reachable via `POST /api/v1/agents/{agentId}/approve-hire` |
+| agent | `status = PENDING_REVIEW`; every door that starts an agent refuses it — a chat message, `/assign` (`409`), an `@mention` on an issue, and a mission task | approval flips it to `IDLE` — also reachable via `POST /api/v1/agents/{agentId}/approve-hire` |
 | schedule | `enabled = 0`; the scheduler only picks up `enabled = 1` rows | approval enables it — also `PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` |
 | mission | stays `PLANNING`; `POST /api/v1/internal/missions/{missionId}/start` answers `403` | approval lets `start` proceed |
 

@@ -52,7 +52,10 @@ import (
 //	404       — agent not found in this workspace.
 //	409       — agent is not in PENDING_REVIEW state (already approved
 //	             by a concurrent operator, was hired under non-guided
-//	             autonomy, or is a permanent agent).
+//	             autonomy), or is a permanent agent — including one the
+//	             autonomy gate is holding, which is an OWNER/ADMIN
+//	             decision taken on POST /approvals/{id}/decide and never
+//	             here. That 409 carries the approval id.
 //	500       — DB error.
 func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -94,21 +97,56 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	// #1768 widened this: a PERSISTENT agent can now be PENDING_REVIEW too,
-	// when POST /api/v1/internal/agents staged it under a guided/trusted
-	// crew's autonomy gate. Those rows need the same release, and it is the
-	// same transition (PENDING_REVIEW → IDLE against the same chatbridge
-	// guard), so they take this path rather than a second endpoint.
+	// EPHEMERAL ONLY — and the check is on the row kind, never on the status.
 	//
-	// The ephemeral check therefore keys off the STATUS, not the row kind: a
-	// permanent agent that is not pending review still gets the old 409 with
-	// the old message, because for that row approve-hire genuinely is
-	// meaningless.
-	if ephemeral != 1 && curStatus != "PENDING_REVIEW" {
-		writeJSON(w, http.StatusConflict, map[string]string{
+	// #1768 briefly widened this to "ephemeral OR pending review", so that a
+	// PERSISTENT agent staged PENDING_REVIEW by POST /api/v1/internal/agents
+	// under a crew's autonomy gate could be released here too. That reasoning
+	// looked at the transition (PENDING_REVIEW → IDLE, same chatbridge guard)
+	// and missed the authority behind it. The two holds are not the same
+	// decision:
+	//
+	//	ephemeral_hire — an OPERATOR asked for the agent via POST /agents/hire
+	//	   (roleCreate). A MANAGER who may hire may approve their own hire;
+	//	   that is the PR-D F5 contract this route is registered for.
+	//	autonomy_gate  — an AGENT created a standing agent and wrote its system
+	//	   prompt. writeAutonomyHold addresses that hold's inbox item to ADMIN
+	//	   precisely because its decide route (POST /approvals/{id}/decide) is
+	//	   roleManage. Releasing it here would let a MANAGER take an OWNER/ADMIN
+	//	   decision through a roleCreate door.
+	//
+	// So an autonomy-gate hold is released on the approvals door alone —
+	// `crewship approvals approve <id>`, OWNER/ADMIN — and this handler stays
+	// what its name says. Collapsing it back here also closes two more holes
+	// the widening opened: findHireApprovalRow could no longer collide with a
+	// MISSION hold that happens to carry the same agent_id as its lead, and a
+	// DENIED or timed-out autonomy hold (whose deny arm deliberately writes no
+	// agents.expired_at) could no longer be resurrected past this preflight.
+	//
+	// The gate-held 409 names the approval and the command that decides it,
+	// IN THE `error` FIELD — cli.CheckError renders `error` (or RFC 7807
+	// `detail`) and nothing else, so a next step parked in `reason` would
+	// never reach the operator typing `crewship hire approve`. The structured
+	// copies stay for API consumers.
+	if ephemeral != 1 {
+		body := map[string]string{
 			"error":  "approve-hire is only valid on ephemeral agents",
 			"reason": "permanent agents do not require hire approval",
-		})
+		}
+		if curStatus == "PENDING_REVIEW" {
+			body["reason"] = "an agent-created agent is released on the approvals queue, " +
+				"which requires OWNER or ADMIN"
+			next := "this agent is held by the crew's autonomy gate, not by a hire waitpoint — " +
+				"decide it with `crewship approvals list`/`approve` (OWNER or ADMIN)"
+			if id := heldAutonomyApprovalID(r.Context(), h.db, workspaceID, agentID); id != "" {
+				body["approval_id"] = id
+				body["decide_with"] = "crewship approvals approve " + id
+				next = "this agent is held by the crew's autonomy gate, not by a hire waitpoint — " +
+					"decide it with `crewship approvals approve " + id + "` (OWNER or ADMIN)"
+			}
+			body["error"] = next
+		}
+		writeJSON(w, http.StatusConflict, body)
 		return
 	}
 	if curStatus != "PENDING_REVIEW" {
@@ -337,22 +375,57 @@ func (h *AgentHandler) ApproveHire(w http.ResponseWriter, r *http.Request) {
 // rejected, an older row hiding beneath it would stay pending forever
 // after an approve. Any second enqueue path must decide (or cancel)
 // every pending hire row for the agent, not just the newest.
+//
+// ONE kind, deliberately. agent_id is not a unique key across kinds: a
+// kind=autonomy_gate MISSION hold carries agent_id = the mission's LEAD
+// agent (missions_internal.go), so widening this filter to `kind IN
+// (ephemeral_hire, autonomy_gate)` made `hire approve <lead>` able to
+// return — and DecideTx — the newest MISSION hold instead of the agent's
+// own. The mission then read `approved` in autonomyGateApproved and
+// dispatched its whole task list, with no operator having seen it.
+//
+// kind=ephemeral_hire is the only kind whose subject is unambiguously the
+// agent: api.Hire is its sole enqueuer, it carries no target/target_id
+// because there is only ever one thing it can mean, and one staged agent
+// gets exactly one row. Any kind added here must be selected by something
+// that identifies the TARGET (kind + payload target_id), never by agent_id
+// alone.
 func findHireApprovalRow(ctx context.Context, q harbormaster.DBTX, workspaceID, agentID string) (string, string, error) {
 	var approvalID, status string
-	// Two kinds, one decision point. kind=autonomy_gate rows are the #1768
-	// equivalent for a PERSISTENT agent staged by POST
-	// /api/v1/internal/agents: same PENDING_REVIEW sentinel, same
-	// waitpoint, so approve-hire must win the same row rather than flip the
-	// agent and leave a pending approval describing a decision that already
-	// happened. The two never coexist for one agent — a row is either
-	// ephemeral-hired or internally created.
 	err := q.QueryRowContext(ctx, `
 		SELECT id, status FROM approvals_queue
-		WHERE workspace_id = ? AND agent_id = ? AND kind IN (?, ?)
+		WHERE workspace_id = ? AND agent_id = ? AND kind = ?
 		ORDER BY created_at DESC LIMIT 1`,
 		workspaceID, agentID,
-		string(harbormaster.KindEphemeralHire), string(harbormaster.KindAutonomyGate)).Scan(&approvalID, &status)
+		string(harbormaster.KindEphemeralHire)).Scan(&approvalID, &status)
 	return approvalID, status, err
+}
+
+// heldAutonomyApprovalID returns the id of the newest STILL-PENDING
+// autonomy-gate hold whose target is this agent, or "" if there is none.
+//
+// Advisory only: it decorates the 409 above so an operator who reaches for
+// `crewship hire approve` on a gate-held agent is handed the approval id and
+// the OWNER/ADMIN command that does work, instead of a refusal with no next
+// step. It decides nothing, so a query error is swallowed — an unavailable
+// hint must not turn a correct 409 into a 500.
+//
+// Note the key: (kind, payload target_id), not agent_id. That is the shape
+// findHireApprovalRow's docstring above requires, and it is why this cannot
+// pick up the MISSION hold that shares the agent's id.
+func heldAutonomyApprovalID(ctx context.Context, q harbormaster.DBTX, workspaceID, agentID string) string {
+	var id string
+	if err := q.QueryRowContext(ctx, `
+		SELECT id FROM approvals_queue
+		WHERE workspace_id = ? AND kind = ? AND status = ?
+		  AND json_extract(payload, '$.target') = ?
+		  AND json_extract(payload, '$.target_id') = ?
+		ORDER BY created_at DESC LIMIT 1`,
+		workspaceID, string(harbormaster.KindAutonomyGate), string(harbormaster.StatusPending),
+		autonomyTargetAgent, agentID).Scan(&id); err != nil {
+		return ""
+	}
+	return id
 }
 
 // applyEphemeralHireDecision performs the agent-side transition for a

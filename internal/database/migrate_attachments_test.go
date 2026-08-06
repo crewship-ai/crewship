@@ -110,6 +110,60 @@ func TestMigrate_Attachments_SameBytesTwiceOnOneOwnerIsOneRow(t *testing.T) {
 	}
 }
 
+// insertNamedIssueAttachment is insertIssueAttachment with the filename chosen
+// by the caller — the column the de-duplication key gained in
+// 20260806214500_attachments_dedupe_filename.sql.
+func insertNamedIssueAttachment(t *testing.T, db *DB, id, sha, filename string) error {
+	t.Helper()
+	_, err := db.Exec(`
+		INSERT INTO attachments (id, workspace_id, owner_type, mission_id, filename, content_type, size_bytes, sha256, storage_key)
+		VALUES (?, 'ws_att', 'issue', 'msn_att', ?, 'text/plain', 12, ?, ?)`,
+		id, filename, sha, "attachments/ws_att/"+sha[:2]+"/"+sha)
+	return err
+}
+
+// The de-duplication key carries the FILENAME, so byte-identical files a user
+// named apart are two attachments.
+//
+// The first version of the index was (mission_id, sha256). crash-before-fix.log
+// and crash-after-fix.log can be byte-identical and mean opposite things: the
+// second INSERT hit the index, the API answered 200 with the FIRST file's name,
+// no activity row was written, and the user believed both were attached. Zero-
+// byte files collided across every unrelated pair for the same reason.
+func TestMigrate_Attachments_SameBytesUnderTwoNamesAreTwoRows(t *testing.T) {
+	t.Parallel()
+	db := migrateChainSetup(t)
+	seedAttachmentFixture(t, db)
+
+	if err := insertNamedIssueAttachment(t, db, "att_before", attSHA, "crash-before-fix.log"); err != nil {
+		t.Fatalf("first attachment: %v", err)
+	}
+	if err := insertNamedIssueAttachment(t, db, "att_after", attSHA, "crash-after-fix.log"); err != nil {
+		t.Fatalf("the same bytes under a different name were refused (%v) — the key has to carry "+
+			"the filename, or the second file is silently answered as the first", err)
+	}
+
+	// …and the retry it was written for is still one row: same owner, same bytes,
+	// SAME name is the double-clicked upload, and collapsing it is the whole
+	// reason the index exists.
+	err := insertNamedIssueAttachment(t, db, "att_retry", attSHA, "crash-after-fix.log")
+	if err == nil {
+		t.Fatal("the identical file was accepted twice; a retried upload must stay one row and " +
+			"one refcount")
+	}
+	if !strings.Contains(strings.ToUpper(err.Error()), "UNIQUE") {
+		t.Errorf("the retry failed for the wrong reason: %v", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE mission_id = 'msn_att'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("rows on the issue = %d, want 2", n)
+	}
+}
+
 // Two owners holding identical bytes is the shared-blob case. It must be two
 // rows: the refcount that decides whether the blob may be unlinked is exactly
 // "how many rows name this sha256", so collapsing them would make the first

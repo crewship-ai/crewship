@@ -30,7 +30,7 @@ package api
 // control, and this file exists to not be that.
 //
 // WHICH DOORS THIS COVERS. Two, and they share one insert
-// (insertCappedAssignment in assignments_run.go) so they cannot drift:
+// (insertCappedAssignment, below) so they cannot drift:
 //
 //   - AssignmentHandler.Create, the endpoint behind the sidecar's /assign;
 //   - AssignmentHandler.DispatchMention, the @mention trigger on an issue
@@ -62,6 +62,20 @@ package api
 // against the agent the row is filed under (see dispatchCaller.FanoutSubjectID
 // below), so "mention the same agent on the same issue forever" is bounded by
 // the same number an agent's /assign fan-out is.
+//
+// What that cost, and what it costs now. A human's mention is filed under the
+// TARGET (a person has no agents.id and assigned_by_id is NOT NULL with a
+// foreign key), so the naive root count charged the mention against every
+// in-flight row that agent owns in the issue's chat — including the ones IT
+// dispatched while leading the mission, which DispatchAssignment writes with
+// the same assigned_by_id, the same chat_id and a NULL parent. A lead running
+// eight tasks on an issue was therefore unmentionable by a human, and the
+// refusal was swallowed into a `refused` row nobody reads. The bucket is now
+// narrowed by dispatchCaller.selfFiled: a human's mention is counted against
+// the rows a human's mentions created (assigned_by = assigned_to = the target),
+// not against that agent's outbound delegations. Same setting, same number,
+// same server-derived count — a different WHERE, so the two kinds of work stop
+// competing for one budget.
 
 import (
 	"context"
@@ -153,6 +167,15 @@ func agentCaller(agentID string) dispatchCaller {
 	return dispatchCaller{ActorAgentID: agentID, FanoutSubjectID: agentID}
 }
 
+// selfFiled reports the human shape: no acting agent, so the row is filed under
+// the agent it is addressed TO. It is the only construction with an empty
+// ActorAgentID, and it is what separates the two kinds of root row that share
+// one chat — "work a person asked this agent for" (assigned_by = assigned_to)
+// from "work this agent handed to somebody else" (assigned_by = it,
+// assigned_to = another). Counting them in one bucket made a busy lead
+// unmentionable; see the file header.
+func (c dispatchCaller) selfFiled() bool { return c.ActorAgentID == "" }
+
 // delegationScope is one /assign call's server-derived position in the tree.
 //
 // ParentID is the assignment the caller was executing, empty when the caller is
@@ -215,7 +238,12 @@ func resolveDelegationScope(ctx context.Context, db *sql.DB, actorAgentID, works
 //     turns, so only IN-FLIGHT dispatches count. Counting its lifetime output
 //     would silently retire a lead after N tasks, which is a different (and
 //     wrong) product decision wearing a safety cap's clothes.
-func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationScope, fanoutSubjectID, chatID string) (int, error) {
+//
+// A SELF-FILED root (a human's mention: no acting agent, so the row is owned by
+// the agent it targets) narrows that second predicate to rows addressed back to
+// the same agent. Without the narrowing a person's mention was measured against
+// the target's own outbound delegations in that chat — see the file header.
+func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationScope, caller dispatchCaller, chatID string) (int, error) {
 	if db == nil {
 		return 0, nil
 	}
@@ -223,16 +251,26 @@ func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationSc
 		n   int
 		err error
 	)
-	if scope.ParentID != "" {
+	switch {
+	case scope.ParentID != "":
 		err = db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM assignments WHERE parent_assignment_id = ?`, scope.ParentID).Scan(&n)
-	} else {
+	case caller.selfFiled():
+		err = db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM assignments
+			 WHERE assigned_by_id = ?
+			   AND assigned_to_id = ?
+			   AND chat_id = ?
+			   AND parent_assignment_id IS NULL
+			   AND status IN ('PENDING','QUEUED','RUNNING')`,
+			caller.FanoutSubjectID, caller.FanoutSubjectID, chatID).Scan(&n)
+	default:
 		err = db.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM assignments
 			 WHERE assigned_by_id = ?
 			   AND chat_id = ?
 			   AND parent_assignment_id IS NULL
-			   AND status IN ('PENDING','QUEUED','RUNNING')`, fanoutSubjectID, chatID).Scan(&n)
+			   AND status IN ('PENDING','QUEUED','RUNNING')`, caller.FanoutSubjectID, chatID).Scan(&n)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("count delegation siblings: %w", err)
@@ -250,17 +288,25 @@ func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationSc
 // racing dispatches serialise and the second sees the first's row, the same
 // argument claimCrewSlot rests on (assignments_queue.go).
 //
-// The predicate must stay identical to countDelegationSiblings' two branches;
+// The predicate must stay identical to countDelegationSiblings' three branches;
 // they answer the same question at two moments.
-func fanoutGuard(scope delegationScope, fanoutSubjectID, chatID string, maxFanout int) (string, []any) {
-	if scope.ParentID != "" {
+func fanoutGuard(scope delegationScope, caller dispatchCaller, chatID string, maxFanout int) (string, []any) {
+	switch {
+	case scope.ParentID != "":
 		return `(SELECT COUNT(*) FROM assignments WHERE parent_assignment_id = ?) < ?`,
 			[]any{scope.ParentID, maxFanout}
+	case caller.selfFiled():
+		return `(SELECT COUNT(*) FROM assignments
+		          WHERE assigned_by_id = ? AND assigned_to_id = ? AND chat_id = ?
+		            AND parent_assignment_id IS NULL
+		            AND status IN ('PENDING','QUEUED','RUNNING')) < ?`,
+			[]any{caller.FanoutSubjectID, caller.FanoutSubjectID, chatID, maxFanout}
+	default:
+		return `(SELECT COUNT(*) FROM assignments
+		          WHERE assigned_by_id = ? AND chat_id = ? AND parent_assignment_id IS NULL
+		            AND status IN ('PENDING','QUEUED','RUNNING')) < ?`,
+			[]any{caller.FanoutSubjectID, chatID, maxFanout}
 	}
-	return `(SELECT COUNT(*) FROM assignments
-	          WHERE assigned_by_id = ? AND chat_id = ? AND parent_assignment_id IS NULL
-	            AND status IN ('PENDING','QUEUED','RUNNING')) < ?`,
-		[]any{fanoutSubjectID, chatID, maxFanout}
 }
 
 // delegationRefusal is a cap saying no, in words the agent can act on.
@@ -272,6 +318,11 @@ func fanoutGuard(scope delegationScope, fanoutSubjectID, chatID string, maxFanou
 type delegationRefusal struct{ msg string }
 
 func (e *delegationRefusal) Error() string { return e.msg }
+
+// dispatchRefused marks a cap's "no" as a DECISION rather than a failure —
+// the same marker *agentHeldError carries, so a caller can record either
+// without enumerating gate types. See assignments.go's dispatchRefusal.
+func (e *delegationRefusal) dispatchRefused() {}
 
 // enforceDelegationCaps resolves the caller's position in the tree and refuses
 // the dispatch when either cap is already met. It returns the scope the new
@@ -310,7 +361,7 @@ func enforceDelegationCaps(
 			scope.Depth-1, lim.MaxDepth, SettingDelegationMaxDepth)}
 	}
 
-	used, err := countDelegationSiblings(ctx, db, scope, caller.FanoutSubjectID, chatID)
+	used, err := countDelegationSiblings(ctx, db, scope, caller, chatID)
 	if err != nil {
 		return delegationScope{}, lim, err
 	}
@@ -331,16 +382,18 @@ func enforceDelegationCaps(
 
 // cappedAssignment is one row insertCappedAssignment writes. Everything the
 // caps care about — depth, parent, the fan-out subject — is deliberately NOT
-// in here: it arrives as the scope/limits enforceDelegationCaps derived, so a
-// caller cannot hand this function a position it chose for itself.
+// in here: it arrives as the scope/limits enforceDelegationCaps derived and the
+// caller it judged, so a door cannot hand this function a position it chose for
+// itself. assigned_by_id is likewise taken from that caller rather than from
+// this struct, so the row's owner and the id the fan-out was counted against
+// are one value and cannot drift apart.
 type cappedAssignment struct {
-	WorkspaceID  string
-	ChatID       string
-	AssignedByID string
-	TargetID     string
-	Task         string
-	GroupID      string
-	CreatedAt    string
+	WorkspaceID string
+	ChatID      string
+	TargetID    string
+	Task        string
+	GroupID     string
+	CreatedAt   string
 }
 
 // insertCappedAssignment writes the PENDING assignment row with the fan-out
@@ -366,6 +419,7 @@ func insertCappedAssignment(
 	db *sql.DB,
 	scope delegationScope,
 	lim delegationLimits,
+	caller dispatchCaller,
 	a cappedAssignment,
 ) (string, error) {
 	assignmentID := generateCUID()
@@ -373,9 +427,9 @@ func insertCappedAssignment(
 	if scope.ParentID != "" {
 		parentVal = scope.ParentID
 	}
-	guardSQL, guardArgs := fanoutGuard(scope, a.AssignedByID, a.ChatID, lim.MaxFanout)
+	guardSQL, guardArgs := fanoutGuard(scope, caller, a.ChatID, lim.MaxFanout)
 	insertArgs := append([]any{
-		assignmentID, a.WorkspaceID, a.ChatID, a.AssignedByID, a.TargetID,
+		assignmentID, a.WorkspaceID, a.ChatID, caller.FanoutSubjectID, a.TargetID,
 		a.Task, a.GroupID, scope.Depth, parentVal, a.CreatedAt,
 	}, guardArgs...)
 	res, err := db.ExecContext(ctx, `
