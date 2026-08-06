@@ -149,7 +149,7 @@ func TestEnsureCrewRuntime_DroppedCapabilitiesAreLoggedNotSilent(t *testing.T) {
 		ID: "crew1", Slug: "eng",
 		CachedImage:  "crewship-cache:abc123",
 		ContainerEnv: map[string]string{"FOO": "bar"},
-		TTLHours:     4,
+		LoginPath:    "/usr/local/bin:/usr/bin",
 	})
 	if err != nil {
 		t.Fatalf("dropped capabilities must not block the crew: %v", err)
@@ -165,7 +165,9 @@ func TestEnsureCrewRuntime_DroppedCapabilitiesAreLoggedNotSilent(t *testing.T) {
 	// provisioned image now, so reporting it as dropped would be false (#1779).
 	// ContainerEnv is deliberately absent: the provider passes every entry as
 	// --env now, so reporting it as dropped would be false (#1779).
-	for _, want := range []string{"TTLHours"} {
+	// TTLHours is deliberately absent too: idle auto-stop is the orchestrator's
+	// reaper on every provider, and this one now feeds it (idle_ttl_test.go).
+	for _, want := range []string{"LoginPath"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log must name the dropped field %q; log:\n%s", want, out)
 		}

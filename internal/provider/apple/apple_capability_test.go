@@ -190,7 +190,12 @@ func TestUnsupportedCrewConfig_EveryDroppedFieldIsReported(t *testing.T) {
 		// detail fragments the message has to carry to be actionable
 		wants []string
 	}{
-		{"TTLHours", func(c *provider.CrewConfig) { c.TTLHours = 4 }, []string{"idle"}},
+		// TTLHours is deliberately not in this table: idle auto-stop is the
+		// orchestrator's reaper on every provider, and this one now supplies
+		// both provider-side facts it needs (FindCrewContainer and
+		// ContainerStatus.Uptime) — see idle_ttl_test.go, which pins the
+		// absence of the entry along with the facts that earned it.
+		{"LoginPath", func(c *provider.CrewConfig) { c.LoginPath = "/usr/bin:/bin" }, []string{"PATH"}},
 		{"PostStartCommands", func(c *provider.CrewConfig) { c.PostStartCommands = []string{"./start.sh"} }, []string{"post-start"}},
 		{"InitHookEnabled", func(c *provider.CrewConfig) { c.InitHookEnabled = true }, []string{"/crew/init.sh"}},
 		{"ProvisionSink", func(c *provider.CrewConfig) {

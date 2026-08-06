@@ -54,6 +54,15 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	containerName := p.CrewContainerName(team.ID, team.Slug)
 
+	// Any cached run-as user for this name is dropped for the whole call. The
+	// name is the cache key (on Apple Containers configuration.id IS the name),
+	// and this function may `rm` the container behind it and build a new one
+	// from a different image — so the answer read before the call cannot be
+	// assumed to describe the container that exists after it. Deferred rather
+	// than done inline so every return path, including the reuse and race
+	// branches, is covered.
+	defer p.forgetContainerUser(containerName)
+
 	// Check if container already exists
 	existing, err := p.findContainer(ctx, containerName)
 	if err == nil && existing != nil {
@@ -210,6 +219,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	info, err := p.inspectContainer(ctx, containerID)
 	if err == nil && info.Configuration.ID != "" {
 		containerID = info.Configuration.ID
+		// The deferred forget above is keyed on the name we asked for; if the
+		// runtime hands back a different id, drop that one too rather than
+		// leave a previous container's user cached under it.
+		defer p.forgetContainerUser(containerID)
 		// Discover host IP from gateway if not already known
 		p.mu.Lock()
 		if p.hostIP == "" && info.GatewayIP() != "" {

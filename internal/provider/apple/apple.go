@@ -20,6 +20,12 @@ var _ provider.ContainerProvider = (*Provider)(nil)
 var _ provider.InteractiveExecProvider = (*Provider)(nil)
 var _ provider.VolumeManager = (*Provider)(nil)
 
+// The idle reaper's boot-time door. Server.rehydrateContainers skips any
+// provider that fails this assertion, and skipping it is what kept
+// CrewConfig.TTLHours unreachable here for a container that survived a
+// restart — see FindCrewContainer.
+var _ provider.CrewContainerLookup = (*Provider)(nil)
+
 // agentContainerUser is the user Apple crew containers are created to run their
 // init process (and therefore the agent) as — the value the create path passes
 // as --user (apple_create_args.go). It is what a crew container this provider
@@ -48,12 +54,110 @@ const agentContainerUser = "1001:1001"
 // refusal. So an unreadable payload yields "" rather than a guess, and an
 // inspect that failed yields an error — never a fallback to the constant,
 // which is the fabrication being removed.
+//
+// It is cached, because reading it from the runtime turned every exec that
+// leaves ExecConfig.User empty into an extra `container` process. Those callers
+// are the polling ones — the listening-port scanner execs every crew container
+// every 15 seconds, containerstate.Capture fires four probes per snapshot — so
+// the cost is recurring rather than one-off, and on this provider an inspect is
+// a fork+exec of a CLI (with a 5-minute watchdog, because it has been seen to
+// wedge) rather than docker's unix-socket call. The value itself cannot change
+// under a container: it is `configuration.initProcess.user`, fixed at create.
+//
+// See containerUserCacheTTL and forgetContainerUser for how the one hazard —
+// same name, different container — is bounded. The short version: every
+// in-product recreation goes through this provider and drops the entry, the TTL
+// backstops out-of-band ones, and resolveExecUser re-checks privilege on
+// whatever it is handed, so a stale answer can never admit root.
 func (p *Provider) ContainerUser(ctx context.Context, containerID string) (string, error) {
+	if user, ok := p.cachedContainerUser(containerID); ok {
+		return user, nil
+	}
 	info, err := p.inspectContainer(ctx, containerID)
 	if err != nil {
+		// Not cached: a failed inspect says nothing about the user, and
+		// remembering it would turn one unreachable-runtime moment into a whole
+		// TTL window of refused execs.
 		return "", fmt.Errorf("inspect container %s for run-as user: %w", containerID, err)
 	}
-	return info.ConfiguredUser(), nil
+	user := info.ConfiguredUser()
+	p.rememberContainerUser(containerID, user)
+	return user, nil
+}
+
+// containerUserCacheTTL bounds how long a container's run-as user is trusted
+// without re-reading it.
+//
+// It is a backstop, not the primary invalidation. The exact one is
+// forgetContainerUser, called from every path in this provider that creates,
+// starts, stops or removes a container — which is every way a crew container is
+// replaced in the product. The TTL exists only for the case that cannot reach:
+// an operator running `container delete` / `container run` against the same
+// name by hand.
+//
+// A minute rather than seconds or hours: it collapses both the burst (one
+// containerstate snapshot's four probes) and the steady state (four
+// listening-port scans) into a single inspect, while keeping the window in
+// which a hand-recreated container could be answered for shorter than the time
+// it takes to notice one. The residual exposure is small by construction —
+// resolveExecUser re-runs IsPrivilegedExecUser on the cached value, so the
+// worst a stale entry can do is exec as the previous container's non-root uid
+// or refuse; it can never admit root.
+const containerUserCacheTTL = time.Minute
+
+type containerUserEntry struct {
+	user     string
+	cachedAt time.Time
+}
+
+// clock is the provider's time source, injectable so the TTL is testable
+// without sleeping. Nil-safe: several constructors build a Provider literal.
+func (p *Provider) clock() time.Time {
+	if p.now != nil {
+		return p.now()
+	}
+	return time.Now()
+}
+
+func (p *Provider) cachedContainerUser(containerID string) (string, bool) {
+	p.userMu.RLock()
+	entry, ok := p.userCache[containerID]
+	p.userMu.RUnlock()
+	if !ok {
+		return "", false
+	}
+	if p.clock().Sub(entry.cachedAt) >= containerUserCacheTTL {
+		return "", false
+	}
+	return entry.user, true
+}
+
+// rememberContainerUser caches an answer that was actually read from the
+// runtime. "" (the payload recorded no user) is cached like any other: it is a
+// real reading of a real container, both consumers refuse on it, and re-asking
+// would produce the same answer until the container is replaced — which drops
+// the entry.
+func (p *Provider) rememberContainerUser(containerID, user string) {
+	p.userMu.Lock()
+	defer p.userMu.Unlock()
+	if p.userCache == nil {
+		p.userCache = make(map[string]containerUserEntry)
+	}
+	p.userCache[containerID] = containerUserEntry{user: user, cachedAt: p.clock()}
+}
+
+// forgetContainerUser drops a container's cached run-as user. Called from every
+// lifecycle transition this provider performs, because on Apple Containers the
+// container id IS the name (configuration.id, set by --name): a crew recreated
+// from a different image reuses the cache key exactly, and the answer it would
+// otherwise be served belongs to a container that no longer exists.
+func (p *Provider) forgetContainerUser(containerID string) {
+	if containerID == "" {
+		return
+	}
+	p.userMu.Lock()
+	defer p.userMu.Unlock()
+	delete(p.userCache, containerID)
 }
 
 // Config holds Apple Container provider configuration.
@@ -106,6 +210,16 @@ type Provider struct {
 	// so CopyToContainer can write through them; see hostPathFor.
 	mountsMu sync.RWMutex
 	mounts   map[string]map[string]string
+
+	// userCache holds each container's run-as user, read from the runtime. Its
+	// own lock: ContainerUser is on the exec hot path and must not queue behind
+	// exec registration. See ContainerUser / forgetContainerUser.
+	userMu    sync.RWMutex
+	userCache map[string]containerUserEntry
+
+	// now is the provider's clock, overridden only by tests so the cache TTL is
+	// exercisable without sleeping. nil means time.Now — see clock().
+	now func() time.Time
 }
 
 type execEntry struct {
@@ -129,8 +243,13 @@ type containerJSON struct {
 	// gateway address it exists to read came back empty, so HostAddress was
 	// never learned from a real container (#1779).
 	Status struct {
-		State    string `json:"state"` // "running", "stopped", "created"
-		Networks []struct {
+		State string `json:"state"` // "running", "stopped", "created"
+		// StartedDate is when the runtime started this container, RFC3339 as
+		// the CLI writes it (captured verbatim in testdata/). It is the only
+		// timestamp in the payload that survives a crewshipd restart, which is
+		// what makes it the idle reaper's durable clock — see ContainerStatus.
+		StartedDate string `json:"startedDate"`
+		Networks    []struct {
 			IPv4Address string `json:"ipv4Address"` // e.g. "192.168.67.4/24"
 			IPv4Gateway string `json:"ipv4Gateway"` // e.g. "192.168.67.1"
 			Hostname    string `json:"hostname"`
@@ -201,6 +320,10 @@ func (c containerJSON) ConfiguredUser() string {
 	}
 	return ""
 }
+
+// StartedAt is when the runtime started this container, or "" when the payload
+// carried none.
+func (c containerJSON) StartedAt() string { return strings.TrimSpace(c.Status.StartedDate) }
 
 // GatewayIP is the first network's IPv4 gateway — the address the host is
 // reachable at from inside the container. Empty when unknown.
@@ -403,6 +526,22 @@ func (p *Provider) CrewContainerName(id, slug string) string {
 // EnsureCrewRuntime creates or starts an Apple Container for the given crew.
 
 func (p *Provider) findContainer(ctx context.Context, name string) (*containerListEntry, error) {
+	entry, err := p.lookupContainer(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if entry == nil {
+		return nil, fmt.Errorf("container %q not found", name)
+	}
+	return entry, nil
+}
+
+// lookupContainer returns the list entry for a container name, (nil, nil) when
+// the runtime knows no such container, and an error only when the runtime could
+// not be asked. Absence and failure are separated here rather than at the call
+// sites because FindCrewContainer's contract turns on the distinction and
+// findContainer's does not.
+func (p *Provider) lookupContainer(ctx context.Context, name string) (*containerListEntry, error) {
 	out, err := runCLI(ctx, "list", "--all", "--format", "json")
 	if err != nil {
 		return nil, err
@@ -420,7 +559,35 @@ func (p *Provider) findContainer(ctx context.Context, name string) (*containerLi
 			return &c, nil
 		}
 	}
-	return nil, fmt.Errorf("container %q not found", name)
+	return nil, nil
+}
+
+// FindCrewContainer is the non-mutating "does this crew already have a
+// container, and is it running" lookup (provider.CrewContainerLookup).
+//
+// It is what lets CrewConfig.TTLHours survive a crewshipd restart on this
+// provider. Server.rehydrateContainers type-asserts the provider to this
+// interface and returns immediately when the assertion fails, so without it a
+// container that outlived the process was never re-registered with the idle
+// reaper — and, never being registered, was never stopped again for as long as
+// the host stayed up (#1662, which fixed the same class of hole for docker).
+// The same assertion also gates the stale-internal-token orphan sweep
+// (internal/api/admin_reap_orphan_containers.go), which 503s without it.
+//
+// Contract, from the interface: ("", false, nil) when no container exists — an
+// error is reserved for failures talking to the runtime, because both callers
+// skip a crew on error and would otherwise be unable to tell "this crew has
+// never started" from "the runtime is unreachable".
+func (p *Provider) FindCrewContainer(ctx context.Context, id, slug string) (string, bool, error) {
+	name := p.CrewContainerName(id, slug)
+	entry, err := p.lookupContainer(ctx, name)
+	if err != nil {
+		return "", false, fmt.Errorf("find crew container %s: %w", name, err)
+	}
+	if entry == nil {
+		return "", false, nil
+	}
+	return entry.Configuration.ID, entry.State() == "running", nil
 }
 
 func (p *Provider) inspectContainer(ctx context.Context, id string) (*containerJSON, error) {
@@ -445,7 +612,14 @@ func (p *Provider) inspectContainer(ctx context.Context, id string) (*containerJ
 }
 
 // StopCrewRuntime gracefully stops a crew container.
+//
+// Unconditionally, before the stop is even attempted: a stop is the point at
+// which a crew container is most likely to come back as a different one (the
+// idle reaper stops precisely so the next start picks up the current container
+// configuration), and an entry kept across that would be answering for the
+// container that was.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
+	p.forgetContainerUser(containerID)
 	_, err := runCLI(ctx, "stop", "--time", "10", containerID)
 	if err != nil {
 		return fmt.Errorf("stop crew runtime %s: %w", provider.ShortID(containerID), err)
@@ -454,7 +628,13 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 }
 
 // RemoveCrewRuntime forcefully removes a crew container.
+//
+// Ahead of the delete, and regardless of whether it succeeds: the intent to
+// replace the container is already enough to make the cached answer untrusted,
+// and a delete that failed for a container that is already gone must not leave
+// its user behind.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
+	p.forgetContainerUser(containerID)
 	_, err := runCLI(ctx, "delete", "--force", containerID)
 	if err != nil {
 		return fmt.Errorf("remove crew runtime %s: %w", provider.ShortID(containerID), err)
@@ -463,6 +643,18 @@ func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) er
 }
 
 // ContainerStatus inspects a container and returns its current state.
+//
+// Uptime carries the container's own start time verbatim, which is what makes
+// CrewConfig.TTLHours work here across a restart. Server.seedCrewReaperClock
+// parses this field to date a boot-discovered container's idle clock; when it
+// is empty the parse fails and the clock is dated from now instead, so every
+// crewshipd restart hands every surviving container a fresh full TTL window
+// and on a host that redeploys more often than the TTL nothing is ever reaped
+// (#1662, fixed for docker by reporting inspect.State.StartedAt in the same
+// field). A start time is a lower bound on last activity, so it can only
+// over-estimate idleness — and over-estimating costs one container start,
+// while the two things that survive a restart (a detached tmux session, a live
+// port exposure) are both probed by the reaper before any stop.
 func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*provider.ContainerStatus, error) {
 	info, err := p.inspectContainer(ctx, containerID)
 	if err != nil {
@@ -484,6 +676,10 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 	return &provider.ContainerStatus{
 		ID:    containerID,
 		State: state,
+		// Empty when the payload recorded none: the caller's documented
+		// fallback (date the clock from now, for one TTL window) is a bounded
+		// degradation, where a fabricated timestamp would not be.
+		Uptime: info.StartedAt(),
 	}, nil
 }
 

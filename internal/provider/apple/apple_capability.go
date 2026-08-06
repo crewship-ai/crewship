@@ -17,6 +17,12 @@ package apple
 // open when it is not. Under-claiming is the safe direction to be wrong in,
 // not a direction it is safe to stay wrong in.
 //
+// The same direction, again, for TTLHours: idle auto-stop is the
+// orchestrator's reaper on every provider, and this one now feeds it the two
+// facts it could not get anywhere else (FindCrewContainer,
+// ContainerStatus.Uptime) — so the entry that said "the container runs until
+// it is stopped explicitly" came out. See the block where it used to be.
+//
 // Still open here: CapDrop/SecurityOpt/noexec mounts and the rest of the
 // table below.
 
@@ -89,12 +95,25 @@ func (p *Provider) UnsupportedCrewConfig(cfg provider.CrewConfig) provider.CrewC
 	// container less contained than it already is here, and none of it is
 	// reported as active anywhere else in the product.
 
-	if cfg.TTLHours > 0 {
-		s.Degraded = append(s.Degraded, provider.DroppedField{
-			Field: "TTLHours", Value: fmt.Sprintf("%d", cfg.TTLHours),
-			Detail: "no idle auto-stop is scheduled; the container runs until it is stopped explicitly",
-		})
-	}
+	// TTLHours is deliberately absent from this report. Idle auto-stop is not a
+	// provider feature on ANY provider here — `container stop --time` has no
+	// idle trigger and neither does docker's daemon. What stops an idle crew is
+	// the orchestrator's reaper (orchestrator_lifecycle.go checkTTLs): it holds
+	// the last-activity clock, refuses to stop a container with an occupant,
+	// and calls StopCrewRuntime. (The docker provider declares no report at
+	// all, so it never claimed this field was dropped either — and on the
+	// mechanism it has nothing this one lacks.)
+	//
+	// This provider's share of that contract is the two facts the reaper cannot
+	// get anywhere else, and both are supplied now: FindCrewContainer, without
+	// which Server.rehydrateContainers skipped this provider entirely and a
+	// container that survived a crewshipd restart was never handed back to the
+	// reaper; and ContainerStatus.Uptime, the container's own start time, which
+	// dates that container's idle clock instead of resetting it to now on every
+	// restart (#1662). Reporting the field as dropped while the reaper stops
+	// these containers would be the stale-entry failure this file's header
+	// describes — an over-report that still changes what every reader does.
+	//
 	// Image / CachedImage are honoured now: create uses CachedImage > Image >
 	// the provider default (crewImage in apple.go). Reporting them as dropped
 	// would understate the provider, and a capability report that lies in the
