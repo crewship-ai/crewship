@@ -230,7 +230,7 @@ type deadLink struct {
 // here — see the note in docs/prd/documentation-contract-testing.md. It needs a
 // slugger that agrees with Mintlify's character-for-character, and the real
 // tree shows both failure directions: `#crewship-routine-result-run_id` is the
-// live anchor for `## `crewship routine result <run_id>“, so a slugger
+// live anchor for the heading "crewship routine result <run_id>", so a slugger
 // that drops the underscore reports the working link and blesses the dead
 // `#crewship-routine-result-run-id` written two pages over. A gate that lands
 // with a pile of ambiguous offenders is a gate someone turns off.
