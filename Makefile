@@ -11,8 +11,10 @@ DATE    ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 # DIRECTORY, so in a nested worktree it stamps the ENCLOSING clone's bit. That
 # is how a `make build` from a clean worktree printed "(uncommitted changes)".
 # Empty (not a repo) is left empty on purpose: buildinfo reads that as
-# "unknown", which is a different fact from "clean".
-DIRTY   ?= $(shell ./scripts/build-stamp.sh dirty)
+# "unknown", which is a different fact from "clean". stderr is discarded for
+# the same reason the neighbours above discard it: a missing or non-executable
+# script must degrade to "unknown", not to build noise.
+DIRTY   ?= $(shell ./scripts/build-stamp.sh dirty 2>/dev/null)
 LICENSE_PUBKEY ?=
 # Coverage knobs for `make cover` (see the Test & Lint section).
 COVER_PKGS   ?= ./...
