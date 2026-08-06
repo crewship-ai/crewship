@@ -20,13 +20,15 @@ import (
 // CrewHandler.container field's type assertion in Services.
 type fakeServiceLister struct {
 	*mockContainerExec
-	services []provider.CrewServiceStatus
-	err      error
-	lastSlug string
+	services   []provider.CrewServiceStatus
+	err        error
+	lastSlug   string
+	lastCrewID string
 }
 
-func (f *fakeServiceLister) ListCrewServices(_ context.Context, slug string) ([]provider.CrewServiceStatus, error) {
+func (f *fakeServiceLister) ListCrewServices(_ context.Context, crewID, slug string) ([]provider.CrewServiceStatus, error) {
 	f.lastSlug = slug
+	f.lastCrewID = crewID
 	if f.err != nil {
 		return nil, f.err
 	}

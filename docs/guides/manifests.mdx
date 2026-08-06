@@ -296,7 +296,7 @@ spec:
 What the provisioner does for each service:
 
 1. Pull the image (best-effort: tolerates registry outages when a local copy exists).
-2. Create per-crew named volumes (`crewship-svc-{crew-slug}-vol-{name}`).
+2. Create per-crew named volumes (`crewship-svc-{crew-slug}-{crew-id}-vol-{name}`).
 3. Start the container with a DNS alias matching `name`, on the crew bridge.
 4. Wait for `healthcheck.test` to report HEALTHY — **capped at 60 s across all sidecars** in the crew (`internal/provider/docker/sidecar.go:EnsureCrewServices`).
 5. Only then start the agent runtime.
@@ -400,7 +400,8 @@ and the crew's own container is up by then.
 
 <Warning>
 **`crewship crew delete` now destroys the crew's sidecars and their named
-volumes.** The containers are force-removed and `crewship-svc-{crew}-vol-*` —
+volumes.** The containers are force-removed and
+`crewship-svc-{crew}-{crew-id}-vol-*` —
 including a Postgres data directory — is deleted with them. Previously both
 were left running forever (#1709), which leaked disk and a live,
 still-authenticated database per deleted crew; the flip side is that deleting a
@@ -422,7 +423,7 @@ force-removed and their named volumes are deleted with them:
 
   redis        redis:7-alpine
   postgres     postgres:16
-               volume crewship-svc-data-crew-vol-pg-data
+               volume crewship-svc-data-crew-clx3k9f0000abc-vol-pg-data
 
 Whatever those volumes hold — a database, a queue, an index — is gone for
 good; it cannot be recovered afterwards. Back it up first if it matters:
@@ -435,34 +436,51 @@ A crew with no `services:` gets the plain one-line prompt it always had, and
 passes `--yes` deletes volumes without asking. Audit those before upgrading.
 
 <Note>
-**When two crews share a slug, nothing is removed.** Sidecar containers are
-labelled `crewship.crew=<slug>` and their volumes are named
-`<prefix>-svc-<slug>-vol-<name>` — neither carries the crew id, while the crew's
-own container deliberately does. Since `crews` is unique on
-(workspace, slug), two workspaces can both hold a `data-crew`, and one delete
-would otherwise take the other's live Postgres and its data directory with it.
-The same applies to a slug that extends another past the volume infix (`data`
-vs `data-vol-x`).
+**Two crews with the same slug are separate all the way down.** `crews` is
+unique on (workspace, slug), not on slug alone, so two workspaces can both hold
+a `data-crew` — and one crewshipd serves every workspace against one Docker
+daemon. Sidecar containers and volumes therefore carry the globally-unique crew
+id, the way the crew's own container has since audit C1:
 
-So the delete checks first: if any other live crew shares that namespace, the
-crew is deleted and its **sidecars are left running**, with the reason printed
-by the command:
+| | Name | Ownership label |
+| --- | --- | --- |
+| Sidecar container | `<prefix>-svc-<slug>-<crew-id>-<service>` | `crewship.crew-id=<crew-id>` |
+| Sidecar volume | `<prefix>-svc-<slug>-<crew-id>-vol-<name>` | `crewship.crew-id=<crew-id>` |
 
-```text
-$ crewship crew delete data-crew --yes
-Crew deleted.
-warning: Sidecar services were NOT removed: the sidecar containers and volumes
-for "data-crew" are named by slug alone, with no crew id, and 1 other live
-crew(s) share that namespace ([data-crew]) — removing them would remove those
-crews' containers and data volumes too. Nothing was removed; delete the sidecars
-for "data-crew" by hand once no other crew uses that slug.
-```
-
-Leaking a container you can remove by hand beats deleting a database you cannot
-get back. Give crews distinct slugs across workspaces on a shared daemon (dev
-slots that seed identical names are the common case) if you want the automatic
-cleanup.
+Start, stop, list and delete all select on that label by exact equality — never
+by a name prefix, because slugs may contain hyphens and one crew's prefix can
+prefix another's names (`data` vs `data-vol-x`). Deleting one workspace's
+`data-crew` leaves the other workspace's `data-crew` Postgres running with its
+data intact, and each crew's own cleanup still happens (#1732; before it, the
+delete refused outright whenever a slug was shared).
 </Note>
+
+<Warning>
+**Upgrading across #1732 re-keys sidecars on the crew's next start.** Instances
+that ran an earlier build have sidecars under the old slug-only names. The
+first `EnsureCrewServices` after upgrade migrates them, per crew, per service:
+
+- the legacy container is stopped and removed — it is ephemeral compute, and
+  the id-scoped replacement starts moments later in the same call. Leaving it
+  would put two containers on the crew bridge answering to the same service
+  alias, and the agent would round-robin between its real database and a
+  freshly-initialised empty one;
+- the legacy volume's **data is copied** into the id-scoped volume by a
+  short-lived helper running the sidecar's own image, and the legacy volume is
+  pruned only after that copy exits 0.
+
+If the copy cannot complete, the legacy volume is left untouched and the crew's
+services **do not start**, with an error naming both volumes — a paused start is
+recoverable, an emptied database is not. If the id-scoped volume already exists,
+the legacy one is left in place and logged rather than clobbering it.
+
+Two crews that shared a slug before the upgrade see the same legacy volume, and
+nothing on the daemon can say which owned it: the first to start claims the
+data, the other gets a clean volume, and the log says so. Back up first
+(`crewship backup create`) if that ambiguity applies to you. `crewship crew
+delete` will not sweep pre-#1732 sidecars for the same reason — start the crew
+once to migrate them, or remove them by hand.
+</Warning>
 
 ### Inventory: what's actually running
 

@@ -21,17 +21,30 @@ func runtimeDaemonHandler(t *testing.T, prefix string, delC, delV *[]string) htt
 	containers := []map[string]any{
 		// Target crew: id-scoped agent container.
 		{"Id": "agent1", "Names": []string{"/" + prefix + "-team-engineering-crew1"}},
-		// Target crew: sidecar (no id-scoped name; matched by label).
-		{"Id": "sidecar1", "Names": []string{"/" + prefix + "-svc-engineering-mcp"},
-			"Labels": map[string]string{"crewship.crew": "engineering", "crewship.kind": "sidecar"}},
+		// Target crew: sidecar (matched by its crew-id label, since the name
+		// also carries the service name this function does not have).
+		{"Id": "sidecar1", "Names": []string{"/" + prefix + "-svc-engineering-crew1-mcp"},
+			"Labels": map[string]string{"crewship.crew-id": "crew1", "crewship.crew": "engineering", "crewship.kind": "sidecar"}},
 		// Other crew: must survive.
 		{"Id": "agent2", "Names": []string{"/" + prefix + "-team-quality-crew2"}},
+		// A crew in ANOTHER WORKSPACE with the IDENTICAL slug — same
+		// crewship.crew label, different crew id. Nuking one workspace used to
+		// take this one's live sidecar with it (#1732).
+		{"Id": "sidecar-twin", "Names": []string{"/" + prefix + "-svc-engineering-crewOther-mcp"},
+			"Labels": map[string]string{"crewship.crew-id": "crewOther", "crewship.crew": "engineering", "crewship.kind": "sidecar"}},
 	}
 	volumes := []map[string]any{
-		{"Name": prefix + "-home-engineering-crew1"},   // target
-		{"Name": prefix + "-tools-engineering-crew1"},  // target
-		{"Name": prefix + "-svc-engineering-vol-work"}, // target sidecar vol
-		{"Name": prefix + "-home-quality-crew2"},       // other crew, keep
+		{"Name": prefix + "-home-engineering-crew1"},  // target
+		{"Name": prefix + "-tools-engineering-crew1"}, // target
+		{"Name": prefix + "-svc-engineering-crew1-vol-work", // target sidecar vol
+			"Labels": map[string]string{"crewship.crew-id": "crew1", "crewship.kind": "sidecar-volume"}},
+		{"Name": prefix + "-home-quality-crew2"}, // other crew, keep
+		// Same slug, another workspace: its data directory must survive.
+		{"Name": prefix + "-svc-engineering-crewOther-vol-work",
+			"Labels": map[string]string{"crewship.crew-id": "crewOther", "crewship.kind": "sidecar-volume"}},
+		// Pre-#1732 slug-only volume: ownership unprovable, so it is reported
+		// and LEFT, not deleted on a guess.
+		{"Name": prefix + "-svc-engineering-vol-work"},
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -76,7 +89,7 @@ func TestPruneCrewRuntimes_RemovesIDScopedAndSidecarOnly(t *testing.T) {
 	}
 	// Volumes: home+tools+sidecar for the target crew, never crew2's home.
 	sort.Strings(delV)
-	wantV := []string{"crewship-home-engineering-crew1", "crewship-svc-engineering-vol-work", "crewship-tools-engineering-crew1"}
+	wantV := []string{"crewship-home-engineering-crew1", "crewship-svc-engineering-crew1-vol-work", "crewship-tools-engineering-crew1"}
 	if strings.Join(delV, ",") != strings.Join(wantV, ",") {
 		t.Errorf("volume deletes = %v; want %v (other crew must survive)", delV, wantV)
 	}

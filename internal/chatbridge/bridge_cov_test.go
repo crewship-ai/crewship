@@ -196,8 +196,12 @@ func (s *sidecarScriptedContainer) EnsureCrewServices(_ context.Context, cc prov
 	return ids, nil
 }
 
-func (s *sidecarScriptedContainer) StopCrewServices(context.Context, string) error   { return nil }
-func (s *sidecarScriptedContainer) RemoveCrewServices(context.Context, string) error { return nil }
+func (s *sidecarScriptedContainer) StopCrewServices(context.Context, string, string) error {
+	return nil
+}
+func (s *sidecarScriptedContainer) RemoveCrewServices(context.Context, string, string) error {
+	return nil
+}
 
 // Compile-time guarantee that the test double actually advertises the
 // sidecar capability the bridge type-asserts for.

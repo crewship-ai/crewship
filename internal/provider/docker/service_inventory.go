@@ -14,26 +14,30 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// matchCrewService reports whether a listed container is one of crewSlug's
+// matchCrewService reports whether a listed container is one of crewID's
 // sidecars and, if so, returns the manifest service name.
 //
 // It keys off the exact per-container labels every sidecar is stamped with
-// at create time (crewship.crew / crewship.kind / crewship.svc — see
-// sidecarContainerName's cfg.Labels), NOT the container name. This is the
-// same authoritative match StopCrewServices and RemoveCrewServices use.
+// at create time (crewship.crew-id / crewship.kind / crewship.svc — see
+// sidecarContainerLabels), NOT the container name. This is the same
+// authoritative match StopCrewServices and RemoveCrewServices use.
 //
 // A name-prefix match ("<prefix>-svc-<slug>-") is UNSAFE here: crew slugs
 // are DNS-label-shaped and may contain hyphens, so crew "alpha"'s prefix
 // "crewship-svc-alpha-" also prefixes crew "alpha-foo"'s container
-// "crewship-svc-alpha-foo-redis". Since slugs are only workspace-unique
-// while the docker daemon is shared instance-wide, that boundary confusion
-// is a cross-tenant information disclosure. Exact-label match has no such
-// ambiguity: crewship.crew == "alpha" never equals "alpha-foo".
-func matchCrewService(labels map[string]string, crewSlug string) (string, bool) {
-	if labels["crewship.crew"] != crewSlug || labels["crewship.kind"] != "sidecar" {
+// "crewship-svc-alpha-foo-redis".
+//
+// Matching the SLUG label was unsafe for a second, independent reason
+// (#1732): slugs are UNIQUE(workspace_id, slug) while one daemon serves
+// every workspace, so `crewship.crew == "data-crew"` names one crew per
+// workspace and this listing showed a tenant another tenant's running
+// services. The crew id is globally unique, so an equality check on
+// crewship.crew-id has no such ambiguity.
+func matchCrewService(labels map[string]string, crewID string) (string, bool) {
+	if !sidecarMatchesCrew(labels, crewID, sidecarKind) {
 		return "", false
 	}
-	svc := labels["crewship.svc"]
+	svc := labels[sidecarSvcLabel]
 	if svc == "" {
 		return "", false
 	}
@@ -44,7 +48,7 @@ func matchCrewService(labels map[string]string, crewSlug string) (string, bool) 
 // has no server-side label filter wired here, so — like
 // FindCrewContainer and ensureSidecar before it — this lists ALL
 // containers (All: true, so stopped sidecars are included) and filters
-// by the crewship.crew label in Go. Read-only: never starts, stops, or
+// by the crewship.crew-id label in Go. Read-only: never starts, stops, or
 // removes anything.
 //
 // State comes from ContainerStatus (an inspect call) rather than the
@@ -53,9 +57,10 @@ func matchCrewService(labels map[string]string, crewSlug string) (string, bool) 
 // own container-status endpoint and never disagrees with it. Ports
 // come from the list Summary, which already reflects the container's
 // exposed ports.
-func (p *Provider) ListCrewServices(ctx context.Context, crewSlug string) ([]provider.CrewServiceStatus, error) {
-	if crewSlug == "" {
-		return nil, fmt.Errorf("docker: ListCrewServices requires a crew slug")
+func (p *Provider) ListCrewServices(ctx context.Context, crewID, crewSlug string) ([]provider.CrewServiceStatus, error) {
+	if crewID == "" {
+		return nil, fmt.Errorf("docker: ListCrewServices requires a crew id (slug %q) — "+
+			"sidecars are identified by the globally-unique crew id, not by the per-workspace slug", crewSlug)
 	}
 
 	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
@@ -65,7 +70,7 @@ func (p *Provider) ListCrewServices(ctx context.Context, crewSlug string) ([]pro
 
 	out := []provider.CrewServiceStatus{}
 	for _, c := range listResult.Items {
-		name, matched := matchCrewService(c.Labels, crewSlug)
+		name, matched := matchCrewService(c.Labels, crewID)
 		if !matched {
 			continue
 		}

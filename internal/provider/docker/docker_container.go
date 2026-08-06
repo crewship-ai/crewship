@@ -269,6 +269,15 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 // exit) returns an actionable error and leaves the legacy volume untouched.
 // Data loss is the cardinal sin here.
 func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, image string) error {
+	return p.migrateLegacyVolumeLabeled(ctx, legacy, target, image, nil)
+}
+
+// migrateLegacyVolumeLabeled is migrateLegacyVolume with extra labels stamped
+// on the TARGET volume. Docker cannot label a volume after creation, so a
+// migrated volume that is later matched by label (sidecar volumes, #1732) has
+// to be labelled here — otherwise the migration would produce a volume its own
+// teardown can no longer find.
+func (p *Provider) migrateLegacyVolumeLabeled(ctx context.Context, legacy, target, image string, labels map[string]string) error {
 	failSafe := func(stage string, cause error) error {
 		return fmt.Errorf("C1 migration of legacy slug-scoped volume %q into %q failed at %s: %w; "+
 			"the legacy volume was NOT removed — its data is intact. Migrate it manually or prune it once confirmed stale (dev: nuke + reseed)",
@@ -290,7 +299,7 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 	copySucceeded := false
 	if _, err := p.client.VolumeCreate(ctx, client.VolumeCreateOptions{
 		Name:   target,
-		Labels: map[string]string{"managed-by": "crewship"},
+		Labels: volumeLabels(labels),
 	}); err != nil {
 		return failSafe("create target volume", err)
 	}
