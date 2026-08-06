@@ -35,3 +35,16 @@ persisted. The in-band test uses an adapter stream with `is_error: true` and a
 zero process exit code. Breakage transcripts belong in the PR description when
 the branch is opened.
 
+## Tracking decisions
+
+- D5 / `temperature` / `max_tokens`: issue #1781.
+- D6 internal `/spawn` and `/assign`: issue #1782.
+- D8 journal semantics: existing audit issue #1369, updated with the 1.0
+  decision requirement.
+- `learned-*.md` delivery: issue #1783.
+
+The ingress matrix is now an explicit synthetic-`ServeHTTP` test in
+`internal/api/ingress_matrix_test.go`. It mounts the production auth,
+workspace, role, and scope middleware around a sentinel handler, so it covers
+the complete recorded route surface without starting background work in a
+business handler.
