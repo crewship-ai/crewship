@@ -24,8 +24,13 @@ func secretsTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// secretsTestReader stands in for a container that ran what it was given. The
+// merged preflight script ends by printing its completion marker and Flush
+// requires it as proof the script was delivered (#1779); a reader that returns
+// nothing would model a runtime silently dropping stdin, which is a different
+// fixture than these tests want.
 func secretsTestReader() io.ReadCloser {
-	return io.NopCloser(strings.NewReader(""))
+	return io.NopCloser(strings.NewReader(preflightDoneMarker + "\n"))
 }
 
 func TestBuildSecretsCleanupScript(t *testing.T) {

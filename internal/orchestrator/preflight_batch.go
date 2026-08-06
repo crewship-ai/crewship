@@ -66,6 +66,17 @@ const (
 	// preflightFailMarker prefixes the single trailing line that names every
 	// step that exited non-zero. Absent when all steps succeeded.
 	preflightFailMarker = "crewship-preflight-failed:"
+
+	// preflightDoneMarker is printed as the script's last act. Its presence is
+	// the only positive evidence that the script was delivered and reached the
+	// end — the failure marker and the exit code both describe HOW a script
+	// failed, and neither can distinguish that from a script that never ran.
+	//
+	// It had to: on Apple Containers the exec dropped stdin, so `sh` read an
+	// empty stream, executed nothing and exited 0. Six preflight steps reported
+	// clean, none had run, and the failure only surfaced later inside the agent
+	// as a missing .mcp.json (#1779).
+	preflightDoneMarker = "crewship-preflight-done"
 )
 
 // preflightBatchTimeout bounds the merged script. The pre-merge form gave each
@@ -232,6 +243,22 @@ func (b *preflightBatch) Flush(ctx context.Context) error {
 	out, _ := io.ReadAll(res.Reader)
 	res.Reader.Close()
 
+	// Delivery first: without the completion marker the script did not run to
+	// the end, so nothing it "did not report" can be trusted. Marking only the
+	// steps it named would be worse than useless here — it named none.
+	if !strings.Contains(string(out), preflightDoneMarker) {
+		for _, s := range steps {
+			b.failed[s.name] = true
+		}
+		if b.logger != nil {
+			b.logger.Error("preflight batch did not run to completion — treating every step as failed",
+				"steps", len(steps), "names", stepNames(steps),
+				"transcript", tailString(string(out), preflightTranscriptTail))
+		}
+		return fmt.Errorf("preflight batch (%d steps: %s): script was not delivered or did not complete",
+			len(steps), stepNames(steps))
+	}
+
 	failed := parsePreflightFailures(string(out))
 	for _, n := range failed {
 		b.failed[n] = true
@@ -281,6 +308,9 @@ func buildPreflightScript(steps []preflightStep) string {
 		sb.WriteString(s.name)
 		sb.WriteString(" \"\n")
 	}
+	// The completion marker prints BEFORE the failure branch exits, so a script
+	// that ran and had failures still proves it was delivered.
+	fmt.Fprintf(&sb, "printf '%%s\\n' '%s'\n", preflightDoneMarker)
 	fmt.Fprintf(&sb, "if [ -n \"$__cs_failed\" ]; then printf '%%s%%s\\n' '%s' \"$__cs_failed\"; exit 1; fi\nexit 0\n",
 		preflightFailMarker)
 	return sb.String()

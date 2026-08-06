@@ -70,6 +70,16 @@ func (c *countingContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*p
 	if c.stdout != nil {
 		out = c.stdout(cfg, stdin)
 	}
+	// A container that actually runs the merged preflight script ends it by
+	// printing the completion marker, and Flush requires that as proof the
+	// script was delivered at all (#1779). Appending it here keeps this fake a
+	// model of a WORKING container: a fake that stayed silent would now mean
+	// "the script never reached the shell", which is a different fixture and
+	// belongs to the tests that deliberately model it.
+	if len(cfg.Cmd) == 1 && cfg.Cmd[0] == "sh" && stdin != "" &&
+		!strings.Contains(out, preflightDoneMarker) {
+		out += preflightDoneMarker + "\n"
+	}
 	return &provider.ExecResult{ExecID: id, Reader: io.NopCloser(strings.NewReader(out))}, nil
 }
 
@@ -122,6 +132,9 @@ func healthySidecarStdout(cfg provider.ExecConfig, _ string) string {
 	if len(cfg.Cmd) == 3 && strings.Contains(cfg.Cmd[2], "9119/health") {
 		return `{"status":"ok","network_mode":"free"}`
 	}
+	// The completion marker is appended centrally by countingContainer.Exec, so
+	// this helper stays a pure "is the sidecar healthy" probe — tests that
+	// chain onto it rely on it returning "" for everything else.
 	return ""
 }
 
