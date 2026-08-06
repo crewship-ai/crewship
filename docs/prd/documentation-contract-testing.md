@@ -176,8 +176,8 @@ deterministic layer is the part that is actually enforced:
 | --- | --- | --- |
 | OpenAPI spec freshness | `Go Lint` → *OpenAPI spec is up to date* | yes |
 | Documentation completeness | `Go Lint` → *API and CLI documentation is complete* (`go run ./scripts/docs-inventory -strict`) | yes |
-| Schemathesis live layers | `scripts/api-contract/run.sh`, run by hand against a dev slot | no |
-| CLI runtime golden smoke | `scripts/test-harness/` | no |
+| Schemathesis live layers | `ci.yml` → *Run deterministic API contract gate*; the same ephemeral seeded server/build as the PR harness | yes |
+| CLI runtime golden smoke | `ci.yml` → Harness PR subset + CLI command breadth smoke | yes |
 
 `-strict` enforces six invariants and names the offending rows rather than only
 counting them: operations with no documentation, operations missing structural
@@ -186,10 +186,13 @@ generic JSON request schemas, CLI commands with no page, and CLI commands with
 undocumented flags. `make docs-inventory` remains the non-failing form for
 regenerating the reports locally; `make docs-inventory:strict` is what CI runs.
 
-Until the live layers are wired, do not read a green `Go Lint` as evidence that
-the documented behaviour was *exercised* — it is evidence that the contract is
-described and internally consistent. That distinction is the whole point of
-splitting structural from semantic checks above.
+The PR gate runs the authentication checks and bounded read-only Schemathesis
+coverage against the exact ephemeral server built in that job. Mutating and
+stateful scenarios remain nightly/manual because they need a disposable data
+policy beyond the control-plane fixture. Do not read a green `Go Lint` as
+evidence that the documented behaviour was *exercised* — it is evidence that
+the contract is described and internally consistent. The live gate supplies
+that semantic check for the safe deterministic layer.
 
 ## Artifacts and triage
 

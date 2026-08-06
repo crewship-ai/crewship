@@ -1,12 +1,15 @@
-# Live API contract prototype
+# Live API contract gate
 
-This directory is a deliberately small, opt-in live contract-test harness for
-Crewship. It loads the running instance's generated OpenAPI route catalog from
+This directory contains the deterministic live contract gate for Crewship. It
+loads the running instance's generated OpenAPI route catalog from
 `/openapi.json` and runs Schemathesis against that instance.
 
-It does not start Crewship, bootstrap an account, select a workspace, or write
-reports. Start and seed a local instance separately, then provide a CLI token
-and a workspace slug or ID.
+The required PR job builds and starts Crewship from the same commit as the
+tests, seeds a disposable database, mints a short-lived CLI token, then runs
+the `auth` and read-only `positive` phases. It uploads the sanitized summary,
+OpenAPI snapshot, JUnit report, and Schemathesis log as CI evidence. The script
+itself remains composable for local or nightly use: it does not start Crewship
+or bootstrap an account.
 
 ## Prerequisites
 
@@ -68,6 +71,10 @@ The default runs are intentionally bounded (`generation.max-examples = 10`,
 one worker, a 10-second request timeout, and a 120-request/minute rate limit).
 The runner prints one concise JSON summary line; it includes the selected and
 excluded operation counts and classifies failures as `schema` or `runtime`.
+When `API_CONTRACT_ARTIFACT_DIR` is set, it also preserves the summary,
+OpenAPI snapshot, JUnit report, and sanitized log in that directory. A schema
+or response declaration change therefore fails the PR and leaves the exact
+operation name in the JUnit/summary evidence.
 The schema is fetched into a temporary file only for validation/counting, then
 removed. Hypothesis examples and reports are temporary too. No token or raw
 response body is included in the summary.
@@ -96,7 +103,7 @@ Example summary:
 
 ## Mutation safety
 
-There is no mutation-enabled command in this prototype. The generated schema
+There is no mutation-enabled command in the PR gate. The generated schema
 contains many POST/PATCH/DELETE operations, but the positive and stateful
 commands explicitly exclude all four mutating method families before making
 requests. Do not remove those exclusions casually: a live instance may hold
