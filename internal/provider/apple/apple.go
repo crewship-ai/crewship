@@ -21,17 +21,39 @@ var _ provider.InteractiveExecProvider = (*Provider)(nil)
 var _ provider.VolumeManager = (*Provider)(nil)
 
 // agentContainerUser is the user Apple crew containers are created to run their
-// init process (and therefore the agent) as. Single-sourced here so the create
-// path (EnsureCrewRuntime) and ContainerUser (used by keeper to run injected
-// commands as the same user, #1060) can never drift apart.
+// init process (and therefore the agent) as — the value the create path passes
+// as --user (apple_create_args.go). It is what a crew container this provider
+// created will report back, but it is NOT what ContainerUser answers with: see
+// that method for why the difference matters.
 const agentContainerUser = "1001:1001"
 
-// ContainerUser returns the container's configured run-as user. Apple crew
-// containers are created with a fixed --user, so this reports that value; it
-// lets keeper run credential-injected commands as the agent user rather than a
-// separate hardcoded constant at the call site (#1060).
-func (p *Provider) ContainerUser(_ context.Context, _ string) (string, error) {
-	return agentContainerUser, nil
+// ContainerUser returns the container's configured run-as user, read from the
+// container itself.
+//
+// It used to `return agentContainerUser, nil` for any id at all. That answer is
+// right for a crew container this provider created and a fabrication for
+// everything else — a crew built from a custom base image whose USER differs
+// (verified: an image with `USER 1500:1500` reports 1500:1500 and the process
+// really runs as uid 1500), or a container running as root.
+//
+// The fabrication defeated the guard that depends on this method. Both
+// consumers — resolveExecUser (apple_exec.go, #1158) and keeper's /execute
+// (#1060) — refuse to run a command when the resolved user is empty or
+// privileged. A constant is neither, so the branch they exist for ("this
+// container has no safe user of its own; do not exec") could never be taken.
+// Answering from the runtime is what gives it something to refuse.
+//
+// Contract, shared with the docker provider (docker.go:1558): an empty string
+// means the user could not be determined, and both callers treat that as a
+// refusal. So an unreadable payload yields "" rather than a guess, and an
+// inspect that failed yields an error — never a fallback to the constant,
+// which is the fabrication being removed.
+func (p *Provider) ContainerUser(ctx context.Context, containerID string) (string, error) {
+	info, err := p.inspectContainer(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("inspect container %s for run-as user: %w", containerID, err)
+	}
+	return info.ConfiguredUser(), nil
 }
 
 // Config holds Apple Container provider configuration.
@@ -119,11 +141,66 @@ type containerJSON struct {
 		Image struct {
 			Reference string `json:"reference"`
 		} `json:"image"`
+		// InitProcess.User is the container's run-as user — the only place the
+		// payload records it. See containerUser for the union it arrives as.
+		InitProcess struct {
+			User containerUser `json:"user"`
+		} `json:"initProcess"`
 	} `json:"configuration"`
+}
+
+// containerUser is `configuration.initProcess.user` from `container inspect`.
+//
+// It is a Swift enum encoded with the case name as the key, so exactly one of
+// two disjoint objects arrives — captured verbatim from container CLI 1.2.0
+// (fixtures in testdata/):
+//
+//	"user" : { "raw" : { "userString" : "1001:1001" } }   // --user, or the image's USER
+//	"user" : { "id"  : { "uid" : 0, "gid" : 0 } }         // neither: the runtime's default, root
+//
+// Both arms are pointers so "the payload said root" stays distinguishable from
+// "the payload said nothing". Collapsing them would report a readable root
+// container as undeterminable — a refusal for the wrong reason — and, worse,
+// invites the reverse mistake of treating an unreadable payload as a known
+// safe user. This is the third struct in this package to be written against
+// this CLI's output; the first two were written from imagination (`status` as
+// a string, an image list with a top-level "reference") and both failed as a
+// silent absence rather than an error (#1779), which is why these came off a
+// live container instead.
+type containerUser struct {
+	Raw *struct {
+		UserString string `json:"userString"`
+	} `json:"raw"`
+	ID *struct {
+		UID int `json:"uid"`
+		GID int `json:"gid"`
+	} `json:"id"`
 }
 
 // State is the container's lifecycle state, or "" when the payload carried none.
 func (c containerJSON) State() string { return c.Status.State }
+
+// ConfiguredUser is the container's run-as user in the "uid:gid" / "uid" /
+// name vocabulary provider.IsPrivilegedExecUser is written against, or "" when
+// the payload recorded none.
+//
+// The id arm is rendered even when it is 0:0. That is the honest reading — the
+// container really does run as root — and it is the whole point: rendered, the
+// exec guard rejects it; swallowed to "", the caller would still refuse but on
+// the weaker "couldn't tell" evidence, and a future caller tempted to treat
+// "unknown" as benign would let root through.
+func (c containerJSON) ConfiguredUser() string {
+	u := c.Configuration.InitProcess.User
+	if u.Raw != nil {
+		if s := strings.TrimSpace(u.Raw.UserString); s != "" {
+			return s
+		}
+	}
+	if u.ID != nil {
+		return fmt.Sprintf("%d:%d", u.ID.UID, u.ID.GID)
+	}
+	return ""
+}
 
 // GatewayIP is the first network's IPv4 gateway — the address the host is
 // reachable at from inside the container. Empty when unknown.

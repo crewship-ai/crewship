@@ -56,7 +56,17 @@ type contractFakeCLI struct {
 //
 // so a fake that always forwarded stdin would pass a provider that omits the
 // flag — i.e. it would have passed the #1779 bug.
+//
+// It also answers `inspect`, because the provider now reads a container's
+// run-as user from the runtime instead of returning the create-time constant.
+// The suite's empty-User contract counts a refusal as conforming, so a stub
+// that stayed silent here would leave that contract passing on the refusal
+// branch and never exercise the resolve at all.
 const contractFakeCLIScript = `
+if [ "$1" = "inspect" ]; then
+  printf '[{"status":{"state":"running"},"configuration":{"id":"%s","initProcess":{"user":{"raw":{"userString":"` + agentContainerUser + `"}}}}}]' "$2"
+  exit 0
+fi
 has_i=0
 op=""
 for a in "$@"; do

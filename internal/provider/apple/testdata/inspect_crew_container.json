@@ -1,0 +1,241 @@
+[
+  {
+    "configuration" : {
+      "capAdd" : [
+
+      ],
+      "capDrop" : [
+
+      ],
+      "creationDate" : "2026-08-06T16:55:01Z",
+      "dns" : {
+        "nameservers" : [
+
+        ],
+        "options" : [
+
+        ],
+        "searchDomains" : [
+
+        ]
+      },
+      "id" : "crewship-1-team-quality-cmsg6n9zj000767b5558f",
+      "image" : {
+        "descriptor" : {
+          "annotations" : {
+            "com.apple.containerization.image.name" : "crewship-cache:66e240493ae4",
+            "io.containerd.image.name" : "docker.io\/library\/crewship-cache:66e240493ae4",
+            "org.opencontainers.image.created" : "2026-08-06T14:51:05Z",
+            "org.opencontainers.image.ref.name" : "66e240493ae4"
+          },
+          "digest" : "sha256:87218fa4dbd11fd85c4fb1721070b68905209c20d02b1622453b92814830ab2f",
+          "mediaType" : "application\/vnd.oci.image.index.v1+json",
+          "size" : 375
+        },
+        "reference" : "crewship-cache:66e240493ae4"
+      },
+      "initProcess" : {
+        "arguments" : [
+
+        ],
+        "environment" : [
+          "NVM_DIR=\/usr\/local\/share\/nvm",
+          "YARN_VERSION=1.22.22",
+          "PYTHON_PATH=\/usr\/local\/python\/current",
+          "PIPX_HOME=\/usr\/local\/py-utils",
+          "PIPX_BIN_DIR=\/usr\/local\/py-utils\/bin",
+          "NVM_SYMLINK_CURRENT=true",
+          "PATH=\/home\/agent\/.local\/bin:\/home\/agent\/.local\/share\/mise\/shims:\/usr\/local\/sbin:\/usr\/local\/bin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin",
+          "NODE_VERSION=22.23.2",
+          "CREWSHIP_CREW_ID=cmsg6n9zj000767b5558f",
+          "LANG=C.UTF-8"
+        ],
+        "executable" : "\/usr\/local\/bin\/entrypoint.sh",
+        "rlimits" : [
+          {
+            "hard" : 0,
+            "limit" : "RLIMIT_CORE",
+            "soft" : 0
+          },
+          {
+            "hard" : 65536,
+            "limit" : "RLIMIT_NOFILE",
+            "soft" : 8192
+          },
+          {
+            "hard" : 4096,
+            "limit" : "RLIMIT_NPROC",
+            "soft" : 4096
+          },
+          {
+            "hard" : 4294967296,
+            "limit" : "RLIMIT_FSIZE",
+            "soft" : 4294967296
+          }
+        ],
+        "supplementalGroups" : [
+
+        ],
+        "terminal" : false,
+        "user" : {
+          "raw" : {
+            "userString" : "1001:1001"
+          }
+        },
+        "workingDirectory" : "\/"
+      },
+      "labels" : {
+
+      },
+      "mounts" : [
+        {
+          "destination" : "\/tmp",
+          "options" : [
+
+          ],
+          "source" : "tmpfs",
+          "type" : {
+            "tmpfs" : {
+
+            }
+          }
+        },
+        {
+          "destination" : "\/home\/agent",
+          "options" : [
+
+          ],
+          "source" : "tmpfs",
+          "type" : {
+            "tmpfs" : {
+
+            }
+          }
+        },
+        {
+          "destination" : "\/workspace",
+          "options" : [
+
+          ],
+          "source" : "\/tmp\/crewship-1-data\/workspaces\/cmsg6n9zj000767b5558f",
+          "type" : {
+            "virtiofs" : {
+
+            }
+          }
+        },
+        {
+          "destination" : "\/output",
+          "options" : [
+
+          ],
+          "source" : "\/tmp\/crewship-1-data\/cmsg6n9zj000767b5558f",
+          "type" : {
+            "virtiofs" : {
+
+            }
+          }
+        },
+        {
+          "destination" : "\/crew",
+          "options" : [
+
+          ],
+          "source" : "\/tmp\/crewship-1-data\/crews\/cmsg6n9zj000767b5558f",
+          "type" : {
+            "virtiofs" : {
+
+            }
+          }
+        },
+        {
+          "destination" : "\/usr\/local\/bin\/crewship-sidecar",
+          "options" : [
+            "ro"
+          ],
+          "source" : "\/tmp\/crewship-sidecar",
+          "type" : {
+            "virtiofs" : {
+
+            }
+          }
+        },
+        {
+          "destination" : "\/usr\/local\/bin\/entrypoint.sh",
+          "options" : [
+            "ro"
+          ],
+          "source" : "\/tmp\/entrypoint.sh",
+          "type" : {
+            "virtiofs" : {
+
+            }
+          }
+        },
+        {
+          "destination" : "\/secrets",
+          "options" : [
+            "mode=1777",
+            "size=16777216"
+          ],
+          "source" : "",
+          "type" : {
+            "tmpfs" : {
+
+            }
+          }
+        }
+      ],
+      "networks" : [
+        {
+          "network" : "crewship-1-agents",
+          "options" : {
+            "hostname" : "crewship-1-team-quality-cmsg6n9zj000767b5558f",
+            "mtu" : 1280
+          }
+        }
+      ],
+      "platform" : {
+        "architecture" : "arm64",
+        "os" : "linux"
+      },
+      "publishedPorts" : [
+
+      ],
+      "publishedSockets" : [
+
+      ],
+      "readOnly" : true,
+      "resources" : {
+        "cpuOverhead" : 1,
+        "cpus" : 2,
+        "memoryInBytes" : 4294967296
+      },
+      "rosetta" : false,
+      "runtimeHandler" : "container-runtime-linux",
+      "ssh" : false,
+      "sysctls" : {
+
+      },
+      "useInit" : true,
+      "virtualization" : false
+    },
+    "id" : "crewship-1-team-quality-cmsg6n9zj000767b5558f",
+    "status" : {
+      "networks" : [
+        {
+          "hostname" : "crewship-1-team-quality-cmsg6n9zj000767b5558f",
+          "ipv4Address" : "192.168.65.4\/24",
+          "ipv4Gateway" : "192.168.65.1",
+          "ipv6Address" : "fd23:40d2:5c57:df5b:f8a2:b1ff:fe89:3c56\/64",
+          "macAddress" : "fa:a2:b1:89:3c:56",
+          "mtu" : 1280,
+          "network" : "crewship-1-agents",
+          "variant" : "reserved"
+        }
+      ],
+      "startedDate" : "2026-08-06T16:55:03Z",
+      "state" : "running"
+    }
+  }
+]

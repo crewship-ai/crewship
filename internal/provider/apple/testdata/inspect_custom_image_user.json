@@ -1,0 +1,117 @@
+[
+  {
+    "configuration" : {
+      "capAdd" : [
+
+      ],
+      "capDrop" : [
+
+      ],
+      "creationDate" : "2026-08-06T17:09:49Z",
+      "dns" : {
+        "nameservers" : [
+
+        ],
+        "options" : [
+
+        ],
+        "searchDomains" : [
+
+        ]
+      },
+      "id" : "probe-imguser-1",
+      "image" : {
+        "descriptor" : {
+          "annotations" : {
+            "com.apple.containerization.image.name" : "probe-userimg:latest",
+            "io.containerd.image.name" : "docker.io\/library\/probe-userimg:latest",
+            "org.opencontainers.image.created" : "2026-08-06T17:09:24Z",
+            "org.opencontainers.image.ref.name" : "latest"
+          },
+          "digest" : "sha256:b72785c47ad7c6284f489f6b9ae3f7be5c2f389f883f611cb4ee19748b0f0358",
+          "mediaType" : "application\/vnd.oci.image.index.v1+json",
+          "size" : 374
+        },
+        "reference" : "probe-userimg:latest"
+      },
+      "initProcess" : {
+        "arguments" : [
+          "300"
+        ],
+        "environment" : [
+          "PATH=\/usr\/local\/sbin:\/usr\/local\/bin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin"
+        ],
+        "executable" : "sleep",
+        "rlimits" : [
+
+        ],
+        "supplementalGroups" : [
+
+        ],
+        "terminal" : false,
+        "user" : {
+          "raw" : {
+            "userString" : "1500:1500"
+          }
+        },
+        "workingDirectory" : "\/"
+      },
+      "labels" : {
+
+      },
+      "mounts" : [
+
+      ],
+      "networks" : [
+        {
+          "network" : "default",
+          "options" : {
+            "hostname" : "probe-imguser-1",
+            "mtu" : 1280
+          }
+        }
+      ],
+      "platform" : {
+        "architecture" : "arm64",
+        "os" : "linux"
+      },
+      "publishedPorts" : [
+
+      ],
+      "publishedSockets" : [
+
+      ],
+      "readOnly" : false,
+      "resources" : {
+        "cpuOverhead" : 1,
+        "cpus" : 4,
+        "memoryInBytes" : 1073741824
+      },
+      "rosetta" : false,
+      "runtimeHandler" : "container-runtime-linux",
+      "ssh" : false,
+      "sysctls" : {
+
+      },
+      "useInit" : false,
+      "virtualization" : false
+    },
+    "id" : "probe-imguser-1",
+    "status" : {
+      "networks" : [
+        {
+          "hostname" : "probe-imguser-1",
+          "ipv4Address" : "192.168.64.12\/24",
+          "ipv4Gateway" : "192.168.64.1",
+          "ipv6Address" : "fd78:e115:a094:1e1:f8fa:c5ff:fe2c:f09c\/64",
+          "macAddress" : "fa:fa:c5:2c:f0:9c",
+          "mtu" : 1280,
+          "network" : "default",
+          "variant" : "reserved"
+        }
+      ],
+      "startedDate" : "2026-08-06T17:09:51Z",
+      "state" : "running"
+    }
+  }
+]

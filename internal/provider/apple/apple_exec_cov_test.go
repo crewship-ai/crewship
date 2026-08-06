@@ -98,7 +98,7 @@ exit 0`)
 }
 
 func TestExecNonZeroExitCode(t *testing.T) {
-	installFakeContainer(t, `
+	installFakeContainer(t, inspectBody(agentContainerUser)+`
 case "$1" in
   exec) exit 3;;
 esac
@@ -127,6 +127,10 @@ func TestExecStartError(t *testing.T) {
 	_, err := p.Exec(context.Background(), provider.ExecConfig{
 		ContainerID: "cid-1",
 		Cmd:         []string{"echo"},
+		// Explicit and non-privileged, so the run-as-user resolve is skipped:
+		// with no binary on PATH the inspect would fail first and this would
+		// test that refusal instead of the Start failure it is named for.
+		User: agentContainerUser,
 	})
 	if err == nil || !strings.Contains(err.Error(), "exec start") {
 		t.Fatalf("err = %v, want exec start error", err)
@@ -203,7 +207,7 @@ exit 0`)
 }
 
 func TestExecInteractiveExitCode(t *testing.T) {
-	installFakeContainer(t, `
+	installFakeContainer(t, inspectBody(agentContainerUser)+`
 case "$1" in
   exec) exit 5;;
 esac
@@ -242,6 +246,7 @@ func TestExecInteractiveStartError(t *testing.T) {
 	_, err := p.ExecInteractive(context.Background(), provider.InteractiveExecConfig{
 		ContainerID: "cid-4",
 		Cmd:         []string{"sh"},
+		User:        agentContainerUser, // see TestExecStartError
 	})
 	if err == nil || !strings.Contains(err.Error(), "exec interactive start") {
 		t.Fatalf("err = %v, want exec interactive start error", err)

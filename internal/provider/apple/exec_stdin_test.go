@@ -28,7 +28,7 @@ import (
 // Docker pins the same contract in docker/exec_stdin_test.go; this provider had
 // no counterpart, which is why a non-conforming implementation got through.
 func TestExec_AttachesStdinWhenSupplied(t *testing.T) {
-	fake := installFakeContainer(t, `exit 0`)
+	fake := installFakeContainer(t, inspectBody(agentContainerUser)+`exit 0`)
 	p := newTestProvider(Config{})
 
 	res, err := p.Exec(context.Background(), provider.ExecConfig{
@@ -51,7 +51,7 @@ func TestExec_AttachesStdinWhenSupplied(t *testing.T) {
 // Without stdin the flag must stay off: -i on a command that has nothing to
 // read changes how the CLI treats the stream for no reason.
 func TestExec_OmitsInteractiveWithoutStdin(t *testing.T) {
-	fake := installFakeContainer(t, `exit 0`)
+	fake := installFakeContainer(t, inspectBody(agentContainerUser)+`exit 0`)
 	p := newTestProvider(Config{})
 
 	res, err := p.Exec(context.Background(), provider.ExecConfig{

@@ -33,8 +33,15 @@ func drainExec(t *testing.T, res *provider.ExecResult) {
 // An omitted User must resolve to the container's configured run-as user
 // rather than being passed through as "no --user at all", which lets the CLI
 // pick the image's default (root on almost every base image).
+//
+// The container here reports a user that is NOT agentContainerUser. That is
+// deliberate: while ContainerUser returned the create-time constant, this test
+// passed without the resolve reading anything at all, so it could not tell
+// "resolved from the container" from "guessed the usual value". Only a
+// distinctive user distinguishes them.
 func TestExec_EmptyUser_ResolvesContainerUser(t *testing.T) {
-	fake := installFakeContainer(t, `exit 0`)
+	const customUser = "1500:1500"
+	fake := installFakeContainer(t, inspectBody(customUser)+`exit 0`)
 	p := newTestProvider(Config{})
 
 	res, err := p.Exec(context.Background(), provider.ExecConfig{
@@ -47,7 +54,7 @@ func TestExec_EmptyUser_ResolvesContainerUser(t *testing.T) {
 	}
 	drainExec(t, res)
 
-	want := "exec --user " + agentContainerUser + " cid-1 true"
+	want := "exec --user " + customUser + " cid-1 true"
 	if !fake.hasCall(t, want) {
 		t.Errorf("expected CLI call %q, got %v", want, fake.calls(t))
 	}
@@ -103,7 +110,8 @@ func TestExec_AllowPrivilegedPermitsRoot(t *testing.T) {
 }
 
 func TestExecInteractive_EmptyUser_ResolvesContainerUser(t *testing.T) {
-	fake := installFakeContainer(t, `exit 0`)
+	const customUser = "1500:1500" // see TestExec_EmptyUser_ResolvesContainerUser
+	fake := installFakeContainer(t, inspectBody(customUser)+`exit 0`)
 	p := newTestProvider(Config{})
 
 	res, err := p.ExecInteractive(context.Background(), provider.InteractiveExecConfig{
@@ -119,7 +127,7 @@ func TestExecInteractive_EmptyUser_ResolvesContainerUser(t *testing.T) {
 	_, _ = io.Copy(io.Discard, res.Conn)
 	_ = res.Conn.Close()
 
-	want := "exec --tty --user " + agentContainerUser + " cid-2 sh"
+	want := "exec --tty --user " + customUser + " cid-2 sh"
 	if !fake.hasCall(t, want) {
 		t.Errorf("expected CLI call %q, got %v", want, fake.calls(t))
 	}
