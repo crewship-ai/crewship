@@ -45,10 +45,11 @@ func TestInstalledCandidatesNameOnlyRuntimesCrewshipCanDrive(t *testing.T) {
 func TestInstalledCandidatesCoverTheRuntimesThatWork(t *testing.T) {
 	t.Parallel()
 
+	vocab := drivableVocabulary(t)
 	found := map[string]bool{}
 	for _, goos := range []string{"darwin", "linux", "windows"} {
 		for _, c := range installedCandidatesFor(goos) {
-			for _, label := range drivableVocabulary(t) {
+			for _, label := range vocab {
 				if strings.Contains(strings.ToLower(c.name), label) {
 					found[label] = true
 				}
@@ -58,7 +59,7 @@ func TestInstalledCandidatesCoverTheRuntimesThatWork(t *testing.T) {
 	// Every Docker-API runtime plus Apple Containers must be scanned for
 	// somewhere. rancher/orbstack/colima/apple are macOS-only in practice, so
 	// this is a union across the three OS lists, not a per-OS assertion.
-	for _, want := range drivableVocabulary(t) {
+	for _, want := range vocab {
 		if !found[want] {
 			t.Errorf("no installed-runtime candidate on any OS names %q — a user who has it installed "+
 				"but stopped is told to install a runtime they already have", want)
