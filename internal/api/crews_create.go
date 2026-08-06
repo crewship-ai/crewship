@@ -126,9 +126,12 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean up soft-deleted crews: cascade-delete their missions to free global
-	// UNIQUE identifier space (e.g. "ENG-5" from deleted crew blocks new "ENG-5").
-	// Match by exact slug OR already-renamed "{slug}_deleted_*" pattern.
+	// Clean up soft-deleted crews: cascade-delete their missions to free
+	// identifier space in THIS workspace — missions are UNIQUE(workspace_id,
+	// identifier) since #1733, and the new crew's issue_counters row starts at 1,
+	// so a soft-deleted crew's leftover "ENG-5" blocks the new crew's "ENG-5".
+	// Only this workspace's rows are touched, and only this workspace's ever
+	// mattered. Match by exact slug OR already-renamed "{slug}_deleted_*" pattern.
 	if _, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM mission_tasks WHERE mission_id IN
 			(SELECT id FROM missions WHERE crew_id IN
