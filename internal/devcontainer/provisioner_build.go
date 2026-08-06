@@ -56,7 +56,22 @@ type ImageProber interface {
 // `$VAR` would either break the build or expand at the wrong moment — the
 // commit path passes these strings to exec untouched, and so must this one.
 type dockerfileRecorder struct {
-	steps []string
+	groups []recordedGroup
+}
+
+// recordedGroup is a run of consecutive commands sharing one user — one
+// Dockerfile layer.
+type recordedGroup struct {
+	user string
+	cmds []string // already shell-quoted, one command per line
+}
+
+// shellQuote wraps s in single quotes so the shell treats it as one literal
+// argument, escaping embedded single quotes the only way sh allows: close the
+// string, emit an escaped quote, reopen. Everything else — $, ", \, spaces,
+// newlines — is inert inside single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
 // exec satisfies ExecFunc. It always reports success: there is nothing to run
@@ -67,31 +82,61 @@ func (r *dockerfileRecorder) exec(_ context.Context, _ string, cmd []string, use
 	if len(cmd) == 0 {
 		return "", 0, nil
 	}
-	argv := cmd
+	if user == "" || user == "root" {
+		user = "0:0"
+	}
+
+	parts := make([]string, 0, len(env)+len(cmd)+1)
 	if len(env) > 0 {
 		// `env K=V … cmd` rather than Dockerfile ENV: these values are
 		// step-scoped in the commit path, and ENV would persist them into every
 		// later layer and into the runtime environment.
-		argv = append(append([]string{"env"}, env...), cmd...)
+		parts = append(parts, "env")
+		for _, kv := range env {
+			parts = append(parts, shellQuote(kv))
+		}
 	}
-	encoded, err := json.Marshal(argv)
-	if err != nil {
-		// argv is []string; Marshal cannot fail. Keep the path total anyway.
-		return "", 0, fmt.Errorf("devcontainer: encoding RUN step: %w", err)
+	for _, a := range cmd {
+		parts = append(parts, shellQuote(a))
 	}
+	line := strings.Join(parts, " ")
 
-	// Root steps emit no USER directive at all — a stray one would leak into
-	// every layer that follows.
-	if user == "" || user == "0:0" || user == "root" {
-		r.steps = append(r.steps, "RUN "+string(encoded))
+	// Extend the open group when the user matches; otherwise start a new one.
+	if n := len(r.groups); n > 0 && r.groups[n-1].user == user {
+		r.groups[n-1].cmds = append(r.groups[n-1].cmds, line)
 		return "", 0, nil
 	}
-	r.steps = append(r.steps,
-		"USER "+user,
-		"RUN "+string(encoded),
-		"USER root",
-	)
+	r.groups = append(r.groups, recordedGroup{user: user, cmds: []string{line}})
 	return "", 0, nil
+}
+
+// steps renders the recorded groups as Dockerfile directives.
+//
+// One layer per group, not per command. Every RUN layer costs ~30-60s of fixed
+// overhead on Apple's builder — measured on a real run, where `printf >>
+// /etc/environment` took 136.7s and a bare `mise --version` took 50.5s — so a
+// layer per exec call turned a handful of seconds of actual work into a twenty
+// minute build. Grouping keeps the same commands in the same order and pays the
+// overhead a few times instead of fifteen.
+//
+// `set -e` preserves the commit path's semantics: it stops at the first
+// failure, and BuildKit then fails the build on the non-zero RUN.
+func (r *dockerfileRecorder) steps() []string {
+	out := make([]string, 0, len(r.groups)*3)
+	for _, g := range r.groups {
+		script := "set -e\n" + strings.Join(g.cmds, "\n")
+		encoded, err := json.Marshal([]string{"sh", "-c", script})
+		if err != nil {
+			// argv is []string; Marshal cannot fail.
+			continue
+		}
+		if g.user == "0:0" {
+			out = append(out, "RUN "+string(encoded))
+			continue
+		}
+		out = append(out, "USER "+g.user, "RUN "+string(encoded), "USER root")
+	}
+	return out
 }
 
 // NewBuildOnlyProvisioner returns a Provisioner that can only build, for
@@ -157,7 +202,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 		return fail(ProvStepImageBuildStart, err)
 	}
 
-	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, rec.steps, tag)
+	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, rec.steps(), tag)
 	if err != nil {
 		return fail(ProvStepImageBuildStart, err)
 	}
