@@ -34,6 +34,21 @@ type DockerfileBuild struct {
 	// OptionsByRef holds the operator-provided options per feature ref. Missing
 	// entries fall back to feature-metadata defaults.
 	OptionsByRef map[string]map[string]any
+	// ExtraSteps are pre-rendered Dockerfile directives appended after the
+	// feature layers and the containerEnv ENV lines. The build-only
+	// provisioning path (#1779) uses them to carry the steps the commit path
+	// runs inside a temp container — agent-home ownership, mise, lifecycle
+	// hooks, postCreate, /etc/environment and cache cleanup. Already-rendered
+	// text: dockerfileRecorder owns the escaping.
+	ExtraSteps []string
+	// FeatureArchives switches feature transfer from a directory COPY to an
+	// `ADD <id>.tar`. Apple's `container build` creates the destination and
+	// copies NOTHING for `COPY <dir>/ <dest>/` (container 1.2.0), so the first
+	// install.sh fails with "No such file or directory"; single files, tar
+	// archives and ADD-with-extraction all work. Set by the build-only path
+	// (#1779); the Docker/BuildKit path keeps COPY so its layer cache and
+	// behaviour are untouched.
+	FeatureArchives bool
 	// RootEnv is the operator's root-level devcontainer.json `containerEnv`. It
 	// is applied as image ENV (root-wins over feature-declared containerEnv) so
 	// the runtime PATH/vars the agent exec inherits are authoritative. Optional.
@@ -98,8 +113,14 @@ func GenerateDockerfile(b DockerfileBuild) (string, error) {
 		destDir := featureInstallBase + "/" + id
 
 		sb.WriteString("\n# feature: " + id + "\n")
-		// Trailing slashes copy directory *contents* into destDir.
-		sb.WriteString("COPY " + ctxDir + "/ " + destDir + "/\n")
+		if b.FeatureArchives {
+			// The archive holds the feature's files at its root, so ADD's
+			// auto-extraction lands them directly in destDir.
+			sb.WriteString("ADD " + ctxDir + ".tar " + destDir + "/\n")
+		} else {
+			// Trailing slashes copy directory *contents* into destDir.
+			sb.WriteString("COPY " + ctxDir + "/ " + destDir + "/\n")
+		}
 
 		// Inline the install env so option values never leak into image layers
 		// as ENV (which would persist and pollute the runtime environment).
@@ -133,6 +154,12 @@ func GenerateDockerfile(b DockerfileBuild) (string, error) {
 	// values, mirroring aggregateFeatureRequirements (provisioner_install.go).
 	for _, line := range containerEnvDirectives(b.Features, b.RootEnv) {
 		sb.WriteString(line + "\n")
+	}
+
+	// Appended last so the steps see the finished filesystem and environment,
+	// mirroring the commit path's ordering.
+	for _, step := range b.ExtraSteps {
+		sb.WriteString(step + "\n")
 	}
 
 	return sb.String(), nil

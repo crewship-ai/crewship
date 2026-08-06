@@ -240,26 +240,27 @@ type ExecFunc func(ctx context.Context, containerID string, cmd []string, user s
 // InstallMise downloads and installs the mise binary inside a container.
 // Runs as root (user "0:0").
 func InstallMise(ctx context.Context, containerID string, exec ExecFunc) error {
-	// Download and install mise.
+	// Install mise straight into /usr/local/bin.
+	//
+	// The installer defaults to $HOME/.local/bin, and as root that is
+	// /root/.local/bin — mode 0700 on the devcontainer base images. Symlinking
+	// /usr/local/bin/mise at it therefore produced a link uid 1001 could not
+	// follow, and `mise install` (which runs as the agent, see
+	// InstallMiseTools) died with exit 126 "permission denied". Pinning
+	// MISE_INSTALL_PATH puts the real binary somewhere every user can execute
+	// and removes the dependency on root's home entirely (#1779).
 	stdout, exitCode, err := exec(ctx, containerID, []string{
-		"sh", "-c", "curl -fsSL https://mise.jdx.dev/install.sh | bash",
+		"sh", "-c",
+		// The assignment belongs to `bash`, not to `curl`: `VAR=x curl | bash`
+		// exports it to the fetch, not to the shell that runs the script.
+		"curl -fsSL https://mise.jdx.dev/install.sh | MISE_INSTALL_PATH=/usr/local/bin/mise bash" +
+			" && chmod 0755 /usr/local/bin/mise",
 	}, "0:0", nil)
 	if err != nil {
 		return fmt.Errorf("%w: download: %v", ErrMiseInstallFailed, err)
 	}
 	if exitCode != 0 {
 		return fmt.Errorf("%w: download exited %d: %s", ErrMiseInstallFailed, exitCode, stdout)
-	}
-
-	// Symlink so all users can access the binary.
-	stdout, exitCode, err = exec(ctx, containerID, []string{
-		"ln", "-sf", "/root/.local/bin/mise", "/usr/local/bin/mise",
-	}, "0:0", nil)
-	if err != nil {
-		return fmt.Errorf("%w: symlink: %v", ErrMiseInstallFailed, err)
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("%w: symlink exited %d: %s", ErrMiseInstallFailed, exitCode, stdout)
 	}
 
 	// Verify installation.

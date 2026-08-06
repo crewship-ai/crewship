@@ -22,7 +22,7 @@ import (
 func TestProvisionStatus_ProgressPayload(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
@@ -104,7 +104,7 @@ func TestProvisionStatus_ProgressPayload(t *testing.T) {
 func TestProvisionStatus_LogTailRingBufferCap(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)

@@ -185,32 +185,32 @@ func TestInstallMise(t *testing.T) {
 		t.Fatalf("InstallMise: %v", err)
 	}
 
-	if len(calls) != 3 {
-		t.Fatalf("expected 3 exec calls, got %d", len(calls))
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 exec calls, got %d", len(calls))
 	}
 
-	// First call: download mise as root.
+	// First call: install mise as root, straight to /usr/local/bin. The
+	// separate symlink step is gone — it pointed into root's 0700 home, which
+	// the agent cannot traverse (#1779).
 	if !strings.Contains(calls[0].cmd, "mise.jdx.dev/install.sh") {
 		t.Errorf("call 0: expected install script, got %q", calls[0].cmd)
+	}
+	// The assignment has to sit on `bash`. On `curl` it reaches the fetch and
+	// not the installer, which then falls back to $HOME/.local/bin and the
+	// chmod fails with "No such file or directory".
+	if !strings.Contains(calls[0].cmd, "| MISE_INSTALL_PATH=/usr/local/bin/mise bash") {
+		t.Errorf("call 0: install path must be pinned on the shell running the script, got %q", calls[0].cmd)
 	}
 	if calls[0].user != "0:0" {
 		t.Errorf("call 0: user = %q, want 0:0", calls[0].user)
 	}
 
-	// Second call: symlink as root.
-	if !strings.Contains(calls[1].cmd, "ln -sf") {
-		t.Errorf("call 1: expected symlink, got %q", calls[1].cmd)
+	// Second call: verify as root.
+	if !strings.Contains(calls[1].cmd, "mise --version") {
+		t.Errorf("call 1: expected version check, got %q", calls[1].cmd)
 	}
 	if calls[1].user != "0:0" {
 		t.Errorf("call 1: user = %q, want 0:0", calls[1].user)
-	}
-
-	// Third call: verify as root.
-	if !strings.Contains(calls[2].cmd, "mise --version") {
-		t.Errorf("call 2: expected version check, got %q", calls[2].cmd)
-	}
-	if calls[2].user != "0:0" {
-		t.Errorf("call 2: user = %q, want 0:0", calls[2].user)
 	}
 }
 
@@ -437,5 +437,31 @@ func TestMiseConfig_Validate_TooManyEnvVars(t *testing.T) {
 	err := cfg.Validate()
 	if !errors.Is(err, ErrMiseTooManyEnvVars) {
 		t.Errorf("Validate: got %v, want ErrMiseTooManyEnvVars", err)
+	}
+}
+
+// mise installs itself under $HOME/.local/bin, and as root that is
+// /root/.local/bin — which is mode 0700 on the devcontainer base images. The
+// symlink into /usr/local/bin therefore pointed somewhere uid 1001 cannot
+// traverse, and `mise install` (which runs as the agent) died with exit 126,
+// "permission denied". Found on the Apple build path (#1779); the same
+// dependency was there on the commit path.
+func TestInstallMise_DoesNotLeaveTheBinaryBehindRootsHome(t *testing.T) {
+	var cmds []string
+	rec := func(_ context.Context, _ string, cmd []string, _ string, _ []string) (string, int, error) {
+		cmds = append(cmds, strings.Join(cmd, " "))
+		return "", 0, nil
+	}
+
+	if err := InstallMise(context.Background(), "cid", rec); err != nil {
+		t.Fatalf("InstallMise: %v", err)
+	}
+
+	all := strings.Join(cmds, "\n")
+	if strings.Contains(all, "/root/.local/bin/mise") {
+		t.Errorf("mise must not be reachable only through root's home:\n%s", all)
+	}
+	if !strings.Contains(all, "/usr/local/bin/mise") {
+		t.Errorf("expected mise to be installed somewhere every user can execute:\n%s", all)
 	}
 }

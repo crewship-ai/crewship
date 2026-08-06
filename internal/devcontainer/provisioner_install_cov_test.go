@@ -438,7 +438,7 @@ func TestRunFeatureLifecycleCommands_RunsAsAgentUser(t *testing.T) {
 		{Metadata: FeatureMetadata{ID: "quiet"}}, // no hook
 		{Metadata: FeatureMetadata{ID: "hooked", PostCreateCommand: "echo hi"}}, // string form
 	}
-	if err := p.runFeatureLifecycleCommands(context.Background(), "cid", features); err != nil {
+	if err := p.runFeatureLifecycleCommands(context.Background(), "cid", features, p.installer.execInContainerAsUser); err != nil {
 		t.Fatalf("runFeatureLifecycleCommands: %v", err)
 	}
 	if len(exec.execs) != 1 {
@@ -467,7 +467,7 @@ func TestRunFeatureLifecycleCommands_Failures(t *testing.T) {
 		return covExecResult{output: "stack trace", exitCode: 3}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err := p.runFeatureLifecycleCommands(context.Background(), "cid", feature)
+	err := p.runFeatureLifecycleCommands(context.Background(), "cid", feature, p.installer.execInContainerAsUser)
 	if err == nil || !strings.Contains(err.Error(), "postCreateCommand exit 3") {
 		t.Errorf("expected exit-3 error, got %v", err)
 	}
@@ -480,7 +480,7 @@ func TestRunFeatureLifecycleCommands_Failures(t *testing.T) {
 		return covExecResult{createErr: errors.New("daemon gone")}
 	})
 	p = newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err = p.runFeatureLifecycleCommands(context.Background(), "cid", feature)
+	err = p.runFeatureLifecycleCommands(context.Background(), "cid", feature, p.installer.execInContainerAsUser)
 	if err == nil || !strings.Contains(err.Error(), "feature f postCreateCommand") {
 		t.Errorf("expected wrapped exec error, got %v", err)
 	}
@@ -494,10 +494,10 @@ func TestInstallMiseMethod_ParseAndValidateErrors(t *testing.T) {
 	exec := newCovExecClient(nil)
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
 
-	if err := p.installMise(context.Background(), "cid", "[tools\nnope"); err == nil {
+	if err := p.installMise(context.Background(), "cid", "[tools\nnope", p.installer.execInContainerAsUser); err == nil {
 		t.Error("expected parse error for malformed TOML")
 	}
-	if err := p.installMise(context.Background(), "cid", "[tools]\n\"bad!name\" = \"1\""); err == nil {
+	if err := p.installMise(context.Background(), "cid", "[tools]\n\"bad!name\" = \"1\"", p.installer.execInContainerAsUser); err == nil {
 		t.Error("expected validation error for invalid tool name")
 	}
 	if len(exec.execs) != 0 {
@@ -510,7 +510,7 @@ func TestInstallMiseMethod_EmptyToolsSkips(t *testing.T) {
 
 	exec := newCovExecClient(nil)
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	if err := p.installMise(context.Background(), "cid", "[tools]\n"); err != nil {
+	if err := p.installMise(context.Background(), "cid", "[tools]\n", p.installer.execInContainerAsUser); err != nil {
 		t.Fatalf("installMise: %v", err)
 	}
 	if len(exec.execs) != 0 {
@@ -523,12 +523,14 @@ func TestInstallMiseMethod_FullPipeline(t *testing.T) {
 
 	exec := newCovExecClient(nil)
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	if err := p.installMise(context.Background(), "cid", "[tools]\nnode = \"22\""); err != nil {
+	if err := p.installMise(context.Background(), "cid", "[tools]\nnode = \"22\"", p.installer.execInContainerAsUser); err != nil {
 		t.Fatalf("installMise: %v", err)
 	}
-	// InstallMise (3 calls) + InstallMiseTools (4 calls).
-	if len(exec.execs) != 7 {
-		t.Fatalf("expected 7 execs, got %d", len(exec.execs))
+	// InstallMise (2 calls — install-to-/usr/local/bin, verify) +
+	// InstallMiseTools (4 calls). The separate symlink step is gone: mise is
+	// installed at its final path rather than linked out of root's home.
+	if len(exec.execs) != 6 {
+		t.Fatalf("expected 6 execs, got %d", len(exec.execs))
 	}
 	if !strings.Contains(exec.execCmd(0), "mise.jdx.dev/install.sh") {
 		t.Errorf("exec 0 = %q, want mise installer download", exec.execCmd(0))
@@ -536,11 +538,11 @@ func TestInstallMiseMethod_FullPipeline(t *testing.T) {
 	if exec.execs[0].User != "0:0" {
 		t.Errorf("mise binary install must run as root, got %q", exec.execs[0].User)
 	}
-	if !strings.Contains(exec.execCmd(3), `node = "22"`) {
-		t.Errorf("exec 3 = %q, want config write containing the tool pin", exec.execCmd(3))
+	if !strings.Contains(exec.execCmd(2), `node = "22"`) {
+		t.Errorf("exec 2 = %q, want config write containing the tool pin", exec.execCmd(2))
 	}
-	if exec.execCmd(5) != "mise install --yes" || exec.execs[5].User != "1001:1001" {
-		t.Errorf("exec 5 = %q (user %q), want mise install --yes as agent", exec.execCmd(5), exec.execs[5].User)
+	if exec.execCmd(4) != "mise install --yes" || exec.execs[4].User != "1001:1001" {
+		t.Errorf("exec 4 = %q (user %q), want mise install --yes as agent", exec.execCmd(4), exec.execs[4].User)
 	}
 }
 
@@ -554,7 +556,7 @@ func TestInstallMiseMethod_BinaryInstallFailure(t *testing.T) {
 		return covExecResult{}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err := p.installMise(context.Background(), "cid", "[tools]\nnode = \"22\"")
+	err := p.installMise(context.Background(), "cid", "[tools]\nnode = \"22\"", p.installer.execInContainerAsUser)
 	if !errors.Is(err, ErrMiseInstallFailed) {
 		t.Errorf("expected ErrMiseInstallFailed, got %v", err)
 	}
@@ -564,13 +566,13 @@ func TestInstallMiseMethod_ToolsInstallFailure(t *testing.T) {
 	t.Parallel()
 
 	exec := newCovExecClient(func(call int, _ client.ExecCreateOptions) covExecResult {
-		if call == 3 { // first InstallMiseTools call: write config
+		if call == 2 { // first InstallMiseTools call: write config
 			return covExecResult{output: "disk full", exitCode: 1}
 		}
 		return covExecResult{}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err := p.installMise(context.Background(), "cid", "[tools]\nnode = \"22\"")
+	err := p.installMise(context.Background(), "cid", "[tools]\nnode = \"22\"", p.installer.execInContainerAsUser)
 	if err == nil || !strings.Contains(err.Error(), "write config") {
 		t.Errorf("expected write-config error, got %v", err)
 	}
@@ -587,7 +589,7 @@ func TestRunPostCreateCommands_Failures(t *testing.T) {
 		return covExecResult{output: "make: error", exitCode: 2}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err := p.runPostCreateCommands(context.Background(), "cid", cfg)
+	err := p.runPostCreateCommands(context.Background(), "cid", cfg, p.installer.execInContainerAsUser)
 	if err == nil || !strings.Contains(err.Error(), `"make setup" exited with code 2`) {
 		t.Errorf("expected exit-code error, got %v", err)
 	}
@@ -596,7 +598,7 @@ func TestRunPostCreateCommands_Failures(t *testing.T) {
 		return covExecResult{createErr: errors.New("daemon gone")}
 	})
 	p = newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err = p.runPostCreateCommands(context.Background(), "cid", cfg)
+	err = p.runPostCreateCommands(context.Background(), "cid", cfg, p.installer.execInContainerAsUser)
 	if err == nil || !strings.Contains(err.Error(), `postCreateCommand "make setup"`) {
 		t.Errorf("expected wrapped exec error, got %v", err)
 	}
@@ -610,7 +612,7 @@ func TestRunPostCreateCommands_RunsAllInOrderWithOutput(t *testing.T) {
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
 	cfg := &Config{Image: "x", PostCreateCommand: []string{"first", "second"}}
-	if err := p.runPostCreateCommands(context.Background(), "cid", cfg); err != nil {
+	if err := p.runPostCreateCommands(context.Background(), "cid", cfg, p.installer.execInContainerAsUser); err != nil {
 		t.Fatalf("runPostCreateCommands: %v", err)
 	}
 	if len(exec.execs) != 2 {
@@ -632,7 +634,7 @@ func TestWriteAggregatedContainerEnv(t *testing.T) {
 	// Empty env: no exec at all.
 	exec := newCovExecClient(nil)
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	if err := p.writeAggregatedContainerEnv(context.Background(), "cid", nil); err != nil {
+	if err := p.writeAggregatedContainerEnv(context.Background(), "cid", nil, p.installer.execInContainerAsUser); err != nil {
 		t.Fatalf("empty env: %v", err)
 	}
 	if len(exec.execs) != 0 {
@@ -641,7 +643,7 @@ func TestWriteAggregatedContainerEnv(t *testing.T) {
 
 	// Deterministic, sorted key order in the written content.
 	env := map[string]string{"ZED": "26", "ALPHA": "1"}
-	if err := p.writeAggregatedContainerEnv(context.Background(), "cid", env); err != nil {
+	if err := p.writeAggregatedContainerEnv(context.Background(), "cid", env, p.installer.execInContainerAsUser); err != nil {
 		t.Fatalf("writeAggregatedContainerEnv: %v", err)
 	}
 	cmd := exec.execCmd(0)
@@ -665,7 +667,7 @@ func TestWriteAggregatedContainerEnv_Failures(t *testing.T) {
 		return covExecResult{exitCode: 1}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err := p.writeAggregatedContainerEnv(context.Background(), "cid", env)
+	err := p.writeAggregatedContainerEnv(context.Background(), "cid", env, p.installer.execInContainerAsUser)
 	if err == nil || !strings.Contains(err.Error(), "exit code 1") {
 		t.Errorf("expected exit-code error, got %v", err)
 	}
@@ -674,7 +676,7 @@ func TestWriteAggregatedContainerEnv_Failures(t *testing.T) {
 		return covExecResult{createErr: errors.New("daemon gone")}
 	})
 	p = newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err = p.writeAggregatedContainerEnv(context.Background(), "cid", env)
+	err = p.writeAggregatedContainerEnv(context.Background(), "cid", env, p.installer.execInContainerAsUser)
 	if err == nil || !strings.Contains(err.Error(), "writing containerEnv") {
 		t.Errorf("expected wrapped exec error, got %v", err)
 	}
@@ -687,7 +689,7 @@ func TestCleanupCaches(t *testing.T) {
 
 	exec := newCovExecClient(nil)
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	if err := p.cleanupCaches(context.Background(), "cid"); err != nil {
+	if err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser); err != nil {
 		t.Fatalf("cleanupCaches: %v", err)
 	}
 	cmd := exec.execCmd(0)
@@ -705,7 +707,7 @@ func TestCleanupCaches_Failures(t *testing.T) {
 		return covExecResult{exitCode: 9}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err := p.cleanupCaches(context.Background(), "cid")
+	err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser)
 	if err == nil || !strings.Contains(err.Error(), "exited with code 9") {
 		t.Errorf("expected exit-code error, got %v", err)
 	}
@@ -714,7 +716,7 @@ func TestCleanupCaches_Failures(t *testing.T) {
 		return covExecResult{createErr: errors.New("daemon gone")}
 	})
 	p = newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	if err := p.cleanupCaches(context.Background(), "cid"); err == nil {
+	if err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser); err == nil {
 		t.Error("expected exec error to propagate")
 	}
 }
