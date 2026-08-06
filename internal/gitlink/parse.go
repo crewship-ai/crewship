@@ -282,6 +282,23 @@ func (r Ref) APIEndpointFor(host string) string {
 	}
 	switch r.Provider {
 	case ProviderGitLab:
+		// www.gitlab.com is a live host, and it answers 308 to the bare
+		// domain. Addressing the API there therefore produced a redirect
+		// ACROSS a host boundary, which Fetch's CheckRedirect refuses on
+		// purpose — it will not carry a credential to a host the caller did
+		// not vet. The result was that an ordinary www paste could never
+		// succeed, failing every time with "cross-host-redirect", an error
+		// about a defence rather than about anything the user did.
+		//
+		// The GitHub arm below has had its equivalent branch since #1758
+		// (www.github.com → api.github.com); GitLab was missing its half.
+		// Only the exact SaaS host is rewritten: a self-hosted instance that
+		// merely begins with "www." keeps its own host, because rewriting it
+		// would send someone's intranet merge request, with their
+		// credential, to gitlab.com.
+		if host == "www.gitlab.com" {
+			host = "gitlab.com"
+		}
 		return scheme + "://" + host +
 			"/api/v4/projects/" + url.PathEscape(r.ProjectPath()) +
 			"/merge_requests/" + strconv.Itoa(r.Number)

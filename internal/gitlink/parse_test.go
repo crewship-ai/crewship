@@ -230,6 +230,31 @@ func TestRef_APIEndpointFor(t *testing.T) {
 			raw:  "https://gitlab.com/acme/platform/billing/-/merge_requests/7",
 			want: "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fbilling/merge_requests/7",
 		},
+		{
+			// www.gitlab.com is a real host that answers 308 to the bare
+			// domain. Sending the API request there produced a redirect to a
+			// DIFFERENT host, which Fetch's CheckRedirect refuses by design
+			// (it will not carry a credential across a host boundary) — so a
+			// perfectly ordinary paste failed with "cross-host-redirect"
+			// every time. github.com already had this branch
+			// (www.github.com → api.github.com); GitLab was simply missing
+			// its half.
+			//
+			// Verified live 2026-08-06: GET https://www.gitlab.com/api/v4/...
+			// → 308 Location: https://gitlab.com/api/v4/...
+			name: "www.gitlab.com resolves to the bare SaaS host, not a redirect",
+			raw:  "https://www.gitlab.com/acme/platform/billing/-/merge_requests/7",
+			want: "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fbilling/merge_requests/7",
+		},
+		{
+			// The counterpart guard: a self-hosted host that merely STARTS
+			// with "www." is not gitlab.com and must keep its own host.
+			// Rewriting it would send someone's intranet MR — with their
+			// credential — to gitlab.com.
+			name: "a self-hosted www host is left alone",
+			raw:  "https://www.git.acme.example/acme/billing/-/merge_requests/7",
+			want: "https://www.git.acme.example/api/v4/projects/acme%2Fbilling/merge_requests/7",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

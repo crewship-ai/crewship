@@ -363,11 +363,22 @@ func statusError(p Provider, resp *http.Response) *FetchError {
 		fe.Detail = "the provider's rate limit for this credential is exhausted"
 	case resp.StatusCode == http.StatusForbidden:
 		// GitHub answers an exhausted rate limit with 403, not 429, and
-		// only the X-RateLimit-Remaining header tells the two apart. Read
-		// as "no access", it sends the user to rotate a perfectly good
-		// token; read as a rate limit, a genuine permission problem looks
-		// transient. Hence the header check rather than a status check.
-		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		// only the headers tell the two apart. Read as "no access", it sends
+		// the user to rotate a perfectly good token; read as a rate limit, a
+		// genuine permission problem looks transient. Hence the header check
+		// rather than a status check.
+		//
+		// TWO headers, not one. X-RateLimit-Remaining: 0 is the PRIMARY limit.
+		// The SECONDARY limit (the burst/abuse limiter) also answers 403, but
+		// GitHub documents its remaining counter as only "may be 0" — what it
+		// promises is a Retry-After. A 403 carrying a retry hint is a "come
+		// back later" by construction: no permission problem is time-boxed,
+		// and no forge tells you when your scopes will improve. Verified
+		// against the live headers on api.github.com (x-ratelimit-remaining /
+		// x-ratelimit-reset are sent on every response, Retry-After only on a
+		// throttle), and against
+		// docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api.
+		if resp.Header.Get("X-RateLimit-Remaining") == "0" || fe.RetryAfter > 0 {
 			fe.Err = ErrRateLimited
 			fe.Detail = "the provider's rate limit for this credential is exhausted (reported as 403, not 429)"
 			if fe.RetryAfter == 0 {
