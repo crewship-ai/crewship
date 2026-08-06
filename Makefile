@@ -3,6 +3,16 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+# DIRTY — was the tree we are building from modified? (#1686)
+#
+# VERSION and COMMIT above are already worktree-correct, because git honours a
+# worktree's `.git` FILE. The dirty bit had no ldflags source at all, so it
+# came from the toolchain's vcs.modified — and cmd/go only recognises a `.git`
+# DIRECTORY, so in a nested worktree it stamps the ENCLOSING clone's bit. That
+# is how a `make build` from a clean worktree printed "(uncommitted changes)".
+# Empty (not a repo) is left empty on purpose: buildinfo reads that as
+# "unknown", which is a different fact from "clean".
+DIRTY   ?= $(shell ./scripts/build-stamp.sh dirty)
 LICENSE_PUBKEY ?=
 # Coverage knobs for `make cover` (see the Test & Lint section).
 COVER_PKGS   ?= ./...
@@ -30,7 +40,7 @@ SENTRY_DSN ?=
 # The pipeline shape is locked by TestSidecarHashShellContract
 # (internal/provider/docker/sidecar_binhash_test.go).
 SIDECAR_BUILD_HASH = $(shell (sha256sum crewship-sidecar 2>/dev/null || shasum -a 256 crewship-sidecar 2>/dev/null) | cut -c1-12)
-LDFLAGS    = -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE) -X github.com/crewship-ai/crewship/internal/license.publicKey=$(LICENSE_PUBKEY) -X github.com/crewship-ai/crewship/internal/crashreport.DSN=$(SENTRY_DSN) -X github.com/crewship-ai/crewship/internal/provider/docker.buildExpectedSidecarHash=$(SIDECAR_BUILD_HASH)"
+LDFLAGS    = -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE) -X github.com/crewship-ai/crewship/internal/buildinfo.buildDirty=$(DIRTY) -X github.com/crewship-ai/crewship/internal/license.publicKey=$(LICENSE_PUBKEY) -X github.com/crewship-ai/crewship/internal/crashreport.DSN=$(SENTRY_DSN) -X github.com/crewship-ai/crewship/internal/provider/docker.buildExpectedSidecarHash=$(SIDECAR_BUILD_HASH)"
 # -trimpath strips workspace paths (/Users/.../crewship_2/...) from the
 # binary, giving reproducible builds across machines and shaving a few KB
 # off the embedded debug info. Adds nothing measurable to compile time.

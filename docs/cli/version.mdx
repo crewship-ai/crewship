@@ -37,7 +37,7 @@ version: v0.1.0-beta.1
 | **version** | Goreleaser/Make-injected tag (`-X main.version`). `dev` for a plain `go build`. |
 | **commit** | Git SHA. From `-X main.commit` when stamped; otherwise from the VCS metadata the Go toolchain embeds in every `go build`. `unknown` only when neither exists. |
 | **built** | RFC 3339. From `-X main.date` when stamped, else the commit time from the VCS metadata. |
-| **(clean) / (uncommitted changes)** | From the embedded `vcs.modified` stamp. **Printed only when it is known** — a build with ldflags but no VCS metadata cannot tell, and says nothing rather than claiming "clean". |
+| **(clean) / (uncommitted changes)** | From the build driver's own `-X …/buildinfo.buildDirty` stamp when present, otherwise the embedded `vcs.modified`. **Printed only when it is known** — a build that neither source answered for cannot tell, and says nothing rather than claiming "clean". |
 | **go** | `runtime.Version()` of the Go toolchain that compiled the binary. |
 | **os/arch** | `runtime.GOOS` and `runtime.GOARCH`. |
 
@@ -49,6 +49,24 @@ version: v0.1.0-beta.1
   absent: it is the only source that answers on that path, and it is the one
   path where "which build is this?" actually gets asked.
 </Note>
+
+<Warning>
+  **A build made inside a nested git worktree needs a stamping build driver.**
+  The Go toolchain only recognises a repository by a `.git` *directory*, and a
+  linked worktree's `.git` is a *file* — so for a worktree that lives inside
+  its parent clone's working tree, the embedded `vcs.*` metadata describes the
+  **parent clone**: a commit that was never built, and a dirty flag from a
+  different tree.
+
+  `make build` and `./dev.sh` ask git directly (`scripts/build-stamp.sh`) and
+  stamp the answer, so binaries they produce are correct anywhere. A bare
+  `go build ./cmd/crewship` in such a worktree is not — use one of the two, or
+  pass the flags yourself:
+
+  ```bash
+  go build -ldflags "$(scripts/build-stamp.sh ldflags)" ./cmd/crewship
+  ```
+</Warning>
 
 ## `--remote`: what is the server running?
 
