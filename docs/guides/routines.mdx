@@ -700,6 +700,25 @@ Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `e
 
 Approve via UI Inbox, CLI `crewship routine waitpoints approve <token>`, or API.
 
+**Waking an `event` wait: by run, or by topic.** There are two doors, and which one you use depends on whether the sender knows the run id.
+
+| | Endpoint | Use when |
+|---|---|---|
+| Per run | `POST /api/v1/workspaces/{ws}/pipeline-runs/{runId}/signal` | You triggered the run and kept its id — an external system finishing a job it was handed. |
+| Per topic | `POST /api/v1/workspaces/{ws}/signals` | You are announcing that something happened and do not know who cares. Wakes **every** run in the workspace parked on that `event_type`. |
+
+```bash
+# one run you already have the id for
+crewship routine signal run_cmox... --event deploy.finished --payload "v1.4.2"
+
+# every run parked on the event, whoever they are
+crewship signal send --event-type deploy.finished --payload "v1.4.2"
+```
+
+The topic form is what makes `wait: event` usable as a subscription rather than a callback: several routines can park on `mission.status_change` and one delivery resumes all of them, each with the payload as its wait step's output. The `event_type` is a free-form string — there is no registry to add to, so a producer and a consumer only have to agree on a name.
+
+Both forms are workspace-fenced: a topic delivery never reaches a run in another workspace, and each parked wait is claimed exactly once, so two producers announcing the same event at the same instant cannot resume one run twice. Delivering a topic nobody is waiting on is a success with `delivered: 0`, not a `404` — an event source emits whether or not anything is listening. (The per-run form still answers `404` when that specific run is not at the wait step, because there the caller named a run and was wrong about it.)
+
 ### `code`
 
 A `code` step has a `runtime`. Two runtimes are wired today — **`expr`** and **`cel`** — both in-process, pure-Go, token-zero (no container, no LLM, no filesystem, no network). Use `expr` for a single boolean comparison (wake-gate probes); reach for `cel` as soon as you need real logic (booleans, arithmetic, string/list ops) — its own code comments call it out as the general-purpose deterministic primitive.

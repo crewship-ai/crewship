@@ -47,7 +47,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Runs | `tree <run_id>` | Show a run and its child runs (call_pipeline / deferred / replay) |
 | Runs | `replay <run_id>` | Re-run a prior run with its original inputs (marked `is_replay`) |
 | Runs | `metadata <run_id>` | Mutate a run's metadata scratchpad (set / increment / append) |
-| Runs | `signal <run_id>` | Deliver a payload to a running run's `wait:event` step |
+| Runs | `signal <run_id>` | Deliver a payload to a running run's `wait:event` step (topic-wide: [`crewship signal send`](/cli/signal)) |
 | Failures | `errors` | List failed runs grouped by error fingerprint |
 | Failures | `bulk-replay` | Replay all failed runs under a fingerprint (after a fix) |
 | Deferred | `pending ...` | List or cancel deferred (delayed/debounced) routine triggers |
@@ -1107,6 +1107,10 @@ crewship routine signal run_cmox... --event approval-received --payload "shipit"
 | `--payload` | string | | String payload that becomes the wait step's output |
 
 Backed by `POST /api/v1/workspaces/{ws}/pipeline-runs/{run_id}/signal`.
+
+Needs a run id, so it only works when you already have one. To wake **every**
+run parked on an event without knowing which they are, use
+[`crewship signal send`](/cli/signal) instead.
 
 ---
 

@@ -1,23 +1,23 @@
 {
   "summary": {
-    "api_operations": 535,
-    "api_exact_docs": 535,
+    "api_operations": 536,
+    "api_exact_docs": 536,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 728,
-    "cli_exact_docs": 728,
-    "cli_root_docs_present": 728,
+    "cli_operations": 730,
+    "cli_exact_docs": 730,
+    "cli_root_docs_present": 730,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 400,
-    "api_with_concrete_response_schemas": 521,
+    "api_with_test_signals": 401,
+    "api_with_concrete_response_schemas": 522,
     "api_generic_response_schemas": 0,
-    "api_with_request_bodies": 224,
-    "api_with_concrete_json_requests": 220,
+    "api_with_request_bodies": 225,
+    "api_with_concrete_json_requests": 221,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 714,
-    "cli_with_flags": 342,
-    "cli_with_all_flags_documented": 342,
+    "cli_with_test_signals": 715,
+    "cli_with_flags": 343,
+    "cli_with_all_flags_documented": 343,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 99,
@@ -19773,6 +19773,7 @@
         "docs/cli/login.mdx",
         "docs/cli/pipeline.mdx",
         "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx",
         "docs/cli/wait.mdx",
         "docs/cli/waitpoint.mdx",
         "docs/cli/webhook.mdx",
@@ -19853,6 +19854,7 @@
         "docs/cli/login.mdx",
         "docs/cli/pipeline.mdx",
         "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx",
         "docs/cli/wait.mdx",
         "docs/cli/waitpoint.mdx",
         "docs/cli/webhook.mdx",
@@ -22514,6 +22516,44 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "source_file": "cmd/gen-openapi/schemas_crews_workspaces_v1.go"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspaces/{workspaceId}/signals",
+      "operation_id": "post_api_v1_workspaces_workspaceId_signals",
+      "tag": "workspaces",
+      "source_file": "cmd/gen-openapi/schemas_remaining_crew_agent.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/workspaces.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/pipeline_signal_topic_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/gen-openapi/schemas_remaining_crew_agent.go",
+          "test_signals": [
+            "internal/api/pipeline_signal_topic_test.go"
+          ]
         }
       }
     },
@@ -37300,6 +37340,7 @@
         "docs/cli/overview.mdx",
         "docs/cli/recurring.mdx",
         "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx",
         "docs/cli/wait.mdx",
         "docs/cli/waitpoint.mdx",
         "docs/cli/webhook.mdx"
@@ -38889,7 +38930,8 @@
       "short": "Deliver a payload to a running run's wait:event step (input-stream injection)",
       "root": "routine",
       "exact_docs": [
-        "docs/cli/routine.mdx"
+        "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -40392,6 +40434,46 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_shell_cov_test.go"
+      ]
+    },
+    {
+      "path": "signal",
+      "use": "signal",
+      "short": "Deliver workspace-wide signals to routines parked on a wait:event step",
+      "root": "signal",
+      "exact_docs": [
+        "docs/cli/overview.mdx",
+        "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/signal.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_parity_test.go"
+      ]
+    },
+    {
+      "path": "signal send",
+      "use": "send",
+      "short": "Deliver an event to every run in the workspace waiting on it",
+      "root": "signal",
+      "exact_docs": [
+        "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/signal.mdx"
+      ],
+      "status": "documented_exact",
+      "flags": [
+        "event-type",
+        "payload"
+      ],
+      "documented_flags": [
+        "event-type",
+        "payload"
       ]
     },
     {
@@ -42153,6 +42235,7 @@
         "docs/cli/overview.mdx",
         "docs/cli/persona.mdx",
         "docs/cli/project.mdx",
+        "docs/cli/signal.mdx",
         "docs/cli/system.mdx",
         "docs/cli/workflow.mdx",
         "docs/cli/workspace.mdx"
@@ -44171,11 +44254,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3886,
-    "api_path_references": 1971,
+    "command_references": 3900,
+    "api_path_references": 1976,
     "environment_references": 395,
     "manifest_kind_references": 209,
-    "flag_references": 1799,
+    "flag_references": 1809,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

@@ -38,6 +38,7 @@ Problem Details shape (`error` is the human-readable message).
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes` | member | Git changes for the run |
 | PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata` | update | Replace run metadata |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal` | update | Deliver a signal to a waiting step |
+| POST | `/api/v1/workspaces/{workspaceId}/signals` | update | Deliver a signal by topic to every run waiting on it |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions` | member | Version list |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}` | member | One immutable version |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff?from=N&to=M` | member | Unified definition diff |
@@ -287,6 +288,32 @@ run.
 
 **Response:** `200 OK` — `{ "ok": true, "delivered": true }`. A durable
 delivery write failure is `500`.
+
+#### `POST /api/v1/workspaces/{workspaceId}/signals`
+
+Topic-scoped delivery: the same act as the per-run signal above, addressed by
+event instead of by run. Use it when the sender knows *what happened* but not
+*who is waiting* — every run in the workspace parked on that `event_type`
+wakes, each receiving the payload as its wait step's output.
+
+**Auth:** `member` plus `update` (MANAGER+) — identical to the per-run signal,
+because delivering one still resumes somebody's parked run. The body is
+`{ "event_type": "mission.status_change", "payload": "..." }`; `event_type` is
+required and is a free-form string (no registry, no enum). Invalid JSON or a
+missing `event_type` is `400`. An unwired signal-wait store is `503` — unlike
+the per-run form there is no in-memory fallback, since the in-process registry
+is keyed by run id and cannot answer "who is waiting on this event".
+
+Each pending wait is claimed exactly once, so two callers delivering the same
+topic simultaneously wake disjoint sets of runs and no run is resumed twice.
+The workspace in the path is the fence: a run in another workspace never wakes.
+
+**Response:** `200 OK` — `{ "ok": true, "delivered": 2, "run_ids": ["run_…", "run_…"] }`.
+Delivering a topic nobody waits on is **`200` with `delivered: 0`**, not `404`:
+an event source emits whether or not a routine happens to be listening. A
+delivery write failure is `500`. In the pathological case of more waits than
+one call can drain, the response adds `"truncated": true` — the listed runs
+were delivered and resumed, and calling again claims the rest.
 
 #### `GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree`
 
