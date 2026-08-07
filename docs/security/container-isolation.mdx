@@ -53,6 +53,19 @@ Because agents run as UID 1001 and the sidecar runs as UID 1002:
 - Agents cannot tamper with outbound request headers (the sidecar handles this)
 - Agents cannot set their own container ID in Keeper execute requests
 
+### The server's own Docker access
+
+Everything on this page fences the *agent* out of the host. The Crewship
+process is on the other side of that fence by necessity: it creates the
+containers, so it holds Docker API access, which is root-equivalent.
+
+You can narrow that to the endpoints Crewship actually calls with a socket
+proxy — [Docker Socket Proxy](/guides/docker-socket-proxy) publishes the exact
+list and ships it wired in `docker/docker-compose.prod.yml`. Read its ceiling
+section before relying on it: the proxy filters URL paths, never request
+bodies, so it cannot stop `Privileged: true`. The workspace flag below is what
+does.
+
 ### Privileged crews and credentials (fail-closed)
 
 A **privileged** crew (Docker-in-Docker) runs without the UID 1001/1002

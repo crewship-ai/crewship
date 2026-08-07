@@ -1214,6 +1214,28 @@ jobs:
       - name: tsformat proximity lint
         run: go run ./scripts/lint-tsformat origin/main
 
+      # Docker API surface gate (#1826). The server reaches Docker directly,
+      # which is root-equivalent on the host. Operators can narrow that with a
+      # socket proxy — we honour DOCKER_HOST — but a proxy is only as good as
+      # the endpoint list behind it, and an endpoint list is exactly the kind
+      # of documentation that rots the first time somebody adds a call. The
+      # list published in docker/docker-compose.prod.yml and
+      # docs/guides/docker-socket-proxy.mdx had already drifted before this
+      # gate existed: it was missing COMMIT, so crew provisioning behind the
+      # proxy we ship would 403 at `docker commit`.
+      #
+      # The tool re-derives the surface from the call sites on every run and
+      # fails on drift in BOTH directions — a new call nobody listed (the
+      # proxy would deny it in production) and a listed endpoint nobody calls
+      # (we would be asking operators to grant a permission we do not need).
+      # The second is the one nobody would ever notice.
+      #
+      # Pure AST work: no daemon, no Docker, no network, ~1s. The same check
+      # also runs as TestRealTreeMatchesDeclaration in the `go` job, so it
+      # survives this step being dropped.
+      - name: Docker API surface matches its published allow-list
+        run: go run ./scripts/docker-api-surface
+
       # OpenAPI spec freshness. internal/api/openapi.gen.json is generated
       # from the r.mux.Handle / r.authedMut / r.authedAdmin / r.authedSelfMut
       # route registrations, and it is what GET /openapi.json serves — the API

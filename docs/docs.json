@@ -166,6 +166,7 @@
                 "expanded": false,
                 "pages": [
                   "guides/backup",
+                  "guides/docker-socket-proxy",
                   "guides/migrations",
                   "guides/migration-checklist",
                   "guides/troubleshooting",
