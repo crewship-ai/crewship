@@ -177,7 +177,10 @@ type Provisioner struct {
 	installer  *Installer
 	downloader *FeatureDownloader
 	builder    ImageBuilder
-	logger     *slog.Logger
+	// imageWaitTimeout / imageWaitInterval bound waitForImage. Zero = defaults.
+	imageWaitTimeout  time.Duration
+	imageWaitInterval time.Duration
+	logger            *slog.Logger
 
 	// digestResolver caches remote manifest digests used by ensureImage. Shared
 	// helper (see internal/dockerutil) so the runtime Provider uses identical
@@ -230,6 +233,10 @@ type ProvisionResult struct {
 	CachedImage  string                 // e.g. "crewship-cache:a1b2c3d4e5f6"
 	ConfigHash   string                 // full SHA-256 hex digest
 	Requirements AggregatedRequirements // runtime requirements bubbled up from features
+	// Features records what the build actually installed — ref, resolved
+	// digest and feature version — so a crew's image can be audited rather
+	// than guessed at. See provenance.go.
+	Features []FeatureRecord
 }
 
 // AggregatedRequirements contains runtime requirements bubbled up from the
@@ -299,6 +306,9 @@ func (p *Provisioner) SetImageBuilder(b ImageBuilder) { p.builder = b }
 const (
 	miseStepLabel   = "Installing language runtimes"
 	commitStepLabel = "Committing image"
+	// buildStepLabel is the commit path's counterpart on runtimes that build
+	// the image instead of committing a container (#1779).
+	buildStepLabel = "Building image"
 )
 
 func pullStepLabel(baseImage string) string {
@@ -365,6 +375,15 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 
 	emitEvt(ProvisionEvent{Step: ProvStepStart, Detail: baseImage})
+
+	// Runtimes with no `commit` (Apple Containers) provision by building the
+	// whole image instead. Dispatching here rather than at the call site keeps
+	// every caller — the HTTP trigger, the dispatch gate, the seed — on one
+	// entry point, and keeps the cache lookup, the requirements JSON and the
+	// job bookkeeping identical for both. See provisioner_build.go (#1779).
+	if p.docker == nil {
+		return p.provisionByBuild(ctx, baseImage, cfg, miseConfig, o, runStart)
+	}
 
 	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg))
 	tag := cacheImageTag(hash)
@@ -519,18 +538,18 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// 5. Handle mise configuration.
 	if miseConfig != "" {
 		emit(miseStepLabel)
-		if err := p.installMise(ctx, containerID, miseConfig); err != nil {
+		if err := p.installMise(ctx, containerID, miseConfig, p.installer.execInContainerAsUser); err != nil {
 			return fail("mise", fmt.Errorf("mise provisioning: %w", err))
 		}
 	}
 
 	// 6a. Run feature-level postCreateCommand hooks. Baked into cached image.
-	if err := p.runFeatureLifecycleCommands(ctx, containerID, resolvedFeatures); err != nil {
+	if err := p.runFeatureLifecycleCommands(ctx, containerID, resolvedFeatures, p.installer.execInContainerAsUser); err != nil {
 		return fail("feature_post_create", err)
 	}
 
 	// 6b. Run root-level postCreateCommand as agent user (1001:1001).
-	if err := p.runPostCreateCommands(ctx, containerID, cfg); err != nil {
+	if err := p.runPostCreateCommands(ctx, containerID, cfg, p.installer.execInContainerAsUser); err != nil {
 		return fail("post_create", err)
 	}
 
@@ -545,7 +564,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	)
 	envStart := time.Now()
 	emitEvt(ProvisionEvent{Step: ProvStepContainerEnvApply, Status: ProvStatusStarted, Detail: fmt.Sprintf("%d vars", len(requirements.ContainerEnv))})
-	if err := p.writeAggregatedContainerEnv(ctx, containerID, requirements.ContainerEnv); err != nil {
+	if err := p.writeAggregatedContainerEnv(ctx, containerID, requirements.ContainerEnv, p.installer.execInContainerAsUser); err != nil {
 		return fail(ProvStepContainerEnvApply, err)
 	}
 	emitEvt(ProvisionEvent{Step: ProvStepContainerEnvApply, Status: ProvStatusCompleted, DurationMs: elapsedMs(envStart)})
@@ -560,7 +579,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	requirements.LoginPath = p.captureLoginPath(ctx, containerID)
 
 	// 8. Clean up caches inside the container.
-	if err := p.cleanupCaches(ctx, containerID); err != nil {
+	if err := p.cleanupCaches(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
 		p.logger.Warn("cache cleanup failed", "error", err)
 	}
 
@@ -586,6 +605,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		CachedImage:  tag,
 		ConfigHash:   hash,
 		Requirements: requirements,
+		Features:     featureRecords(resolvedFeatures),
 	}, nil
 }
 

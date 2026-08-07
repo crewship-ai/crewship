@@ -78,14 +78,22 @@ func NewProvisioningHandler(
 	catalogFetcher *devcontainer.CatalogFetcher,
 	runtimeFetcher *devcontainer.RuntimeFetcher,
 	docker *client.Client,
+	builder devcontainer.ImageBuilder,
 	featureCacheDir string,
 	wsHub *ws.Hub,
 ) *ProvisioningHandler {
 	var provisioner *devcontainer.Provisioner
-	if docker != nil {
+	switch {
+	case docker != nil:
 		featureDL := devcontainer.NewFeatureDownloader(featureCacheDir, logger)
 		installer := devcontainer.NewInstaller(docker, logger)
 		provisioner = devcontainer.NewProvisioner(docker, installer, featureDL, logger)
+	case builder != nil && builder.Available():
+		// No Docker client, but a runtime that can build: Apple Containers on
+		// macOS. The provisioner builds the whole image rather than committing
+		// a mutated temp container, because `container` has no commit (#1779).
+		provisioner = devcontainer.NewBuildOnlyProvisioner(
+			builder, devcontainer.NewFeatureDownloader(featureCacheDir, logger), logger)
 	}
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	h := &ProvisioningHandler{

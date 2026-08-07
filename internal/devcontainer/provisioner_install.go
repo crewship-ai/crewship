@@ -276,7 +276,7 @@ func (p *Provisioner) installResolvedFeatures(ctx context.Context, containerID s
 // in install order. Effects are baked into the cached image. Runs as the
 // agent user (1001:1001) to match the final runtime environment.
 
-func (p *Provisioner) runFeatureLifecycleCommands(ctx context.Context, containerID string, features []*ResolvedFeature) error {
+func (p *Provisioner) runFeatureLifecycleCommands(ctx context.Context, containerID string, features []*ResolvedFeature, exec ExecFunc) error {
 	for _, feature := range features {
 		if feature == nil || feature.Metadata.PostCreateCommand == nil {
 			continue
@@ -286,7 +286,7 @@ func (p *Provisioner) runFeatureLifecycleCommands(ctx context.Context, container
 			p.logger.Info("running feature postCreateCommand",
 				"feature", feature.Metadata.ID, "cmd", cmd)
 			// strict mode — fail loud on first error, matches install.sh behavior.
-			output, exitCode, err := p.installer.execInContainerAsUser(ctx, containerID,
+			output, exitCode, err := exec(ctx, containerID,
 				[]string{"bash", "-c", "set -e\n" + cmd},
 				"1001:1001",
 				[]string{"HOME=/home/agent", "USER=agent"},
@@ -310,7 +310,7 @@ func (p *Provisioner) runFeatureLifecycleCommands(ctx context.Context, container
 // installMise parses the mise config, installs the mise binary, and installs
 // the configured tools inside the container.
 
-func (p *Provisioner) installMise(ctx context.Context, containerID string, miseConfig string) error {
+func (p *Provisioner) installMise(ctx context.Context, containerID string, miseConfig string, exec ExecFunc) error {
 	cfg, err := ParseMiseConfig(miseConfig)
 	if err != nil {
 		return err
@@ -323,8 +323,7 @@ func (p *Provisioner) installMise(ctx context.Context, containerID string, miseC
 		return nil
 	}
 
-	// Build an ExecFunc adapter from the installer's docker client.
-	execFn := p.installer.execInContainerAsUser
+	execFn := exec
 
 	p.logger.Info("installing mise binary", "container", containerID)
 	if err := InstallMise(ctx, containerID, execFn); err != nil {
@@ -341,7 +340,7 @@ func (p *Provisioner) installMise(ctx context.Context, containerID string, miseC
 
 // runPostCreateCommands executes postCreateCommand entries as the agent user.
 
-func (p *Provisioner) runPostCreateCommands(ctx context.Context, containerID string, cfg *Config) error {
+func (p *Provisioner) runPostCreateCommands(ctx context.Context, containerID string, cfg *Config, exec ExecFunc) error {
 	cmds := cfg.NormalizedPostCreateCommands()
 	if len(cmds) == 0 {
 		return nil
@@ -349,7 +348,7 @@ func (p *Provisioner) runPostCreateCommands(ctx context.Context, containerID str
 
 	for _, cmd := range cmds {
 		// strict mode — fail loud on first error, matches install.sh behavior.
-		output, exitCode, err := p.installer.execInContainerAsUser(ctx, containerID,
+		output, exitCode, err := exec(ctx, containerID,
 			[]string{"bash", "-c", "set -e\n" + cmd},
 			"1001:1001",
 			[]string{"USER=agent", "HOME=/home/agent"},
@@ -429,7 +428,7 @@ func sanitizeCapturedPath(s string) string {
 // writeAggregatedContainerEnv writes the merged (feature + root-level)
 // containerEnv map to /etc/environment. Iteration order is deterministic.
 
-func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, containerID string, env map[string]string) error {
+func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, containerID string, env map[string]string, exec ExecFunc) error {
 	if len(env) == 0 {
 		return nil
 	}
@@ -449,7 +448,7 @@ func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, container
 
 	// Append to /etc/environment (preserves existing content).
 	cmd := []string{"bash", "-c", fmt.Sprintf("printf '%%s' %q >> /etc/environment", content)}
-	_, exitCode, err := p.installer.execInContainer(ctx, containerID, cmd, nil)
+	_, exitCode, err := exec(ctx, containerID, cmd, "0:0", nil)
 	if err != nil {
 		return fmt.Errorf("writing containerEnv: %w", err)
 	}
@@ -468,7 +467,7 @@ func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, container
 // Uses `2>/dev/null || true` so missing directories on exotic base images do
 // not fail the cleanup step.
 
-func (p *Provisioner) cleanupCaches(ctx context.Context, containerID string) error {
+func (p *Provisioner) cleanupCaches(ctx context.Context, containerID string, exec ExecFunc) error {
 	const script = `set -u
 for path in \
   /var/cache/apt \
@@ -488,7 +487,7 @@ done
 mkdir -p /tmp /var/tmp
 chmod 1777 /tmp /var/tmp`
 	cmd := []string{"bash", "-c", script}
-	_, exitCode, err := p.installer.execInContainer(ctx, containerID, cmd, nil)
+	_, exitCode, err := exec(ctx, containerID, cmd, "0:0", nil)
 	if err != nil {
 		return err
 	}

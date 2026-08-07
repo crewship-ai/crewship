@@ -40,6 +40,14 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_ENTRYPOINT_PATH` | autodetected | Absolute host path to `entrypoint.sh`. |
 | `CREWSHIP_SKIP_SIDECAR` | (unset) | Set to `1` to bypass fail-fast autodetect (tests only — never set in production). |
 
+### Set by Crewship inside the container
+
+These are not configuration — Crewship sets them on the crew container itself, and an agent (or a `postCreateCommand`) can read them.
+
+| Variable | Description |
+|----------|-------------|
+| `CREWSHIP_CREW_ID` | The crew's id. Set on every crew container by both providers, and the one variable the Apple provider guarantees regardless of what the devcontainer's own `containerEnv` asks for. Useful for a hook or script that needs to know which crew it is running in. |
+
 <Note>
   `CREWSHIP_CONTAINER_PREFIX` is essential for multi-instance deployments. Without it, multiple Crewship instances will create containers with colliding names like `crewship-team-engineering`.
 </Note>

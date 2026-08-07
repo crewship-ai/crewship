@@ -53,7 +53,7 @@ func TestRestartCrewAgents_RealDocker(t *testing.T) {
 
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, docker, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, docker, nil, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
@@ -153,7 +153,7 @@ func TestRestartCrewAgents_NoContainer(t *testing.T) {
 
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, docker, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, docker, nil, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
@@ -197,7 +197,7 @@ func TestRestartCrewAgents_NoContainer(t *testing.T) {
 func TestRestartCrewAgents_ForbiddenRole(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
@@ -226,7 +226,7 @@ func TestRestartCrewAgents_ForbiddenRole(t *testing.T) {
 func TestRestartCrewAgents_NoDocker(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil /* docker */, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil /* docker */, nil /* builder */, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)

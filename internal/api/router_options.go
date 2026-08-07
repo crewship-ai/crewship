@@ -262,6 +262,16 @@ func WithDockerClient(c *dockerclient.Client) RouterOption {
 	}
 }
 
+// WithImageBuilder attaches an image builder for container runtimes that
+// cannot commit. Apple Containers has no `commit`, so on macOS this is what
+// makes provisioning possible at all — the provisioner builds the whole image
+// instead of mutating a temp container and committing it (#1779).
+func WithImageBuilder(b devcontainer.ImageBuilder) RouterOption {
+	return func(r *Router) {
+		r.imageBuilder = b
+	}
+}
+
 // WithFeatureCacheDir sets the on-disk cache directory for downloaded
 // devcontainer feature tarballs.
 func WithFeatureCacheDir(path string) RouterOption {

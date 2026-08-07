@@ -183,12 +183,12 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var devcontainerConfig, cachedImage, cfgHash, slug sql.NullString
+	var devcontainerConfig, cachedImage, cfgHash, slug, resolvedFeatures sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT devcontainer_config, cached_image, config_hash, slug
+		`SELECT devcontainer_config, cached_image, config_hash, slug, resolved_features
 		 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		crewID, workspaceID,
-	).Scan(&devcontainerConfig, &cachedImage, &cfgHash, &slug)
+	).Scan(&devcontainerConfig, &cachedImage, &cfgHash, &slug, &resolvedFeatures)
 
 	if err == sql.ErrNoRows {
 		replyError(w, http.StatusNotFound, "crew not found")
@@ -208,6 +208,17 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		"devcontainer_config": nullStringPtr(devcontainerConfig),
 		"cached_image":        nullStringPtr(cachedImage),
 		"config_hash":         nullStringPtr(cfgHash),
+	}
+
+	// What the image is actually made of. Null (rather than []) when the crew
+	// was provisioned before provenance was recorded — "we do not know" and
+	// "it uses no features" are different answers and the UI shows them
+	// differently (#1779).
+	if resolvedFeatures.Valid {
+		var recs []devcontainer.FeatureRecord
+		if err := json.Unmarshal([]byte(resolvedFeatures.String), &recs); err == nil {
+			resp["resolved_features"] = recs
+		}
 	}
 
 	// agents_pending_restart: agents in this crew running on a stale image.
@@ -806,10 +817,39 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	// (not the 30-min provisioning ctx, which may be near its deadline).
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer updateCancel()
+	// What the build actually installed, so the image can be audited rather
+	// than inferred from the config (#1779). Stored as '[]' when a crew uses no
+	// features — distinct from NULL, which means "built before this existed".
+	// nil and empty mean different things here, so the test is `!= nil` and
+	// not `len() > 0`. A build always sets the slice — featureRecords returns
+	// a non-nil slice even for a crew with no features — so empty means "this
+	// build installed none", which is an answer and belongs in the column as
+	// '[]'. A cache hit builds nothing and leaves the field nil; writing that
+	// would serialize to JSON `null` and erase the digests an earlier build
+	// recorded, after which the CLI reports the crew as "not recorded" and the
+	// audit trail the column exists for is gone (#1779).
+	setFeatures := ""
+	updateArgs := []any{result.CachedImage, result.ConfigHash, reqJSON}
+	if result.Features != nil {
+		featBytes, marshalErr := json.Marshal(result.Features)
+		if marshalErr != nil {
+			// Leave the column alone rather than blanking it: "unknown" is
+			// better recorded as the previous answer than as no answer.
+			h.logger.Warn("marshal resolved_features failed, leaving the column untouched",
+				"crew_id", crewID, "error", marshalErr)
+		} else {
+			setFeatures = "resolved_features = ?, "
+			updateArgs = append(updateArgs, string(featBytes))
+		}
+	}
+	updateArgs = append(updateArgs, crewID, workspaceID)
+
 	_, err = h.db.ExecContext(updateCtx,
-		`UPDATE crews SET cached_image = ?, config_hash = ?, cached_requirements = ?, updated_at = datetime('now')
+		`UPDATE crews SET cached_image = ?, config_hash = ?, cached_requirements = ?, `+
+			setFeatures+
+			`updated_at = datetime('now')
 		 WHERE id = ? AND workspace_id = ?`,
-		result.CachedImage, result.ConfigHash, reqJSON, crewID, workspaceID,
+		updateArgs...,
 	)
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("update db: %w", err))

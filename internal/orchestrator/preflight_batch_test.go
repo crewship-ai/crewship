@@ -38,9 +38,15 @@ func (f *batchFake) Exec(ctx context.Context, cfg provider.ExecConfig) (*provide
 	return f.countingContainer.Exec(ctx, cfg)
 }
 
+// newBatchFake models a script that WAS delivered: the real merged script
+// prints preflightDoneMarker as its last act, and Flush now requires it — a
+// transcript without it means the script never ran (#1779). Tests that want to
+// model an undelivered script use newUndeliveredBatchFake instead.
 func newBatchFake(stdout string, exit int) *batchFake {
 	f := &batchFake{}
-	f.countingContainer.stdout = func(provider.ExecConfig, string) string { return stdout }
+	f.countingContainer.stdout = func(provider.ExecConfig, string) string {
+		return stdout + preflightDoneMarker + "\n"
+	}
 	f.countingContainer.exitFor = func(provider.ExecConfig) int { return exit }
 	return f
 }

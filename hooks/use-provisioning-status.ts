@@ -94,6 +94,10 @@ export interface ProvisioningCrewState {
   /** Feature IDs active on this crew, derived from devcontainer_config.
    *  Used by the popover to render feature icons next to each crew. */
   featureIds: string[]
+  /** What the last build actually resolved each feature ref to, keyed by ref.
+   *  Absent when the crew was provisioned before provenance was recorded —
+   *  which is a different answer from "no features" (#1779). */
+  resolvedFeatures?: Record<string, { version?: string; digest?: string; pinned: boolean }>
   /** Live progress fields — populated for `running` (and the most recent
    *  message also persists into `failed` / fresh `completed` for context). */
   step?: number
@@ -156,6 +160,9 @@ interface ProvisionStatusResponse {
   log_tail?: string[]
   agents_pending_restart?: number
   steps?: string[]
+  /** What the last build resolved each feature ref to. Absent (not empty) for
+   *  crews provisioned before this was recorded. */
+  resolved_features?: { ref: string; id: string; version?: string; digest?: string; pinned: boolean }[]
 }
 
 /** Wire shape of a `provision.event` frame (see internal/api/crew_provisioning_jobs.go). */
@@ -233,6 +240,14 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
             status,
             error: data.error,
             featureIds,
+            resolvedFeatures: data.resolved_features
+              ? Object.fromEntries(
+                  data.resolved_features.map((f) => [
+                    f.ref,
+                    { version: f.version, digest: f.digest, pinned: f.pinned },
+                  ]),
+                )
+              : undefined,
             step: data.step,
             total: data.total,
             message: data.message,

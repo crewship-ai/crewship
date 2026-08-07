@@ -22,7 +22,7 @@ func newJobsTestHandler(t *testing.T) *ProvisioningHandler {
 	t.Helper()
 	logger := newTestLogger()
 	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
-	h := NewProvisioningHandler(setupTestDB(t), logger, nil, nil, nil, "", hub)
+	h := NewProvisioningHandler(setupTestDB(t), logger, nil, nil, nil, nil, "", hub)
 	t.Cleanup(h.Stop)
 	return h
 }

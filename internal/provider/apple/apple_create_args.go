@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -155,6 +156,13 @@ type createArgsInput struct {
 	// sidecarPath / entrypointPath are HOST paths, bind-mounted read-only.
 	sidecarPath    string
 	entrypointPath string
+
+	// containerEnv is the crew's devcontainer containerEnv. Passed explicitly
+	// rather than reported as dropped: `container create` has supported --env
+	// all along (CREWSHIP_CREW_ID already used it), and for an unprovisioned
+	// crew nothing else supplies these — a provisioned one gets them a second
+	// time from the image's own ENV, which is harmless (#1779).
+	containerEnv map[string]string
 }
 
 // buildCreateArgs renders the full `container create` argument vector for a
@@ -248,6 +256,17 @@ func buildCreateArgs(in createArgsInput) ([]string, error) {
 	// semantics — so no explicit keep-alive argv is needed here. The script
 	// itself ends in `exec sleep infinity`, which is what keeps the container
 	// up for the exec pattern.
+	// Sorted so the same crew config always renders the same argument vector;
+	// map order would make two identical starts incomparable.
+	envKeys := make([]string, 0, len(in.containerEnv))
+	for k := range in.containerEnv {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, k := range envKeys {
+		args = append(args, "--env", k+"="+in.containerEnv[k])
+	}
+
 	args = append(args, "--entrypoint", entrypointTargetPath)
 
 	// Image LAST — see the doc comment.

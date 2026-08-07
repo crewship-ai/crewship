@@ -146,6 +146,7 @@ type Router struct {
 	catalogFetcher         *devcontainer.CatalogFetcher
 	runtimeFetcher         *devcontainer.RuntimeFetcher
 	dockerClient           *dockerclient.Client
+	imageBuilder           devcontainer.ImageBuilder
 	featureCacheDir        string
 	portExposeRegistry     *PortExposeRegistry // closed via Shutdown() on server stop
 	portExposePublicURL    string              // e.g. http://crewship.example.com:8080, used to build capability URLs

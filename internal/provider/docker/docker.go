@@ -1500,8 +1500,23 @@ func (p *Provider) ExecInspect(ctx context.Context, execID string) (bool, int, e
 	if err != nil {
 		return false, 0, fmt.Errorf("exec inspect: %w", err)
 	}
-	return resp.Running, resp.ExitCode, nil
+	// A running exec must not answer with a success value. dockerd reports
+	// ExitCode 0 while the process is still in flight (the field is a plain
+	// int, so a null exit code decodes to 0), and several callers discard the
+	// running flag and branch on the code alone — routes_files.go:368 and :450,
+	// keeper_execute.go:697 — for which that 0 reads as "the command
+	// succeeded". Return a value that fails closed instead; the Apple provider
+	// already does (#1779).
+	if resp.Running {
+		return true, execRunningExitCode, nil
+	}
+	return false, resp.ExitCode, nil
 }
+
+// execRunningExitCode is reported for an exec that has not finished. It is not
+// a real status: it exists so a caller that ignores the running flag cannot
+// mistake "still going" for "exited 0".
+const execRunningExitCode = -1
 
 // ExecInteractive creates an interactive TTY exec session with bidirectional I/O.
 // Unlike Exec(), this supports stdin and returns a raw connection for terminal use.

@@ -19,6 +19,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
+// execProbeTimeout bounds waiting for a crew-file exec to report its status.
+const execProbeTimeout = 30 * time.Second
+
 // resolveCrewFileKey maps a client-supplied crew file path to a storage
 // key, reporting whether it is valid.
 //
@@ -365,7 +368,7 @@ func (s *Server) deleteCrewSharedFileViaContainer(ctx context.Context, crewID, c
 	defer result.Reader.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(result.Reader, 64*1024))
 
-	_, code, ierr := s.container.ExecInspect(ctx, result.ExecID)
+	code, ierr := provider.WaitExecExit(ctx, s.container, result.ExecID, execProbeTimeout)
 	if ierr != nil {
 		return fmt.Errorf("inspect container delete: %w", ierr)
 	}
@@ -447,7 +450,7 @@ func (s *Server) writeCrewSharedFileViaContainer(ctx context.Context, crewID, co
 	// process has finished, but the daemon can still momentarily report
 	// running=true before it finalizes the exit code — treating that as a
 	// failure produced spurious errors on a write that actually succeeded.
-	_, code, ierr := s.container.ExecInspect(ctx, result.ExecID)
+	code, ierr := provider.WaitExecExit(ctx, s.container, result.ExecID, execProbeTimeout)
 	if ierr != nil {
 		return fmt.Errorf("inspect container write: %w", ierr)
 	}

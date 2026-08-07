@@ -1,0 +1,453 @@
+package devcontainer
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// recordingAppleCLI writes a stand-in `container` that records its argv and
+// emits two build-log lines, then returns the record path. Asserting on the
+// builder's fields would pass just as happily if Build never invoked anything —
+// the argv that actually reaches the subprocess is the only real evidence.
+func recordingAppleCLI(t *testing.T, exitCode int) (bin, recordPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	recordPath = filepath.Join(dir, "argv")
+	bin = filepath.Join(dir, "container")
+	script := "#!/bin/sh\n" +
+		"echo \"$@\" > " + recordPath + "\n" +
+		"echo '#1 [internal] load build definition'\n" +
+		"echo '#5 DONE 0.1s'\n" +
+		"exit " + itoa(exitCode) + "\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, recordPath
+}
+
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	return string(rune('0' + i))
+}
+
+func appleArgv(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("fake container CLI never ran (%v)", err)
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func TestAppleBuilder_UnavailableWithoutBinary(t *testing.T) {
+	b := &AppleContainerBuilder{logger: slog.Default()}
+	if b.Available() {
+		t.Fatal("a builder with no resolved binary must not report itself available")
+	}
+	if err := b.Build(context.Background(), t.TempDir(), "crewship-cache:x", nil); err == nil {
+		t.Fatal("Build must fail when the CLI is unavailable")
+	}
+}
+
+func TestAppleBuilder_AvailableWithBinary(t *testing.T) {
+	bin, _ := recordingAppleCLI(t, 0)
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default()}
+	if !b.Available() {
+		t.Fatal("a builder with a resolved binary must report itself available")
+	}
+}
+
+// The Dockerfile the provisioner generates opens with `# syntax=` and uses
+// `RUN --mount=type=cache`, so the build has to run through the real frontend.
+// It also has to be plain-progress: `auto` emits TTY control sequences, and
+// those lines are streamed verbatim into provision events and the journal.
+func TestAppleBuilder_InvokesContainerBuildWithTagFileAndPlainProgress(t *testing.T) {
+	bin, rec := recordingAppleCLI(t, 0)
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default()}
+	dir := t.TempDir()
+
+	if err := b.Build(context.Background(), dir, "crewship-cache:abc123", nil); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	argv := appleArgv(t, rec)
+	for _, want := range []string{
+		"build",
+		"--tag crewship-cache:abc123",
+		"--file " + filepath.Join(dir, "Dockerfile"),
+		"--progress plain",
+		dir,
+	} {
+		if !strings.Contains(argv, want) {
+			t.Errorf("argv %q missing %q", argv, want)
+		}
+	}
+}
+
+func TestAppleBuilder_StreamsBuildLogLines(t *testing.T) {
+	bin, _ := recordingAppleCLI(t, 0)
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default()}
+
+	var lines []string
+	if err := b.Build(context.Background(), t.TempDir(), "crewship-cache:x", func(l string) {
+		lines = append(lines, l)
+	}); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected the two emitted log lines, got %d: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], "load build definition") {
+		t.Errorf("first line not streamed through: %q", lines[0])
+	}
+}
+
+func TestAppleBuilder_BuildFailureNamesTheTag(t *testing.T) {
+	bin, _ := recordingAppleCLI(t, 1)
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default()}
+
+	err := b.Build(context.Background(), t.TempDir(), "crewship-cache:deadbeef", nil)
+	if err == nil {
+		t.Fatal("a non-zero exit must surface as an error")
+	}
+	if !strings.Contains(err.Error(), "crewship-cache:deadbeef") {
+		t.Errorf("error should name the tag being built, got %q", err)
+	}
+}
+
+// Apple's `container build` can finish the image and then never exit: observed
+// on 2026-08-06 with container 1.2.0 — the manifest was exported and tagged at
+// 12:02, and the process then sat at 0% CPU for 13 minutes until it was killed.
+// A provisioning job that waits on it waits forever, which is the one outcome a
+// customer must never see. The builder therefore gives up on silence rather
+// than on a total deadline: a legitimate build emits progress continuously, so
+// a long quiet gap means the work is over even when the process disagrees.
+func TestAppleBuilder_GivesUpWhenTheCLIGoesSilent(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	// Emits one line, then sleeps far past the idle window without exiting.
+	script := "#!/bin/sh\necho '#1 building'\nsleep 30\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default(), idleTimeout: 300 * time.Millisecond}
+
+	start := time.Now()
+	err := b.Build(context.Background(), dir, "crewship-cache:quiet", nil)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("a build that stops emitting must not hang the caller")
+	}
+	if elapsed > 10*time.Second {
+		t.Errorf("gave up after %s — the idle watchdog did not fire", elapsed)
+	}
+}
+
+// The silent build above may well have produced its image before going quiet —
+// that is exactly what happened in the real run. Killing it must therefore not
+// be reported as a failure when the tag is actually there.
+func TestAppleBuilder_ImageExistsAsksTheCLIForTheTag(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	rec := filepath.Join(dir, "argv")
+	script := "#!/bin/sh\necho \"$@\" > " + rec + "\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default()}
+
+	ok, err := b.ImageExists(context.Background(), "crewship-cache:abc")
+	if err != nil {
+		t.Fatalf("ImageExists: %v", err)
+	}
+	if !ok {
+		t.Error("a zero exit from `image inspect` means the tag is present")
+	}
+	argv := appleArgv(t, rec)
+	if !strings.Contains(argv, "image inspect crewship-cache:abc") {
+		t.Errorf("argv %q should inspect the tag", argv)
+	}
+}
+
+func TestAppleBuilder_ImageExistsReportsAbsence(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default()}
+
+	ok, err := b.ImageExists(context.Background(), "crewship-cache:missing")
+	if err != nil {
+		t.Fatalf("ImageExists must not error on a plain absence: %v", err)
+	}
+	if ok {
+		t.Error("a non-zero exit means the tag is not there")
+	}
+}
+
+// A build that goes quiet without ever announcing an export really did fail,
+// so the short settle delay must not be mistaken for success.
+func TestAppleBuilder_KeepsWaitingWhileTheImageIsAbsent(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"image\" ]; then exit 1; fi\n" +
+		"echo '#1 building'\n" +
+		"sleep 30\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := &AppleContainerBuilder{
+		bin:         bin,
+		logger:      slog.Default(),
+		idleTimeout: 600 * time.Millisecond,
+	}
+
+	err := b.Build(context.Background(), dir, "crewship-cache:absent", nil)
+	if err == nil {
+		t.Fatal("no image and no output must remain a failure")
+	}
+}
+
+func TestBuilderShare_LeavesHeadroomForTheHost(t *testing.T) {
+	cpus, memMB := builderShare(10, 16*1024)
+	if cpus >= 10 || cpus < 2 {
+		t.Errorf("cpus = %d, want a share below the host's 10 and at least 2", cpus)
+	}
+	if memMB >= 16*1024 || memMB < 2048 {
+		t.Errorf("memoryMB = %d, want a share below the host's 16384 and at least 2048", memMB)
+	}
+}
+
+// A small machine must not end up worse off than Apple's own defaults.
+func TestBuilderShare_NeverGoesBelowTheDefaults(t *testing.T) {
+	cpus, memMB := builderShare(2, 4*1024)
+	if cpus < 2 {
+		t.Errorf("cpus = %d, must not drop under the CLI default of 2", cpus)
+	}
+	if memMB < 2048 {
+		t.Errorf("memoryMB = %d, must not drop under the CLI default of 2048", memMB)
+	}
+}
+
+// Apple's builder defaults to 2 CPUs and 2048 MB regardless of the host. On a
+// 10-core / 16 GB Mac that is what a devcontainer feature's `apt-get install`
+// and `npm ci` are squeezed through, and those installs are the bulk of a cold
+// provisioning run.
+//
+// The sizing belongs to the BUILDER, not to the build: `container build`
+// accepts --cpus/--memory and then ignores them when the builder container is
+// already up. Verified on 1.2.0 — `container build --cpus 6` against a running
+// 2-CPU builder still reported nproc=3 and `builder status` still read CPUS 2;
+// recreating the builder at that size reported nproc=7. So this asserts on the
+// builder lifecycle, which is where the setting actually lands.
+func TestAppleBuilder_ResizesAnUndersizedBuilder(t *testing.T) {
+	bin, rec := fakeContainerCLI(t, "2", "2048")
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default(), cpus: 6, memoryMB: 8192}
+
+	b.ensureBuilderSized(context.Background())
+
+	argv := appleArgv(t, rec)
+	if !strings.Contains(argv, "builder delete --force") {
+		t.Errorf("an undersized builder must be replaced, argv:\n%s", argv)
+	}
+	if !strings.Contains(argv, "builder start --cpus 6 --memory 8192m") {
+		t.Errorf("the replacement must carry the sizing, argv:\n%s", argv)
+	}
+}
+
+// Recreating the builder throws away its layer cache, so a builder that is
+// already big enough must be left alone.
+func TestAppleBuilder_LeavesASufficientBuilderAlone(t *testing.T) {
+	bin, rec := fakeContainerCLI(t, "8", "16384")
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default(), cpus: 6, memoryMB: 8192}
+
+	b.ensureBuilderSized(context.Background())
+
+	if strings.Contains(appleArgv(t, rec), "builder delete") {
+		t.Error("a big-enough builder must keep its cache")
+	}
+}
+
+// fakeContainerCLI stands in for `container`, reporting a builder of the given
+// size and recording every argv it is called with.
+func fakeContainerCLI(t *testing.T, cpus, memMB string) (bin, recordPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	recordPath = filepath.Join(dir, "argv")
+	bin = filepath.Join(dir, "container")
+	script := `#!/bin/sh
+echo "$@" >> ` + recordPath + `
+if [ "$1" = "builder" ] && [ "$2" = "status" ]; then
+  echo "ID        IMAGE  STATE    IP  CPUS  MEMORY"
+  echo "buildkit  img    running  ip  ` + cpus + `     ` + memMB + ` MB"
+fi
+exit 0
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, recordPath
+}
+
+// TestAppleBuilder_StopsShortlyAfterTheExportCompletes removed: it pinned an
+// early kill on the export marker, and that behaviour destroys the build. The
+// CLI registers the image into the runtime's store AFTER the marker, so killing
+// there leaves no image at all — see
+// TestAppleBuilder_DoesNotKillAfterTheExportMarker, written against the live
+// failure it caused (#1779).
+
+// Without an export the build never produced anything, so silence is a failure
+// and only the long fallback may end it.
+func TestAppleBuilder_SilenceBeforeAnyExportIsStillAFailure(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	script := "#!/bin/sh\necho '#3 [1/5] RUN apt-get install'\nsleep 30\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := &AppleContainerBuilder{
+		bin:         bin,
+		logger:      slog.Default(),
+		idleTimeout: 600 * time.Millisecond,
+	}
+
+	if err := b.Build(context.Background(), dir, "crewship-cache:noexport", nil); err == nil {
+		t.Fatal("silence with no export must remain a failure")
+	}
+}
+
+// The export marker is NOT the end of the build.
+//
+// This builder used to kill the CLI as soon as BuildKit printed its export
+// DONE, on the theory that anything after was the CLI failing to exit. It is
+// not: the CLI then registers the image into the runtime's store, and killing
+// it there aborts that write. Measured live — a build killed 16.8s after the
+// export marker produced NO image at all, and the provisioning that followed
+// failed with "never appeared in the image store" while the store stayed empty
+// for minutes afterwards.
+//
+// A build that is still working must be left alone. Only the long idle timeout
+// may end one, because only prolonged silence distinguishes a wedge from work
+// (#1779).
+func TestAppleBuilder_DoesNotKillAfterTheExportMarker(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	done := filepath.Join(dir, "finished")
+	// Announces the export, stays quiet while it "registers the image", then
+	// exits cleanly — the shape of every healthy build.
+	script := "#!/bin/sh\n" +
+		"echo '#18 exporting to oci image format'\n" +
+		"echo '#18 DONE 61.3s'\n" +
+		"sleep 1\n" +
+		"touch " + done + "\n" +
+		"exit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := &AppleContainerBuilder{
+		bin:         bin,
+		logger:      slog.Default(),
+		idleTimeout: time.Hour, // must not be what ends this
+	}
+
+	if err := b.Build(context.Background(), dir, "crewship-cache:exporting", nil); err != nil {
+		t.Fatalf("a build still doing its work must not be failed: %v", err)
+	}
+	if _, err := os.Stat(done); err != nil {
+		t.Error("the CLI was killed before it finished — the image write is what happens here")
+	}
+}
+
+// builderCPUMem parses `container builder status`, and this branch has already
+// paid three times for a decoder written against an imagined shape. This is the
+// last hand-rolled parse still shipping without a captured sample, and its
+// failure mode is expensive: a mis-parse reads as (0,0), ensureBuilderSized
+// concludes the builder is undersized, and deletes it — throwing away the
+// BuildKit layer cache on every server start and turning every provision cold.
+//
+// The fixture below is verbatim `container builder status` from 1.2.0.
+func TestBuilderCPUMem_ParsesTheRealStatusOutput(t *testing.T) {
+	// Read, not skipped-if-missing: the fixture is checked in, so its absence
+	// is this test losing its subject — and a skip reports the same "ok" as a
+	// pass, which is exactly the invisible coverage loss scripts/skip-budget.sh
+	// exists to catch.
+	raw, err := os.ReadFile("testdata/builder_status.txt")
+	if err != nil {
+		t.Fatalf("captured builder status missing: %v", err)
+	}
+	cpus, memMB := parseBuilderCPUMem(string(raw))
+	if cpus <= 0 || memMB <= 0 {
+		t.Fatalf("real output parsed as (%d, %d) — a zero here deletes the builder and its cache:\n%s", cpus, memMB, raw)
+	}
+}
+
+// An unrecognised rendering must NOT read as "undersized". Reporting zero is
+// how a future CLI release would silently destroy the layer cache.
+func TestBuilderCPUMem_UnknownShapeDoesNotReadAsUndersized(t *testing.T) {
+	for _, out := range []string{
+		"",
+		"ID  IMAGE  STATE\nbuildkit  img  running\n",
+		"ID IMAGE STATE CPUS MEMORY\nbuildkit img running 2 2GiB\n",
+	} {
+		cpus, memMB := parseBuilderCPUMem(out)
+		if cpus == 0 && memMB == 0 {
+			continue // "cannot tell" is fine; the caller must treat it as such
+		}
+		if cpus < 0 || memMB < 0 {
+			t.Errorf("negative sizing from %q: (%d, %d)", out, cpus, memMB)
+		}
+	}
+}
+
+// TestAppleBuilder_CancellationReleasesTheCallerPromptly covers what
+// exec.CommandContext does not do: it signals the `container` process and
+// nothing below it. A descendant that inherited the write end of stdout keeps
+// the pipe open, so the scanner reading it goes on blocking after the caller
+// has cancelled — and the build is only released when the idle watchdog fires,
+// which in production is five minutes later.
+//
+// The fake mirrors that shape: a child holds the pipe and outlives the parent
+// it was started from.
+func TestAppleBuilder_CancellationReleasesTheCallerPromptly(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	// The child inherits stdout and sleeps well past the idle window; the
+	// parent exits immediately, leaving the pipe held by the child alone.
+	script := "#!/bin/sh\necho '#1 building'\n( sleep 60 ) &\nwait\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An idle timeout long enough that only cancellation can end this test in
+	// time — otherwise the watchdog would rescue it and prove nothing.
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default(), idleTimeout: 60 * time.Second}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- b.Build(ctx, dir, "crewship-cache:cancelled", nil) }()
+
+	time.Sleep(300 * time.Millisecond) // let the child take the pipe
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a cancelled build must not report success")
+		}
+		if elapsed := time.Since(start); elapsed > 15*time.Second {
+			t.Errorf("returned after %s — cancellation did not reach the process group", elapsed)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Build never returned after cancellation: a descendant still holds stdout")
+	}
+}
