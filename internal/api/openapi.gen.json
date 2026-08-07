@@ -10878,6 +10878,9 @@
       },
       "WorkflowPipelineSaveRequest": {
         "properties": {
+          "author_agent_id": {
+            "type": "string"
+          },
           "author_crew_id": {
             "type": "string"
           },
@@ -39505,7 +39508,7 @@
                               },
                               "payload_equals": {
                                 "additionalProperties": true,
-                                "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type.",
+                                "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. A key the emitter never writes is accepted and matches nothing — mission.status_change carries only action and details.",
                                 "type": "object"
                               },
                               "severities": {
@@ -39733,7 +39736,7 @@
                       },
                       "payload_equals": {
                         "additionalProperties": true,
-                        "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type.",
+                        "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. A key the emitter never writes is accepted and matches nothing — mission.status_change carries only action and details.",
                         "type": "object"
                       },
                       "severities": {
@@ -39825,7 +39828,7 @@
                         },
                         "payload_equals": {
                           "additionalProperties": true,
-                          "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type.",
+                          "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. A key the emitter never writes is accepted and matches nothing — mission.status_change carries only action and details.",
                           "type": "object"
                         },
                         "severities": {
@@ -39925,7 +39928,7 @@
                         },
                         "payload_equals": {
                           "additionalProperties": true,
-                          "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type.",
+                          "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. A key the emitter never writes is accepted and matches nothing — mission.status_change carries only action and details.",
                           "type": "object"
                         },
                         "severities": {
@@ -40133,7 +40136,7 @@
                       },
                       "payload_equals": {
                         "additionalProperties": true,
-                        "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type.",
+                        "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. A key the emitter never writes is accepted and matches nothing — mission.status_change carries only action and details.",
                         "type": "object"
                       },
                       "severities": {
@@ -40599,7 +40602,7 @@
                       },
                       "payload_equals": {
                         "additionalProperties": true,
-                        "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type.",
+                        "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. A key the emitter never writes is accepted and matches nothing — mission.status_change carries only action and details.",
                         "type": "object"
                       },
                       "severities": {
@@ -40691,7 +40694,7 @@
                         },
                         "payload_equals": {
                           "additionalProperties": true,
-                          "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type.",
+                          "description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. A key the emitter never writes is accepted and matches nothing — mission.status_change carries only action and details.",
                           "type": "object"
                         },
                         "severities": {
