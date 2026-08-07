@@ -57,9 +57,9 @@ Tier C (#1823) is the one that covers runs **nobody started over a WebSocket**:
 it saves a one-step routine, invokes it, and watches the step's chat with
 `crewship chat stream`. It is the regression signal for every non-socket
 dispatch path — scheduler, webhook, routine step, agent-start IPC — because all
-of them publish through the same chokepoint (`orchestrator.RunAgent`). Before
-#1823 it could not pass: every attach answered `no_active_run` for a run that
-was executing.
+of them publish through the same chokepoint (`orchestrator.RunAgent`). It could
+not pass before #1823: every attach answered `no_active_run` for a run that was
+executing.
 
 **PR subset:** `test-keeper.sh`, `test-keeper-config.sh`,
 `test-keeper-aux.sh`, `test-inbox.sh`, and `test-orphan-token-reap.sh`.

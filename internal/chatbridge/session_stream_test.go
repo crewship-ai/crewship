@@ -3,6 +3,7 @@ package chatbridge
 import (
 	"context"
 	"log/slog"
+	"os"
 	"sync"
 	"testing"
 
@@ -62,7 +63,10 @@ func TestHandleChatMessage_DoesNotOpenASecondSessionRecording(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	logger := slog.Default()
+	// Warn-level handler rather than slog.Default(): a run that reaches
+	// RunAgent logs its way through container setup, and the default logger is
+	// process-global state a test should not be reconfiguring.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	ctr := &scriptedContainer{agentOutput: "{}\n"}
 	orch := orchestrator.New(ctr, &memState{data: make(map[string]map[string][]byte)}, logger)
 	pub := &countingPublisher{}

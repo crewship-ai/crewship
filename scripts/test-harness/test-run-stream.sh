@@ -217,6 +217,48 @@ else
     bash -c "$CREWSHIP --server '$SERVER' chat stream '$CHAT_ID' --last-seq 1 --idle 10 --quiet >/dev/null 2>&1"
 fi
 
+# ── Shared between Tier B and Tier C ───────────────────────────────────────
+
+# await_new_chat <agent-slug> <before-ids> <pid> <timeout-secs>
+#
+# Echo the id of the first chat that appears for <agent-slug> which was not in
+# <before-ids>, or nothing if none does. Both tiers need it: nothing that starts
+# a run hands back the chat id, so the only way to attach to a run somebody else
+# started is to watch the agent's chat list. Gives up when the launching process
+# is gone — a run that died before creating a chat never got off the ground.
+await_new_chat() {
+  local agent="$1" before="$2" pid="$3" budget="$4"
+  local after found waited=0
+  while (( waited < budget )); do
+    after="$(cs chat list "$agent" --format json 2>/dev/null | jq -r '.[]?.id' 2>/dev/null | sort)"
+    found="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -1)"
+    if [[ -n "$found" ]]; then
+      printf '%s' "$found"
+      return 0
+    fi
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 2; waited=$((waited+2))
+  done
+}
+
+# assert_increasing_seq <label> <ndjson>
+#
+# Sequence numbers must be strictly increasing across one stream's frames — that
+# is the entire basis of `--last-seq` resume, and the property a second,
+# divergent implementation of the recorder would silently break. Asserted on
+# both tiers because they exercise two different producers of those numbers.
+assert_increasing_seq() {
+  local label="$1" out="$2" seqs
+  seqs="$(printf '%s\n' "$out" | jq -r 'select(.seq != null) | .seq' 2>/dev/null)"
+  if [[ -z "$seqs" ]]; then
+    _fail "$label" "no frame carried a sequence number"
+  elif [[ "$seqs" == "$(printf '%s' "$seqs" | sort -n -u)" ]]; then
+    _pass "$label"
+  else
+    _fail "$label" "seqs: $(printf '%s' "$seqs" | tr '\n' ' ')"
+  fi
+}
+
 # ── Tier B: a live run ─────────────────────────────────────────────────────
 
 RUN_AGENT="$(printf '%s\n' "$AGENT_SLUGS" | head -1)"
@@ -242,19 +284,12 @@ cs run "$RUN_AGENT" "Reply with the single word ACKNOWLEDGED and nothing else." 
 RUN_PID=$!
 
 # Poll for the chat the run created, then attach to it while it is still live.
+# Without jq there is no way to read an id out of the list, so the tier has
+# nothing to attach to and falls through to its SKIP below.
 NEW_CHAT=""
-waited=0
-while (( waited < RUN_ATTACH_TIMEOUT )); do
-  if have jq; then
-    AFTER_IDS="$(cs chat list "$RUN_AGENT" --format json 2>/dev/null | jq -r '.[]?.id' 2>/dev/null | sort)"
-    NEW_CHAT="$(comm -13 <(printf '%s\n' "$BEFORE_IDS") <(printf '%s\n' "$AFTER_IDS") | head -1)"
-  fi
-  [[ -n "$NEW_CHAT" ]] && break
-  # The run process dying before a chat appeared means it never got off the
-  # ground — almost always a missing provider credential.
-  kill -0 "$RUN_PID" 2>/dev/null || break
-  sleep 2; waited=$((waited+2))
-done
+if have jq; then
+  NEW_CHAT="$(await_new_chat "$RUN_AGENT" "$BEFORE_IDS" "$RUN_PID" "$RUN_ATTACH_TIMEOUT")"
+fi
 
 if [[ -z "$NEW_CHAT" ]]; then
   wait "$RUN_PID" 2>/dev/null
@@ -286,16 +321,7 @@ else
   if have jq; then
     REPLY="$(printf '%s\n' "$STREAM_OUT" | jq -r 'select(.type=="text") | .content' 2>/dev/null | tr -d '\n')"
     assert_nonempty "live stream delivered the agent's text" "$REPLY"
-    # Sequence numbers must be strictly increasing — that is what makes the
-    # resume watermark meaningful.
-    SEQS="$(printf '%s\n' "$STREAM_OUT" | jq -r 'select(.seq != null) | .seq' 2>/dev/null)"
-    if [[ -z "$SEQS" ]]; then
-      _fail "run frames carry seq" "no frame carried a sequence number"
-    elif [[ "$SEQS" == "$(printf '%s' "$SEQS" | sort -n -u)" ]]; then
-      _pass "run frames carry strictly increasing seq"
-    else
-      _fail "run frames carry strictly increasing seq" "seqs: $(printf '%s' "$SEQS" | tr '\n' ' ')"
-    fi
+    assert_increasing_seq "run frames carry strictly increasing seq" "$STREAM_OUT"
   fi
 fi
 }
@@ -374,15 +400,7 @@ R_PID=$!
 
 # The step creates its chat row BEFORE it starts the agent, so the id is
 # discoverable while the run is still in front of us.
-R_CHAT=""
-waited=0
-while (( waited < ROUTINE_STREAM_TIMEOUT )); do
-  R_AFTER="$(cs chat list "$RUN_AGENT" --format json 2>/dev/null | jq -r '.[]?.id' 2>/dev/null | sort)"
-  R_CHAT="$(comm -13 <(printf '%s\n' "$R_BEFORE") <(printf '%s\n' "$R_AFTER") | head -1)"
-  [[ -n "$R_CHAT" ]] && break
-  kill -0 "$R_PID" 2>/dev/null || break
-  sleep 2; waited=$((waited+2))
-done
+R_CHAT="$(await_new_chat "$RUN_AGENT" "$R_BEFORE" "$R_PID" "$ROUTINE_STREAM_TIMEOUT")"
 
 if [[ -z "$R_CHAT" ]]; then
   wait "$R_PID" 2>/dev/null
@@ -455,17 +473,9 @@ else
   assert_eq "routine stream exits 0" "0" "$R_RC"
 fi
 
-# Frames must be sequenced the same way a chat-initiated run's are — that is
-# what makes `--last-seq` resumable, and it is the property a second
-# implementation of the recorder would have quietly broken.
-R_SEQS="$(printf '%s\n' "$R_OUT" | jq -r 'select(.seq != null) | .seq' 2>/dev/null)"
-if [[ -z "$R_SEQS" ]]; then
-  _fail "routine run frames carry seq" "no frame carried a sequence number"
-elif [[ "$R_SEQS" == "$(printf '%s' "$R_SEQS" | sort -n -u)" ]]; then
-  _pass "routine run frames carry strictly increasing seq"
-else
-  _fail "routine run frames carry strictly increasing seq" "seqs: $(printf '%s' "$R_SEQS" | tr '\n' ' ')"
-fi
+# Sequenced the same way a chat-initiated run's frames are — same assertion,
+# different producer, which is the point of running it on both tiers.
+assert_increasing_seq "routine run frames carry strictly increasing seq" "$R_OUT"
 
 # The agent's own words. A run that failed (no credential, container refused)
 # still produces run_begin + error + done — real frames, and enough to prove the
