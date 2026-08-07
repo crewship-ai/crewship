@@ -691,3 +691,56 @@ func TestWalk_RejectsEmptyWorkspace(t *testing.T) {
 		t.Fatal("a walk with no workspace must fail closed, not scan every tenant")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The automation edge
+// ---------------------------------------------------------------------------
+
+// A run an automation fired must name the rule that fired it.
+//
+// expandRun dereferences triggered_by_id for triggered_via 'issue' and
+// 'call_pipeline' and for nothing else, so a run stamped 'automation' — the
+// stamp the dispatcher now sets, and the one `routine records` prints — has no
+// parent edge at all. The graph presents it as a chain root: a run that
+// started for no reason anybody can see.
+//
+// resolveAnchor carries the same gap from the other direction, with a comment
+// saying "there is no automations table on this branch". There is one, since
+// migration 20260807160000; this package was simply never told.
+//
+// Observed on a live instance on 2026-08-07: `crewship chain <run-id>` on a
+// run whose triggered_via was 'automation' and whose triggered_by_id named a
+// real rule printed two nodes — the run and its routine — and one edge. The
+// rule and the issue whose status change caused it were both absent, and
+// `crewship chain <automation-id>` 404s.
+//
+// The assertion is on the automation's Ref rather than on a NodeKind constant
+// so it does not prejudge what the kind is called.
+func TestWalk_RunTriggeredByAutomationNamesTheRule(t *testing.T) {
+	r := newRig(t, "ws-auto")
+	pid := r.seedRoutine(t, "pl-1", r.ws, "triage")
+	r.exec(t, `
+		INSERT INTO automations (id, workspace_id, name, event_type, action_kind,
+		                         action_config_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'routine', '{"routine_slug":"triage"}', ?, ?)`,
+		"aut_1", r.ws, "triage on close", "mission.status_change",
+		time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
+	runID := r.seedRun(t, "run-1", r.ws, pid, "triage", "automation", "aut_1")
+
+	g, err := Walk(context.Background(), r.db, r.ws, runID, Options{})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	for _, n := range g.Nodes {
+		if n.Ref == "aut_1" {
+			return
+		}
+	}
+	var got []string
+	for _, n := range g.Nodes {
+		got = append(got, string(n.Kind)+":"+n.Ref)
+	}
+	t.Fatalf("no node for automation aut_1; got %v — a run stamped triggered_via=automation "+
+		"is rendered as a chain root, so the one surface that answers \"what caused this\" "+
+		"cannot see the composition edge", got)
+}
