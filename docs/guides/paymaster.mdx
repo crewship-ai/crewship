@@ -4,6 +4,7 @@ description: "Cost ledger and hierarchical budget enforcement for every LLM call
 icon: "credit-card"
 ---
 
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 # Paymaster
 
 Paymaster owns cost accounting and budget enforcement. It is the read/write side of the `cost_ledger` and `budget_limits` tables (migration 52, extended by migration 62) and it ships as middleware on the [LLM call stack](/guides/llm-middleware). Every priced LLM round-trip produces exactly one `cost_ledger` row plus a `llm.call` journal entry; metered rows additionally emit `cost.incurred`, and either side can emit `budget.warning` / `budget.exceeded` when limits are hit.
@@ -204,7 +205,7 @@ CREWSHIP_AUX_<SLOT>_MODEL
 CREWSHIP_AUX_<SLOT>_TIMEOUT     # Go duration, e.g. 5s; bad value is ignored, deadline preserved
 ```
 
-Example: `CREWSHIP_AUX_CURATOR_MODEL=llama3.1 CREWSHIP_AUX_CURATOR_PROVIDER=ollama`.
+Example: `CREWSHIP_AUX_CURATOR_MODEL=llama3.1 CREWSHIP_AUX_CURATOR_PROVIDER=ollama`. {/* docs-inventory: ignore — <SLOT> is substituted at runtime (internal/keepercfg/aux.go), so the composed name is never a literal in Go source */}
 
 Delegated **worker** sub-agents (a lead handing a bounded sub-task to a crew member) rarely need the top model tier. Set `CREWSHIP_SUBAGENT_MODEL` to route them to a cheaper model; the lead planner keeps its own configured model. Unset = each agent uses its own model (no downgrade), so this is a pure opt-in.
 

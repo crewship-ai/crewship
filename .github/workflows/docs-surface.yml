@@ -1,0 +1,52 @@
+name: Documentation surface
+
+on:
+  pull_request:
+    paths: ['docs/**', 'scripts/docs-surface-check/**', 'scripts/docs-inventory/**', '.github/workflows/docs-surface.yml']
+  push:
+    branches: [main]
+    paths: ['docs/**', 'scripts/docs-surface-check/**', 'scripts/docs-inventory/**', '.github/workflows/docs-surface.yml']
+  # The deployed-index comparison lives on a schedule, not on the PR. Mintlify
+  # publishes after a merge, so on a PR that adds a page the local navigation
+  # leads the served llms.txt by construction — gating on it would fail the
+  # exact change it exists to bless. Daily, "the deployed index is behind the
+  # repo" is real drift instead.
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  surface:
+    runs-on: ubuntu-latest
+    steps:
+      # persist-credentials: false — this job runs code from the pull request
+      # (`go run ./scripts/...`), and checkout otherwise leaves the workflow
+      # token in the local git config where that code can read it. `contents:
+      # read` bounds what the token can do, not who can exfiltrate it. Every
+      # other workflow in this repo checks out the same way.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Hermetic: contextual config, navigation integrity, description quality,
+      # and every internal link written inside a page body — a target that
+      # docs.json never declares and Mintlify never fails on (#1774).
+      # No network, so it is safe to require on every pull request.
+      - name: Verify the contextual surface, navigation and inline links
+        run: go run ./scripts/docs-surface-check
+
+      # Only on the schedule / manual runs — never on a PR. See checkServed's
+      # doc comment in scripts/docs-surface-check/main.go.
+      - name: Compare the deployed LLM index
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: go run ./scripts/docs-surface-check -url https://docs.crewship.ai
+
+      # The strict reference inventory is NOT repeated here: ci.yml's Go Lint
+      # job already runs it on every pull request with no path filter, which is
+      # strictly stronger than this workflow's docs-only trigger. Two copies
+      # would mean two places to keep in step for no added coverage.

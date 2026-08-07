@@ -100,15 +100,30 @@ curl -X DELETE \
 | Layer | Scope | Behaviour |
 |---|---|---|
 | `peer_cards` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
-| `peer_cards` (disk files) | corresponding `peer-card-{user_slug}.md` files in each agent's `.memory/` | Best-effort — `outputBasePath` must be configured + filesystem writable. Failures logged but do not block DB delete. |
+| `peer_cards` (disk files) | `peers/{user_slug}.md` **and its `.lock` sentinel** in each agent's `.memory/` | Best-effort — `outputBasePath` must be configured + filesystem writable. Failures logged but do not block DB delete. |
 | `memory_versions` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
 | `memory_versions` (blob store) | content-addressed blobs deduplicated across the workspace | **NOT** auto-deleted in v107 — rows go but blobs left for cross-tenant dedup safety; tracked as PR-F16 for a separate orphan-GC sweep |
 | `inbox_items` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
 | `user_models` (DB) | row WHERE `user_id = $USER_ID` in this workspace | Hard delete |
-| `user_models` (disk file) | `/crew/shared/.memory/users/{user_slug}.md` in the subject's most-active crew | Best-effort — `outputBasePath` must be configured. Failures logged but do not block the DB delete. |
+| `user_models` (disk file) | `/crew/shared/.memory/users/{user_slug}.md` **and its `.lock` sentinel** in the subject's most-active crew | Best-effort — `outputBasePath` must be configured. Failures logged but do not block the DB delete. |
 | `keeper_requests` | All rows | **Excluded** — these record sidecar decisions and don't carry user-attributable content beyond the agent_id |
 | `lessons.md` content scan | Per-crew lessons files | **Manual** — the handler logs a warning naming the subject when it finds the user_slug in any lessons.md; operator decides whether to edit the file by hand |
 | `chats` | All rows owned by subject | **NOT** auto-deleted — operator runs a separate query if the data subject was also a Crewship user; see [Chat sessions retention](/guides/chat-sessions#retention) |
+
+<Note>
+**No per-subject marker survives the erasure.** Each peer card and operator
+model is written under a `<user_slug>.md.lock` sentinel, and that sentinel is
+now removed with the file it guards — on the Art. 17 cascade, on
+`crewship privacy user-model delete`, and on the opt-out purge alike. It used
+to stay: a zero-byte file named after the subject, left in a directory whose
+other artefacts were all gone. `user_slug` is `sha256(user_id ‖ 0x00 ‖
+workspace_id)[:16]` and carries no personal data, but it is recomputable by
+anyone holding the workspace id and a list of users, so a listing still
+answered *"did this workspace ever hold a record about this person?"* after
+the record itself was erased. A purge for a subject who never had a card or a
+model now writes nothing at all, rather than creating the sentinel it was
+called to remove.
+</Note>
 
 The response confirms what landed:
 

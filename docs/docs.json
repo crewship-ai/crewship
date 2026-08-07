@@ -12,6 +12,26 @@
     "dark": "/logo/dark.svg"
   },
   "favicon": "/favicon.svg",
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "assistant",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "grok",
+      "aistudio",
+      "devin",
+      "windsurf",
+      "mcp",
+      "add-mcp",
+      "cursor",
+      "vscode",
+      "devin-mcp"
+    ],
+    "display": "header"
+  },
   "icons": {
     "library": "lucide"
   },
@@ -23,7 +43,7 @@
           {
             "group": "Get Started",
             "icon": "rocket",
-            "pages": ["index", "quickstart", "philosophy", "production-checklist", "architecture"]
+            "pages": ["index", "quickstart", "guides/task-index", "guides/first-projects", "concepts", "guides/use-cases", "guides/writing-good-tasks", "guides/when-not-to-use", "philosophy", "production-checklist", "architecture"]
           },
           {
             "group": "Guides",
@@ -320,7 +340,6 @@
             "expanded": false,
             "pages": [
               "cli/inbox",
-              "cli/notification",
               "cli/notify",
               "cli/notifychannel",
               "cli/digest"
@@ -454,7 +473,6 @@
               "api-reference/conversations",
               "api-reference/preferences",
               "api-reference/privacy",
-              "api-reference/notifications",
               "api-reference/notification-channels",
               "api-reference/inbox",
               "api-reference/webhooks",

@@ -5,13 +5,14 @@
 # This is NOT a unit-test layer — it drives the *real* `crewship` CLI against a
 # running dev server (per CLAUDE.md: all ops go through the local CLI, never a
 # DB shell or hand-rolled curl). It validates RUNTIME behaviour that can't be
-# unit-tested: agent memory recall, crew-shared memory, notifications landing
-# after a routine run, recipe determinism, agent credential self-service.
+# unit-tested: agent memory recall, crew-shared memory, a routine run's outcome
+# being observable afterwards, recipe determinism, agent credential self-service.
 #
 # Source this from each test-*.sh. It provides:
 #   - cs()              thin `crewship --server <SERVER>` wrapper
 #   - ask_agent()       one-shot prompt → captured plain-text reply (fresh session)
 #   - assert_*          assertion helpers that record pass/fail and KEEP GOING
+#   - assert_ok()       run a command; record pass/fail on its exit status
 #   - nonce()           a random token so recall can't be satisfied by chance
 #   - finish()          print the summary and set the process exit code
 #
@@ -150,6 +151,26 @@ assert_not_contains() {
 assert_eq() {
   local name="$1" exp="$2" act="$3"
   if [[ "$exp" == "$act" ]]; then _pass "$name"; else _fail "$name" "expected «${exp}», got «${act}»"; fi
+}
+
+# assert_ok <name> <cmd...> — run the command, record pass/fail on its EXIT
+# STATUS, and keep going. Output is captured and only shown on failure, so a
+# passing run stays readable.
+#
+# The gap this fills: a suite that runs `cs foo >/dev/null` without checking
+# `$?` discards the result entirely, and because lib.sh deliberately has no
+# `set -e`, a documented command can fail while later assertions still pass off
+# pre-existing state (#1771 review).
+assert_ok() {
+  local name="$1"; shift
+  local out status
+  out="$("$@" 2>&1)"; status=$?
+  if (( status == 0 )); then
+    _pass "$name"
+  else
+    _fail "$name" "exit $status: $(printf '%s' "$out" | tail -c 200 | tr '\n' ' ')"
+  fi
+  return 0
 }
 
 # assert_nonempty <name> <value>

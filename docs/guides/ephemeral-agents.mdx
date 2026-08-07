@@ -4,6 +4,7 @@ description: "Operator playbook for the short-lived contractor-agent lifecycle: 
 icon: "hourglass"
 ---
 
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 # Ephemeral agents — hire, ghost, rehire
 
 A Crewship crew can have **permanent** agents (the default — once created, they stay until soft-deleted) and **ephemeral** agents (hired with a TTL, ghost when the TTL elapses, rehirable if needed). The ephemeral lifecycle is for short-lived contractor work where you want a real audit trail of WHEN the agent was active without paying for it to sit in your roster forever.

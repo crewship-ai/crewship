@@ -65,9 +65,12 @@ func TestCrewDeletePromptNamesTheSidecarVolumesItDestroys(t *testing.T) {
 	t.Logf("the operator sees:\n%s", out)
 
 	for _, want := range []string{
-		"postgres",                  // the service, by the name the operator declared
-		"svc-data-crew-vol-pg-data", // the volume, by the name docker knows it as
-		"redis",                     // every sidecar, not just the one with a volume
+		"postgres", // the service, by the name the operator declared
+		// The volume, by the name docker knows it as — which since #1732
+		// carries the crew id, so the operator is not shown a name that could
+		// belong to an identically-slugged crew in another workspace.
+		"svc-data-crew-" + covCrewIDCli4 + "-vol-pg-data",
+		"redis", // every sidecar, not just the one with a volume
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the confirmation never mentions %q — an operator answering it cannot know a "+

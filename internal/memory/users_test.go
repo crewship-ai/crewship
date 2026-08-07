@@ -1,9 +1,12 @@
 package memory
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -126,6 +129,138 @@ func TestUserModel_DeleteBySlug(t *testing.T) {
 	// Empty user_id delete is a no-op too.
 	if err := DeleteUserModel(p, "", "ws1"); err != nil {
 		t.Errorf("empty user delete should be nil; got %v", err)
+	}
+}
+
+// An erasure must leave NOTHING named after the subject (#1701).
+//
+// The model file used to go while `<slug>.md.lock` stayed, and after an
+// erasure the index row is gone too — so that zero-byte file was the only
+// remaining artefact, and a directory listing still answered "did this
+// workspace ever hold a model for this person?" for anyone who can hash a
+// candidate user id. That is the question the erasure was asked to stop
+// answering.
+func TestUserModel_DeleteLeavesNothingNamedAfterTheSubject(t *testing.T) {
+	dir := t.TempDir()
+	p := UserModelPaths{SharedDir: dir}
+	if err := WriteUserModel(p, "u1", "ws1", "- timezone: UTC+1"); err != nil {
+		t.Fatalf("WriteUserModel: %v", err)
+	}
+	slug := UserSlug("u1", "ws1")
+
+	if err := DeleteUserModel(p, "u1", "ws1"); err != nil {
+		t.Fatalf("DeleteUserModel: %v", err)
+	}
+
+	entries, err := os.ReadDir(p.UsersDir())
+	if err != nil {
+		t.Fatalf("ReadDir(users): %v", err)
+	}
+	var left []string
+	for _, e := range entries {
+		left = append(left, e.Name())
+		if strings.Contains(e.Name(), slug) {
+			t.Errorf("erasure left a per-subject artefact behind: %q", e.Name())
+		}
+	}
+	if len(left) != 0 {
+		t.Errorf("users/ not empty after erasure: %v", left)
+	}
+}
+
+// The same guarantee through the slug entry point, which is what the
+// Art. 17 admin cascade and the opt-out purge call.
+func TestUserModel_DeleteBySlugRemovesTheLockSentinel(t *testing.T) {
+	dir := t.TempDir()
+	p := UserModelPaths{SharedDir: dir}
+	if err := WriteUserModel(p, "u1", "ws1", "body"); err != nil {
+		t.Fatalf("WriteUserModel: %v", err)
+	}
+	slug := UserSlug("u1", "ws1")
+	if err := DeleteUserModelBySlug(p, slug); err != nil {
+		t.Fatalf("DeleteUserModelBySlug: %v", err)
+	}
+	if _, err := os.Stat(p.ModelPath(slug) + ".lock"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("lock sentinel survived the erasure (stat err=%v)", err)
+	}
+}
+
+// A sentinel left behind by an OLDER build is cleaned up by the next
+// erasure for that subject: the marker outlives the model file, so a
+// purge that only looks at the model file would leave every pre-fix
+// artefact in place forever.
+func TestUserModel_DeleteSweepsAStrandedLockSentinel(t *testing.T) {
+	dir := t.TempDir()
+	p := UserModelPaths{SharedDir: dir}
+	slug := UserSlug("u1", "ws1")
+	if err := os.MkdirAll(p.UsersDir(), 0o755); err != nil {
+		t.Fatalf("mkdir users: %v", err)
+	}
+	stranded := p.ModelPath(slug) + ".lock"
+	if err := os.WriteFile(stranded, nil, 0o600); err != nil {
+		t.Fatalf("seed stranded sentinel: %v", err)
+	}
+	if err := DeleteUserModelBySlug(p, slug); err != nil {
+		t.Fatalf("DeleteUserModelBySlug: %v", err)
+	}
+	if _, err := os.Stat(stranded); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("stranded sentinel survived (stat err=%v)", err)
+	}
+}
+
+// A purge for a subject who never had a model must not CREATE the marker
+// it exists to remove. The opt-out purge runs this per sweep for every
+// opted-out operator, most of whom have no model at all.
+func TestUserModel_DeleteForANeverWrittenModelCreatesNothing(t *testing.T) {
+	dir := t.TempDir()
+	p := UserModelPaths{SharedDir: dir}
+	if err := DeleteUserModel(p, "u1", "ws1"); err != nil {
+		t.Fatalf("DeleteUserModel on a missing model: %v", err)
+	}
+	if _, err := os.Stat(p.UsersDir()); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("purge created users/ where nothing was ever written (err=%v)", err)
+	}
+}
+
+// Ordering: the sentinel is unlinked inside the critical section, so a
+// writer that is already blocked on the lock stays serialised against the
+// delete. Writes are whole-content atomic renames, so the only admissible
+// outcomes are "erased" and "rewritten in full" — never a partial file.
+// Run under -race, this also covers the unlink/unlock sequence itself.
+func TestUserModel_DeleteRacingAWriterNeverTearsTheFile(t *testing.T) {
+	dir := t.TempDir()
+	p := UserModelPaths{SharedDir: dir}
+	const body = "- role: runs the platform team\n- timezone: UTC+1"
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for i := 0; i < 8; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if err := WriteUserModel(p, "u1", "ws1", body); err != nil {
+				errs <- err
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if err := DeleteUserModel(p, "u1", "ws1"); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent write/delete: %v", err)
+	}
+
+	got, err := LoadUserModel(p, "u1", "ws1")
+	if err != nil {
+		t.Fatalf("LoadUserModel: %v", err)
+	}
+	if got != "" && got != body {
+		t.Errorf("torn or partial model after the race: %q", got)
 	}
 }
 

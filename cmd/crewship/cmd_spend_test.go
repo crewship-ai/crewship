@@ -179,6 +179,43 @@ func TestAcceptance_Spend_Human(t *testing.T) {
 	}
 }
 
+// The two halves of the rollup come from different sources and measure
+// different things: the total sums `cost.incurred` journal entries, which
+// paymaster emits only for BillingMetered calls, while the routine tables sum
+// pipeline_runs.cost_usd for every run regardless of billing mode. On a
+// subscription instance a single routine can therefore exceed the stated total
+// by two orders of magnitude — observed on dev3 as total=$0.0188 above
+// classify-ticket=$2.4174 (#1786).
+//
+// That is not an arithmetic bug and must not be "fixed" by making the numbers
+// agree. It is only readable if each number says what it measures, so the
+// labels are the contract this test pins.
+func TestAcceptance_Spend_LabelsBothBases(t *testing.T) {
+	bin := buildCrewshipBinary(t)
+	srv := newSpendBackedServer(t)
+	cfgPath := writeSpendCLIConfig(t)
+
+	cmd := exec.Command(bin, "spend", "--window", "24h", "--server", srv.URL, "--no-color")
+	cmd.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfgPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\noutput: %s", err, out)
+	}
+	got := string(out)
+
+	for _, want := range []string{
+		"metered total=",
+		"billed (metered calls only)",
+		"subscription-covered work is excluded",
+		"modelled cost of every run",
+		"reconciles with the total above",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("spend output does not state the basis of its numbers: missing %q\nfull output:\n%s", want, got)
+		}
+	}
+}
+
 // TestAcceptance_Spend_BadWindow proves the binary rejects an invalid
 // window before making any HTTP call (real flag validation in RunE).
 func TestAcceptance_Spend_BadWindow(t *testing.T) {

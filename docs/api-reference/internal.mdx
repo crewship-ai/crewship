@@ -4,6 +4,7 @@ description: "Sidecar / orchestrator endpoints under /api/v1/internal/. X-Intern
 icon: "lock"
 ---
 
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 # Internal IPC
 
 Routes mounted under `/api/v1/internal/*` are not part of the public API. They are the surface used by the **sidecar** (running as UID 1002 inside every crew container) and a small set of orchestrator helpers. The sidecar holds the only internal-API credential inside a container — a **workspace-bound token** derived from `CREWSHIP_INTERNAL_TOKEN` (never the master itself); agents (UID 1001) cannot read it from disk or process memory.

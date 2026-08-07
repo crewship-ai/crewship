@@ -80,7 +80,7 @@ Examples:
 }
 
 var agentAvatarSetCmd = &cobra.Command{
-	Use:   "set <slug-or-id> -f <file.svg>",
+	Use:   "set <slug-or-id> --file <file.svg>",
 	Short: "Store a rendered avatar SVG for an agent",
 	Long: `Store an SVG as the agent's avatar. The server validates it against an
 allowlist of inert drawing elements — anything that could load or execute
@@ -90,8 +90,8 @@ Storing is write-once: an agent that already has a stored avatar returns a
 conflict. Use "agent avatar clear" first to replace one.
 
 Examples:
-  crewship agent avatar set my-agent -f avatar.svg
-  crewship agent avatar set my-agent -f -        # read from stdin`,
+  crewship agent avatar set my-agent --file avatar.svg
+  cat avatar.svg | crewship agent avatar set my-agent --file -        # read from stdin`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
@@ -165,7 +165,9 @@ Example:
 
 func init() {
 	agentAvatarShowCmd.Flags().StringP("out", "o", "", "Write the SVG to this file instead of stdout")
-	agentAvatarSetCmd.Flags().StringP("file", "f", "", "SVG file to store, or \"-\" for stdin")
+	// -f is reserved by the root --format flag. A child-level -f causes Cobra
+	// to panic while merging persistent flags, so keep this explicit.
+	agentAvatarSetCmd.Flags().String("file", "", "SVG file to store, or \"-\" for stdin")
 
 	agentAvatarCmd.AddCommand(agentAvatarShowCmd)
 	agentAvatarCmd.AddCommand(agentAvatarSetCmd)

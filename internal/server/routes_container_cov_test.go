@@ -65,11 +65,11 @@ func (c *covSidecarContainer) StopCrewRuntime(_ context.Context, containerID str
 func (c *covSidecarContainer) EnsureCrewServices(_ context.Context, _ provider.CrewConfig) (map[string]string, error) {
 	return nil, nil
 }
-func (c *covSidecarContainer) StopCrewServices(_ context.Context, crewSlug string) error {
+func (c *covSidecarContainer) StopCrewServices(_ context.Context, _ string, crewSlug string) error {
 	c.stoppedSidecar = crewSlug
 	return c.sidecarErr
 }
-func (c *covSidecarContainer) RemoveCrewServices(_ context.Context, _ string) error { return nil }
+func (c *covSidecarContainer) RemoveCrewServices(_ context.Context, _, _ string) error { return nil }
 
 // covExecRecordingContainer captures the ExecConfig so tests can assert
 // on the constructed command/workdir, and returns canned output.

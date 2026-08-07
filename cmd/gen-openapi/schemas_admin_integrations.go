@@ -102,8 +102,6 @@ func operationalDomainSchemaCatalog() map[string]map[string]DomainSchema {
 		"POST /api/v1/memory/search/hybrid":              {Request: jsonRequest(map[string]any{"query": stringSchema(), "limit": intSchema()}), Response: list(anyObject())},
 	}
 	notifications := map[string]DomainSchema{
-		"GET /api/v1/notifications":           {Response: list(anyObject())},
-		"GET /api/v1/notifications/count":     {Response: objectSchema(map[string]any{"count": intSchema()})},
 		"GET /api/v1/notification-channels":   {Response: list(anyObject())},
 		"POST /api/v1/notification-channels":  {Request: anyObject(), Response: anyObject()},
 		"GET /api/v1/notification-providers":  {Response: list(anyObject())},

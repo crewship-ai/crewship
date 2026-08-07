@@ -234,6 +234,237 @@ func TestVerify_WritesWhatWasStatedAndRefusesTheRest(t *testing.T) {
 	}
 }
 
+// #1700 — the transcript a real claude-haiku-4-5 was measured against
+// under #1698. Across 33 extractions it proposed 57 candidates, 53 were
+// stored, and all 4 refusals came from these two operator turns with the
+// same reason: evidence_quote_too_short. Every one of them was a true
+// fact the person had stated.
+//
+// Not one quote_not_in_transcript, key_not_in_profile, imperative_phrasing
+// or trend_language_not_in_evidence in 57 candidates — so this was not one
+// refusal among many, it was the ONLY refusal the gate produced, and it
+// was wrong every time it fired.
+func measuredTranscript() []Turn {
+	return []Turn{
+		{Role: "assistant", Content: "I can. What timezone are you in, and how should I reach you when it fires?"},
+		{Role: "user", BySubject: true, Content: "UTC+1. Ping me on Slack, not email — I don't read email during the day."},
+		{Role: "assistant", Content: "Slack it is. Do you want it daily or weekdays only?"},
+		{Role: "user", BySubject: true, Content: "Weekdays."},
+	}
+}
+
+// The answer to a direct question is the shape the character floor gets
+// wrong: the information density of a real answer is inversely related to
+// its length, and "UTC+1." is the most precise timezone statement a person
+// can make. What distinguishes it from the "I" the floor exists to refuse
+// is not length — it is that the person finished a sentence.
+func TestVerify_ShortAnswerToADirectQuestionIsEvidence(t *testing.T) {
+	p := ProfileStatedTechnical
+	turns := measuredTranscript()
+
+	cases := []struct {
+		name       string
+		cand       Candidate
+		wantReason string // "" — must be WRITTEN
+	}{
+		{
+			name: "the timezone answer, refused on all three measured runs",
+			cand: Candidate{
+				Key: "timezone", Value: "UTC+1",
+				Quote: "UTC+1.", Source: "stated",
+			},
+		},
+		{
+			name: "the same answer quoted without its full stop",
+			cand: Candidate{
+				Key: "timezone", Value: "UTC+1",
+				Quote: "UTC+1", Source: "stated",
+			},
+		},
+		{
+			name: "the one-word answer that is the whole turn",
+			cand: Candidate{
+				Key: "prefers", Value: "on-call notifications on weekdays only",
+				Quote: "Weekdays.", Source: "stated",
+			},
+		},
+		{
+			// Stored on all three runs already — from the SAME sentence as
+			// the timezone answer. The regression guard: the fix must not
+			// disturb what the gate gets right.
+			name: "the contact fact from the same sentence, already stored",
+			cand: Candidate{
+				Key: "contact", Value: "reach via Slack, not email",
+				Quote: "Ping me on Slack, not email", Source: "stated",
+			},
+		},
+		{
+			// The floor's real target, and it must stay refused: a span cut
+			// out of the middle of a sentence supports nothing, because the
+			// sentence continues past it.
+			name: "a fragment cut short of the sentence end",
+			cand: Candidate{
+				Key: "contact", Value: "wants to be pinged",
+				Quote: "Ping me", Source: "stated",
+			},
+			wantReason: ReasonQuoteTooShort,
+		},
+		{
+			name: "a fragment that ends a sentence but does not start one",
+			cand: Candidate{
+				Key: "prefers", Value: "works during the day",
+				Quote: "the day.", Source: "stated",
+			},
+			wantReason: ReasonQuoteTooShort,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			accepted, refused := Verify(p, turns, []Candidate{tc.cand})
+			if tc.wantReason == "" {
+				if len(accepted) != 1 {
+					t.Fatalf("a stated fact was refused: %v", refused)
+				}
+				return
+			}
+			if len(accepted) != 0 {
+				t.Fatalf("expected %q, but the fact was WRITTEN as %q: %q",
+					tc.wantReason, accepted[0].Key, accepted[0].Value)
+			}
+			if len(refused) != 1 || refused[0].Reason != tc.wantReason {
+				t.Fatalf("want %s, got %v", tc.wantReason, refused)
+			}
+		})
+	}
+}
+
+// The exemption cannot become the hole the floor was plugging. A complete
+// sentence that states nothing on its own — a bare assent — takes its
+// meaning from the AGENT's question, which is precisely the laundering
+// route memU's assistant-turn exclusion closes. Refused, with a reason
+// that says which of the two things went wrong.
+func TestVerify_ShortCompleteSentenceMustStateSomething(t *testing.T) {
+	turns := []Turn{
+		{Role: "assistant", Content: "So you want the digest daily, on Postgres, in Czech?"},
+		{Role: "user", BySubject: true, Content: "Yes."},
+		{Role: "user", BySubject: true, Content: "Ok, do it."},
+		{Role: "user", BySubject: true, Content: "Czech."},
+	}
+	for _, tc := range []struct {
+		name       string
+		cand       Candidate
+		wantReason string
+	}{
+		{
+			name: "a bare yes, whose content is the agent's question",
+			cand: Candidate{
+				Key: "tooling", Value: "Postgres",
+				Quote: "Yes.", Source: "stated",
+			},
+			wantReason: ReasonQuoteStatesNothing,
+		},
+		{
+			name: "assent plus an instruction to act, still stating nothing",
+			cand: Candidate{
+				Key: "prefers", Value: "a daily digest",
+				Quote: "Ok, do it.", Source: "stated",
+			},
+			wantReason: ReasonQuoteStatesNothing,
+		},
+		{
+			name: "the same shape of answer, but it names the thing",
+			cand: Candidate{
+				Key: "language", Value: "Czech",
+				Quote: "Czech.", Source: "stated",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			acc, ref := Verify(ProfileStatedTechnical, turns, []Candidate{tc.cand})
+			if tc.wantReason == "" {
+				if len(acc) != 1 {
+					t.Fatalf("expected the fact to be written, refused: %v", ref)
+				}
+				return
+			}
+			if len(acc) != 0 {
+				t.Fatalf("expected %q, wrote %v", tc.wantReason, acc)
+			}
+			if len(ref) != 1 || ref[0].Reason != tc.wantReason {
+				t.Fatalf("want %s, got %v", tc.wantReason, ref)
+			}
+		})
+	}
+}
+
+// The exemption is scoped to sentences the SUBJECT wrote. An agent's short
+// sentence is not readmitted through it — that would hand the assistant's
+// own words the one route the origin check exists to close.
+func TestVerify_ShortSentenceExemptionIsSubjectOnly(t *testing.T) {
+	turns := []Turn{
+		{Role: "assistant", Content: "Postgres. That is what the rest of the team uses."},
+		{Role: "user", BySubject: true, Content: "Let's talk about the deploy pipeline instead."},
+		{Role: "user", BySubject: false, Content: "Neovim."},
+	}
+	for _, tc := range []struct {
+		name  string
+		quote string
+	}{
+		{"an agent's short sentence", "Postgres."},
+		{"a third party's short sentence", "Neovim."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			acc, ref := Verify(ProfileStatedTechnical, turns, []Candidate{{
+				Key: "tooling", Value: "Postgres", Quote: tc.quote, Source: "stated",
+			}})
+			if len(acc) != 0 {
+				t.Fatalf("a span the subject never wrote was admitted: %v", acc)
+			}
+			if len(ref) != 1 || ref[0].Reason != ReasonQuoteTooShort {
+				t.Fatalf("want %s, got %v", ReasonQuoteTooShort, ref)
+			}
+		})
+	}
+}
+
+// The exemption is a profile switch, not a compiled-in relaxation: a
+// profile that turns it off gets the absolute character floor back.
+func TestVerify_ShortSentenceExemptionIsAProfileSwitch(t *testing.T) {
+	strict := ProfileStatedTechnical
+	strict.Name = "stated-technical-strict"
+	strict.AllowShortCompleteSentence = false
+
+	cand := Candidate{Key: "timezone", Value: "UTC+1", Quote: "UTC+1.", Source: "stated"}
+	if acc, _ := Verify(ProfileStatedTechnical, measuredTranscript(), []Candidate{cand}); len(acc) != 1 {
+		t.Fatalf("the shipped profile must admit the answer")
+	}
+	acc, ref := Verify(strict, measuredTranscript(), []Candidate{cand})
+	if len(acc) != 0 {
+		t.Fatalf("the switch was ignored: %v", acc)
+	}
+	if len(ref) != 1 || ref[0].Reason != ReasonQuoteTooShort {
+		t.Fatalf("want %s, got %v", ReasonQuoteTooShort, ref)
+	}
+}
+
+// The prompt is rendered FROM the profile so it cannot drift from the
+// gate. A profile that admits short complete sentences has to say so —
+// a model that does not know it pads the span with the agent's words and
+// gets refused for origin instead — and a profile that does not admit
+// them must not advertise them.
+func TestBuildSystemPrompt_TracksTheShortSentenceSwitch(t *testing.T) {
+	on := BuildSystemPrompt(ProfileStatedTechnical)
+	if !strings.Contains(on, `"UTC+1."`) {
+		t.Errorf("the prompt does not tell the model a short whole sentence is a valid span")
+	}
+	strict := ProfileStatedTechnical
+	strict.AllowShortCompleteSentence = false
+	if strings.Contains(BuildSystemPrompt(strict), `"UTC+1."`) {
+		t.Errorf("the prompt promises what a strict profile's gate refuses")
+	}
+}
+
 // Whitespace is the one thing a model reliably fails to reproduce, and
 // it cannot change which words were said — so the span match collapses
 // runs of whitespace and is byte-exact otherwise. Case is NOT folded:

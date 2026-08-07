@@ -417,8 +417,8 @@ var crewDeleteCmd = &cobra.Command{
 
 		// What actually happened to the sidecars. The prompt above named the
 		// volumes this was going to delete; if the server did not delete them —
-		// because another live crew shares the slug-keyed namespace, or the
-		// daemon refused — the operator has to hear it here rather than believe
+		// because the daemon refused, or the provider has no sidecar support —
+		// the operator has to hear it here rather than believe
 		// a promise the server could not keep.
 		var deleted struct {
 			SidecarTeardown struct {

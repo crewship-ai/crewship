@@ -15,7 +15,7 @@ icon: "play"
 | `r_…` / `run_…` | Looked up via `client.GetRun`; the run's `chat_id` is followed. |
 | `https://github.com/owner/repo/pull/<n>` | Searches the journal for the PR identifier and reuses the chat that produced it (best-effort — only works if an agent journaled the PR creation). |
 
-If the agent slug isn't part of the resolved object, the chat detail is fetched from `GET /api/v1/chats/{id}` to recover it.
+If the agent slug isn't part of the resolved object, the chat detail is fetched from `GET /api/v1/agents/{agentId}/chats/{chatId}` to recover it.
 
 ## `crewship resume [chat-id | run-id | pr-url]`
 

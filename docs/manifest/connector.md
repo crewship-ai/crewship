@@ -65,7 +65,7 @@ The mapping is **directional, but both sides are env-var names**.
 credentials:
   LINEAR_API_KEY: LINEAR_PROD_KEY
   #     ^                ^
-  #     |                └── name of a workspace credential (kind: Credential)
+  #     |                └── name of a workspace credential (managed with `crewship credential`, not a manifest kind)
   #     |                    declared elsewhere in the manifest or already
   #     |                    present in the workspace credentials table
   #     └── env var the connector's MCP/HTTP runtime reads at request time
@@ -115,9 +115,9 @@ spec:
 ```
 
 `LINEAR_PROD_KEY` here refers to a workspace credential row whose
-`name` column equals `LINEAR_PROD_KEY`. You either declare it earlier
-in the same manifest (kind: Credential) or it already exists in the
-workspace from a previous apply / UI action.
+`name` column equals `LINEAR_PROD_KEY`. Credentials are not a manifest
+kind — create it with `crewship credential create`, or rely on one that
+already exists in the workspace from a previous apply / UI action.
 
 ### Cross-kind reference — credential declared in the same bundle
 

@@ -71,7 +71,10 @@ func (h *CrewHandler) Services(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	live, err := lister.ListCrewServices(r.Context(), crewSlug)
+	// crewID comes from the workspace-scoped SELECT above, so the listing is
+	// fenced to this workspace's crew even when another workspace has a crew
+	// with the same slug (#1732).
+	live, err := lister.ListCrewServices(r.Context(), crewID, crewSlug)
 	if err != nil {
 		replyInternalError(w, h.logger, "services: list crew services", err)
 		return

@@ -180,8 +180,12 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Cascade: hard-delete orphan-prone children before soft-deleting the crew.
-	// Missions have a UNIQUE(identifier) constraint that is NOT workspace-scoped,
-	// so leaving them behind blocks future crews from reusing identifier prefixes.
+	// Missions carry a UNIQUE(workspace_id, identifier) constraint (#1733 — it
+	// used to be global, which was a cross-tenant bug), and issue_counters is
+	// keyed by crew_id, so a replacement crew in THIS workspace starts numbering
+	// at 1 again. Leaving the old crew's issues behind would make the new crew's
+	// first ENG-1 collide with a row belonging to a crew the user already
+	// deleted. Other workspaces were never affected and are not now.
 	if _, err := h.db.ExecContext(r.Context(),
 		"DELETE FROM mission_tasks WHERE mission_id IN (SELECT id FROM missions WHERE crew_id = ?)", crewID); err != nil {
 		h.logger.Warn("cascade delete mission_tasks", "crew_id", crewID, "error", err)
@@ -217,8 +221,8 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	// The teardown outcome travels with the response. The operator answered a
 	// confirmation that named the volumes this would delete; if it did not
-	// delete them — because another crew shares the slug-keyed namespace, or the
-	// daemon refused — they have to hear it from the command they ran, not from
+	// delete them — because the daemon refused, or the provider has no sidecar
+	// support — they have to hear it from the command they ran, not from
 	// a server log they will never read.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":          true,

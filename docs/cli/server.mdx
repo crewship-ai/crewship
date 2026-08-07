@@ -88,8 +88,8 @@ a different host).
 Because a directory match (layer 3) outranks the persisted `current` default
 (layer 4), `crewship server use <name>` can appear to silently "not work" when
 run inside a directory-mapped clone — the directory binding keeps winning.
-`crewship server current` surfaces this explicitly when it happens (`directory
-override for <dir> — persisted default (\`server use\`) is "<name>"`), and
+`crewship server current` surfaces this explicitly when it happens
+(`directory override for <dir> — persisted default (server use) is "<name>"`), and
 `crewship server list`'s active marker shows `*d` instead of plain `*` for a
 directory-resolved profile. If you actually want the persisted default to win
 in that directory, `crewship server remove` the directory binding (or edit
