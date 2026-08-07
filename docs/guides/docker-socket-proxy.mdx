@@ -127,6 +127,7 @@ API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
 | `ImageInspect` | `GET /images/{name}/json` | Checks presence locally, reads baked-in env |
 | `ImageList` | `GET /images/json` | Finds cached provisioning images to reuse |
 | `ImageRemove` | `DELETE /images/{name}` | Garbage-collects unreferenced `crewship-cache:*` images |
+| `ImageTag` | `POST /images/{name}/tag` | Restores the local tag after a digest-pinned pull |
 
 ### Networks and volumes — `NETWORKS: 1`, `VOLUMES: 1`
 

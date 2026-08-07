@@ -190,6 +190,11 @@ var allowList = []Endpoint{
 		Why: "garbage-collects unreferenced crewship-cache:* images",
 	},
 	{
+		Method: "ImageTag", HTTP: "POST /images/{name}/tag", ProxyVars: []string{"IMAGES", proxyVarPOST},
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "restores the local tag after a digest-pinned pull (#1825) — `docker pull repo@sha256:…` fetches the manifest but leaves the image unnamed, and everything downstream still addresses it by tag",
+	},
+	{
 		Method: "Info", HTTP: "GET /info", ProxyVars: []string{"INFO"},
 		Tier: TierCore, Packages: []string{"internal/provider/docker"},
 		Why: "detects the cgroup version and whether the daemon shares the host filesystem",
