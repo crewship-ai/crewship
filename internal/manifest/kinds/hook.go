@@ -3,11 +3,17 @@
 // _test.go and documentation page under docs/manifest.
 //
 // This file implements `kind: Hook` — the smallest manifest kind in
-// the system. Hooks are registered in CODE (not over REST): an
-// operator can NEVER create a new hook via the manifest. The manifest
-// pipeline knows how to do exactly one thing with a hook: flip the
-// `enabled` boolean on or off via the existing
+// the system. An operator can NEVER create a new hook via the
+// manifest. The manifest pipeline knows how to do exactly one thing
+// with a hook: flip the `enabled` boolean on or off via the existing
 // POST /api/v1/hooks/{id}/{enable|disable} endpoints.
+//
+// Registration happens elsewhere: `crewship hooks create` /
+// POST /api/v1/hooks (OWNER or ADMIN, shell handlers OWNER only), or
+// hooks.Register from Go. Keeping it out of the manifest is now a
+// choice rather than a limitation — `crewship apply` has no
+// per-document role check, so letting YAML author a shell handler
+// would launder an OWNER-only grant through a weaker gate.
 //
 // Because the create / delete verbs are intentionally absent, Plan
 // produces only ActionUnchanged or ActionUpdate items, never
@@ -17,10 +23,9 @@
 //
 // The slug<->id contract: the hooks table has no `slug` column. The
 // manifest treats the hook's `id` (the CUID returned by
-// /api/v1/hooks) as the slug. Operators register hooks in code with a
-// stable ID; the manifest references that ID via metadata.slug so
-// cross-environment apply is reproducible. The handler endpoint path
-// embeds that same ID after `/api/v1/hooks/`.
+// /api/v1/hooks) as the slug. The manifest references that ID via
+// metadata.slug so cross-environment apply is reproducible. The
+// handler endpoint path embeds that same ID after `/api/v1/hooks/`.
 package kinds
 
 import (

@@ -39,6 +39,7 @@ DELETE /api/v1/crews/{crewId}/persona roleCreate
 DELETE /api/v1/feature-flags/{key} roleManage
 DELETE /api/v1/feature-flags/{key}/override roleManage
 DELETE /api/v1/feedback roleSelf
+DELETE /api/v1/hooks/{id} roleManage
 DELETE /api/v1/inbox roleManage
 DELETE /api/v1/instance/settings/{key} roleManage
 DELETE /api/v1/integrations/composio/accounts/{accountId} roleManage
@@ -88,6 +89,7 @@ PATCH /api/v1/crews/{crewId}/missions/{missionId} roleCreate
 PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId} roleCreate
 PATCH /api/v1/escalations/{escalationId}/resolve roleCreate
 PATCH /api/v1/feature-flags/{key} roleManage
+PATCH /api/v1/hooks/{id} roleManage
 PATCH /api/v1/inbox/{id} roleSelf
 PATCH /api/v1/integrations/{integrationId} roleManage
 PATCH /api/v1/issues/bulk roleCreate
@@ -193,6 +195,7 @@ POST /api/v1/eval/regression roleManage
 POST /api/v1/eval/replay roleManage
 POST /api/v1/feature-flags roleManage
 POST /api/v1/feedback roleSelf
+POST /api/v1/hooks roleManage
 POST /api/v1/hooks/{id}/disable roleManage
 POST /api/v1/hooks/{id}/enable roleManage
 POST /api/v1/inbox/bulk roleSelf
