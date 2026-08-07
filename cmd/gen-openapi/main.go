@@ -760,7 +760,49 @@ func applyAnnotation(info *handlerInfo, annotation string) {
 var statusNames = map[string]string{"StatusOK": "200", "StatusCreated": "201", "StatusAccepted": "202", "StatusNoContent": "204", "StatusBadRequest": "400", "StatusUnauthorized": "401", "StatusForbidden": "403", "StatusNotFound": "404", "StatusConflict": "409", "StatusTooManyRequests": "429", "StatusInternalServerError": "500", "StatusNotImplemented": "501", "StatusBadGateway": "502", "StatusServiceUnavailable": "503", "StatusGatewayTimeout": "504"}
 var selectorPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)`)
 var functionPattern = regexp.MustCompile(`func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
-var queryPattern = regexp.MustCompile(`(?:URL\.Query\(\)|\b[A-Za-z_][A-Za-z0-9_]*)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
+
+// directQueryPattern matches a query read taken straight off the request:
+// r.URL.Query().Get("cursor") and its Has/Values siblings.
+var directQueryPattern = regexp.MustCompile(`URL\.Query\(\)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
+
+// queryValuesBindingPattern matches a local bound to the request's decoded
+// query values — `q := r.URL.Query()` — so the far more common
+// `q.Get("cursor")` two lines later is still recognised.
+var queryValuesBindingPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*[A-Za-z_][A-Za-z0-9_.]*\.URL\.Query\(\)`)
+
+// accessorPattern matches any `<ident>.Get|Has|Values("name")`. url.Values is
+// not the only type with that shape: r.Header, r.Trailer, r.Form, r.PostForm
+// and an http.Client read identically, so a match here is a query parameter
+// only when queryValuesBindingPattern bound the receiver above. Unrecognised
+// receivers fail safe — no parameter — because guessing wrong publishes, for
+// example, `?Authorization=` to every agent that drives the API from the spec.
+var accessorPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
+
+// queryParamNames returns the query parameter names read by a handler body.
+func queryParamNames(body string) []string {
+	bound := map[string]bool{}
+	for _, m := range queryValuesBindingPattern.FindAllStringSubmatch(body, -1) {
+		bound[m[1]] = true
+	}
+	seen := map[string]bool{}
+	var names []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	for _, m := range directQueryPattern.FindAllStringSubmatch(body, -1) {
+		add(m[1])
+	}
+	for _, m := range accessorPattern.FindAllStringSubmatch(body, -1) {
+		if bound[m[1]] {
+			add(m[2])
+		}
+	}
+	return names
+}
 
 func inferHandlerInfo(rt route) handlerInfo {
 	info := handlerInfo{query: map[string]string{}, statuses: map[string]bool{"200": true}}
@@ -809,8 +851,8 @@ func inferHandlerInfo(rt route) handlerInfo {
 			if body == "" {
 				continue
 			}
-			for _, q := range queryPattern.FindAllStringSubmatch(body, -1) {
-				info.query[q[1]] = "string"
+			for _, name := range queryParamNames(body) {
+				info.query[name] = "string"
 			}
 			for name, code := range statusNames {
 				if strings.Contains(body, "http."+name) {
