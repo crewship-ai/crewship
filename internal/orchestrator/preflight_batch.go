@@ -91,6 +91,14 @@ const preflightBatchTimeout = 60 * time.Second
 // without pasting a whole run's transcript into a log line.
 const preflightTranscriptTail = 2048
 
+// maxPreflightOutputBytes bounds what is read from a step's output stream.
+// io.ReadAll grows without limit, so a step that goes haywire — a loop that
+// prints, a tool that dumps a binary to stdout — would be allocated in full on
+// the server before truncateOutput ever gets to shorten it. Only the tail ends
+// up in an error anyway; 4 MB is far more than any real transcript and still
+// bounded.
+const maxPreflightOutputBytes = 4 << 20
+
 // preflightStep is one named fragment of the merged script.
 type preflightStep struct {
 	name string
@@ -240,7 +248,7 @@ func (b *preflightBatch) Flush(ctx context.Context) error {
 		}
 		return fmt.Errorf("preflight batch (%d steps: %s): %w", len(steps), stepNames(steps), err)
 	}
-	out, _ := io.ReadAll(res.Reader)
+	out, _ := io.ReadAll(io.LimitReader(res.Reader, maxPreflightOutputBytes))
 	res.Reader.Close()
 
 	// Delivery first: without the completion marker the script did not run to
@@ -272,8 +280,22 @@ func (b *preflightBatch) Flush(ctx context.Context) error {
 	// The exit code is a second, independent signal: a script that died before
 	// it could print its failure line (OOM-killed, sh parse error) still has to
 	// surface as a failure rather than as a silent success.
-	running, exitCode, inspectErr := b.inner.ExecInspect(ctx, res.ExecID)
-	if inspectErr == nil && !running && exitCode != 0 && len(failed) == 0 {
+	// Wait for the final state rather than sampling once. Draining the reader
+	// to EOF is not synchronisation on either provider: an async runtime can
+	// close the output before it publishes the exit code, and a single
+	// ExecInspect then reports "still running" — which the old condition
+	// silently treated as success, the same way ignoring the exit code
+	// entirely used to.
+	exitCode, inspectErr := provider.WaitExecExit(ctx, b.inner, res.ExecID, execProbeTimeout)
+	if inspectErr != nil {
+		// The steps all reported, so this is not a delivery failure; say what
+		// could not be confirmed instead of inventing a verdict.
+		if b.logger != nil {
+			b.logger.Warn("preflight batch completed but its exit status could not be confirmed",
+				"steps", len(steps), "error", inspectErr)
+		}
+	}
+	if inspectErr == nil && exitCode != 0 && len(failed) == 0 {
 		for _, s := range steps {
 			b.failed[s.name] = true
 		}
@@ -392,7 +414,7 @@ func runOrBatch(ctx context.Context, container provider.ContainerProvider, name 
 	// Read the output BEFORE inspecting: the exec is asynchronous and the exit
 	// code is only final once the stream ends. The output is also what makes a
 	// failure diagnosable, so it is carried into the error rather than dropped.
-	out, readErr := io.ReadAll(result.Reader)
+	out, readErr := io.ReadAll(io.LimitReader(result.Reader, maxPreflightOutputBytes))
 	_ = result.Reader.Close()
 	if readErr != nil {
 		return fmt.Errorf("%s: reading output: %w", name, readErr)

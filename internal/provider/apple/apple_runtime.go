@@ -306,8 +306,23 @@ func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstP
 				return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
 			}
 			// The agent runs as 1001:1001 and must be able to read it.
+			// Setting that owner needs root, which the server does not have
+			// on a normal macOS install, so this usually fails — and a 0600
+			// file owned by the server user is one the agent cannot read.
+			// Returning nil there reproduces the "config file not found"
+			// symptom this whole path exists to fix, with nothing to act on.
+			//
+			// So when the ownership cannot be handed over, widen the mode
+			// instead of leaving a file nobody can use. The directory above
+			// is created 0750, so this does not expose the file to another
+			// local user: they cannot traverse into it.
 			if err := os.Chown(dst, agentUID, agentGID); err != nil {
-				p.logger.Warn("could not chown copied file to the agent user", "path", dst, "error", err)
+				if chmodErr := os.Chmod(dst, 0o644); chmodErr != nil {
+					return fmt.Errorf("copy %s into %s: could not give the agent access (chown: %v; chmod: %w)",
+						name, dstPath, err, chmodErr)
+				}
+				p.logger.Debug("could not chown copied file to the agent user; widened the mode instead",
+					"path", dst, "error", err)
 			}
 		}
 		return nil
@@ -440,10 +455,20 @@ func unpackTarInto(root string, content io.Reader) ([]string, error) {
 			return nil, fmt.Errorf("staging %s: %w", rel, err)
 		}
 		// Bounded copy: an archive is not a reason to fill the host disk.
-		n, err := io.Copy(f, io.LimitReader(tr, maxCopyEntryBytes))
+		// Read one byte past the cap so an entry that lies about its size in
+		// the header is caught here rather than silently truncated. A
+		// half-written .mcp.json is worse than a refusal: the copy reports
+		// success and the consumer fails later on a parse error that names
+		// nothing about the real cause.
+		n, err := io.Copy(f, io.LimitReader(tr, maxCopyEntryBytes+1))
 		if err != nil {
 			_ = f.Close()
 			return nil, fmt.Errorf("staging %s: %w", rel, err)
+		}
+		if n > maxCopyEntryBytes {
+			_ = f.Close()
+			return nil, fmt.Errorf("archive entry %q streamed more than its declared size and exceeds the per-entry cap (%d)",
+				hdr.Name, int64(maxCopyEntryBytes))
 		}
 		if err := f.Close(); err != nil {
 			return nil, fmt.Errorf("staging %s: %w", rel, err)

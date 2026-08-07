@@ -58,3 +58,39 @@ describe("FeatureChip", () => {
     expect(chip.textContent).toBe("python")
   })
 })
+
+/**
+ * The floating-ref hazard was carried by two things a screen-reader user never
+ * receives: a `warn` colour, and a `title` attribute. `title` is not announced
+ * by most screen readers and never appears on keyboard focus, since the chip is
+ * a non-interactive span — so the warning reached sighted mouse users only.
+ * Colour alone carries no meaning either. The state has to exist as text.
+ */
+describe("FeatureChip accessibility", () => {
+  beforeEach(() => cleanup())
+
+  it("states the floating hazard as text, not only as colour and a tooltip", () => {
+    render(
+      <FeatureChip
+        featureRef="ghcr.io/devcontainers/features/github-cli:1"
+        resolved={{ version: "1.0.14", digest: "sha256:abc", pinned: false }}
+      />,
+    )
+    const chip = screen.getByTestId("feature-chip")
+    // Remove every styling hook and the tooltip; what a screen reader is left
+    // with must still say the ref can drift.
+    expect(chip.textContent ?? "").toMatch(/floating|can change/i)
+  })
+
+  it("says a pinned ref is pinned rather than saying nothing", () => {
+    render(
+      <FeatureChip
+        featureRef="ghcr.io/devcontainers/features/github-cli@sha256:abc"
+        resolved={{ version: "1.0.14", digest: "sha256:abc", pinned: true }}
+      />,
+    )
+    const chip = screen.getByTestId("feature-chip")
+    expect(chip.textContent ?? "").toMatch(/pinned/i)
+    expect(chip.textContent ?? "").not.toMatch(/floating/i)
+  })
+})

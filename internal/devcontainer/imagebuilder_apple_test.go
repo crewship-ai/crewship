@@ -408,3 +408,46 @@ func TestBuilderCPUMem_UnknownShapeDoesNotReadAsUndersized(t *testing.T) {
 		}
 	}
 }
+
+// TestAppleBuilder_CancellationReleasesTheCallerPromptly covers what
+// exec.CommandContext does not do: it signals the `container` process and
+// nothing below it. A descendant that inherited the write end of stdout keeps
+// the pipe open, so the scanner reading it goes on blocking after the caller
+// has cancelled — and the build is only released when the idle watchdog fires,
+// which in production is five minutes later.
+//
+// The fake mirrors that shape: a child holds the pipe and outlives the parent
+// it was started from.
+func TestAppleBuilder_CancellationReleasesTheCallerPromptly(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "container")
+	// The child inherits stdout and sleeps well past the idle window; the
+	// parent exits immediately, leaving the pipe held by the child alone.
+	script := "#!/bin/sh\necho '#1 building'\n( sleep 60 ) &\nwait\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An idle timeout long enough that only cancellation can end this test in
+	// time — otherwise the watchdog would rescue it and prove nothing.
+	b := &AppleContainerBuilder{bin: bin, logger: slog.Default(), idleTimeout: 60 * time.Second}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- b.Build(ctx, dir, "crewship-cache:cancelled", nil) }()
+
+	time.Sleep(300 * time.Millisecond) // let the child take the pipe
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a cancelled build must not report success")
+		}
+		if elapsed := time.Since(start); elapsed > 15*time.Second {
+			t.Errorf("returned after %s — cancellation did not reach the process group", elapsed)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("Build never returned after cancellation: a descendant still holds stdout")
+	}
+}

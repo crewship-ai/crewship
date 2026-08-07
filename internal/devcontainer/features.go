@@ -330,9 +330,16 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 		return fmt.Errorf("fetching image %q: %w", ref, err)
 	}
 
+	// Resolve the digest now, but do not record it yet. Writing it here — to
+	// destDir, or from a defer — stamps it onto whatever is already cached,
+	// and every failure path below returns while destDir still holds the
+	// *previous* feature. That produces an entry whose content is one
+	// version and whose provenance claims another. It is written into the
+	// temp dir instead, so it arrives with the content it describes or not
+	// at all.
+	var digest string
 	if dg, derr := img.Digest(); derr == nil {
-		// Recorded into the extracted directory below, once it exists.
-		defer func() { _ = writeFeatureDigest(destDir, dg.String()) }()
+		digest = dg.String()
 	}
 
 	layers, err := img.Layers()
@@ -379,6 +386,15 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 	}
 	if _, err := os.Stat(filepath.Join(tempDir, "devcontainer-feature.json")); err != nil {
 		return fmt.Errorf("extracted feature %q missing devcontainer-feature.json", ref)
+	}
+
+	// Record provenance inside the staged directory so it moves with the
+	// content in the rename below, rather than as a separate write that
+	// could land — or fail — on its own.
+	if digest != "" {
+		if err := writeFeatureDigest(tempDir, digest); err != nil {
+			return fmt.Errorf("recording digest for %q: %w", ref, err)
+		}
 	}
 
 	// Remove any existing destination before atomic rename.

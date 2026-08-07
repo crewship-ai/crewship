@@ -88,3 +88,73 @@ func TestWaitExecExit_PropagatesInspectErrors(t *testing.T) {
 		t.Errorf("err = %v, want it to wrap %v", err, want)
 	}
 }
+
+// blockingInspector never answers until its context is cancelled — the shape
+// of a runtime whose inspect call hangs (a wedged daemon, a VM that stopped
+// servicing the socket).
+type blockingInspector struct {
+	provider.ContainerProvider
+	entered chan struct{}
+}
+
+func (b *blockingInspector) ExecInspect(ctx context.Context, _ string) (bool, int, error) {
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return false, -1, ctx.Err()
+}
+
+// TestWaitExecExit_BoundsAHangingInspect covers the gap the deadline check
+// alone leaves: it is evaluated only after ExecInspect returns, so a call that
+// never returns is never bounded and WaitExecExit waits forever. The timeout
+// has to reach the inspect itself.
+func TestWaitExecExit_BoundsAHangingInspect(t *testing.T) {
+	t.Parallel()
+
+	insp := &blockingInspector{entered: make(chan struct{}, 1)}
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		_, err := provider.WaitExecExit(context.Background(), insp, "exec-1", 200*time.Millisecond)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("WaitExecExit returned nil for an exec that never reported")
+		}
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Errorf("returned after %s — the timeout did not bound the inspect", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitExecExit never returned: a hanging ExecInspect is not bounded by the timeout")
+	}
+}
+
+// The caller's own cancellation must still win, and promptly.
+func TestWaitExecExit_HonoursCallerCancellation(t *testing.T) {
+	t.Parallel()
+
+	insp := &blockingInspector{entered: make(chan struct{}, 1)}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := provider.WaitExecExit(ctx, insp, "exec-1", time.Hour)
+		done <- err
+	}()
+
+	<-insp.entered
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v; want it to wrap context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelling the caller's context did not stop the wait")
+	}
+}

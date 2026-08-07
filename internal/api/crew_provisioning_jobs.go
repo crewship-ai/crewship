@@ -820,14 +820,17 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	// What the build actually installed, so the image can be audited rather
 	// than inferred from the config (#1779). Stored as '[]' when a crew uses no
 	// features — distinct from NULL, which means "built before this existed".
-	// resolved_features is written only when this run actually resolved some.
-	// A cache hit resolves nothing — it built nothing — and writing that as
-	// JSON `null` would erase the digests an earlier build recorded, after
-	// which the CLI reports the crew as "not recorded" and the audit trail the
-	// column exists for is gone (#1779).
+	// nil and empty mean different things here, so the test is `!= nil` and
+	// not `len() > 0`. A build always sets the slice — featureRecords returns
+	// a non-nil slice even for a crew with no features — so empty means "this
+	// build installed none", which is an answer and belongs in the column as
+	// '[]'. A cache hit builds nothing and leaves the field nil; writing that
+	// would serialize to JSON `null` and erase the digests an earlier build
+	// recorded, after which the CLI reports the crew as "not recorded" and the
+	// audit trail the column exists for is gone (#1779).
 	setFeatures := ""
 	updateArgs := []any{result.CachedImage, result.ConfigHash, reqJSON}
-	if len(result.Features) > 0 {
+	if result.Features != nil {
 		featBytes, marshalErr := json.Marshal(result.Features)
 		if marshalErr != nil {
 			// Leave the column alone rather than blanking it: "unknown" is

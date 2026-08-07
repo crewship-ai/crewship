@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -44,9 +45,23 @@ func WaitExecExit(ctx context.Context, insp execInspector, execID string, timeou
 	}
 	deadline := time.Now().Add(timeout)
 
+	// The deadline has to reach ExecInspect itself. Checking it only between
+	// calls bounds a runtime that keeps answering "still running" but not one
+	// whose inspect never returns — a wedged daemon, or a VM that stopped
+	// servicing its socket — and that is the case where waiting forever hurts
+	// most, because the caller is holding a provisioning step open.
+	waitCtx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+
 	for {
-		running, code, err := insp.ExecInspect(ctx, execID)
+		running, code, err := insp.ExecInspect(waitCtx, execID)
 		if err != nil {
+			// Distinguish "we ran out of time" from "the runtime said no".
+			// Only our own deadline becomes a timeout; the caller's
+			// cancellation stays the caller's.
+			if ctx.Err() == nil && errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
+				return -1, fmt.Errorf("exec %s did not finish within %s", execID, timeout)
+			}
 			return -1, fmt.Errorf("inspecting exec %s: %w", execID, err)
 		}
 		if !running {
@@ -56,8 +71,11 @@ func WaitExecExit(ctx context.Context, insp execInspector, execID string, timeou
 			return -1, fmt.Errorf("exec %s did not finish within %s", execID, timeout)
 		}
 		select {
-		case <-ctx.Done():
-			return -1, ctx.Err()
+		case <-waitCtx.Done():
+			if ctx.Err() != nil {
+				return -1, ctx.Err()
+			}
+			return -1, fmt.Errorf("exec %s did not finish within %s", execID, timeout)
 		case <-time.After(waitExecPollInterval):
 		}
 	}

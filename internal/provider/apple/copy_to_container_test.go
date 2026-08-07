@@ -133,3 +133,50 @@ func TestCopyToContainer_FallsBackToTheCLIOffMount(t *testing.T) {
 		t.Error("an unmounted destination should still be attempted through the CLI")
 	}
 }
+
+// TestCopyToContainer_LeavesTheFileReadableWhenChownFails covers the failure
+// this method exists to prevent, reintroduced one layer down.
+//
+// The file is written 0600 owned by whoever runs the server; the agent in the
+// container is uid 1001. Setting that owner needs root, which the server does
+// not have on a normal macOS install, so the chown fails — and the copy used
+// to return nil anyway. The agent then gets EACCES and reports the config as
+// missing, which is exactly the "MCP config file not found" symptom this path
+// was written to fix, with no error anywhere to act on.
+//
+// The containing directory is created 0750, so a readable mode here is not
+// reachable by another local user: they cannot traverse into it.
+func TestCopyToContainer_LeavesTheFileReadableWhenChownFails(t *testing.T) {
+	if os.Geteuid() == agentUID {
+		t.Skip("running as the agent uid — chown is a no-op and this case cannot arise")
+	}
+	installFakeContainer(t, `exit 0`)
+	hostCrewDir := t.TempDir()
+
+	p := newTestProvider(Config{})
+	p.rememberBindMounts("crew-container", map[string]string{"/crew": hostCrewDir})
+
+	if err := p.CopyToContainer(context.Background(), "crew-container", "/crew/agents/casey",
+		tarOf(t, map[string]string{".mcp.json": `{"mcpServers":{"memory":{}}}`})); err != nil {
+		t.Fatalf("CopyToContainer: %v", err)
+	}
+
+	dst := filepath.Join(hostCrewDir, "agents", "casey", ".mcp.json")
+	st, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat copied file: %v", err)
+	}
+	if st.Mode().Perm()&0o044 == 0 {
+		t.Errorf("mode = %#o — the chown could not have succeeded, so a mode only the owner can read leaves the agent unable to read its own config", st.Mode().Perm())
+	}
+
+	// The directory must stay closed, since that is what makes the readable
+	// file safe.
+	dirSt, err := os.Stat(filepath.Dir(dst))
+	if err != nil {
+		t.Fatalf("stat parent: %v", err)
+	}
+	if dirSt.Mode().Perm()&0o007 != 0 {
+		t.Errorf("parent dir mode = %#o — world-traversable, which makes the readable file reachable", dirSt.Mode().Perm())
+	}
+}

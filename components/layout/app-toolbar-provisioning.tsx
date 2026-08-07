@@ -587,6 +587,20 @@ function FeatureChip({
       {resolved?.version && (
         <span className="ml-1 opacity-70 tabular-nums">{resolved.version}</span>
       )}
+      {/*
+        The hazard has to exist as text. The `warn` colour above and the
+        `title` attribute both miss a screen-reader user — title is rarely
+        announced and never surfaces on keyboard focus, since this is a
+        non-interactive span — and colour alone carries no meaning to anyone
+        reading without it.
+      */}
+      {resolved != null && (
+        <span className="sr-only">
+          {floating
+            ? " — floating ref, a rebuild can change this"
+            : " — pinned ref"}
+        </span>
+      )}
     </span>
   )
 }

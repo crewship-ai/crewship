@@ -99,3 +99,52 @@ func TestPreflightFlush_ReportedFailureStillMarksThatStep(t *testing.T) {
 		t.Error("a step the script did not report must not be collateral")
 	}
 }
+
+// asyncExitContainer models a runtime that closes the output stream before it
+// publishes the exit status — the shape both providers can take, since
+// draining a reader to EOF is not synchronisation on either.
+type asyncExitContainer struct {
+	provider.ContainerProvider
+	output     string
+	exitCode   int
+	runningFor int // inspects that answer "still running" before the code lands
+	inspects   int
+}
+
+func (c *asyncExitContainer) Exec(_ context.Context, _ provider.ExecConfig) (*provider.ExecResult, error) {
+	return &provider.ExecResult{ExecID: "e1", Reader: io.NopCloser(strings.NewReader(c.output))}, nil
+}
+
+func (c *asyncExitContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
+	c.inspects++
+	if c.inspects <= c.runningFor {
+		return true, -1, nil
+	}
+	return false, c.exitCode, nil
+}
+
+// TestPreflightFlush_WaitsForAnExitCodePublishedLate covers the gap a single
+// ExecInspect leaves. The script ran to completion and named no failing step,
+// but died non-zero afterwards; if the exit status has not been published at
+// the moment Flush looks, sampling once reports "still running" and the batch
+// passes — the same silent success that ignoring exit codes altogether used to
+// produce.
+func TestPreflightFlush_WaitsForAnExitCodePublishedLate(t *testing.T) {
+	ctr := &asyncExitContainer{
+		output:     preflightStepMarker + "mcp-config\n" + preflightDoneMarker + "\n",
+		exitCode:   2,
+		runningFor: 3,
+	}
+	b := newBatchFor(ctr)
+
+	err := b.Flush(context.Background())
+	if err == nil {
+		t.Fatal("a batch that exited 2 without naming a step must not pass because the code arrived late")
+	}
+	if !strings.Contains(err.Error(), "exited 2") {
+		t.Errorf("err = %v; want it to name the exit code", err)
+	}
+	if ctr.inspects <= 1 {
+		t.Errorf("inspects = %d; Flush sampled once instead of waiting for the final state", ctr.inspects)
+	}
+}

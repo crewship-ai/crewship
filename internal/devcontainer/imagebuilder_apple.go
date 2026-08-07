@@ -266,6 +266,15 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 			select {
 			case <-watchdogDone:
 				return
+			case <-ctx.Done():
+				// exec.CommandContext kills the `container` process and
+				// nothing else. Its descendants can still hold the write end
+				// of stdout, so scanner.Scan() below keeps blocking after
+				// cancellation and the build is only released when the idle
+				// timer fires — minutes after the caller gave up. kill()
+				// takes the whole process group, which closes the pipe.
+				kill()
+				return
 			case <-ticker.C:
 				quiet := time.Since(time.Unix(0, lastOutput.Load()))
 				// Only prolonged silence ends a build. The export marker is
