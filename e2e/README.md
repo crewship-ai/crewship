@@ -11,6 +11,7 @@ Three configs, three owners — do not cross-wire them:
 |---|---|---|
 | `playwright.fresh.config.ts` | `onboarding-wizard.spec.ts` only | `e2e-devcontainer.yml`, nightly 02:30 UTC |
 | `playwright.nightly.config.ts` | everything except `visual` + `onboarding-wizard`, split into a gate bucket and a drift bucket | `nightly-e2e.yml`, nightly 03:50 UTC |
+| `playwright.pr.config.ts` | one serial browser scenario with five named contract steps | `ci.yml`, every PR |
 | `playwright.config.ts` | the main suite minus its `testIgnore` list | local `pnpm test:e2e` |
 
 Before `nightly-e2e.yml` landed, **6 of ~84 tests ran automatically** — the
@@ -26,6 +27,13 @@ healthy and the specs had drifted. So the nightly splits them:
 
 A `coverage-guard` job fails if any `e2e/*.spec.ts` belongs to neither bucket,
 so a new spec cannot silently skip nightly coverage.
+
+The PR subset covers login, crew creation, agent creation, issue creation, and
+dialog cancellation in one serial browser scenario so session-cookie rotation
+cannot invalidate later contexts. It deliberately does not claim chat
+send/receive or even the chat-shell runtime path: those require a provider-backed
+agent fixture and remain in the nightly/runtime bucket until one exists. The remaining browser specs likewise stay nightly with their explicit
+gate/drift classification.
 
 `visual.spec.ts` is in neither: every baseline in `visual.spec.ts-snapshots` is
 `*-chromium-darwin.png`, and Playwright resolves snapshots per platform — on a

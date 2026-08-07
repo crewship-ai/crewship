@@ -28,7 +28,7 @@ var agentCreateCmd = &cobra.Command{
 		flags := cmd.Flags()
 		name, _ := flags.GetString("name")
 		if name == "" {
-			return fmt.Errorf("--name is required")
+			return cli.WithExitCode(fmt.Errorf("--name is required"), cli.ExitValidation)
 		}
 
 		body := map[string]interface{}{"name": name}

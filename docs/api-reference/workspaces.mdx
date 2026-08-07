@@ -4,6 +4,7 @@ description: "Manage workspaces -- the top-level tenant boundary that owns crews
 icon: "building"
 ---
 
+<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
 A **workspace** is the top-level tenant in Crewship. Every crew, agent, credential, skill, and pipeline belongs to exactly one workspace, and a user joins a workspace with a role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). Reach for these endpoints whenever you need to read or change a workspace itself or anything scoped under it -- its members and their capabilities, invitations, pipelines and their runs/versions/schedules/webhooks, and the workspace skills registry. The standalone workspace-metadata calls (list/create/get/update) sit at the top; everything else is nested under `/api/v1/workspaces/{workspaceId}/...`.
 
 <Note>

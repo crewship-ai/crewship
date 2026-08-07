@@ -24,6 +24,7 @@ JUNIT_FILE=""
 RUN_LOG=""
 FAILURE_CLASS=""
 FAILURE_MESSAGE=""
+ARTIFACT_DIR="${API_CONTRACT_ARTIFACT_DIR:-}"
 
 BASE_URL="${BASE_URL%/}"
 SCHEMA_URL="${BASE_URL}/openapi.json"
@@ -41,19 +42,36 @@ die() { fail runtime "$@"; }
 emit_summary() {
   local rc=$?
   [[ -n "$RUN_DIR" ]] || return 0
-  python3 "$SCRIPT_DIR/summary.py" \
-    --phase "$PHASE" \
-    --exit-code "$rc" \
-    --failure-class "$FAILURE_CLASS" \
-    --failure-message "$FAILURE_MESSAGE" \
-    --schema-file "$SCHEMA_FILE" \
-    --junit-file "$JUNIT_FILE" \
-    --run-log "$RUN_LOG" \
-    --catalog-count "$CATALOG_COUNT" \
-    --selected-count "$SELECTED_COUNT" \
-    --excluded-auth-count "$EXCLUDED_AUTH_COUNT" \
-    --excluded-non-json-count "$EXCLUDED_NON_JSON_COUNT" \
+  if [[ -n "$ARTIFACT_DIR" ]]; then
+    mkdir -p "$ARTIFACT_DIR" || true
+  fi
+  summary_args=(
+    --phase "$PHASE"
+    --exit-code "$rc"
+    --failure-class "$FAILURE_CLASS"
+    --failure-message "$FAILURE_MESSAGE"
+    --schema-file "$SCHEMA_FILE"
+    --junit-file "$JUNIT_FILE"
+    --run-log "$RUN_LOG"
+    --catalog-count "$CATALOG_COUNT"
+    --selected-count "$SELECTED_COUNT"
+    --excluded-auth-count "$EXCLUDED_AUTH_COUNT"
+    --excluded-non-json-count "$EXCLUDED_NON_JSON_COUNT"
     --excluded-method-count "$EXCLUDED_METHOD_COUNT"
+  )
+  if [[ -n "$ARTIFACT_DIR" ]]; then
+    python3 "$SCRIPT_DIR/summary.py" "${summary_args[@]}" \
+      | tee "$ARTIFACT_DIR/${PHASE}-summary.json"
+  else
+    python3 "$SCRIPT_DIR/summary.py" "${summary_args[@]}"
+  fi
+  if [[ -n "$ARTIFACT_DIR" ]]; then
+    # Keep the exact inputs needed to reproduce a failure. The schema and
+    # Schemathesis output are sanitized/contract metadata, not credentials.
+    cp "$SCHEMA_FILE" "$ARTIFACT_DIR/${PHASE}-openapi.json" 2>/dev/null || true
+    cp "$JUNIT_FILE" "$ARTIFACT_DIR/${PHASE}-junit.xml" 2>/dev/null || true
+    cp "$RUN_LOG" "$ARTIFACT_DIR/${PHASE}-schemathesis.log" 2>/dev/null || true
+  fi
   rm -rf "$RUN_DIR"
 }
 

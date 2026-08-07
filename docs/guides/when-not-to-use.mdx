@@ -1,0 +1,26 @@
+---
+title: "When not to use Crewship"
+description: "Recognize the jobs Crewship is not designed for, including low-latency services, unreviewed production changes, and work with missing context or credentials."
+icon: "circle-stop"
+---
+
+# When not to use Crewship
+
+Crewship is an orchestration and governance layer for bounded agent work. It is a poor fit when the orchestration cost or uncertainty is greater than the task.
+
+| If your requirement sounds like… | Prefer this instead | Why Crewship is the wrong first tool |
+|---|---|---|
+| “Return a fraud decision inside the request's tail-latency budget.” | A conventional service with a deterministic model and an explicit SLO. | Crewship runs are asynchronous; model, container, and approval latency are variable. |
+| “Reformat every row in this ten-million-row table exactly the same way.” | A SQL/data pipeline or a one-off program with a checkpointed batch. | An agent adds token cost and variance where there is no judgment to supply. |
+| “Push this production migration automatically and roll it back if health drops.” | A deployment system with tested rollout and rollback semantics. | Crewship can prepare a change and pause at a waitpoint, but it is not your production controller. |
+| “Review this repository, but the crew cannot read the repository or its tests.” | Grant the workspace or attach the repository first, then reassess. | A better prompt cannot create missing files, permissions, acceptance criteria, or domain context. |
+| “Give the agent our regulated customer export because it might help.” | Keep the data in the approved system and use a purpose-built, audited integration. | Credential injection governs delivery; it does not make an unapproved data boundary acceptable. |
+| “Keep an autonomous process alive forever and let it decide what to do next.” | An event-driven service or scheduler with explicit state transitions and owners. | Crewship is queue-and-trigger based; routines finish, fail, or pause at durable waitpoints. |
+| “Have the agent change a security chokepoint without a test or reviewer.” | A controlled engineering change with red-test-first review and protected deployment. | Crewship can coordinate the work, but an agent run is not evidence that a security-sensitive change is correct. |
+
+Two product examples make the boundary concrete:
+
+- A dependency-upgrade routine is a good fit when it opens a bounded issue, runs the repository checks, and stops for a major-version decision. It is a poor fit when you want it to merge arbitrary upgrades directly to production with no branch protection.
+- A credential-aware integration task is a good fit when the agent needs a narrowly assigned token for one run and a human can approve escalation. It is a poor fit when the requirement is to copy a long-lived secret into chat history or a shared repository.
+
+Use Crewship when an agent can make progress in a bounded workspace, the outcome can be checked, and a human or policy can own the decision when the work crosses a trust boundary. Start with [First projects](/guides/first-projects) and stop after the rung that proves your use case.

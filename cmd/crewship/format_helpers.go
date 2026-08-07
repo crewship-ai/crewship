@@ -18,6 +18,14 @@ func resolvedFormat(cmd *cobra.Command) string {
 	if b, err := cmd.Flags().GetBool("json"); err == nil && b {
 		return "json"
 	}
+	// Some older/local commands own a string --format flag (for example
+	// memory search). On an error path exitWithError receives the resolved
+	// Cobra command, not the command's successful formatter, so preserve the
+	// explicitly supplied local value here. Looking only at flagFormat loses
+	// it when the child shadows the persistent root flag.
+	if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && f.Value.String() != "" {
+		return f.Value.String()
+	}
 	return cli.ResolveFormat(flagFormat, cliCfg)
 }
 

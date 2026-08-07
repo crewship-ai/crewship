@@ -121,9 +121,9 @@ crewship apply --dir ./manifests/             # Walk a directory; apply every YA
 
 ```bash
 crewship export workspace                     # everything in the workspace (multi-doc YAML)
-crewship export workspace --split-dir ./out/  # one file per kind
+crewship export workspace --output ws.yaml    # write to a file instead of stdout
 crewship export crew uo-outlands              # the crew + everything labelled `crew: uo-outlands`
-crewship export crew uo-outlands --crew-only  # JUST the crew document, no labels/projects/routines
+crewship export crew uo-outlands --no-skill-bodies  # slug-only skill references
 ```
 
 ## CLI per-kind admin commands
@@ -164,7 +164,7 @@ Some entities are deliberately out of scope:
 | `workspace_members`, `crew_members` | IAM lives in SSO / UI / CSV import, not YAML |
 | `sessions`, `cli_pairings`, `oauth_states` | Ephemeral auth state |
 | `backup_catalog`, `scheduled_jobs` | System runtime |
-| `keeper_requests`, `approvals_queue` | Runtime instances of policies (policies themselves may land in a future `kind: ApprovalPolicy`) |
+| `keeper_requests`, `approvals_queue` | Runtime instances of policies (policies themselves may land in a future `kind: ApprovalPolicy`) | <!-- docs-inventory: ignore — names a hypothetical future kind, not a shipped one -->
 
 ## See also
 

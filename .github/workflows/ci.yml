@@ -121,6 +121,10 @@ jobs:
         run: bash scripts/deploy-dev-test.sh
       - name: test-harness lib (binary resolution + preflight)
         run: bash scripts/test-harness-lib-test.sh
+      - name: test-harness integrity (ShellCheck + helper calls)
+        run: bash scripts/test-harness-integrity.sh
+      - name: test-harness integrity negative test
+        run: bash scripts/test-harness-integrity-test.sh
       - name: claim-issue.sh (claim parsing + clone detection)
         run: bash scripts/claim-issue-test.sh
 
@@ -144,6 +148,232 @@ jobs:
       # block a merge is branch-protection policy and the repo owner's call.
       - name: review-status.sh (throttled vs reviewed classifier)
         run: bash scripts/review-status-test.sh
+
+  # ── Per-PR control-plane harness ──
+  # This is intentionally a small, explicit subset. Runtime suites that need
+  # a provider key remain in nightly-harness.yml; they are listed there with
+  # the reason they cannot be deterministic on an ordinary PR runner.
+  harness-pr:
+    needs: [merge-conflict-markers]
+    name: Harness PR subset
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build server and CLI from this commit
+        run: go build -o crewship ./cmd/crewship
+      - name: Generate ephemeral instance secrets
+        run: |
+          set -euo pipefail
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
+          {
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
+          } >> "$GITHUB_ENV"
+      - name: Start ephemeral server
+        env:
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+          CREWSHIP_SKIP_SIDECAR: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
+          ./crewship start >/tmp/crewship-pr-harness.log 2>&1 &
+          echo $! >/tmp/crewship-pr-harness.pid
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null http://localhost:8080/healthz; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/crewship-pr-harness.log >&2
+          exit 1
+      - name: Seed clean control-plane fixture
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if ./crewship seed --skip-issues --server "$CREWSHIP_SERVER"; then exit 0; fi
+            sleep 5
+          done
+          cat /tmp/crewship-pr-harness.log >&2
+          exit 1
+      - name: Run named PR harness subset
+        env:
+          CREWSHIP: ${{ github.workspace }}/crewship
+          CREWSHIP_SERVER: http://localhost:8080
+          SERVER: http://localhost:8080
+          ASK_TIMEOUT: "90"
+          POLL_TIMEOUT: "60"
+          POLL_INTERVAL: "2"
+          HARNESS_SUITE_TIMEOUT: "480"
+        run: bash scripts/test-harness/pr-subset.sh
+      - name: Install pinned API contract checker
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/crewship-api-contract-venv
+          /tmp/crewship-api-contract-venv/bin/python -m pip install \
+            --disable-pip-version-check --requirement scripts/api-contract/requirements.txt
+      - name: Run deterministic API contract gate
+        env:
+          CREWSHIP_BASE_URL: http://localhost:8080
+          API_CONTRACT_ARTIFACT_DIR: ${{ github.workspace }}/api-contract-artifacts
+        run: |
+          set -euo pipefail
+          tok="$(./crewship token create api-contract-pr --quiet)"
+          echo "::add-mask::$tok"
+          ws="$(./crewship whoami --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspace"]["id"])')"
+          export CREWSHIP_TOKEN="$tok" CREWSHIP_WORKSPACE="$ws"
+          export PATH="/tmp/crewship-api-contract-venv/bin:$PATH"
+          bash scripts/api-contract/run.sh auth
+          bash scripts/api-contract/run.sh positive
+      - name: Upload API contract evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: api-contract-${{ github.run_id }}
+          path: api-contract-artifacts/
+          if-no-files-found: warn
+      - name: Dump server log on failure
+        if: failure()
+        run: tail -300 /tmp/crewship-pr-harness.log || true
+      - name: Stop ephemeral server
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -f /tmp/crewship-pr-harness.pid ] && kill "$(cat /tmp/crewship-pr-harness.pid)" 2>/dev/null || true
+
+  # ── CLI breadth contract ──
+  cli-command-smoke:
+    needs: [merge-conflict-markers]
+    name: CLI command breadth smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build CLI from this commit
+        run: go build -o crewship ./cmd/crewship
+      - name: Run C1 command breadth smoke
+        run: bash scripts/cli-command-smoke.sh
+      - name: Run C2 exit-code contract
+        run: bash scripts/cli-exit-code-contract.sh
+
+  # ── Per-PR browser smoke ──
+  # Five deterministic checks are selected in playwright.pr.config.ts. The
+  # provider-backed chat send/receive path and the remaining specs stay in the
+  # explicit nightly buckets; they are not silently treated as PR coverage.
+  playwright-pr:
+    needs: [merge-conflict-markers]
+    name: Playwright PR subset
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Build web UI and CLI from this commit
+        run: |
+          set -euo pipefail
+          pnpm build
+          ./scripts/embed-web-out.sh sync
+          go build -o crewship ./cmd/crewship
+      - name: Generate ephemeral instance secrets
+        run: |
+          set -euo pipefail
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
+          {
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
+          } >> "$GITHUB_ENV"
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Start ephemeral browser server
+        env:
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+          CREWSHIP_SKIP_SIDECAR: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
+          ./crewship start >/tmp/crewship-pr-playwright.log 2>&1 &
+          echo $! >/tmp/crewship-pr-playwright.pid
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null http://localhost:8080/healthz; then exit 0; fi
+            sleep 1
+          done
+          tail -300 /tmp/crewship-pr-playwright.log >&2
+          exit 1
+      - name: Seed browser fixture
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if ./crewship seed --server "$CREWSHIP_SERVER"; then exit 0; fi
+            sleep 5
+          done
+          tail -300 /tmp/crewship-pr-playwright.log >&2
+          exit 1
+      - name: Give browser fixture deterministic API headroom
+        env:
+          CREWSHIP_SERVER: http://localhost:8080
+        run: |
+          set -euo pipefail
+          ws="$(./crewship whoami --format json --server "$CREWSHIP_SERVER" | jq -r '.workspace.id')"
+          CREWSHIP_WORKSPACE="$ws" ./crewship admin ratelimits set http.api_per_min 1000 --server "$CREWSHIP_SERVER"
+      - name: Run named Playwright PR subset
+        env:
+          CI: "1"
+          PLAYWRIGHT_BASE_URL: http://localhost:8080
+          E2E_EMAIL: demo@crewship.ai
+          E2E_PASSWORD: password123
+          CREWSHIP_INSTANCE_ID: pr-playwright
+        run: pnpm exec playwright test --config=playwright.pr.config.ts
+      - name: Upload Playwright PR evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-pr-${{ github.run_id }}
+          path: |
+            playwright-pr-report.json
+            test-results/
+          if-no-files-found: warn
+      - name: Dump browser server log on failure
+        if: failure()
+        run: tail -300 /tmp/crewship-pr-playwright.log || true
+      - name: Stop browser server
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -f /tmp/crewship-pr-playwright.pid ] && kill "$(cat /tmp/crewship-pr-playwright.pid)" 2>/dev/null || true
 
   # ── Frontend: lint, typecheck, build ──
   frontend:

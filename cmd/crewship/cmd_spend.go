@@ -110,13 +110,29 @@ func fetchSpend(c *cli.Client, window string, top int) (spendResponse, error) {
 	return body, nil
 }
 
+// printSpendHeader labels the total with its BASIS, not just its value.
+//
+// The total and the per-routine tables below are computed from two different
+// sources and deliberately measure two different things (#1786):
+//
+//   - total / By agent — SUM of `cost.incurred` journal entries, which
+//     internal/paymaster/ledger.go emits only for BillingMetered calls with a
+//     non-zero cost. Subscription (flat-rate) work is excluded on purpose:
+//     "sub already covers them".
+//   - Top routines / Top runs — SUM of pipeline_runs.cost_usd, the modelled
+//     cost of every run regardless of billing mode.
+//
+// So on an instance whose agents run on a subscription token, a single routine
+// can legitimately show more than the stated total. Unlabelled, that reads as
+// arithmetic nonsense on a money screen; labelled, both numbers are useful.
 func printSpendHeader(b spendResponse) {
-	fmt.Printf("%s%s%s  window=%s  total=%s$%.4f%s",
+	fmt.Printf("%s%s%s  window=%s  metered total=%s$%.4f%s",
 		cli.Bold, "Spend rollup", cli.Reset, b.Window, cli.Yellow, b.TotalCostUSD, cli.Reset)
 	if b.Truncated {
 		fmt.Printf("  %s(truncated — window has more rows than the aggregation cap)%s", cli.Dim, cli.Reset)
 	}
 	fmt.Println()
+	fmt.Printf("%sbilled (metered calls only) — subscription-covered work is excluded%s\n", cli.Dim, cli.Reset)
 	fmt.Println(strings.Repeat("─", 64))
 }
 
@@ -124,7 +140,8 @@ func printSpendTop(title string, rows []spendTopRow) {
 	if len(rows) == 0 {
 		return
 	}
-	fmt.Printf("\n%s%s%s\n", cli.Bold, title, cli.Reset)
+	fmt.Printf("\n%s%s%s %s(modelled cost of every run, including subscription-covered)%s\n",
+		cli.Bold, title, cli.Reset, cli.Dim, cli.Reset)
 	for i, r := range rows {
 		fmt.Printf("  %2d. %-40s  %s$%8.4f%s\n",
 			i+1, truncateString(r.Label, 40), cli.Yellow, r.CostUSD, cli.Reset)
@@ -135,7 +152,8 @@ func printSpendByAgent(rows []spendByAgentRow) {
 	if len(rows) == 0 {
 		return
 	}
-	fmt.Printf("\n%sBy agent%s\n", cli.Bold, cli.Reset)
+	fmt.Printf("\n%sBy agent%s %s(billed, reconciles with the total above)%s\n",
+		cli.Bold, cli.Reset, cli.Dim, cli.Reset)
 	for _, r := range rows {
 		agent := r.AgentID
 		if agent == "" {
