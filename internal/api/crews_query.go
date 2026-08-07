@@ -208,8 +208,12 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cascade: hard-delete orphan-prone children before soft-deleting the crew.
-	// Missions have a UNIQUE(identifier) constraint that is NOT workspace-scoped,
-	// so leaving them behind blocks future crews from reusing identifier prefixes.
+	// Missions carry a UNIQUE(workspace_id, identifier) constraint (#1733 — it
+	// used to be global, which was a cross-tenant bug), and issue_counters is
+	// keyed by crew_id, so a replacement crew in THIS workspace starts numbering
+	// at 1 again. Leaving the old crew's issues behind would make the new crew's
+	// first ENG-1 collide with a row belonging to a crew the user already
+	// deleted. Other workspaces were never affected and are not now.
 	if _, err := h.db.ExecContext(r.Context(),
 		"DELETE FROM mission_tasks WHERE mission_id IN (SELECT id FROM missions WHERE crew_id = ?)", crewID); err != nil {
 		h.logger.Warn("cascade delete mission_tasks", "crew_id", crewID, "error", err)

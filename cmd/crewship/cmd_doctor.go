@@ -276,7 +276,10 @@ func checkContainerRuntime(ctx context.Context) checkResult {
 	return checkResult{
 		name:   "container runtime",
 		status: "FAIL",
-		detail: "no container runtime installed (Docker, Podman, Colima, OrbStack, Rancher Desktop, Apple Containers)",
+		// Same list `system info` prints (probedRuntimeNames in cmd_system.go),
+		// so the two surfaces cannot name different runtimes — which is how
+		// containerd/nerdctl outlived its removal from the detector (#1689).
+		detail: "no container runtime installed (" + strings.Join(probedRuntimeNames, ", ") + ")",
 		hint:   installHintForOS(runtime.GOOS),
 	}
 }

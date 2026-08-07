@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -50,6 +51,35 @@ func isBareForbidden(detail string) bool {
 var systemCmd = &cobra.Command{
 	Use:   "system",
 	Short: "Show system information (runtime, license, keeper)",
+}
+
+// probedRuntimeNames is the one list of container runtimes the CLI is allowed
+// to name, in display form. `system info`'s "nothing answered" hint and
+// `doctor`'s "none installed" detail both render from it, so the two cannot
+// drift apart — or drift away from what the detector actually probes, which is
+// what runtime_vocabulary_test.go pins them to (docker.RuntimeLabels() plus
+// Apple Containers).
+//
+// containerd/nerdctl was here and is not a runtime Crewship can use: containerd
+// serves its own gRPC API over HTTP/2, the moby client speaks the Docker REST
+// API over HTTP/1.1, and no version of either bridges that (#1687). Naming it
+// sent operators on a containerd host off to start a daemon that was already
+// running (#1689).
+var probedRuntimeNames = []string{
+	"Docker",
+	"Colima",
+	"OrbStack",
+	"Rancher Desktop",
+	"Podman",
+	"Apple Containers",
+}
+
+// noRuntimeHint is what `system info` prints when the server reports no
+// runtime available — the list of what it looked for, so the reader can tell
+// "I have none of these" from "the one I have is stopped".
+func noRuntimeHint() string {
+	return "No container runtime answered. Crewship probes " +
+		strings.Join(probedRuntimeNames, ", ") + "."
 }
 
 var systemInfoCmd = &cobra.Command{
@@ -102,27 +132,17 @@ var systemInfoCmd = &cobra.Command{
 		return newFormatter().AutoHuman(payload, func() {
 			fmt.Printf("%sContainer Runtime%s\n", cli.Bold, cli.Reset)
 			fmt.Printf("  Available:  %v\n", runtime.Available)
-			fmt.Printf("  Runtime:    %s\n", runtime.Runtime)
-			fmt.Printf("  Version:    %s\n", runtime.Version)
-			if runtime.Socket != "" {
-				fmt.Printf("  Socket:     %s\n", runtime.Socket)
-			}
-			// Everything else that answered a socket probe. The first entry
-			// is the one in use; the rest are what you could switch to.
-			if len(runtime.Runtimes) > 1 {
-				fmt.Printf("  Also found: ")
-				for i, rt := range runtime.Runtimes[1:] {
-					if i > 0 {
-						fmt.Printf(", ")
-					}
-					fmt.Printf("%s %s", rt.Runtime, rt.Version)
-				}
-				fmt.Println()
-			}
-			if !runtime.Available {
-				fmt.Printf("  %sNo container runtime answered. Crewship probes Docker, Colima,\n", cli.Dim)
-				fmt.Printf("  OrbStack, Rancher Desktop, Podman (rootless/root/machine),\n")
-				fmt.Printf("  containerd/nerdctl and Apple Containers.%s\n", cli.Reset)
+			switch {
+			case !runtime.Available:
+				// Nothing answered: an empty `Runtime:` line adds nothing the
+				// availability flag has not already said. Say what was looked
+				// for, and where to get one.
+				fmt.Printf("  %s%s%s\n", cli.Dim, noRuntimeHint(), cli.Reset)
+				printInstallLinks(runtime.InstallLinks)
+			case runtime.redacted():
+				printRedactedRuntimeHint()
+			default:
+				printRuntimeDetail(runtime)
 			}
 			if license != nil {
 				fmt.Printf("\n%sLicense%s\n", cli.Bold, cli.Reset)
@@ -151,12 +171,105 @@ type systemRuntimeInfo struct {
 	// Desktop and Podman on one laptop is the normal case for anyone testing
 	// both, and without this list switching between them is invisible.
 	Runtimes []systemRuntimeEntry `json:"runtimes,omitempty"`
+	// InstallLinks is the server's "how do I get one" map, keyed by runtime
+	// label. It is sent alongside an available runtime too, not only when none
+	// was found (#1690) — an operator with one runtime installed still needs to
+	// be told what the others are. The CLI used to drop it on the floor (#1707).
+	InstallLinks map[string]string `json:"install_links,omitempty"`
 }
 
 type systemRuntimeEntry struct {
 	Runtime string `json:"runtime"`
 	Version string `json:"version"`
 	Socket  string `json:"socket,omitempty"`
+	// InUse marks the single runtime the server is actually driving. Not
+	// omitempty: `false` is the answer for every other entry and dropping it
+	// would make "not in use" indistinguishable from "this server is too old
+	// to say". The whole reason /system/runtime carries the flag is that
+	// installed and in-use are different facts (#1696); the CLI dropped it and
+	// so could not answer the one question the endpoint exists for (#1707).
+	InUse bool `json:"in_use"`
+}
+
+// redacted reports whether the server answered with the availability-only
+// shape it gives a caller it cannot resolve as ADMIN+ in a workspace (#865):
+// `{"available": true}` and nothing else. Printing that as `Runtime:` and
+// `Version:` with empty values reads as "no runtime detected" — the opposite of
+// what the server said (#1707).
+//
+// An unavailable runtime is not redaction (the server volunteers `available:
+// false` to everyone), and neither is a server that lists runtimes while
+// driving none — `runtimes` is populated there.
+func (r systemRuntimeInfo) redacted() bool {
+	return r.Available && r.Runtime == "" && r.Version == "" && r.Socket == "" && len(r.Runtimes) == 0
+}
+
+func printRedactedRuntimeHint() {
+	fmt.Printf("  %sRuntime, version and socket are host detail: the server sends them only\n", cli.Dim)
+	fmt.Printf("  to an ADMIN or OWNER of the workspace on the request. Select one you\n")
+	fmt.Printf("  administer — 'crewship workspace use <slug>' — or pass --workspace.%s\n", cli.Reset)
+}
+
+// printRuntimeDetail renders the runtime being driven and, when more than one
+// answered, the whole inventory with the driven one marked.
+//
+// The list used to be printed as "Also found: …" over runtimes[1:], on the
+// assumption that entry 0 is the one in use, and captioned "what you could
+// switch to". Both were untrue: the server marks the driven entry with `in_use`
+// and it need not be first (a DOCKER_HOST engine is appended last), and there is
+// no switch to make — `container.provider` accepts only docker | apple | auto,
+// so no value names orbstack, colima, rancher or podman (#1689).
+func printRuntimeDetail(runtime systemRuntimeInfo) {
+	if runtime.Runtime == "" && len(runtime.Runtimes) > 0 {
+		// The server sends runtime/version/socket as null when runtimes are
+		// installed but none is in use — it booted without a container provider
+		// (`--no-docker`). Naming one of them there would report a runtime that
+		// is running nothing, so say so instead of printing a blank.
+		fmt.Printf("  Runtime:    %s(none in use — installed, but this server drives none)%s\n", cli.Dim, cli.Reset)
+	} else {
+		fmt.Printf("  Runtime:    %s\n", runtime.Runtime)
+		fmt.Printf("  Version:    %s\n", runtime.Version)
+		if runtime.Socket != "" {
+			fmt.Printf("  Socket:     %s\n", runtime.Socket)
+		}
+	}
+	// One runtime that is also the one in use is already fully described by the
+	// three lines above; listing it again is noise. Everything else — several
+	// installed, or none in use — needs the inventory.
+	if len(runtime.Runtimes) == 0 || (len(runtime.Runtimes) == 1 && runtime.Runtime != "") {
+		return
+	}
+	fmt.Printf("  Detected:\n")
+	for _, rt := range runtime.Runtimes {
+		line := fmt.Sprintf("    %-10s %-10s %s", rt.Runtime, dashIfEmpty(rt.Version), rt.Socket)
+		line = strings.TrimRight(line, " ")
+		if rt.InUse {
+			line += fmt.Sprintf("  %s(in use)%s", cli.Green, cli.Reset)
+		}
+		fmt.Println(line)
+	}
+	if len(runtime.Runtimes) < 2 {
+		return
+	}
+	fmt.Printf("  %sNot selectable by name — Crewship drives the first socket that answers.\n", cli.Dim)
+	fmt.Printf("  Point DOCKER_HOST at another one, or stop the daemon that wins.%s\n", cli.Reset)
+}
+
+// printInstallLinks renders the server's install_links map. Sorted, so two runs
+// against the same server produce the same bytes.
+func printInstallLinks(links map[string]string) {
+	if len(links) == 0 {
+		return
+	}
+	names := make([]string, 0, len(links))
+	for name := range links {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	fmt.Printf("  Install one:\n")
+	for _, name := range names {
+		fmt.Printf("    %-10s %s\n", name, links[name])
+	}
 }
 
 type systemLicenseInfo struct {

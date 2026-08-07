@@ -17,8 +17,8 @@ import (
 // and wrong for telling anyone what is available: with it, `/system/runtime`
 // can carry at most one Docker-API entry plus Apple, so Colima, OrbStack,
 // Podman and Rancher can never appear separately however many of them are
-// installed and running — and `crewship doctor`'s "Also found:" can only ever
-// list Apple.
+// installed and running — and `crewship system info`'s "Detected:" inventory
+// can only ever list Apple.
 //
 // Three things this owes the caller, all of them learned the hard way:
 //

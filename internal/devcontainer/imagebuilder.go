@@ -181,21 +181,53 @@ func (b *DockerBuildKitBuilder) Build(ctx context.Context, contextDir, tag strin
 		return fmt.Errorf("starting docker build: %w", err)
 	}
 
-	// Stream log lines so the UI can show live per-layer progress.
+	// Stream log lines so the UI can show live per-layer progress, and keep a
+	// bounded tail of the same stream so a failure can say WHY (#1730). The two
+	// existing sinks are both usually absent at the moment of failure — onLog is
+	// nil for any caller that did not pass WithProgress, and Debug is below the
+	// default level — while the returned error is the only thing that reaches
+	// the operator, CI and a test log.
+	tail := newBoundedLog(buildErrTailLineCap, buildErrTailByteCap)
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
+		tail.add(line)
 		if onLog != nil {
 			onLog(line)
 		}
 		b.logger.Debug("docker build", "line", line)
 	}
+	// A token-too-long stream stops the loop early and would otherwise leave
+	// the tail silently short — the same class of bug as the one above.
+	if scanErr := scanner.Err(); scanErr != nil {
+		tail.add(fmt.Sprintf("[crewship: build output truncated: %v]", scanErr))
+	}
 
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("docker build failed for %s: %w", tag, err)
+		return fmt.Errorf("docker build failed for %s: %w%s", tag, err, buildOutputSuffix(tail))
 	}
 	return nil
+}
+
+// buildOutputSuffix renders the retained build-output window for attachment to
+// a build error.
+//
+// Scrubbed on the way out: the window is arbitrary build output, and a
+// feature's `RUN` can echo a build-arg, an env var or a `curl -H` header. This
+// error travels to terminals, CI logs, journal rows and WS payloads, so it goes
+// through the same scrubber the durable build_failed event already uses rather
+// than becoming a second, unfiltered path for the same secrets.
+//
+// Empty output gets a sentence instead of an empty block: a `docker` that died
+// without printing anything is itself the finding (the CLI never reached a
+// daemon), and an empty block reads like the output was cut.
+func buildOutputSuffix(tail *boundedLog) string {
+	scrubbed := buildLogScrubber.Scrub(tail.tail())
+	if strings.TrimSpace(scrubbed) == "" {
+		return " — the build produced no output, which usually means the docker CLI never reached a daemon"
+	}
+	return "\ndocker build output (tail):\n" + scrubbed
 }
 
 // buildFeatureImage stages a build context for the resolved features and builds
@@ -289,6 +321,20 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 const (
 	buildLogTailLineCap = 100
 	buildLogTailByteCap = 8 * 1024
+)
+
+// buildErrTailLineCap / buildErrTailByteCap bound the window attached to the
+// RETURNED error of a failed build (#1730). Deliberately tighter than the
+// durable-event caps above, because the two windows are read differently: the
+// event payload is a stored record someone opens on purpose, while the error
+// string is printed inline into a terminal, a CI log or a `go test` failure,
+// where an 8 KB wall of layer progress buries the sentence it was added to
+// show. A BuildKit failure block — the failing `RUN`'s output, its
+// `#N ERROR:` line, the Dockerfile excerpt and the `failed to solve` summary —
+// runs about 25-30 lines, so 40 covers it with room to spare.
+const (
+	buildErrTailLineCap = 40
+	buildErrTailByteCap = 4 * 1024
 )
 
 // boundedLog keeps only the last `lineCap` lines appended to it — a fixed-size

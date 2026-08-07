@@ -113,7 +113,23 @@ func installedCandidatesFor(goos string) []installedCandidate {
 		return []installedCandidate{
 			{name: "Docker Engine", binary: "docker", startHint: "sudo systemctl start docker"},
 			{name: "Podman", binary: "podman", startHint: "systemctl --user enable --now podman.socket"},
-			{name: "containerd (nerdctl)", binary: "nerdctl", startHint: "sudo systemctl start containerd"},
+			// NOTE: `containerd (nerdctl)` was here, hinting `sudo systemctl
+			// start containerd`. It is gone, and this is not a coverage loss —
+			// it was the one entry whose advice could never work. containerd
+			// serves its own gRPC API over HTTP/2 while the moby client this
+			// product is built on speaks the Docker REST API over HTTP/1.1, so
+			// no version of containerd and no version of nerdctl (a client for
+			// that same gRPC API) can answer a probe (#1687). A user on such a
+			// host was told to start a daemon that was already running, saw no
+			// change, and had nothing to suggest the instruction was impossible.
+			//
+			// Dropping the entry moves that host from RuntimeInstalledNotRunning
+			// ("start it") to RuntimeMissing, whose Linux guidance says to
+			// install Docker Engine or Podman — which is the true next step.
+			// Keeping it with an honest hint was the alternative and it fits
+			// worse: the whole message frame around Installed is "a runtime is
+			// installed but not running — start it", and that sentence is false
+			// for containerd no matter what the hint says.
 		}
 	case "windows":
 		return []installedCandidate{

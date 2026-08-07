@@ -27,6 +27,18 @@ var titleLine = regexp.MustCompile(`(?m)^title:\s*["']?([^"'\n]+)`)
 var descriptionLine = regexp.MustCompile(`(?m)^description:\s*["']?([^"'\n]+)`)
 var llmsLink = regexp.MustCompile(`(?m)^- \[[^]]+\]\([^)]*\)`)
 
+// proseLink matches the two forms a page body uses to point at another page:
+// the Markdown target `](/guides/routines)` and the JSX attribute
+// `href="/guides/routines"` that <Card>, <Column> and friends take. Both are
+// required to start with "/" in the capture, which is what excludes external
+// URLs, `mailto:`, same-page `#anchor` links and relative paths — the docs tree
+// uses all of those and none of them name a page in this repository.
+var proseLink = regexp.MustCompile(`\]\((/[^)\s]*)\)|href=["'](/[^"']*)["']`)
+
+// codeFence matches the opening or closing line of a fenced block, indented or
+// not. Mintlify accepts both fence characters.
+var codeFence = regexp.MustCompile("^\\s*(?:```|~~~)")
+
 func main() {
 	root := flag.String("root", ".", "repository root")
 	// Empty by default: the repository-side assertions are hermetic and safe
@@ -61,6 +73,23 @@ func main() {
 	if len(missing) > 0 {
 		fail(fmt.Errorf("navigation pages missing from docs tree: %s", strings.Join(missing, ", ")))
 	}
+
+	// Third pass: the links written inside the pages, not just the ids
+	// docs.json declares. Hermetic like the two above — it reads the same
+	// tree — so it belongs on every pull request.
+	dead, checkedLinks, err := brokenProseLinks(*root)
+	if err != nil {
+		fail(err)
+	}
+	if len(dead) > 0 {
+		offenders := make([]string, 0, len(dead))
+		for _, d := range dead {
+			offenders = append(offenders, fmt.Sprintf("%s links to %s", d.page, d.target))
+		}
+		fail(fmt.Errorf("dead internal links in prose (no such page in the docs tree):\n  %s", strings.Join(offenders, "\n  ")))
+	}
+	fmt.Printf("docs-surface-check: internal prose links %d checked, 0 dead\n", checkedLinks)
+
 	served, err := checkServed(*baseURL, len(declared))
 	if err != nil {
 		fail(err)
@@ -177,6 +206,116 @@ func fetch(url string) (string, error) {
 	}
 	body, err := io.ReadAll(resp.Body)
 	return string(body), err
+}
+
+// deadLink is one internal link whose target is not a page in the docs tree:
+// the page that has to be edited, and the target as it is written there.
+type deadLink struct {
+	page   string
+	target string
+}
+
+// brokenProseLinks resolves every internal link written inside a page body
+// against the docs tree, and returns the ones that do not land on a file.
+//
+// docs.json's navigation is gated; the links inside the prose were not, so
+// `](/guides/does-not-exist)` passed every check this repository had and
+// Mintlify's build too. The orientation-layer pages (#1770/#1771) added 28 such
+// links and they were verified by a shell loop pasted into a review comment,
+// which is a check that exists only while someone remembers to run it (#1774).
+//
+// Fragments are dropped before resolution: `/guides/routines#cross-run-state`
+// addresses a position inside a page, and the page is what must exist. Whether
+// the *heading* behind that fragment still exists is deliberately NOT checked
+// here — see the note in docs/prd/documentation-contract-testing.md. It needs a
+// slugger that agrees with Mintlify's character-for-character, and the real
+// tree shows both failure directions: `#crewship-routine-result-run_id` is the
+// live anchor for the heading "crewship routine result <run_id>", so a slugger
+// that drops the underscore reports the working link and blesses the dead
+// `#crewship-routine-result-run-id` written two pages over. A gate that lands
+// with a pile of ambiguous offenders is a gate someone turns off.
+func brokenProseLinks(root string) ([]deadLink, int, error) {
+	docs := filepath.Join(root, "docs")
+	checked := 0
+	dead := []deadLink{}
+	err := filepath.Walk(docs, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || (!strings.HasSuffix(path, ".mdx") && !strings.HasSuffix(path, ".md")) {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		page := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+		for _, target := range internalLinks(string(body)) {
+			checked++
+			resolved := strings.TrimPrefix(pageOf(target), "/")
+			if fileExists(filepath.Join(docs, filepath.FromSlash(resolved)+".mdx")) ||
+				fileExists(filepath.Join(docs, filepath.FromSlash(resolved)+".md")) {
+				continue
+			}
+			dead = append(dead, deadLink{page: page, target: target})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, checked, err
+	}
+	sort.Slice(dead, func(i, j int) bool {
+		if dead[i].page != dead[j].page {
+			return dead[i].page < dead[j].page
+		}
+		return dead[i].target < dead[j].target
+	})
+	return dead, checked, nil
+}
+
+// internalLinks returns every absolute internal target a page body points at,
+// in the order they are written.
+//
+// Fenced blocks are skipped. They hold transcripts and Markdown samples, not
+// navigation — the issue asking for this gate quotes `](/guides/does-not-exist)`
+// as its own illustration, and a check that reddens on the page explaining it
+// is a check that gets deleted rather than obeyed.
+func internalLinks(body string) []string {
+	targets := []string{}
+	fenced := false
+	for _, line := range strings.Split(body, "\n") {
+		if codeFence.MatchString(line) {
+			fenced = !fenced
+			continue
+		}
+		if fenced {
+			continue
+		}
+		for _, match := range proseLink.FindAllStringSubmatch(line, -1) {
+			if match[1] != "" {
+				targets = append(targets, match[1])
+				continue
+			}
+			targets = append(targets, match[2])
+		}
+	}
+	return targets
+}
+
+// pageOf reduces a link target to the page id it addresses: fragment and query
+// dropped, trailing slash trimmed, and the site root resolved to `index`, which
+// is the page Mintlify serves there. Both spellings are legal to write, and a
+// gate that reddens on a working link gets argued with rather than obeyed.
+func pageOf(target string) string {
+	page := target
+	if i := strings.IndexAny(page, "#?"); i >= 0 {
+		page = page[:i]
+	}
+	page = strings.TrimSuffix(page, "/")
+	if page == "" {
+		return "/index"
+	}
+	return page
 }
 
 func descriptionQuality(root string) (total, good, bad int) {
