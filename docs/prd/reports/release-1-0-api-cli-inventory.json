@@ -43831,6 +43831,7 @@
         "docs/guides/conversation-search.mdx",
         "docs/guides/crew-journal.mdx",
         "docs/guides/devcontainers.mdx",
+        "docs/guides/docker-socket-proxy.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/episodic-memory.mdx",
         "docs/guides/files-and-output.mdx",
@@ -44270,7 +44271,7 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3909,
+    "command_references": 3910,
     "api_path_references": 1980,
     "environment_references": 398,
     "manifest_kind_references": 209,

@@ -389,6 +389,15 @@ describes the **current implementation**, with these gaps:
 - **Container-runtime isolation is the host's responsibility.** The
   default Docker config is _not_ rootless, and Apple Containers /
   Colima have different threat profiles than upstream Docker.
+- **The server itself holds Docker socket access**, which is
+  root-equivalent on the host. Nothing above changes that: agents are
+  fenced out of the socket, the process that creates their containers
+  is not. A filtering proxy narrows it to the endpoints we use — see
+  [Docker Socket Proxy](/guides/docker-socket-proxy) — but that page is
+  explicit that the control cannot stop a privileged container being
+  created, because the proxy filters URL paths and `Privileged: true`
+  lives in the request body. The workspace
+  `allow_privileged_credentials` gate remains the fence for that.
 - **Keeper rulesets ship empty.** Operators write the rules that
   matter for their environment; there is no "secure by default"
   policy yet.
