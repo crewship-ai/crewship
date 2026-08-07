@@ -133,6 +133,15 @@ jobs:
         run: bash scripts/test-harness-pr-subset-test.sh
       - name: claim-issue.sh (claim parsing + clone detection)
         run: bash scripts/claim-issue-test.sh
+      - name: api-contract gate (budget arithmetic + pacing/advisory flags)
+        run: bash scripts/api-contract-gate-test.sh
+      # summary.py decides what counts as a finding and how many operations
+      # were graded — the numbers the advisory exemption is judged on. Its
+      # test file predates any workflow that ran it, which is the same
+      # "green because nothing executed it" shape the steps above exist to
+      # close.
+      - name: api-contract summary classifier
+        run: python3 scripts/api-contract/summary_test.py
 
       # Skip budget ratchet. `go test ./...` prints `ok` for a package whose
       # every test called t.Skip, so a skip is indistinguishable from a pass
@@ -184,6 +193,33 @@ jobs:
             echo "NEXTAUTH_SECRET=$nextauth"
             echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
+      #
+      # ⚠ CREWSHIP_RATELIMIT_DISABLED is set HERE and nowhere else.
+      #
+      # It is scoped to this one step's environment on purpose: it is not
+      # written to $GITHUB_ENV, not a job-level `env:`, and not a repo or
+      # environment variable — so it reaches this throwaway server process
+      # and nothing else. `scripts/api-contract-gate-test.sh` fails the
+      # `shell` job if it ever appears outside this block.
+      #
+      # Why it is safe here and would not be anywhere else: this server is
+      # hermetic (localhost, one client, deleted with the runner), so the
+      # limiter is protecting it from the very gate that is testing it. In
+      # production the flag cannot take effect at all —
+      # goapi.MustNotDisableRateLimitInProd (internal/server/server.go)
+      # panics at boot when CREWSHIP_ENV is prod/production. CI does not
+      # set CREWSHIP_ENV, so this server is not classified as prod.
+      #
+      # Why it is needed: the contract gate below probes 231 read-only
+      # operations x --max-examples 10, and Schemathesis paces what it
+      # GENERATES (~8000 cases), not what it sends. Held to the shipped
+      # 120 req/min that is a ~66-minute floor, inside a 30-minute job that
+      # also has to build, boot, seed and run five harness suites (#1813).
+      # No suite in this job asserts 429 behaviour, so nothing
+      # here loses coverage by turning the limiter off — the limiter's own
+      # tests are Go units in internal/api, and test-keeper-load.sh (which
+      # does exercise throttling) is a nightly suite, not part of the PR
+      # subset.
       - name: Start ephemeral server
         env:
           CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
@@ -192,6 +228,7 @@ jobs:
           DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
           CREWSHIP_NEXTJS_URL: http://localhost:8080
           CREWSHIP_SKIP_SIDECAR: "1"
+          CREWSHIP_RATELIMIT_DISABLED: "1"
         run: |
           set -euo pipefail
           mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
@@ -230,10 +267,65 @@ jobs:
           python3 -m venv /tmp/crewship-api-contract-venv
           /tmp/crewship-api-contract-venv/bin/python -m pip install \
             --disable-pip-version-check --requirement scripts/api-contract/requirements.txt
+      #
+      # ⚠ INVARIANT: API_CONTRACT_TIMEOUT (seconds) < this step's
+      #   timeout-minutes < the job's timeout-minutes. Enforced by
+      #   scripts/api-contract-gate-test.sh; do not "tidy" them together.
+      #
+      # Same rule as the `go` job below, for the same reason: whoever wins
+      # the race decides how debuggable the failure is. The job budget is
+      # the worst possible winner here — GitHub reports a timeout-minutes
+      # reap as `cancelled`, which is indistinguishable from a human
+      # pressing stop, and it kills run.sh before its EXIT trap can write
+      # the machine-readable verdict the next step uploads. Runs
+      # 92801456298 and 92808010491 died exactly that way (#1813).
+      #
+      # So run.sh holds the innermost deadline and loses only to itself:
+      # it stops Schemathesis at API_CONTRACT_TIMEOUT and exits with a
+      # named runtime failure plus its summary artifact. The step cap is
+      # the backstop if the script itself wedges before that.
+      #
+      # 600s is ~40x the measured cost of this step against an unthrottled
+      # server: 15s for both phases on a runner, 13.3s of it inside
+      # Schemathesis, for the same 231 operations (run 31165903601). It is
+      # headroom, not a budget to grow into — if this phase ever needs more
+      # than a couple of minutes, find out why before raising it.
+      #
+      # ⚠ ADVISORY, TEMPORARILY, AND ONLY FOR FINDINGS — see #1815.
+      #
+      # The `positive` phase runs, reports, uploads its evidence, and does
+      # NOT fail this job. When the phase first became able to finish it
+      # reported 265 findings across 227 graded operations — every one of
+      # them pre-existing, most already tracked as #1583 (the generated
+      # spec documents only 200) and #1489. They were invisible only
+      # because the phase had never once completed, so blocking on them
+      # would fail PRs that did not cause them and cannot fix them.
+      #
+      # What this does NOT excuse, and must never be widened to: a server
+      # that will not boot, a schema that will not load, a Schemathesis
+      # crash, or a blown deadline. Those all still fail the job. That is
+      # why the exemption is a flag run.sh interprets — it passes only on
+      # "exit 1 AND the JUnit report shows operations were graded" — and
+      # NOT `continue-on-error`, which would excuse the lot and turn a gate
+      # into decoration. scripts/api-contract-gate-test.sh fails the build
+      # if that line moves.
+      #
+      # Remove this env var when #1815 closes. Until then the count is
+      # printed in this step's log and in the job summary, so the debt is
+      # read every run rather than filed away in an artifact.
       - name: Run deterministic API contract gate
+        timeout-minutes: 12
         env:
           CREWSHIP_BASE_URL: http://localhost:8080
           API_CONTRACT_ARTIFACT_DIR: ${{ github.workspace }}/api-contract-artifacts
+          API_CONTRACT_TIMEOUT: "600"
+          API_CONTRACT_ADVISORY: "1"
+          # No client-side pacing: the server above boots with its limiter
+          # off, so there is nothing to stay under. Only valid paired with
+          # CREWSHIP_RATELIMIT_DISABLED on the same job's server — against
+          # a limited instance this buys 429s reported as contract
+          # failures, not speed. The pairing is a tested invariant.
+          API_CONTRACT_RATE_LIMIT: "off"
         run: |
           set -euo pipefail
           tok="$(./crewship token create api-contract-pr --quiet)"

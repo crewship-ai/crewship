@@ -4,6 +4,7 @@
 import argparse
 import json
 import re
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -24,6 +25,30 @@ def classify_failure(text: str, exit_code: int) -> str:
     # Schemathesis uses 2 for schema/configuration aborts and 1 for executed
     # checks. An executed but unrecognised failure is conservatively runtime.
     return "schema" if exit_code == 2 else "runtime"
+
+
+def junit_counts(path: str) -> tuple[int, int]:
+    """Return (graded, findings) from a JUnit report.
+
+    `graded` is how many operations the run actually reached a verdict on;
+    `findings` how many of those it graded badly. The pair is what separates
+    "the gate ran and found things" — which advisory mode may excuse — from
+    "the gate did not run", which nothing excuses. An unreadable or missing
+    report is (0, 0): no evidence it ran is not evidence it ran clean.
+    """
+    if not path or not Path(path).is_file():
+        return (0, 0)
+    try:
+        root = ET.parse(path).getroot()
+    except (ET.ParseError, OSError):
+        return (0, 0)
+    graded = 0
+    findings = 0
+    for case in root.iter("testcase"):
+        graded += 1
+        if case.find("failure") is not None or case.find("error") is not None:
+            findings += 1
+    return (graded, findings)
 
 
 def junit_failures(path: str, exit_code: int) -> list[dict[str, str]]:
@@ -51,6 +76,16 @@ def junit_failures(path: str, exit_code: int) -> list[dict[str, str]]:
 
 
 def main() -> None:
+    # `--count-junit <path>` prints "<graded> <findings>" and exits. run.sh
+    # needs both numbers before the summary is written — for the line it
+    # prints into the job log, and to decide whether an advisory run may
+    # pass — and this keeps that arithmetic in one place instead of a
+    # second XML parser in shell.
+    if len(sys.argv) == 3 and sys.argv[1] == "--count-junit":
+        graded, findings = junit_counts(sys.argv[2])
+        print(f"{graded} {findings}")
+        return
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True)
     parser.add_argument("--exit-code", type=int, required=True)
@@ -61,8 +96,14 @@ def main() -> None:
     parser.add_argument("--run-log", required=True)
     for name in ("catalog", "selected", "excluded-auth", "excluded-non-json", "excluded-method"):
         parser.add_argument(f"--{name}-count", type=int, required=True)
+    parser.add_argument(
+        "--advisory",
+        action="store_true",
+        help="record that this phase was allowed to report findings without failing the caller",
+    )
     args = parser.parse_args()
 
+    graded, findings = junit_counts(args.junit_file)
     failures = junit_failures(args.junit_file, args.exit_code)
     failure_class = args.failure_class or ""
     if not failure_class and failures:
@@ -79,11 +120,17 @@ def main() -> None:
     summary = {
         "tool": "crewship-api-contract",
         "phase": args.phase,
+        # `advisory` says the caller was not failed; `status` says what the
+        # run actually found. Both, always — an advisory run that recorded
+        # itself as "passed" would launder its findings into a green record.
+        "advisory": bool(args.advisory),
+        "findings": findings,
         "status": status,
         "failure_class": failure_class or "runtime",
         "operations": {
             "catalog": args.catalog_count,
             "selected": args.selected_count,
+            "graded": graded,
             "excluded": {
                 "methods": args.excluded_method_count,
                 "auth_ui": args.excluded_auth_count,
