@@ -764,6 +764,23 @@ type RenderContext struct {
 	// input. Isolated per schedule; survives process restart (it is durable in
 	// SQL, not in-memory).
 	State map[string]string
+	// Event carries the journal entry that TRIGGERED this render, for the
+	// {{ event.<field> }} namespace an automation's inputs are written
+	// against (internal/automation). Recognised keys are the scope fields a
+	// journal entry always has — mission_id, agent_id, crew_id, run_id —
+	// plus "payload", whose value is the entry's payload map and which
+	// backs {{ event.payload.<key> }}.
+	//
+	// It lives on RenderContext, rather than in a second templating engine
+	// owned by the automation package, precisely so there is ONE substitution
+	// language in this product. A rule author who has written
+	// {{ inputs.x }} in a routine already knows how {{ event.x }} behaves,
+	// including that an unknown reference renders empty rather than erroring.
+	//
+	// Nil for every render the executor performs — a routine step has no
+	// triggering event, so {{ event.anything }} renders empty there, exactly
+	// like any other unset namespace.
+	Event map[string]any
 }
 
 // resolveRef walks one template body (already trimmed of {{ }}) against
@@ -840,6 +857,32 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 			return v, true
 		}
 		return "", false
+	case "event":
+		// event.<field> — the journal entry that triggered an automation.
+		// event.payload.<key> reaches one level into the entry payload;
+		// deeper paths are not supported, matching inputs.X.path.
+		if ctx.Event == nil {
+			return "", false
+		}
+		if parts[1] == "payload" && len(parts) == 3 {
+			m, ok := ctx.Event["payload"].(map[string]any)
+			if !ok {
+				return "", false
+			}
+			v, ok := m[parts[2]]
+			if !ok {
+				return "", false
+			}
+			return stringify(v), true
+		}
+		if len(parts) != 2 {
+			return "", false
+		}
+		v, ok := ctx.Event[parts[1]]
+		if !ok {
+			return "", false
+		}
+		return stringify(v), true
 	case "routine":
 		// routine.state.<key> — cross-run routine state (#1420), loaded per
 		// (pipeline, schedule) at run start. A missing key renders empty,

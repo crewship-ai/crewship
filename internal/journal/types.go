@@ -222,6 +222,26 @@ const (
 	EntryHookFired   EntryType = "hook.fired"
 	EntryHookBlocked EntryType = "hook.blocked"
 
+	// Automations — workspace-scoped rules that turn a journal event into a
+	// deferred routine run (`automations` table, internal/automation). Both
+	// entries below describe a REFUSAL, which is why they exist at all: an
+	// automation that silently stops firing is indistinguishable from one
+	// nobody triggered, and that is the failure mode a rules engine gets
+	// support tickets for.
+	//
+	// EntryAutomationThrottled fires when an automation exceeds its
+	// max_per_hour budget. Exactly ONE per automation per hour, never one
+	// per dropped event — a storm that trips the cap 10,000 times must not
+	// write 10,000 rows saying so. Payload: automation_id, automation_name,
+	// event_type, max_per_hour, window_started_at.
+	EntryAutomationThrottled EntryType = "automation.throttled"
+
+	// EntryAutomationDepthExceeded fires when a composed chain
+	// (automation → routine → action → automation → …) reaches the shared
+	// chain_depth cap and the next hop is refused rather than enqueued.
+	// Payload: automation_id, chain_depth, max_depth, chain_origin.
+	EntryAutomationDepthExceeded EntryType = "automation.depth_exceeded"
+
 	// Pipelines — declarative AI-authored workflows persisted per-
 	// workspace and reusable across crews. See PIPELINES.md for the
 	// full design. Run-level entries (started/completed/failed) frame
