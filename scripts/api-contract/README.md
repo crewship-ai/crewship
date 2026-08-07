@@ -111,9 +111,11 @@ per-PR job's ephemeral server boots with `CREWSHIP_RATELIMIT_DISABLED`
 precisely so the gate can use it: 305 selected operations at
 `--max-examples 10` is a hard ~25-minute floor at 120/m, and that floor does
 not fit a 30-minute job that also builds, boots, seeds, and runs five harness
-suites (#1813). Measured on one laptop against the same seeded fixture, same
-305 operations, same `--max-examples`: **35s unthrottled**, against a
-throttled control run of the same phase still going at 28 minutes. The
+suites (#1813). Measured in CI on that job, same 305 operations, same
+`--max-examples`: the whole step — `auth` plus `positive` — takes **15
+seconds** unthrottled, 13.3s of it inside Schemathesis. Throttled, the same
+phase has never once completed: two runs were killed at the 30-minute job
+cap with the step 28 minutes in. The
 pairing (`off` only where the server's limiter is off)
 and the deadline ordering are asserted by
 `scripts/api-contract-gate-test.sh`, which runs in CI's `shell` job.

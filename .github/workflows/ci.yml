@@ -271,11 +271,11 @@ jobs:
       # named runtime failure plus its summary artifact. The step cap is
       # the backstop if the script itself wedges before that.
       #
-      # 600s is ~17x the measured cost of the phase against an unthrottled
-      # server (31s of Schemathesis for 305 selected operations on a
-      # laptop; a runner is slower but not by an order of magnitude). It
-      # is headroom, not a budget to grow into — if this phase ever needs
-      # more than a couple of minutes, find out why before raising it.
+      # 600s is ~40x the measured cost of this step against an unthrottled
+      # server: 15s for both phases on a runner, 13.3s of it inside
+      # Schemathesis, for the same 305 operations (run 31165903601). It is
+      # headroom, not a budget to grow into — if this phase ever needs more
+      # than a couple of minutes, find out why before raising it.
       - name: Run deterministic API contract gate
         timeout-minutes: 12
         env:
