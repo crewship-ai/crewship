@@ -192,14 +192,64 @@ scope_args=(
   --exclude-path-regex "$NON_JSON_PATH_REGEX"
 )
 
+# Client-side pacing, at the call site for the same reason the method
+# deny-list is: a live instance must not be out-run by its own contract
+# check. The default matches the server's shipped `http.api_per_min`
+# (120), so a run against a real instance stays under that limiter
+# instead of collecting 429s — which Schemathesis reports as contract
+# failures for operations that are in fact fine.
+#
+# `off` (or `none`) drops the throttle entirely. That is correct ONLY
+# against an instance whose own limiter is off — CI's ephemeral,
+# single-client server boots with CREWSHIP_RATELIMIT_DISABLED for
+# exactly this. Anywhere else it buys 429s, not speed.
+#
+# Why it is worth having: with 305 selected operations x
+# --max-examples 10, 120/m is a hard ~25-minute floor per run, one that
+# grows with every route we add and that the PR job's 30-minute budget
+# cannot absorb (#1813). The throttle is protecting a throwaway server
+# from its only client.
+RATE_LIMIT="${API_CONTRACT_RATE_LIMIT:-120/m}"
+rate_limit_args=(--rate-limit "$RATE_LIMIT")
+case "$RATE_LIMIT" in
+  off | none) rate_limit_args=() ;;
+esac
+
+# Deadline for the Schemathesis process itself. Unset by default: a local
+# or nightly run takes whatever time it takes.
+#
+# CI sets it so THIS script owns the kill. A job-level `timeout-minutes`
+# reap reports the job as `cancelled` (indistinguishable from someone
+# pressing stop), fells the process before the EXIT trap can classify
+# anything, and leaves no summary artifact behind — which is precisely
+# the "a check that dies without recording why" failure mode this
+# runner is built to avoid.
+DEADLINE="${API_CONTRACT_TIMEOUT:-}"
+deadline_args=()
+if [[ -n "$DEADLINE" ]]; then
+  command -v timeout >/dev/null 2>&1 \
+    || die "API_CONTRACT_TIMEOUT=$DEADLINE is set but coreutils 'timeout' is not on PATH (macOS: brew install coreutils, or unset the variable)"
+  deadline_args=(timeout "$DEADLINE")
+fi
+
+# `${arr[@]+"${arr[@]}"}` rather than a bare `"${arr[@]}"`: these two
+# arrays can be empty, and bash 3.2 (what macOS ships) treats an empty
+# array expansion as an unbound variable under `set -u`.
+#
 # Keep the output contract small and bounded. The full Schemathesis log stays
 # in the temporary directory only long enough for summary.py to classify it.
-schemathesis --config-file "$SCRIPT_DIR/schemathesis.toml" run \
+${deadline_args[@]+"${deadline_args[@]}"} \
+  schemathesis --config-file "$SCRIPT_DIR/schemathesis.toml" run \
   "$SCHEMA_FILE" "${phase_args[@]}" "${safe_method_args[@]}" "${scope_args[@]}" \
+  ${rate_limit_args[@]+"${rate_limit_args[@]}"} \
   --max-examples 10 \
   --report junit --report-junit-path "$JUNIT_FILE" \
   --output-sanitize true >"$RUN_LOG" 2>&1
 rc=$?
+if [[ -n "$DEADLINE" && "$rc" -eq 124 ]]; then
+  tail -n 8 "$RUN_LOG" >&2
+  fail runtime "schemathesis exceeded API_CONTRACT_TIMEOUT=$DEADLINE on the $PHASE phase ($SELECTED_COUNT operations selected, rate limit ${RATE_LIMIT})"
+fi
 if [[ "$rc" -eq 2 ]]; then
   FAILURE_CLASS=schema
 fi

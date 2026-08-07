@@ -69,6 +69,9 @@ the settings are explicit and do not affect any repository-wide test command.
 
 The default runs are intentionally bounded (`generation.max-examples = 10`,
 one worker, a 10-second request timeout, and a 120-request/minute rate limit).
+The rate limit is the one bound that lives in `run.sh` rather than
+`schemathesis.toml`, because it is the one that has to differ between targets —
+see [Pacing and deadlines](#pacing-and-deadlines).
 The runner prints one concise JSON summary line; it includes the selected and
 excluded operation counts and classifies failures as `schema` or `runtime`.
 When `API_CONTRACT_ARTIFACT_DIR` is set, it also preserves the summary,
@@ -87,6 +90,40 @@ exclusions because they return binary or streaming data and are not suitable
 for this JSON-focused probe. The exclusions are reported separately from the method deny-list,
 so a lower selected count is visible rather than silently looking like route
 coverage.
+
+## Pacing and deadlines
+
+Two environment variables tune how the runner spends time. Both default to
+the conservative value, so a run against a live instance behaves the same as
+before they existed.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `API_CONTRACT_RATE_LIMIT` | `120/m` | Client-side pacing passed to Schemathesis. `off` (or `none`) removes it. |
+| `API_CONTRACT_TIMEOUT` | unset | Seconds before the runner stops Schemathesis itself and exits with a named `runtime` failure. Needs coreutils `timeout` on `PATH`; if it is missing the runner refuses to start rather than silently ignoring the deadline. |
+
+`120/m` matches the server's shipped `http.api_per_min`, so a run against a
+real instance cannot out-run its limiter — which matters, because a 429 is
+reported as a contract failure for an operation that is in fact fine.
+
+`off` is correct only against an instance that has no limiter of its own. The
+per-PR job's ephemeral server boots with `CREWSHIP_RATELIMIT_DISABLED`
+precisely so the gate can use it: 305 selected operations at
+`--max-examples 10` is a hard ~25-minute floor at 120/m, and that floor does
+not fit a 30-minute job that also builds, boots, seeds, and runs five harness
+suites (#1813). Measured on one laptop against the same seeded fixture, same
+305 operations, same `--max-examples`: **35s unthrottled**, against a
+throttled control run of the same phase still going at 28 minutes. The
+pairing (`off` only where the server's limiter is off)
+and the deadline ordering are asserted by
+`scripts/api-contract-gate-test.sh`, which runs in CI's `shell` job.
+
+Set the deadline when something else owns a shorter budget than the run does —
+CI, mainly. Without it a slow phase is reaped by the job's `timeout-minutes`,
+which GitHub reports as `cancelled` (indistinguishable from a human pressing
+stop) and which kills the runner before its `EXIT` trap can leave a verdict
+behind. With it, the runner loses the race to itself and still writes the
+summary.
 
 Failure triage starts with the summary: `schema` means the OpenAPI document,
 Schemathesis configuration, or declared response schema could not be used;
