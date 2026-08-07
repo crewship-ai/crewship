@@ -74,6 +74,16 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"last_status": str(), "last_run_id": str(), "fire_count": integer(), "created_at": str(), "updated_at": str(),
 	})
 
+	// One line of GET /api/v1/chats/{chatId}/stream. `type` is either an agent
+	// event (text/thinking/tool_call/tool_result/done/error/run_begin) or a
+	// `stream.`-prefixed control frame (open/heartbeat/reset/end) — the dot is
+	// what keeps the two families distinguishable after flattening.
+	runStreamFrame := object(map[string]any{
+		"type": str(), "seq": integer(), "content": str(), "metadata": anyObject(),
+		"chat_id": str(), "from_seq": integer(), "active": boolean(),
+		"reason": str(), "last_seq": integer(),
+	})
+
 	chatCreate := request(map[string]any{"session_id": str(), "origin": str()})
 	conversationSearch := request(map[string]any{"agent_id": str(), "query": str(), "limit": integer()}, "agent_id", "query")
 	inboxPatch := request(map[string]any{"state": str(), "resolved_action": str()}, "state")
@@ -98,6 +108,11 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"GET /api/v1/chats/{chatId}/participants":                              {Response: object(map[string]any{"participants": array(participant)})},
 		"POST /api/v1/chats/{chatId}/participants":                             {Request: participantAdd, Response: participant},
 		"POST /api/v1/chats/{chatId}/steer":                                    {Request: anyObject(), Response: anyObject()},
+		// The NDJSON agent-run stream (#1818). The response schema describes ONE
+		// frame, not the whole body: the body is an unbounded sequence of these
+		// separated by newlines, which OpenAPI has no vocabulary for — the same
+		// compromise `GET /api/v1/journal/stream` makes for text/event-stream.
+		"GET /api/v1/chats/{chatId}/stream": {Response: runStreamFrame, ResponseMedia: []string{"application/x-ndjson"}},
 	}
 	conversations := map[string]DomainSchema{
 		"POST /api/v1/conversations/search": {Request: conversationSearch, Response: object(map[string]any{"hits": array(searchHit), "query": str(), "count": integer()})},

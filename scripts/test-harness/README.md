@@ -44,9 +44,14 @@ green night closes the bot's own issue).
 | `test-keeper-toctou.sh` | 15 assertions, 0 fail |
 | `test-orphan-token-reap.sh` | 1 assertion + 1 self-SKIP (no docker provider) — and see the coverage note below for what it does and does not prove on a PR runner |
 | `test-attack-surface.sh` | 4 assertions (Tier A), Tier B SKIPs by design |
+| `test-run-stream.sh` | Tier A (CLI parity, 404-not-403, idle-chat frame contract); Tier B SKIPs without a provider |
 
 All five were driven end-to-end against a clean-DB bootstrap of exactly that
-sequence before the workflow was written.
+sequence before the workflow was written. `test-run-stream.sh` (#1818) joined
+the tier afterwards; it is claimed by the control-plane matrix rather than the
+PR subset, and its own output states which of its two tiers actually ran — a
+green square proves the CLI↔API parity and the 404-not-403 rule, and says out
+loud when it did **not** prove live delivery of a run.
 
 **PR subset:** `test-keeper.sh`, `test-keeper-config.sh`,
 `test-keeper-aux.sh`, `test-inbox.sh`, and `test-orphan-token-reap.sh`.

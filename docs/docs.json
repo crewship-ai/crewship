@@ -63,6 +63,7 @@
               },
               "guides/first-crew",
               "guides/chat-sessions",
+              "guides/watching-agent-runs",
               "guides/manifests",
               "guides/devcontainers",
               "guides/credentials",
