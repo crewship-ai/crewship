@@ -89,7 +89,7 @@ An uploaded file is attacker-controlled input. On a self-hosted instance anyone
 who can comment on an issue can attach to it, and the content lands directly in
 an agent's context — the ingress prompt-injection surface
 ([OWASP LLM01](https://owasp.org/www-project-top-10-for-large-language-model-applications/))
-that Crewship's [trust fence](/guides/security#the-untrusted-fence) exists for.
+that Crewship's trust fence (`internal/untrusted`) exists for.
 
 Both the **filename** and the **content** go through the fence. The filename
 matters as much as the body: `ignore previous instructions.txt` is a shorter and
