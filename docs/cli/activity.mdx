@@ -4,7 +4,7 @@ description: "Cross-crew activity feed — assignments, peer conversations, and 
 icon: "activity"
 ---
 
-<!-- docs-inventory: ignore-api /api/v1/activity reason=historical-removed-route -->
+{/* docs-inventory: ignore-api /api/v1/activity reason=historical-removed-route */}
 # Activity
 
 `cmd/crewship/cmd_activity.go` is a journal-backed view: it queries `GET /api/v1/journal` filtered to the activity entry types (`peer.conversation`, `peer.escalation`, and the full assignment lifecycle `assignment.created` → `assignment.running` → `assignment.completed`/`assignment.failed`), descending by time, narrowable by crew. The journal is the canonical event stream, so this is an **event** feed (one row per event) — not the entity snapshot the retired `/api/v1/activity` aggregator returned. The terminal rows are included on purpose: without them the feed would never show an assignment finishing or failing. The parallel `run.completed`/`run.failed` entries (keyed by `trace_id`) are the finer per-run trace — use [`crewship journal`](/cli/journal) for those.

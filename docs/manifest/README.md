@@ -164,7 +164,7 @@ Some entities are deliberately out of scope:
 | `workspace_members`, `crew_members` | IAM lives in SSO / UI / CSV import, not YAML |
 | `sessions`, `cli_pairings`, `oauth_states` | Ephemeral auth state |
 | `backup_catalog`, `scheduled_jobs` | System runtime |
-| `keeper_requests`, `approvals_queue` | Runtime instances of policies (policies themselves may land in a future `kind: ApprovalPolicy`) | <!-- docs-inventory: ignore — names a hypothetical future kind, not a shipped one -->
+| `keeper_requests`, `approvals_queue` | Runtime instances of policies (policies themselves may land in a future `kind: ApprovalPolicy`) | {/* docs-inventory: ignore — names a hypothetical future kind, not a shipped one */}
 
 ## See also
 

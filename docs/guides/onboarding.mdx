@@ -16,7 +16,9 @@ Behind both surfaces the onboarding service (`internal/api/onboarding.go` and `i
 
 <Note>
 Onboarding takes a **CLI token**, not a raw provider API key. For Anthropic it expects a Claude Code OAuth token (`sk-ant-oat…`, produced by `claude setup-token`) and `validateOnboardingCredential` rejects a raw account key (`sk-ant-api…`) with a fix-it message, then probes `api.anthropic.com` to confirm the token works before completing. On the CLI, `crewship setup` takes this as `--token` (the older `--api-key` alias is deprecated).
-</Note> After that flag flips, both `/onboarding` and the bootstrap auth page redirect to the regular sign-in flow — the wizard is intentionally one-shot.
+</Note>
+
+After that flag flips, both `/onboarding` and the bootstrap auth page redirect to the regular sign-in flow — the wizard is intentionally one-shot.
 
 ## Related
 

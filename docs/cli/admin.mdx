@@ -4,7 +4,7 @@ description: "Host-only operator commands that bypass the HTTP API and write dir
 icon: "key-round"
 ---
 
-<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 # crewship admin
 
 `cmd/crewship/cmd_admin.go` exposes the **operator-on-the-host recovery surface**. Every subcommand under `admin` opens the local SQLite database directly (no HTTP, no auth token) — the server doesn't even need to be running. Use these when a user is locked out of the UI.
