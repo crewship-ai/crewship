@@ -280,8 +280,42 @@ func (r Ref) APIEndpointFor(host string) string {
 	if r.Scheme == "http" {
 		scheme = "http"
 	}
+	// Canonicalise before anything compares against it. `host` is the host the
+	// CALLER vetted, which traces back to a credential's operator-typed
+	// account_label; Fetch admits it with strings.EqualFold against ref.Host
+	// and then hands it here unchanged. Every SaaS branch below is an exact
+	// ==, so without this a differently-cased spelling of the same host — DNS
+	// does not distinguish them — misses its branch and lands somewhere wrong:
+	//
+	//	GITHUB.COM      → https://GITHUB.COM/api/v3/…  the GitHub ENTERPRISE
+	//	                  layout addressed at the SaaS host. Not an error, just
+	//	                  a 404 on every link, which reads like a bad token.
+	//	WWW.GITLAB.COM  → the 308 to the bare domain that CheckRedirect refuses,
+	//	                  i.e. "cross-host-redirect" on an ordinary paste.
+	//
+	// Lower-casing is safe for self-hosted hosts too (hostnames are
+	// case-insensitive) and is NOT a rewrite: only the two exact SaaS matches
+	// below change which host is addressed.
+	host = strings.ToLower(host)
 	switch r.Provider {
 	case ProviderGitLab:
+		// www.gitlab.com is a live host, and it answers 308 to the bare
+		// domain. Addressing the API there therefore produced a redirect
+		// ACROSS a host boundary, which Fetch's CheckRedirect refuses on
+		// purpose — it will not carry a credential to a host the caller did
+		// not vet. The result was that an ordinary www paste could never
+		// succeed, failing every time with "cross-host-redirect", an error
+		// about a defence rather than about anything the user did.
+		//
+		// The GitHub arm below has had its equivalent branch since #1758
+		// (www.github.com → api.github.com); GitLab was missing its half.
+		// Only the exact SaaS host is rewritten: a self-hosted instance that
+		// merely begins with "www." keeps its own host, because rewriting it
+		// would send someone's intranet merge request, with their
+		// credential, to gitlab.com.
+		if host == "www.gitlab.com" {
+			host = "gitlab.com"
+		}
 		return scheme + "://" + host +
 			"/api/v4/projects/" + url.PathEscape(r.ProjectPath()) +
 			"/merge_requests/" + strconv.Itoa(r.Number)

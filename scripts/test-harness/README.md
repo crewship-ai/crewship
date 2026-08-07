@@ -94,10 +94,21 @@ delegation still work" until then.
 
 **Never run in CI, on purpose:** `test-realworld-github.sh`,
 `test-secretless-github.sh`, `test-notifications-shoutrrr.sh`,
-`test-ollama-local.sh`, `test-datastore-redis-auth.sh` and
-`test-redteam-insider.sh` — each needs a secret, an external service, a
-provisioned crew, or a shared dev slot it is allowed to mutate. The reasons are
-spelled out per suite in the workflow header.
+`test-ollama-local.sh`, `test-datastore-redis-auth.sh`,
+`test-gitlink-realworld.sh` and `test-redteam-insider.sh` — each needs a
+secret, an external service, a provisioned crew, or a shared dev slot it is
+allowed to mutate. The reasons are spelled out per suite in the workflow
+header.
+
+> `test-gitlink-realworld.sh` is *safe* in CI — with no forge token it SKIPs
+> and exits 0 before it contacts the server or any forge — but it would prove
+> nothing there, so it belongs in `EXCLUDED_SUITES` rather than in a matrix.
+> It is claimed in `nightly-harness.yml` — both in `EXCLUDED_SUITES` and in
+> the "Suites deliberately NOT run here" header block — so
+> `suite-coverage-guard`, which fails the nightly on any `test-*.sh` claimed
+> by no tier, is satisfied. The exclusion is for honesty, not safety: a suite
+> that can only ever skip in CI would report green while proving nothing
+> about the forges it exists to check.
 
 ### Adding a suite: the tiers are enforced, not documented
 
@@ -193,6 +204,31 @@ Two CI-specific notes worth keeping:
    ```
    Every section SKIPs cleanly when its own inputs are absent, so a run with
    none of them still reports a useful result.
+6. Only for `test-gitlink-realworld.sh`, and one per forge — each enables that
+   provider's half and nothing else:
+   ```bash
+   GITLINK_GITHUB_TOKEN=ghp_...    # read-only GitHub PAT; `public_repo` (classic)
+                                   # or a fine-grained token with no repo access
+   GITLINK_GITLAB_TOKEN=glpat-...  # gitlab.com PAT with `read_api`
+   ```
+   The objects it reads are public and long-lived, and it only ever `GET`s
+   them — nothing is written to either forge. With neither variable set the
+   whole file SKIPs and exits 0 without contacting anything.
+
+   Two preconditions, both worth knowing before you read a run as coverage —
+   and they do **not** behave the same way when unmet.
+
+   The resolved CLI must be new enough to have `credential create
+   --account-label` and `issue link` (#1758). Without either, the suite SKIPs.
+
+   The workspace must not already hold an **older** ACTIVE credential for that
+   provider labelled with the forge host — that one wins credential resolution,
+   and the suite then **FAILS**, it does not skip. `crewship credential
+   list/get` do not expose `account_label`, so this condition is stated rather
+   than checked; the good-path failure message names it as the likely cause.
+   Exposing `account_label` on those commands would let the suite check its own
+   precondition, and would answer "which credential will this link resolve to?"
+   for operators too — worth doing, not done here.
 
 ## Run
 
@@ -223,6 +259,8 @@ cd scripts/test-harness
 
 ./run-all.sh                 # memory + notifications + credentials + determinism
 WITH_GITHUB=1 ./run-all.sh   # + real-world GitHub scenario
+WITH_GITLINK=0 ./run-all.sh  # - the real-forge git-link suite (it is in by default;
+                             #   without GITLINK_*_TOKEN it skips and costs nothing)
 WITH_SECRETLESS=1 ./run-all.sh   # + the secretless-GitHub proof (T-H1…T-H9)
 ./run-all.sh --quick         # skip the determinism sweep
 
@@ -268,6 +306,7 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 | `test-keeper-config.sh` | the **instance judge configuration** via the real `crewship keeper config` CLI: `get` reports the effective judge **with provenance** (`instance` / `env` / `default`); `set` is a **partial update** — an unmentioned field keeps both its value and its provenance; an override reads back as `source=instance`, so the change is genuinely in force **without a restart**; clearing a field **returns it to the server's `KEEPER_*` value**; enabling Keeper with **no judge is refused** (fail-closed — it would DENY every credential request); `reset` drops every override. Captures the starting configuration and restores it **as it was found**, so an inherited field goes back to inheriting rather than to a pinned copy. SKIPs if the installed CLI has no `keeper config` command, if `jq` is missing, or if the caller is not OWNER/ADMIN. Whether the configured judge actually answers is `keeper judge test`, a separate script — it needs a real model on the target. |
 | `test-determinism.sh` | a pure-transform recipe yields **byte-identical** `@json` output across N runs; prints a latency/cost **baseline**. |
 | `test-realworld-github.sh` | an agent uses the in-container **`gh`** CLI against a public repo (read-only); SKIPs if `gh` isn't authenticated. |
+| `test-gitlink-realworld.sh` | **the link-first Git integration against a REAL forge** — the one thing `internal/gitlink`'s fixtures cannot do. Attaches real, public, long-lived objects to a throwaway issue via `crewship issue link` and asserts the **parse**, not the 200: a **MERGED** PR/MR reads MERGED (on GitHub only a non-null `merged_at` distinguishes it — `state` says `closed`), a **closed-not-merged** object from the same repo reads CLOSED (the GitLab default has a **null `closed_at`**, so CLOSED can only have come from `state`), and **author / source branch / target branch** carry through — i.e. `user.login`+`head.ref`+`base.ref` and `author.username`+`source_branch`+`target_branch`, the exact keys an upstream rename would break. Then the two failures fixtures cannot honestly simulate: a **repository that does not exist** (real 404) and a **credential the provider rejects** (real 401/403), both asserted on Crewship's own **RFC 7807 `type` URI + `code`** rather than the status, because three different remedies share 502. Also: `relink` re-reads the provider and clears `last_sync_error`. **Read-only against the forge**; everything it writes is one Crewship issue + up to two credentials per provider, nonce-named and removed on exit (including on Ctrl-C). Enabled per provider by `GITLINK_GITHUB_TOKEN` / `GITLINK_GITLAB_TOKEN`; with neither it SKIPs before contacting anything. |
 | `test-secretless-github.sh` | **the secretless claim, end to end** (PRD-CREDENTIALS-V2 §4.3, T-H1…T-H9): a credential assigned to a **crew** reaches the crew's agent (proved by a synthetic **canary** whose fingerprint the agent reports back) and makes **`gh auth status`** work with **no step inside the container**; `gh auth login` **never ran** (no `hosts.yml`, nothing in shell history); **zero-disk** — the canary value appears in **no file** under `$HOME`, `/home/agent`, `/secrets`, `/tmp`; private-repo **clone + commit + push** over HTTPS leaves **no `.git-credentials`**; **`docker login ghcr.io`** with the same PAT; **git over SSH** from an `SSH_KEY` credential; **revocation** — after `credential delete` the agent's next `gh` exec **fails** (the proof no dried copy survived); **cross-crew isolation** — crew B's agent has neither the value nor a file. Filesystem facts come from a token-zero `script` routine running in the crew container (the `test-redteam-insider.sh` pattern), never from the model. **Every section SKIPs on its own missing input** — with none of `SEED_GITHUB_TOKEN` / `SEED_GITHUB_TOKEN_CLASSIC` / `SEED_GITHUB_SSH_KEY` / `SEED_GITHUB_TEST_REPO` you still get the fanout, zero-disk and isolation legs. Opt-in: `WITH_SECRETLESS=1 ./run-all.sh`. **Dev slots only.** |
 | `test-orphan-token-reap.sh` | the **#1385 stable-master** remediation lever: `admin reap-orphan-containers` is wired (API↔CLI parity), and a **dry-run sweep against the running server finds ZERO orphans** — proving the fail-safe classifier never false-positives a healthy container — and is **non-mutating + idempotent** (the two sweeps must agree byte-for-byte, whichever answer this environment produces). Self-**SKIPs** when the provider isn't docker (503), and again when docker is present but **no crew container is running** — that is "nothing to inspect", not a clean sweep, and the suite refuses to report it as one. An **inert detector** (#1390) is a hard FAIL, not a skip. The restart-invalidation property itself is locked by the Go unit tests. |
 | `test-keeper-ingress-fence.sh` | the **internal keeper HTTP surface** rejects every request with no token / forged / zero / spoofed-XFF (fence holds), across a **method matrix** (GET/PUT/DELETE/PATCH/OPTIONS), a **malformed-token fuzz** (empty, 8 KB, CRLF, SQL/shell/path-ish), an **oversized body**, and **other `/internal/*`** routes; asserts **no info leak** in rejections and that the **public API still needs auth**; runs a **constant-time timing probe**; flags whether the **network-origin gate** is defeated behind the proxy (off-host → 403 not 404 ⇒ static `X-Internal-Token` is the sole guard). *The one suite that uses raw `curl` — the internal channel has no CLI by design.* |
@@ -320,3 +359,4 @@ they aren't silently lost:
 | 4c | **No CLI path ingests a multi-line secret.** `credential create --value-stdin` reads a single line (`bufio.Scanner` + one `Scan`), there is no `--value-file`, and manifests carry credential *slots*, not values — so an `SSH_KEY` PEM can only be passed via `--value`, which puts it in the process argv. | **OPEN** — `test-secretless-github.sh` §6 SKIPs the git-over-SSH leg with that reason instead of leaking the key; the leg goes live unchanged the moment the CLI can take a multi-line value. | `cmd/crewship/cmd_credential_mutate.go` |
 | 4d | **No CLI can exec a command in a crew container.** The PRD's §4.4 CI gate is written as `docker exec … + grep`, which the CLI cannot express. The harness works around it with a token-zero `script` routine step (deterministic, in-container, CLI-driven); anything that must run *as the agent* (i.e. with credential env) still goes through `crewship ask`, so it is model-mediated. | **OPEN** (workaround in place) | `scripts/test-harness/test-secretless-github.sh` |
 | 4 | Synchronous `routine run` of an **approval gate** surfaces **no pollable waitpoint** | **FIXED** — the run parks as WAITING with a waitpoint token; the original symptom was a CLI gap (`waitpoints list --format json` printed the human table so jq never saw the token). The suite now FAILS (not skips) if no waitpoint appears. | `cmd/crewship/cmd_routine_waitpoints.go` |
+| 5 | **`account_label` is write-only from the CLI.** `credential create --account-label` exists (it is how a git link is matched to a self-hosted forge, #1758), but neither `credential list --format json` nor `credential get --format json` returns the field — so no operator or agent can answer "which credential will this `github.com` link resolve to?" from the CLI. Found while writing `test-gitlink-realworld.sh`, which therefore cannot verify its own precondition. | **OPEN** — the suite states the precondition instead, and its good-path failure message names it as the likely cause. | `internal/api/credentials.go` (the API response carries it) ↔ `cmd/crewship/cmd_credential.go` (the list/get structs drop it) |

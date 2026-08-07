@@ -117,10 +117,15 @@ func TestInitProviders_StorageAndState(t *testing.T) {
 	}
 }
 
+// TestInitProviders_UnknownProvidersTolerated covers Container and State only.
+// Storage used to be asserted here with `s3` — "recognised in config
+// validation but not wired here" — which is precisely the defect #1768 item 7
+// reported, pinned as intended behaviour. Storage now fails init instead; see
+// TestInitProviders_UnwiredStorageProviderErrors. The tolerance for the other
+// two is deliberate and stays: --no-docker legitimately leaves Container nil.
 func TestInitProviders_UnknownProvidersTolerated(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Container.Provider = "warp-drive"
-	cfg.Storage.Provider = "s3" // recognised in config validation but not wired here
 	cfg.State.Provider = "postgres"
 
 	deps, err := initProviders(context.Background(), cfg, nil, covLogger(), true)

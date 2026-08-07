@@ -52,6 +52,13 @@ tests=(test-memory.sh test-delegation.sh test-crew-links.sh test-notifications.s
 # the fake webhook receiver — see the script header for the network-
 # reachability note when SERVER is a remote devN.
 [[ "${WITH_NOTIFICATIONS_SHOUTRRR:-0}" == "1" ]] && tests+=(test-notifications-shoutrrr.sh)
+# Real-forge proof for the link-first Git integration (internal/gitlink). Gated
+# by its own secrets rather than by a flag: with neither GITLINK_GITHUB_TOKEN
+# nor GITLINK_GITLAB_TOKEN set it SKIPs before contacting the server or any
+# forge, so including it by default costs a run nothing. With a token set it
+# creates + deletes one issue and up to two credentials per provider, and only
+# ever GETs public objects upstream. Opt out with WITH_GITLINK=0.
+[[ "${WITH_GITLINK:-1}" == "1" ]] && tests+=(test-gitlink-realworld.sh)
 # Adversarial suites — opt-in, and deliberately NOT in the default set.
 #
 # test-attack-surface.sh (Tier A) is read-only and creates nothing, but it is
