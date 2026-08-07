@@ -259,6 +259,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.automations = auh
 	r.mux.Handle("GET /api/v1/automations", authed(wsCtx(http.HandlerFunc(auh.List))))
 	r.authedMut("POST", "/api/v1/automations", roleManage, auh.Create)
+	// Read-only: it replays entries already written and never enqueues a
+	// run, so it is a create-level permission rather than manage.
+	r.authedMut("POST", "/api/v1/automations/preview", roleCreate, auh.PreviewMatch)
 	r.authedMut("PATCH", "/api/v1/automations/{id}", roleManage, auh.Patch)
 	r.authedMut("DELETE", "/api/v1/automations/{id}", roleManage, auh.Delete)
 

@@ -186,6 +186,67 @@ id that is already deleted answers `404`.
 
 ---
 
+## Preview what a rule would catch
+
+```
+POST /api/v1/automations/preview
+```
+
+**Authentication:** session or bearer token; `create` permission.
+
+Replays recent journal history against a matcher and reports what it would
+have caught. Nothing is saved and no run is started, so this is safe against a
+live workspace.
+
+A matcher is otherwise written blind — save it, wait, and notice nothing
+happened. When nothing matches, the reply names the clause that excluded the
+most entries and what was actually there.
+
+**Request:** either name a saved rule, or describe a candidate.
+
+```json
+{ "automation_id": "aut_9f2c1a04bd77e310" }
+```
+
+```json
+{
+  "event_type": "mission.status_change",
+  "matcher": { "payload_equals": { "action": "status_changed" } }
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "event_type": "mission.status_change",
+  "window_hours": 168,
+  "scanned": 6,
+  "matched": 0,
+  "samples": [],
+  "top_rejection": {
+    "clause": "payload_equals.to",
+    "count": 6,
+    "detail": "the entry carries no key \"to\"; keys present: action, details",
+    "key_absent": true
+  }
+}
+```
+
+`scanned` is entries of this event type in the window. **Zero means there is
+nothing to judge the rule against — not that the rule is wrong**, and the two
+must not be confused: a quiet workspace would otherwise send you to edit a
+predicate that is correct.
+
+`key_absent` marks the one failure no value change can fix: the predicate
+names a payload key the event does not carry.
+
+**Status codes:** `200` OK · `400` neither `automation_id` nor `event_type` ·
+`401` no workspace · `403` below `create` · `404` unknown `automation_id` ·
+`500` journal read failed.
+
+---
+
 ## CLI equivalents
 
 | API | CLI |

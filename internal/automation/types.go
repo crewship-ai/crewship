@@ -37,6 +37,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -241,4 +243,87 @@ func EventContext(e journal.Entry) map[string]any {
 		"run_id":  e.TraceID,
 		"payload": e.Payload,
 	}
+}
+
+// MatchResult is why a matcher did or did not accept an entry.
+//
+// Matches answers yes/no, which is all the registry needs. A person needs
+// the other half: a rule that never fires is the worst failure this feature
+// has, because nothing tells you — `automation create`'s own help text warns
+// about it, which is an admission rather than a fix. Explain is what a
+// preview can print, so a matcher can be checked before it is trusted.
+type MatchResult struct {
+	Matched bool
+	// Clause is the predicate that rejected, in the matcher's own vocabulary
+	// ("crew_ids", "payload_equals.to"), so the answer names something the
+	// author can go and edit.
+	Clause string
+	// Detail is what was wanted and what was there.
+	Detail string
+	// KeyAbsent marks the one failure that no value change can fix: the
+	// predicate names a payload key the entry does not carry at all. "to !=
+	// DONE" reads like a typo in DONE; "there is no key `to`" tells you the
+	// rule can never match anything.
+	KeyAbsent bool
+}
+
+// Explain reports the first clause that rejects, or a match.
+//
+// It MUST agree with Matches on every input — a diagnostic describing a
+// different matcher than the one doing the work is worse than none. A test
+// pins the agreement rather than a comment asking for it.
+func (m Matcher) Explain(e journal.Entry) MatchResult {
+	reject := func(clause, detail string) MatchResult {
+		return MatchResult{Clause: clause, Detail: detail}
+	}
+	if len(m.CrewIDs) > 0 && !contains(m.CrewIDs, e.CrewID) {
+		return reject("crew_ids", fmt.Sprintf("entry crew %q is not one of %v", e.CrewID, m.CrewIDs))
+	}
+	if len(m.AgentIDs) > 0 && !contains(m.AgentIDs, e.AgentID) {
+		return reject("agent_ids", fmt.Sprintf("entry agent %q is not one of %v", e.AgentID, m.AgentIDs))
+	}
+	if len(m.MissionIDs) > 0 && !contains(m.MissionIDs, e.MissionID) {
+		return reject("mission_ids", fmt.Sprintf("entry issue %q is not one of %v", e.MissionID, m.MissionIDs))
+	}
+	if len(m.Severities) > 0 && !contains(m.Severities, string(e.Severity)) {
+		return reject("severities", fmt.Sprintf("entry severity %q is not one of %v", e.Severity, m.Severities))
+	}
+	// Sorted so a preview over many entries reports the same clause every
+	// time; ranging a map would name a different one per run and make the
+	// diagnostic look like a flake.
+	keys := make([]string, 0, len(m.PayloadEquals))
+	for k := range m.PayloadEquals {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		want := m.PayloadEquals[k]
+		got, ok := e.Payload[k]
+		if !ok {
+			return MatchResult{
+				Clause:    "payload_equals." + k,
+				KeyAbsent: true,
+				Detail: fmt.Sprintf("the entry carries no key %q; keys present: %s",
+					k, strings.Join(payloadKeys(e.Payload), ", ")),
+			}
+		}
+		if !jsonEqual(got, want) {
+			return reject("payload_equals."+k, fmt.Sprintf("want %v, entry has %v", want, got))
+		}
+	}
+	return MatchResult{Matched: true}
+}
+
+// payloadKeys lists what an entry actually carries, sorted. This is the fix
+// a reader needs when their predicate names a key that is not there.
+func payloadKeys(p map[string]any) []string {
+	if len(p) == 0 {
+		return []string{"(none)"}
+	}
+	out := make([]string, 0, len(p))
+	for k := range p {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

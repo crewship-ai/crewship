@@ -148,6 +148,7 @@ POST /api/v1/auth/cli-token roleSelf
 POST /api/v1/auth/pair/start roleSelf
 POST /api/v1/auth/sessions/{id}/revoke roleSelf
 POST /api/v1/automations roleManage
+POST /api/v1/automations/preview roleCreate
 POST /api/v1/chats/{chatId}/messages/{messageId}/reactions roleSelf
 POST /api/v1/chats/{chatId}/participants roleSelf
 POST /api/v1/chats/{chatId}/steer roleSelf

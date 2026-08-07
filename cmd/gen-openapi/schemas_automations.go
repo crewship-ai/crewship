@@ -74,5 +74,34 @@ func automationSchemaCatalog() map[string]DomainSchema {
 		"DELETE /api/v1/automations/{id}": {
 			Response: obj(map[string]any{"status": str(), "id": str()}),
 		},
+		// The preview: a rule judged against history it has already seen,
+		// without saving it and without starting a run. Either name a saved
+		// rule or describe a candidate; the reply says what it WOULD have
+		// caught, and when that is nothing, which clause is responsible.
+		"POST /api/v1/automations/preview": {
+			Request: obj(map[string]any{
+				"automation_id": map[string]any{"type": "string",
+					"description": "Preview a saved rule. Supply this OR event_type + matcher."},
+				"event_type": map[string]any{"type": "string",
+					"description": "Journal entry type to replay, for a rule that is not saved yet."},
+				"matcher": matcher,
+			}),
+			Response: obj(map[string]any{
+				"event_type":   str(),
+				"window_hours": integer(),
+				"scanned": map[string]any{"type": "integer",
+					"description": "Entries of this event type in the window. Zero means there is nothing to judge the rule against — NOT that the rule is wrong."},
+				"matched": integer(),
+				"samples": arr(map[string]any{"type": "object", "additionalProperties": true}),
+				"top_rejection": obj(map[string]any{
+					"clause": map[string]any{"type": "string",
+						"description": "The predicate that excluded the most entries, named in the matcher's own vocabulary."},
+					"count":  integer(),
+					"detail": str(),
+					"key_absent": map[string]any{"type": "boolean",
+						"description": "The predicate names a payload key the entry does not carry, so no change of value can make it match."},
+				}),
+			}),
+		},
 	}
 }

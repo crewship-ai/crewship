@@ -274,25 +274,9 @@ func automationWriteBody(cmd *cobra.Command, create bool) (map[string]any, error
 		body["max_per_hour"] = m
 	}
 
-	matcher := map[string]any{}
-	if v, _ := cmd.Flags().GetStringSlice("crew"); len(v) > 0 {
-		matcher["crew_ids"] = v
-	}
-	if v, _ := cmd.Flags().GetStringSlice("agent"); len(v) > 0 {
-		matcher["agent_ids"] = v
-	}
-	if v, _ := cmd.Flags().GetStringSlice("mission"); len(v) > 0 {
-		matcher["mission_ids"] = v
-	}
-	if v, _ := cmd.Flags().GetStringSlice("severity"); len(v) > 0 {
-		matcher["severities"] = v
-	}
-	if v, _ := cmd.Flags().GetStringSlice("payload-equals"); len(v) > 0 {
-		pairs, err := parseKeyValues(v, "--payload-equals")
-		if err != nil {
-			return nil, err
-		}
-		matcher["payload_equals"] = pairs
+	matcher, err := matcherFromFlags(cmd)
+	if err != nil {
+		return nil, err
 	}
 	if len(matcher) > 0 {
 		body["matcher"] = matcher
@@ -355,7 +339,11 @@ func parseKeyValues(pairs []string, flag string) (map[string]any, error) {
 }
 
 func init() {
-	for _, c := range []*cobra.Command{automationCreateCmd, automationUpdateCmd} {
+	// preview takes the predicate flags too — the whole point is checking a
+	// candidate before it is saved, which needs the same vocabulary the save
+	// takes. It skips --routine and the burst controls: they do not change
+	// what a rule MATCHES.
+	for _, c := range []*cobra.Command{automationCreateCmd, automationUpdateCmd, automationPreviewCmd} {
 		c.Flags().String("name", "", "Human-readable name")
 		c.Flags().String("event", "", "Journal entry type to watch, e.g. mission.status_change")
 		c.Flags().String("routine", "", "Routine slug to run when an entry matches")
@@ -370,9 +358,135 @@ func init() {
 	}
 
 	automationCmd.AddCommand(automationListCmd)
+	automationCmd.AddCommand(automationPreviewCmd)
 	automationCmd.AddCommand(automationCreateCmd)
 	automationCmd.AddCommand(automationUpdateCmd)
 	automationCmd.AddCommand(automationEnableCmd)
 	automationCmd.AddCommand(automationDisableCmd)
 	automationCmd.AddCommand(automationDeleteCmd)
+}
+
+// automationPreviewCmd answers the question `automation create` warns about
+// in its own help text and could not answer: would this rule ever fire?
+//
+// A matcher is written blind today — save it, wait, notice nothing happened.
+// The shipped example predicated on a payload key the event does not carry,
+// so the first rule most readers built did nothing and told them nothing.
+// Judging a candidate against history moves that answer to before the rule
+// is trusted, and names the clause responsible when the answer is no.
+var automationPreviewCmd = &cobra.Command{
+	Use:   "preview [id]",
+	Short: "Replay recent history against a rule and report what it would have caught",
+	Long: `Replay recent journal entries against a matcher and report what it would
+have caught — without saving anything and without starting a run.
+
+With an id, previews a saved rule. Without one, previews a candidate built
+from the same flags ` + "`create`" + ` takes, so a predicate can be checked before it
+is committed to.
+
+When nothing matches, the clause that excluded the most entries is named,
+along with what it wanted and what was actually there. A predicate on a
+payload key the event never carries is called out as such: no change of
+value can rescue it.
+
+Examples:
+  crewship automation preview aut_1234
+  crewship automation preview --event mission.status_change --payload-equals action=status_changed`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		body := map[string]any{}
+		if len(args) == 1 {
+			body["automation_id"] = args[0]
+		} else {
+			event, _ := cmd.Flags().GetString("event")
+			if event == "" {
+				return fmt.Errorf("give an automation id, or --event to preview a candidate rule")
+			}
+			body["event_type"] = event
+			matcher, err := matcherFromFlags(cmd)
+			if err != nil {
+				return err
+			}
+			body["matcher"] = matcher
+		}
+
+		resp, err := newAPIClient().Post("/api/v1/automations/preview", body)
+		if err != nil {
+			return err
+		}
+		var out struct {
+			EventType   string `json:"event_type"`
+			WindowHours int    `json:"window_hours"`
+			Scanned     int    `json:"scanned"`
+			Matched     int    `json:"matched"`
+			TopReject   struct {
+				Clause    string `json:"clause"`
+				Count     int    `json:"count"`
+				Detail    string `json:"detail"`
+				KeyAbsent bool   `json:"key_absent"`
+			} `json:"top_rejection"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		return f.AutoHuman(out, func() {
+			fmt.Printf("%s · last %dh\n", out.EventType, out.WindowHours)
+			switch {
+			case out.Scanned == 0:
+				// Not a verdict on the rule. Saying "0 matched" here would
+				// send a reader to edit a matcher that may be fine.
+				fmt.Printf("  no %s entries in the window — nothing to judge this rule against yet\n",
+					out.EventType)
+			case out.Matched > 0:
+				fmt.Printf("  would have fired %d time(s) out of %d entries\n", out.Matched, out.Scanned)
+			default:
+				fmt.Printf("  would NOT have fired: 0 of %d entries matched\n", out.Scanned)
+				if out.TopReject.Clause != "" {
+					fmt.Printf("  %s excluded %d of them — %s\n",
+						out.TopReject.Clause, out.TopReject.Count, out.TopReject.Detail)
+					if out.TopReject.KeyAbsent {
+						fmt.Println("  that key is absent, so no value will match; predicate on a key the event carries")
+					}
+				}
+			}
+		})
+	},
+}
+
+// matcherFromFlags builds a matcher out of the predicate flags.
+//
+// Shared by `create`, `update` and `preview` deliberately: a preview that
+// interpreted a flag differently from the command that saves it would be a
+// preview of a rule nobody is going to run.
+func matcherFromFlags(cmd *cobra.Command) (map[string]any, error) {
+	matcher := map[string]any{}
+	if v, _ := cmd.Flags().GetStringSlice("crew"); len(v) > 0 {
+		matcher["crew_ids"] = v
+	}
+	if v, _ := cmd.Flags().GetStringSlice("agent"); len(v) > 0 {
+		matcher["agent_ids"] = v
+	}
+	if v, _ := cmd.Flags().GetStringSlice("mission"); len(v) > 0 {
+		matcher["mission_ids"] = v
+	}
+	if v, _ := cmd.Flags().GetStringSlice("severity"); len(v) > 0 {
+		matcher["severities"] = v
+	}
+	if v, _ := cmd.Flags().GetStringSlice("payload-equals"); len(v) > 0 {
+		pairs, err := parseKeyValues(v, "--payload-equals")
+		if err != nil {
+			return nil, err
+		}
+		matcher["payload_equals"] = pairs
+	}
+	return matcher, nil
 }

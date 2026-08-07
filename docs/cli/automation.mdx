@@ -30,6 +30,39 @@ see [Output Formats](/cli/overview#output-formats).
 
 ---
 
+## `crewship automation preview`
+
+Replay recent history against a rule and see what it would have caught —
+without saving anything and without starting a run.
+
+```bash
+# a candidate, before committing to it
+crewship automation preview --event mission.status_change \
+  --payload-equals action=status_changed
+
+# a rule that is already saved
+crewship automation preview aut_1234
+```
+
+A matcher is otherwise written blind: you save it, wait, and notice nothing
+happened. When a preview finds nothing, it names the clause that excluded the
+most entries and what was actually there:
+
+```
+mission.status_change · last 168h
+  would NOT have fired: 0 of 6 entries matched
+  payload_equals.to excluded 6 of them — the entry carries no key "to"; keys present: action, details
+  that key is absent, so no value will match; predicate on a key the event carries
+```
+
+<Note>
+  **"no entries in the window" is not a verdict on the rule.** A quiet
+  workspace has nothing to judge a matcher against; the output says so rather
+  than reporting zero matches, which would send you to edit a predicate that
+  may be perfectly correct.
+</Note>
+
+
 ## `crewship automation list`
 
 ```bash
