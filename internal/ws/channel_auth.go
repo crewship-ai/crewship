@@ -80,12 +80,19 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 		// mission:{missionId} — check mission's workspace membership
 		return a.isMemberOfMissionWorkspace(ctx, userID, chID)
 	case "user":
-		// user:{userId} — a per-user channel (notification.created is
-		// broadcast here). Only the user themselves may subscribe; there is
-		// no workspace membership to consult because the channel is scoped
-		// to the identity, not a tenant. Without this case the authorizer
-		// fell through to default:false, so no client could ever subscribe
-		// and real-time notifications silently never arrived (issue #614).
+		// user:{userId} — the identity-scoped channel. Only the user
+		// themselves may subscribe; there is no workspace membership to
+		// consult because the channel is scoped to the identity, not a
+		// tenant. Without this case the authorizer fell through to
+		// default:false, so no client could ever subscribe (issue #614).
+		//
+		// #1751 removed its one producer (`notification.created`, from the
+		// dead entity-scoped notifications table), so nothing broadcasts
+		// here today. The rule stays because it is an authorization
+		// decision about an identity, not about that event: a per-user feed
+		// built on notifyroute + inbox lands on this same channel, and the
+		// property worth pinning — nobody may subscribe to another user's
+		// channel — is tested in channel_auth_test.go either way.
 		return userID == chID, nil
 	case "providers":
 		// global channel — any authenticated user

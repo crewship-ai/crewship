@@ -33,8 +33,10 @@ func (c *brokenSidecarContainer) EnsureCrewServices(context.Context, provider.Cr
 	c.mu.Unlock()
 	return nil, errors.New("port already allocated")
 }
-func (c *brokenSidecarContainer) StopCrewServices(context.Context, string) error   { return nil }
-func (c *brokenSidecarContainer) RemoveCrewServices(context.Context, string) error { return nil }
+func (c *brokenSidecarContainer) StopCrewServices(context.Context, string, string) error { return nil }
+func (c *brokenSidecarContainer) RemoveCrewServices(context.Context, string, string) error {
+	return nil
+}
 
 var _ provider.SidecarProvider = (*brokenSidecarContainer)(nil)
 var _ provider.ContainerProvider = (*brokenSidecarContainer)(nil)

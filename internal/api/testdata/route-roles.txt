@@ -31,6 +31,7 @@ DELETE /api/v1/crews/{crewId}/escalations roleManage
 DELETE /api/v1/crews/{crewId}/files/delete roleCreate
 DELETE /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
 DELETE /api/v1/crews/{crewId}/issues/{identifier} roleCreate
+DELETE /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId} roleCreate
 DELETE /api/v1/crews/{crewId}/members/{memberId} roleManage
 DELETE /api/v1/crews/{crewId}/missions/{missionId} roleCreate
 DELETE /api/v1/crews/{crewId}/persona roleCreate
@@ -49,7 +50,6 @@ DELETE /api/v1/milestones/{milestoneId} roleManage
 DELETE /api/v1/notification-channels/{id} roleInline
 DELETE /api/v1/notification-channels/{id}/agents/{agentId} roleInline
 DELETE /api/v1/notification-templates roleManage
-DELETE /api/v1/notifications/{notificationId} roleSelf
 DELETE /api/v1/projects/{projectId} roleManage
 DELETE /api/v1/recurring-issues/{recurringId} roleManage
 DELETE /api/v1/relations/{relationId} roleCreate
@@ -169,6 +169,8 @@ POST /api/v1/crews/{crewId}/integrations roleCreate
 POST /api/v1/crews/{crewId}/integrations/{integrationId}/test roleCreate
 POST /api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh roleManage
 POST /api/v1/crews/{crewId}/issues roleInline
+POST /api/v1/crews/{crewId}/issues/{identifier}/code-links roleCreate
+POST /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/comments roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/relations roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/review roleCreate
@@ -210,8 +212,6 @@ POST /api/v1/notification-channels roleInline
 POST /api/v1/notification-channels/test roleInline
 POST /api/v1/notification-channels/{id}/agents roleInline
 POST /api/v1/notification-channels/{id}/test roleInline
-POST /api/v1/notifications/read-all roleSelf
-POST /api/v1/notifications/{notificationId}/read roleSelf
 POST /api/v1/oauth/auto-connect roleManage
 POST /api/v1/oauth/discover roleSelf
 POST /api/v1/oauth/exchange roleInline

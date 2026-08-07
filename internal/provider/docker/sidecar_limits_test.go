@@ -71,7 +71,7 @@ func captureSidecarHostConfig(t *testing.T) *container.HostConfig {
 		}
 	})
 
-	if _, err := p.ensureSidecar(context.Background(), "alpha", &svc); err != nil {
+	if _, err := p.ensureSidecar(context.Background(), "ckalpha0001", "alpha", &svc); err != nil {
 		t.Fatalf("ensureSidecar: %v", err)
 	}
 

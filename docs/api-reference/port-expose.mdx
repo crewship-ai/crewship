@@ -4,7 +4,7 @@ description: "Capability URLs for exposing in-container ports to the operator's 
 icon: "globe"
 ---
 
-<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 When an agent runs `npm run dev` or starts a service inside its container, the operator wants a clickable URL to open it. Port expose creates a **capability URL** — `https://<host>/exposed/<token>` — that reverse-proxies to the in-container port. The token is the auth: anyone with the URL gets through, anyone without it gets a 404. Exposes are created by the sidecar on the agent's behalf, then listed and revoked through the user-facing crew endpoints.
 
 This is the right shape for ephemeral dev URLs: short-lived, easy to share with a teammate via Slack, no JWT plumbing needed. For long-lived or sensitive surfaces, do not use this — set up a proper authenticating proxy.

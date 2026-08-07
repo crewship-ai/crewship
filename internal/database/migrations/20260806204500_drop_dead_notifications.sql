@@ -1,0 +1,28 @@
+-- Drop the entity-scoped `notifications` table (#1751).
+--
+-- Created in v42 for an in-app bell. The bell was removed from the top bar
+-- because it rendered a table nothing in the product ever wrote to, and the
+-- backend behind it followed: handler, five read/clear routes and the
+-- `crewship notification` command group are all gone in the same change.
+--
+-- Why dropping is safe rather than merely tidy. The table cannot hold a row on
+-- any install:
+--
+--   * The only INSERT INTO notifications outside a test lived in the
+--     CreateNotification helper, and `git log -S` over the whole history shows
+--     that helper was added with the issue tracker and never called from
+--     non-test code in any released version.
+--   * There was never a create route, so no client could write one either.
+--   * The table was classified IntentExcludeRuntime, so no restored bundle has
+--     ever carried a row in.
+--
+-- A DROP that cannot lose data is not the destructive half of this change;
+-- leaving an unreachable table behind is the half that costs — it keeps
+-- answering the backup totality guard, the FK discovery walk and every future
+-- schema reader as though it meant something.
+--
+-- The tables that keep the word are the OUTBOUND surface and are untouched:
+-- notification_channels, user_notification_prefs, notification_channel_agents,
+-- notification_templates, notification_deliveries.
+
+DROP TABLE IF EXISTS notifications;

@@ -143,9 +143,9 @@ If `--all-unread` returns exactly the page cap (500), the CLI refuses to proceed
 | `waitpoint` | Waitpoint creation (mission step paused for human input). |
 | `escalation` | Agent escalation (agent asked for help). |
 | `failed_run` | Run-failure handler when a run exits non-zero. |
-| `message` | Direct message addressed at a human via `crewship notification`. |
+| `message` | A routine's `notify` step, or an agent addressing a human directly (e.g. a hire request). |
 
-The inbox is *human-attention-scoped*. The lower-level per-entity event log lives under `crewship notification`.
+The inbox is *human-attention-scoped*: it holds the things somebody has to look at, not every event that happened. Where those items are delivered outward — email, webhook, chat, push — is `crewship notifychannel`.
 
 ## Common errors
 
@@ -157,5 +157,5 @@ The inbox is *human-attention-scoped*. The lower-level per-entity event log live
 ## See also
 
 - [`crewship approvals`](/cli/approvals) — waitpoint approve/deny lifecycle (the source side of `resolve --action approved`).
-- [`crewship notification`](/cli/notification) — per-entity event log; lower-level, larger volume.
+- [`crewship notifychannel`](/cli/notifychannel) — where inbox items are delivered outward (email, webhook, chat, push).
 - [Inbox API](/api-reference/inbox) — `GET /api/v1/inbox`.

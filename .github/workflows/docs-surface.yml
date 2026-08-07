@@ -33,9 +33,11 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      # Hermetic: contextual config, navigation integrity, description quality.
+      # Hermetic: contextual config, navigation integrity, description quality,
+      # and every internal link written inside a page body — a target that
+      # docs.json never declares and Mintlify never fails on (#1774).
       # No network, so it is safe to require on every pull request.
-      - name: Verify the contextual surface and navigation
+      - name: Verify the contextual surface, navigation and inline links
         run: go run ./scripts/docs-surface-check
 
       # Only on the schedule / manual runs — never on a PR. See checkServed's

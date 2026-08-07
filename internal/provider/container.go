@@ -304,10 +304,17 @@ type HostAddressProvider interface {
 // sidecars must type-assert at the call site (graceful degradation:
 // if the provider doesn't support sidecars, the manifest's
 // `services:` block is ignored at runtime with a warning).
+//
+// Every method is keyed by the globally-unique crew ID, with the slug carried
+// alongside only for names and log lines. Keyed on the slug alone (as these
+// were until #1732) two workspaces with an identically-slugged crew shared one
+// sidecar container and one data volume, and either crew's teardown destroyed
+// the other's live database. `crews` is UNIQUE(workspace_id, slug); one daemon
+// serves every workspace.
 type SidecarProvider interface {
 	EnsureCrewServices(ctx context.Context, team CrewConfig) (map[string]string, error)
-	StopCrewServices(ctx context.Context, crewSlug string) error
-	RemoveCrewServices(ctx context.Context, crewSlug string) error
+	StopCrewServices(ctx context.Context, crewID, crewSlug string) error
+	RemoveCrewServices(ctx context.Context, crewID, crewSlug string) error
 }
 
 // ServiceVolumeRemover is the second half of a sidecar teardown: the named
@@ -324,7 +331,11 @@ type SidecarProvider interface {
 // Callers remove volumes AFTER RemoveCrewServices; docker refuses to remove a
 // volume that a container still references.
 type ServiceVolumeRemover interface {
-	RemoveCrewServiceVolumes(ctx context.Context, crewSlug string) error
+	// RemoveCrewServiceVolumes removes only volumes that prove they belong to
+	// crewID. An implementation must not select them by name prefix: crew slugs
+	// may contain hyphens, so one crew's prefix can prefix another's volume
+	// names (#1732).
+	RemoveCrewServiceVolumes(ctx context.Context, crewID, crewSlug string) error
 }
 
 // CrewContainerLookup is an optional interface that container providers
@@ -436,5 +447,8 @@ type CrewServiceStatus struct {
 // today) leave the GET /services endpoint answering an empty list rather
 // than erroring.
 type ServiceLister interface {
-	ListCrewServices(ctx context.Context, crewSlug string) ([]CrewServiceStatus, error)
+	// ListCrewServices enumerates only the sidecars owned by crewID. Selecting
+	// them by slug would list an identically-slugged crew's services from
+	// another workspace (#1732).
+	ListCrewServices(ctx context.Context, crewID, crewSlug string) ([]CrewServiceStatus, error)
 }

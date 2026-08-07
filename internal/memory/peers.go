@@ -184,20 +184,27 @@ func DeletePeerCard(p PeerPaths, userID, workspaceID string) error {
 // DeletePeerCardBySlug removes a card by its slug. Used by sweep
 // operations that walk the index table (peer_cards) and call this
 // per row.
+//
+// Removes the lock sentinel with the card, for the reason spelled out on
+// removeUnderLock: after an erasure a zero-byte `<slug>.md.lock` is the
+// only artefact left and the slug is recomputable, so the listing still
+// answers a question the erasure was asked to stop answering (#1701).
+//
+// The existence check in front matters more here than on the user-model
+// side. The Art. 17 cascade calls this once per AGENT in the workspace,
+// and without it every agent that had never held a card for the subject
+// would have the sentinel CREATED under it — minting the marker the
+// erasure exists to remove — or, where the agent has no peers/ directory
+// at all, fail the lock open with ENOENT and log a warning per agent.
 func DeletePeerCardBySlug(p PeerPaths, userSlug string) error {
 	if userSlug == "" {
 		return nil
 	}
 	path := p.CardPath(userSlug)
-	lk := NewFileLock(path + ".lock")
-	if err := lk.Lock(); err != nil {
-		return fmt.Errorf("peers: lock: %w", err)
+	if !anyExists(path, path+lockSuffix) {
+		return nil
 	}
-	defer func() { _ = lk.Unlock() }()
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("peers: remove: %w", err)
-	}
-	return nil
+	return removeUnderLock(path, "peers")
 }
 
 // ListPeerSlugs returns every peer card slug present on disk for

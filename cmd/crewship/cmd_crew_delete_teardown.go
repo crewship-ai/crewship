@@ -30,6 +30,22 @@ import (
 // volume, is exact either way.
 const defaultContainerPrefix = "crewship"
 
+// sidecarVolumeDisplayName mirrors the docker provider's sidecarVolumeName:
+// "<prefix>-svc-<slug>-<crew_id>-vol-<volume>". The crew id is in there because
+// slugs are unique only per workspace, so a name without it names a volume that
+// may belong to a crew in another workspace (#1732) — and a prompt that printed
+// another crew's volume would be worse than one that printed none.
+func sidecarVolumeDisplayName(crewID, crewSlug, volume string) string {
+	parts := []string{defaultContainerPrefix, "svc"}
+	if crewSlug != "" {
+		parts = append(parts, crewSlug)
+	}
+	if crewID != "" {
+		parts = append(parts, crewID)
+	}
+	return strings.Join(parts, "-") + "-vol-" + volume
+}
+
 type crewDeleteService struct {
 	Name    string `json:"name"`
 	Image   string `json:"image"`
@@ -76,12 +92,12 @@ func crewSidecarDeleteWarning(client *cli.Client, crewID string) string {
 		return ""
 	}
 
-	return renderCrewSidecarDeleteWarning(crew.Slug, services)
+	return renderCrewSidecarDeleteWarning(crewID, crew.Slug, services)
 }
 
 // renderCrewSidecarDeleteWarning is the text itself, kept pure so it can be
 // read (and tested) without a server.
-func renderCrewSidecarDeleteWarning(crewSlug string, services []crewDeleteService) string {
+func renderCrewSidecarDeleteWarning(crewID, crewSlug string, services []crewDeleteService) string {
 	var b strings.Builder
 	b.WriteString("This also destroys the crew's sidecar services — their containers are\n")
 	b.WriteString("force-removed and their named volumes are deleted with them:\n\n")
@@ -103,8 +119,8 @@ func renderCrewSidecarDeleteWarning(crewSlug string, services []crewDeleteServic
 				continue
 			}
 			anyVolume = true
-			fmt.Fprintf(&b, "               volume %s-svc-%s-vol-%s\n",
-				defaultContainerPrefix, crewSlug, vol)
+			fmt.Fprintf(&b, "               volume %s\n",
+				sidecarVolumeDisplayName(crewID, crewSlug, vol))
 		}
 	}
 
