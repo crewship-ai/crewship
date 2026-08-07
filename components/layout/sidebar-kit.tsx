@@ -1,8 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { ChevronDown, Filter as FilterIcon, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react"
+import { Check, ChevronDown, Filter as FilterIcon, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
+import { AnimatePresence, motion } from "motion/react"
 
 import { cn } from "@/lib/utils"
 import { ListRow } from "@/components/ui/list-row"
@@ -129,6 +130,216 @@ export function SidebarFilterButton({
           {activeCount}
         </span>
       )}
+    </button>
+  )
+}
+
+/* ------------------------------------------------------- filter popover */
+
+const FILTER_PANEL_ANIM = {
+  initial: { opacity: 0, scale: 0.95, y: -4 },
+  animate: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.12 } },
+  exit: { opacity: 0, scale: 0.95, y: -4, transition: { duration: 0.1 } },
+}
+
+/**
+ * The filter panel itself — trigger, dismiss layer, anchored panel and its
+ * animation as one component.
+ *
+ * The kit used to export only `SidebarFilterButton`, so each surface wrote the
+ * panel by hand and they drifted (#1776). Two of the behaviours here are the
+ * reason it is worth sharing at all, and both were fixed once, for Issues,
+ * where nobody else could inherit them:
+ *
+ *  · **A pick never closes the panel.** Credentials closed on every pick, which
+ *    makes reaching a second facet a matter of reopening the menu.
+ *  · **A pick never touches a sibling facet.** That is the consumer's job, but
+ *    the panel is what made it feel wrong: with each pick clearing the last one,
+ *    the count badge could only ever read 0 or 1 — a switch wearing a filter's
+ *    clothes.
+ *
+ * Open state is owned here; pass `open`/`onOpenChange` only if the surface
+ * genuinely needs to drive it.
+ */
+export function SidebarFilterPopover({
+  label,
+  activeCount = 0,
+  onClear,
+  open: openProp,
+  onOpenChange,
+  icon,
+  triggerLabel,
+  panelClassName,
+  className,
+  children,
+}: {
+  /** Accessible name for the panel, e.g. "Filter issues". */
+  label: string
+  activeCount?: number
+  /** Renders "Clear all" in the header while something is active. */
+  onClear?: () => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  icon?: LucideIcon
+  triggerLabel?: React.ReactNode
+  panelClassName?: string
+  className?: string
+  children: React.ReactNode
+}) {
+  const [uncontrolled, setUncontrolled] = React.useState(false)
+  const open = openProp ?? uncontrolled
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      if (openProp === undefined) setUncontrolled(next)
+      onOpenChange?.(next)
+    },
+    [openProp, onOpenChange],
+  )
+
+  // Ties the trigger to the panel it opens, so a screen reader can move
+  // between them.
+  const panelId = React.useId()
+
+  // Escape closes. The dismiss layer below only catches pointers, and a filter
+  // panel you can open from the keyboard has to be closable from it too.
+  React.useEffect(() => {
+    if (!open) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [open, setOpen])
+
+  return (
+    <div className={cn("relative shrink-0", className)}>
+      <SidebarFilterButton
+        activeCount={activeCount}
+        icon={icon}
+        aria-expanded={open}
+        // Without these the trigger reads as an ordinary action button:
+        // nothing tells a screen reader that activating it reveals more
+        // controls, or which region those controls live in. aria-expanded
+        // alone says "expanded" without naming what expanded.
+        aria-haspopup="dialog"
+        aria-controls={open ? panelId : undefined}
+        onClick={() => setOpen(!open)}
+      >
+        {triggerLabel}
+      </SidebarFilterButton>
+      <AnimatePresence>
+        {open && (
+          <>
+            <div
+              data-testid="sidebar-filter-dismiss"
+              className="fixed inset-0 z-40"
+              onClick={() => setOpen(false)}
+            />
+            <motion.div
+              {...FILTER_PANEL_ANIM}
+              id={panelId}
+              role="group"
+              aria-label={label}
+              className={cn(
+                "absolute right-0 top-9 z-50 min-w-[200px] max-h-[360px] overflow-y-auto",
+                "rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl",
+                panelClassName,
+              )}
+            >
+              <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-1.5">
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-foreground/40">
+                  Filters
+                </span>
+                {activeCount > 0 && onClear && (
+                  <button
+                    type="button"
+                    onClick={onClear}
+                    className="ml-auto text-[10px] text-muted-foreground/80 hover:text-foreground"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+              {children}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+/**
+ * One facet inside the panel: a header, an explicit reset row, and its values.
+ *
+ * The reset row is what makes "drop the crew but keep the priority" a single
+ * click. Without it the only way back to "all crews" is a control that also
+ * clears the agent — which is how a filter panel teaches people not to trust it.
+ */
+export function SidebarFacet({
+  label,
+  resetLabel,
+  resetActive,
+  onReset,
+  first = false,
+  children,
+}: {
+  label: React.ReactNode
+  resetLabel: string
+  /** True when this facet has no selection — i.e. the reset row IS the state. */
+  resetActive: boolean
+  onReset: () => void
+  /** Suppresses the leading divider on the first facet in a panel. */
+  first?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <>
+      {!first && <div className="mt-1 border-t border-white/[0.06]" />}
+      <div className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-foreground/40">
+        {label}
+      </div>
+      <button
+        type="button"
+        onClick={onReset}
+        aria-pressed={resetActive}
+        className={cn(
+          "w-full px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+          resetActive ? "text-primary" : "text-muted-foreground/80",
+        )}
+      >
+        {resetLabel}
+      </button>
+      {children}
+    </>
+  )
+}
+
+/** One value inside a facet. Toggles itself; never touches its neighbours. */
+export function SidebarFacetOption({
+  active,
+  onToggle,
+  className,
+  children,
+}: {
+  active: boolean
+  onToggle: () => void
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      className={cn(
+        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+        active ? "text-primary" : "text-muted-foreground/80",
+        className,
+      )}
+    >
+      {children}
+      {active && <Check className="ml-auto h-3 w-3 shrink-0" />}
     </button>
   )
 }
