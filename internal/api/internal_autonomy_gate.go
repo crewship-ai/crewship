@@ -497,10 +497,31 @@ func (c *capturedResponse) WriteHeader(code int) { c.status = code }
 // exactly what the underlying handler said).
 func (c *capturedResponse) flush(w http.ResponseWriter) {
 	for k, vs := range c.header {
-		for _, v := range vs {
+		// Set, not Add, for the first value of each key. The outer middleware
+		// has already written its headers onto w by the time a handler runs, so
+		// Add-ing a captured Content-Type produced TWO of them — and which one a
+		// client honours is not something to leave to a client.
+		for i, v := range vs {
+			if i == 0 {
+				w.Header().Set(k, v)
+				continue
+			}
 			w.Header().Add(k, v)
 		}
 	}
+	// The captured handler is an internal JSON handler and the body is its JSON.
+	// Say so rather than replaying whatever it happened to set: this response is
+	// bytes that trace back to a request, and a Content-Type it could influence
+	// is the only thing standing between that and a browser parsing it as
+	// markup. nosniff is set by SecurityHeaders on every API route already
+	// (middleware.go), which is what makes the reflected-XSS reading of this
+	// function a false positive — it is repeated here so the guarantee does not
+	// depend on middleware ORDER, which is the kind of assumption this whole
+	// change exists to stop relying on.
+	if w.Header().Get("Content-Type") == "" || c.header.Get("Content-Type") != "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(c.status)
 	_, _ = w.Write(c.body.Bytes())
 }
