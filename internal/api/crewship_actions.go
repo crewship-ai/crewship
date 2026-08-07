@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -97,6 +98,34 @@ var crewshipInjected = []string{
 	"agent_id", "actor_agent_id",
 }
 
+// crewshipTenantScopedArgs are author-supplied args that NAME A ROW in the
+// tenant, mapped to the table the row lives in. Both sides are constants in
+// this file and never come from a request, so the lookup below is not
+// assembled from caller data.
+//
+// chat_id is here rather than in crewshipInjected because it cannot be
+// injected: a run has no chat, and both verbs that take one require the author
+// to name it (crewship_step.go). That is exactly why the entry is needed —
+// where a value can be OWNED by the dispatcher it is owned, and where it
+// cannot it has to be CHECKED, because on the far side of the loopback it is a
+// tenant-scoping input:
+//
+//   - escalation_handler.go broadcasts escalation_created into the session
+//     channel named by chat_id and files the row's chat_id straight from the
+//     body;
+//   - assignments_run.go resolves assigned_by_id and the assigner's crew with
+//     `SELECT agent_id FROM chats WHERE id = ?` — no workspace predicate — and
+//     later writes a mission_comments row keyed on the same value.
+//
+// Both routes DO call assertBoundChatWorkspaceDB, and it is a documented
+// no-op for master-token callers on the grounds that those are "host-side
+// trusted services" (middleware.go). The `crewship` step is the first
+// master-token caller whose body a USER writes, so that premise no longer
+// covers this door and the fence has to be re-established on this side of it.
+var crewshipTenantScopedArgs = map[string]string{
+	"chat_id": "chats",
+}
+
 // Do gates the verb on the author crew's autonomy level, then performs the
 // call.
 func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) (string, error) {
@@ -109,6 +138,18 @@ func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) 
 		// Save-time validation refuses these; this is the belt for a
 		// definition saved by an older build.
 		return "", fmt.Errorf("crewship: action %q has no policy action and cannot be dispatched", req.Verb)
+	}
+
+	// Tenancy fence FIRST, before the autonomy gate — because the gate is one
+	// of the things it protects. decideInternalAction resolves the crew, and
+	// policy.Resolver answers an unknown crew with its guided default rather
+	// than an error; guided PERMITS mission_create, issue_write,
+	// assignment_create and escalation_create, so a crew_id that does not
+	// resolve is not held, it is waved through. Proving the crew before the
+	// gate is what keeps "bounded by the crew's autonomy level" a statement
+	// about a crew that exists.
+	if err := c.fenceTenancy(ctx, req); err != nil {
+		return "", fmt.Errorf("crewship %s: %w", req.Verb, err)
 	}
 
 	// Autonomy gate, through the same decision function every internal
@@ -176,6 +217,73 @@ func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) 
 			req.Verb, method, path, resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	return string(respBody), nil
+}
+
+// fenceTenancy proves every identity this call will act under belongs to the
+// RUN's workspace, before anything is decided and before anything is sent.
+//
+// Before the send, because the damage a cross-tenant request does is done by
+// the request itself: an escalation broadcast lands in the other tenant's live
+// session channel whatever this side later makes of the response.
+//
+// Fails CLOSED on a read error or a missing DB, matching the escalation cap's
+// rule: a fence that cannot read its own state has not established that this
+// call is inside it.
+func (c *crewshipActions) fenceTenancy(ctx context.Context, req pipeline.CrewshipRequest) error {
+	if c.db == nil {
+		return errors.New("no database wired — refusing to dispatch with an unverified crew_id/chat_id")
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	if workspaceID == "" {
+		return errors.New("the run names no workspace, so nothing it acts on can be scoped to one")
+	}
+
+	crewID := strings.TrimSpace(req.CrewID)
+	if crewID == "" {
+		return errors.New("the routine has no author crew, so there is no principal whose " +
+			"autonomy level bounds this action — set the routine's author crew")
+	}
+	switch ok, err := c.rowInWorkspace(ctx, "crews", crewID, workspaceID); {
+	case err != nil:
+		return err
+	case !ok:
+		// One message for "another tenant's crew" and for "no such crew", so
+		// this is not an existence oracle for ids in a workspace the author
+		// cannot read — the same rule chain.ErrAnchorNotFound follows.
+		return fmt.Errorf("crew %q does not belong to this run's workspace", crewID)
+	}
+
+	for arg, table := range crewshipTenantScopedArgs {
+		id, _ := req.Args[arg].(string)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			// Absent or empty: the route decides whether it is required. This
+			// fence only judges values that are actually present.
+			continue
+		}
+		switch ok, err := c.rowInWorkspace(ctx, table, id, workspaceID); {
+		case err != nil:
+			return err
+		case !ok:
+			return fmt.Errorf("%s %q does not belong to this run's workspace — a routine may "+
+				"only act on rows in the workspace that owns it", arg, id)
+		}
+	}
+	return nil
+}
+
+// rowInWorkspace reports whether table.id names a row in workspaceID. table is
+// always a literal from this file, never caller data.
+func (c *crewshipActions) rowInWorkspace(ctx context.Context, table, id, workspaceID string) (bool, error) {
+	var got sql.NullString
+	err := c.db.QueryRowContext(ctx, `SELECT workspace_id FROM `+table+` WHERE id = ?`, id).Scan(&got)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("resolve %s %q: %w", table, id, err)
+	}
+	return got.Valid && got.String == workspaceID, nil
 }
 
 // enforceVolumeBounds applies the per-verb quantity limits that the autonomy

@@ -108,8 +108,18 @@ Two independent controls, and they do different jobs.
 **`debounce_seconds`** collapses a storm into one run. Two hundred status
 changes on the same issue inside the debounce window produce a single run
 carrying the most recent event's inputs, not two hundred runs. The parked run
-also has a ceiling, so a stream of events that never stops still fires
-eventually instead of being pushed out forever.
+also has a ceiling — `debounce_seconds × 10` from the first match — so a
+stream of events that never stops still fires at the ceiling instead of being
+pushed out forever, and the next match after it starts a fresh run.
+
+Events collapse together only when they are about the **same subject**. The
+subject is the most specific identity the entry carries: the issue, else the
+run, else the agent, else the crew. So fifty `run.failed` entries for one run
+are one triage run, but two different runs failing inside the window are two —
+coalescing keeps the last event's inputs, and folding unrelated subjects into
+one run would silently act on whichever arrived last. An entry that carries
+none of those identities is genuinely workspace-scoped and collapses to the
+rule itself.
 
 **`max_per_hour`** caps how many runs the rule may cause per rolling hour. It
 is charged per **run**, not per matched event — a burst that coalesces into

@@ -18,8 +18,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// crewshipWorkspace is the workspace every fixture crew belongs to. The
+// dispatcher's tenancy fence (fenceTenancy) proves crew_id resolves inside the
+// RUN's workspace, so a fixture whose crew has no workspace is a fixture that
+// cannot dispatch — the column and the value are part of the contract now, not
+// scenery.
+const crewshipWorkspace = "ws_real"
+
 // crewshipPolicyDB builds the one table policy.Resolver reads, with a single
-// crew at the requested autonomy level.
+// crew at the requested autonomy level, in crewshipWorkspace.
 func crewshipPolicyDB(t *testing.T, crewID, level string) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
@@ -31,6 +38,7 @@ func crewshipPolicyDB(t *testing.T, crewID, level string) *sql.DB {
 	if _, err := db.Exec(`
 CREATE TABLE crews (
     id TEXT PRIMARY KEY,
+    workspace_id TEXT,
     autonomy_level TEXT,
     behavior_mode TEXT,
     autonomy_set_by_user_id TEXT,
@@ -50,8 +58,13 @@ CREATE TABLE escalations (
 );`); err != nil {
 		t.Fatalf("escalations schema: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO crews (id, autonomy_level, behavior_mode) VALUES (?, ?, 'warn')`,
-		crewID, level); err != nil {
+	// The chats table the tenancy fence reads for an author-supplied chat_id.
+	if _, err := db.Exec(`CREATE TABLE chats (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL);
+INSERT INTO chats (id, workspace_id) VALUES ('chat_1', '` + crewshipWorkspace + `')`); err != nil {
+		t.Fatalf("chats schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, autonomy_level, behavior_mode) VALUES (?, ?, ?, 'warn')`,
+		crewID, crewshipWorkspace, level); err != nil {
 		t.Fatalf("seed crew: %v", err)
 	}
 	return db

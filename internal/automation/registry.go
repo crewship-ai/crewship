@@ -89,6 +89,17 @@ type Registry struct {
 	// times for the one run it actually produces. Pruned in Flush once the
 	// run it refers to is due.
 	charged map[string]time.Time
+	// ceiling holds, per debounce key, the debounce_max_at of the run that
+	// key is currently accumulating into. It MUST survive a flush, for the
+	// same reason `charged` does and with more at stake: `pending` is emptied
+	// every 250ms, so an intent rebuilt from scratch recomputes its ceiling
+	// relative to the new `now` four times a second, and a ceiling that moves
+	// with the storm is not a ceiling. Without it a never-ending storm defers
+	// its run forever AND — because `charged` is pruned against a fireAt that
+	// slides the same way — never pays a second budget unit, which makes
+	// max_per_hour unreachable by exactly the traffic it exists to bound.
+	// Dropped in Flush alongside `charged`, once the run they describe is due.
+	ceiling map[string]time.Time
 	// notices are automation.throttled entries the flusher will emit.
 	notices []journal.Entry
 
@@ -161,6 +172,7 @@ func NewRegistry(store loader, enq Enqueuer, opts Options) *Registry {
 		rate:         map[string]*window{},
 		pending:      map[string]*intent{},
 		charged:      map[string]time.Time{},
+		ceiling:      map[string]time.Time{},
 		wake:         make(chan struct{}, 1),
 		stop:         make(chan struct{}),
 	}
@@ -280,7 +292,7 @@ func (r *Registry) Observer(entries []journal.Entry) {
 			if !rule.Matcher.Matches(e) {
 				continue
 			}
-			key := debounceKey(rule.ID, e.MissionID)
+			key := debounceKey(rule.ID, e)
 			// The rate budget is spent on RUNS, not on matched events: a
 			// burst that coalesces into one run costs one unit. Debounce
 			// already governs the storm; making max_per_hour count events
@@ -291,6 +303,13 @@ func (r *Registry) Observer(entries []journal.Entry) {
 				if !r.admitLocked(rule, now) {
 					continue
 				}
+				// The unit just charged buys a NEW run: either this key had
+				// none in flight, or the one it had is due. Retire its
+				// ceiling here rather than leaving it to Flush — Observer and
+				// Flush both notice "the run is due", and if only one of them
+				// started the next window the boundary would be charged
+				// twice, once by each.
+				delete(r.ceiling, key)
 			}
 			r.coalesceLocked(rule, e, key, now)
 			r.charged[key] = r.pending[key].fireAt
@@ -307,12 +326,40 @@ func (r *Registry) Observer(entries []journal.Entry) {
 	}
 }
 
-// debounceKey is the coalescing identity: one automation, one mission. An
-// entry with no mission (a budget warning, a container error) collapses to
-// the automation's own key, which is the intended behaviour — those events
-// are about the workspace, not about a row.
-func debounceKey(automationID, missionID string) string {
-	return "auto:" + automationID + ":" + missionID
+// debounceKey is the coalescing identity: one automation, one SUBJECT.
+//
+// The subject has to be whatever the rendered inputs vary by, because
+// coalescing keeps the LAST event's inputs and discards the rest — so two
+// entries that share a key had better be about the same thing. mission_id
+// alone covers that for the mission.* and issue.* types and for nothing else:
+// run.failed, assignment.failed, guardrail.input_blocked, agent.mentioned and
+// budget.warning all arrive with no mission and with the run, agent and crew
+// the author's {{ event.* }} references actually name. Keyed on the mission
+// alone, two unrelated failed runs became one incident about the second and
+// the first was dropped with `coalesced_events: 2` recording it as intended.
+//
+// The ladder is by specificity, and it mirrors EventContext: mission, then run
+// (trace_id, which is what EventContext exposes as run_id), then agent, then
+// crew. The first one present wins — an entry that has a mission is about that
+// mission whatever else it carries, and an entry with none of them really is
+// workspace-scoped and collapses to the automation's own key, which is what
+// the original comment described and the only case where it was right.
+//
+// The kind prefix is part of the key so an id that appears in two roles cannot
+// alias, and so a key stays readable in a log line.
+func debounceKey(automationID string, e journal.Entry) string {
+	kind, subject := "ws", ""
+	switch {
+	case e.MissionID != "":
+		kind, subject = "mission", e.MissionID
+	case e.TraceID != "":
+		kind, subject = "run", e.TraceID
+	case e.AgentID != "":
+		kind, subject = "agent", e.AgentID
+	case e.CrewID != "":
+		kind, subject = "crew", e.CrewID
+	}
+	return "auto:" + automationID + ":" + kind + ":" + subject
 }
 
 // admitLocked spends one unit of the automation's hourly budget, or refuses
@@ -339,6 +386,22 @@ func (r *Registry) admitLocked(rule Resolved, now time.Time) bool {
 // pending_runs' own coalesce semantics (a run fires with the payload of the
 // event that most recently extended it). Caller holds mu.
 func (r *Registry) coalesceLocked(rule Resolved, e journal.Entry, key string, now time.Time) {
+	// The ceiling on how long a never-ending storm may keep pushing the run
+	// out. Without it a workspace that emits one matching event every
+	// debounce_seconds-1 never fires the run at all, and the automation looks
+	// broken rather than busy.
+	//
+	// It is read from `ceiling` rather than computed here because the intent
+	// this method may be about to create is NOT necessarily the first for this
+	// key: Flush empties `pending` every 250ms, so a storm rebuilds the intent
+	// many times over one run's life. Anchoring the ceiling to the FIRST match
+	// of the current run is what makes it fixed; computing it from `now` made
+	// it move with the storm.
+	maxAt, live := r.ceiling[key]
+	if !live {
+		maxAt = now.Add(time.Duration(rule.DebounceSeconds*10) * time.Second)
+		r.ceiling[key] = maxAt
+	}
 	it, ok := r.pending[key]
 	if !ok {
 		it = &intent{
@@ -349,11 +412,7 @@ func (r *Registry) coalesceLocked(rule Resolved, e journal.Entry, key string, no
 			pipelineID:     rule.PipelineID,
 			pipelineSlug:   rule.PipelineSlug,
 			debounceKey:    key,
-			// The ceiling on how long a never-ending storm may keep
-			// pushing the run out. Without it a workspace that emits one
-			// matching event every debounce_seconds-1 never fires the run
-			// at all, and the automation looks broken rather than busy.
-			debounceMaxAt: now.Add(time.Duration(rule.DebounceSeconds*10) * time.Second),
+			debounceMaxAt:  maxAt,
 		}
 		r.pending[key] = it
 	}
@@ -378,10 +437,17 @@ func (r *Registry) Flush(ctx context.Context) int {
 	r.pending = map[string]*intent{}
 	r.notices = nil
 	// A key whose run is now due has spent its budget unit; the next match
-	// on it belongs to a NEW run and must pay again.
+	// on it belongs to a NEW run and must pay again. The ceiling goes with it:
+	// the next run gets its own, measured from its own first match.
+	//
+	// `until` is bounded by the key's ceiling (coalesceLocked clamps fireAt to
+	// it), so this prune actually arrives during a sustained storm. It did not
+	// when the ceiling was recomputed per flush — fireAt outran `now` forever
+	// and one budget unit covered an unbounded number of runs.
 	for key, until := range r.charged {
 		if !now.Before(until) {
 			delete(r.charged, key)
+			delete(r.ceiling, key)
 		}
 	}
 	r.mu.Unlock()
