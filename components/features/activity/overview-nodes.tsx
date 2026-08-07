@@ -2,7 +2,7 @@
 
 import { memo } from "react"
 import Link from "next/link"
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react"
+import { Handle, Position, type Node, type NodeProps, type NodeTypes } from "@xyflow/react"
 import {
   CircleDot,
   PauseCircle,
@@ -16,6 +16,7 @@ import { relTime } from "@/lib/time"
 import { routineHref } from "@/lib/routine-href"
 import type {
   OverviewIssueNodeData,
+  OverviewNodeType,
   OverviewRoutineNodeData,
   OverviewRunNodeData,
 } from "@/lib/trace/build-overview-graph"
@@ -140,6 +141,21 @@ function RunNodeBase({ data: d }: NodeProps<Node<OverviewRunNodeData>>) {
   )
 }
 export const OverviewRunNode = memo(RunNodeBase)
+
+/**
+ * The overview half of the canvas `nodeTypes` map.
+ *
+ * Typed against `OverviewNodeType` on purpose: the same union types the
+ * width map in build-overview-graph, so registering a component the
+ * layout has no width for — the bug that used to land silently, as a
+ * card half a width off its column — is a compile error here, and a
+ * test asserts it at runtime too.
+ */
+export const overviewNodeTypes: Record<OverviewNodeType, NodeTypes[string]> = {
+  overviewIssue: OverviewIssueNode,
+  overviewRoutine: OverviewRoutineNode,
+  overviewRun: OverviewRunNode,
+}
 
 // ── helpers ────────────────────────────────────────────────────────
 

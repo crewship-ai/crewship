@@ -9,10 +9,45 @@ import type { Mission } from "@/lib/types/mission"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 
-const ISSUE_W = 200
-const ROUTINE_W = 200
-const RUN_W = 180
-const NODE_H = 64
+/**
+ * Every node type this builder emits, and the canvas registers.
+ *
+ * The list is the contract between the two: `overviewNodeTypes` in
+ * `components/features/activity/overview-nodes.tsx` is typed as a
+ * `Record<OverviewNodeType, …>`, so a component registered without a
+ * type here — or a type here without a width below — is a compile
+ * error, and a test asserts the same at runtime.
+ */
+export const OVERVIEW_NODE_TYPES = [
+  "overviewIssue",
+  "overviewRoutine",
+  "overviewRun",
+] as const
+
+export type OverviewNodeType = (typeof OVERVIEW_NODE_TYPES)[number]
+
+/**
+ * Layout width per node type, in the same pixels the node component
+ * renders (`w-[200px]` etc.). Dagre is handed these and returns node
+ * CENTRES, so the same number has to come back out when the centre is
+ * converted to React Flow's top-left `position`.
+ *
+ * This used to be two parallel ternaries — one for the dagre pass, one
+ * for the position pass — that both ended in `: RUN_W`. A node type
+ * added to only the canvas therefore ranked correctly and rendered
+ * half a card off its column, with nothing to catch it. One map, read
+ * by both passes, cannot drift from itself.
+ *
+ * Keep a value in step with the width class on its component.
+ */
+export const OVERVIEW_NODE_WIDTH: Record<OverviewNodeType, number> = {
+  overviewIssue: 200,
+  overviewRoutine: 200,
+  overviewRun: 180,
+}
+
+/** Shared layout height. Every overview card is a two-line card. */
+export const OVERVIEW_NODE_HEIGHT = 64
 
 export interface OverviewGraphData {
   nodes: Node[]
@@ -189,13 +224,7 @@ export function buildOverviewGraph(input: BuildOverviewInput): OverviewGraphData
   g.setDefaultEdgeLabel(() => ({}))
 
   for (const n of nodes) {
-    const w =
-      n.type === "overviewIssue"
-        ? ISSUE_W
-        : n.type === "overviewRoutine"
-          ? ROUTINE_W
-          : RUN_W
-    g.setNode(n.id, { width: w, height: NODE_H })
+    g.setNode(n.id, { width: widthFor(n.type), height: OVERVIEW_NODE_HEIGHT })
   }
   for (const e of edges) g.setEdge(e.source, e.target)
   dagreLayout(g)
@@ -203,15 +232,30 @@ export function buildOverviewGraph(input: BuildOverviewInput): OverviewGraphData
   for (const n of nodes) {
     const pos = g.node(n.id)
     if (pos) {
-      const w =
-        n.type === "overviewIssue"
-          ? ISSUE_W
-          : n.type === "overviewRoutine"
-            ? ROUTINE_W
-            : RUN_W
-      n.position = { x: pos.x - w / 2, y: pos.y - NODE_H / 2 }
+      n.position = {
+        x: pos.x - widthFor(n.type) / 2,
+        y: pos.y - OVERVIEW_NODE_HEIGHT / 2,
+      }
     }
   }
 
   return { nodes, edges }
+}
+
+/**
+ * Width for a node type, or a loud failure.
+ *
+ * Unreachable for anything this builder emits — every node it pushes
+ * carries one of the three registered types, and the width map is
+ * total over that union — so the throw fires only for a type someone
+ * added without registering a width, at the moment they add it, which
+ * is the whole point. The alternative was the silent `: RUN_W` that
+ * would have shipped a node type rendering half a card off its column.
+ */
+function widthFor(type: string | undefined): number {
+  const w = type === undefined ? undefined : OVERVIEW_NODE_WIDTH[type as OverviewNodeType]
+  if (typeof w !== "number") {
+    throw new Error(`buildOverviewGraph: no width registered for node type "${type}"`)
+  }
+  return w
 }

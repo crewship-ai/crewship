@@ -23,11 +23,7 @@ import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { PipelineDSL } from "@/lib/trace/types"
 import { buildTraceGraph } from "@/lib/trace/build-trace-graph"
 import { TraceStepNode, TraceTriggerNode } from "./trace-step-node"
-import {
-  OverviewIssueNode,
-  OverviewRoutineNode,
-  OverviewRunNode,
-} from "./overview-nodes"
+import { overviewNodeTypes } from "./overview-nodes"
 import { TraceDataFlowEdge } from "./trace-data-flow-edge"
 import { TraceRoutedEdge } from "./trace-routed-edge"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
@@ -43,12 +39,15 @@ import { minZoomForGraph } from "@/lib/trace/zoom-floor"
 // Inferring step status from run state is centralized in
 // buildTraceGraph; this component is a thin React Flow wrapper.
 
+// The single registration point for every node type this canvas can
+// render. The overview half is spread in from overview-nodes, where it
+// is typed against the same union as the layout's width map — so a new
+// overview node cannot be registered here without a width, which used
+// to mean it ranked correctly and rendered half a card off its column.
 const nodeTypes: NodeTypes = {
   traceStep: TraceStepNode,
   traceTrigger: TraceTriggerNode,
-  overviewIssue: OverviewIssueNode,
-  overviewRoutine: OverviewRoutineNode,
-  overviewRun: OverviewRunNode,
+  ...overviewNodeTypes,
 }
 
 const edgeTypes: EdgeTypes = {
