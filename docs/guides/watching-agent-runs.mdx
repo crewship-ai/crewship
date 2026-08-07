@@ -14,15 +14,18 @@ An agent run streams as it happens: text, reasoning, tool calls, tool results, a
 
 The WebSocket path is untouched; this is additive. Both read one event source and one replay buffer, so they cannot drift apart on what you are allowed to watch or on what order events arrive in.
 
-<Warning>
-**Only chat-initiated runs stream today.** A run started from the chat UI, `crewship run`, or `crewship ask` emits frames on the session channel. A run started by a **routine, a webhook, a pipeline step, or the internal agent-start IPC** does not — those paths execute the agent without publishing to the session channel at all, so attaching to one yields `stream.open` with `active:false`, then `stream.end` / `no_active_run`, and no output.
+<Note>
+**Every run with a chat streams — not just the ones you started.** A run dispatched by a **routine step**, a **webhook trigger**, the **scheduler** (a cron'd agent) or the internal **agent-start IPC** publishes on the same session channel as a chat message does, so `crewship chat stream <chat-id>` works on all of them. Take the chat id from the routine's step, the chat list, or the run record, and attach.
 
-The run is really executing; there is simply nothing on the channel to watch. This is not specific to the HTTP stream — the WebSocket path has the same blind spot — and [issue #1823](https://github.com/crewship-ai/crewship/issues/1823) tracks making those runs watchable. Until it lands, use the [Crew Journal](/guides/crew-journal) to follow automated runs.
-</Warning>
+Two kinds of run are deliberately **not** streamed:
+
+- **A run with no chat.** The agent-start IPC can execute an agent without creating a chat row. No chat, no `session:` channel, nothing to attach to — use the [Crew Journal](/guides/crew-journal) for those.
+- **A delegated or peer sub-agent.** When an agent delegates work (`assignments`, peer queries), the sub-agent runs against the *delegating* chat's id. Its output belongs to the parent agent's turn, so it is not published as a turn of its own; you see the parent's reply, not the sub-agent's raw stream.
+</Note>
 
 ## When to use it
 
-- **Watch a run somebody else started.** `crewship run` and `crewship ask` already follow the run they launch. This follows a chat-initiated run started by the web UI or another shell — you only need the chat id. (Routine, webhook and pipeline runs are not yet covered; see the warning above.)
+- **Watch a run somebody else started.** `crewship run` and `crewship ask` already follow the run they launch. This follows a run started by the web UI, another shell, a routine step, a webhook or the scheduler — you only need the chat id.
 - **Script against agent output.** `--format ndjson` prints the server's frames verbatim, one JSON object per line, which is what `jq` wants. `crewship chat stream <id> --format ndjson | jq -r 'select(.type=="text").content'` is the whole integration.
 - **Capture a reply to a file.** The run's text goes to stdout and nothing else does, so `crewship chat stream <id> > reply.md` yields the reply and only the reply. Thinking, tool activity and stream notices go to stderr.
 - **Gate a pipeline on a run.** The command exits when the run finishes and exits non-zero if it ended in an error, so `crewship chat stream <id> || notify-failure` works.

@@ -91,9 +91,11 @@ A run that ends in an error exits non-zero.
 Only a workspace-scoped token is needed — **not** a selected workspace. The route
 resolves tenancy from the chat itself, so `CREWSHIP_TOKEN` plus a chat id is enough.
 
-Note that only **chat-initiated** runs currently stream (chat UI, `crewship run`,
-`crewship ask`). Routine, webhook and pipeline runs publish nothing on the session
-channel yet — see [issue #1823](https://github.com/crewship-ai/crewship/issues/1823).
+Any run that has a chat can be watched this way — a chat message, `crewship run`,
+`crewship ask`, a routine's `agent_run` step, a webhook trigger or a scheduled
+agent. A run executed with no chat row has no session channel to attach to, and a
+delegated sub-agent's output is reported as part of the delegating agent's turn
+rather than as a stream of its own.
 
 `--format ndjson` (or `json`) switches to passthrough: every server frame is
 printed verbatim, one JSON object per line. That is the mode to script against.

@@ -7,7 +7,7 @@
 # handler writes frames, but it cannot show that the shipped binary, the
 # shipped route, the auth chain and the frame contract line up end to end.
 #
-# Two tiers, and the suite says which one it ran:
+# Three tiers, and the suite says which ones it ran:
 #
 #   Tier A — control plane, NO provider credential required.
 #     CLI parity, the 404-for-a-chat-you-cannot-see rule, and the frame
@@ -20,13 +20,20 @@
 #     with the reason when no agent replies (the `LLMRunner: provider: no
 #     active … credential` shape every runtime suite hits without a key).
 #
-# Tier B deliberately drives `cs run`, and that is a real coverage limit worth
-# stating: today the WebSocket send_message path is the ONLY producer of
-# session-channel frames (internal/ws/client.go streams.begin/record). A run
-# started by a routine, webhook or pipeline emits nothing there, so this suite
-# CANNOT catch a regression on those paths — there is no signal to regress.
-# #1823 tracks extending emission to them; when it lands, add a case here that
-# starts the run from a routine instead of the CLI.
+# Tier B drives `cs run`, which goes over the WebSocket — the path that has
+# always worked.
+#
+#   Tier C — a ROUTINE-triggered run, requires a provider credential.
+#     The case #1823 exists for. A routine's agent_run step never touches the
+#     WebSocket: it calls orch.RunAgent from the pipeline runner. Before #1823
+#     that produced nothing on `session:{chatId}`, so attaching answered
+#     stream.open{active:false} → stream.end/no_active_run with zero output for
+#     a run that was demonstrably executing. This tier fails on exactly that
+#     answer, which is why it could not have passed before the fix.
+#
+# Tier C is the regression signal for every non-WebSocket dispatch path
+# (scheduler, webhook, pipeline step, agent-start IPC): they all publish through
+# the one chokepoint the routine path exercises here.
 #
 # Usage:
 #   export CREWSHIP_SERVER=<devN url>
@@ -210,14 +217,61 @@ else
     bash -c "$CREWSHIP --server '$SERVER' chat stream '$CHAT_ID' --last-seq 1 --idle 10 --quiet >/dev/null 2>&1"
 fi
 
+# ── Shared between Tier B and Tier C ───────────────────────────────────────
+
+# await_new_chat <agent-slug> <before-ids> <pid> <timeout-secs>
+#
+# Echo the id of the first chat that appears for <agent-slug> which was not in
+# <before-ids>, or nothing if none does. Both tiers need it: nothing that starts
+# a run hands back the chat id, so the only way to attach to a run somebody else
+# started is to watch the agent's chat list. Gives up when the launching process
+# is gone — a run that died before creating a chat never got off the ground.
+await_new_chat() {
+  local agent="$1" before="$2" pid="$3" budget="$4"
+  local after found waited=0
+  while (( waited < budget )); do
+    after="$(cs chat list "$agent" --format json 2>/dev/null | jq -r '.[]?.id' 2>/dev/null | sort)"
+    found="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -1)"
+    if [[ -n "$found" ]]; then
+      printf '%s' "$found"
+      return 0
+    fi
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 2; waited=$((waited+2))
+  done
+}
+
+# assert_increasing_seq <label> <ndjson>
+#
+# Sequence numbers must be strictly increasing across one stream's frames — that
+# is the entire basis of `--last-seq` resume, and the property a second,
+# divergent implementation of the recorder would silently break. Asserted on
+# both tiers because they exercise two different producers of those numbers.
+assert_increasing_seq() {
+  local label="$1" out="$2" seqs
+  seqs="$(printf '%s\n' "$out" | jq -r 'select(.seq != null) | .seq' 2>/dev/null)"
+  if [[ -z "$seqs" ]]; then
+    _fail "$label" "no frame carried a sequence number"
+  elif [[ "$seqs" == "$(printf '%s' "$seqs" | sort -n -u)" ]]; then
+    _pass "$label"
+  else
+    _fail "$label" "seqs: $(printf '%s' "$seqs" | tr '\n' ' ')"
+  fi
+}
+
 # ── Tier B: a live run ─────────────────────────────────────────────────────
 
+RUN_AGENT="$(printf '%s\n' "$AGENT_SLUGS" | head -1)"
+
+# Tier B is a function so its early exits are `return`, not `finish`: Tier C
+# below is the one that covers #1823 and must run even when Tier B has nothing
+# to work with.
+tier_b() {
 section "Tier B · watching a run somebody else started"
 
-RUN_AGENT="$(printf '%s\n' "$AGENT_SLUGS" | head -1)"
 if [[ -z "$RUN_AGENT" ]]; then
   skip "live run stream" "no agents in this workspace"
-  finish
+  return 0
 fi
 
 # Start the run in the background and attach from THIS process — that is the
@@ -230,19 +284,12 @@ cs run "$RUN_AGENT" "Reply with the single word ACKNOWLEDGED and nothing else." 
 RUN_PID=$!
 
 # Poll for the chat the run created, then attach to it while it is still live.
+# Without jq there is no way to read an id out of the list, so the tier has
+# nothing to attach to and falls through to its SKIP below.
 NEW_CHAT=""
-waited=0
-while (( waited < RUN_ATTACH_TIMEOUT )); do
-  if have jq; then
-    AFTER_IDS="$(cs chat list "$RUN_AGENT" --format json 2>/dev/null | jq -r '.[]?.id' 2>/dev/null | sort)"
-    NEW_CHAT="$(comm -13 <(printf '%s\n' "$BEFORE_IDS") <(printf '%s\n' "$AFTER_IDS") | head -1)"
-  fi
-  [[ -n "$NEW_CHAT" ]] && break
-  # The run process dying before a chat appeared means it never got off the
-  # ground — almost always a missing provider credential.
-  kill -0 "$RUN_PID" 2>/dev/null || break
-  sleep 2; waited=$((waited+2))
-done
+if have jq; then
+  NEW_CHAT="$(await_new_chat "$RUN_AGENT" "$BEFORE_IDS" "$RUN_PID" "$RUN_ATTACH_TIMEOUT")"
+fi
 
 if [[ -z "$NEW_CHAT" ]]; then
   wait "$RUN_PID" 2>/dev/null
@@ -252,7 +299,7 @@ if [[ -z "$NEW_CHAT" ]]; then
   fi
   skip "live run stream" "$REASON"
   rm -f "$RUN_LOG"
-  finish
+  return 0
 fi
 
 info "attaching to live chat $NEW_CHAT"
@@ -274,17 +321,183 @@ else
   if have jq; then
     REPLY="$(printf '%s\n' "$STREAM_OUT" | jq -r 'select(.type=="text") | .content' 2>/dev/null | tr -d '\n')"
     assert_nonempty "live stream delivered the agent's text" "$REPLY"
-    # Sequence numbers must be strictly increasing — that is what makes the
-    # resume watermark meaningful.
-    SEQS="$(printf '%s\n' "$STREAM_OUT" | jq -r 'select(.seq != null) | .seq' 2>/dev/null)"
-    if [[ -z "$SEQS" ]]; then
-      _fail "run frames carry seq" "no frame carried a sequence number"
-    elif [[ "$SEQS" == "$(printf '%s' "$SEQS" | sort -n -u)" ]]; then
-      _pass "run frames carry strictly increasing seq"
-    else
-      _fail "run frames carry strictly increasing seq" "seqs: $(printf '%s' "$SEQS" | tr '\n' ' ')"
-    fi
+    assert_increasing_seq "run frames carry strictly increasing seq" "$STREAM_OUT"
   fi
 fi
+}
+
+tier_b
+
+# ── Tier C: a run NOBODY sent over the WebSocket ────────────────────────────
+#
+# The assertion this whole issue turns on. A routine's `agent_run` step reaches
+# the agent through internal/pipeline/runner_orchestrator.go → orch.RunAgent —
+# no socket, no send_message, no `cs run`. Before #1823 that published nothing
+# on `session:{chatId}`: every attach answered no_active_run and exited 0 with
+# no output, so the docs had to say so and this suite had no signal at all.
+#
+# Note what is NOT special-cased here: the scheduler, the webhook trigger and
+# the agent-start IPC take the same chokepoint, so a regression on any of them
+# reddens this tier too.
+
+section "Tier C · watching a ROUTINE-triggered run (#1823)"
+
+# How long to keep re-attaching while the routine works its way to the agent
+# step. Cold container + first token lives inside this on a dev slot.
+ROUTINE_STREAM_TIMEOUT="${ROUTINE_STREAM_TIMEOUT:-180}"
+
+tier_c() {
+if ! have jq; then
+  skip "routine run stream" "needs jq to discover the step's chat"
+  return 0
+fi
+if [[ -z "$RUN_AGENT" ]]; then
+  skip "routine run stream" "no agents in this workspace"
+  return 0
+fi
+
+# The routine is owned by a crew, and its agent_slug resolves against THAT crew
+# (the cross-crew reuse contract in `routine save`). Read the crew off the agent
+# rather than guessing a name.
+RUN_CREW="$(cs agent get "$RUN_AGENT" --format json 2>/dev/null \
+  | jq -r '.crew_slug // .crew.slug // .crew // empty' 2>/dev/null)"
+if [[ -z "$RUN_CREW" || "$RUN_CREW" == "null" ]]; then
+  skip "routine run stream" "could not resolve the crew that owns agent $RUN_AGENT"
+  return 0
+fi
+
+# Lowercase kebab-case is a server-side constraint on the DSL's `name`
+# (422 otherwise); nonce() emits uppercase for model-echo reliability, which is
+# not what this needs.
+R_SLUG="hs-stream-$(nonce p | tr '[:upper:]' '[:lower:]')"
+R_DSL="$(mktemp -t cs-stream-routine.XXXXXX)"
+cat > "$R_DSL" <<JSON
+{ "name":"$R_SLUG","description":"#1823 — routine-triggered run must be watchable","dsl_version":"1.0",
+  "steps":[{"id":"say","type":"agent_run","agent_slug":"$RUN_AGENT",
+            "prompt":"Reply with the single word ACKNOWLEDGED and nothing else."}] }
+JSON
+
+if ! R_SAVE="$(cs routine save --name "$R_SLUG" --description "1823 stream probe" \
+      --definition "$R_DSL" --author-crew "$RUN_CREW" 2>&1)"; then
+  rm -f "$R_DSL"
+  # Report what the server said. A silenced save turns every environment
+  # problem (slug rules, a crew with no such agent, a missing tier config) into
+  # the same blank SKIP, which is how a suite quietly stops testing anything.
+  skip "routine run stream" "could not save the probe routine (crew=$RUN_CREW agent=$RUN_AGENT): $(printf '%s' "$R_SAVE" | tr '\n' ' ' | head -c 200)"
+  return 0
+fi
+rm -f "$R_DSL"
+info "routine $R_SLUG saved (crew $RUN_CREW, agent $RUN_AGENT)"
+
+# The probe routine is disposable — soft-delete it on every exit from here on
+# so a suite run does not leave a new `hs-stream-*` in the registry each time.
+_tier_c_cleanup() { cs routine delete "$R_SLUG" --yes >/dev/null 2>&1 || true; }
+
+R_LOG="$(mktemp -t cs-stream-routine-run.XXXXXX)"
+R_BEFORE="$(cs chat list "$RUN_AGENT" --format json 2>/dev/null | jq -r '.[]?.id' 2>/dev/null | sort)"
+cs routine run "$R_SLUG" >"$R_LOG" 2>&1 &
+R_PID=$!
+
+# The step creates its chat row BEFORE it starts the agent, so the id is
+# discoverable while the run is still in front of us.
+R_CHAT="$(await_new_chat "$RUN_AGENT" "$R_BEFORE" "$R_PID" "$ROUTINE_STREAM_TIMEOUT")"
+
+if [[ -z "$R_CHAT" ]]; then
+  wait "$R_PID" 2>/dev/null
+  REASON="no chat appeared within ${ROUTINE_STREAM_TIMEOUT}s"
+  if grep -qi "no active .* credential\|provider:" "$R_LOG" 2>/dev/null; then
+    REASON="no provider credential in this workspace — $(head -c 120 "$R_LOG" | tr '\n' ' ')"
+  fi
+  skip "routine run stream" "$REASON — $(head -c 160 "$R_LOG" | tr '\n' ' ')"
+  rm -f "$R_LOG"
+  _tier_c_cleanup
+  return 0
+fi
+info "routine step chat: $R_CHAT"
+
+# Attach with --follow, and retry while the routine is still working.
+#
+# --follow is what removes the race, and the race is real: the chat row exists
+# before the agent starts, so a plain attach can land during container start,
+# get the documented `no_active_run` answer for an idle chat, and return before
+# the run produces anything. With --follow the connection instead WAITS for the
+# run — so a step that takes three seconds end to end is watched rather than
+# missed. The cost is that the stream deliberately outlives the run and closes
+# on `idle_timeout` rather than `run_complete`; the terminal `done` frame is the
+# run-finished signal asserted below.
+#
+# The retry loop covers the other direction: a cold container start longer than
+# one idle window. It stops when frames arrive, or when the routine process is
+# gone and nothing ever did.
+#
+# Before #1823 no attach ever delivered a frame, so this loop ran out against a
+# routine that was demonstrably executing and the assertion below failed on an
+# empty transcript. That is the red this tier exists to produce.
+R_IDLE="${ROUTINE_STREAM_IDLE:-25}"
+R_OUT=""; R_RC=0; attached=0; waited=0
+while (( waited < ROUTINE_STREAM_TIMEOUT )); do
+  R_OUT="$(cs chat stream "$R_CHAT" --format ndjson --follow --idle "$R_IDLE" --quiet 2>&1)"; R_RC=$?
+  if printf '%s\n' "$R_OUT" | grep -qE '"type":"(run_begin|text|thinking|tool_call|done)"'; then
+    attached=1
+    break
+  fi
+  kill -0 "$R_PID" 2>/dev/null || break
+  waited=$((waited+R_IDLE))
+done
+wait "$R_PID" 2>/dev/null
+
+if (( ! attached )); then
+  _fail "routine-triggered run publishes on the session channel" \
+    "every attach to $R_CHAT answered with no run frames while the routine was executing — this is #1823's failure mode. last stream: $(printf '%s' "$R_OUT" | head -c 200) | routine: $(head -c 200 "$R_LOG" | tr '\n' ' ')"
+  rm -f "$R_LOG"
+  _tier_c_cleanup
+  return 0
+fi
+_pass "routine-triggered run publishes on the session channel"
+rm -f "$R_LOG"
+_tier_c_cleanup
+
+assert_contains "routine stream opened" "$R_OUT" '"type":"stream.open"'
+assert_contains "routine stream delivered a terminal done" "$R_OUT" '"type":"done"'
+
+# Exit status is a contract of its own: 0 for a run that finished, non-zero
+# when the stream carried an agent error. Asserting a flat 0 would call a
+# correctly-reported failure a bug.
+if printf '%s\n' "$R_OUT" | grep -q '"type":"error"'; then
+  if (( R_RC != 0 )); then
+    _pass "routine stream exits non-zero when the run errored"
+  else
+    _fail "routine stream exits non-zero when the run errored" "exit 0 despite an error frame"
+  fi
+else
+  assert_eq "routine stream exits 0" "0" "$R_RC"
+fi
+
+# Sequenced the same way a chat-initiated run's frames are — same assertion,
+# different producer, which is the point of running it on both tiers.
+assert_increasing_seq "routine run frames carry strictly increasing seq" "$R_OUT"
+
+# The agent's own words. A run that failed (no credential, container refused)
+# still produces run_begin + error + done — real frames, and enough to prove the
+# channel works — so report that case rather than failing on it.
+R_TEXT="$(printf '%s\n' "$R_OUT" | jq -r 'select(.type=="text") | .content' 2>/dev/null | tr -d '\n')"
+if [[ -n "$R_TEXT" ]]; then
+  _pass "routine stream delivered the agent's text"
+elif printf '%s\n' "$R_OUT" | grep -q '"type":"error"'; then
+  skip "routine stream delivered the agent's text" \
+    "the routine's run failed and the stream reported it: $(printf '%s\n' "$R_OUT" | jq -r 'select(.type=="error") | .content' 2>/dev/null | head -c 160)"
+else
+  _fail "routine stream delivered the agent's text" "no text and no error frame: $(printf '%s' "$R_OUT" | head -c 200)"
+fi
+
+# Every line still has to be a standalone JSON object on this path too.
+if printf '%s\n' "$R_OUT" | grep -v '^$' | jq -e . >/dev/null 2>&1; then
+  _pass "every routine-stream line parses as JSON"
+else
+  _fail "every routine-stream line parses as JSON" "$(printf '%s' "$R_OUT" | head -c 200)"
+fi
+}
+
+tier_c
 
 finish

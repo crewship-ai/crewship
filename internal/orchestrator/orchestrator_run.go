@@ -47,6 +47,13 @@ func (o *Orchestrator) execPreflight(ctx context.Context, cfg provider.ExecConfi
 
 func (o *Orchestrator) RunAgentForAssignment(ctx context.Context, req AgentRunRequest, handler EventHandler) error {
 	req.SkipConvHistory = true
+	// A delegated/peer sub-agent runs against the DELEGATING chat's id (see
+	// api/assignments_run.go, api/query_handler.go) — it is not a turn of that
+	// chat, it is work happening underneath one. Publishing its raw events on
+	// `session:{ChatID}` would interleave a sub-agent's output with the primary
+	// agent's reply and render as one confused turn. The delegation surfaces
+	// (peer_query_running / assignment events) are how those runs are reported.
+	req.SuppressSessionStream = true
 	return o.RunAgent(ctx, req, handler)
 }
 
@@ -55,9 +62,10 @@ func (o *Orchestrator) SetConversationStore(store *conversation.Store) {
 	o.convStore = store
 }
 
-// RunAgent executes an agent run inside its crew's container, streaming events
-
-func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) (err error) {
+// runAgent executes an agent run inside its crew's container, streaming events
+// to handler. Callers use RunAgent (session_stream.go), which wraps this with
+// the session-channel publication every entry point shares.
+func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) (err error) {
 	o.mu.RLock()
 	if !o.accepting {
 		o.mu.RUnlock()

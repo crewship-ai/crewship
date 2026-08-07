@@ -204,6 +204,15 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 	jwtValidator, wsHub := newWSHub(cfg, logger, deps)
 
+	// Make every agent run watchable, not just the ones a WebSocket started
+	// (#1823). With the hub wired as the orchestrator's session publisher, a
+	// run dispatched by the scheduler, a webhook, a routine's agent_run step
+	// or the agent-start IPC publishes its events on `session:{chatID}` — the
+	// same seq'd, replayable channel `crewship chat stream` and the browser
+	// read. Without this call the orchestrator silently skips publication, so
+	// a CLI-only build behaves exactly as it did before.
+	orch.SetSessionPublisher(wsHub)
+
 	// File watcher broadcasts real-time file events to WebSocket clients on
 	// the crew:{crewID} channel AND emits file.written journal entries so
 	// Crow's Nest's Filesystem panel actually fills. The journal pointer
