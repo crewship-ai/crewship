@@ -82,10 +82,17 @@ type Matcher struct {
 	//
 	// A key NO emitter writes is not an error here and cannot be: this type
 	// knows nothing about the 117 journal entry types or their payloads. The
-	// rule is simply saved and matches nothing, which is the silent failure
-	// `--payload-equals to=DONE` shipped as the documented first example for
-	// months. Keys per entry type are documented in docs/guides/automations.mdx
-	// and pinned against the real emitter by
+	// rule is simply saved and matches nothing.
+	//
+	// That silence shipped once: `--payload-equals to=DONE` was the documented
+	// first example for months against an emitter that wrote only `action` and
+	// `details`, so the first rule a reader built did nothing and said nothing.
+	// The emitter now writes `from`/`to` on a transition, which makes that
+	// example correct — but the failure MODE it demonstrated is unchanged, and
+	// is why Explain and Preview exist.
+	//
+	// Keys per entry type are documented in docs/guides/automations.mdx and
+	// pinned against the real emitter by
 	// api.TestIssueEvents_JournalPayloadIsWhatAutomationsMatchOn.
 	PayloadEquals map[string]any `json:"payload_equals,omitempty"`
 }

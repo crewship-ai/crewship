@@ -51,9 +51,12 @@ most entries and what was actually there:
 ```
 mission.status_change · last 168h
   would NOT have fired: 0 of 6 entries matched
-  payload_equals.to excluded 6 of them — the entry carries no key "to"; keys present: action, details
+  payload_equals.status excluded 6 of them — the entry carries no key "status"; keys present: action, details, from, to
   that key is absent, so no value will match; predicate on a key the event carries
 ```
+
+The fix is in the last line: the event spells the new status `to`, not
+`status`. Re-run with `--payload-equals to=DONE` and the preview fires.
 
 <Note>
   **"no entries in the window" is not a verdict on the rule.** A quiet
