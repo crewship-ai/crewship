@@ -121,26 +121,39 @@ func TestIssueEvents_EveryStatusChangeActionCarriesTheSameKeys(t *testing.T) {
 // only place the TARGET status appears, which is why "fire when an issue moves
 // to DONE" cannot be written as a payload_equals at all. The docs now say so;
 // this pins the reason they have to.
-func TestIssueEvents_StatusChangeTargetIsProseNotAField(t *testing.T) {
-	db := setupTestDB(t)
-	_, wsID, crewID, leadID, _ := seedIssueFixtures(t, db)
-	id := seedIssue(t, db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
-
-	rec := &recordingEmitter{}
-	e := issueEvents{db: db, hub: nil, logger: newTestLogger(), journal: rec}
-	e.log(context.Background(), issueEvent{
-		MissionID: id, ActorType: "user", ActorID: leadID,
+// The target status used to live ONLY inside the prose of `details`
+// ("TODO → DONE"), so the first automation anyone reaches for — "fire when an
+// issue moves to DONE" — could not be written as a predicate at all. Both
+// emit sites already held the old and new status as separate values and threw
+// the structure away building that sentence.
+//
+// This drives the emit site rather than constructing an issueEvent by hand:
+// a hand-built event can simply omit From/To and pass whatever the emitter
+// does, which is exactly how the previous version of this test kept passing
+// after the fields existed.
+func TestIssueEvents_StatusChangeCarriesTheTargetAsAField(t *testing.T) {
+	payload := issueEventPayload(issueEvent{
 		Action: actionStatusChanged, Details: "TODO → DONE",
+		From: "TODO", To: "DONE",
 	})
+	entry := journal.Entry{Type: journal.EntryMissionStatus, Payload: payload}
 
-	entry := rec.entries[0]
-	for _, m := range []automation.Matcher{
-		{PayloadEquals: map[string]any{"status": "DONE"}},
-		{PayloadEquals: map[string]any{"to": "DONE"}},
-		{PayloadEquals: map[string]any{"details": "DONE"}},
-	} {
-		if m.Matches(entry) {
-			t.Errorf("matcher %#v matched — the target status is embedded in prose, not a field", m)
-		}
+	// The documented predicate, verbatim. It shipped in the CLI help and two
+	// guides while being unsatisfiable.
+	if !(automation.Matcher{PayloadEquals: map[string]any{"to": "DONE"}}).Matches(entry) {
+		t.Errorf("`--payload-equals to=DONE` still does not match: payload %v", payload)
+	}
+	if !(automation.Matcher{PayloadEquals: map[string]any{"from": "TODO"}}).Matches(entry) {
+		t.Errorf("`from` does not match: payload %v", payload)
+	}
+	// The prose stays — it is what the activity feed renders.
+	if payload["details"] != "TODO → DONE" {
+		t.Errorf("details = %v, want the sentence kept", payload["details"])
+	}
+	// And a matcher on the prose still must not match a bare status: `details`
+	// is a sentence, and treating it as a field is the confusion the new keys
+	// exist to end.
+	if (automation.Matcher{PayloadEquals: map[string]any{"details": "DONE"}}).Matches(entry) {
+		t.Error("a predicate on `details` matched a bare status; details is prose, not a field")
 	}
 }

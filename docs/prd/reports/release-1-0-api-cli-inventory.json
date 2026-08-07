@@ -5675,7 +5675,8 @@
       "status": "documented_exact",
       "test_signals": [
         "internal/api/automations_preview_test.go",
-        "internal/api/automations_test.go"
+        "internal/api/automations_test.go",
+        "internal/api/issue_events_payload_contract_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -5695,7 +5696,8 @@
           "source_file": "cmd/crewship/cmd_automation.go",
           "test_signals": [
             "internal/api/automations_preview_test.go",
-            "internal/api/automations_test.go"
+            "internal/api/automations_test.go",
+            "internal/api/issue_events_payload_contract_test.go"
           ]
         }
       }
@@ -5716,7 +5718,8 @@
       "status": "documented_exact",
       "test_signals": [
         "internal/api/automations_preview_test.go",
-        "internal/api/automations_test.go"
+        "internal/api/automations_test.go",
+        "internal/api/issue_events_payload_contract_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -5736,7 +5739,8 @@
           "source_file": "cmd/crewship/cmd_automation.go",
           "test_signals": [
             "internal/api/automations_preview_test.go",
-            "internal/api/automations_test.go"
+            "internal/api/automations_test.go",
+            "internal/api/issue_events_payload_contract_test.go"
           ]
         }
       }
@@ -31748,6 +31752,7 @@
         "docs/cli/label.mdx",
         "docs/cli/project.mdx",
         "docs/cli/recurring.mdx",
+        "docs/cli/routine.mdx",
         "docs/cli/saved-view.mdx",
         "docs/cli/triage.mdx",
         "docs/cli/workflow.mdx"
@@ -32578,6 +32583,7 @@
       "exact_docs": [
         "docs/cli/activity.mdx",
         "docs/cli/audit.mdx",
+        "docs/cli/automation.mdx",
         "docs/cli/escalation.mdx",
         "docs/cli/explain.mdx",
         "docs/cli/inspect.mdx",
@@ -45024,11 +45030,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3978,
+    "command_references": 3984,
     "api_path_references": 2011,
     "environment_references": 395,
     "manifest_kind_references": 209,
-    "flag_references": 1845,
+    "flag_references": 1854,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,
