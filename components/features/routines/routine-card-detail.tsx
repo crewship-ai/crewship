@@ -40,17 +40,23 @@ import {
   GitBranch,
   Globe,
   KeyRound,
+  PenSquare,
   Puzzle,
   ShieldAlert,
   Webhook,
   XCircle,
+  Zap,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { relTime, formatDurationDecimal } from "@/lib/time"
 import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
-import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
+import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
+import { useAutomations } from "@/hooks/use-automations"
+import { automationsForRoutine, crewshipActionsInDefinition } from "@/lib/automations"
+import { runProvenance } from "@/lib/run-provenance"
+import { AutomationList } from "@/components/features/automations/automation-list"
 import { integrationLabel } from "@/lib/integration-labels"
 import { credentialTypeLabel } from "@/lib/credential-labels"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -98,6 +104,32 @@ interface Props {
 
 type SideTab = "triggers" | "versions"
 
+/**
+ * Which kind of trigger the Triggers card is showing.
+ *
+ * Automations join cron and webhooks here rather than taking a card of their
+ * own, because they are the same question — what starts this routine — and the
+ * card's own design note argues that case: one card behind a switch beats two
+ * half-empty ones. The switch only offers `automations` when at least one rule
+ * targets this routine; a permanent third option that is empty on nearly every
+ * routine is the scaffolding this page was built to remove.
+ */
+type TriggerKind = "schedules" | "webhooks" | "automations"
+
+const TRIGGER_KINDS: readonly TriggerKind[] = ["schedules", "webhooks", "automations"]
+
+const TRIGGER_TITLE: Record<TriggerKind, string> = {
+  schedules: "Triggers",
+  webhooks: "Webhooks",
+  automations: "Automations",
+}
+
+const TRIGGER_ICON: Record<TriggerKind, React.ComponentType<{ className?: string }>> = {
+  schedules: CalendarClock,
+  webhooks: Webhook,
+  automations: Zap,
+}
+
 // The same curve the detail kit's Appear uses, so a pane opening and a
 // card arriving are visibly the same product rather than two people's
 // idea of a transition.
@@ -131,7 +163,7 @@ export function RoutineCardDetail({
     setFocus(null)
   }, [])
   const [sideTab, setSideTab] = React.useState<SideTab>("triggers")
-  const [showWebhooks, setShowWebhooks] = React.useState(false)
+  const [triggerKind, setTriggerKind] = React.useState<TriggerKind>("schedules")
   const [manageTriggers, setManageTriggers] = React.useState(false)
   const [manageVersions, setManageVersions] = React.useState(false)
   // Cancelling a specific run lives in RoutineRunsTab, which has the
@@ -178,11 +210,30 @@ export function RoutineCardDetail({
 
   const { records } = usePipelineRunRecords(workspaceId, routine.slug)
   const { schedules } = usePipelineSchedules(workspaceId)
+  const { automations } = useAutomations(workspaceId)
 
   const mine = React.useMemo(
     () => schedules.filter((s) => s.target_pipeline_id === routine.id),
     [schedules, routine.id],
   )
+  // The rules that can start THIS routine. A routine a rule can fire, on a
+  // page listing only cron schedules, reads as manual-or-cron — and the reader
+  // is right to conclude that from what the page shows them.
+  const myAutomations = React.useMemo(
+    () => automationsForRoutine(automations, routine.slug),
+    [automations, routine.slug],
+  )
+  // A `crewship` step is the line between a routine that reads the board and
+  // one that writes to it (internal/pipeline/crewship_step.go).
+  const crewshipActions = React.useMemo(
+    () => crewshipActionsInDefinition(routine.definition),
+    [routine.definition],
+  )
+  // Losing the automations view when the last rule is deleted must not strand
+  // the card on an empty pane.
+  React.useEffect(() => {
+    if (triggerKind === "automations" && myAutomations.length === 0) setTriggerKind("schedules")
+  }, [triggerKind, myAutomations.length])
   const nextRun = React.useMemo(() => {
     const upcoming = mine
       .filter((s) => s.enabled && s.next_run_at)
@@ -275,6 +326,17 @@ export function RoutineCardDetail({
             <div className="flex flex-wrap items-center gap-1.5">
               {statusPills}
               <Pill tone="default">{mine.length > 0 ? "scheduled" : "manual"}</Pill>
+              {/* The pill above answers "does a clock start this". It has no
+                  word for "an event starts this", and without one a routine a
+                  rule fires reads as manual at a glance. */}
+              {myAutomations.length > 0 && (
+                <span data-testid="routine-automations-pill">
+                  <Pill tone="default">
+                    <Zap className="h-3 w-3" />
+                    {myAutomations.length} automation{myAutomations.length === 1 ? "" : "s"}
+                  </Pill>
+                </span>
+              )}
               {steps.length > 0 && (
                 <Pill tone={agentPct >= 60 ? "warn" : "default"}>{agentPct}% agent steps</Pill>
               )}
@@ -416,17 +478,19 @@ export function RoutineCardDetail({
               working editors rather than replacing them. */}
           <Appear order={4}>
             <DetailCard
-              title={sideTab === "triggers" ? (showWebhooks ? "Webhooks" : "Triggers") : "Versions"}
+              title={sideTab === "triggers" ? TRIGGER_TITLE[triggerKind] : "Versions"}
               subtitle={
                 sideTab === "triggers"
-                  ? showWebhooks
-                    ? undefined
-                    : String(mine.length)
+                  ? triggerKind === "schedules"
+                    ? String(mine.length)
+                    : triggerKind === "automations"
+                      ? String(myAutomations.length)
+                      : undefined
                   : routine.head_version != null
                     ? `v${routine.head_version}`
                     : undefined
               }
-              icon={sideTab === "triggers" ? (showWebhooks ? Webhook : CalendarClock) : GitBranch}
+              icon={sideTab === "triggers" ? TRIGGER_ICON[triggerKind] : GitBranch}
               tone="purple"
               action={
                 <div className="flex items-center gap-1">
@@ -452,28 +516,56 @@ export function RoutineCardDetail({
                       </button>
                     ))}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      sideTab === "triggers"
-                        ? setManageTriggers((v) => !v)
-                        : setManageVersions((v) => !v)
-                    }
-                    className="rounded-md border border-border/60 px-1.5 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                  >
-                    {(sideTab === "triggers" ? manageTriggers : manageVersions) ? "Done" : "Manage"}
-                  </button>
+                  {/* Automations have no in-app editor to reveal, so the card
+                      does not offer one. A Manage button that opens the same
+                      read-only list is a button that lies. */}
+                  {!(sideTab === "triggers" && triggerKind === "automations") && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        sideTab === "triggers"
+                          ? setManageTriggers((v) => !v)
+                          : setManageVersions((v) => !v)
+                      }
+                      className="rounded-md border border-border/60 px-1.5 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      {(sideTab === "triggers" ? manageTriggers : manageVersions)
+                        ? "Done"
+                        : "Manage"}
+                    </button>
+                  )}
                 </div>
               }
               footer={
                 sideTab === "triggers" ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowWebhooks((v) => !v)}
-                    className="text-[11px] text-primary hover:underline"
-                  >
-                    {showWebhooks ? "Show cron schedules" : "Show inbound webhooks"}
-                  </button>
+                  // Was a link that toggled between two kinds. A third kind
+                  // makes a toggle unreadable — you cannot see the option you
+                  // are not on — so the same switch the card already uses in
+                  // its header does the job here. `automations` appears only
+                  // when a rule actually targets this routine.
+                  <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+                    {TRIGGER_KINDS.filter(
+                      (k) => k !== "automations" || myAutomations.length > 0,
+                    ).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => {
+                          setTriggerKind(k)
+                          setManageTriggers(false)
+                        }}
+                        aria-pressed={triggerKind === k}
+                        className={cn(
+                          "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
+                          triggerKind === k
+                            ? "bg-primary/15 text-primary"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {k}
+                      </button>
+                    ))}
+                  </div>
                 ) : undefined
               }
             >
@@ -490,8 +582,19 @@ export function RoutineCardDetail({
                     rollback.
                   </p>
                 )
+              ) : triggerKind === "automations" ? (
+                <div data-testid="routine-automations" className="space-y-2.5">
+                  <p className="text-[12px] text-muted-foreground">
+                    <span data-testid="routine-automations-count" className="text-foreground/85">
+                      {myAutomations.length}
+                    </span>{" "}
+                    {myAutomations.length === 1 ? "automation" : "automations"} can start this
+                    routine.
+                  </p>
+                  <AutomationList automations={myAutomations} />
+                </div>
               ) : manageTriggers ? (
-                showWebhooks ? (
+                triggerKind === "webhooks" ? (
                   <RoutineWebhooksTab
                     workspaceId={workspaceId}
                     pipelineId={routine.id}
@@ -504,7 +607,7 @@ export function RoutineCardDetail({
                     slug={routine.slug}
                   />
                 )
-              ) : showWebhooks ? (
+              ) : triggerKind === "webhooks" ? (
                 <p className="text-[12px] text-muted-foreground">
                   Inbound HTTP triggers. Press Manage to add or rotate one.
                 </p>
@@ -515,7 +618,7 @@ export function RoutineCardDetail({
           </Appear>
 
           <Appear order={5}>
-            <AccessCard routine={routine} />
+            <AccessCard routine={routine} crewshipActions={crewshipActions} />
           </Appear>
 
           {(routine.manifest?.agents?.length ?? 0) > 0 && (
@@ -748,7 +851,14 @@ function ScheduleList({
  * one exists: a chip reading "Gmail" beside a generic puzzle piece has
  * stopped carrying its own meaning.
  */
-function AccessCard({ routine }: { routine: RoutineDetail }) {
+function AccessCard({
+  routine,
+  crewshipActions,
+}: {
+  routine: RoutineDetail
+  /** `crewship` verbs the definition acts with, e.g. ["issue.create"]. */
+  crewshipActions: string[]
+}) {
   const m = routine.manifest
   const items: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; risk?: boolean }[] = []
 
@@ -773,29 +883,53 @@ function AccessCard({ routine }: { routine: RoutineDetail }) {
       tone="warn"
       footer={items.length > 0 ? "Amber marks reach a reviewer should look at twice." : undefined}
     >
-      {items.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">
-          Nothing outside Crewship — no integrations, credentials or egress.
-        </p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {items.map((item) => {
-            const brand = brandIconForType(item.label)
-            return (
-              <EntityChip
-                key={item.key}
-                icon={
-                  brand
-                    ? () => <BrandGlyph brand={brand} fallback={item.icon} className="h-3 w-3" />
-                    : item.icon
-                }
-                label={item.label}
-                tone={item.risk ? "warn" : "default"}
-              />
-            )
-          })}
-        </div>
-      )}
+      <div className="space-y-3">
+        {items.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">
+            Nothing outside Crewship — no integrations, credentials or egress.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {items.map((item) => {
+              const brand = brandIconForType(item.label)
+              return (
+                <EntityChip
+                  key={item.key}
+                  icon={
+                    brand
+                      ? () => <BrandGlyph brand={brand} fallback={item.icon} className="h-3 w-3" />
+                      : item.icon
+                  }
+                  label={item.label}
+                  tone={item.risk ? "warn" : "default"}
+                />
+              )
+            })}
+          </div>
+        )}
+
+        {/* Reach that points back at us.
+
+            The card above is about what a routine can touch OUTSIDE Crewship,
+            and it answered "nothing" for a routine that files issues and
+            reassigns work on the board — which is the reach a reviewer most
+            needs to see, not the least. Kept as its own labelled group rather
+            than mixed into the chips above, because "writes to your board" and
+            "can call Stripe" are different risks and a reviewer sorts them
+            differently. Absent entirely when the routine only reads. */}
+        {crewshipActions.length > 0 && (
+          <div data-testid="routine-crewship-actions" className="space-y-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+              Writes to Crewship
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {crewshipActions.map((action) => (
+                <EntityChip key={action} icon={PenSquare} label={action} tone="warn" />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </DetailCard>
   )
 }
@@ -838,7 +972,7 @@ function RunsCard({
 }: {
   slug: string
   workspaceId: string
-  records: { id: string; status: string; started_at?: string; duration_ms?: number; cost_usd?: number; triggered_via?: string }[]
+  records: PipelineRunRecord[]
   manage: boolean
   onManageChange: (next: boolean) => void
 }) {
@@ -874,7 +1008,7 @@ function RunsList({
   records,
 }: {
   slug: string
-  records: { id: string; status: string; started_at?: string; duration_ms?: number; cost_usd?: number; triggered_via?: string }[]
+  records: PipelineRunRecord[]
 }) {
   return (
     <>
@@ -885,10 +1019,16 @@ function RunsList({
           {records.slice(0, 8).map((r) => {
             const tone = toneOf(r.status)
             const Icon = tone === "success" ? CheckCircle2 : tone === "destructive" ? XCircle : Clock
+            // Not `r.triggered_via`. Every deferred run is stored as
+            // "schedule", automations included, so the raw enum reports a cron
+            // for a rule-fired run — on the one line whose job is "why did
+            // this happen". See lib/run-provenance.ts.
+            const prov = runProvenance(r)
             return (
               <li key={r.id}>
                 <Link
                   href={activityHref(slug, r.id)}
+                  data-testid={`run-row-${r.id}`}
                   className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-white/[0.025]"
                 >
                   <Icon
@@ -901,8 +1041,24 @@ function RunsList({
                   />
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11px] text-foreground/85">{r.id}</div>
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                      {r.triggered_via ?? "manual"}
+                    <div className="flex flex-wrap items-baseline gap-x-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                      <span>{prov.label}</span>
+                      {prov.source && (
+                        <span className="truncate normal-case text-muted-foreground-soft">
+                          {prov.source}
+                        </span>
+                      )}
+                      {/* Only on a composed run. A depth-0 badge on every row
+                          would be chrome for a fact that is the default. */}
+                      {prov.chainDepth !== undefined && (
+                        <span
+                          data-testid={`run-chain-depth-${r.id}`}
+                          title="Composed run: hops from whatever a human did (max 8)"
+                          className="rounded border border-border/60 px-1 normal-case tabular-nums text-muted-foreground"
+                        >
+                          chain {prov.chainDepth}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right text-[11px] tabular-nums text-muted-foreground">

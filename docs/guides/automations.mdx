@@ -123,6 +123,32 @@ crewship journal --type automation.throttled
 One per hour, not one per drop. A rule that trips its cap ten thousand times
 must not write ten thousand rows saying so.
 
+## Where rules show up in the UI
+
+There is no automation management screen — the CLI above is the whole write
+surface — but the two pages a rule affects both say so, read-only:
+
+- **A routine's detail page** ([`/routines`](/guides/routines#the-detail-page))
+  shows `N automations` beside its status pills whenever a rule targets it, and
+  lists them under **Triggers → Automations**: rule name, the event type it
+  watches, and whether it is armed. A disabled rule is shown greyed rather than
+  hidden — a rule that is switched off is usually the answer to "why did
+  nothing happen".
+- **An issue's detail page** ([`/issues`](/guides/issue-detail)) grows an
+  **Automations** card listing the rules an event from that issue could set
+  off.
+
+Both are absent when nothing applies. A routine no rule targets, and an issue
+no rule watches, show nothing extra at all.
+
+<Note>
+The issue card lists rules that **could** fire, not rules that will. Only
+`mission_ids` and `crew_ids` can be decided from an issue; `agent_ids`,
+`severities` and `payload_equals` describe an event that has not happened yet
+and narrow further at match time. A rule excluded by `mission_ids` or
+`crew_ids` is never listed — that exclusion is provable.
+</Note>
+
 ## Watching a rule work
 
 ```bash
