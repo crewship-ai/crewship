@@ -196,6 +196,10 @@ export function SidebarFilterPopover({
     [openProp, onOpenChange],
   )
 
+  // Ties the trigger to the panel it opens, so a screen reader can move
+  // between them.
+  const panelId = React.useId()
+
   // Escape closes. The dismiss layer below only catches pointers, and a filter
   // panel you can open from the keyboard has to be closable from it too.
   React.useEffect(() => {
@@ -213,6 +217,12 @@ export function SidebarFilterPopover({
         activeCount={activeCount}
         icon={icon}
         aria-expanded={open}
+        // Without these the trigger reads as an ordinary action button:
+        // nothing tells a screen reader that activating it reveals more
+        // controls, or which region those controls live in. aria-expanded
+        // alone says "expanded" without naming what expanded.
+        aria-haspopup="dialog"
+        aria-controls={open ? panelId : undefined}
         onClick={() => setOpen(!open)}
       >
         {triggerLabel}
@@ -227,6 +237,7 @@ export function SidebarFilterPopover({
             />
             <motion.div
               {...FILTER_PANEL_ANIM}
+              id={panelId}
               role="group"
               aria-label={label}
               className={cn(

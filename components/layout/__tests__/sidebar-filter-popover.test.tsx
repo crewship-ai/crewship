@@ -181,3 +181,42 @@ describe("SidebarFacet / SidebarFacetOption", () => {
     expect(screen.getByRole("button", { name: /urgent/i }).getAttribute("aria-pressed")).toBe("false")
   })
 })
+
+/**
+ * Keyboard and assistive-tech contract. The panel is reachable from the
+ * keyboard (the trigger is a button) and dismissible from it (Escape already
+ * worked), but two things were missing that only a screen-reader or
+ * keyboard-only user would notice — which is to say, nobody testing by mouse.
+ */
+describe("SidebarFilterPopover accessibility", () => {
+  beforeEach(() => cleanup())
+
+  it("announces the trigger as opening a popup, and points it at the panel", () => {
+    render(<TwoFacets />)
+    const trigger = screen.getByRole("button", { name: /filter/i })
+
+    // Without aria-haspopup the button reads as an ordinary action: nothing
+    // tells a screen reader that activating it reveals more controls.
+    expect(trigger.getAttribute("aria-haspopup")).toBeTruthy()
+
+    openPanel()
+    const controls = trigger.getAttribute("aria-controls")
+    expect(controls).toBeTruthy()
+    // The association has to be real, not merely present.
+    expect(panel()?.getAttribute("id")).toBe(controls)
+  })
+
+  it("returns focus to the trigger when Escape closes the panel", () => {
+    render(<TwoFacets />)
+    const trigger = screen.getByRole("button", { name: /filter/i })
+    trigger.focus()
+    openPanel()
+
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("false")
+    // Closing without restoring focus drops a keyboard user at the top of the
+    // document with no idea where they were.
+    expect(document.activeElement).toBe(trigger)
+  })
+})
