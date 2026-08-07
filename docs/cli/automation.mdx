@@ -51,10 +51,10 @@ aut_5b81dd0e3f4a2c96  page on budget    budget.exceeded         page-oncall     
 
 ```bash
 crewship automation create \
-  --name "triage on close" \
+  --name "triage on status change" \
   --event mission.status_change \
-  --payload-equals to=DONE \
-  --routine post-close-triage \
+  --payload-equals action=status_changed \
+  --routine post-status-triage \
   --input issue='{{ event.mission_id }}'
 ```
 
@@ -72,12 +72,29 @@ saved as a rule that never fires.
 | `--agent` | `stringSlice` | Only match entries from these agent IDs. Repeatable. |
 | `--mission` | `stringSlice` | Only match entries on these mission IDs. Repeatable. |
 | `--severity` | `stringSlice` | Only match these severities: `info`, `notice`, `warn`, `error`. Repeatable. |
-| `--payload-equals` | `stringSlice` | Only match when a journal payload field equals this, as `key=value`. Repeatable. |
+| `--payload-equals` | `stringSlice` | Only match when a journal payload field equals this, as `key=value`. Repeatable. A key no emitter writes is accepted and matches nothing — see below. |
 | `--debounce-seconds` | `int` | Hold the enqueued run open this long for further events to coalesce into. Default 10. |
 | `--max-per-hour` | `int` | Cap runs this automation may cause per hour. Default 60. |
 
 A predicate flag you omit is "don't care"; omit all of them and every entry of
 the event type matches.
+
+<Warning>
+  Check the payload before you match on it. A `--payload-equals` key that no
+  emitter writes is accepted, saved, listed — and matches nothing, forever,
+  with no error anywhere:
+
+  ```bash
+  crewship journal --type mission.status_change --lines 1 --format json
+  ```
+
+  `mission.status_change` carries exactly two keys: `action` (a closed set —
+  `status_changed`, `review_approved`, `task_failed`, …) and `details` (prose,
+  e.g. `"BACKLOG → TODO"`). Match on `action`; read `details` inside the
+  routine via `{{ event.payload.details }}`. "Moved to DONE" is not
+  expressible as a predicate — the target status lives only in that prose. See
+  [Automations → what `mission.status_change` actually carries](/guides/automations).
+</Warning>
 
 ---
 

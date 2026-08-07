@@ -74,6 +74,16 @@ type crewshipVerb struct {
 	PolicyAction string
 	// RequiredArgs must be present and non-empty after rendering.
 	RequiredArgs []string
+	// RequiresActingAgent marks a verb whose internal route REFUSES a call
+	// that names no acting agent, rather than falling back to "system".
+	//
+	// The dispatcher injects agent_id from the routine's author agent and
+	// nothing else can supply it (crewship_actions.go: it is stripped from the
+	// author's args on purpose). So for these verbs "the routine has no author
+	// agent" is not a degraded mode, it is a guaranteed run-time 400 — which
+	// makes it knowable at SAVE, and ValidateCrewshipActingAgent is where it is
+	// refused.
+	RequiresActingAgent bool
 	// Summary is the one-line description surfaced in editor completions and
 	// docs.
 	Summary string
@@ -126,7 +136,13 @@ var crewshipVerbs = map[string]crewshipVerb{
 		Path:         "/api/v1/internal/issues/{identifier}/comments",
 		PolicyAction: "issue_write",
 		RequiredArgs: []string{"identifier", "body"},
-		Summary:      "Comment on an issue",
+		// mission_comments' author_type CHECK allows only ('user','agent'), and
+		// the internal route has no user door — so a comment with no acting
+		// agent has nobody it can be filed under and the route answers
+		// "agent_id is required". The other five verbs all have a documented
+		// no-agent fallback, which is why this is the only true here.
+		RequiresActingAgent: true,
+		Summary:             "Comment on an issue (requires the routine to have an author agent)",
 	},
 	"issue.link": {
 		Method: "POST",
@@ -163,6 +179,9 @@ var crewshipVerbs = map[string]crewshipVerb{
 var (
 	ErrCrewshipVerbUnknown    = errors.New("unknown crewship action")
 	ErrCrewshipVerbUngoverned = errors.New("crewship action has no policy action")
+	// ErrCrewshipNoActingAgent is the third save-time refusal: the verb exists
+	// and is governed, but the routine names no agent for it to act as.
+	ErrCrewshipNoActingAgent = errors.New("crewship action needs an acting agent and the routine has none")
 )
 
 // CrewshipVerbs returns every verb name in the registry, sorted. Used by the
@@ -231,6 +250,73 @@ func ValidateCrewshipAction(stepID, action string) error {
 			stepID, action, ErrCrewshipVerbUngoverned, strings.Join(EnabledCrewshipVerbs(), ", "))
 	}
 	return nil
+}
+
+// ValidateCrewshipActingAgent is the SAVE-TIME gate on WHO the routine's
+// crewship steps act as.
+//
+// It lives here rather than in Validate because the answer is not in the DSL:
+// the acting agent is the routine's author agent, a property of the row being
+// saved. Both save handlers (user and internal) call it once they know whether
+// one was supplied, which is why hasActingAgent is a bool and not a lookup.
+//
+// The failure it prevents is specific and was real: a routine whose only
+// crewship step is `issue.comment`, saved from the CLI with no author agent,
+// saves clean and then fails EVERY run with `400: agent_id is required`. That
+// is knowable the moment the definition and the author are both in hand, so it
+// is refused then — the same reasoning ValidateCrewshipAction's docstring gives
+// for the unknown-verb refusal.
+//
+// Not applied on the import path: a bundle carries no author agent and has no
+// field to name one, so gating there would make such routines unimportable
+// with no remedy. That is a design fork (bundles growing an author-agent
+// binding), not a bug fix.
+func ValidateCrewshipActingAgent(dsl *DSL, hasActingAgent bool) error {
+	if dsl == nil || hasActingAgent {
+		return nil
+	}
+	return validateStepsActingAgent(dsl.Steps)
+}
+
+func validateStepsActingAgent(steps []Step) error {
+	for _, st := range steps {
+		switch st.Type {
+		case StepForeach:
+			// The loop reaches nothing; its body does. Without this, wrapping
+			// the step in a foreach would be a way past the gate.
+			if st.Foreach == nil {
+				continue
+			}
+			if err := validateStepsActingAgent(st.Foreach.Steps); err != nil {
+				return err
+			}
+		case StepCrewship:
+			v, ok := crewshipVerbs[st.Action]
+			if !ok || !v.RequiresActingAgent {
+				continue
+			}
+			return fmt.Errorf("pipeline: step %q (crewship %s) %w — the acting agent is the "+
+				"routine's author agent and this routine has none, so every run of this step "+
+				"would fail with \"agent_id is required\". Save with --author-agent <slug|id> "+
+				"(an agent in the routine's author crew), or use a verb that can act unattended: %s",
+				st.ID, st.Action, ErrCrewshipNoActingAgent,
+				strings.Join(crewshipVerbsNotNeedingActingAgent(), ", "))
+		}
+	}
+	return nil
+}
+
+// crewshipVerbsNotNeedingActingAgent is the remedy half of the message above:
+// the verbs a routine with no author agent CAN still use.
+func crewshipVerbsNotNeedingActingAgent() []string {
+	var out []string
+	for name, v := range crewshipVerbs {
+		if v.PolicyAction != "" && !v.RequiresActingAgent {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ValidateCrewshipArgs checks the verb's required arguments are present as

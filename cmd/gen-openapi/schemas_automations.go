@@ -23,7 +23,7 @@ func automationSchemaCatalog() map[string]DomainSchema {
 		"severities":  arr(str()),
 		"payload_equals": map[string]any{
 			"type": "object", "additionalProperties": true,
-			"description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type.",
+			"description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type. A key the emitter never writes is accepted and matches nothing — mission.status_change carries only action and details.",
 		},
 	})
 	action := obj(map[string]any{

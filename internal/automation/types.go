@@ -73,10 +73,18 @@ type Matcher struct {
 	MissionIDs []string `json:"mission_ids,omitempty"`
 	Severities []string `json:"severities,omitempty"`
 	// PayloadEquals requires entry.Payload[k] to equal v for every pair.
-	// Comparison is by JSON encoding, so a rule stored as {"to": "DONE"}
+	// Comparison is by JSON encoding, so a rule stored as {"count": 3}
 	// still matches a payload that arrived with a numeric or boolean value
 	// of the same shape — the alternative is a rule that matches in tests
 	// and not in production because one side round-tripped through SQLite.
+	//
+	// A key NO emitter writes is not an error here and cannot be: this type
+	// knows nothing about the 117 journal entry types or their payloads. The
+	// rule is simply saved and matches nothing, which is the silent failure
+	// `--payload-equals to=DONE` shipped as the documented first example for
+	// months. Keys per entry type are documented in docs/guides/automations.mdx
+	// and pinned against the real emitter by
+	// api.TestIssueEvents_JournalPayloadIsWhatAutomationsMatchOn.
 	PayloadEquals map[string]any `json:"payload_equals,omitempty"`
 }
 

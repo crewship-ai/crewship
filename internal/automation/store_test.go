@@ -34,7 +34,7 @@ func sample(workspaceID, name string) Automation {
 		Name:        name,
 		Enabled:     true,
 		EventType:   "mission.status_change",
-		Matcher:     Matcher{PayloadEquals: map[string]any{"to": "DONE"}},
+		Matcher:     Matcher{PayloadEquals: map[string]any{"action": "status_changed"}},
 		ActionKind:  ActionKindRoutine,
 		Action:      Action{RoutineSlug: "triage", Inputs: map[string]any{"issue": "{{ event.mission_id }}"}},
 	}
@@ -69,7 +69,7 @@ func TestStoreCreateReadRoundTrip(t *testing.T) {
 	if got.Action.RoutineSlug != "triage" || got.Action.Inputs["issue"] != "{{ event.mission_id }}" {
 		t.Errorf("action did not survive the round trip: %+v", got.Action)
 	}
-	if got.Matcher.PayloadEquals["to"] != "DONE" {
+	if got.Matcher.PayloadEquals["action"] != "status_changed" {
 		t.Errorf("matcher did not survive the round trip: %+v", got.Matcher)
 	}
 	if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
@@ -126,7 +126,7 @@ func TestStoreUpdateIsSparse(t *testing.T) {
 	if updated.Enabled {
 		t.Error("enabled was not written")
 	}
-	if updated.Name != "a" || updated.Matcher.PayloadEquals["to"] != "DONE" {
+	if updated.Name != "a" || updated.Matcher.PayloadEquals["action"] != "status_changed" {
 		t.Errorf("a one-field patch clobbered the rest: %+v", updated)
 	}
 }

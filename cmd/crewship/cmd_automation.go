@@ -27,14 +27,27 @@ entry matches its predicate, parks a deferred run of a routine. It can only
 enqueue: it never executes anything inline and holds no veto over anything.
 
   crewship automation list
-  crewship automation create --name "triage on close" \
+  crewship automation create --name "triage on status change" \
       --event mission.status_change --routine triage \
-      --payload-equals to=DONE --input issue='{{ event.mission_id }}'
+      --payload-equals action=status_changed \
+      --input issue='{{ event.mission_id }}'
   crewship automation disable <id>
 
 Inputs may reference the triggering entry with {{ event.mission_id }},
 {{ event.agent_id }}, {{ event.crew_id }}, {{ event.run_id }} and
-{{ event.payload.<key> }} — the same renderer routine steps use.`,
+{{ event.payload.<key> }} — the same renderer routine steps use.
+
+A mission.status_change entry carries exactly two payload keys:
+
+  action   what happened, from a closed set: status_changed,
+           priority_changed, review_approved, task_failed, … — this is
+           the key to write predicates against
+  details  human-readable prose, e.g. "BACKLOG → TODO"
+
+Note what that means: "fire when an issue moves to DONE" is NOT
+expressible as a predicate. The target status only appears inside
+details, which is prose and not stable to match on. Match on the action
+and let the routine read {{ event.payload.details }} to decide.`,
 }
 
 // automationRow mirrors the API's automation JSON. --format json must pass
@@ -118,7 +131,15 @@ supported: confirm the type exists first with
 because a typo produces a rule that is saved, listed, and never fires.
 
 Predicate flags narrow which entries of that type match; every one you pass
-must be satisfied, and passing none matches all of them.`,
+must be satisfied, and passing none matches all of them.
+
+--payload-equals has the same silent-failure mode as a typo'd --event, and a
+worse one: a key that no emitter writes is accepted and matches nothing. Read
+one real entry before you write the predicate —
+
+    crewship journal --type mission.status_change --lines 1 --format json
+
+— and match on a key you can see in its payload.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {

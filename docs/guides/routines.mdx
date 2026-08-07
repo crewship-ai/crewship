@@ -1127,7 +1127,12 @@ steps:
   workspace, a sibling crew, or a different agent — the last one matters
   because the acting agent is what the delegation depth cap is measured from.
   A routine with no author agent cannot use `issue.comment`, which needs an
-  author it can name.
+  author it can name — so a routine containing that step is **refused at save**
+  unless one is set. Set it with `crewship routine save --author-agent
+  <slug|id>` (the agent must belong to `--author-crew`), or `author_agent_id`
+  on the save API. The refusal is deliberate: the same routine used to save
+  clean and then fail every run at 03:00 with `400: agent_id is required`. The
+  other five verbs have a documented no-agent fallback and are unaffected.
 - **Chain depth.** Whatever the verb creates records the run that created it,
   so an automation reacting to it inherits this run's chain budget rather than
   starting a new one. See [Chain depth](#chain-depth-the-composition-budget).

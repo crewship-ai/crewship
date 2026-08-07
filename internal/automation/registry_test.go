@@ -94,6 +94,18 @@ func rule(id, workspace, eventType string) Resolved {
 	}
 }
 
+// entry builds a journal entry shaped like one the product really emits.
+//
+// The payload used to be {"to": "DONE"} — a shape no emitter in Crewship has
+// ever produced. It was copied from the docs, and the docs had copied it from
+// nowhere: internal/api's issueEvents.log writes mission.status_change with
+// exactly {"action", "details"} (see TestIssueEvents_JournalPayloadIsWhatAutomationsMatchOn).
+// So every matcher test in this package was passing against a fiction, which is
+// why the documented first example — `--payload-equals to=DONE` — could ship in
+// three places and match nothing.
+//
+// Keep this in step with the emitter. A helper that invents its own wire format
+// tests the helper.
 func entry(workspace, eventType, mission string) journal.Entry {
 	return journal.Entry{
 		WorkspaceID: workspace,
@@ -102,7 +114,7 @@ func entry(workspace, eventType, mission string) journal.Entry {
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorSystem,
 		Summary:     "test",
-		Payload:     map[string]any{"to": "DONE"},
+		Payload:     map[string]any{"action": "status_changed", "details": "TODO → DONE"},
 	}
 }
 
