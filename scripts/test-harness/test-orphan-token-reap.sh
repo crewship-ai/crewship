@@ -67,23 +67,6 @@ fi
 # token is the SAME one validating now, so nothing is orphaned. A non-empty
 # "Found N orphaned" here would be a false positive (the detector reaping a
 # healthy container) — exactly what the fail-safe classifier must never do.
-# Nothing to inspect is not a clean sweep. When no crew container is running,
-# `admin reap-orphan-containers` says so in as many words — "No running crew
-# containers to inspect" — instead of claiming no orphans were found, because
-# the detector had nothing to classify. That is the same distinction the CLI
-# draws for DETECTOR INERT, and it is the honest one.
-#
-# The suite has to draw it too. Asserting the clean-sweep sentence here made an
-# ephemeral CI server (which starts no containers) fail a test about false
-# positives, and rewriting the assertion to accept the empty case would be
-# worse: it would report green on a run that exercised no detection at all.
-# Skip, and say why.
-if printf '%s' "$dry_out" | grep -q "No running crew containers to inspect"; then
-  skip "orphan reap on a stable-master server" \
-    "no crew containers are running, so the detector classified nothing — a pass here would prove nothing"
-  finish
-fi
-
 assert_contains "no orphaned containers on a stable-master server" "$dry_out" "No orphaned crew containers found"
 
 # ─────────────────────────────────────────────────────────────────────────────
