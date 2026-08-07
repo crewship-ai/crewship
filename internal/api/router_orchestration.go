@@ -388,6 +388,16 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// `crewship chat stream`) instead of implementing a WS client and the
 	// /api/v1/ws-token dance. Additive: the socket path is unchanged.
 	//
+	// KNOWN LIMIT — only CHAT-INITIATED runs are watchable here. The session
+	// channel's frames are produced in exactly one place, ws/client.go's
+	// send_message path (streams.begin/record/end). Runs started by the
+	// scheduler, a webhook, a pipeline step or the IPC POST /agents/{id}/start
+	// call orch.RunAgent directly and publish nothing on `session:` — attaching to
+	// one answers stream.open{active:false} then no_active_run. That predates
+	// this route (the WebSocket path has the same blind spot); #1823 tracks
+	// extending emission to those call sites. Do not describe this endpoint as
+	// covering automated runs until it lands.
+	//
 	// Registered under `authed` WITHOUT wsCtx on purpose. The handler
 	// authorizes against the chat's OWN workspace via the hub's channel
 	// authorizer — strictly stronger than a caller-supplied workspace header,

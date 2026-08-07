@@ -39,6 +39,71 @@ func TestSessionStream_SeqMonotonicWithinRun(t *testing.T) {
 	}
 }
 
+// Finding 3 (#1822 review). `counters` is in-memory, so a server restart puts
+// the channel's seq back to 0 while clients still hold a watermark from the
+// previous lifetime (our own CLI prints it, and the docs tell people to feed
+// it back via --last-seq). replay() clamped the baseline UP to the run start
+// but never DOWN, so a watermark of 42 against a run producing seqs 1..N
+// matched nothing, and the caller silently received the rest of the run as
+// zero frames. Clamp both ways: a watermark above everything the run has
+// produced cannot be a real position inside it.
+func TestSessionStream_ReplayClampsAStaleWatermarkDown(t *testing.T) {
+	s := newSessionStreams()
+	ch := "session:c1"
+	s.begin(ch)
+	recordEvent(t, s, ch, "a") // seq 1
+	recordEvent(t, s, ch, "b") // seq 2
+	recordEvent(t, s, ch, "c") // seq 3
+
+	// 42 is beyond anything this run produced — a pre-restart watermark.
+	res := s.replay(ch, 42)
+	if !res.found || !res.active {
+		t.Fatalf("replay = %+v, want a live run", res)
+	}
+	if len(res.frames) != 3 {
+		t.Fatalf("replay(42) returned %d frames, want all 3 — a stale watermark must not swallow the run", len(res.frames))
+	}
+	if res.fromSeq != 0 {
+		t.Errorf("fromSeq = %d, want the run baseline 0, not the stale 42", res.fromSeq)
+	}
+}
+
+// The clamp must not fire for a caller that is legitimately caught up: seq
+// equal to the current head is a real position, not a stale one.
+func TestSessionStream_ReplayKeepsACaughtUpWatermark(t *testing.T) {
+	s := newSessionStreams()
+	ch := "session:c1"
+	s.begin(ch)
+	recordEvent(t, s, ch, "a") // seq 1
+	recordEvent(t, s, ch, "b") // seq 2
+
+	res := s.replay(ch, 2)
+	if len(res.frames) != 0 {
+		t.Fatalf("replay(2) returned %d frames, want 0 — the caller already has both", len(res.frames))
+	}
+	if res.fromSeq != 2 {
+		t.Errorf("fromSeq = %d, want 2 — a caught-up watermark must be preserved", res.fromSeq)
+	}
+}
+
+// A mid-run watermark keeps its meaning: only the gap comes back.
+func TestSessionStream_ReplayKeepsAMidRunWatermark(t *testing.T) {
+	s := newSessionStreams()
+	ch := "session:c1"
+	s.begin(ch)
+	recordEvent(t, s, ch, "a") // seq 1
+	recordEvent(t, s, ch, "b") // seq 2
+	recordEvent(t, s, ch, "c") // seq 3
+
+	res := s.replay(ch, 1)
+	if len(res.frames) != 2 {
+		t.Fatalf("replay(1) returned %d frames, want 2 (the gap)", len(res.frames))
+	}
+	if res.fromSeq != 1 {
+		t.Errorf("fromSeq = %d, want 1", res.fromSeq)
+	}
+}
+
 func TestSessionStream_SeqNeverRegressesAcrossRuns(t *testing.T) {
 	s := newSessionStreams()
 	ch := "session:c1"

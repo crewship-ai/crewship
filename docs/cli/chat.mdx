@@ -80,13 +80,20 @@ crewship chat steer c_abc123 -m "use the staging DB, not prod"
 | --- | --- | --- |
 | `--follow` | `false` | Keep the stream open past the run's terminal event, so the next run on the same session streams too. Without it the command exits when the run finishes. |
 | `--last-seq <n>` | `0` | Resume after this sequence number. Use the `last_seq` value from a previous run's `stream.end` frame. |
-| `--idle <seconds>` | `0` (server default, 300s) | Give up after this long with no event. Heartbeats do not reset it. |
+| `--idle <seconds>` | `0` (server default, 300s) | Give up after this long with no event. Heartbeats do not reset it. `0` selects the server default rather than disabling the bound. |
 | `--quiet` | `false` | Suppress the stderr chatter (thinking, tool calls, status). The run's text still goes to stdout. |
 
 Reads `GET /api/v1/chats/{chatId}/stream`. The run's text lands on **stdout** and
 nothing else does, so `crewship chat stream c_abc123 > reply.md` captures the
 reply and only the reply; thinking, tool calls and stream notices go to stderr.
 A run that ends in an error exits non-zero.
+
+Only a workspace-scoped token is needed — **not** a selected workspace. The route
+resolves tenancy from the chat itself, so `CREWSHIP_TOKEN` plus a chat id is enough.
+
+Note that only **chat-initiated** runs currently stream (chat UI, `crewship run`,
+`crewship ask`). Routine, webhook and pipeline runs publish nothing on the session
+channel yet — see [issue #1823](https://github.com/crewship-ai/crewship/issues/1823).
 
 `--format ndjson` (or `json`) switches to passthrough: every server frame is
 printed verbatim, one JSON object per line. That is the mode to script against.

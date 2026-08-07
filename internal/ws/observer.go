@@ -47,7 +47,16 @@ type Observer struct {
 	// closed guards the close(ch) in RemoveObserver so a double remove (a
 	// handler's defer plus an explicit call on the error path) can't panic.
 	closed atomic.Bool
+	// revoked distinguishes "the sweep took this stream's access away" from
+	// "the stream ended". Both close ch; only the first is a permanent verdict
+	// the caller must not retry against.
+	revoked atomic.Bool
 }
+
+// Revoked reports whether this observer was detached by the hub's periodic
+// channel re-authorization sweep (membership removed) rather than by its own
+// reader finishing.
+func (o *Observer) Revoked() bool { return o.revoked.Load() }
 
 // Frames is the receive side. It is closed by RemoveObserver, so a reader
 // ranging over it terminates when the stream is torn down.
@@ -103,6 +112,72 @@ func (h *Hub) RemoveObserver(channel string, o *Observer) {
 	if o.closed.CompareAndSwap(false, true) {
 		close(o.ch)
 	}
+}
+
+// revokeObserver detaches o because it is no longer authorized for channel,
+// flagging it first so its reader can tell a permanent verdict from an
+// ordinary end-of-stream and refuse to retry.
+//
+// This is the observer half of sweepChannelAuthorization. Membership change is
+// a distinct event from session revocation, and without it the HTTP stream's
+// authorization would be a one-time check at request time — a member removed
+// from the workspace would keep receiving the chat's frames for as long as
+// they held the connection, while a socket on the same channel was cut on the
+// next tick.
+func (h *Hub) revokeObserver(channel string, o *Observer) {
+	if o == nil {
+		return
+	}
+	o.revoked.Store(true)
+	h.RemoveObserver(channel, o)
+}
+
+// RevokeObservers detaches every HTTP run-stream observer on channel that
+// belongs to userID, returning how many were detached. An empty userID matches
+// every observer on the channel.
+//
+// This is the enforcement verb for "this caller may no longer watch this
+// chat". sweepChannelAuthorization drives it on the periodic membership
+// re-check; it is exported because the decision (who lost access) belongs to
+// whatever policy made it, while the teardown belongs here.
+func (h *Hub) RevokeObservers(channel, userID string) int {
+	if h == nil {
+		return 0
+	}
+	h.mu.RLock()
+	var doomed []*Observer
+	for o := range h.observers[channel] {
+		if userID == "" || o.userID == userID {
+			doomed = append(doomed, o)
+		}
+	}
+	h.mu.RUnlock()
+	for _, o := range doomed {
+		h.revokeObserver(channel, o)
+	}
+	return len(doomed)
+}
+
+// observerSnapshot is one attached observer plus what the sweep needs to
+// re-check it. Taken under the lock and consumed outside it, because
+// CanSubscribe hits the DB and must never run while the hub lock is held.
+type observerSnapshot struct {
+	channel  string
+	userID   string
+	observer *Observer
+}
+
+// snapshotObservers copies the current observer set for the sweep.
+func (h *Hub) snapshotObservers() []observerSnapshot {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var out []observerSnapshot
+	for channel, set := range h.observers {
+		for o := range set {
+			out = append(out, observerSnapshot{channel: channel, userID: o.userID, observer: o})
+		}
+	}
+	return out
 }
 
 // dispatchObservers fans data out to every observer on channel. Called from

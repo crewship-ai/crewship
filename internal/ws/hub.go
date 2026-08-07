@@ -385,14 +385,17 @@ func (h *Hub) IsUserSubscribed(channel, userID string) bool {
 			return true
 		}
 	}
-	// HTTP NDJSON stream readers (#1818) are watching the same run just as
-	// live as a socket is. Omitting them here would ring the inbox bell for a
-	// user who is staring at the reply as it streams.
-	for o := range h.observers[channel] {
-		if o.userID == userID {
-			return true
-		}
-	}
+	// HTTP run-stream observers (#1818) are deliberately NOT counted here.
+	//
+	// It is tempting to — they are watching the same channel. But this signal's
+	// only consumer treats "present" as licence to skip inbox.UpsertMessage
+	// outright (internal/chatnotify/notify.go), dropping the DURABLE record of
+	// the reply and not merely an external push. Nothing backfills it. A socket
+	// is a browser session actively rendering the transcript; an HTTP stream
+	// may be a script redirecting to a file, a reader that has stopped
+	// consuming, or a connection blocked in a write — none of which prove the
+	// user saw anything. Losing the user's only copy of a reply is strictly
+	// worse than one redundant bell, so the durable record wins.
 	return false
 }
 
@@ -732,6 +735,29 @@ func (h *Hub) sweepChannelAuthorization(ctx context.Context) {
 			h.logger.Info("ws subscription revoked by periodic re-check",
 				"user_id", c.userID, "channel", ch)
 		}
+	}
+
+	// HTTP run-stream observers (#1818) sit on the same channels and need the
+	// same re-check. Without this the endpoint's authorization would be a
+	// one-time gate at request time: a member removed from the workspace keeps
+	// receiving that chat's text/thinking/tool frames for the life of the
+	// connection, while a socket beside them is cut on this very tick. Same
+	// deny-vs-error rule as above — only a definitive (false, nil) revokes.
+	for _, snap := range h.snapshotObservers() {
+		qCtx, cancel := context.WithTimeout(ctx, sweepQueryTimeout)
+		ok, err := h.channelAuth.CanSubscribe(qCtx, snap.userID, snap.channel)
+		cancel()
+		if err != nil {
+			h.logger.Debug("http stream channel re-check: transient error, retrying next tick",
+				"error", err, "user_id", snap.userID, "channel", snap.channel)
+			continue
+		}
+		if ok {
+			continue
+		}
+		h.revokeObserver(snap.channel, snap.observer)
+		h.logger.Info("http run stream revoked by periodic re-check",
+			"user_id", snap.userID, "channel", snap.channel)
 	}
 }
 

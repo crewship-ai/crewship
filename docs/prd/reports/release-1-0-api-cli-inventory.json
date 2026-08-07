@@ -43568,6 +43568,7 @@
       "name": "CREWSHIP_TOKEN",
       "docs": [
         "docs/api-reference/issues.mdx",
+        "docs/cli/chat.mdx",
         "docs/cli/overview.mdx",
         "docs/configuration/environment.mdx",
         "docs/guides/watching-agent-runs.mdx"
@@ -44085,6 +44086,7 @@
     {
       "name": "Routine",
       "docs": [
+        "docs/cli/chat.mdx",
         "docs/cli/digest.mdx",
         "docs/cli/eval.mdx",
         "docs/cli/inspect.mdx",
@@ -44105,6 +44107,7 @@
         "docs/guides/routines-cookbook.mdx",
         "docs/guides/routines-migration.mdx",
         "docs/guides/routines.mdx",
+        "docs/guides/watching-agent-runs.mdx",
         "docs/manifest/README.md",
         "docs/manifest/recurring_issue.md",
         "docs/manifest/routine.md",
@@ -44263,9 +44266,9 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3905,
+    "command_references": 3909,
     "api_path_references": 1980,
-    "environment_references": 397,
+    "environment_references": 398,
     "manifest_kind_references": 209,
     "flag_references": 1805,
     "missing_commands": 0,

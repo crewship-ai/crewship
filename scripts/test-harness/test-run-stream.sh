@@ -20,6 +20,14 @@
 #     with the reason when no agent replies (the `LLMRunner: provider: no
 #     active … credential` shape every runtime suite hits without a key).
 #
+# Tier B deliberately drives `cs run`, and that is a real coverage limit worth
+# stating: today the WebSocket send_message path is the ONLY producer of
+# session-channel frames (internal/ws/client.go streams.begin/record). A run
+# started by a routine, webhook or pipeline emits nothing there, so this suite
+# CANNOT catch a regression on those paths — there is no signal to regress.
+# #1823 tracks extending emission to them; when it lands, add a case here that
+# starts the run from a routine instead of the CLI.
+#
 # Usage:
 #   export CREWSHIP_SERVER=<devN url>
 #   ./scripts/test-harness/test-run-stream.sh

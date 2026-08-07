@@ -205,6 +205,18 @@ func (s *sessionStreams) replay(channel string, afterSeq int64) replayResult {
 	if from < st.startSeq {
 		from = st.startSeq
 	}
+	// Clamp DOWN as well. `counters` lives in memory, so a server restart puts
+	// this channel's seq back to 0 while clients still hold a watermark from
+	// the previous process lifetime — and we actively hand that watermark out
+	// (the HTTP stream prints it as `last_seq` and tells callers to resume with
+	// it). A watermark above everything the run has produced cannot be a real
+	// position inside it, and honouring it filters out every frame: the caller
+	// gets a live-looking stream that silently delivers nothing for the rest of
+	// the run. Trust the run's own baseline instead. `from == head` is the
+	// legitimate caught-up case and is deliberately left alone.
+	if from > s.counterFor(channel).seq {
+		from = st.startSeq
+	}
 	var frames [][]byte
 	for _, f := range st.frames {
 		if f.seq > from {

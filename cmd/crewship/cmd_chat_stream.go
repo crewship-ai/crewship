@@ -47,10 +47,16 @@ Examples:
   crewship chat stream c_abc123 --last-seq 42     # resume where you left off`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
-		if err != nil {
+		// requireAuth, NOT requireAuthAndWorkspace. The endpoint is registered
+		// without wsCtx and never reads X-Workspace-ID — it resolves tenancy
+		// from the chat row itself. Demanding a workspace locally would refuse
+		// an agent holding only CREWSHIP_TOKEN and a chat id, which is exactly
+		// the caller this command exists for, for a request the server would
+		// have served.
+		if err := requireAuth(); err != nil {
 			return err
 		}
+		client := newAPIClient()
 		follow, _ := cmd.Flags().GetBool("follow")
 		lastSeq, _ := cmd.Flags().GetInt64("last-seq")
 		idle, _ := cmd.Flags().GetInt("idle")
@@ -143,6 +149,15 @@ func streamChatRun(client *cli.Client, chatID string, opts chatStreamOptions) er
 		case "replay_truncated":
 			r.flushText()
 			return fmt.Errorf("the server's replay buffer for this run was truncated — the gap cannot be recovered by reconnecting; read the transcript with `crewship chat %s`", chatID)
+		case "access_revoked":
+			// The hub's periodic re-check found this caller no longer has
+			// access to the chat (workspace membership removed mid-stream).
+			// Permanent by construction — reconnecting would hammer a chat we
+			// may not read.
+			r.flushText()
+			return cli.WithExitCode(
+				fmt.Errorf("access to chat %s was revoked while streaming — you are no longer a member of its workspace", chatID),
+				cli.ExitAuth)
 		}
 
 		// Either the connection dropped with no terminal frame, or the server
@@ -273,8 +288,20 @@ func (r *chatStreamRenderer) line(raw []byte) error {
 			fmt.Fprintf(os.Stderr, "%s[watching %s — %s, from seq %d]%s\n",
 				cli.Dim, f.ChatID, state, f.FromSeq, cli.Reset)
 		}
-	case "stream.heartbeat", "run_begin":
-		// Keep-alive and run boundary: structural, not output.
+	case "stream.heartbeat":
+		// Keep-alive: structural, not output.
+	case "run_begin":
+		// A new run starts here, so any failure recorded for the PREVIOUS one
+		// stops being this command's exit status. Without this, --follow
+		// carried run 1's error across the run boundary and a later clean end
+		// exited non-zero citing a run that finished long before — a false
+		// alarm for the documented `crewship chat stream <id> || notify` shape.
+		//
+		// run_begin, not "each reconnect": a reconnect can land MID-run, and
+		// clearing there would discard an error whose terminal `done` has not
+		// arrived yet. The run boundary is the precise place the exit status
+		// should reset.
+		r.runError = ""
 	case "stream.reset":
 		if !r.quiet && !r.passthrough {
 			fmt.Fprintf(os.Stderr, "%s[stream reset: %s]%s\n", cli.Yellow, f.Reason, cli.Reset)

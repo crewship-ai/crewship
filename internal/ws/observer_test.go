@@ -134,28 +134,6 @@ func TestReplaySessionExposesBufferedGap(t *testing.T) {
 	}
 }
 
-// Presence drives chatnotify's "don't ring the bell, they're watching" rule.
-// An HTTP stream reader is watching just as live as a socket, so an attached
-// observer must satisfy IsUserSubscribed — and must stop doing so once the
-// stream ends.
-func TestObserverCountsAsPresence(t *testing.T) {
-	hub := newRunningHub(t)
-	if hub.IsUserSubscribed("session:c1", "u1") {
-		t.Fatal("IsUserSubscribed true before anyone attached")
-	}
-	obs := hub.AddObserver("session:c1", "u1", 8)
-	if !hub.IsUserSubscribed("session:c1", "u1") {
-		t.Error("an attached HTTP stream reader does not register as present; they would get an inbox bell for a reply they are watching stream in")
-	}
-	if hub.IsUserSubscribed("session:c1", "u2") {
-		t.Error("presence leaked to a different user")
-	}
-	hub.RemoveObserver("session:c1", obs)
-	if hub.IsUserSubscribed("session:c1", "u1") {
-		t.Error("presence outlived the stream")
-	}
-}
-
 // CanSubscribeChannel is the authorization the HTTP stream shares with the WS
 // subscribe/resume paths. With no authorizer configured it must deny — the
 // same fail-closed default handleResume applies.

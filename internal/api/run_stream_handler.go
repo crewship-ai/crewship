@@ -85,8 +85,17 @@ const (
 	runStreamDefaultIdle = 5 * time.Minute
 
 	// runStreamMaxIdle caps what a caller may ask for. Without a ceiling,
-	// `?idle=86400` turns into a file-descriptor leak with a URL.
+	// `?idle=86400` turns into a file-descriptor leak with a URL. There is
+	// deliberately no way to disable the idle timeout: an unbounded stream that
+	// only ends when the client closes lets any authenticated member pin
+	// goroutines, observer buffers and sockets until the server runs out of
+	// file descriptors.
 	runStreamMaxIdle = time.Hour
+
+	// runStreamWriteTimeout bounds a single frame write. See runStreamWriter.write
+	// for why an unbounded one is a goroutine leak rather than a slow client.
+	// Generous enough for a large tool_result over a slow link.
+	runStreamWriteTimeout = 30 * time.Second
 )
 
 // runStreamFrame is one NDJSON line.
@@ -209,20 +218,35 @@ func (h *RunStreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	replay := h.src.ReplaySession(channel, lastSeq)
 
-	st := &runStreamWriter{w: w, flusher: flusher, lastSeq: lastSeq}
+	st := &runStreamWriter{w: w, flusher: flusher, rc: http.NewResponseController(w), lastSeq: lastSeq}
 	fromSeq := replay.FromSeq
 	active := replay.Active
 	st.write(runStreamFrame{Type: "stream.open", ChatID: chatID, FromSeq: &fromSeq, Active: &active})
 
+	// resuming distinguishes "catch me up from where I was" from a first
+	// attach. Only the former can be harmed by a buffer it cannot read.
+	resuming := lastSeq > 0
+	terminatedInReplay := false
+
 	switch {
-	case replay.Reset:
-		// The buffer overflowed mid-run and cannot serve a coherent gap. Say so
-		// and stop: emitting the surviving tail would render as a complete run
-		// to a client that has no way to know the head is missing. Chat history
-		// (GET /api/v1/chats/{id}/messages) is the recovery path.
+	case replay.Reset && resuming:
+		// The buffer overflowed mid-run, so the gap this caller asked for is
+		// genuinely gone. Say so and stop: emitting the surviving tail would
+		// render as a complete run to a client that has no way to know the head
+		// is missing. Chat history is the recovery path.
 		st.write(runStreamFrame{Type: "stream.reset", Reason: "replay_truncated"})
 		st.end("replay_truncated")
 		return
+	case replay.Reset:
+		// Truncated, but this caller is NOT resuming — it asked for no replay,
+		// so nothing it wanted has been lost and it can be served live from
+		// here. Failing it outright (the previous behaviour) was worse than
+		// useless: `truncated` is sticky for the whole run, so every fresh
+		// attach for the rest of a long run got an instant non-retryable error,
+		// and the fallback we point at is empty because the run is not
+		// persisted yet. Announce that earlier output is unavailable — as an
+		// informational reset, not a terminal one — and stream on.
+		st.write(runStreamFrame{Type: "stream.reset", Reason: "replay_truncated"})
 	case replay.Active:
 		// Replay ONLY while a run is still generating — the same rule
 		// Client.handleResume applies, and for the same reason: a finished run
@@ -230,17 +254,30 @@ func (h *RunStreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		// the caller a second copy of what chat history returns. A buffer that
 		// lingers past its run (grace TTL, see session_stream.go) is therefore
 		// deliberately not replayed.
+		//
+		// Adopt the run's baseline in BOTH directions before replaying. The seq
+		// counter is in-memory, so a restart resets it while callers still hold
+		// a watermark from the previous lifetime — one we handed them ourselves
+		// as `last_seq`. Clamping only upward left st.lastSeq above every live
+		// frame, and the dedupe below then silently dropped the entire run,
+		// `done` included. The buffer is the authority on where this run sits.
+		st.lastSeq = replay.FromSeq
 		for _, frame := range replay.Frames {
-			st.writeHubFrame(frame)
-		}
-		// The replay baseline is authoritative even when the buffer held nothing
-		// past it — otherwise a client resuming at a seq below the run's start
-		// would re-accept frames it has already applied.
-		if replay.FromSeq > st.lastSeq {
-			st.lastSeq = replay.FromSeq
+			if st.writeHubFrame(frame) {
+				// The gap contained the run's terminal frame. Record it: the
+				// live duplicate is suppressed by the seq dedupe, so if this is
+				// dropped nothing else can ever end the stream and the caller
+				// waits out the full idle timeout for a run that is over.
+				terminatedInReplay = true
+			}
 		}
 	}
 	st.flush()
+
+	if terminatedInReplay && !follow {
+		st.end("run_complete")
+		return
+	}
 
 	if !follow && !replay.Active {
 		// Nothing is generating. Close with a reason rather than hold the
@@ -266,16 +303,17 @@ func (h *RunStreamHandler) pump(ctx context.Context, st *runStreamWriter, obs *w
 	heartbeat := time.NewTicker(runStreamHeartbeatInterval)
 	defer heartbeat.Stop()
 
-	// The idle timer is armed only when the caller asked for a bound. It is
+	// The idle timer is always armed. parseRunStreamQuery guarantees a bound in
+	// (0, runStreamMaxIdle]; the floor here restates that invariant locally so
+	// a future caller of pump cannot reintroduce an unbounded stream. It is
 	// reset by real frames, never by heartbeats — a heartbeat proves the socket
 	// is alive, not that the run is.
-	var idleC <-chan time.Time
-	var idleTimer *time.Timer
-	if idle > 0 {
-		idleTimer = time.NewTimer(idle)
-		defer idleTimer.Stop()
-		idleC = idleTimer.C
+	if idle <= 0 {
+		idle = runStreamDefaultIdle
 	}
+	idleTimer := time.NewTimer(idle)
+	defer idleTimer.Stop()
+	idleC := idleTimer.C
 
 	for {
 		select {
@@ -289,8 +327,23 @@ func (h *RunStreamHandler) pump(ctx context.Context, st *runStreamWriter, obs *w
 		case <-heartbeat.C:
 			st.write(runStreamFrame{Type: "stream.heartbeat"})
 			st.flush()
+			if st.failed() {
+				// The heartbeat is what detects a client that stopped reading
+				// without closing: the write hits its deadline and latches.
+				// Return so the deferred RemoveObserver actually runs.
+				return
+			}
 		case data, open := <-obs.Frames():
 			if !open {
+				if obs.Revoked() {
+					// The hub's re-authorization sweep took this stream's
+					// access away (workspace membership removed). A distinct,
+					// terminal reason — reporting it as an ordinary close would
+					// send the CLI straight back into its reconnect loop
+					// against a chat it may no longer read.
+					st.end("access_revoked")
+					return
+				}
 				st.end("stream_closed")
 				return
 			}
@@ -306,15 +359,16 @@ func (h *RunStreamHandler) pump(ctx context.Context, st *runStreamWriter, obs *w
 			}
 			terminal := st.writeHubFrame(data)
 			st.flush()
-			if idleTimer != nil {
-				if !idleTimer.Stop() {
-					select {
-					case <-idleTimer.C:
-					default:
-					}
-				}
-				idleTimer.Reset(idle)
+			if st.failed() {
+				return
 			}
+			if !idleTimer.Stop() {
+				select {
+				case <-idleTimer.C:
+				default:
+				}
+			}
+			idleTimer.Reset(idle)
 			if terminal && !follow {
 				st.end("run_complete")
 				return
@@ -328,17 +382,45 @@ func (h *RunStreamHandler) pump(ctx context.Context, st *runStreamWriter, obs *w
 type runStreamWriter struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
+	rc      *http.ResponseController
 	lastSeq int64
+	// writeErr latches the first failed write.
+	writeErr error
 }
 
+// failed reports whether a write has already failed, so the pump can stop
+// rather than keep serialising frames into a dead connection.
+func (s *runStreamWriter) failed() bool { return s.writeErr != nil }
+
 func (s *runStreamWriter) write(f runStreamFrame) {
+	if s.writeErr != nil {
+		return
+	}
 	data, err := json.Marshal(f)
 	if err != nil {
 		return
 	}
-	// Write and forget: a failed write means the client is gone, and the pump's
-	// context arm handles the teardown. Nothing here can fix a broken pipe.
-	_, _ = s.w.Write(append(data, '\n'))
+	// A per-frame write deadline is what keeps this goroutine reclaimable.
+	// internal/server/server.go leaves http.Server.WriteTimeout unset (streams
+	// are long-lived by design), so without a deadline a client that stops
+	// reading WITHOUT closing — TCP zero-window — blocks this Write forever.
+	// That parks the goroutine inside Write rather than in pump's select, so
+	// neither the request context nor the idle timer can fire, and the deferred
+	// RemoveObserver never runs: one leaked goroutine, socket and hub observer
+	// per stuck client, with dispatch still iterating the observer on every
+	// frame. errors.ErrUnsupported is tolerated so a ResponseWriter without
+	// deadline support (some middleware wrappers, test recorders) still works.
+	if s.rc != nil {
+		if derr := s.rc.SetWriteDeadline(time.Now().Add(runStreamWriteTimeout)); derr != nil && !errors.Is(derr, errors.ErrUnsupported) {
+			s.writeErr = derr
+			return
+		}
+	}
+	if _, werr := s.w.Write(append(data, '\n')); werr != nil {
+		// Latch it. The connection is gone; every further frame is wasted work
+		// on a stream nobody is reading, and pump uses this to tear down.
+		s.writeErr = werr
+	}
 }
 
 func (s *runStreamWriter) flush() { s.flusher.Flush() }
@@ -445,7 +527,14 @@ func parseRunStreamQuery(r *http.Request) (lastSeq int64, follow bool, idle time
 		if perr != nil || secs < 0 {
 			return 0, false, 0, errors.New("idle must be a non-negative number of seconds")
 		}
-		idle = time.Duration(secs) * time.Second
+		// 0 means "use the server default", NOT "disable". It used to disable,
+		// which left the timeout arm unreachable: with follow=1 the stream then
+		// ended only when the client closed, so any authenticated member could
+		// hold streams open indefinitely and exhaust file descriptors. There is
+		// no way to opt out of the bound — only to choose one within the ceiling.
+		if secs > 0 {
+			idle = time.Duration(secs) * time.Second
+		}
 		if idle > runStreamMaxIdle {
 			idle = runStreamMaxIdle
 		}

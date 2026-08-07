@@ -220,7 +220,7 @@ Accept: application/x-ndjson
 |---|---|---|---|
 | `last_seq` | integer | `0` | Resume watermark — replay buffered frames with `seq` greater than this. The `Last-Event-ID` request header is accepted as an alias; the query parameter wins. |
 | `follow` | boolean | `false` | Stay open past the run's terminal `done`, so the next run on the session streams too. |
-| `idle` | integer (seconds) | `300` | Close after this long with no run frame. Heartbeats do not reset it. `0` disables; values above `3600` are clamped. |
+| `idle` | integer (seconds) | `300` | Close after this long with no run frame. Heartbeats do not reset it. `0` means "use the default"; values above `3600` are clamped. The bound cannot be disabled — an unbounded stream would let one caller hold a connection, an observer buffer and a goroutine indefinitely. |
 
 **Auth:** An authenticated caller who may subscribe to the chat's `session:{chatId}` channel — the same check the WebSocket subscribe and resume paths run. Tenancy comes from the chat's own workspace membership; this route takes no workspace context parameter and does not read `X-Workspace-ID`.
 
@@ -245,8 +245,12 @@ Two families of frame share the `type` field:
 |---|---|
 | `stream.open` | Always first. Carries `chat_id`, the replay baseline `from_seq`, and `active` (whether a run is generating right now). |
 | `stream.heartbeat` | Keep-alive, roughly every 20 s of silence, so proxies and NAT tables do not reap an idle connection. Ignore it. |
-| `stream.reset` | The stream has a gap it cannot fill — `reason` is `replay_truncated` (the server's buffer overflowed during the run) or `slow_consumer` (this reader fell too far behind). |
-| `stream.end` | Always last. `reason` is one of `run_complete`, `no_active_run`, `idle_timeout`, `replay_truncated`, `slow_consumer`, `stream_closed`; `last_seq` is the resume watermark. Without `follow`, a chat with nothing generating gets `no_active_run` immediately — use `follow=1` (bounded by `idle`) to wait for a run to start. |
+| `stream.reset` | The stream has a gap it cannot fill — `reason` is `replay_truncated` (the server's buffer overflowed during the run) or `slow_consumer` (this reader fell too far behind). On a **first attach** (no `last_seq`) a `replay_truncated` reset is informational: earlier output is unavailable, but the stream continues live. |
+| `stream.end` | Always last. `reason` is one of `run_complete`, `no_active_run`, `idle_timeout`, `replay_truncated` (resuming callers only), `slow_consumer`, `stream_closed`, `access_revoked`; `last_seq` is the resume watermark. Without `follow`, a chat with nothing generating gets `no_active_run` immediately — use `follow=1` (bounded by `idle`) to wait for a run to start. |
+
+**Authorization is continuous.** The caller is re-checked against the chat's workspace membership on the hub's periodic sweep (about every 30 s), not only at request time. A caller removed from the workspace mid-stream is detached and the response ends with `reason: access_revoked` — the same enforcement a WebSocket subscriber on that channel gets.
+
+**Only chat-initiated runs currently emit frames.** Runs started by a routine, webhook, pipeline step or the internal agent-start IPC execute without publishing to the session channel, so attaching to one returns `stream.open` with `active:false` and then `no_active_run`. See [issue #1823](https://github.com/crewship-ai/crewship/issues/1823).
 
 **Sequence numbers and resume.** Every run frame carries a `seq` that is monotonic per session and survives run boundaries. Reconnect with `?last_seq=<n>` and the server replays the buffered gap before resuming live delivery. Replay is only offered while the run is still active: a finished run is persisted, so its transcript comes from `GET /api/v1/chats/{chatId}/messages` instead — replaying it here as well would double it. If the buffer overflowed (5000 frames or 8 MiB in one run), the server answers `stream.reset` with `reason: replay_truncated` rather than serving a partial stream that would render as complete.
 
