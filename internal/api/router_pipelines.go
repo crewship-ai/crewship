@@ -133,6 +133,16 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree", authed(wsCtx(http.HandlerFunc(pipes.GetRunTree))))
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata", roleCreate, pipes.UpdateRunMetadata)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal", roleCreate, pipes.SignalRun)
+	// Topic-scoped delivery: same act as the per-run signal above, addressed
+	// by (workspace, event_type) instead of by run id, so an event source
+	// that does not know which runs are parked can still wake them. Same
+	// role tier for the same reason — it resumes someone's parked run.
+	// Workspace-level (not under /pipeline-runs/) because the whole point is
+	// that there is no run id: the topic, not a run, is the resource.
+	// (No `// openapi:` annotation here: gen-openapi attaches the last
+	// annotation within 400 chars to EVERY route that follows it, so one
+	// here silently rewrites the /logs route below as well.)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/signals", roleCreate, pipes.SignalWorkspace)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/logs", authed(wsCtx(http.HandlerFunc(pipes.RunLogs))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", roleManage, pipes.CancelRun)
 	// Observability (replay-with-original-inputs pattern): replay a failed run
