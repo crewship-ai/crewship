@@ -15,7 +15,7 @@
     "api_with_concrete_json_requests": 225,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 720,
+    "cli_with_test_signals": 721,
     "cli_with_flags": 348,
     "cli_with_all_flags_documented": 348,
     "cli_missing_flag_docs": 0,
@@ -25021,7 +25021,10 @@
       "root_docs": [
         "docs/cli/automation.mdx"
       ],
-      "status": "documented_exact"
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_routine_records_provenance_test.go"
+      ]
     },
     {
       "path": "automation create",
@@ -44853,11 +44856,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3950,
-    "api_path_references": 2006,
+    "command_references": 3952,
+    "api_path_references": 2007,
     "environment_references": 395,
     "manifest_kind_references": 209,
-    "flag_references": 1835,
+    "flag_references": 1837,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

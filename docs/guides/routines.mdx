@@ -61,10 +61,18 @@ Opening a routine gives you one scrolling surface of cards, not a tab bar:
 |------|-----------------|
 | **Definition** | What it does. The step graph, drawn by the same renderer Activity uses for live runs — so a definition and a run of it read as one picture. **Edit code** opens the DSL editor beside it; the expand button takes it full screen over a blurred page, carrying the unsaved buffer both ways. |
 | **Last run** | How the most recent invocation ended, tinted by outcome, linking to its full trace. |
-| **Triggers** | Cron schedules and inbound webhooks. **Manage** reveals the full editors. |
-| **Access** | Integrations, credentials, agents and egress — everything the routine can reach if it misbehaves. |
+| **Triggers** | Cron schedules, inbound webhooks, and — when at least one exists — the [automations](/guides/automations) that can start this routine, with the event each one watches and whether it is armed. |
+| **Access** | Integrations, credentials, agents and egress — everything the routine can reach if it misbehaves — plus **Writes to Crewship**, the [`crewship` step](#crewship--act-on-crewships-own-nouns) verbs the definition acts on the board with. |
 | **Versions** | Head version and metadata; **History** reveals the full version list and rollback. |
-| **Runs** | Recent invocations, each linking into Activity filtered to this routine. **Manage** reveals per-run controls, including cancelling an active run. |
+| **Runs** | Recent invocations, each linking into Activity filtered to this routine, and each saying **how it started**. A run that was composed rather than started directly carries a `chain N` badge — hops from whatever a human did, capped at 8. |
+
+<Warning>
+On the Runs card, **automation** and **schedule** are different words for a
+reason. Every deferred run — cron and rule alike — is stored with
+`triggered_via: "schedule"`, so the raw field cannot tell them apart. The page
+reads the rule's name off the run instead. If a row says `automation`, a
+[rule](/guides/automations) started it; if it says `schedule`, a cron did.
+</Warning>
 
 A routine's **monthly budget** is on its own card here. It used to be a workspace-wide roll-up on the overview, which put a third card about money on one row — and before that a tab nobody opened. It is kept as a per-routine guardrail; it is not a bill, and nothing on the overview sums it.
 
