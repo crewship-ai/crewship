@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -31,10 +32,12 @@ const (
 	pinLocalDigest  = "sha256:bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222"
 )
 
-// pullRecorder captures what each ImagePull actually asked the daemon for.
+// pullRecorder captures what each ImagePull actually asked the daemon for,
+// and every ImageTag that followed.
 type pullRecorder struct {
 	mu    sync.Mutex
 	calls []string // the ?tag= value of each /images/create
+	tags  []string // "<source> -> <repo>:<tag>" for each /images/{src}/tag
 }
 
 func (r *pullRecorder) record(tag string) {
@@ -47,6 +50,22 @@ func (r *pullRecorder) snapshot() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.calls...)
+}
+
+// recordTag captures a POST /images/{source}/tag?repo=&tag=.
+func (r *pullRecorder) recordTag(path string, q url.Values) {
+	// path is ".../images/<source>/tag"; take the segment before "/tag".
+	trimmed := strings.TrimSuffix(path, "/tag")
+	source := trimmed[strings.Index(trimmed, "/images/")+len("/images/"):]
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tags = append(r.tags, source+" -> "+q.Get("repo")+":"+q.Get("tag"))
+}
+
+func (r *pullRecorder) tagSnapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.tags...)
 }
 
 // TestEnsureImage_PullsByDigestNotTag is the headline of #1825: with a
@@ -89,6 +108,93 @@ func TestEnsureImage_PullsByDigestNotTag(t *testing.T) {
 	}
 	if !prov.Verified {
 		t.Error("a digest-addressed pull must report Verified — otherwise the audit row understates what we actually proved")
+	}
+}
+
+// TestEnsureImage_PinnedPullRestoresTheLocalTag is a regression test for a
+// defect this PR's first draft shipped to CI and only a REAL daemon caught
+// (TestResilienceNetworkRecreate, "No such image: alpine:latest").
+//
+// `docker pull repo@sha256:…` fetches the manifest but does NOT create the
+// `repo:tag` entry in the local image store. Everything downstream of
+// ensureImage still addresses the image by tag — fixBindMountOwnership's init
+// container, buildCrewContainerConfig, ContainerCreate, and the drift check in
+// reconcileExistingContainer that compares inspect.Config.Image against the
+// desired tag. Pinning the pull without re-tagging therefore left every one of
+// them looking at an image that was on disk but unnamed.
+//
+// A fake daemon answers any inspect, so no unit test in this package could see
+// it. This one asserts the fix at the protocol level: a pinned pull must be
+// followed by POST /images/<pinned>/tag mapping it back to the original ref.
+func TestEnsureImage_PinnedPullRestoresTheLocalTag(t *testing.T) {
+	t.Parallel()
+
+	var rec pullRecorder
+	p, ref := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+			rec.recordTag(path, r.URL.Query())
+			w.WriteHeader(http.StatusCreated)
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+			http.Error(w, `{"message":"No such image"}`, http.StatusNotFound)
+		case strings.HasSuffix(path, "/images/create"):
+			rec.record(r.URL.Query().Get("tag"))
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	if _, err := p.ensureImage(context.Background(), ref); err != nil {
+		t.Fatalf("ensureImage: %v", err)
+	}
+
+	tags := rec.tagSnapshot()
+	if len(tags) != 1 {
+		t.Fatalf("ImageTag calls = %d (%v), want exactly 1 — a digest-pinned pull leaves no local tag, so every downstream reference to %q breaks",
+			len(tags), tags, ref)
+	}
+	// Source must be the digest reference we pulled; target the ref we started
+	// from, so `ref` resolves again afterwards.
+	wantSource := strings.TrimSuffix(ref, ":tag") + "@" + pinRemoteDigest
+	if !strings.HasPrefix(tags[0], wantSource+" -> ") {
+		t.Errorf("ImageTag source = %q, want it to start from the pinned ref %q", tags[0], wantSource)
+	}
+	if !strings.HasSuffix(tags[0], ":tag") {
+		t.Errorf("ImageTag target = %q, want the ORIGINAL tag restored", tags[0])
+	}
+}
+
+// TestEnsureImage_UnpinnedPullDoesNotRetag guards the other side: when the
+// pull was already tag-addressed the daemon created the tag itself, and an
+// extra ImageTag would be a pointless round-trip on every cold start.
+func TestEnsureImage_UnpinnedPullDoesNotRetag(t *testing.T) {
+	t.Parallel()
+
+	var rec pullRecorder
+	// registryDigest "" → manifest HEAD 404s → nothing to pin to.
+	p, ref := newCovImageProvider(t, "", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+			rec.recordTag(path, r.URL.Query())
+			w.WriteHeader(http.StatusCreated)
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+			http.Error(w, `{"message":"No such image"}`, http.StatusNotFound)
+		case strings.HasSuffix(path, "/images/create"):
+			rec.record(r.URL.Query().Get("tag"))
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	if _, err := p.ensureImage(context.Background(), ref); err != nil {
+		t.Fatalf("ensureImage: %v", err)
+	}
+	if tags := rec.tagSnapshot(); len(tags) != 0 {
+		t.Errorf("unpinned pull must not re-tag, got %v", tags)
 	}
 }
 

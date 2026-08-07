@@ -874,6 +874,32 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 	}
 	p.logger.Info("agent runtime image pulled", "image", ref, "digest", remoteDigest, "pinned", pinned)
 
+	// Restore the local tag. `docker pull repo@sha256:…` fetches the manifest
+	// but does NOT create a `repo:tag` entry in the local image store, and
+	// EVERYTHING downstream of here still addresses the image by tag:
+	// fixBindMountOwnership's init container, buildCrewContainerConfig,
+	// ContainerCreate, and the drift check in reconcileExistingContainer that
+	// compares inspect.Config.Image against the desired tag. Pinning the pull
+	// without this left the image on disk but unnamed, and the next daemon call
+	// failed with "No such image: alpine:latest".
+	//
+	// This does NOT reopen the window pinning closed. The bytes were fetched by
+	// digest, from the manifest we verified; the tag we create afterwards is a
+	// LOCAL alias, written by us, pointing at those exact bytes. A registry that
+	// repoints the remote tag a millisecond later cannot affect it. What we have
+	// bought is the guarantee that `ref` on this host now means the manifest we
+	// checked — which is strictly stronger than what a tag pull gave us.
+	//
+	// Best-effort: a tagging failure means the image is present but unnamed, so
+	// the caller's own ImageInspect is the honest place for that to surface,
+	// with the real daemon error rather than one invented here.
+	if pinned && pullRef != ref {
+		if _, tagErr := p.client.ImageTag(ctx, client.ImageTagOptions{Source: pullRef, Target: ref}); tagErr != nil {
+			p.logger.Warn("pulled by digest but could not restore the local tag; downstream lookups by tag may fail",
+				"image", ref, "pull_ref", pullRef, "error", tagErr)
+		}
+	}
+
 	if remoteDigest != "" {
 		return imageProvenance{Digest: remoteDigest, Verified: pinned}, nil
 	}
