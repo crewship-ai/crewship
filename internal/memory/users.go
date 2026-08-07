@@ -151,6 +151,18 @@ func DeleteUserModel(p UserModelPaths, userID, workspaceID string) error {
 // DeleteUserModelBySlug removes a model by its slug. Used by sweep
 // operations that walk the index table (user_models) and call this
 // per row.
+//
+// It removes the lock sentinel too. The sentinel persists on purpose on
+// the WRITE path (writer.go) — flock state is per-fd, so a leftover
+// lockfile costs nothing and saves a create on the next write — but a
+// delete is the one moment where nothing more is coming. After an
+// erasure the index row is gone and the content is gone, so a zero-byte
+// `<slug>.md.lock` is the ONLY remaining artefact, and the slug is
+// derivable: sha256(user_id ‖ 0x00 ‖ workspace_id)[:16] can be recomputed
+// by anyone holding the workspace id and a list of users. A directory
+// listing would then still answer "did this workspace ever hold a model
+// for this person?" — the question the erasure was asked to stop
+// answering (#1701).
 func DeleteUserModelBySlug(p UserModelPaths, userSlug string) error {
 	if userSlug == "" {
 		return nil
@@ -161,18 +173,15 @@ func DeleteUserModelBySlug(p UserModelPaths, userSlug string) error {
 	// created (the lazy-mkdir-on-write contract means a workspace that
 	// never wrote a model has no users/ dir at all). os.Stat ENOENT
 	// here is the common opt-out-with-no-card case.
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+	//
+	// The sentinel is checked as well as the model: a sentinel stranded
+	// by a pre-#1701 build outlives the model file, so a purge that only
+	// looked at the model would leave every historical marker in place
+	// forever.
+	if !anyExists(path, path+lockSuffix) {
 		return nil
 	}
-	lk := NewFileLock(path + ".lock")
-	if err := lk.Lock(); err != nil {
-		return fmt.Errorf("users: lock: %w", err)
-	}
-	defer func() { _ = lk.Unlock() }()
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("users: remove: %w", err)
-	}
-	return nil
+	return removeUnderLock(path, "users")
 }
 
 // ListUserModelSlugs returns every user model slug present on disk for

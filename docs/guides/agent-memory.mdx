@@ -321,6 +321,23 @@ insufficient for exactly this: an independent audit of a comparable system
 found attribution laundering in 12 of 12 trials with its anti-attribution
 prompt in place.
 
+**A short answer is still an answer.** The span has to be long enough to
+support a claim, or a model could quote `"I"` and hang anything off it — but
+the information density of a real answer runs the other way, and `"UTC+1."` is
+the most precise timezone statement a person can make. So the length floor
+applies to a *fragment*, and a span that is a whole sentence the person
+finished is admitted however short it is:
+
+| Quote | Verdict |
+| --- | --- |
+| `"UTC+1."` — the operator's entire answer to "what timezone are you in?" | Recorded |
+| `"Weekdays."` — their entire turn | Recorded |
+| `"I run"` — cut out of "I run the platform team here" | Refused, `evidence_quote_too_short` |
+| `"Yes."` — complete, but its content is in the *agent's* question | Refused, `evidence_quote_states_nothing` |
+
+Nothing else is relaxed: the sentence still has to be one the person authored,
+matched byte for byte, under a key the profile has, phrased as a description.
+
 #### Switching the mode
 
 The extraction profile is an instance setting, read fresh on every sweep:
@@ -403,7 +420,10 @@ INFO user model extraction workspace_id=… user_slug=… profile=stated-technic
 - `proposed>0` with `written=0` — the model proposed facts and the gate refused
   all of them. `reasons` says why; `quote_not_in_transcript` dominating means it
   is paraphrasing rather than quoting, which is a prompt problem and not a
-  reason to loosen the check.
+  reason to loosen the check. `evidence_quote_too_short` means it is quoting
+  fragments instead of whole sentences; `evidence_quote_states_nothing` means it
+  is quoting the operator's *assent* to something the agent proposed, and the
+  fact it was hanging off that is worth reading sceptically.
 - **no line at all** — the extraction never reached the model: the operator is
   below the interaction threshold, the profile is `off`, the person opted out,
   they spoke in no chat they opened, or the `curator` slot could not be built.
