@@ -1327,6 +1327,20 @@ func detectCgroupVersion(ctx context.Context, cli *client.Client) string {
 // that state by inspecting the Mountpoint, force-remove, then recreate.
 // (Issue #536.)
 func (p *Provider) ensureVolume(ctx context.Context, name string) error {
+	return p.ensureVolumeLabeled(ctx, name, nil)
+}
+
+// ensureVolumeLabeled is ensureVolume with extra labels stamped on the volume
+// at CREATE time. Docker has no API to add labels to an existing volume, so
+// these land only on first creation — every code path that needs a volume to
+// be findable by label must therefore create it through here, not through a
+// bare VolumeCreate.
+//
+// Labels are how sidecar volumes are matched for teardown (#1732). Matching
+// them by name prefix instead is unsafe: crew slugs are DNS-label-shaped and
+// may contain hyphens, so a prefix built from one crew's slug can prefix
+// another crew's volume name. An exact label match cannot.
+func (p *Provider) ensureVolumeLabeled(ctx context.Context, name string, labels map[string]string) error {
 	if inspectResult, err := p.client.VolumeInspect(ctx, name, client.VolumeInspectOptions{}); err == nil {
 		existing := inspectResult.Volume
 		// Docker tracks the volume. Confirm the backing directory
@@ -1367,15 +1381,23 @@ func (p *Provider) ensureVolume(ctx context.Context, name string) error {
 		}
 	}
 	_, err := p.client.VolumeCreate(ctx, client.VolumeCreateOptions{
-		Name: name,
-		Labels: map[string]string{
-			"managed-by": "crewship",
-		},
+		Name:   name,
+		Labels: volumeLabels(labels),
 	})
 	if err != nil {
 		return fmt.Errorf("volume create %s: %w", name, err)
 	}
 	return nil
+}
+
+// volumeLabels merges caller-supplied labels over the mandatory
+// managed-by=crewship marker every crewship volume carries.
+func volumeLabels(extra map[string]string) map[string]string {
+	out := map[string]string{"managed-by": "crewship"}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
 }
 
 // RemoveCrewVolumes removes persistent named volumes for a crew (home + tools).

@@ -100,13 +100,13 @@ func (f *reapFakeContainer) EnsureCrewServices(_ context.Context, _ provider.Cre
 	f.ensureServicesCalls++
 	return nil, nil
 }
-func (f *reapFakeContainer) StopCrewServices(_ context.Context, _ string) error {
+func (f *reapFakeContainer) StopCrewServices(_ context.Context, _, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stopServicesCalls++
 	return nil
 }
-func (f *reapFakeContainer) RemoveCrewServices(_ context.Context, _ string) error {
+func (f *reapFakeContainer) RemoveCrewServices(_ context.Context, _, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removeServicesCalls++

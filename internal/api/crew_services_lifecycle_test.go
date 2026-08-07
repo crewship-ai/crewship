@@ -233,19 +233,19 @@ func (c *teardownContainer) CopyToContainer(context.Context, string, string, io.
 func (c *teardownContainer) EnsureCrewServices(context.Context, provider.CrewConfig) (map[string]string, error) {
 	return nil, nil
 }
-func (c *teardownContainer) StopCrewServices(_ context.Context, slug string) error {
+func (c *teardownContainer) StopCrewServices(_ context.Context, _, slug string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stopped = append(c.stopped, slug)
 	return nil
 }
-func (c *teardownContainer) RemoveCrewServices(_ context.Context, slug string) error {
+func (c *teardownContainer) RemoveCrewServices(_ context.Context, _, slug string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.removedSvcs = append(c.removedSvcs, slug)
 	return nil
 }
-func (c *teardownContainer) RemoveCrewServiceVolumes(_ context.Context, slug string) error {
+func (c *teardownContainer) RemoveCrewServiceVolumes(_ context.Context, _, slug string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.removedVolumes = append(c.removedVolumes, slug)

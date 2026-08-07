@@ -221,8 +221,8 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	// The teardown outcome travels with the response. The operator answered a
 	// confirmation that named the volumes this would delete; if it did not
-	// delete them — because another crew shares the slug-keyed namespace, or the
-	// daemon refused — they have to hear it from the command they ran, not from
+	// delete them — because the daemon refused, or the provider has no sidecar
+	// support — they have to hear it from the command they ran, not from
 	// a server log they will never read.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success":          true,
