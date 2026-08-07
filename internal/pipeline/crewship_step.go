@@ -83,21 +83,29 @@ type crewshipVerb struct {
 // and the JSON Schema all read it, so a verb cannot be saveable but
 // undispatchable, or dispatchable but ungated.
 //
-// PolicyAction is empty for five of the six, and that is a finding, not an
-// oversight. internal/policy declares eight Actions today and only
-// mission_create describes any of this: there is no Action for updating an
-// issue, commenting on one, linking two, creating an assignment, or raising
-// an escalation. Those capabilities exist and agents already reach them
-// through the sidecar UNGATED, which means picking an Action for them is a
-// governance decision — what should a `guided` crew be allowed to do
-// unattended? — and not something a step kind gets to decide on the way past.
+// ALL SIX ARE NOW GOVERNED. Five of them shipped refused, because
+// internal/policy described none of these capabilities and picking an Action
+// for them was a governance decision — what may a `guided` crew do unattended?
+// — that a step kind does not get to make on the way past. That decision now
+// exists: internal/policy declares issue_write, assignment_create and
+// escalation_create with a decided cell for every autonomy level, and the
+// reasoning for each cell lives there rather than here.
 //
-// So they are declared here (the shape is right, the routes are right) and
-// REFUSED AT SAVE TIME with a message that names what is missing. A routine
-// author finds out at authoring time; nobody discovers at 03:00 that a verb
-// runs with no policy behind it. Enabling one is a one-line change here
-// AFTER the matching Action lands in internal/policy with its decision matrix
-// row.
+// The refusal path is deliberately still live. A verb added here with no
+// PolicyAction is refused at SAVE with a message naming what is missing, so the
+// next capability someone reaches for cannot ship ungoverned by being forgotten
+// — the mechanism is not scaffolding that gets removed once the first five are
+// through.
+//
+// PolicyAction is a plain string because internal/pipeline must not import
+// internal/policy. That makes a typo here a silent forever-refusal rather than
+// a compile error, so internal/api asserts every value names a declared Action
+// (TestCrewshipVerbs_EveryPolicyActionIsDeclared).
+//
+// RequiredArgs is what the internal route requires MINUS what the dispatcher
+// injects (workspace_id, crew_id, agent_id, actor_agent_id, author_agent_id,
+// author_run_id — see crewshipInjected). Getting this list right is what turns
+// a 400 at 03:00 into an error the author reads while saving.
 var crewshipVerbs = map[string]crewshipVerb{
 	"issue.create": {
 		Method:       "POST",
@@ -109,32 +117,43 @@ var crewshipVerbs = map[string]crewshipVerb{
 	"issue.update": {
 		Method:       "PATCH",
 		Path:         "/api/v1/internal/issues/{identifier}",
+		PolicyAction: "issue_write",
 		RequiredArgs: []string{"identifier"},
-		Summary:      "Change an issue's status/fields (awaiting a policy action)",
+		Summary:      "Change an issue's status, priority, assignee, labels or due date",
 	},
 	"issue.comment": {
 		Method:       "POST",
 		Path:         "/api/v1/internal/issues/{identifier}/comments",
+		PolicyAction: "issue_write",
 		RequiredArgs: []string{"identifier", "body"},
-		Summary:      "Comment on an issue (awaiting a policy action)",
+		Summary:      "Comment on an issue",
 	},
 	"issue.link": {
-		Method:       "POST",
-		Path:         "/api/v1/internal/issues/{identifier}/relations",
-		RequiredArgs: []string{"identifier"},
-		Summary:      "Relate two issues (awaiting a policy action)",
+		Method: "POST",
+		Path:   "/api/v1/internal/issues/{identifier}/relations",
+		// relation_type is required by the route (blocks | blocked_by |
+		// relates_to | duplicate_of | sub_issue_of) and has no default, so
+		// omitting it is a 400. Required here instead.
+		PolicyAction: "issue_write",
+		RequiredArgs: []string{"identifier", "target_identifier", "relation_type"},
+		Summary:      "Relate two issues (blocks, relates_to, sub_issue_of, …)",
 	},
 	"assignment.create": {
 		Method:       "POST",
 		Path:         "/api/v1/internal/assignments",
-		RequiredArgs: []string{},
-		Summary:      "Delegate work to an agent (awaiting a policy action)",
+		PolicyAction: "assignment_create",
+		RequiredArgs: []string{"target_slug", "task", "chat_id"},
+		Summary:      "Delegate a task to an agent in the author crew",
 	},
 	"escalation.create": {
-		Method:       "POST",
-		Path:         "/api/v1/internal/escalations",
-		RequiredArgs: []string{},
-		Summary:      "Raise an escalation to a human (awaiting a policy action)",
+		Method: "POST",
+		Path:   "/api/v1/internal/escalations",
+		// from_slug is the ESCALATING agent, looked up inside the injected
+		// crew_id — so it can only ever name a member of the routine's own
+		// crew, which is why it stays an author-supplied arg.
+		PolicyAction: "escalation_create",
+		RequiredArgs: []string{"from_slug", "reason", "chat_id"},
+		Summary:      "Raise an escalation to a human",
 	},
 }
 

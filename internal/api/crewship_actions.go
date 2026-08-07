@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,15 +35,19 @@ type crewshipActions struct {
 	baseURL       string
 	internalToken string
 	policy        *policy.Resolver
-	logger        *slog.Logger
-	client        *http.Client
+	// db serves the volume bounds this door owns — the ones the per-call
+	// autonomy matrix cannot express. Today that is the escalation backlog cap
+	// (crewship_escalation_cap.go), counted from server-side rows.
+	db     *sql.DB
+	logger *slog.Logger
+	client *http.Client
 }
 
 // newCrewshipActions builds the dispatcher. baseURL is the daemon's own
 // loopback address (WithInternalLoopbackURL); an empty one disables the
 // capability, and crewship steps then fail closed with the executor's wiring
 // hint rather than silently doing nothing.
-func newCrewshipActions(baseURL, internalToken string, pol *policy.Resolver, logger *slog.Logger) pipeline.CrewshipActions {
+func newCrewshipActions(baseURL, internalToken string, pol *policy.Resolver, db *sql.DB, logger *slog.Logger) pipeline.CrewshipActions {
 	if strings.TrimSpace(baseURL) == "" || strings.TrimSpace(internalToken) == "" {
 		return nil
 	}
@@ -53,6 +58,7 @@ func newCrewshipActions(baseURL, internalToken string, pol *policy.Resolver, log
 		baseURL:       strings.TrimRight(baseURL, "/"),
 		internalToken: internalToken,
 		policy:        pol,
+		db:            db,
 		logger:        logger,
 		// A routine step must not be able to wedge a run against our own
 		// daemon. The internal routes are local writes; 30s is generous.
@@ -64,7 +70,32 @@ func newCrewshipActions(baseURL, internalToken string, pol *policy.Resolver, log
 // after the author's args, so an authored value can never replace them: a
 // routine naming a foreign workspace_id or a sibling crew_id would be the
 // whole cross-tenant hole the master token's lack of injection opens.
-var crewshipInjected = []string{"workspace_id", "crew_id", "author_agent_id", "author_run_id"}
+//
+// The last two are the ACTING AGENT under the two names the internal routes
+// spell it, and both are here for the same reason the first four are — the
+// routine author does not get to say who acted:
+//
+//   - agent_id is what the issue routes read (issues_internal.go's comment
+//     handler requires it, update/relations attribute the audit row to it), so
+//     without injection issue.comment 400s and issue.update files its change
+//     under "system".
+//   - actor_agent_id is what POST /internal/assignments reads, and it is the id
+//     the DELEGATION CAP measures depth from (delegation_limits.go: "depth
+//     comes from assignments.depth of the row the CALLER is executing, found by
+//     the acting agent id"). An author-supplied value there is depth
+//     laundering — name a shallow agent, get a shallow position — which is the
+//     /query failure that file exists in order not to be. Stripping it is not
+//     optional.
+//
+// Both are set from the run's author agent, which may be empty for a routine a
+// human authored. Empty is the same as absent to every route that reads them:
+// assignments falls back to the chat's agent, issue.update attributes to
+// "system", issue.comment refuses with "agent_id is required" — the honest
+// answer, since a comment needs an author it can name.
+var crewshipInjected = []string{
+	"workspace_id", "crew_id", "author_agent_id", "author_run_id",
+	"agent_id", "actor_agent_id",
+}
 
 // Do gates the verb on the author crew's autonomy level, then performs the
 // call.
@@ -103,6 +134,15 @@ func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) 
 			req.Verb, d.Level, actionName, d.CrewID, d.Decision)
 	}
 
+	// Volume bounds this door owns. The autonomy matrix decides per call and
+	// cannot express a rate, so an action whose real risk is "how many" needs a
+	// number counted from server state — the same split mission_limits.go makes
+	// against the mission_create cell. Runs BEFORE the request is built: a
+	// refused escalation must cost nothing but the count.
+	if err := c.enforceVolumeBounds(ctx, req); err != nil {
+		return "", fmt.Errorf("crewship %s: %w", req.Verb, err)
+	}
+
 	path, err := crewshipRoutePath(pathTmpl, req.Args)
 	if err != nil {
 		return "", fmt.Errorf("crewship %s: %w", req.Verb, err)
@@ -138,6 +178,16 @@ func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) 
 	return string(respBody), nil
 }
 
+// enforceVolumeBounds applies the per-verb quantity limits that the autonomy
+// matrix structurally cannot. One verb has one today; the switch is here so the
+// next one lands next to it rather than inline in Do.
+func (c *crewshipActions) enforceVolumeBounds(ctx context.Context, req pipeline.CrewshipRequest) error {
+	if req.Verb == "escalation.create" {
+		return enforceRoutineEscalationCap(ctx, c.db, req.CrewID)
+	}
+	return nil
+}
+
 // crewshipBody assembles the request body: the author's args first, then the
 // dispatcher-owned identity/provenance fields on top.
 //
@@ -162,6 +212,12 @@ func crewshipBody(req pipeline.CrewshipRequest) map[string]any {
 	body["crew_id"] = req.CrewID
 	body["author_agent_id"] = req.AgentID
 	body["author_run_id"] = req.RunID
+	// The same acting agent under the two names the internal routes read it by.
+	// Set unconditionally, including when empty: a conditional here would let an
+	// authored value survive for a routine with no author agent, which is
+	// exactly the case where forging one is worth something.
+	body["agent_id"] = req.AgentID
+	body["actor_agent_id"] = req.AgentID
 	return body
 }
 

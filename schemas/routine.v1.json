@@ -236,7 +236,7 @@
         "action": {
           "type": "string",
           "enum": ["issue.create", "issue.update", "issue.comment", "issue.link", "assignment.create", "escalation.create"],
-          "description": "Used by crewship. The namespaced verb this step performs against Crewship's own API. Only verbs bounded by a policy action are accepted at save time; the rest are declared but refused until one exists (today: issue.create)."
+          "description": "Used by crewship. The namespaced verb this step performs against Crewship's own API. Every verb is bounded by a policy action resolved against the author crew's autonomy_level; a verb declared without one is refused at save time. All six are available."
         },
         "args": {
           "type": "object",
