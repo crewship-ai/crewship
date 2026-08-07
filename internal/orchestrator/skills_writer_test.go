@@ -60,6 +60,7 @@ func (f *fakeContainer) ContainerStatus(_ context.Context, _ string) (*provider.
 func (f *fakeContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
 	return nil, nil
 }
+
 // A finished exec, which is what a working container reports once its command
 // has run. Returning (running=true, 0) modelled the ambiguity this package now
 // refuses to read — "still going" and "exited cleanly" cannot be the same

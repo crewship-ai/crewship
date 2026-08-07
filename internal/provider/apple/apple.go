@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 
 	"github.com/crewship-ai/crewship/internal/provider"
-	"syscall"
 	"time"
 )
 
@@ -748,13 +747,8 @@ func runCLIWithin(ctx context.Context, timeout time.Duration, args ...string) ([
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "container", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
-			return syscall.Kill(-pgid, syscall.SIGKILL)
-		}
-		return cmd.Process.Kill()
-	}
+	ownProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

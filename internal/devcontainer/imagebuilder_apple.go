@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -236,7 +235,7 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 	// only the CLI leaves its helpers holding the write end of the pipe, and
 	// the read below then blocks until they happen to exit — which is the very
 	// hang the watchdog exists to end.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	ownProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting container build: %w", err)
@@ -255,15 +254,7 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 	}
 	watchdogDone := make(chan struct{})
 	var wedged atomic.Bool
-	kill := func() {
-		// Negative pid = the whole process group. Killing only the CLI leaves
-		// its helpers holding the write end of the pipe.
-		if pgid, gerr := syscall.Getpgid(cmd.Process.Pid); gerr == nil {
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		} else {
-			_ = cmd.Process.Kill()
-		}
-	}
+	kill := func() { killProcessGroup(cmd) }
 	go func() {
 		tick := idle / 4
 		if tick <= 0 {
