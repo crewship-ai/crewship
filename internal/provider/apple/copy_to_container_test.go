@@ -147,9 +147,6 @@ func TestCopyToContainer_FallsBackToTheCLIOffMount(t *testing.T) {
 // The containing directory is created 0750, so a readable mode here is not
 // reachable by another local user: they cannot traverse into it.
 func TestCopyToContainer_LeavesTheFileReadableWhenChownFails(t *testing.T) {
-	if os.Geteuid() == agentUID {
-		t.Skip("running as the agent uid — chown is a no-op and this case cannot arise")
-	}
 	installFakeContainer(t, `exit 0`)
 	hostCrewDir := t.TempDir()
 
@@ -166,8 +163,18 @@ func TestCopyToContainer_LeavesTheFileReadableWhenChownFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat copied file: %v", err)
 	}
-	if st.Mode().Perm()&0o044 == 0 {
-		t.Errorf("mode = %#o — the chown could not have succeeded, so a mode only the owner can read leaves the agent unable to read its own config", st.Mode().Perm())
+	// The contract is "the agent can read it", and there are two ways to
+	// satisfy it. As root — or as uid 1001 itself — the chown lands and 0600
+	// is correct, because the owner IS the agent. Otherwise the chown cannot
+	// land and the mode has to carry it instead. Deriving the expectation
+	// from the euid keeps both worlds asserted rather than skipping one.
+	if os.Geteuid() == agentUID {
+		if st.Mode().Perm()&0o400 == 0 {
+			t.Errorf("mode = %#o — not readable by its owner, which is the agent here", st.Mode().Perm())
+		}
+	} else if st.Mode().Perm()&0o044 == 0 {
+		t.Errorf("mode = %#o — the chown to uid %d could not have succeeded from euid %d, so a mode only the owner can read leaves the agent unable to read its own config",
+			st.Mode().Perm(), agentUID, os.Geteuid())
 	}
 
 	// The directory must stay closed, since that is what makes the readable
