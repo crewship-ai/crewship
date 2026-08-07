@@ -56,10 +56,18 @@ type AgentRunRequest struct {
 	// Without it a link is invisible to the model: it cannot learn another
 	// crew is reachable, so it refuses the work or guesses a crew-local
 	// endpoint and reports the crew as unreachable.
-	ConnectedCrews        []ConnectedCrew
-	SkipSidecar           bool              // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
-	ApprovalMode          string            // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
-	SkipConvHistory       bool              // When true, skip injecting conversation history (used by assignment sub-agents)
+	ConnectedCrews  []ConnectedCrew
+	SkipSidecar     bool   // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	ApprovalMode    string // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
+	SkipConvHistory bool   // When true, skip injecting conversation history (used by assignment sub-agents)
+	// SuppressSessionStream opts this run OUT of the automatic publication of
+	// its events on `session:{ChatID}` (see session_stream.go). Two callers set
+	// it, both because the frames are already accounted for: the WebSocket send
+	// path, where ws.Client records the whole turn itself, and delegated/peer
+	// sub-agent runs, whose output belongs to the parent's turn rather than to
+	// a turn of their own. Default false — a new dispatch path is watchable by
+	// construction, which is the point of #1823.
+	SuppressSessionStream bool
 	NetworkMode           string            // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains        []string          // Extra allowed domains for restricted mode
 	AllowPrivateEndpoints bool              // #961: crew opted in to reach a private/LAN model endpoint (RFC1918/loopback). Link-local/metadata stay blocked regardless.
@@ -314,9 +322,13 @@ type Orchestrator struct {
 	// (provisioned image, declared sidecars, limits) for the crew-start
 	// contract — see SetCrewCompleter. nil in tests/headless.
 	crewCompleter crewstart.Completer
-	mu            sync.RWMutex
-	accepting     bool
-	crews         map[string]*crewState
+	// sessionPublisher publishes a run's events on its chat's session channel
+	// so routine/webhook/pipeline/IPC runs are watchable, not just WebSocket
+	// ones (#1823). nil in tests/headless — see session_stream.go.
+	sessionPublisher SessionPublisher
+	mu               sync.RWMutex
+	accepting        bool
+	crews            map[string]*crewState
 
 	// runSem bounds concurrent agent-run exec fan-outs. RunAgent acquires a
 	// token before its container.Exec fan-out (sidecar start, the mkdir/setup

@@ -26,6 +26,7 @@ Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachmen
 | POST | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#add-reaction) | Add a reaction |
 | DELETE | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}`](#remove-reaction) | Remove a reaction |
 | POST | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments`](#upload-attachment) | Upload a chat attachment |
+| GET | [`/api/v1/chats/{chatId}/stream`](#stream-a-run) | Watch a session's agent run as newline-delimited JSON |
 | POST | [`/api/v1/conversations/search`](#search-conversations) | Search one agent's conversation history |
 
 Peer-to-peer crew messaging lives on the [internal IPC plane](#crew-messaging-sidecar-ipc), not the public API.
@@ -193,6 +194,77 @@ The `path` is relative — the agent reads it from `/output/<agentSlug>/<path>`.
 | 400 | Missing `file`, invalid multipart, or file > 25 MB. |
 | 403 | Insufficient role (need `create`), **or** chat exists but is scoped to a different agent. |
 | 404 | Agent not in workspace, or chat not in workspace. |
+
+---
+
+## Run stream
+
+Watching an agent run used to require a WebSocket client: mint a short-lived JWT at `GET /api/v1/ws-token`, upgrade `/ws`, subscribe to the `session:{chatId}` channel. That is right for the browser and wrong for a script or an agent working from a shell. This endpoint streams the **same** frames over ordinary authenticated HTTP as newline-delimited JSON, so `curl -N` is a sufficient client.
+
+It is additive. The WebSocket path is unchanged and the dashboard still uses it. Both read one event source and one replay buffer, so ordering, sequence numbers and access control cannot drift apart between them.
+
+The user-facing walkthrough is [Watching agent runs](/guides/watching-agent-runs).
+
+### Stream a run
+
+```
+GET /api/v1/chats/{chatId}/stream
+Accept: application/x-ndjson
+```
+
+**Path parameters:** `chatId` is the chat (session) ID.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Meaning |
+|---|---|---|---|
+| `last_seq` | integer | `0` | Resume watermark — replay buffered frames with `seq` greater than this. The `Last-Event-ID` request header is accepted as an alias; the query parameter wins. |
+| `follow` | boolean | `false` | Stay open past the run's terminal `done`, so the next run on the session streams too. |
+| `idle` | integer (seconds) | `300` | Close after this long with no run frame. Heartbeats do not reset it. `0` means "use the default"; values above `3600` are clamped. The bound cannot be disabled — an unbounded stream would let one caller hold a connection, an observer buffer and a goroutine indefinitely. |
+
+**Auth:** An authenticated caller who may subscribe to the chat's `session:{chatId}` channel — the same check the WebSocket subscribe and resume paths run. Tenancy comes from the chat's own workspace membership; this route takes no workspace context parameter and does not read `X-Workspace-ID`.
+
+**Response:** `200 OK`, `Content-Type: application/x-ndjson`, one JSON object per line, flushed as it is produced.
+
+```
+{"type":"stream.open","chat_id":"cht_xyz","from_seq":0,"active":true}
+{"type":"run_begin","seq":1,"from_seq":0}
+{"type":"thinking","seq":2,"content":"checking the failing test first"}
+{"type":"tool_call","seq":3,"content":"bash","metadata":{"command":"go test ./internal/api/"}}
+{"type":"text","seq":4,"content":"The assertion was inverted. Fixing."}
+{"type":"done","seq":5}
+{"type":"stream.end","reason":"run_complete","last_seq":5}
+```
+
+Two families of frame share the `type` field:
+
+- **Agent events** carry the event name verbatim: `run_begin`, `text`, `thinking`, `tool_call`, `tool_result`, `status`, `error`, `done`. These are the same events the WebSocket session channel emits, with the `{"type":"chat_event","payload":{…}}` envelope flattened away — a shell pipeline should not have to know about the transport's envelope.
+- **Control frames** are namespaced with a `stream.` prefix. No agent event name contains a dot, so the two are always distinguishable.
+
+| Control frame | Meaning |
+|---|---|
+| `stream.open` | Always first. Carries `chat_id`, the replay baseline `from_seq`, and `active` (whether a run is generating right now). |
+| `stream.heartbeat` | Keep-alive, roughly every 20 s of silence, so proxies and NAT tables do not reap an idle connection. Ignore it. |
+| `stream.reset` | The stream has a gap it cannot fill — `reason` is `replay_truncated` (the server's buffer overflowed during the run) or `slow_consumer` (this reader fell too far behind). On a **first attach** (no `last_seq`) a `replay_truncated` reset is informational: earlier output is unavailable, but the stream continues live. |
+| `stream.end` | Always last. `reason` is one of `run_complete`, `no_active_run`, `idle_timeout`, `replay_truncated` (resuming callers only), `slow_consumer`, `stream_closed`, `access_revoked`; `last_seq` is the resume watermark. Without `follow`, a chat with nothing generating gets `no_active_run` immediately — use `follow=1` (bounded by `idle`) to wait for a run to start. |
+
+**Authorization is continuous.** The caller is re-checked against the chat's workspace membership on the hub's periodic sweep (about every 30 s), not only at request time. A caller removed from the workspace mid-stream is detached and the response ends with `reason: access_revoked` — the same enforcement a WebSocket subscriber on that channel gets.
+
+**Which runs emit frames.** Every run that has a chat publishes here: chat messages, `crewship run` / `crewship ask`, routine `agent_run` steps, webhook triggers, scheduled (cron'd) agents and the internal agent-start IPC. Two cases do not, by design: a run executed with **no chat row** (there is no `session:` channel to publish on), and a **delegated or peer sub-agent**, whose events belong to the delegating agent's turn rather than to a turn of its own.
+
+**Sequence numbers and resume.** Every run frame carries a `seq` that is monotonic per session and survives run boundaries. Reconnect with `?last_seq=<n>` and the server replays the buffered gap before resuming live delivery. Replay is only offered while the run is still active: a finished run is persisted, so its transcript comes from `GET /api/v1/chats/{chatId}/messages` instead — replaying it here as well would double it. If the buffer overflowed (5000 frames or 8 MiB in one run), the server answers `stream.reset` with `reason: replay_truncated` rather than serving a partial stream that would render as complete.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | `last_seq`, `follow` or `idle` is not a valid value. |
+| 401 | Not authenticated. |
+| 404 | Chat not found, or the caller may not subscribe to it. The two are deliberately indistinguishable — a `403` would confirm the id exists in another tenant. |
+| 500 | The HTTP stack does not support streaming (no `http.Flusher`). |
+| 503 | The authorization check could not be completed, or this server has no WebSocket hub attached and therefore no run stream to serve. |
+
+CLI parity: [`crewship chat stream`](/cli/chat).
 
 ---
 

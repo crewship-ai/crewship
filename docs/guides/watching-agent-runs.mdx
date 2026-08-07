@@ -1,0 +1,143 @@
+---
+title: "Watching Agent Runs"
+description: "Follow an agent run from a shell over plain HTTP — newline-delimited JSON, resumable, no WebSocket client required."
+icon: "radio"
+---
+
+# Watching Agent Runs
+
+## Overview
+
+An agent run streams as it happens: text, reasoning, tool calls, tool results, and a terminal `done`. Until now the only way to see that stream was the WebSocket path — mint a short-lived JWT at `GET /api/v1/ws-token`, upgrade the connection, subscribe to the `session:{chatId}` channel. That is the right shape for the dashboard, which already holds a socket open. It is the wrong shape for a script, a CI step, or an agent driving Crewship from a shell, all of which would have to implement a WebSocket client and a token dance before reading a single line.
+
+`crewship chat stream` and the endpoint behind it, `GET /api/v1/chats/{chatId}/stream`, close that gap. Same events, same ordering, same access control — delivered as newline-delimited JSON over the ordinary authenticated HTTP surface. `curl -N` is a sufficient client.
+
+The WebSocket path is untouched; this is additive. Both read one event source and one replay buffer, so they cannot drift apart on what you are allowed to watch or on what order events arrive in.
+
+<Note>
+**Every run with a chat streams — not just the ones you started.** A run dispatched by a **routine step**, a **webhook trigger**, the **scheduler** (a cron'd agent) or the internal **agent-start IPC** publishes on the same session channel as a chat message does, so `crewship chat stream <chat-id>` works on all of them. Take the chat id from the routine's step, the chat list, or the run record, and attach.
+
+Two kinds of run are deliberately **not** streamed:
+
+- **A run with no chat.** The agent-start IPC can execute an agent without creating a chat row. No chat, no `session:` channel, nothing to attach to — use the [Crew Journal](/guides/crew-journal) for those.
+- **A delegated or peer sub-agent.** When an agent delegates work (`assignments`, peer queries), the sub-agent runs against the *delegating* chat's id. Its output belongs to the parent agent's turn, so it is not published as a turn of its own; you see the parent's reply, not the sub-agent's raw stream.
+</Note>
+
+## When to use it
+
+- **Watch a run somebody else started.** `crewship run` and `crewship ask` already follow the run they launch. This follows a run started by the web UI, another shell, a routine step, a webhook or the scheduler — you only need the chat id.
+- **Script against agent output.** `--format ndjson` prints the server's frames verbatim, one JSON object per line, which is what `jq` wants. `crewship chat stream <id> --format ndjson | jq -r 'select(.type=="text").content'` is the whole integration.
+- **Capture a reply to a file.** The run's text goes to stdout and nothing else does, so `crewship chat stream <id> > reply.md` yields the reply and only the reply. Thinking, tool activity and stream notices go to stderr.
+- **Gate a pipeline on a run.** The command exits when the run finishes and exits non-zero if it ended in an error, so `crewship chat stream <id> || notify-failure` works.
+- **Tail a session over time.** `--follow` keeps the connection open past a run's terminal event, so the next run on the same session streams too.
+
+Reach for the WebSocket path instead when you need to *send* into the chat mid-stream (`send_message`, `cancel_message`), or when you are building a browser UI that already holds a socket.
+
+## Key concepts
+
+<Accordion title="Glossary — frame, seq, replay, control frame">
+
+| Term | What it means here |
+|------|-------------------|
+| **Frame** | One line of the stream: one JSON object, newline-terminated. |
+| **Agent event** | A frame whose `type` is the agent event itself — `run_begin`, `text`, `thinking`, `tool_call`, `tool_result`, `status`, `error`, `done`. |
+| **Control frame** | A frame whose `type` starts with `stream.` — `stream.open`, `stream.heartbeat`, `stream.reset`, `stream.end`. No agent event name contains a dot, so the two families never collide. |
+| **`seq`** | A per-session sequence number, monotonic and stable across run boundaries. It is the resume watermark. |
+| **Replay** | On reconnect with `?last_seq=<n>`, the server sends the buffered frames you missed before resuming live delivery. Offered only while the run is still generating. |
+| **Truncation** | A run that overflows the server's buffer (5000 frames or 8 MiB) loses its replayability. The server says so with `stream.reset` rather than serving a partial stream that would look complete. |
+
+</Accordion>
+
+## Quickstart
+
+```bash
+# Watch a run to completion. Exits 0 on success, non-zero if the run errored.
+crewship chat stream c_abc123
+
+# Machine-readable: every frame verbatim, one per line.
+crewship chat stream c_abc123 --format ndjson | jq -r 'select(.type=="text").content'
+
+# Keep watching the session after this run ends.
+crewship chat stream c_abc123 --follow
+
+# Resume where a previous stream stopped.
+crewship chat stream c_abc123 --last-seq 42
+```
+
+Raw HTTP, for anything that is not the CLI:
+
+```bash
+curl -N -H "Authorization: Bearer $CREWSHIP_TOKEN" \
+  "$CREWSHIP_SERVER/api/v1/chats/c_abc123/stream"
+```
+
+`-N` matters: without it curl buffers and you see the whole run at the end instead of as it happens.
+
+## What the stream looks like
+
+```
+{"type":"stream.open","chat_id":"c_abc123","from_seq":0,"active":true}
+{"type":"run_begin","seq":1,"from_seq":0}
+{"type":"thinking","seq":2,"content":"checking the failing test first"}
+{"type":"tool_call","seq":3,"content":"bash","metadata":{"command":"go test ./internal/api/"}}
+{"type":"tool_result","seq":4,"content":"FAIL  internal/api  0.4s"}
+{"type":"text","seq":5,"content":"The assertion was inverted. Fixing."}
+{"type":"done","seq":6}
+{"type":"stream.end","reason":"run_complete","last_seq":6}
+```
+
+`stream.open` is always first and `stream.end` is always last. `stream.end` carries a `reason`:
+
+| Reason | Meaning |
+|---|---|
+| `run_complete` | The run emitted its terminal `done`. This is the normal ending. |
+| `no_active_run` | Nothing was generating when the stream opened. Not an error — the CLI exits 0. |
+| `idle_timeout` | No run frame arrived within the idle window. |
+| `replay_truncated` | You were **resuming** and the server's buffer for this run had overflowed, so your gap is unrecoverable. Read the transcript with `crewship chat <chat-id>` instead. A first attach is never ended this way — it is served live. |
+| `access_revoked` | Your access to the chat was withdrawn mid-stream (removed from the workspace). Permanent — the CLI does not retry it and exits with the auth code. |
+| `slow_consumer` | This reader fell far enough behind that frames were dropped. Reconnect with `last_seq` — the replay buffer fills the gap. |
+| `stream_closed` | The server closed the channel. Reconnect with `last_seq`. |
+
+`stream.heartbeat` appears after roughly 20 seconds of silence. It exists so proxies and NAT tables do not reap an idle connection; ignore it. It deliberately does **not** reset the idle timer — a heartbeat proves the socket is alive, not that the run is.
+
+## Reconnecting without losing or duplicating output
+
+Every run frame carries a `seq`. The CLI tracks the highest one it printed and, if the connection drops, reconnects on a bounded backoff with `?last_seq=<n>`. The server replays the buffered gap, then resumes live delivery. A frame you already saw is never printed twice, because the reader drops anything at or below its watermark.
+
+Two limits are worth knowing:
+
+- **Replay is only offered while the run is active.** A finished run is already persisted, so its transcript comes from `crewship chat <chat-id>` (`GET /api/v1/chats/{chatId}/messages`). Replaying it here too would double it.
+- **The buffer is capped** at 5000 frames or 8 MiB per run. Past that the run loses its replayability for the rest of its life. What that means depends on who is asking: a caller **resuming** with `last_seq` is ended with `reason: replay_truncated`, because serving the surviving tail would render as a complete run to a client with no way to know the head is missing. A **first attach** asked for no replay, so nothing it wanted was lost — it gets an informational `stream.reset` telling it earlier output is unavailable, and then streams live as normal.
+- **Access is re-checked while you stream**, not only when you connect. If you are removed from the chat's workspace mid-run the stream ends with `reason: access_revoked` within about 30 seconds.
+
+## Flags and parameters
+
+The CLI flags map onto the endpoint's query parameters:
+
+| CLI flag | Query parameter | Default | Effect |
+|---|---|---|---|
+| `--follow` | `follow` | off | Stay open past the run's terminal `done`. |
+| `--last-seq <n>` | `last_seq` | `0` | Resume after this sequence number. The `Last-Event-ID` header works too. |
+| `--idle <seconds>` | `idle` | server default, 300 s | Close after this long with no run frame. `0` means "use the default"; above 3600 is clamped. There is deliberately no way to disable the bound — an unbounded stream would let one caller pin a connection indefinitely. |
+| `--quiet` | — | off | Suppress the stderr chatter. The run's text still goes to stdout. |
+| `--format ndjson` | — | text | Print server frames verbatim instead of rendering them. |
+
+## Access control
+
+Streaming a chat requires the same authorization as subscribing to its WebSocket channel: an authenticated caller who is a member of the chat's workspace. Tenancy is resolved from the chat row itself, so the route takes no workspace parameter and ignores `X-Workspace-ID` — there is nothing for a caller to get wrong.
+
+A chat you may not watch answers `404`, the same as a chat that does not exist. That is deliberate: a `403` would confirm the id is real in somebody else's workspace.
+
+## Gotchas
+
+- **`curl` without `-N` buffers the whole run.** You will see everything at once, at the end, and conclude the stream is broken.
+- **A chat with no active run ends immediately.** That is the honest answer — nothing is generating, and a finished run's transcript comes from `crewship chat <chat-id>`, not from here. To *wait* for a run instead of watching one already in flight, use `--follow` (bounded by `--idle` so it still terminates).
+- **`error` is followed by `done`.** The CLI records the error, waits for the terminal frame, then exits non-zero. Do not treat the first `error` frame as the end of the stream.
+- **Streaming does not suppress your inbox item.** Unlike a browser tab on the chat, an open HTTP stream does **not** count as "watching live", so the "agent replied" inbox item is still created. That is deliberate: the inbox row is the durable record of the reply, and a stream that is redirected to a file — or wedged on a reader that stopped consuming — is no evidence anyone saw it. A redundant bell beats a lost record.
+
+## Related
+
+- [Chat & Sessions](/guides/chat-sessions) — the session model this streams from.
+- [`crewship chat`](/cli/chat) — the full command tree, including `chat stream`.
+- [Conversations API](/api-reference/conversations) — the endpoint reference, frame-by-frame.
+- [Crew Journal](/guides/crew-journal) — the workspace-wide event stream, if you want everything rather than one run.

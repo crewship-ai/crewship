@@ -120,3 +120,60 @@ func TestEnsureCrewRuntime_Sink_EmitsFailedOnError(t *testing.T) {
 		t.Errorf("failed path must not emit ready: %+v", got)
 	}
 }
+
+// TestEnsureCrewRuntime_Sink_CarriesImageProvenance is the wiring test for
+// #1825: whatever ensureImage established about the image has to reach the
+// sink, because the sink is what the journal is written from.
+//
+// The scenario is deliberately the discriminating one — a local copy WITH a
+// manifest digest and a registry that cannot be reached to confirm it. Digest
+// is therefore non-empty while the identity is UNverified, which is exactly
+// the state a `Pinned: digest != ""` shortcut would misreport as pinned.
+func TestEnsureCrewRuntime_Sink_CarriesImageProvenance(t *testing.T) {
+	const localDigest = "sha256:cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333cccc3333"
+
+	p, _ := newEnsureRuntimeFixtureWithRepoDigests(t,
+		Config{RuntimeImage: "fake/runtime:latest"},
+		[]string{"fake/runtime@" + localDigest},
+	)
+
+	var got []devcontainer.ProvisionEvent
+	sink := func(ev devcontainer.ProvisionEvent) { got = append(got, ev) }
+
+	if _, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{
+		ID:            "crew-prov",
+		Slug:          "eng",
+		ProvisionSink: sink,
+	}); err != nil {
+		t.Fatalf("EnsureCrewRuntime: %v", err)
+	}
+
+	idx := indexOfProvStep(got, devcontainer.ProvStepImageResolved)
+	if idx < 0 {
+		t.Fatalf("missing image_resolved event — nothing records which image ran: %+v", got)
+	}
+	ev := got[idx]
+	if ev.Digest != localDigest {
+		t.Errorf("image_resolved Digest = %q, want %q", ev.Digest, localDigest)
+	}
+	if ev.Pinned {
+		t.Error("Pinned must be false: the registry was never reached, so the digest is an unconfirmed local read-back")
+	}
+	if ev.Tag != "fake/runtime:latest" {
+		t.Errorf("image_resolved Tag = %q, want the requested tag alongside the digest", ev.Tag)
+	}
+
+	// It must land BEFORE container_create — the point is to have recorded the
+	// image even when the create then fails.
+	if createIdx := indexOfProvStep(got, devcontainer.ProvStepContainerCreate); createIdx >= 0 && idx > createIdx {
+		t.Errorf("image_resolved (%d) must precede container_create (%d)", idx, createIdx)
+	}
+
+	// The digest rides forward onto the terminal ready event too, so a consumer
+	// that only watches for "ready" still learns what started.
+	if readyIdx := indexOfProvStep(got, devcontainer.ProvStepReady); readyIdx >= 0 {
+		if got[readyIdx].Digest != localDigest {
+			t.Errorf("ready Digest = %q, want %q carried forward", got[readyIdx].Digest, localDigest)
+		}
+	}
+}

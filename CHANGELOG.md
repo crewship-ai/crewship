@@ -69,6 +69,40 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **The Docker API surface the server can reach is now specified, published
+  and gated (#1826).** The server talks to Docker directly, which is
+  root-equivalent on the host. `DOCKER_HOST` already let an operator put a
+  filtering proxy in front of that, and `docker/docker-compose.prod.yml`
+  already shipped one — but nobody had ever derived the endpoint list behind
+  it, and it was wrong: **`COMMIT` was missing**, so crew provisioning behind
+  the proxy we ship would have failed with a `403` on `POST /commit`, and the
+  BuildKit path (`BUILD` + `SESSION`) was unaccounted for entirely.
+
+  The real surface is **31 Engine API endpoints** — not the 25 previously
+  assumed. `ContainerCommit`, `ContainerPause`, `ContainerUnpause`,
+  `CopyFromContainer`, `ImageList`, `ImageRemove`, `Info`, `Ping` and
+  `ServerVersion` were all reached and unlisted; `ContainerLogs` and
+  `NetworkRemove` were listed and never called. `scripts/docker-api-surface`
+  re-derives the list from the call sites on every CI run and fails on drift in
+  **both** directions — a new call nobody declared (the proxy would deny it in
+  production) and a declared endpoint nobody calls (we would be asking
+  operators to grant a permission we do not need). It also catches a package
+  newly importing the Docker SDK, and a subprocess executed with `DOCKER_HOST`
+  pinned, which is a second client of the same socket that no compile-time
+  check would see.
+
+  New guide: [Docker Socket Proxy](https://docs.crewship.ai/guides/docker-socket-proxy).
+  It is deliberately unflattering about the ceiling. The proxy filters URL
+  paths and never request bodies, so it **cannot** block `Privileged: true` in
+  a `ContainerCreate` — the workspace `allow_privileged_credentials` gate stays
+  the real fence. Its granularity is a path prefix, not an endpoint:
+  `CONTAINERS: 1` also opens `POST /containers/prune` and
+  `POST /containers/{id}/update` for every container on the host. And the verbs
+  we genuinely need (`ContainerCreate`, `ExecCreate`/`Start`/`Attach`,
+  `CopyToContainer`) are most of what an attacker would want. What it does
+  remove is real — image build, `commit`, swarm, plugin install, `/system`
+  prune, registry auth — and that is the claim the page makes, no larger.
+
 - **Internal tokens are now bound to a crew, closing the
   credential-metadata enumeration leak (#1159).** The `?crew_id` scope on
   `GET /api/v1/internal/credentials` (#1031) was opt-in and fail-open: a

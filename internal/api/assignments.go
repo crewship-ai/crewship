@@ -34,10 +34,12 @@ type MissionCallback interface {
 type crewProvisioner interface {
 	EnsureProvisioned(ctx context.Context, crewID, workspaceID string, timeout time.Duration) error
 	// RuntimeProvisionSink builds the sink that journals + live-streams the
-	// runtime container-preparation events (start → container_create → ready /
-	// failed) the container provider emits during EnsureCrewRuntime, so the
-	// agent-run/ensure-container path is audited like the explicit job runner.
-	RuntimeProvisionSink(crewID, workspaceID string) func(devcontainer.ProvisionEvent)
+	// runtime container-preparation events (start → image_resolved →
+	// container_create → ready / failed) the container provider emits during
+	// EnsureCrewRuntime, so the agent-run/ensure-container path is audited like
+	// the explicit job runner. The ctx supplies the run identity the emitted
+	// rows are stamped with; it is used for values only, never cancellation.
+	RuntimeProvisionSink(ctx context.Context, crewID, workspaceID string) func(devcontainer.ProvisionEvent)
 }
 
 // agentConfigResolver resolves an agent ID to its full runtime config —

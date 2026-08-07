@@ -63,6 +63,7 @@
               },
               "guides/first-crew",
               "guides/chat-sessions",
+              "guides/watching-agent-runs",
               "guides/manifests",
               "guides/devcontainers",
               "guides/credentials",
@@ -166,6 +167,7 @@
                 "expanded": false,
                 "pages": [
                   "guides/backup",
+                  "guides/docker-socket-proxy",
                   "guides/migrations",
                   "guides/migration-checklist",
                   "guides/troubleshooting",

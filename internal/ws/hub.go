@@ -65,14 +65,18 @@ type Hub struct {
 	sessions     sessions.Store
 	clients      map[*Client]bool
 	channels     map[string]map[*Client]bool
-	register     chan *Client
-	unregister   chan *Client
-	broadcast    chan ChannelMessage
-	mu           sync.RWMutex
-	connCount    atomic.Int64
-	cancelFns    map[string]context.CancelFunc // session_id -> cancel function for active runs
-	cancelMu     sync.Mutex
-	channelAuth  ChannelAuthorizer
+	// observers are non-WebSocket subscribers (the HTTP NDJSON run stream,
+	// #1818). Guarded by the same mu as channels so dispatch fans out to
+	// sockets and observers under one lock acquisition. See observer.go.
+	observers   map[string]map[*Observer]bool
+	register    chan *Client
+	unregister  chan *Client
+	broadcast   chan ChannelMessage
+	mu          sync.RWMutex
+	connCount   atomic.Int64
+	cancelFns   map[string]context.CancelFunc // session_id -> cancel function for active runs
+	cancelMu    sync.Mutex
+	channelAuth ChannelAuthorizer
 
 	// streams holds per-session replay buffers so an agent run's output can be
 	// resumed by a client that reconnects mid-generation. See session_stream.go.
@@ -271,6 +275,7 @@ func NewHub(logger *slog.Logger, chatHandler ChatHandler, jwtValidator *auth.JWT
 		sessions:        sessionsStore,
 		clients:         make(map[*Client]bool),
 		channels:        make(map[string]map[*Client]bool),
+		observers:       make(map[string]map[*Observer]bool),
 		register:        make(chan *Client),
 		unregister:      make(chan *Client),
 		broadcast:       make(chan ChannelMessage, 256),
@@ -380,6 +385,17 @@ func (h *Hub) IsUserSubscribed(channel, userID string) bool {
 			return true
 		}
 	}
+	// HTTP run-stream observers (#1818) are deliberately NOT counted here.
+	//
+	// It is tempting to — they are watching the same channel. But this signal's
+	// only consumer treats "present" as licence to skip inbox.UpsertMessage
+	// outright (internal/chatnotify/notify.go), dropping the DURABLE record of
+	// the reply and not merely an external push. Nothing backfills it. A socket
+	// is a browser session actively rendering the transcript; an HTTP stream
+	// may be a script redirecting to a file, a reader that has stopped
+	// consuming, or a connection blocked in a write — none of which prove the
+	// user saw anything. Losing the user's only copy of a reply is strictly
+	// worse than one redundant bell, so the durable record wins.
 	return false
 }
 
@@ -447,6 +463,13 @@ func (h *Hub) marshalFrame(msg ServerMessage) ([]byte, bool) {
 func (h *Hub) dispatch(channel string, data []byte, filter func(*Client) bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	// Observers (HTTP NDJSON streams, #1818) are fanned out FIRST and are not
+	// subject to `filter`: filter exists to exclude a specific originating
+	// *Client (BroadcastExcept, the sender's own emit), and an observer is
+	// never that client. Doing it before the early return below also means an
+	// observer still receives frames on a channel with no live sockets — the
+	// exact case a shell agent watching a run hits.
+	h.dispatchObservers(channel, data)
 	subs, ok := h.channels[channel]
 	if !ok {
 		return
@@ -712,6 +735,29 @@ func (h *Hub) sweepChannelAuthorization(ctx context.Context) {
 			h.logger.Info("ws subscription revoked by periodic re-check",
 				"user_id", c.userID, "channel", ch)
 		}
+	}
+
+	// HTTP run-stream observers (#1818) sit on the same channels and need the
+	// same re-check. Without this the endpoint's authorization would be a
+	// one-time gate at request time: a member removed from the workspace keeps
+	// receiving that chat's text/thinking/tool frames for the life of the
+	// connection, while a socket beside them is cut on this very tick. Same
+	// deny-vs-error rule as above — only a definitive (false, nil) revokes.
+	for _, snap := range h.snapshotObservers() {
+		qCtx, cancel := context.WithTimeout(ctx, sweepQueryTimeout)
+		ok, err := h.channelAuth.CanSubscribe(qCtx, snap.userID, snap.channel)
+		cancel()
+		if err != nil {
+			h.logger.Debug("http stream channel re-check: transient error, retrying next tick",
+				"error", err, "user_id", snap.userID, "channel", snap.channel)
+			continue
+		}
+		if ok {
+			continue
+		}
+		h.revokeObserver(snap.channel, snap.observer)
+		h.logger.Info("http run stream revoked by periodic re-check",
+			"user_id", snap.userID, "channel", snap.channel)
 	}
 }
 

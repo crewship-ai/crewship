@@ -32,6 +32,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,8 +64,17 @@ type route struct {
 	ws     bool
 }
 
+// queryParam is one documented query parameter. required is only ever true
+// when the handler was seen to reject the request outright without it — see
+// requiredQueryParams. Everything else stays optional, because over-claiming
+// required tells a client a request will fail when it will succeed.
+type queryParam struct {
+	typ      string
+	required bool
+}
+
 type handlerInfo struct {
-	query    map[string]string
+	query    map[string]queryParam
 	statuses map[string]bool
 }
 
@@ -165,16 +177,33 @@ func addRoute(seen map[route]bool, routes *[]route, method, path, file string, s
 
 var annotationPattern = regexp.MustCompile(`(?m)^\s*//\s*openapi:\s*(.+)$`)
 
+// routeAnnotation returns the `// openapi:` annotation attached to the
+// registration starting at `start`, if any.
+//
+// "Attached" means it sits in the contiguous run of comment lines immediately
+// above the registration — the doc-comment position. A byte window instead of
+// a line walk is what made the annotation on /api/v1/audit (router_admin.go)
+// also apply to /api/v1/admin/stats, /admin/users and /admin/workspaces three
+// lines below it: those handlers read no query string at all, yet each
+// published the audit log's ten filters. An annotation is local to one route
+// by design (see applyAnnotation); this makes the lookup say so.
 func routeAnnotation(src string, start int) string {
-	begin := start - 400
-	if begin < 0 {
-		begin = 0
+	lines := strings.Split(src[:start], "\n")
+	// The last element is the partial line the registration starts on; the
+	// comment block, if any, is above it.
+	for i := len(lines) - 2; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "//") {
+			return ""
+		}
+		if m := annotationPattern.FindStringSubmatch(lines[i]); m != nil {
+			return m[1]
+		}
 	}
-	matches := annotationPattern.FindAllStringSubmatch(src[begin:start], -1)
-	if len(matches) == 0 {
-		return ""
-	}
-	return matches[len(matches)-1][1]
+	return ""
 }
 
 // registrationCall returns the complete registration expression. Keeping this
@@ -303,10 +332,10 @@ func buildDocument(routes []route) map[string]any {
 				"schema":   map[string]any{"type": "string"},
 			})
 		}
-		for name, typ := range info.query {
+		for name, param := range info.query {
 			params = append(params, map[string]any{
-				"name": name, "in": "query", "required": false,
-				"schema": map[string]any{"type": typ},
+				"name": name, "in": "query", "required": param.required,
+				"schema": map[string]any{"type": param.typ},
 			})
 		}
 		sort.Slice(params, func(i, j int) bool {
@@ -749,7 +778,11 @@ func applyAnnotation(info *handlerInfo, annotation string) {
 			}
 			switch typ {
 			case "integer", "number", "boolean", "string":
-				info.query[bits[0]] = typ
+				// Keep any requiredness already inferred from the handler:
+				// the annotation declares the type, not the obligation.
+				param := info.query[bits[0]]
+				param.typ = typ
+				info.query[bits[0]] = param
 			}
 		}
 	}
@@ -764,17 +797,533 @@ func applyAnnotation(info *handlerInfo, annotation string) {
 }
 
 var statusNames = map[string]string{"StatusOK": "200", "StatusCreated": "201", "StatusAccepted": "202", "StatusNoContent": "204", "StatusBadRequest": "400", "StatusUnauthorized": "401", "StatusForbidden": "403", "StatusNotFound": "404", "StatusConflict": "409", "StatusTooManyRequests": "429", "StatusInternalServerError": "500", "StatusNotImplemented": "501", "StatusBadGateway": "502", "StatusServiceUnavailable": "503", "StatusGatewayTimeout": "504"}
-var selectorPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)`)
-var functionPattern = regexp.MustCompile(`func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
-var queryPattern = regexp.MustCompile(`(?:URL\.Query\(\)|\b[A-Za-z_][A-Za-z0-9_]*)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
+
+// inboundRequestParamPattern matches a `*http.Request` parameter declaration —
+// the handler's own request, or one taken by a closure declared inside it.
+// This is the only way a request enters a handler from the outside; anything
+// the handler builds itself (http.NewRequest, http.NewRequestWithContext) is
+// outbound and carries no API query surface.
+var inboundRequestParamPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s+\*http\.Request\b`)
+
+// derivedRequestPattern matches a request derived from another request, as a
+// whole statement: `stripped := r.Clone(r.Context())`, `scoped := r.WithContext(ctx)`,
+// or a bare alias `req := r`. Provenance travels across these — journal Count
+// reads its real `limit`/`cursor` off an r.Clone, so a rule that accepted only
+// the literal `r` would drop them from the spec.
+var derivedRequestPattern = regexp.MustCompile(`(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*([A-Za-z_][A-Za-z0-9_]*)(?:\.(?:Clone|WithContext)\([^\n]*\))?\s*$`)
+
+// requestQueryPattern matches a query read taken straight off a request:
+// r.URL.Query().Get("cursor") and its Has/Values siblings. The receiver is
+// captured because `.URL.Query()` alone does not mean the API's query string —
+// an outbound *http.Request has the same method.
+var requestQueryPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.URL\.Query\(\)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
+
+// queryValuesBindingPattern matches a local bound to a request's decoded query
+// values — `q := r.URL.Query()` — so the far more common `q.Get("cursor")` two
+// lines later is still recognised. The request receiver is captured for the
+// same reason as above.
+var queryValuesBindingPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*([A-Za-z_][A-Za-z0-9_]*)\.URL\.Query\(\)`)
+
+// accessorPattern matches any `<ident>.Get|Has|Values("name")`. url.Values is
+// not the only type with that shape: r.Header, r.Trailer, r.Form, r.PostForm
+// and an http.Client read identically, so a match here is a query parameter
+// only when queryValuesBindingPattern bound the receiver above. Unrecognised
+// receivers fail safe — no parameter — because guessing wrong publishes, for
+// example, `?Authorization=` to every agent that drives the API from the spec.
+var accessorPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
+
+// inboundRequests returns the identifiers that hold the request the server was
+// handed, plus every request derived from one. Provenance is a whitelist on
+// purpose: an identifier of unknown origin is not an inbound request, so it
+// contributes nothing rather than being guessed into the published contract.
+func inboundRequests(signature, body string) map[string]bool {
+	inbound := map[string]bool{}
+	for _, decl := range []string{signature, body} {
+		for _, m := range inboundRequestParamPattern.FindAllStringSubmatch(decl, -1) {
+			inbound[m[1]] = true
+		}
+	}
+	// Derivations chain (`a := r.Clone(...)`, then `b := a`), so propagate to a
+	// fixed point rather than one hop.
+	for changed := true; changed; {
+		changed = false
+		for _, m := range derivedRequestPattern.FindAllStringSubmatch(body, -1) {
+			if inbound[m[2]] && !inbound[m[1]] {
+				inbound[m[1]] = true
+				changed = true
+			}
+		}
+	}
+	return inbound
+}
+
+// boundQueryValues returns the identifiers holding a request's decoded query
+// values — the receivers for which `x.Get("n")` means a query parameter.
+func boundQueryValues(inbound map[string]bool, body string) map[string]bool {
+	bound := map[string]bool{}
+	for _, m := range queryValuesBindingPattern.FindAllStringSubmatch(body, -1) {
+		if inbound[m[2]] {
+			bound[m[1]] = true
+		}
+	}
+	return bound
+}
+
+// queryParamNames returns the query parameter names a handler reads off the
+// inbound request. signature is the handler's parameter list, body its source.
+func queryParamNames(signature, body string) []string {
+	inbound := inboundRequests(signature, body)
+	bound := boundQueryValues(inbound, body)
+	seen := map[string]bool{}
+	var names []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	for _, m := range requestQueryPattern.FindAllStringSubmatch(body, -1) {
+		if inbound[m[1]] {
+			add(m[2])
+		}
+	}
+	for _, m := range accessorPattern.FindAllStringSubmatch(body, -1) {
+		if bound[m[1]] {
+			add(m[2])
+		}
+	}
+	return names
+}
+
+// queryReadAssignmentPattern matches a query read bound to a local at the top
+// level of a handler body: `filePath := r.URL.Query().Get("path")` or, when the
+// decoded values were bound first, `since := qs.Get("since")`. The receiver is
+// captured so the caller can check it is really the inbound request's query.
+// One leading tab, and the read as the whole statement, is deliberate — see
+// requiredQueryParams.
+var queryReadAssignmentPattern = regexp.MustCompile(
+	`^\t([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*([A-Za-z_][A-Za-z0-9_]*)(\.URL\.Query\(\))?\.Get\(\s*"([^"]+)"\s*\)\s*$`)
+
+// emptyCheckPattern matches the emptiness test itself, in the two spellings
+// this codebase uses.
+func emptyCheckPattern(name string) *regexp.Regexp {
+	q := regexp.QuoteMeta(name)
+	return regexp.MustCompile(`(?:\b` + q + `\s*==\s*""|TrimSpace\(\s*` + q + `\s*\)\s*==\s*"")`)
+}
+
+// requiredQueryParams returns the query parameters the handler rejects the
+// request for omitting — the ones a client must send.
+//
+// The rule is deliberately one narrow shape. Both halves must sit at the top
+// level of the handler body (a single leading tab, which gofmt guarantees), so
+// that both are reached unconditionally:
+//
+//	v := r.URL.Query().Get("name")
+//	…
+//	if v == "" {            // or strings.TrimSpace(v) == "", or `v == "" || w == ""`
+//	    <4xx write>
+//	    return
+//	}
+//
+// A `||` chain marks every emptiness-tested parameter in it, because any one
+// of them being absent produces the 4xx on its own. It never fires when the
+// guard defaults the value (`if v == "" { v = "7d" }`), when the emptiness
+// test is only one of several conditions that must ALL hold (`&&`), when the
+// guard has an else branch, or when either half sits inside a nested block —
+// where "missing" may only be fatal on some other condition.
+//
+// Everything it does not recognise stays optional. That asymmetry is the whole
+// design: under-claiming leaves a client where it already was, while
+// over-claiming tells it a request will fail when it will succeed, and a
+// generated client turns that into a mandatory argument its caller cannot omit.
+// AuthMiddleware.RequireWorkspace is the case that shows why the shape has to
+// be this tight — it reads ?workspace_id and 400s on empty, but only after
+// falling back to the path segment and the X-Workspace-ID header, so the
+// parameter is not required at all. Its guard assigns rather than replies, and
+// this rule does not fire on it.
+func requiredQueryParams(signature, body string) map[string]bool {
+	inbound := inboundRequests(signature, body)
+	bound := boundQueryValues(inbound, body)
+	lines := strings.Split(body, "\n")
+
+	// Locals holding a query read taken unconditionally at the top level.
+	reads := map[string]string{}
+	for _, line := range lines {
+		m := queryReadAssignmentPattern.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		local, receiver, viaURL, name := m[1], m[2], m[3] != "", m[4]
+		// `r.URL.Query().Get(…)` must come off an inbound request; a bare
+		// `x.Get(…)` only counts when x was bound to one's decoded values.
+		// Anything else (r.Header, an outbound request, a plain url.Values)
+		// is not a query parameter — the same provenance rule queryParamNames
+		// applies, for the same reason.
+		if viaURL != inbound[receiver] || (!viaURL && !bound[receiver]) {
+			continue
+		}
+		reads[local] = name
+	}
+
+	required := map[string]bool{}
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "\tif ") || strings.Contains(line, "&&") {
+			continue
+		}
+		block, closed := guardBlock(lines, i)
+		if !closed || !strings.Contains(block, "return") || !rejects4xx(block) {
+			continue
+		}
+		for local, name := range reads {
+			if !emptyCheckPattern(local).MatchString(line) {
+				continue
+			}
+			if reassigned(lines, local) {
+				continue
+			}
+			required[name] = true
+		}
+	}
+	return required
+}
+
+// reassigned reports whether a local that was read from the query string is
+// written again anywhere in the handler. Any second source — a default
+// (`if v == "" { v = "7d" }`) or a fallback chain (query, then path segment,
+// then header, as AuthMiddleware.RequireWorkspace does for workspace_id) —
+// means a later 4xx guard does not prove the query parameter was required.
+func reassigned(lines []string, local string) bool {
+	pattern := regexp.MustCompile(`^\s*` + regexp.QuoteMeta(local) + `\s*=[^=]`)
+	for _, line := range lines {
+		if pattern.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// guardBlock returns the body of the top-level `if` opening at lines[start],
+// and whether it closed with a plain `}` — an `} else {` means the empty case
+// is handled rather than rejected.
+func guardBlock(lines []string, start int) (string, bool) {
+	var block []string
+	for i := start + 1; i < len(lines); i++ {
+		if lines[i] == "\t}" {
+			return strings.Join(block, "\n"), true
+		}
+		if strings.HasPrefix(lines[i], "\t}") {
+			return "", false
+		}
+		block = append(block, lines[i])
+	}
+	return "", false
+}
+
+// rejects4xx reports whether a guard body answers with a 4xx status.
+func rejects4xx(block string) bool {
+	for name, code := range statusNames {
+		if code[0] == '4' && strings.Contains(block, "http."+name) {
+			return true
+		}
+	}
+	for _, m := range inlineStatusPattern.FindAllStringSubmatch(block, -1) {
+		if m[1][0] == '4' {
+			return true
+		}
+	}
+	return false
+}
+
+// handlerTarget names a handler the generator resolved from a registration: a
+// method on a concrete type, or (typeName empty) a package-level function.
+type handlerTarget struct {
+	typeName string
+	method   string
+}
+
+// inlineHandler is a function literal registered directly as the handler. Its
+// body is the handler body, so it needs no lookup at all.
+type inlineHandler struct {
+	signature string
+	body      string
+}
+
+// unwrapHandlerArg peels the middleware wrappers a registration puts around
+// its handler — authed(...), wsCtx(...), http.HandlerFunc(...),
+// r.authMw.OptionalWorkspaceRole(...) — down to the handler expression. Only
+// single-argument calls are peeled; anything else is already the handler (or
+// is not one).
+func unwrapHandlerArg(e ast.Expr) ast.Expr {
+	for i := 0; i < 8; i++ {
+		call, ok := e.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 {
+			return e
+		}
+		if _, literal := call.Args[0].(*ast.BasicLit); literal {
+			return e
+		}
+		e = call.Args[0]
+	}
+	return e
+}
+
+// typeNameOf resolves the expression a handler method is called on to the
+// concrete type declaring it, using the registering file as the scope:
+//
+//	audit.List                          -> `audit := NewAuditHandler(...)`   -> AuditHandler
+//	NewAdminKeeperHealthHandler(l).Get  -> constructor call                  -> AdminKeeperHealthHandler
+//	NewSystemHandler(...).WithBuild(b)  -> builder chain, resolve the head   -> SystemHandler
+//	r.steerHandler.Steer                -> `r.steerHandler = NewSteerHandler(...)` -> SteerHandler
+//
+// An empty result means unresolved, and callers must then infer nothing.
+func typeNameOf(e ast.Expr, src string) string {
+	switch b := e.(type) {
+	case *ast.CallExpr:
+		switch fun := b.Fun.(type) {
+		case *ast.Ident:
+			// A constructor, and only a constructor: any other function's
+			// name is not a type name, and guessing one resolves to nothing
+			// at best and to the wrong handler at worst.
+			if strings.HasPrefix(fun.Name, "New") && len(fun.Name) > 3 {
+				return fun.Name[3:]
+			}
+		case *ast.SelectorExpr:
+			return typeNameOf(fun.X, src)
+		}
+	case *ast.Ident:
+		return declaredTypeName(b.Name, src)
+	case *ast.SelectorExpr:
+		if recv, ok := b.X.(*ast.Ident); ok {
+			return fieldTypeName(recv.Name, b.Sel.Name, src)
+		}
+	case *ast.UnaryExpr:
+		return typeNameOf(b.X, src)
+	case *ast.CompositeLit:
+		if id, ok := b.Type.(*ast.Ident); ok {
+			return id.Name
+		}
+	}
+	return ""
+}
+
+func declaredTypeName(name, src string) string {
+	m := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\s*:=\s*(?:&?)([A-Za-z_][A-Za-z0-9_]*)`).FindStringSubmatch(src)
+	if len(m) != 2 {
+		return ""
+	}
+	return strings.TrimPrefix(m[1], "New")
+}
+
+// fieldTypeName resolves `r.steerHandler` through the assignment that builds
+// it, then through the struct field declaration if the assignment lives in
+// another file.
+func fieldTypeName(recv, field, src string) string {
+	assign := regexp.MustCompile(`\b` + regexp.QuoteMeta(recv) + `\.` + regexp.QuoteMeta(field) + `\s*=\s*(?:&?)([A-Za-z_][A-Za-z0-9_]*)`)
+	decl := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(field) + `\s+\*([A-Za-z_][A-Za-z0-9_]*)\s*$`)
+	for _, scope := range []string{src, packageSource()} {
+		if m := assign.FindStringSubmatch(scope); len(m) == 2 {
+			if name := strings.TrimPrefix(m[1], "New"); name != "" {
+				return name
+			}
+		}
+		if m := decl.FindStringSubmatch(scope); len(m) == 2 {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// requestParamNames returns the names a function literal gives its inbound
+// *http.Request, skipping the blank identifier — a handler written
+// `func(w http.ResponseWriter, _ *http.Request)` cannot read a query string.
+func requestParamNames(fn *ast.FuncType) []string {
+	var names []string
+	for _, field := range fn.Params.List {
+		star, ok := field.Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		sel, ok := star.X.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Request" {
+			continue
+		}
+		for _, name := range field.Names {
+			if name.Name != "_" {
+				names = append(names, name.Name)
+			}
+		}
+	}
+	return names
+}
+
+// delegatedTargets finds the handler a registered closure forwards to —
+// `NewSystemHandler(...).WithBuild(r.build).Version(w, req)` — recognised by
+// the closure passing its own request along. Without this the closure-wrapped
+// routes would resolve to nothing and document only their middleware statuses.
+func delegatedTargets(lit *ast.FuncLit, src string) []handlerTarget {
+	requests := map[string]bool{}
+	for _, name := range requestParamNames(lit.Type) {
+		requests[name] = true
+	}
+	if len(requests) == 0 {
+		return nil
+	}
+	var targets []handlerTarget
+	ast.Inspect(lit.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		forwarded := false
+		for _, arg := range call.Args {
+			if id, ok := arg.(*ast.Ident); ok && requests[id.Name] {
+				forwarded = true
+			}
+		}
+		if !forwarded {
+			return true
+		}
+		if typeName := typeNameOf(sel.X, src); typeName != "" {
+			targets = append(targets, handlerTarget{typeName: typeName, method: sel.Sel.Name})
+		}
+		return true
+	})
+	return targets
+}
+
+// resolveHandlerRefs parses a route registration and returns the handler it
+// registers. ok is false when the registration resolves to nothing — and that
+// is the point: the previous fallback matched every same-named function in
+// internal/api (test helpers included) and merged their query parameters, so
+// five operations published the union of all 95 query parameters in the
+// package, including GET /api/health, which reads none. An unresolved
+// registration must document nothing rather than everything; the `// openapi:`
+// annotation is the escape hatch when a route genuinely needs more.
+func resolveHandlerRefs(call, src string) (inline []inlineHandler, targets []handlerTarget, ok bool) {
+	fset := token.NewFileSet()
+	expr, err := parser.ParseExprFrom(fset, "registration.go", []byte(call), 0)
+	if err != nil {
+		return nil, nil, false
+	}
+	callExpr, isCall := expr.(*ast.CallExpr)
+	if !isCall {
+		return nil, nil, false
+	}
+	offset := func(p token.Pos) int { return fset.Position(p).Offset }
+	for i := len(callExpr.Args) - 1; i >= 0; i-- {
+		switch handler := unwrapHandlerArg(callExpr.Args[i]).(type) {
+		case *ast.FuncLit:
+			start, end := offset(handler.Body.Lbrace), offset(handler.Body.Rbrace)
+			if start < 0 || end+1 > len(call) || start >= end {
+				return nil, nil, false
+			}
+			inline = append(inline, inlineHandler{
+				signature: call[offset(handler.Type.Pos()):start],
+				body:      call[start : end+1],
+			})
+			return inline, delegatedTargets(handler, src), true
+		case *ast.SelectorExpr:
+			typeName := typeNameOf(handler.X, src)
+			if typeName == "" {
+				return nil, nil, false
+			}
+			return nil, []handlerTarget{{typeName: typeName, method: handler.Sel.Name}}, true
+		case *ast.Ident:
+			return nil, []handlerTarget{{method: handler.Name}}, true
+		}
+	}
+	return nil, nil, false
+}
+
+// sourceFiles lists the package's non-test Go files. _test.go is excluded
+// unconditionally: a test helper is never a handler, and merging one's query
+// reads into a published operation documents parameters no caller can send.
+func sourceFiles() []string {
+	if cachedSourceFiles != nil {
+		return cachedSourceFiles
+	}
+	all, _ := filepath.Glob(filepath.Join(routerDir, "*.go"))
+	for _, file := range all {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		cachedSourceFiles = append(cachedSourceFiles, file)
+	}
+	return cachedSourceFiles
+}
+
+var (
+	cachedSourceFiles []string
+	cachedSources     = map[string]string{}
+	cachedPackageSrc  string
+)
+
+func readSource(path string) string {
+	if src, ok := cachedSources[path]; ok {
+		return src
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		cachedSources[path] = ""
+		return ""
+	}
+	cachedSources[path] = string(data)
+	return cachedSources[path]
+}
+
+// packageSource is every non-test file concatenated — the scope for a lookup
+// that can legitimately cross files, such as a Router field declared in
+// router.go and assigned in router_orchestration.go.
+func packageSource() string {
+	if cachedPackageSrc != "" {
+		return cachedPackageSrc
+	}
+	var b strings.Builder
+	for _, file := range sourceFiles() {
+		b.WriteString(readSource(file))
+		b.WriteString("\n")
+	}
+	cachedPackageSrc = b.String()
+	return cachedPackageSrc
+}
+
+var inlineStatusPattern = regexp.MustCompile(`(?:writeJSON|WriteHeader)\([^\n]*?\b(\d{3})\b`)
+
+// absorbHandlerBody folds one handler body's query reads and status branches
+// into the operation being built.
+func absorbHandlerBody(info *handlerInfo, signature, body string) {
+	required := requiredQueryParams(signature, body)
+	for _, name := range queryParamNames(signature, body) {
+		param := info.query[name]
+		if param.typ == "" {
+			param.typ = "string"
+		}
+		if required[name] {
+			param.required = true
+		}
+		info.query[name] = param
+	}
+	for name, code := range statusNames {
+		if strings.Contains(body, "http."+name) {
+			info.statuses[code] = true
+		}
+	}
+	for _, n := range inlineStatusPattern.FindAllStringSubmatch(body, -1) {
+		info.statuses[n[1]] = true
+	}
+}
 
 func inferHandlerInfo(rt route) handlerInfo {
-	info := handlerInfo{query: map[string]string{}, statuses: map[string]bool{"200": true}}
-	srcBytes, err := os.ReadFile(rt.source)
-	if err != nil {
+	info := handlerInfo{query: map[string]queryParam{}, statuses: map[string]bool{"200": true}}
+	src := readSource(rt.source)
+	if src == "" {
 		return info
 	}
-	src := string(srcBytes)
 	// Middleware failures are part of every wrapped operation's wire contract.
 	if strings.Contains(rt.call, "authed") {
 		info.statuses["401"] = true
@@ -785,50 +1334,42 @@ func inferHandlerInfo(rt route) handlerInfo {
 	if strings.Contains(rt.call, "wsCtx") {
 		info.statuses["400"] = true
 	}
-	selectors := selectorPattern.FindAllStringSubmatch(rt.call, -1)
-	if len(selectors) == 0 {
+
+	inline, targets, ok := resolveHandlerRefs(rt.call, src)
+	if !ok {
 		return info
 	}
-	receiver := selectors[len(selectors)-1][1]
-	method := selectors[len(selectors)-1][2]
-	// Prefer the concrete handler type declared beside the registration (for
-	// example `audit := NewAuditHandler(...)`). This avoids merging the query
-	// parameters of every `Get` method in the package.
-	typeName := ""
-	decl := regexp.MustCompile(`\b` + regexp.QuoteMeta(receiver) + `\s*:=\s*(?:&?)([A-Za-z_][A-Za-z0-9_]*)`).FindStringSubmatch(src)
-	if len(decl) == 2 {
-		typeName = strings.TrimPrefix(decl[1], "New")
+	for _, handler := range inline {
+		absorbHandlerBody(&info, handler.signature, handler.body)
 	}
-	files, _ := filepath.Glob(filepath.Join(routerDir, "*.go"))
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			continue
+	for _, target := range targets {
+		pattern := regexp.MustCompile(`(?m)^func\s+` + regexp.QuoteMeta(target.method) + `\s*\(`)
+		if target.typeName != "" {
+			pattern = regexp.MustCompile(`func\s+\([^)]*\*` + regexp.QuoteMeta(target.typeName) + `\)\s*` + regexp.QuoteMeta(target.method) + `\s*\(`)
 		}
-		candidate := string(data)
-		functionRE := functionPattern
-		if typeName != "" {
-			functionRE = regexp.MustCompile(`func\s+\([^)]*\*` + regexp.QuoteMeta(typeName) + `\)\s*` + regexp.QuoteMeta(method) + `\s*\(`)
-		}
-		for _, m := range functionRE.FindAllStringIndex(candidate, -1) {
-			body := functionBody(candidate, m[1])
-			if body == "" {
-				continue
-			}
-			for _, q := range queryPattern.FindAllStringSubmatch(body, -1) {
-				info.query[q[1]] = "string"
-			}
-			for name, code := range statusNames {
-				if strings.Contains(body, "http."+name) {
-					info.statuses[code] = true
+		for _, file := range sourceFiles() {
+			candidate := readSource(file)
+			for _, m := range pattern.FindAllStringIndex(candidate, -1) {
+				body := functionBody(candidate, m[1])
+				if body == "" {
+					continue
 				}
-			}
-			for _, n := range regexp.MustCompile(`(?:writeJSON|WriteHeader)\([^\n]*?\b(\d{3})\b`).FindAllStringSubmatch(body, -1) {
-				info.statuses[n[1]] = true
+				absorbHandlerBody(&info, functionSignature(candidate, m[1]), body)
 			}
 		}
 	}
 	return info
+}
+
+// functionSignature returns the parameter list between `from` — the index just
+// past a function's opening parenthesis — and the brace that opens its body.
+// That text is where the inbound `*http.Request` is declared.
+func functionSignature(src string, from int) string {
+	open := strings.IndexByte(src[from:], '{')
+	if open < 0 {
+		return ""
+	}
+	return src[from : from+open]
 }
 
 func functionBody(src string, from int) string {

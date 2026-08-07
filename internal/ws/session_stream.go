@@ -99,6 +99,23 @@ func (s *sessionStreams) counterFor(channel string) *counterState {
 	return cs
 }
 
+// counterSeqFor is the READ-ONLY companion to counterFor: it reports the
+// channel's current high-water seq without creating an entry and without
+// refreshing its idle TTL.
+//
+// Read paths must use this. `touchedAt` is the sweep's only evidence that a
+// channel is still in use, so a reader that bumps it makes reclamation depend
+// on who happened to look rather than on who is actually running — and a
+// lookup that lazily inserts turns "did anyone ever run here?" into "has
+// anyone ever asked?". Returns 0 for a channel with no counter, which is the
+// same answer a fresh counter would have given.
+func (s *sessionStreams) counterSeqFor(channel string) int64 {
+	if cs := s.counters[channel]; cs != nil {
+		return cs.seq
+	}
+	return 0
+}
+
 // begin starts a run on a channel and returns the baseline seq (the counter
 // value before this run). The monotonic seq counter is preserved across runs so
 // sequence numbers never regress. If a run is ALREADY active on this channel
@@ -203,6 +220,18 @@ func (s *sessionStreams) replay(channel string, afterSeq int64) replayResult {
 
 	from := afterSeq
 	if from < st.startSeq {
+		from = st.startSeq
+	}
+	// Clamp DOWN as well. `counters` lives in memory, so a server restart puts
+	// this channel's seq back to 0 while clients still hold a watermark from
+	// the previous process lifetime — and we actively hand that watermark out
+	// (the HTTP stream prints it as `last_seq` and tells callers to resume with
+	// it). A watermark above everything the run has produced cannot be a real
+	// position inside it, and honouring it filters out every frame: the caller
+	// gets a live-looking stream that silently delivers nothing for the rest of
+	// the run. Trust the run's own baseline instead. `from == head` is the
+	// legitimate caught-up case and is deliberately left alone.
+	if from > s.counterSeqFor(channel) {
 		from = st.startSeq
 	}
 	var frames [][]byte

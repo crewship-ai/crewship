@@ -280,7 +280,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	// Audit the runtime container-prep steps for this agent-run path too.
 	if h.provisioner != nil {
-		crewCfg.ProvisionSink = h.provisioner.RuntimeProvisionSink(body.CrewID, body.WorkspaceID)
+		crewCfg.ProvisionSink = h.provisioner.RuntimeProvisionSink(r.Context(), body.CrewID, body.WorkspaceID)
 	}
 	containerID, err = h.orch.GetOrCreateContainerCfg(r.Context(), crewCfg, body.WorkspaceID)
 	if err != nil {

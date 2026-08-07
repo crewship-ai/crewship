@@ -556,6 +556,22 @@ func (h *ProvisioningHandler) emitProvisionEvent(ctx context.Context, crewID, wo
 	if ev.Tag != "" {
 		payload["tag"] = ev.Tag
 	}
+	// Supply-chain provenance (#1825). The digest is the only field here that
+	// answers "which image actually ran", so it rides the same durable row as
+	// the rest of the step vocabulary — no new table, no migration, and the
+	// tamper-evident chain (#1369, v152) hashes it along with everything else.
+	//
+	// `pinned` is written whenever a digest is, INCLUDING when it is false.
+	// Every other optional field here is omitted when empty because "absent"
+	// and "empty" mean the same thing for them. They do not for this one: a
+	// missing `pinned` would be indistinguishable from `pinned: false`, and
+	// the difference is exactly the security claim — did the daemon fetch the
+	// manifest we verified, or did it re-resolve a mutable tag? A digest with
+	// no qualifier would read as a guarantee we did not make.
+	if ev.Digest != "" {
+		payload["digest"] = ev.Digest
+		payload["pinned"] = ev.Pinned
+	}
 	if ev.DurationMs != 0 {
 		payload["duration_ms"] = ev.DurationMs
 	}
@@ -605,21 +621,35 @@ func (h *ProvisioningHandler) emitProvisionEvent(ctx context.Context, crewID, wo
 
 // RuntimeProvisionSink returns a ProvisionSink for the agent-run /
 // ensure-container path: the runtime container-preparation events emitted by the
-// container provider's EnsureCrewRuntime (start → container_create → ready, plus
-// failed) are journaled + live-streamed with the SAME schema and routing as the
-// explicit provisioning-job runner. Wiring this onto provider.CrewConfig closes
-// the gap where agent-triggered container creation prepared a container with no
-// audit trail. Returns nil on a nil handler (provisioning disabled) so the
-// caller can assign it unconditionally — a nil sink is a no-op in the provider.
+// container provider's EnsureCrewRuntime (start → image_resolved →
+// container_create → ready, plus failed) are journaled + live-streamed with the
+// SAME schema and routing as the explicit provisioning-job runner. Wiring this
+// onto provider.CrewConfig closes the gap where agent-triggered container
+// creation prepared a container with no audit trail. Returns nil on a nil
+// handler (provisioning disabled) so the caller can assign it unconditionally —
+// a nil sink is a no-op in the provider.
 //
-// Uses context.Background() for journal emits (not a request/run ctx) so a
-// completed/cancelled run can't drop the final ready/failed audit row.
-func (h *ProvisioningHandler) RuntimeProvisionSink(crewID, workspaceID string) func(devcontainer.ProvisionEvent) {
+// runCtx is the DISPATCH context, taken for its values only: both call sites
+// stamp journal.WithRunID before building the sink, so the emitted rows inherit
+// trace_id == run.id and the image digest recorded here (#1825) is attributable
+// to a specific run rather than merely to a crew and a timestamp.
+//
+// It is passed through context.WithoutCancel, not used directly. The original
+// reason this function reached for context.Background() still holds — a run
+// that completes or is cancelled the instant its container comes up must not
+// drop the final ready/failed audit row, and journal.Emit races the queue send
+// against ctx.Done(). WithoutCancel keeps that durability while stopping the
+// values from being thrown away with the cancellation.
+func (h *ProvisioningHandler) RuntimeProvisionSink(runCtx context.Context, crewID, workspaceID string) func(devcontainer.ProvisionEvent) {
 	if h == nil {
 		return nil
 	}
+	if runCtx == nil {
+		runCtx = context.Background()
+	}
+	emitCtx := context.WithoutCancel(runCtx)
 	return func(ev devcontainer.ProvisionEvent) {
-		h.emitProvisionEvent(context.Background(), crewID, workspaceID, ev)
+		h.emitProvisionEvent(emitCtx, crewID, workspaceID, ev)
 	}
 }
 

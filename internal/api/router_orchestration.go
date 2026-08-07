@@ -416,6 +416,53 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedSelfMut("POST", "/api/v1/chats/{chatId}/messages/{messageId}/reactions", mrh.Add)
 	r.authedSelfMut("DELETE", "/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}", mrh.Remove)
 
+	// Watch an agent run over plain HTTP (#1818). Streams the same session
+	// channel the browser's WebSocket subscribes to, as newline-delimited
+	// JSON, so an agent in a shell can follow a run with `curl -N` (or
+	// `crewship chat stream`) instead of implementing a WS client and the
+	// /api/v1/ws-token dance. Additive: the socket path is unchanged.
+	//
+	// COVERAGE — every run that carries a chat id is watchable here, not just
+	// the chat-initiated ones. Session-channel frames used to be produced in
+	// exactly one place (ws/client.go's send_message path), so a run started by
+	// the scheduler, a webhook, a pipeline step or the IPC
+	// POST /agents/{id}/start answered stream.open{active:false} then
+	// no_active_run. #1823 moved the publication to the chokepoint those paths
+	// share — orchestrator.RunAgent (see internal/orchestrator/session_stream.go)
+	// — so a new dispatch path is watchable by construction. Still NOT watchable,
+	// deliberately: a run with no chat row (no `session:` channel exists), and a
+	// delegated/peer sub-agent run (its frames belong to the parent's turn).
+	//
+	// Registered under `authed` WITHOUT wsCtx on purpose. The handler
+	// authorizes against the chat's OWN workspace via the hub's channel
+	// authorizer — strictly stronger than a caller-supplied workspace header,
+	// which this route never consults. Requiring the header would only add a
+	// precondition an agent has to satisfy before it can watch anything.
+	//
+	// Registered unconditionally even when no hub is attached (a CLI-only or
+	// test router): the handler answers 503 in that case, the same shape the
+	// steer route uses below. Gating the registration on r.hub would make the
+	// published OpenAPI surface depend on runtime wiring, which is exactly the
+	// drift openapi_conformance_test.go exists to catch.
+	//
+	// Keep the handler in a NAMED local rather than inlining the constructor
+	// into the Handle call: cmd/gen-openapi resolves a route's handler by
+	// looking for a `local := NewSomethingHandler(...)` assignment beside the
+	// registration. Inlined, it falls back to merging every same-named method
+	// in the package and stamps the route with ~130 bogus query parameters in
+	// openapi.gen.json. (Its lookup is a regex over this file, so do not write
+	// that assignment shape for this local in a comment either — the first
+	// textual match wins.)
+	var runStreamSrc runStreamSource
+	if r.hub != nil {
+		runStreamSrc = r.hub
+	}
+	rsh := NewRunStreamHandler(runStreamSrc, r.logger)
+	// The query knobs are parsed in parseRunStreamQuery, not in Stream itself,
+	// so the generator's body scan cannot see them — declare them here.
+	// openapi: query last_seq:integer follow:boolean idle:integer; responses 200,400,401,404,500,503
+	r.mux.Handle("GET /api/v1/chats/{chatId}/stream", authed(http.HandlerFunc(rsh.Stream)))
+
 	// Chat participants: who is in a multi-user group chat. Adding the first
 	// extra participant flips chats.visibility to 'group' (agent responds only
 	// on @mention). Scoped via chats.workspace_id like reactions.

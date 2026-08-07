@@ -102,6 +102,32 @@ Emitted by `internal/containerstate` after every successful agent exec. The pack
 
 This is **what the container actually has** after agents ran `apt-get install` / `pip install` / `npm install` during a session. Compare with declared intent in [`devcontainer.json`](/guides/devcontainers#container-actuals).
 
+#### `provisioning.step` — which image the run executed under
+
+Every container preparation emits one `provisioning.step` row per step, whether it came from an explicit `crewship crew provision` or from an agent run that had to bring a container up. The `image_resolved` step carries the supply-chain answer:
+
+```json
+{
+  "crew_id": "clx…",
+  "phase": "provision",
+  "step": "image_resolved",
+  "status": "completed",
+  "tag": "ghcr.io/crewship-ai/agent-runtime:latest",
+  "digest": "sha256:aaaa…",
+  "pinned": true
+}
+```
+
+- `tag` is what the crew manifest asked for; `digest` is what the daemon actually fetched. The pull itself is addressed by digest, so the two cannot drift apart mid-start — see [Runtime image pinning](/configuration/environment#runtime-image-pinning).
+- `pinned: false` means the digest is known but the fetch was still tag-addressed (the registry never answered a digest lookup). It is a weaker claim than `pinned: true` and is recorded as such rather than being rounded up.
+- No `digest` key at all means the image has no registry manifest — a locally built `crewship-cache:*` derivative.
+
+The row carries the run's `trace_id`, so `--trace-id <run-id>` narrows it to one run's image:
+
+```bash
+crewship journal --type provisioning.step --trace-id <run-id>
+```
+
 Severity is one of `info`, `notice`, `warn`, `error`. Actor types: `agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`.
 
 ## Priority markers

@@ -16,6 +16,17 @@ This is a **route catalog**, not a hand-authored contract: paths, HTTP methods, 
 
 `/api/v1/internal/*` routes are deliberately excluded — that surface is sidecar-only, `X-Internal-Token` authenticated (see [Internal IPC](/api-reference/internal)), and this endpoint itself carries no auth. Publishing a route map of the one part of the API kept non-public would be counterproductive.
 
+## Query parameters
+
+Query parameters are **inferred from the handler body** — the generator resolves each registration to the concrete handler it runs and lists the names that handler reads off the request. A parameter it cannot attribute to a handler is left out rather than guessed in, so the list is a subset of what an operation accepts, never a superset. Where a handler delegates its parsing to a shared helper, the route carries an explicit `// openapi:` annotation instead.
+
+`required` is inferred the same way, and asymmetrically:
+
+- **`required: true`** means the handler was seen to answer `4xx` when the parameter is absent — for example `DELETE /api/v1/crews/{crewId}/files/delete?path=`, which answers `400 path parameter required`. Send it.
+- **`required: false`** means *not proven required*, not *proven optional*. Most parameters are genuinely optional; a few are required in ways the inference does not recognise (validation delegated to a helper, or an obligation that depends on another parameter).
+
+Over-claiming would tell a client a request will fail when it will succeed, so the generator under-claims by design. Treat `required: true` as binding and `required: false` as unknown.
+
 ## Methods not listed are rejected
 
 If the spec lists only `GET` for a path, every other method on that path answers `405 Method Not Allowed` with an [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#field.allow) `Allow` header naming the methods that do work:

@@ -2,10 +2,10 @@ name: Documentation surface
 
 on:
   pull_request:
-    paths: ['docs/**', 'scripts/docs-surface-check/**', 'scripts/docs-inventory/**', '.github/workflows/docs-surface.yml']
+    paths: ['docs/**', 'scripts/docs-surface-check/**', 'scripts/docs-inventory/**', 'scripts/docker-api-surface/**', 'docker/docker-compose.prod.yml', '.github/workflows/docs-surface.yml']
   push:
     branches: [main]
-    paths: ['docs/**', 'scripts/docs-surface-check/**', 'scripts/docs-inventory/**', '.github/workflows/docs-surface.yml']
+    paths: ['docs/**', 'scripts/docs-surface-check/**', 'scripts/docs-inventory/**', 'scripts/docker-api-surface/**', 'docker/docker-compose.prod.yml', '.github/workflows/docs-surface.yml']
   # The deployed-index comparison lives on a schedule, not on the PR. Mintlify
   # publishes after a merge, so on a PR that adds a page the local navigation
   # leads the served llms.txt by construction — gating on it would fail the
@@ -45,6 +45,18 @@ jobs:
       - name: Compare the deployed LLM index
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: go run ./scripts/docs-surface-check -url https://docs.crewship.ai
+
+      # The Docker socket-proxy guide publishes a security control: the exact
+      # Engine API endpoints an operator's proxy must allow. An endpoint quietly
+      # dropped from that page is an endpoint their proxy will deny, which
+      # surfaces as a 403 on their instance rather than a red build on ours.
+      #
+      # This IS repeated from ci.yml's Go Lint job, unlike the inventory below,
+      # because ci.yml carries `paths-ignore: docs/**` — a pull request that
+      # only edits the guide skips it entirely, and that is precisely the change
+      # this assertion exists to catch.
+      - name: Docker API surface matches its published allow-list
+        run: go run ./scripts/docker-api-surface
 
       # The strict reference inventory is NOT repeated here: ci.yml's Go Lint
       # job already runs it on every pull request with no path filter, which is

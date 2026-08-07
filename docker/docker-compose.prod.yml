@@ -53,20 +53,66 @@ services:
   # proxy brokers a tcp API on the internal network and rejects (403)
   # everything outside the allowlist below.
   #
-  # If you add a feature that needs another endpoint (BUILD, COMMIT, ...),
-  # widen this list explicitly -- defaults deny.
+  # Read docs/guides/docker-socket-proxy.mdx before relying on this. The
+  # short version: the proxy filters by URL path, never by request body, so
+  # it CANNOT stop a `Privileged: true` container being created -- we need
+  # ContainerCreate and exec to do our job at all. The workspace
+  # allow_privileged_credentials flag is the fence for that, not this file.
+  #
+  # The list below is derived from the source and gated in CI:
+  #
+  #   go run ./scripts/docker-api-surface
+  #
+  # It fails on drift in both directions, so do not hand-edit it out of sync
+  # with scripts/docker-api-surface/allowlist.go.
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
     container_name: crewship-docker-proxy
     restart: unless-stopped
     environment:
-      CONTAINERS: 1  # ContainerList / Create / Remove / Inspect
-      EXEC: 1        # ContainerExec* (the sidecar provider runs commands inside sidecars)
-      IMAGES: 1      # ImagePull / Inspect during ContainerCreate
-      NETWORKS: 1    # NetworkList / Create (crew network provisioning)
-      VOLUMES: 1     # VolumeList / Create (per-crew bind mounts)
-      INFO: 1        # /info (version-negotiation prerequisite)
-      POST: 1        # required to allow non-GET requests through the proxy
+      # Non-GET verbs. HAProxy matches METH_GET only, so this one flag also
+      # gates PUT, DELETE and HEAD -- CopyToContainer and Ping issue a HEAD.
+      POST: 1
+      # /containers -- ContainerCreate/Start/Stop/Remove/Inspect/List/Stats/
+      # Wait/Pause/Unpause, CopyToContainer, CopyFromContainer, and
+      # ExecCreate (which posts to /containers/{id}/exec, not /exec).
+      CONTAINERS: 1
+      # /exec -- ExecStart, ExecAttach, ExecInspect, ExecResize.
+      EXEC: 1
+      # /images -- ImagePull, ImageInspect, ImageList, ImageRemove.
+      IMAGES: 1
+      # /networks -- NetworkCreate, NetworkList (per-crew network).
+      NETWORKS: 1
+      # /volumes -- VolumeCreate, VolumeInspect, VolumeList, VolumeRemove.
+      VOLUMES: 1
+      # /info -- cgroup version and host-filesystem detection.
+      INFO: 1
+      # /_ping and /version -- daemon detection. The image defaults both to 1;
+      # set explicitly so this file is the whole story.
+      PING: 1
+      VERSION: 1
+      # /events -- the image defaults this to 1. We never subscribe, so turn
+      # it off rather than leave an unused stream open.
+      EVENTS: 0
+
+      # --- devcontainer provisioning: opt in ------------------------------
+      # Only crews carrying a devcontainer or mise config provision an image
+      # (internal/api/crew_runtime_config.go:crewNeedsProvision). Leave these
+      # off and such a crew fails at provisioning with a 403 on POST /commit;
+      # every other crew is unaffected.
+      #
+      # /commit -- ContainerCommit, the last step of provisioning.
+      # COMMIT: 1
+      # /build and /session -- `docker build` with BuildKit, used when a crew
+      # declares devcontainer FEATURES. Crewship shells out to the docker CLI
+      # with DOCKER_HOST pinned here. Granting BUILD is a real widening: a
+      # build runs arbitrary RUN steps against arbitrary base images.
+      # BUILD: 1
+      # SESSION: 1
+
+      # Everything else stays at the image's default of 0: AUTH, SECRETS,
+      # SWARM, NODES, TASKS, SERVICES, CONFIGS, PLUGINS, SYSTEM (host-wide
+      # prune and disk usage), DISTRIBUTION, GRPC.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:

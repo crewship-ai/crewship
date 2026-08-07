@@ -561,7 +561,7 @@ func (h *AssignmentHandler) runAssignment(
 	// container creation is auditable exactly like an explicit provisioning job
 	// (nothing prepared silently). nil provisioner → nil sink → provider no-op.
 	if h.provisioner != nil {
-		crewCfg.ProvisionSink = h.provisioner.RuntimeProvisionSink(body.CrewID, body.WorkspaceID)
+		crewCfg.ProvisionSink = h.provisioner.RuntimeProvisionSink(ctx, body.CrewID, body.WorkspaceID)
 	}
 	containerID, err = h.orch.GetOrCreateContainerCfg(ctx, crewCfg, body.WorkspaceID)
 	if err != nil {

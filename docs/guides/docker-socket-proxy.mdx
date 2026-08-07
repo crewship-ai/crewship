@@ -1,0 +1,293 @@
+---
+title: "Docker Socket Proxy"
+description: "Run the server without raw /var/run/docker.sock: the exact Engine API endpoints Crewship uses, a compose deployment, and a straight account of what this control does not cover."
+icon: "shield"
+---
+
+# Docker Socket Proxy
+
+Crewship creates, starts, execs into and tears down the containers your agents
+run in. It does that by talking to the Docker Engine API, and by default it
+talks to it over `/var/run/docker.sock`.
+
+Access to that socket is equivalent to root on the host. That is an
+uncomfortable amount of privilege for a process whose day job is running LLM
+agents over content it did not write, so this page documents the supported way
+to narrow it: put a filtering proxy in front of the socket and point Crewship at
+the proxy with `DOCKER_HOST`.
+
+<Warning>
+Read [What this does not protect against](#what-this-does-not-protect-against)
+before you deploy it. A socket proxy removes API we never call. It does **not**
+remove the API an attacker would reach for first, because we legitimately need
+most of that API ourselves. Deploying this and believing the agent container
+problem is solved would be worse than not deploying it.
+</Warning>
+
+## How it works
+
+Crewship resolves its daemon endpoint from `DOCKER_HOST` before falling back to
+socket probing (`internal/provider/docker/detect_all.go`). Nothing special is
+needed on our side — point it at a proxy and it uses the proxy.
+
+```
+crewship  ==[ DOCKER_HOST, tcp ]==>  docker-socket-proxy  ==[ socket, ro ]==>  dockerd
+                                     (path allow-list)
+```
+
+The proxy in the supported deployment is
+[Tecnativa's `docker-socket-proxy`](https://github.com/Tecnativa/docker-socket-proxy):
+HAProxy with one `http-request allow` rule per API path prefix, each gated by an
+environment variable, and a final `http-request deny`.
+
+## Deployment
+
+`docker/docker-compose.prod.yml` in this repository ships the proxy already
+wired. The relevant service:
+
+```yaml docker/docker-compose.prod.yml
+  crewship:
+    environment:
+      # No socket mount on this container. That is the whole point: if the
+      # server is compromised, the attacker gets the proxy's allow-list.
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+    networks:
+      - crewship-internal
+
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    restart: unless-stopped
+    environment:
+      POST: 1        # every non-GET verb, including PUT, DELETE and HEAD
+      CONTAINERS: 1  # /containers
+      EXEC: 1        # /exec
+      IMAGES: 1      # /images
+      NETWORKS: 1    # /networks
+      VOLUMES: 1     # /volumes
+      INFO: 1        # /info
+      PING: 1        # /_ping
+      VERSION: 1     # /version
+      EVENTS: 0      # on by default in the image; we never subscribe
+      # Opt in only if you use devcontainer provisioning — see below.
+      # COMMIT: 1
+      # BUILD: 1
+      # SESSION: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - crewship-internal
+```
+
+Keep the proxy on an `internal: true` network and never publish its port. It has
+no authentication of its own: anything that can reach `tcp://…:2375` has
+whatever the variables above allow.
+
+## The endpoints we actually use
+
+Derived from the source, not from memory. Every row below has at least one call
+site in this repository, and `go run ./scripts/docker-api-surface` fails the
+build if that stops being true in either direction — a new call nobody listed,
+or a listed endpoint nobody calls.
+
+### Containers — `CONTAINERS: 1`
+
+| SDK method | Engine API | Why we call it |
+| --- | --- | --- |
+| `ContainerCreate` | `POST /containers/create` | Creates every agent, sidecar and provisioning container |
+| `ContainerStart` | `POST /containers/{id}/start` | Starts them |
+| `ContainerStop` | `POST /containers/{id}/stop` | Stops crews and sidecars before removal |
+| `ContainerRemove` | `DELETE /containers/{id}` | Tears down crews, temp containers, stranded runtime |
+| `ContainerInspect` | `GET /containers/{id}/json` | State, mounts and network reads |
+| `ContainerList` | `GET /containers/json` | Reconciles the crew inventory against what is running |
+| `ContainerStats` | `GET /containers/{id}/stats` | Memory and CPU readings behind the admission gate |
+| `ContainerWait` | `POST /containers/{id}/wait` | Blocks on one-shot helpers (secrets sweep, image cache warm) |
+| `ContainerPause` | `POST /containers/{id}/pause` | Quiesces a crew for a consistent backup |
+| `ContainerUnpause` | `POST /containers/{id}/unpause` | Resumes it afterwards |
+| `CopyToContainer` | `HEAD` + `PUT /containers/{id}/archive` | Writes devcontainer features, restored backups, the sidecar binary |
+| `CopyFromContainer` | `GET /containers/{id}/archive` | Streams crew content out for a backup |
+| `ExecCreate` | `POST /containers/{id}/exec` | Creates the exec session an agent turn runs in |
+
+`ExecCreate` is in this table rather than the next one on purpose: the Engine
+API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
+
+### Exec — `EXEC: 1`
+
+| SDK method | Engine API | Why we call it |
+| --- | --- | --- |
+| `ExecStart` | `POST /exec/{id}/start` | Runs a detached exec |
+| `ExecAttach` | `POST /exec/{id}/start` (hijacked) | Streams stdio for an agent command |
+| `ExecInspect` | `GET /exec/{id}/json` | Reads the exit code of a finished exec |
+| `ExecResize` | `POST /exec/{id}/resize` | Sizes the TTY for interactive CLI adapters |
+
+### Images — `IMAGES: 1`
+
+| SDK method | Engine API | Why we call it |
+| --- | --- | --- |
+| `ImagePull` | `POST /images/create` | Pulls a crew's base image and the sidecar image |
+| `ImageInspect` | `GET /images/{name}/json` | Checks presence locally, reads baked-in env |
+| `ImageList` | `GET /images/json` | Finds cached provisioning images to reuse |
+| `ImageRemove` | `DELETE /images/{name}` | Garbage-collects unreferenced `crewship-cache:*` images |
+
+### Networks and volumes — `NETWORKS: 1`, `VOLUMES: 1`
+
+| SDK method | Engine API | Why we call it |
+| --- | --- | --- |
+| `NetworkCreate` | `POST /networks/create` | Creates the per-crew internal network |
+| `NetworkList` | `GET /networks` | Checks whether it already exists |
+| `VolumeCreate` | `POST /volumes/create` | Creates per-agent home and memory volumes |
+| `VolumeInspect` | `GET /volumes/{name}` | Reads a volume's mountpoint and labels |
+| `VolumeList` | `GET /volumes` | Enumerates crew volumes for reconciliation and pruning |
+| `VolumeRemove` | `DELETE /volumes/{name}` | Removes volumes of a deleted crew |
+
+### Daemon probes — `INFO: 1`, `PING: 1`, `VERSION: 1`
+
+| SDK method | Engine API | Why we call it |
+| --- | --- | --- |
+| `Info` | `GET /info` | Cgroup version and whether the daemon shares the host filesystem |
+| `Ping` | `HEAD /_ping` (`GET` on fallback) | Reachability probe during socket detection |
+| `ServerVersion` | `GET /version` | Distinguishes dockerd from a nerdctl-style shim |
+
+### Why `POST: 1` is unavoidable
+
+HAProxy's first rule in this proxy is `deny unless METH_GET || POST`. `METH_GET`
+matches `GET` and nothing else, so the single `POST` variable also gates `PUT`,
+`DELETE` **and `HEAD`**. Creating a container, removing a volume, writing an
+archive into a container and pinging the daemon all need it. There is no
+read-only mode of Crewship that would let you leave it off.
+
+## Devcontainer provisioning is opt-in
+
+Crews that carry a devcontainer or mise config get a provisioned, cached image
+(`crewNeedsProvision` in `internal/api/crew_runtime_config.go`). That path needs
+two things the core allow-list does not grant:
+
+| What | Variable | Endpoint | When |
+| --- | --- | --- | --- |
+| `ContainerCommit` | `COMMIT: 1` | `POST /commit` | Every provisioned crew — the last step bakes the container into a cached image |
+| `docker build` | `BUILD: 1` + `SESSION: 1` | `POST /build`, `POST /session` | Only crews that declare devcontainer **features** |
+
+The build path is not an SDK call. `internal/devcontainer/imagebuilder.go` shells
+out to the `docker` CLI with `DOCKER_BUILDKIT=1` and `DOCKER_HOST` pinned to the
+same endpoint, so it reaches the daemon as a second client of the same proxy.
+
+Leave these off and crews with no devcontainer config are unaffected; a crew that
+needs provisioning fails with a `403` on `POST /commit` (or on the build). If you
+turn them on, be clear about what you are granting: `BUILD` lets the caller run
+arbitrary `RUN` steps against arbitrary base images, and `COMMIT` lets it turn any
+running container into an image. Both are opt-in for that reason.
+
+<Note>
+The BuildKit path behind a proxy is documented from the code, not from a live
+run — we have not driven a feature build end to end through the proxy. Depending
+on daemon version BuildKit may also want `/grpc`. If a feature build fails with a
+`403` on a path we do not list here, that is the gap, and it is worth an issue.
+</Note>
+
+## What this does not protect against
+
+This is the part that decides whether the control is worth deploying. Read it
+before you tell anyone the agent-container problem is handled.
+
+**It cannot block `Privileged: true`.** The proxy filters by URL path. It never
+parses the request body, and `Privileged`, `CapAdd` and `Binds` all live in the
+body of `POST /containers/create` — an endpoint we cannot function without. The
+fence for privileged crews is the workspace `allow_privileged_credentials` flag,
+enforced server-side at crew create and update
+([Container Isolation](/security/container-isolation)). That is the control that
+actually covers this risk, and a socket proxy does not change it either way.
+
+**It cannot block a host bind mount** for the same reason. `mounts[].source` is
+validated by `internal/devcontainer/mount_validate.go` and re-filtered at
+container start. Again: our code, not the proxy.
+
+**The verbs we need are the dangerous ones.** `ContainerCreate` plus
+`ExecCreate`/`ExecStart`/`ExecAttach` plus `CopyToContainer` is, in combination,
+"run arbitrary code in a container of your choosing, with a filesystem of your
+choosing". Anyone who reaches the proxy has that. An attacker with code execution
+inside the Crewship process is inconvenienced, not stopped.
+
+**The granularity is a path prefix, not an endpoint.** The table above is what
+*we* call. What the proxy *opens* is five whole namespaces. `CONTAINERS: 1` also
+allows `POST /containers/prune` (removes every stopped container on the host),
+`POST /containers/{id}/kill`, `POST /containers/{id}/update` (raise resource
+limits), `GET /containers/{id}/logs` and `GET /containers/{id}/export` —
+including for containers that have nothing to do with Crewship. `IMAGES: 1` also
+allows `POST /images/prune` and `POST /images/{name}/push`. `VOLUMES: 1` also
+allows `POST /volumes/prune`. The proxy has no way to express "only these
+thirty-one calls".
+
+**You have moved the trust, not removed it.** The proxy container is now the one
+holding the socket. It is a smaller, simpler process than Crewship, which is a
+real gain — but it is still root-equivalent, and anything that can reach its port
+inherits its allow-list. Keep it on an internal network.
+
+**This is a static derivation, not an end-to-end proof.** The allow-list is
+derived from call sites by `scripts/docker-api-surface` and gated in CI. Nothing
+in CI runs the product against a live proxy, so a mismatch between "the endpoint
+we call" and "the path the proxy matches" would not be caught here.
+
+## What it does remove
+
+The gain is real, it is just narrower than "socket access is now safe". With the
+core profile the daemon stops accepting, from Crewship's network position:
+
+- `POST /build` and `POST /commit` — image build and container-to-image commit
+  (unless you opt in above).
+- `/swarm`, `/nodes`, `/tasks`, `/services` — the entire swarm control plane,
+  including joining the host to a swarm you control.
+- `/secrets` and `/configs` — swarm secret and config material.
+- `/plugins` — plugin install, which is arbitrary code on the host by design.
+- `/system` — `POST /system/prune` (host-wide destruction) and disk usage.
+- `/auth` — registry login with the daemon's credentials.
+- `/distribution`, `/grpc`, `/session`, `/events`.
+
+If the alternative on the table is a bind-mounted `/var/run/docker.sock`, this is
+strictly better and you should deploy it. Just do not let it stand in for the
+controls in [Container Isolation](/security/container-isolation) and the
+[Threat Model](/security/threat-model), which are where the privileged-container
+and mount risks are actually handled.
+
+## Keeping the list honest
+
+An endpoint allow-list written once is wrong within a quarter. This one is
+derived from the code on every CI run:
+
+```bash
+go run ./scripts/docker-api-surface          # check; exit 1 on drift
+go run ./scripts/docker-api-surface -list    # print every call site
+```
+
+The check reads the exported method set of `*client.Client` by reflection, finds
+every call site in the packages that import the Docker SDK, and compares the
+result with `scripts/docker-api-surface/allowlist.go`. It fails when:
+
+- a Docker call appears that the allow-list does not declare — the published
+  proxy config would `403` on it in production;
+- a declared endpoint has no call site left — we would be asking operators to
+  grant a permission we no longer need;
+- a package that never touched Docker starts importing the SDK;
+- a new subprocess is executed with `DOCKER_HOST` pinned, which is a second
+  client of the same socket that no compile-time check would see;
+- `docker/docker-compose.prod.yml` or this page stops matching the table.
+
+## Troubleshooting
+
+**`403 Forbidden` from the daemon.** The proxy denies with a plain 403 and logs
+the path. `docker logs crewship-docker-proxy` shows which one; map it back to the
+tables above. If the path is not listed here, `go run ./scripts/docker-api-surface`
+should already have failed in CI — if it did not, that is a gap in the check.
+
+**Crew provisioning fails immediately after "cleanup caches".** That is the
+`POST /commit` step. Set `COMMIT: 1`.
+
+**Nothing works and the server reports no Docker daemon.** Detection uses
+`HEAD /_ping`, which is a non-`GET` verb: check `POST: 1` is set, not just
+`PING: 1`.
+
+## Related
+
+- [Container Isolation](/security/container-isolation) — UID split, capability
+  drop, the privileged-crew gate.
+- [Threat Model](/security/threat-model) — what is and is not mitigated overall.
+- [Devcontainers](/guides/devcontainers) — what provisioning does, and when the
+  `COMMIT` / `BUILD` permissions come into play.

@@ -717,6 +717,15 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		CPUs:        cpuVal,
 		MaxTurns:    msgOpt.MaxTurns,
 	})
+	// This path's caller (ws.Client.handleSendMessage) already records the
+	// whole turn on `session:{chatID}` — container-start status events, the
+	// agent's output via streamFn, and the terminal error/done pair AFTER
+	// RunAgent returns. Letting the orchestrator open a second recording
+	// underneath it (#1823) would publish every agent event twice and close
+	// the stream with a `done` while the turn is still finishing. The
+	// orchestrator-level publication exists for the paths that have no such
+	// caller: scheduler, webhook, routine step, agent-start IPC.
+	req.SuppressSessionStream = true
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
 	// On subsequent messages the container is warm — no progress noise.
