@@ -49,8 +49,14 @@ func Open(databaseURL string) (*DB, error) {
 		sep = "&"
 	}
 	// cache_size(-65536) = 64 MiB per-connection page cache. SetMaxOpenConns
-	// caps the pool at 5 (see below), so worst case is ~320 MiB resident —
-	// trivial against the VMs we target. 64 MiB keeps the hot working set of
+	// caps the pool at 5 (see below). The "~320 MiB worst case" this comment
+	// used to quote was wrong in both directions, corrected under #1817 by
+	// measurement: while the database fits inside mmap_size below, reads come
+	// off the mapping and the cache stays nearly empty (5 connections, 15 MiB
+	// physical); past the mmap window the cache does fill, and 64 MiB nominal
+	// costs ~145 MiB resident, because modernc.org/memory rounds each ~4 KiB
+	// cache page up to an 8 KiB slab. Five connections on a 548 MiB database
+	// measured at 725 MiB. 64 MiB keeps the hot working set of
 	// journal_entries + agents + missions resident through dashboard polls
 	// instead of round-tripping page reads from disk on every refresh.
 	// Bumping further (e.g. 256 MiB) buys diminishing returns unless the
@@ -92,6 +98,56 @@ func Open(databaseURL string) (*DB, error) {
 	// busy_timeout(5000ms) applies per-connection via the DSN pragma
 	// above, so it stays in effect at any pool size.
 	db.SetMaxOpenConns(5)
+
+	// Idle must match the open cap, or three of those five connections are
+	// torn down the moment a burst drains and reopened on the next one.
+	// database/sql defaults MaxIdleConns to 2 and this call was missing until
+	// #1817, so that is exactly what production did.
+	//
+	// Measured on an M4, 235 MiB corpus, 5 concurrent readers (benchmarks in
+	// pool_test.go, numbers in PR #1821):
+	//
+	//   - One reopen costs 386 µs: a fresh file open plus the seven DSN
+	//     pragmas above, WAL handshake and mmap window included, against
+	//     16 µs for the same statement on a warm connection.
+	//   - Bursty load — the several-dashboard-tabs-polling pattern this pool
+	//     is sized for — ran 2.6x faster warm: 435 µs vs 169 µs per 5-query
+	//     burst, 11.5k vs 29.6k queries/s. Under *sustained* saturation the
+	//     gap narrows to ~1.2x, because database/sql hands a released
+	//     connection straight to a waiting goroutine and never consults the
+	//     idle pool. The churn only bites when a burst drains.
+	//
+	// The obvious objection is memory: cache_size(-65536) is 64 MiB per
+	// connection, so five warm connections look like 320 MiB on a self-hosted
+	// box. Measured, they are not:
+	//
+	//   - While the database fits inside mmap_size (256 MiB), SQLite serves
+	//     reads straight from the mapping and barely touches the pager cache.
+	//     Five warm connections cost 15.3 MiB of physical footprint against
+	//     13.2 MiB for two — 0.7 MiB per extra connection. RSS reads ~1.2 GiB
+	//     because it counts the same file mapped five times; those pages are
+	//     clean, file-backed, shared by the kernel and reclaimed under
+	//     pressure. RSS is the wrong number here.
+	//   - Past the mmap window the pager cache does fill: on a 548 MiB
+	//     database five warm connections held 725 MiB. But that peak belongs
+	//     to SetMaxOpenConns, not to this line — any five-way burst opens five
+	//     connections and fills five caches whatever the idle cap says. When
+	//     the burst drained at idle 2, closing three connections returned
+	//     21 MiB of the 725 (704 MiB vs 724 MiB at idle 5): modernc.org/memory
+	//     does not hand freed slabs back to the OS. The low idle cap buys ~3%
+	//     of the memory it appears to and pays 2.6x on burst latency for it.
+	//
+	// SetConnMaxLifetime and SetConnMaxIdleTime stay unset, deliberately. The
+	// usual reasons to cap connection lifetime — load balancers cutting idle
+	// connections, server-side timeouts, rebalancing onto a new replica — all
+	// describe a database reached over a network. This one is a file on the
+	// local disk: nothing expires it, and recycling would only re-pay the
+	// 386 µs open. ConnMaxIdleTime would be the one candidate, as a valve to
+	// give the pager cache back on a quiet box, but the release measurement
+	// above shows there is almost nothing to give back. If large-database
+	// memory becomes a real problem, the lever is cache_size or mmap_size, not
+	// connection expiry.
+	db.SetMaxIdleConns(5)
 
 	if err := db.Ping(); err != nil {
 		db.Close()
