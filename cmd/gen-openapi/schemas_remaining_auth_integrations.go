@@ -29,11 +29,6 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 
 	status := object(map[string]any{"status": str()})
 	label := object(map[string]any{"id": str(), "name": str(), "color": str(), "label_group": nullable(str())})
-	notification := object(map[string]any{
-		"id": str(), "actor_type": str(), "actor_id": str(), "actor_name": nullable(str()),
-		"action": str(), "entity_type": str(), "entity_id": nullable(str()), "entity_title": nullable(str()),
-		"read_at": nullable(str()), "created_at": str(),
-	})
 	feedback := object(map[string]any{
 		"id": str(), "message_id": str(), "chat_id": nullable(str()), "trace_id": nullable(str()),
 		"signal": map[string]any{"type": "string", "enum": []string{"helpful", "not_helpful", "inaccurate", "unsafe", "edit", "regenerate"}},
@@ -56,7 +51,7 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 	pairPoll := object(map[string]any{"status": str(), "adapter_hint": nullable(str()), "expires_at": str()})
 
 	components := map[string]any{
-		"RemainingLabel": label, "RemainingNotification": notification, "RemainingFeedback": feedback,
+		"RemainingLabel": label, "RemainingFeedback": feedback,
 		"RemainingHook": hook, "RemainingSavedView": savedView, "RemainingSession": session,
 		"RemainingCredentialAudit": credentialAudit, "RemainingCredentialBinding": credentialBinding,
 		"RemainingCredentialField": field, "RemainingPairStart": pair, "RemainingPairPoll": pairPoll,
@@ -78,11 +73,6 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 		"POST /api/v1/labels":                                         {Request: ref("RemainingLabelCreateRequest"), Response: ref("RemainingLabel")},
 		"PATCH /api/v1/labels/{labelId}":                              {Request: ref("RemainingLabelUpdateRequest"), Response: ref("RemainingLabel")},
 		"DELETE /api/v1/labels/{labelId}":                             {Response: map[string]any{"type": "object", "properties": map[string]any{}}},
-		"GET /api/v1/notifications":                                   {Response: array(ref("RemainingNotification"))},
-		"GET /api/v1/notifications/count":                             {Response: object(map[string]any{"unread": integer()})},
-		"POST /api/v1/notifications/{notificationId}/read":            {Response: status},
-		"POST /api/v1/notifications/read-all":                         {Response: object(map[string]any{"updated": integer()})},
-		"DELETE /api/v1/notifications/{notificationId}":               {Response: map[string]any{"type": "object", "properties": map[string]any{}}},
 		"POST /api/v1/feedback":                                       {Request: ref("RemainingFeedbackCreateRequest"), Response: object(map[string]any{"id": str()})},
 		"GET /api/v1/feedback":                                        {Response: object(map[string]any{"feedback": array(ref("RemainingFeedback"))})},
 		"DELETE /api/v1/feedback":                                     {Response: map[string]any{"type": "object", "properties": map[string]any{}}},

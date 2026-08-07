@@ -31,8 +31,8 @@ func TestRemainingAuthIntegrationsCatalogWiresExactFields(t *testing.T) {
 	if got := routes["GET /api/v1/hooks"].Response["properties"].(map[string]any)["rows"]; got == nil {
 		t.Fatal("hooks list must expose rows envelope")
 	}
-	if got := routes["GET /api/v1/notifications/count"].Response["properties"].(map[string]any)["unread"]; got == nil {
-		t.Fatal("notification count must expose unread")
+	if got := routes["GET /api/v1/saved-views"].Response; got == nil {
+		t.Fatal("saved views list must have a response schema")
 	}
 }
 

@@ -270,7 +270,8 @@ func TestOpenAPISpecMatchesRegisteredRoutes(t *testing.T) {
 // method the path does not declare must not reach a handler. Before the method
 // guards, 29 literal paths leaked into a sibling wildcard route — e.g.
 // DELETE /api/v1/notifications/count ran the delete-notification handler with
-// id="count" instead of answering 405.
+// id="count" instead of answering 405. (Those routes are gone since #1751; the
+// three cases below are live instances of the same shape.)
 //
 // Resolution is checked with ServeMux.Handler, which reports the pattern a
 // request WOULD reach without running it — no handler side effects, and the
@@ -329,8 +330,6 @@ func TestMethodGuard_Answers405WithAllow(t *testing.T) {
 	cases := []struct {
 		method, path, wantAllow string
 	}{
-		// Shadowed by DELETE /api/v1/notifications/{id}.
-		{http.MethodDelete, "/api/v1/notifications/count", "GET, HEAD"},
 		// Shadowed by GET /api/v1/agents/{id}.
 		{http.MethodGet, "/api/v1/agents/hire", "POST"},
 		// Shadowed by PATCH /api/v1/inbox/{id}.

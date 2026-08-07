@@ -1,7 +1,7 @@
 package api
 
 // Orchestration-domain routes — the heart of the app's day-to-day
-// surface: missions, issues, projects, milestones, notifications,
+// surface: missions, issues, projects, milestones,
 // runs, journal, cartographer, paymaster, approvals, inbox, eval,
 // queries (peer-to-peer + escalations + activity feed), assignments,
 // proxy/files, MCP audit + registry, OAuth provider flows, and the
@@ -130,13 +130,6 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/projects/{projectId}/milestones", roleCreate, milestones.Create)
 	r.authedMut("PATCH", "/api/v1/milestones/{milestoneId}", roleCreate, milestones.Update)
 	r.authedMut("DELETE", "/api/v1/milestones/{milestoneId}", roleManage, milestones.Delete)
-	// Notifications
-	notifications := NewNotificationHandler(r.db, r.hub, r.logger)
-	r.mux.Handle("GET /api/v1/notifications", authed(wsCtx(http.HandlerFunc(notifications.List))))
-	r.mux.Handle("GET /api/v1/notifications/count", authed(wsCtx(http.HandlerFunc(notifications.Count))))
-	r.authedMut("POST", "/api/v1/notifications/{notificationId}/read", roleSelf, notifications.MarkRead)
-	r.authedMut("POST", "/api/v1/notifications/read-all", roleSelf, notifications.MarkAllRead)
-	r.authedMut("DELETE", "/api/v1/notifications/{notificationId}", roleSelf, notifications.Delete)
 	// Saved Views
 	savedViews := NewSavedViewHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/saved-views", authed(wsCtx(http.HandlerFunc(savedViews.List))))

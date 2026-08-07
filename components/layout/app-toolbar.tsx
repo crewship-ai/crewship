@@ -342,7 +342,9 @@ export function AppToolbar() {
           * with the Inbox as the origin and Activity as the record, and that
           * table sits outside it. Three panels also cost more than they
           * bought: "machine vs human" is a line a user can hold, "Activity
-          * vs Inbox vs Notifications" is not.
+          * vs Inbox vs Notifications" is not. The backend behind that bell —
+          * handler, routes, CLI group and the table itself — followed in
+          * #1751.
           *
           * System-wide messages (new version, degraded runtime, lost
           * realtime) are banners — UpdateBanner / RuntimeBanner /

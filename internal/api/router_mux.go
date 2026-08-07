@@ -16,14 +16,15 @@ import (
 //  1. Method guards (#1489). Go 1.22 routing resolves METHOD + path
 //     together, so a request whose method is not registered for a LITERAL
 //     path silently falls through to a sibling WILDCARD pattern instead of
-//     answering 405. `GET /api/v1/notifications/count` is registered, and
-//     `DELETE /api/v1/notifications/{id}` is registered, so
-//     `DELETE /api/v1/notifications/count` reaches the delete-notification
+//     answering 405. The case that surfaced it: `GET /api/v1/notifications/count`
+//     was registered, and so was `DELETE /api/v1/notifications/{id}`, so
+//     `DELETE /api/v1/notifications/count` reached the delete-notification
 //     handler with id="count" — the client gets 401/404/200 for a method
 //     the endpoint does not support, and RFC 9110's Allow header never
-//     appears. sealMethodGuards() closes that by registering an explicit
-//     405 handler wherever a real route would otherwise capture a method
-//     the path does not declare.
+//     appears. (Those two routes are themselves gone since #1751; the
+//     shape they demonstrated is not.) sealMethodGuards() closes that by
+//     registering an explicit 405 handler wherever a real route would
+//     otherwise capture a method the path does not declare.
 //
 //  2. Spec drift (#1489). openapi.gen.json is produced by a regex scan of
 //     router_*.go (cmd/gen-openapi). Routes() hands the *runtime* route

@@ -55,10 +55,6 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"created_by": str(), "created_at": dateTime(), "provider": str(), "scope": str(), "owner_user_id": str(),
 		"categories": array(str()), "min_priority": str(),
 	})
-	notification := object(map[string]any{
-		"id": str(), "actor_type": str(), "actor_id": str(), "actor_name": nullableString(), "action": str(),
-		"entity_type": str(), "entity_id": nullableString(), "entity_title": nullableString(), "read_at": nullableString(), "created_at": dateTime(),
-	})
 	providerField := object(map[string]any{"key": str(), "label": str(), "type": str(), "required": boolean(), "secret": boolean(), "placeholder": str(), "help": str(), "help_url": str()})
 	provider := object(map[string]any{"provider": str(), "scheme": str(), "label": str(), "blurb": str(), "category": str(), "fields": array(providerField), "enabled": boolean()})
 	delivery := object(map[string]any{
@@ -121,10 +117,6 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"GET /api/v1/presence/roster":                        {Response: object(map[string]any{"rows": array(rosterRow), "count": integer()})},
 		"GET /api/v1/system/runtime":                         {Response: runtime},
 		"GET /api/v1/runtime/capacity":                       {Response: capacity},
-		"GET /api/v1/notifications":                          {Response: array(notification)},
-		"GET /api/v1/notifications/count":                    {Response: object(map[string]any{"unread": integer()})},
-		"POST /api/v1/notifications/{notificationId}/read":   {Response: object(map[string]any{"status": str()})},
-		"POST /api/v1/notifications/read-all":                {Response: object(map[string]any{"updated": integer()})},
 		"GET /api/v1/notification-channels":                  {Response: object(map[string]any{"channels": array(channel)})},
 		"POST /api/v1/notification-channels":                 {Request: json(map[string]any{"type": str(), "url": str(), "to": str(), "secret": str(), "events": array(str()), "provider": str(), "fields": stringMap(), "shoutrrr_url": str(), "personal": boolean(), "categories": array(str()), "min_priority": str()}), Response: object(map[string]any{"id": str(), "workspace_id": str(), "type": str(), "url": str(), "to": str(), "events": array(str()), "enabled": boolean(), "created_by": str(), "created_at": dateTime(), "provider": str(), "scope": str(), "owner_user_id": str(), "categories": array(str()), "min_priority": str(), "secret": str()})},
 		"PATCH /api/v1/notification-channels/{id}":           {Request: json(map[string]any{"enabled": boolean(), "categories": array(str()), "min_priority": str(), "events": array(str())}), Response: object(map[string]any{"updated": str()})},
