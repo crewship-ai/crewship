@@ -511,7 +511,11 @@ func contractInspectReportsRunning() Contract {
 			if len(rt.BlockCmd) == 0 || rt.Unblock == nil {
 				return res.skip("Runtime.BlockCmd/Unblock are not set")
 			}
-			defer rt.Unblock()
+			var result *provider.ExecResult
+			// Registered before the Exec so an error path still unblocks, and
+			// running after closeExec (LIFO) so the stream is shut before the
+			// wait.
+			defer func() { releaseBlocked(ctx, rt, result) }()
 			result, err := rt.Provider.Exec(ctx, provider.ExecConfig{
 				ContainerID: rt.ContainerID,
 				Cmd:         rt.BlockCmd,
@@ -544,7 +548,11 @@ func contractInspectRunningNotSuccess() Contract {
 			if len(rt.BlockCmd) == 0 || rt.Unblock == nil {
 				return res.skip("Runtime.BlockCmd/Unblock are not set")
 			}
-			defer rt.Unblock()
+			var result *provider.ExecResult
+			// Registered before the Exec so an error path still unblocks, and
+			// running after closeExec (LIFO) so the stream is shut before the
+			// wait.
+			defer func() { releaseBlocked(ctx, rt, result) }()
 			result, err := rt.Provider.Exec(ctx, provider.ExecConfig{
 				ContainerID: rt.ContainerID,
 				Cmd:         rt.BlockCmd,
@@ -721,6 +729,28 @@ func closeExec(r *provider.ExecResult) {
 	if r != nil && r.Reader != nil {
 		_ = r.Reader.Close()
 	}
+}
+
+// releaseBlocked unblocks a blocking exec and waits for it to actually exit.
+//
+// Unblock only *asks* the process to stop, so a contract that returns straight
+// after calling it leaves a live process behind, still holding — and writing
+// into — the fixture directory the harness is about to remove. That surfaced as
+// `TempDir RemoveAll cleanup: directory not empty` on the arm64 CI jobs and
+// nowhere else: on a faster host the process happened to win the race.
+//
+// The wait is bounded and its result deliberately discarded. This is teardown;
+// the contract's verdict was decided above, and a provider that cannot report
+// the exit is already failing a contract of its own.
+func releaseBlocked(ctx context.Context, rt Runtime, r *provider.ExecResult) {
+	if rt.Unblock == nil {
+		return
+	}
+	rt.Unblock()
+	if r == nil || r.ExecID == "" {
+		return
+	}
+	_, _ = provider.WaitExecExit(ctx, rt.Provider, r.ExecID, 10*time.Second)
 }
 
 // execAndRead runs one exec and drains its output stream, returning the output
