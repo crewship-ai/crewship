@@ -236,12 +236,6 @@ const (
 	// event_type, max_per_hour, window_started_at.
 	EntryAutomationThrottled EntryType = "automation.throttled"
 
-	// EntryAutomationDepthExceeded fires when a composed chain
-	// (automation → routine → action → automation → …) reaches the shared
-	// chain_depth cap and the next hop is refused rather than enqueued.
-	// Payload: automation_id, chain_depth, max_depth, chain_origin.
-	EntryAutomationDepthExceeded EntryType = "automation.depth_exceeded"
-
 	// Pipelines — declarative AI-authored workflows persisted per-
 	// workspace and reusable across crews. See PIPELINES.md for the
 	// full design. Run-level entries (started/completed/failed) frame

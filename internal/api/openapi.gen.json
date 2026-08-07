@@ -12768,6 +12768,14 @@
           },
           {
             "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "runtime",
             "required": false,
             "schema": {
@@ -19742,6 +19750,14 @@
           {
             "in": "query",
             "name": "requester_crew_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
             "required": false,
             "schema": {
               "type": "string"
@@ -38085,6 +38101,14 @@
           },
           {
             "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "runtime",
             "required": false,
             "schema": {
@@ -43222,6 +43246,14 @@
           {
             "in": "query",
             "name": "requester_crew_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
             "required": false,
             "schema": {
               "type": "string"
@@ -97529,6 +97561,14 @@
           {
             "in": "query",
             "name": "requester_crew_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
             "required": false,
             "schema": {
               "type": "string"

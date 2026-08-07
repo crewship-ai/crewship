@@ -1,24 +1,24 @@
 {
   "summary": {
-    "api_operations": 539,
-    "api_exact_docs": 539,
+    "api_operations": 543,
+    "api_exact_docs": 543,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 735,
-    "cli_exact_docs": 735,
-    "cli_root_docs_present": 735,
+    "cli_operations": 740,
+    "cli_exact_docs": 740,
+    "cli_root_docs_present": 740,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 402,
-    "api_with_concrete_response_schemas": 525,
-    "api_generic_response_schemas": 0,
-    "api_with_request_bodies": 226,
-    "api_with_concrete_json_requests": 222,
-    "api_generic_json_requests": 0,
+    "api_with_test_signals": 406,
+    "api_with_concrete_response_schemas": 526,
+    "api_generic_response_schemas": 3,
+    "api_with_request_bodies": 229,
+    "api_with_concrete_json_requests": 223,
+    "api_generic_json_requests": 2,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 716,
-    "cli_with_flags": 344,
-    "cli_with_all_flags_documented": 344,
-    "cli_missing_flag_docs": 0,
+    "cli_with_test_signals": 720,
+    "cli_with_flags": 348,
+    "cli_with_all_flags_documented": 346,
+    "cli_missing_flag_docs": 2,
     "api_contract_gaps": 0,
     "environment_variables": 99,
     "environment_variables_missing": 0,
@@ -12115,9 +12115,9 @@
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_hooks_cov_test.go",
         "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_routine_webhooks_cov_test.go",
-        "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -12142,10 +12142,154 @@
             "cmd/crewship/cmd_format_sweep_batch4_test.go",
             "cmd/crewship/cmd_hooks_cov_test.go",
             "cmd/crewship/cmd_hooks_test.go",
+            "cmd/crewship/cmd_hooks_write_test.go",
             "cmd/crewship/cmd_notifychannel_cov_test.go",
             "cmd/crewship/cmd_routine_webhooks_cov_test.go",
-            "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
             "…"
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/hooks",
+      "operation_id": "post_api_v1_hooks",
+      "tag": "hooks",
+      "source_file": "cmd/crewship/cmd_hooks.go",
+      "exact_docs": [
+        "docs/api-reference/hooks.mdx",
+        "docs/guides/hooks.mdx",
+        "docs/manifest/hook.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/hooks.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
+        "cmd/crewship/cmd_format_sweep_batch2_test.go",
+        "cmd/crewship/cmd_format_sweep_batch4_test.go",
+        "cmd/crewship/cmd_hooks_cov_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
+        "cmd/crewship/cmd_notifychannel_cov_test.go",
+        "cmd/crewship/cmd_routine_webhooks_cov_test.go",
+        "…"
+      ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
+      "request_body_present": true,
+      "concrete_json_request": false,
+      "generic_json_request": true,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/crewship/cmd_hooks.go",
+          "test_signals": [
+            "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
+            "cmd/crewship/cmd_format_sweep_batch2_test.go",
+            "cmd/crewship/cmd_format_sweep_batch4_test.go",
+            "cmd/crewship/cmd_hooks_cov_test.go",
+            "cmd/crewship/cmd_hooks_test.go",
+            "cmd/crewship/cmd_hooks_write_test.go",
+            "cmd/crewship/cmd_notifychannel_cov_test.go",
+            "cmd/crewship/cmd_routine_webhooks_cov_test.go",
+            "…"
+          ]
+        }
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/hooks/{id}",
+      "operation_id": "delete_api_v1_hooks_id",
+      "tag": "hooks",
+      "source_file": "internal/api/router_orchestration.go",
+      "exact_docs": [
+        "docs/api-reference/hooks.mdx",
+        "docs/guides/hooks.mdx",
+        "docs/manifest/hook.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/hooks.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+        "internal/hooks/store_write_test.go",
+        "internal/manifest/kinds/hook_test.go"
+      ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_orchestration.go",
+          "test_signals": [
+            "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+            "internal/hooks/store_write_test.go",
+            "internal/manifest/kinds/hook_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/hooks/{id}",
+      "operation_id": "patch_api_v1_hooks_id",
+      "tag": "hooks",
+      "source_file": "internal/api/router_orchestration.go",
+      "exact_docs": [
+        "docs/api-reference/hooks.mdx",
+        "docs/guides/hooks.mdx",
+        "docs/manifest/hook.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/hooks.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+        "internal/hooks/store_write_test.go",
+        "internal/manifest/kinds/hook_test.go"
+      ],
+      "concrete_response_schema": false,
+      "generic_response_schema": true,
+      "request_body_present": true,
+      "concrete_json_request": false,
+      "generic_json_request": true,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_orchestration.go",
+          "test_signals": [
+            "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
+            "internal/hooks/store_write_test.go",
+            "internal/manifest/kinds/hook_test.go"
           ]
         }
       }
@@ -13851,7 +13995,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schema_contract_test.go",
-        "cmd/gen-openapi/schemas_final_workflow_issues_test.go"
+        "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+        "internal/api/crewship_actions_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -13871,7 +14016,8 @@
           "source_file": "cmd/gen-openapi/main.go",
           "test_signals": [
             "cmd/gen-openapi/schema_contract_test.go",
-            "cmd/gen-openapi/schemas_final_workflow_issues_test.go"
+            "cmd/gen-openapi/schemas_final_workflow_issues_test.go",
+            "internal/api/crewship_actions_test.go"
           ]
         }
       }
@@ -19917,6 +20063,7 @@
         "docs/cli/login.mdx",
         "docs/cli/pipeline.mdx",
         "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx",
         "docs/cli/wait.mdx",
         "docs/cli/waitpoint.mdx",
         "docs/cli/webhook.mdx",
@@ -19997,6 +20144,7 @@
         "docs/cli/login.mdx",
         "docs/cli/pipeline.mdx",
         "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx",
         "docs/cli/wait.mdx",
         "docs/cli/waitpoint.mdx",
         "docs/cli/webhook.mdx",
@@ -22663,6 +22811,44 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/workspaces/{workspaceId}/signals",
+      "operation_id": "post_api_v1_workspaces_workspaceId_signals",
+      "tag": "workspaces",
+      "source_file": "cmd/gen-openapi/schemas_remaining_crew_agent.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/workspaces.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/pipeline_signal_topic_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/gen-openapi/schemas_remaining_crew_agent.go",
+          "test_signals": [
+            "internal/api/pipeline_signal_topic_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/workspaces/{workspaceId}/skills/bulk-import",
       "operation_id": "post_api_v1_workspaces_workspaceId_skills_bulk-import",
       "tag": "workspaces",
@@ -24855,9 +25041,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -25723,9 +25909,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -28280,6 +28466,7 @@
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_digest_test.go",
         "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "cmd/crewship/cmd_keeper_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
@@ -29264,9 +29451,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -29303,8 +29490,8 @@
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
         "cmd/crewship/cmd_crew_manage_cov_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_instance_cov_test.go",
-        "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
       ],
       "flags": [
@@ -29461,7 +29648,10 @@
     {
       "path": "hooks",
       "use": "hooks",
-      "short": "Lifecycle hooks registry (list/enable/disable)",
+      "short": "Lifecycle hooks registry (list/create/update/delete/enable/disable)",
+      "aliases": [
+        "hook"
+      ],
       "root": "hooks",
       "exact_docs": [
         "docs/cli/hooks.mdx"
@@ -29472,7 +29662,88 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_hooks_cov_test.go",
-        "cmd/crewship/cmd_hooks_test.go"
+        "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go"
+      ]
+    },
+    {
+      "path": "hooks create",
+      "use": "create",
+      "short": "Register a new lifecycle hook",
+      "root": "hooks",
+      "exact_docs": [
+        "docs/cli/hooks.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/hooks.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_audit_test.go",
+        "cmd/crewship/cmd_checkpoint_cov_test.go",
+        "cmd/crewship/cmd_checkpoint_test.go",
+        "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_cov_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
+        "…"
+      ],
+      "flags": [
+        "blocking",
+        "command",
+        "crew",
+        "disabled",
+        "event",
+        "handler",
+        "handler-config",
+        "matcher",
+        "matcher-agents",
+        "matcher-crews",
+        "matcher-severities",
+        "matcher-tools",
+        "subagent",
+        "url"
+      ],
+      "documented_flags": [
+        "blocking",
+        "command",
+        "crew",
+        "disabled",
+        "event",
+        "handler",
+        "handler-config",
+        "matcher",
+        "matcher-agents",
+        "matcher-crews",
+        "matcher-severities",
+        "matcher-tools",
+        "subagent",
+        "url"
+      ]
+    },
+    {
+      "path": "hooks delete",
+      "use": "delete \u003cid\u003e",
+      "short": "Delete a registered lifecycle hook",
+      "root": "hooks",
+      "exact_docs": [
+        "docs/cli/hooks.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/hooks.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_hooks_cov_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
       ]
     },
     {
@@ -29489,7 +29760,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_hooks_cov_test.go",
-        "cmd/crewship/cmd_hooks_test.go"
+        "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go"
       ]
     },
     {
@@ -29506,7 +29778,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_hooks_cov_test.go",
-        "cmd/crewship/cmd_hooks_test.go"
+        "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go"
       ]
     },
     {
@@ -29537,6 +29810,56 @@
       ],
       "documented_flags": [
         "crew"
+      ]
+    },
+    {
+      "path": "hooks update",
+      "use": "update \u003cid\u003e",
+      "short": "Update a registered lifecycle hook",
+      "root": "hooks",
+      "exact_docs": [
+        "docs/cli/hooks.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/hooks.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_hooks_cov_test.go",
+        "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go"
+      ],
+      "flags": [
+        "blocking",
+        "command",
+        "crew",
+        "disabled",
+        "event",
+        "handler",
+        "handler-config",
+        "matcher",
+        "matcher-agents",
+        "matcher-crews",
+        "matcher-severities",
+        "matcher-tools",
+        "subagent",
+        "url"
+      ],
+      "documented_flags": [
+        "blocking",
+        "command",
+        "crew",
+        "disabled",
+        "event",
+        "handler",
+        "handler-config",
+        "matcher",
+        "matcher-agents",
+        "matcher-crews",
+        "matcher-severities",
+        "matcher-tools",
+        "subagent",
+        "url"
       ]
     },
     {
@@ -30391,12 +30714,12 @@
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_cov_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
-        "cmd/crewship/cmd_integration_tools_cov_test.go",
         "…"
       ]
     },
@@ -31128,10 +31451,10 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_cov_test.go",
-        "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
       ]
     },
@@ -31433,10 +31756,10 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
         "cmd/crewship/cmd_crew_manage_cov_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_attachments_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "…"
       ],
       "flags": [
@@ -31551,9 +31874,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_attachments_test.go",
-        "cmd/crewship/cmd_issue_cov_test.go",
         "…"
       ],
       "flags": [
@@ -32119,6 +32442,7 @@
         "mission",
         "priority",
         "query",
+        "run-id",
         "severity",
         "since",
         "trace-id",
@@ -32138,6 +32462,9 @@
         "since",
         "trace-id",
         "type"
+      ],
+      "missing_flags": [
+        "run-id"
       ]
     },
     {
@@ -32171,6 +32498,7 @@
         "mission",
         "priority",
         "query",
+        "run-id",
         "severity",
         "since",
         "trace-id",
@@ -32190,6 +32518,9 @@
         "trace-id",
         "type",
         "until"
+      ],
+      "missing_flags": [
+        "run-id"
       ]
     },
     {
@@ -32751,12 +33082,12 @@
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_eval_test.go",
-        "cmd/crewship/cmd_keeper_foureyes_test.go",
         "…"
       ]
     },
@@ -32775,12 +33106,12 @@
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_eval_test.go",
-        "cmd/crewship/cmd_keeper_foureyes_test.go",
         "…"
       ]
     },
@@ -33406,12 +33737,12 @@
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_eval_test.go",
-        "cmd/crewship/cmd_keeper_foureyes_test.go",
         "…"
       ]
     },
@@ -33430,12 +33761,12 @@
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_eval_test.go",
-        "cmd/crewship/cmd_keeper_foureyes_test.go",
         "…"
       ]
     },
@@ -33726,9 +34057,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -34751,9 +35082,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -35067,12 +35398,12 @@
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "cmd/crewship/cmd_keeper_test.go",
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
-        "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "…"
       ]
     },
@@ -35091,12 +35422,12 @@
       "test_signals": [
         "cmd/crewship/cmd_credential_reveal_test.go",
         "cmd/crewship/cmd_hooks_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_tools_cov_test.go",
         "cmd/crewship/cmd_keeper_test.go",
         "cmd/crewship/cmd_notify_cov_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
-        "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "…"
       ]
     },
@@ -36525,8 +36856,8 @@
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
         "cmd/crewship/cmd_crew_manage_cov_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_instance_cov_test.go",
-        "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
       ],
       "flags": [
@@ -36671,8 +37002,8 @@
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
         "cmd/crewship/cmd_crew_manage_cov_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_instance_cov_test.go",
-        "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
       ],
       "flags": [
@@ -36769,9 +37100,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -37382,8 +37713,8 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
-        "cmd/crewship/cmd_issue_cov_test.go",
         "…"
       ],
       "flags": [
@@ -37609,6 +37940,7 @@
         "docs/cli/overview.mdx",
         "docs/cli/recurring.mdx",
         "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx",
         "docs/cli/wait.mdx",
         "docs/cli/waitpoint.mdx",
         "docs/cli/webhook.mdx"
@@ -38935,9 +39267,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -39198,7 +39530,8 @@
       "short": "Deliver a payload to a running run's wait:event step (input-stream injection)",
       "root": "routine",
       "exact_docs": [
-        "docs/cli/routine.mdx"
+        "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx"
       ],
       "root_docs": [
         "docs/cli/routine.mdx"
@@ -39888,9 +40221,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -40253,8 +40586,8 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
-        "cmd/crewship/cmd_issue_cov_test.go",
         "…"
       ],
       "flags": [
@@ -40700,7 +41033,49 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_hooks_cov_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_shell_cov_test.go"
+      ]
+    },
+    {
+      "path": "signal",
+      "use": "signal",
+      "short": "Deliver workspace-wide signals to routines parked on a wait:event step",
+      "root": "signal",
+      "exact_docs": [
+        "docs/cli/overview.mdx",
+        "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/signal.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_parity_test.go"
+      ]
+    },
+    {
+      "path": "signal send",
+      "use": "send",
+      "short": "Deliver an event to every run in the workspace waiting on it",
+      "root": "signal",
+      "exact_docs": [
+        "docs/cli/routine.mdx",
+        "docs/cli/signal.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/signal.mdx"
+      ],
+      "status": "documented_exact",
+      "flags": [
+        "event-type",
+        "payload"
+      ],
+      "documented_flags": [
+        "event-type",
+        "payload"
       ]
     },
     {
@@ -40770,9 +41145,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42007,8 +42382,8 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
-        "cmd/crewship/cmd_issue_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42342,9 +42717,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42462,6 +42837,7 @@
         "docs/cli/overview.mdx",
         "docs/cli/persona.mdx",
         "docs/cli/project.mdx",
+        "docs/cli/signal.mdx",
         "docs/cli/system.mdx",
         "docs/cli/workflow.mdx",
         "docs/cli/workspace.mdx"
@@ -42500,9 +42876,9 @@
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42948,10 +43324,10 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
         "cmd/crewship/cmd_crew_manage_cov_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_label_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44481,11 +44857,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3912,
-    "api_path_references": 1987,
+    "command_references": 3949,
+    "api_path_references": 2006,
     "environment_references": 395,
     "manifest_kind_references": 209,
-    "flag_references": 1806,
+    "flag_references": 1834,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,
