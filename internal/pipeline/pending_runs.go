@@ -31,6 +31,24 @@ type PendingRun struct {
 	// `to: trigger` to a real recipient (issue #842 Phase 1). Empty for
 	// service/token triggers → `to: trigger` falls back to a workspace notice.
 	InvokingUserID string
+	// TriggeredVia / TriggeredByID are what actually started this deferred
+	// run. Empty means "did not say" — effectivePendingTrigger applies the
+	// dispatcher's documented default — which is a different fact from
+	// claiming a schedule.
+	TriggeredVia  TriggeredVia
+	TriggeredByID string
+}
+
+// effectivePendingTrigger resolves what a fired deferred run should claim.
+//
+// One function so the default lives in one place: the dispatcher used to
+// inline it, which is why an attributed producer had nowhere to put its
+// answer even once it had one.
+func effectivePendingTrigger(pr PendingRun) (TriggeredVia, string) {
+	if pr.TriggeredVia != "" {
+		return pr.TriggeredVia, pr.TriggeredByID
+	}
+	return TriggeredViaSchedule, pr.ID
 }
 
 // PendingRunStore is the DB access layer for deferred dispatch.
@@ -70,13 +88,14 @@ func (s *PendingRunStore) Enqueue(ctx context.Context, pr PendingRun) (string, b
 INSERT INTO pending_runs (
     id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     tier_override, priority, debounce_key, fire_at, expires_at, debounce_max_at,
-    invoking_user_id, status, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
+    invoking_user_id, triggered_via, triggered_by_id, status, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
 		pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
 		pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
-		nullableStr(pr.InvokingUserID))
+		nullableStr(pr.InvokingUserID),
+		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID))
 	if err != nil {
 		// Debounce race: a concurrent trigger with the same key inserted
 		// first, so the partial-unique index rejects this one. Both
@@ -149,7 +168,8 @@ func (s *PendingRunStore) DueRuns(ctx context.Context, now time.Time, limit int)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
-       COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,'')
+       COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''),
+       COALESCE(triggered_via,''), COALESCE(triggered_by_id,'')
 FROM pending_runs
 WHERE status = 'pending' AND fire_at <= ?
 ORDER BY priority DESC, created_at ASC
@@ -163,7 +183,7 @@ LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
 		var pr PendingRun
 		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 			&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
-			&pr.InvokingUserID); err != nil {
+			&pr.InvokingUserID, &pr.TriggeredVia, &pr.TriggeredByID); err != nil {
 			return nil, err
 		}
 		out = append(out, pr)

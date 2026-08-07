@@ -456,3 +456,32 @@ func itoa(i int) string {
 	}
 	return string(b)
 }
+
+// An automation-fired run must say an automation fired it.
+//
+// Before pending_runs carried attribution, PendingRunDispatcher labelled
+// every deferred run `schedule` and pointed triggered_by_id at the pending
+// row itself, so a rule was indistinguishable from a cron on every surface
+// that reads the enum. The rule survived only as a shape inside
+// metadata_json, which each reader had to reverse-engineer.
+func TestFlush_StampsTheAutomationAsTheTrigger(t *testing.T) {
+	enq := &recordingEnqueuer{}
+	reg := NewRegistry(nil, enq, Options{})
+	reg.Load([]Resolved{rule("a1", "ws_1", "mission.status_change")})
+
+	reg.Observer([]journal.Entry{entry("ws_1", "mission.status_change", "m_1")})
+	reg.Flush(context.Background())
+
+	if got := enq.n(); got != 1 {
+		t.Fatalf("enqueues = %d, want 1", got)
+	}
+	pr := enq.at(0)
+	if pr.TriggeredVia != pipeline.TriggeredViaAutomation {
+		t.Errorf("TriggeredVia = %q, want %q — a rule must not read as a cron",
+			pr.TriggeredVia, pipeline.TriggeredViaAutomation)
+	}
+	if pr.TriggeredByID != "a1" {
+		t.Errorf("TriggeredByID = %q, want the automation id a1 — pointing at the pending row "+
+			"is what made every rule-fired run indistinguishable from a schedule", pr.TriggeredByID)
+	}
+}

@@ -153,7 +153,8 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		pipeline.TriggeredViaSchedule,
 		pipeline.TriggeredViaWebhook,
 		pipeline.TriggeredViaCallPipeline,
-		pipeline.TriggeredViaIssue:
+		pipeline.TriggeredViaIssue,
+		pipeline.TriggeredViaAutomation:
 		// accepted
 	default:
 		triggeredVia = pipeline.TriggeredViaManual

@@ -197,14 +197,18 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		_ = json.Unmarshal([]byte(pr.TagsJSON), &tags)
 	}
 
+	triggeredVia, triggeredByID := effectivePendingTrigger(pr)
 	res, runErr := d.executor.Run(ctx, RunInput{
-		PipelineID:    pr.PipelineID,
-		WorkspaceID:   pr.WorkspaceID,
-		Inputs:        inputs,
-		Mode:          ModeRun,
-		TierOverride:  Complexity(pr.TierOverride),
-		TriggeredVia:  TriggeredViaSchedule,
-		TriggeredByID: pr.ID,
+		PipelineID:   pr.PipelineID,
+		WorkspaceID:  pr.WorkspaceID,
+		Inputs:       inputs,
+		Mode:         ModeRun,
+		TierOverride: Complexity(pr.TierOverride),
+		// Honour what the row says started it. Before pending_runs carried
+		// attribution this was hard-coded to schedule/self, so every
+		// automation-fired run reported a cron.
+		TriggeredVia:  triggeredVia,
+		TriggeredByID: triggeredByID,
 		// Thread the enqueuing user through so a notify step's `to: trigger`
 		// in this deferred run resolves to them (issue #842 Phase 1); empty
 		// keeps the workspace-notice fallback.

@@ -58,6 +58,13 @@ const (
 	// crons produce many of these, so run lists can filter them out
 	// by this marker.
 	TriggeredViaWakeCheck TriggeredVia = "wake_check"
+
+	// TriggeredViaAutomation marks a run an automation rule started, so a
+	// reader can tell a rule from a cron. Both arrive through pending_runs;
+	// before this existed the dispatcher labelled every deferred run
+	// "schedule" and the rule was only recoverable out of metadata_json.
+	// TriggeredByID carries the automations.id.
+	TriggeredViaAutomation TriggeredVia = "automation"
 	// TriggeredViaIssue marks runs fired from an issue's "Run routine"
 	// button. TriggeredByID carries the issue identifier (e.g. ENG-15)
 	// so the runs list can JOIN back to missions for the source pill.

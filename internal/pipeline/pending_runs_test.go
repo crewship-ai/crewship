@@ -27,6 +27,8 @@ CREATE TABLE pending_runs (
     fire_at TEXT NOT NULL, expires_at TEXT, debounce_max_at TEXT,
     invoking_user_id TEXT,
     status TEXT NOT NULL DEFAULT 'pending', fired_run_id TEXT,
+    triggered_via TEXT,
+    triggered_by_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','subsec')));
 CREATE UNIQUE INDEX idx_pending_runs_debounce ON pending_runs (pipeline_id, debounce_key)

@@ -422,6 +422,11 @@ func (r *Registry) Flush(ctx context.Context) int {
 			DebounceKey:   it.debounceKey,
 			FireAt:        it.fireAt,
 			DebounceMaxAt: &maxAt,
+			// Say who fired this on the row. metadata_json still carries the
+			// rule for readers that want its name, but provenance a UI has to
+			// reverse-engineer out of a scratchpad is provenance that drifts.
+			TriggeredVia:  pipeline.TriggeredViaAutomation,
+			TriggeredByID: it.automationID,
 		}); err != nil {
 			r.logger.Error("automation: enqueue failed",
 				"err", err, "automation_id", it.automationID,
