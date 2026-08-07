@@ -163,6 +163,15 @@ var readRoutesWithoutWorkspace = map[string]string{
 	"GET /api/v1/chats/{chatId}/participants": "workspace derived from the chat itself via " +
 		"ChatParticipantsHandler.chatWorkspace, then membership-checked — guarantee lives in that handler, not the chokepoint",
 	"GET /api/v1/chats/{chatId}/messages/{messageId}/reactions": "same chat-derived scoping as the participants route",
+	// #1818. The stream authorizes with ws.Hub.CanSubscribeChannel on
+	// `session:{chatId}` — the SAME authorizer the WebSocket subscribe and
+	// resume paths use, which resolves chats.workspace_id and then checks
+	// workspace_members. That is strictly stronger than a caller-supplied
+	// X-Workspace-ID (which this route never reads), so wsCtx would add a
+	// precondition without adding a check. The guarantee therefore lives in
+	// DBChannelAuthorizer.isSessionOwner, not in the chokepoint.
+	"GET /api/v1/chats/{chatId}/stream": "workspace derived from the chat via the hub's channel authorizer " +
+		"(the same gate the WS session channel uses), then membership-checked",
 }
 
 // TestEveryReadRouteDeclaresItsWorkspaceScope is the invariant: a read route is

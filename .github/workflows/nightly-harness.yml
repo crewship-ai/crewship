@@ -206,6 +206,12 @@ jobs:
           # Tier A perimeter probes (raw curl by design — it sends requests
           # the CLI would never construct).
           - suite: test-attack-surface.sh
+          # NDJSON agent-run stream (#1818). Its Tier A block — CLI parity, the
+          # 404-not-403 rule for a chat you cannot see, and the frame contract
+          # on an idle chat — needs no provider credential. Its Tier B block
+          # (watching a live run) SKIPs with the reason when no agent replies,
+          # so a green square here does NOT claim live delivery was proved.
+          - suite: test-run-stream.sh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

@@ -65,14 +65,18 @@ type Hub struct {
 	sessions     sessions.Store
 	clients      map[*Client]bool
 	channels     map[string]map[*Client]bool
-	register     chan *Client
-	unregister   chan *Client
-	broadcast    chan ChannelMessage
-	mu           sync.RWMutex
-	connCount    atomic.Int64
-	cancelFns    map[string]context.CancelFunc // session_id -> cancel function for active runs
-	cancelMu     sync.Mutex
-	channelAuth  ChannelAuthorizer
+	// observers are non-WebSocket subscribers (the HTTP NDJSON run stream,
+	// #1818). Guarded by the same mu as channels so dispatch fans out to
+	// sockets and observers under one lock acquisition. See observer.go.
+	observers   map[string]map[*Observer]bool
+	register    chan *Client
+	unregister  chan *Client
+	broadcast   chan ChannelMessage
+	mu          sync.RWMutex
+	connCount   atomic.Int64
+	cancelFns   map[string]context.CancelFunc // session_id -> cancel function for active runs
+	cancelMu    sync.Mutex
+	channelAuth ChannelAuthorizer
 
 	// streams holds per-session replay buffers so an agent run's output can be
 	// resumed by a client that reconnects mid-generation. See session_stream.go.
@@ -271,6 +275,7 @@ func NewHub(logger *slog.Logger, chatHandler ChatHandler, jwtValidator *auth.JWT
 		sessions:        sessionsStore,
 		clients:         make(map[*Client]bool),
 		channels:        make(map[string]map[*Client]bool),
+		observers:       make(map[string]map[*Observer]bool),
 		register:        make(chan *Client),
 		unregister:      make(chan *Client),
 		broadcast:       make(chan ChannelMessage, 256),
@@ -380,6 +385,14 @@ func (h *Hub) IsUserSubscribed(channel, userID string) bool {
 			return true
 		}
 	}
+	// HTTP NDJSON stream readers (#1818) are watching the same run just as
+	// live as a socket is. Omitting them here would ring the inbox bell for a
+	// user who is staring at the reply as it streams.
+	for o := range h.observers[channel] {
+		if o.userID == userID {
+			return true
+		}
+	}
 	return false
 }
 
@@ -447,6 +460,13 @@ func (h *Hub) marshalFrame(msg ServerMessage) ([]byte, bool) {
 func (h *Hub) dispatch(channel string, data []byte, filter func(*Client) bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	// Observers (HTTP NDJSON streams, #1818) are fanned out FIRST and are not
+	// subject to `filter`: filter exists to exclude a specific originating
+	// *Client (BroadcastExcept, the sender's own emit), and an observer is
+	// never that client. Doing it before the early return below also means an
+	// observer still receives frames on a channel with no live sockets — the
+	// exact case a shell agent watching a run hits.
+	h.dispatchObservers(channel, data)
 	subs, ok := h.channels[channel]
 	if !ok {
 		return

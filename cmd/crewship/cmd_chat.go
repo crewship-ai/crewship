@@ -746,4 +746,16 @@ func init() {
 	chatCmd.AddCommand(chatReadCmd)
 	chatCmd.AddCommand(chatDeleteCmd)
 	chatCmd.AddCommand(chatSteerCmd)
+
+	// Live run stream (#1818). Flags live here with the rest of the chat tree
+	// so there is one init to read.
+	// No `-f` shorthand: the root command already owns it for --format
+	// (main.go), and cobra PANICS on the collision the first time the
+	// persistent flags are merged — which is at `chat stream --help`, not at
+	// init, so only a run of the real binary catches it.
+	chatStreamCmd.Flags().Bool("follow", false, "Keep streaming past the run's terminal event (next run on the same session)")
+	chatStreamCmd.Flags().Int64("last-seq", 0, "Resume after this sequence number (from a previous stream's stream.end)")
+	chatStreamCmd.Flags().Int("idle", 0, "Give up after N seconds with no event (0 = server default, 300s)")
+	chatStreamCmd.Flags().Bool("quiet", false, "Suppress the stderr chatter; the run's text still goes to stdout")
+	chatCmd.AddCommand(chatStreamCmd)
 }

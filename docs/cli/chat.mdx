@@ -27,6 +27,7 @@ Auth: every subcommand requires an authenticated session (`crewship login`) and 
 | `chat react remove <chat-id> <msg-id> <emoji>` | Remove your reaction (`rm` / `delete` aliases). |
 | `chat react list <chat-id> <msg-id>` | List reactions with counts and whether the caller already reacted. |
 | `chat steer <chat-id>` | Queue a mid-turn steering message for a chat (applied on the next turn if a run is in flight). |
+| `chat stream <chat-id>` | Watch the session's agent run live over HTTP — no WebSocket client needed. See [Watching agent runs](/guides/watching-agent-runs). |
 | `chat participants list <chat-id>` | List the humans in a group chat (columns `USER ID` / `EMAIL` / `NAME` / `ROLE`). Prints `No participants (private chat).` when empty. Alias: `members`. |
 | `chat participants add <chat-id> <user-id>` | Add a workspace user. Adding the first participant promotes the chat to a group, after which the agent only replies when @mentioned. |
 | `chat participants remove <chat-id> <user-id>` | Remove a user (`rm` / `delete` aliases). Cannot remove the chat owner. |
@@ -72,6 +73,33 @@ The message POSTs to `POST /api/v1/chats/{chatId}/steer`. If a run is in flight,
 crewship chat steer c_abc123 --message "focus on the auth bug first"
 crewship chat steer c_abc123 -m "use the staging DB, not prod"
 ```
+
+### `chat stream <chat-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--follow` | `false` | Keep the stream open past the run's terminal event, so the next run on the same session streams too. Without it the command exits when the run finishes. |
+| `--last-seq <n>` | `0` | Resume after this sequence number. Use the `last_seq` value from a previous run's `stream.end` frame. |
+| `--idle <seconds>` | `0` (server default, 300s) | Give up after this long with no event. Heartbeats do not reset it. |
+| `--quiet` | `false` | Suppress the stderr chatter (thinking, tool calls, status). The run's text still goes to stdout. |
+
+Reads `GET /api/v1/chats/{chatId}/stream`. The run's text lands on **stdout** and
+nothing else does, so `crewship chat stream c_abc123 > reply.md` captures the
+reply and only the reply; thinking, tool calls and stream notices go to stderr.
+A run that ends in an error exits non-zero.
+
+`--format ndjson` (or `json`) switches to passthrough: every server frame is
+printed verbatim, one JSON object per line. That is the mode to script against.
+
+```bash
+crewship chat stream c_abc123
+crewship chat stream c_abc123 --follow
+crewship chat stream c_abc123 --format ndjson | jq -r 'select(.type=="text").content'
+```
+
+If the connection drops mid-run the command reconnects on a bounded backoff and
+resumes from the last sequence number it printed, so a blip neither loses nor
+duplicates output. Full frame reference: [Watching agent runs](/guides/watching-agent-runs).
 
 ### `chat participants add <chat-id> <user-id>`
 
