@@ -211,3 +211,48 @@ describe("buildChainGraph over a real response", () => {
     }
   })
 })
+
+describe("the contract with the walker", () => {
+  // internal/chain spells an automation's state into `status` as the literal
+  // "enabled"/"disabled", and this adapter derives the boolean from it. That
+  // is a string agreement across a language boundary with nothing checking
+  // it: rename the spelling on either side and every rule silently renders
+  // as enabled, which is the wrong way round for a safety-relevant flag.
+  it("reads a disabled rule as disabled, not as enabled-by-default", () => {
+    const g = buildChainGraph(
+      chain({
+        nodes: [
+          {
+            id: "automation:a1",
+            kind: "automation",
+            ref: "a1",
+            key: "mission.status_change",
+            label: "triage on close",
+            status: "disabled",
+            depth: 0,
+          },
+        ],
+      }),
+    )
+    expect(g.nodes[0].data.enabled).toBe(false)
+  })
+
+  it("reads an enabled rule as enabled", () => {
+    const g = buildChainGraph(
+      chain({
+        nodes: [
+          {
+            id: "automation:a1",
+            kind: "automation",
+            ref: "a1",
+            key: "mission.status_change",
+            label: "triage on close",
+            status: "enabled",
+            depth: 0,
+          },
+        ],
+      }),
+    )
+    expect(g.nodes[0].data.enabled).toBe(true)
+  })
+})

@@ -71,12 +71,16 @@ export interface ChainGraph {
  * ------------------------------------------------------------------ */
 
 // The walker's kinds and the canvas's node types were built from two
-// different bases, so they do not line up by accident: the walk returns
-// `assignment`, which had no component, and a component exists for
-// `automation`, which the walk does not yet return. Both are mapped here so
-// neither side has to know about the other's gaps, and a kind with no entry
-// falls back to the run card rather than vanishing — a missing node in a
-// picture whose job is completeness is worse than an approximate one.
+// different bases and did not line up: the walk returned `assignment`, which
+// had no component, and a component existed for `automation`, which the walk
+// did not return. The walk returns automations now, so both sides are whole;
+// the mapping stays explicit anyway, because a kind with no entry falls back
+// to the run card rather than vanishing, and a missing node in a picture
+// whose job is completeness is worse than an approximate one.
+//
+// `assignment` still borrows the run card. It IS a run of agent work — the
+// mission engine's half of the substrate — and the label says which it is,
+// so it does not mislead. Its own card is a want, not a correctness gap.
 const NODE_TYPE_BY_KIND: Record<string, OverviewNodeType> = {
   issue: "overviewIssue",
   routine: "overviewRoutine",
