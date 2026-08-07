@@ -141,8 +141,10 @@ type runStreamFrame struct {
 //	follow=1      stay open past the run's terminal `done` frame, so the next
 //	              run on the same session streams too. Default off: the common
 //	              case is "watch this run and exit with a status".
-//	idle=<secs>   give up after this long with no run frame. Default 300,
-//	              max 3600, 0 disables (bounded only by follow/done).
+//	idle=<secs>   give up after this long with no run frame. Default 300, max
+//	              3600. 0 selects the default; the bound cannot be disabled —
+//	              an unbounded stream lets one caller hold a goroutine, an
+//	              observer buffer and a socket open indefinitely.
 func (h *RunStreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil || user.ID == "" {

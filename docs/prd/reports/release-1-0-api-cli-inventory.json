@@ -6096,7 +6096,8 @@
       "test_signals": [
         "internal/api/openapi_conformance_test.go",
         "internal/api/route_read_scope_invariant_test.go",
-        "internal/api/run_stream_handler_test.go"
+        "internal/api/run_stream_handler_test.go",
+        "internal/api/run_stream_tenancy_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -6116,7 +6117,8 @@
           "test_signals": [
             "internal/api/openapi_conformance_test.go",
             "internal/api/route_read_scope_invariant_test.go",
-            "internal/api/run_stream_handler_test.go"
+            "internal/api/run_stream_handler_test.go",
+            "internal/api/run_stream_tenancy_test.go"
           ]
         }
       }
@@ -13858,6 +13860,7 @@
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_journal_cov_test.go",
+        "cmd/gen-openapi/query_params_test.go",
         "internal/api/journal_handler_cov2_test.go",
         "internal/api/journal_handler_test.go"
       ],
@@ -13880,6 +13883,7 @@
           "test_signals": [
             "cmd/crewship/cmd_format_sweep_batch4_test.go",
             "cmd/crewship/cmd_journal_cov_test.go",
+            "cmd/gen-openapi/query_params_test.go",
             "internal/api/journal_handler_cov2_test.go",
             "internal/api/journal_handler_test.go"
           ]
@@ -33903,9 +33907,9 @@
         "cmd/crewship/cmd_chat_delete_test.go",
         "cmd/crewship/cmd_chat_read_test.go",
         "cmd/crewship/cmd_chat_steer_test.go",
+        "cmd/crewship/cmd_chat_stream_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_conversation_test.go",
-        "cmd/crewship/cmd_hire_test.go",
         "…"
       ]
     },

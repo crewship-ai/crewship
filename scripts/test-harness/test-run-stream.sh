@@ -60,11 +60,28 @@ fi
 
 assert_ok "chat stream --help" bash -c "$CREWSHIP --no-color chat stream --help >/dev/null 2>&1"
 
-section "Tier A · a chat you cannot see is 404, not 403"
+section "Discovery"
 
-# A bogus id and another tenant's id must be indistinguishable — a 403 on the
-# second would confirm it exists. The CLI surfaces the status verbatim, and
-# must NOT retry a permanent error.
+# Any agent with a chat will do; the contract under test is the transport, not
+# the conversation. Prefer an agent that already has one so the suite does not
+# have to create state. Discovered up front because the tenancy section below
+# needs a chat that genuinely EXISTS.
+CHAT_ID=""
+AGENT_SLUGS="$(cs agent list --format json 2>/dev/null | { have jq && jq -r '.[]?.slug // empty' || cat; } 2>/dev/null | head -10)"
+for slug in $AGENT_SLUGS; do
+  if have jq; then
+    CHAT_ID="$(cs chat list "$slug" --format json 2>/dev/null | jq -r '.[0]?.id // empty' 2>/dev/null)"
+  fi
+  [[ -n "$CHAT_ID" ]] && break
+done
+info "chat for transport tests: ${CHAT_ID:-<none>}"
+
+section "Tier A - a chat that does not exist is 404"
+
+# The CLI surfaces the status verbatim and must NOT retry a permanent error.
+# NOTE: this covers only the "no such row" arm of the authorizer. On its own it
+# cannot tell a correct implementation from one that leaks existence - see the
+# cross-tenant section below, which is the assertion with teeth.
 BOGUS_OUT="$(cs chat stream cnotarealchatid00000 --idle 5 2>&1)"; BOGUS_RC=$?
 if (( BOGUS_RC == 0 )); then
   _fail "unknown chat exits non-zero" "exit 0 for a chat that does not exist"
@@ -74,19 +91,92 @@ fi
 assert_contains "unknown chat reports 404" "$BOGUS_OUT" "404"
 assert_not_contains "unknown chat does not leak a 403" "$BOGUS_OUT" "403"
 
-section "Tier A · frame contract on an idle chat"
+section "Tier A - an EXISTING chat you may not see is ALSO 404, not 403"
 
-# Any agent with a chat will do; the contract under test is the transport, not
-# the conversation. Prefer an agent that already has one so the suite does not
-# have to create state.
-CHAT_ID=""
-AGENT_SLUGS="$(cs agent list --format json 2>/dev/null | { have jq && jq -r '.[]?.slug // empty' || cat; } 2>/dev/null | head -10)"
-for slug in $AGENT_SLUGS; do
-  if have jq; then
-    CHAT_ID="$(cs chat list "$slug" --format json 2>/dev/null | jq -r '.[0]?.id // empty' 2>/dev/null)"
+# The security property this endpoint stands on: a caller who is not a member
+# of the chat's workspace must not be able to tell "no such chat" from "not
+# yours". A 403 here confirms the id is real in somebody else's workspace, and
+# an attacker enumerates ids and reads the status code as an oracle.
+#
+# Proving that needs a chat that EXISTS and a caller who may not see it. This
+# builds the second identity out of the seeded users (`crewship seed
+# --with-users`, known passwords) and then removes that user from the
+# workspace, which is the real-world trigger: membership withdrawn while the
+# chat stays exactly where it was.
+#
+# The membership is restored immediately after the request is captured - before
+# any assertion runs, so a FAILING assertion cannot leave the workspace altered
+# - and again from an EXIT trap in case the suite dies unexpectedly.
+T2_EMAIL="${RUN_STREAM_T2_EMAIL:-viewer1@crewship.local}"
+T2_PASSWORD="${RUN_STREAM_T2_PASSWORD:-viewerpass12}"
+T2_PROFILE="harness-run-stream-t2"
+T2_USER_ID=""
+T2_ROLE=""
+
+restore_t2_membership() {
+  [[ -z "$T2_USER_ID" || -z "$T2_ROLE" ]] && return 0
+  # Idempotent: re-adding an existing member is not an error worth reporting
+  # from a trap, and the whole point is that the workspace ends as it started.
+  cs workspace member add "$T2_USER_ID" --role "$T2_ROLE" >/dev/null 2>&1 || true
+}
+trap restore_t2_membership EXIT
+
+if ! have jq; then
+  skip "cross-tenant 404" "needs jq to resolve the second user"
+elif [[ -z "$CHAT_ID" ]]; then
+  skip "cross-tenant 404" "no existing chat to test against"
+else
+  T2_ROW="$(cs workspace member list --format json 2>/dev/null \
+    | jq -r --arg e "$T2_EMAIL" '.[]? | select(.email==$e) | "\(.user_id // .id)\t\(.role)"' 2>/dev/null | head -1)"
+  T2_USER_ID="$(printf '%s' "$T2_ROW" | cut -f1)"
+  T2_ROLE="$(printf '%s' "$T2_ROW" | cut -f2)"
+
+  if [[ -z "$T2_USER_ID" || -z "$T2_ROLE" ]]; then
+    skip "cross-tenant 404" "seeded user $T2_EMAIL is not a member of this workspace (re-seed with 'crewship seed --with-users')"
+  elif ! "$CREWSHIP" server add "$T2_PROFILE" --server "$SERVER" >/dev/null 2>&1; then
+    skip "cross-tenant 404" "could not create the $T2_PROFILE server profile"
+  elif ! printf '%s' "$T2_PASSWORD" | "$CREWSHIP" login --profile "$T2_PROFILE" --server "$SERVER" \
+        --email "$T2_EMAIL" --password-stdin >/dev/null 2>&1; then
+    skip "cross-tenant 404" "could not log in as $T2_EMAIL (seeded password changed?)"
+  else
+    info "second identity $T2_EMAIL ($T2_USER_ID, $T2_ROLE) - removing from the workspace"
+    if ! cs workspace member remove "$T2_USER_ID" --yes >/dev/null 2>&1; then
+      skip "cross-tenant 404" "could not remove $T2_EMAIL from the workspace"
+    else
+      # The chat still exists and is unchanged; only this caller's membership
+      # is gone. `chat stream` needs no workspace, so nothing else is in play.
+      XT_OUT="$("$CREWSHIP" --profile "$T2_PROFILE" --server "$SERVER" --no-color \
+        chat stream "$CHAT_ID" --idle 5 2>&1)"; XT_RC=$?
+
+      # Restore BEFORE asserting, so a failing assertion cannot leave the
+      # workspace altered.
+      restore_t2_membership
+      T2_USER_ID=""; T2_ROLE=""   # the trap now has nothing left to do
+
+      if (( XT_RC == 0 )); then
+        _fail "cross-tenant stream exits non-zero" "exit 0 - a non-member was served chat $CHAT_ID"
+      else
+        _pass "cross-tenant stream exits non-zero"
+      fi
+      assert_contains "existing chat, non-member caller reports 404" "$XT_OUT" "404"
+      # THE assertion. A 403 is the existence oracle: it says "this chat is
+      # real, you just cannot have it".
+      assert_not_contains "existing chat, non-member caller does NOT leak a 403" "$XT_OUT" "403"
+      # Same wire shape as the nonexistent case - the two must be
+      # indistinguishable, not merely both non-zero. The ids are normalised out
+      # so only the shape of the answer is compared.
+      if [[ "${BOGUS_OUT//cnotarealchatid00000/X}" == "${XT_OUT//$CHAT_ID/X}" ]]; then
+        _pass "cross-tenant and nonexistent answers are indistinguishable"
+      else
+        _fail "cross-tenant and nonexistent answers are indistinguishable" \
+          "missing=<$(printf '%s' "$BOGUS_OUT" | head -c 100)> cross-tenant=<$(printf '%s' "$XT_OUT" | head -c 100)>"
+      fi
+    fi
   fi
-  [[ -n "$CHAT_ID" ]] && break
-done
+fi
+"$CREWSHIP" server remove "$T2_PROFILE" >/dev/null 2>&1 || true
+
+section "Tier A - frame contract on an idle chat"
 
 if [[ -z "$CHAT_ID" ]]; then
   skip "idle-chat frame contract" "no existing chat in this workspace (seed with --with-memory, or run Tier B first)"

@@ -82,9 +82,9 @@ type chatStreamOptions struct {
 	quiet bool
 }
 
-// chatStreamBackoffBase is the first reconnect delay after a transient drop.
-// Doubles up to chatStreamBackoffMax. A package var only so it stays in one
-// place; nothing rewrites it.
+// chatStreamBackoffBase is the first reconnect delay after a transient drop;
+// chatStreamBackoffMax is the ceiling. nextStreamBackoff owns how they compose.
+// Package vars only so they live in one place; nothing rewrites them.
 var (
 	chatStreamBackoffBase = time.Second
 	chatStreamBackoffMax  = 30 * time.Second
@@ -95,6 +95,26 @@ var (
 // after, but returning deterministically means the outer loop decides what to
 // do next on the frame, not on a race with EOF.
 var errStreamEnded = errors.New("stream ended")
+
+// nextStreamBackoff computes the delay before the next reconnect.
+//
+// progressed means the connection just closed delivered at least one new
+// frame. When it did, the backoff RESETS: exponential backoff exists to spare
+// a peer that is failing repeatedly, and a connection that reconnected and
+// streamed successfully is not that. Without the reset a long-lived --follow
+// session that survives a handful of unrelated blips over hours stays pinned
+// at the ceiling forever, so the next genuine drop costs 30 s of missed output
+// for no reason.
+func nextStreamBackoff(current time.Duration, progressed bool) time.Duration {
+	if progressed {
+		return chatStreamBackoffBase
+	}
+	next := current * 2
+	if next > chatStreamBackoffMax {
+		next = chatStreamBackoffMax
+	}
+	return next
+}
 
 // streamChatRun opens the NDJSON stream and renders it until the run finishes,
 // the user interrupts, or a permanent error occurs.
@@ -120,6 +140,9 @@ func streamChatRun(client *cli.Client, chatID string, opts chatStreamOptions) er
 
 	for {
 		r.endReason = ""
+		// Watermark before the attempt: if it moves, this connection delivered
+		// something and the backoff has earned a reset.
+		seqBefore := r.lastSeq
 		err := client.WithContext(ctx).StreamNDJSON(ctx, chatStreamPath(chatID, r.lastSeq, opts), "", r.line)
 		if errors.Is(err, errStreamEnded) {
 			err = nil
@@ -173,10 +196,7 @@ func streamChatRun(client *cli.Client, chatID string, opts chatStreamOptions) er
 			r.flushText()
 			return nil
 		}
-		backoff *= 2
-		if backoff > chatStreamBackoffMax {
-			backoff = chatStreamBackoffMax
-		}
+		backoff = nextStreamBackoff(backoff, r.lastSeq > seqBefore)
 	}
 }
 

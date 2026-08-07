@@ -39,6 +39,40 @@ func TestSessionStream_SeqMonotonicWithinRun(t *testing.T) {
 	}
 }
 
+// replay is a READ. It must not refresh the counter's idle TTL as a side
+// effect: `touchedAt` is the sweep's only evidence that a channel is still in
+// use, and a read path that keeps bumping it makes reclamation depend on who
+// happened to look rather than on who is actually running. (Impact today is
+// bounded — replay only reaches the counter while a buffer exists, and the
+// sweep will not reclaim a counter that still has one — but a read that
+// mutates lifetime state is exactly the coupling that turns into a leak the
+// next time either rule moves.)
+func TestSessionStream_ReplayDoesNotRefreshTheCounterTTL(t *testing.T) {
+	s := newSessionStreams()
+	ch := "session:c1"
+	s.begin(ch)
+	recordEvent(t, s, ch, "a")
+
+	past := time.Now().Add(-30 * time.Minute)
+	s.counters[ch].touchedAt = past
+
+	s.replay(ch, 0)
+
+	if !s.counters[ch].touchedAt.Equal(past) {
+		t.Fatalf("replay moved touchedAt from %v to %v — a read path must not extend the counter's lifetime",
+			past, s.counters[ch].touchedAt)
+	}
+}
+
+// And it must not conjure a counter for a channel it merely looked at.
+func TestSessionStream_ReplayDoesNotCreateCounters(t *testing.T) {
+	s := newSessionStreams()
+	s.replay("session:never-ran", 7)
+	if len(s.counters) != 0 {
+		t.Fatalf("replay created %d counter(s) for a channel that never ran", len(s.counters))
+	}
+}
+
 // Finding 3 (#1822 review). `counters` is in-memory, so a server restart puts
 // the channel's seq back to 0 while clients still hold a watermark from the
 // previous lifetime (our own CLI prints it, and the docs tell people to feed

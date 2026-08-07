@@ -5,25 +5,61 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
-// ndjsonStreamServer answers /api/v1/chats/{id}/stream with the given lines
-// and records the query string of every request, so a test can assert the
-// resume watermark the CLI sent on reconnect.
-func ndjsonStreamServer(t *testing.T, bodies ...string) (*httptest.Server, *[]string) {
+// streamStubRecorder records the query string of every request the stub
+// served, so a test can assert the resume watermark the CLI sent on reconnect.
+//
+// The mutex is load-bearing, not decoration. The handler appends from the
+// httptest server's goroutine while the test reads from its own, and the test
+// owns no synchronization between the two: the atomic counter below orders a
+// DIFFERENT variable and creates no happens-before edge for this slice. Today
+// the ordering happens to hold because net/http's connection handoff supplies
+// an incidental edge — that is a property of net/http's internals, not of this
+// test, and it is not something a test should be built on.
+type streamStubRecorder struct {
+	mu      sync.Mutex
+	queries []string
+}
+
+func (r *streamStubRecorder) record(q string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.queries = append(r.queries, q)
+}
+
+// all returns a copy, so a caller cannot hold a slice header that the handler
+// goroutine is still appending to.
+func (r *streamStubRecorder) all() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.queries...)
+}
+
+func (r *streamStubRecorder) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.queries)
+}
+
+// ndjsonStreamServer answers /api/v1/chats/{id}/stream with the given lines,
+// one per connection, and records each request's query string.
+func ndjsonStreamServer(t *testing.T, bodies ...string) (*httptest.Server, *streamStubRecorder) {
 	t.Helper()
-	var queries []string
+	rec := &streamStubRecorder{}
 	var n int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/stream") {
 			http.NotFound(w, r)
 			return
 		}
-		queries = append(queries, r.URL.RawQuery)
+		rec.record(r.URL.RawQuery)
 		i := int(atomic.AddInt32(&n, 1)) - 1
 		if i >= len(bodies) {
 			w.WriteHeader(http.StatusNotFound)
@@ -33,7 +69,58 @@ func ndjsonStreamServer(t *testing.T, bodies ...string) (*httptest.Server, *[]st
 		fmt.Fprint(w, bodies[i])
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &queries
+	return srv, rec
+}
+
+// The recorder must be safe to read WHILE requests are in flight. Without the
+// mutex this fires under -race deterministically; with it, it is silent. The
+// existing tests read only after the stream returns and therefore ride on
+// net/http's incidental ordering — this one does not, which is what makes the
+// guarantee the recorder's own rather than borrowed.
+func TestStreamStubRecorder_IsSafeForConcurrentUse(t *testing.T) {
+	rec := &streamStubRecorder{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			rec.record(fmt.Sprintf("last_seq=%d", i))
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		_ = rec.all()
+		_ = rec.count()
+	}
+	<-done
+	if rec.count() != 200 {
+		t.Fatalf("count = %d, want 200", rec.count())
+	}
+}
+
+// The reconnect backoff must reset once a connection makes progress.
+// Otherwise a long-lived --follow session that survives a few unrelated blips
+// over hours stays pinned at the 30 s ceiling forever, so the next real drop
+// costs half a minute of missed output for no reason. Exponential backoff is
+// for a peer that is failing repeatedly, not for one that reconnected and
+// streamed fine.
+func TestNextStreamBackoff(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		current    time.Duration
+		progressed bool
+		want       time.Duration
+	}{
+		{"progress resets to the base", 16 * time.Second, true, chatStreamBackoffBase},
+		{"progress resets even from the ceiling", chatStreamBackoffMax, true, chatStreamBackoffBase},
+		{"no progress doubles", 2 * time.Second, false, 4 * time.Second},
+		{"no progress is capped", chatStreamBackoffMax, false, chatStreamBackoffMax},
+		{"doubling never exceeds the cap", chatStreamBackoffMax - time.Second, false, chatStreamBackoffMax},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nextStreamBackoff(tc.current, tc.progressed); got != tc.want {
+				t.Errorf("nextStreamBackoff(%s, progressed=%v) = %s, want %s", tc.current, tc.progressed, got, tc.want)
+			}
+		})
+	}
 }
 
 // The default (non-follow) run: text lands on stdout, the stream ends on
@@ -105,11 +192,11 @@ func TestStreamChatRun_ResumesFromLastSeqAfterDrop(t *testing.T) {
 	if !strings.Contains(out, "first") || !strings.Contains(out, "second") {
 		t.Errorf("stdout = %q, want both sides of the reconnect", out)
 	}
-	if len(*queries) < 2 {
-		t.Fatalf("connections = %d, want a reconnect after the drop", len(*queries))
+	if queries.count() < 2 {
+		t.Fatalf("connections = %d, want a reconnect after the drop", queries.count())
 	}
-	if !strings.Contains((*queries)[1], "last_seq=9") {
-		t.Errorf("reconnect query = %q, want last_seq=9", (*queries)[1])
+	if !strings.Contains(queries.all()[1], "last_seq=9") {
+		t.Errorf("reconnect query = %q, want last_seq=9", queries.all()[1])
 	}
 }
 
@@ -171,8 +258,8 @@ func TestStreamChatRun_ReplayTruncatedIsFatalNotRetried(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "truncated") {
 		t.Fatalf("err = %v, want a fatal truncation error", err)
 	}
-	if len(*queries) != 1 {
-		t.Errorf("connections = %d, want 1 — reconnecting cannot heal a truncated buffer", len(*queries))
+	if queries.count() != 1 {
+		t.Errorf("connections = %d, want 1 — reconnecting cannot heal a truncated buffer", queries.count())
 	}
 }
 
@@ -214,7 +301,7 @@ func TestStreamChatRun_SendsAllQueryParameters(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("streamChatRun: %v", err)
 	}
-	q := (*queries)[0]
+	q := queries.all()[0]
 	for _, want := range []string{"last_seq=12", "follow=true", "idle=45"} {
 		if !strings.Contains(q, want) {
 			t.Errorf("query %q missing %s", q, want)
@@ -287,8 +374,8 @@ func TestStreamChatRun_AccessRevokedIsFatalNotRetried(t *testing.T) {
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "access") {
 		t.Fatalf("err = %v, want a fatal access error", err)
 	}
-	if len(*queries) != 1 {
-		t.Errorf("connections = %d, want 1 — revocation must not be retried", len(*queries))
+	if queries.count() != 1 {
+		t.Errorf("connections = %d, want 1 — revocation must not be retried", queries.count())
 	}
 }
 

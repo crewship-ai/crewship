@@ -13,7 +13,7 @@ crewship chat <chat-id> [flags]
 crewship chat <subcommand> ...
 ```
 
-Auth: every subcommand requires an authenticated session (`crewship login`) and a selected workspace. The transcript hits `GET /api/v1/chats/{id}/messages?limit=500` — the cap is server-side and not paged today.
+Auth: every subcommand requires an authenticated session (`crewship login`). All of them also require a selected workspace **except `chat stream`**, which resolves tenancy from the chat row itself and so needs only a token and a chat id. The transcript hits `GET /api/v1/chats/{id}/messages?limit=500` — the cap is server-side and not paged today.
 
 ## Subcommands
 

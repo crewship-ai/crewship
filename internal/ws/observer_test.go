@@ -7,8 +7,12 @@ import (
 )
 
 // receiveFrame drains one frame from an observer, failing the test if none
-// arrives. Observers are fed from Hub.dispatch, which runs on the caller's
-// goroutine, so a short deadline is plenty.
+// arrives.
+//
+// Hub.Broadcast does NOT dispatch on the caller's goroutine: it enqueues onto
+// h.broadcast, and Hub.Run drains that queue and calls dispatch on the hub's
+// own goroutine. Everything below depends on knowing that, because it means a
+// broadcast is not observable the instant Broadcast returns - see sentinel().
 func receiveFrame(t *testing.T, o *Observer) ServerMessage {
 	t.Helper()
 	select {
@@ -37,23 +41,47 @@ func TestObserverReceivesChannelBroadcasts(t *testing.T) {
 	}
 }
 
-// An observer must stop receiving the moment it is removed — otherwise a
+// sentinel broadcasts a uniquely-typed frame on channel. Because Hub.Run
+// drains h.broadcast in FIFO order on ONE goroutine, a sentinel that has been
+// RECEIVED proves every broadcast enqueued before it was already dispatched.
+//
+// That is what makes the negative assertions below mean anything. "Nothing
+// arrived within 100 ms" is a timing assumption, not a fact: on a loaded
+// runner the hub may simply not have reached the broadcast yet, and the test
+// passes having exercised nothing. Ordering against a sentinel turns absence
+// into a property of dispatch rather than a property of the scheduler.
+func sentinel(hub *Hub, channel string) {
+	hub.Broadcast(channel, ServerMessage{Type: "sentinel", Channel: channel})
+}
+
+// An observer must stop receiving the moment it is removed - otherwise a
 // finished HTTP stream keeps costing fan-out work on every subsequent frame
 // (the same slow-consumer accounting Hub.dispatch does for sockets).
 func TestObserverStopsAfterRemove(t *testing.T) {
 	hub := newRunningHub(t)
-	obs := hub.AddObserver("session:c1", "u1", 8)
-	hub.RemoveObserver("session:c1", obs)
+	gone := hub.AddObserver("session:c1", "u1", 8)
+	// A second observer that STAYS. Its receipt is the proof that dispatch
+	// actually ran for this broadcast, so the removed one's silence is a real
+	// verdict rather than a race the test happened to win.
+	stays := hub.AddObserver("session:c1", "u2", 8)
+	defer hub.RemoveObserver("session:c1", stays)
 
-	hub.Broadcast("session:c1", ServerMessage{Type: "chat_event", Channel: "session:c1", Payload: ChatEvent{Type: "text", Content: "hi"}})
+	hub.RemoveObserver("session:c1", gone)
+	sentinel(hub, "session:c1")
 
+	if got := receiveFrame(t, stays); got.Type != "sentinel" {
+		t.Fatalf("still-attached observer got %q, want the sentinel - dispatch did not run", got.Type)
+	}
+
+	// Dispatch has demonstrably happened. A non-blocking read is now decisive:
+	// the channel must be closed and must never have carried the sentinel.
 	select {
-	case data, ok := <-obs.Frames():
+	case data, ok := <-gone.Frames():
 		if ok {
 			t.Fatalf("removed observer still received a frame: %s", data)
 		}
-	case <-time.After(100 * time.Millisecond):
-		// Nothing arrived, which is the point.
+	default:
+		t.Fatal("removed observer's frame channel was not closed")
 	}
 }
 
@@ -65,12 +93,15 @@ func TestObserverIsChannelScoped(t *testing.T) {
 	obs := hub.AddObserver("session:c1", "u1", 8)
 	defer hub.RemoveObserver("session:c1", obs)
 
+	// Enqueue the foreign frame FIRST, then the sentinel on our own channel.
+	// FIFO means the foreign one is dispatched first, so if it leaked it would
+	// be the frame we read here.
 	hub.Broadcast("session:c2", ServerMessage{Type: "chat_event", Channel: "session:c2", Payload: ChatEvent{Type: "text", Content: "other"}})
+	sentinel(hub, "session:c1")
 
-	select {
-	case data := <-obs.Frames():
-		t.Fatalf("observer received another channel's frame: %s", data)
-	case <-time.After(100 * time.Millisecond):
+	got := receiveFrame(t, obs)
+	if got.Type != "sentinel" {
+		t.Fatalf("first frame was %q from channel %q - another channel's frame leaked in", got.Type, got.Channel)
 	}
 }
 

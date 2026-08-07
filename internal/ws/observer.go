@@ -34,10 +34,17 @@ var ErrNoChannelAuthorizer = errors.New("ws: no channel authorizer configured")
 // socket subscriber receives, seq numbers included.
 type Observer struct {
 	ch chan []byte
-	// userID is who is watching. It exists for ONE reason: Hub.IsUserSubscribed
-	// is the presence signal chatnotify uses to decide "this user is watching
-	// live, don't ring the inbox bell". Counting only sockets would ring the
-	// bell for someone tailing the very same run over HTTP.
+	// userID is who is watching. Its consumers are snapshotObservers (the
+	// hub's periodic channel re-authorization, which re-checks this user
+	// against the channel) and RevokeObservers (which tears down that user's
+	// streams when the check fails).
+	//
+	// It is deliberately NOT used for presence. Hub.IsUserSubscribed excludes
+	// observers on purpose: its only consumer, chatnotify, treats "present" as
+	// licence to skip inbox.UpsertMessage entirely, so counting a stream that
+	// may be redirected to a file — or blocked in a write — would destroy the
+	// user's durable record of the reply. TestObserverDoesNotCountAsPresence
+	// pins that. Do not "restore" presence counting here.
 	userID string
 	// dropped flips when dispatch could not enqueue a frame because the buffer
 	// was full. It is one-way: once a stream has a hole in it, the only honest
