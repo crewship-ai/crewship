@@ -508,6 +508,42 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 		return nil, err
 	}
 
+	// Which agents actually did the work in this run.
+	//
+	// There is no agent column on pipeline_runs that survives the DAG —
+	// invoking_agent_id names who STARTED the run, not who executed its
+	// steps — so the journal is the only record of it, correlated the way
+	// the run-logs endpoint does it: pipeline runs tag their entries with
+	// payload.run_id (surfaced as the VIRTUAL generated column run_id, v120),
+	// while agent-driven runs use trace_id instead. Both arms are index-
+	// unionable (idx_journal_ws_run).
+	//
+	// This is a direct OR against journal_entries rather than two
+	// journal.Query calls merged in Go: journal.Query ANDs its fields, so the
+	// package-level API cannot express "either", and issuing two queries
+	// would double the round trips to reconstruct one index union SQLite
+	// already does.
+	if err := w.collect(ctx, &out, `
+		SELECT DISTINCT a.id, COALESCE(a.name,''), COALESCE(a.slug,''), COALESCE(a.status,'')
+		FROM journal_entries j
+		JOIN agents a ON a.id = j.actor_id AND a.workspace_id = j.workspace_id
+		WHERE j.workspace_id = ?
+		  AND j.actor_type = 'agent'
+		  AND (j.trace_id = ? OR j.run_id = ?)
+		ORDER BY a.id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, n.Ref, w.fanOutLimit()},
+		func(rows *sql.Rows) (neighbour, error) {
+			var id, name, slug, status string
+			if err := rows.Scan(&id, &name, &slug, &status); err != nil {
+				return neighbour{}, err
+			}
+			an := agentNode(id, name, slug, status)
+			return neighbour{node: an, edge: Edge{From: an.ID, To: n.ID, Kind: EdgeExecutes}}, nil
+		}); err != nil {
+		return nil, err
+	}
+
 	// Inbox, kind 'waitpoint': inbox_items.source_id is the waitpoint TOKEN,
 	// and pipeline_waitpoints.pipeline_run_id is what names the run.
 	if err := w.collect(ctx, &out, `

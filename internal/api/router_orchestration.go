@@ -322,6 +322,17 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/paymaster/top-spenders", authed(wsCtx(http.HandlerFunc(ph.TopSpenders))))
 	r.mux.Handle("GET /api/v1/paymaster/subscriptions", authed(wsCtx(http.HandlerFunc(ph.SubscriptionUsage))))
 
+	// Chains: the causal graph around one anchor (issue identifier, issue id,
+	// run id, routine id or slug, assignment id, inbox item id) in a single
+	// call. One route, not one per anchor type — a client asking "why did
+	// this run happen" and one asking "what did this issue set off" want the
+	// same connected component from different ends, and two routes would
+	// duplicate the traversal and let it drift. Read-only; every query inside
+	// internal/chain carries the workspace from wsCtx.
+	// openapi: query depth:integer limit:integer; responses 200,400,401,403,404,500
+	chainH := NewChainHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/chains/{anchor}", authed(wsCtx(http.HandlerFunc(chainH.Get))))
+
 	// Harbor Master: HITL approvals inbox. Enqueue side runs inside
 	// the orchestrator's gate; this handler is list + decide for humans.
 	ah := NewApprovalsHandler(r.db, r.logger, r.Journal())

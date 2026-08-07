@@ -517,6 +517,59 @@ func TestWalk_PolymorphicTriggeredByIsNotFollowedBlind(t *testing.T) {
 	}
 }
 
+// Who actually executed a run is only recorded in the journal — pipeline_runs
+// .invoking_agent_id names who STARTED it, not who ran its steps. The
+// correlation has two arms because pipeline runs tag payload.run_id while
+// agent-driven runs use trace_id; both must be walked.
+func TestWalk_RunToAgentViaJournal(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		traceID string
+		payload string
+	}{
+		{"payload.run_id arm", "some-other-trace", `{"run_id":"run-1"}`},
+		{"trace_id arm", "run-1", `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := "ws-journal-" + strings.ReplaceAll(tc.name, " ", "-")
+			r := newRig(t, ws)
+			r.seedRoutine(t, "p1", r.ws, "nightly")
+			r.seedRun(t, "run-1", r.ws, "p1", "nightly", "manual", "")
+			r.exec(t, `
+				INSERT INTO journal_entries (id, workspace_id, entry_type, actor_type, actor_id, summary, trace_id, payload)
+				VALUES ('j1', ?, 'agent.step', 'agent', ?, 'did a thing', ?, ?)`,
+				r.ws, r.agent, tc.traceID, tc.payload)
+
+			g := walk(t, r, "run-1", Options{MaxDepth: 3, MaxNodes: 100})
+
+			if !hasEdge(g, "agent:"+r.agent, "run:run-1", EdgeExecutes) {
+				t.Errorf("missing agent -> run edge; edges: %#v", g.Edges)
+			}
+		})
+	}
+}
+
+// A journal entry belonging to another workspace must not attach that
+// workspace's agent to this run, even when the run id collides.
+func TestWalk_JournalCorrelationIsWorkspaceScoped(t *testing.T) {
+	r := newRig(t, "ws-journal-fence")
+	r.seedWorkspace(t, "ws-other", "ws-other-slug")
+	otherCrew := r.seedCrew(t, "ws-other-crew", "ws-other")
+	otherAgent := r.seedAgent(t, "ws-other-agent", "ws-other", otherCrew, "Grace")
+	r.seedRoutine(t, "p1", r.ws, "nightly")
+	r.seedRun(t, "run-1", r.ws, "p1", "nightly", "manual", "")
+	r.exec(t, `
+		INSERT INTO journal_entries (id, workspace_id, entry_type, actor_type, actor_id, summary, trace_id, payload)
+		VALUES ('j1', 'ws-other', 'agent.step', 'agent', ?, 'theirs', 'run-1', '{"run_id":"run-1"}')`,
+		otherAgent)
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 3, MaxNodes: 100})
+
+	if hasNode(g, "agent:"+otherAgent) {
+		t.Errorf("a journal entry from another workspace attached its agent to this run; nodes = %v", nodeIDs(g))
+	}
+}
+
 // An anchor with no chain and an anchor that does not exist must be different
 // answers.
 func TestWalk_UnknownAnchor(t *testing.T) {
