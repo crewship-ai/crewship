@@ -144,7 +144,8 @@ numbers every other dispatch is — not by a mention-only rule:
 | Bound | What it means |
 | --- | --- |
 | `delegation.max_depth` | How many hops a chain may travel. An agent whose own run is already at the limit cannot mention its way to another one, so `A mentions B, B's reply mentions C…` terminates. A mention written by a **person** is a root: it does not inherit a depth, and mentioning a busy agent is never refused for being "too deep". |
-| `delegation.max_fanout` | How many runs one dispatcher may have in flight. On a mention this counts the mentioned agent's concurrent mention-runs on that issue, so repeatedly mentioning one agent queues rather than multiplies. |
+| `delegation.max_fanout` | How many runs one dispatcher may have in flight. On a mention this counts the mentioned agent's concurrent mention-runs on that issue, so repeatedly mentioning one agent queues rather than multiplies. It counts only runs a capped door admitted — a lead's own mission plan is one authored piece of work, not a delegation hop, so leading an issue does not make an agent unmentionable. |
+| **10 mentions per comment** | A fixed structural bound, not an instance setting — there is no workflow on the other side of raising it, and the remedy is a second comment. Beyond the first ten (in the order you wrote them) the rest are ignored *before* they are resolved, and the author is told how many were dropped. A comment naming more than ten agents is a broadcast, not a hand-off. |
 
 Both are instance settings (`crewship instance settings set delegation.max_depth 3`).
 When one refuses, the mention is still recorded and still appears in History —
@@ -169,12 +170,40 @@ And one that is not a limit but a hold:
   `/assign` and a mission task give, and the same answer it gives a chat
   message. Approve it from the inbox and mention it again.
 
-### When nothing runs, you are told
+### When nothing runs
 
-A refused or failed mention is not silent. The join row keeps the reason, and
-the person who wrote the comment gets an inbox item — *"@Robin was not woken by
-your mention on ENG-42"* — carrying the refusal verbatim. Nothing is queued
-behind it: re-mention once the reason no longer holds.
+A mention that starts nothing is recorded either way: the join row keeps
+`dispatch_state` and the reason, and the issue's History still shows the
+`mentioned` entry. Nothing is queued behind it — re-mention once the reason no
+longer holds.
+
+Whether anyone is *told* depends on who wrote the comment.
+
+**A person gets an inbox item** — *"Your mention of Robin on ENG-42 did not
+start a run"*. What it carries depends on why:
+
+- **Refused** — a limit or a rule said no. The sentence is reproduced verbatim,
+  because it names the setting an operator would change.
+- **Failed** — something broke on the Crewship side. You get a fixed sentence
+  saying so. The underlying error is deliberately *not* shown: it is an
+  internal fault, not a decision about your mention, and it lands on the
+  mention record and in the server log instead.
+
+**A comment written by an agent produces no inbox item at all.** There is no
+author with an inbox to address, and every alternative recipient would be
+invented — notifying the whole workspace about one agent's comment is the
+failure this rule exists to prevent, not a fallback. The fact is not lost: it
+is on the join row, in the History entry, and in the server log against the
+comment's id.
+
+<Note>
+An agent's own answer arguably belongs in the response to its comment, and
+today it is **not** there — `POST /api/v1/internal/issues/{identifier}/comments`
+returns the comment, not what its mentions did. So an agent that mentions a
+capped or held colleague currently learns nothing from the call itself. That is
+a gap, not a design: it is worth closing, and it is tracked separately rather
+than described here as though it already worked.
+</Note>
 
 ### Being notified
 

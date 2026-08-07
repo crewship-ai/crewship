@@ -155,7 +155,12 @@ Consequences worth knowing:
   deliberately: their blobs are not content-addressed (see
   [chat sessions](/guides/chat-sessions)), so a chat file that happens to hash the
   same is a different file in a different place and must not keep an issue
-  attachment's bytes alive after you delete it.
+  attachment's bytes alive after you delete it. The question asked of every other
+  record is "would downloading it read this file?" — an issue or comment
+  attachment always resolves its bytes from the content-addressed path, so a
+  record restored from a backup into a *new* workspace still keeps its file
+  alive even though the path recorded on it names the workspace the backup came
+  from.
 
 <Warning>
 **Bulk deletes leave reclaimable bytes.** When an issue is hard-deleted (a
@@ -164,10 +169,19 @@ wiped, SQLite removes the attachment records by cascade without the application
 seeing it — so the reference count never runs and the stored bytes stay on disk.
 They are unreachable, not exposed: nothing points at them any more.
 
-Deleting an issue through `crewship issue delete` reclaims them: it reads the
-digests the issue is carrying *before* the delete and unlinks exactly those. The
-crew-wipe and workspace-wipe paths do not yet; their bytes are reclaimed the next
-time a reclaim pass runs over that workspace.
+Deleting an issue through `crewship issue delete` reclaims them straight away: it
+reads the digests the issue is carrying *before* the delete and unlinks exactly
+those. The crew-wipe and workspace-wipe paths do not, and nothing on a request
+path could — SQLite removes those records without the application ever running.
+They are collected instead by a background pass that runs **once when the server
+starts and then every hour**, across every workspace under the storage root. It
+needs no operator action and has no switch.
+
+A wiped tenant is included. The pass walks the directories under the storage
+root rather than the workspace records, so a workspace whose records are all gone
+is still visited and its files still reclaimed — which is the case that motivated
+the pass, since it is also the largest. Chat attachment files are not in that
+tree and are not its job; they belong to the crew files surface.
 
 The pass checks each stored file individually against the database while holding
 that file's own lock — the same lock an upload holds across writing its bytes and

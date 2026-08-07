@@ -44,11 +44,16 @@ package api
 // different file. Counting by digest alone let that unrelated file pin an issue
 // attachment's bytes forever: the user deleted the file, the API said ok, and the
 // bytes stayed. The refcount is a question about ONE blob, so it is asked about
-// the key, not about the hash.
+// the key, not about the hash — but "the key" means the key a READ of that row
+// would resolve to, not only the string in the column, because a restored or
+// hand-edited row can carry a key its own download path never looks at. See
+// attachmentContentAddressedPredicate.
 //
 // Rows removed by FK CASCADE never reach this code — SQLite deletes them with
 // no application involvement — so their blobs would stay on disk.
-// reclaimAttachmentBlobs is the sweep for that case.
+// reclaimAttachmentBlobs is the sweep for that case, and attachments_gc.go is
+// what runs it: an hourly background pass, off every request path, because the
+// cascades that orphan those blobs are exactly the deletes no request sees.
 //
 // ── Why the sweep takes a lock ──────────────────────────────────────────────
 //
@@ -403,12 +408,45 @@ func readAttachmentBlob(root, workspaceID, sha string) ([]byte, error) {
 // blob", spelled once because both the refcount and the sweep must ask the same
 // question or the two disagree about what is garbage.
 //
-// It reconstructs attachmentStorageKey in SQL and compares it to the stored key,
-// so a row whose blob lives anywhere else — today a chat attachment, tomorrow
-// any producer that keeps its own layout — is not counted as a reference to the
-// content-addressed file. `storage_key` is the authority on where a row's bytes
-// are; the digest alone never was.
-const attachmentContentAddressedPredicate = `storage_key = 'attachments/' || workspace_id || '/' || substr(sha256, 1, 2) || '/' || sha256`
+// The question it has to answer is not "where does the row SAY its bytes are"
+// but "would a read of this row resolve to the content-addressed file" — because
+// that is what makes deleting the file lose data. Both readers of an issue
+// attachment (AttachmentHandler.Download and the agent's internal twin) call
+// readAttachmentBlob(root, workspace_id, sha256), which derives the path and
+// never consults storage_key. So the predicate has two branches, and each one
+// covers a case the other gets wrong:
+//
+//   - storage_key = <the reconstruction>. The row says its bytes are there, and
+//     that is what excludes a CHAT row: a chat blob stays at
+//     <crew>/<agent>/attachments/<chat>/<filename>, so a chat row carrying the
+//     same digest is a different file in a different place and must not pin an
+//     issue attachment's bytes (the defect the previous round fixed).
+//   - owner_type <> 'chat'. The row's READ path goes to the content-addressed
+//     file whatever its key says, so it references that file even when the key
+//     has drifted.
+//
+// The second branch is not hypothetical. `crewship backup restore --as-workspace`
+// forks a bundle into a NEW workspace: backup.RemapIDs rewrites every PK and
+// every FK column, so attachments.workspace_id becomes the new id, while
+// storage_key is a plain TEXT column nothing remaps and still spells the OLD
+// workspace. With only the first branch those restored rows are invisible to the
+// refcount — the sweep unlinks their blob while the issue still lists the file,
+// and every download 404s for good. A hand-edited row and a bundle written by an
+// older layout land in the same shape.
+//
+// The other way to make the two agree — resolve the download from storage_key —
+// was rejected: storage_key is not scoped to the row's workspace, so trusting it
+// on the read path turns a drifted key into a cross-tenant read of another
+// workspace's blob tree. Deriving the path from (workspace, digest) is the
+// tenancy guarantee; the refcount is what had to move.
+//
+// The remaining inaccuracy is in the safe direction: a future non-chat owner
+// that keeps its own layout would be counted here and its digest's
+// content-addressed blob kept alive. That leaks reclaimable bytes, which the
+// sweep can still collect once the predicate learns about it; the other
+// direction deletes bytes a live row is serving.
+const attachmentContentAddressedPredicate = `(storage_key = 'attachments/' || workspace_id || '/' || substr(sha256, 1, 2) || '/' || sha256
+	   OR owner_type <> '` + string(attachmentOwnerChat) + `')`
 
 // attachmentBlobIsUnreferenced reports whether the content-addressed blob for
 // (workspace, digest) has no row naming it.
@@ -563,6 +601,11 @@ const attachmentTempReclaimAge = time.Hour
 // cascades those without running any Go, so the refcount above is never
 // consulted and the blobs remain. It returns the number of blobs removed so a
 // caller can log something truthful.
+//
+// Its caller is the hourly collector in attachments_gc.go, which walks one
+// workspace directory at a time. The issue-delete handler uses it only as the
+// fallback for "we could not read what this delete orphaned"; the ordinary path
+// there reclaims a known digest set instead.
 //
 // The workspace directory is walked rather than the table: the question is
 // "which files on disk are unreferenced", and only the filesystem can enumerate

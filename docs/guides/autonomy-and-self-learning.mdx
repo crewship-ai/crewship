@@ -62,6 +62,8 @@ Note that this is an **oversight** decision, not a security one. The autonomy es
 
 - a held **crew** is pinned to `autonomy_level=strict`, so nothing can be created inside it; approving restores the *creating* crew's level, never higher
 - a held **agent** is `status=PENDING_REVIEW`; nothing starts it — not a chat message, not `/assign`, not an `@mention` on an issue, not a mission task
+
+  A mission task assigned to a held agent **waits**; it is not failed. The mission engine checks before it writes anything, so a hold that stands for an hour costs no rows and no error log, and the tick after an operator approves picks the task up and runs it. That matters because a hold is a *wait for a human*, and the alternative — reporting the task as failed — would make approving it useless: nothing retries a terminally failed task. The same applies to a held lead: the mission simply does not plan until it is released.
 - a held **mission** stays `PLANNING` and cannot be started
 
 Holds land on the approvals queue and are mirrored as a blocking, ADMIN-addressed inbox waitpoint:

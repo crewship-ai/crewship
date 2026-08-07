@@ -23,11 +23,18 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 // ── fixture ────────────────────────────────────────────────────────────────
@@ -680,5 +687,549 @@ func TestMentions_ResolveIsScopedToOneWorkspace(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].AgentID != f.target {
 		t.Fatalf("resolved = %+v, want exactly the in-workspace agent %q", got, f.target)
+	}
+}
+
+// ═══ the second round ═══════════════════════════════════════════════════════
+//
+// Everything below tests the notice itself rather than the dispatch. The
+// notice was added to close a silence and opened five holes of its own; these
+// are the tests that hold it to the same standard the dispatch is held to.
+
+// ── helpers for the second round ───────────────────────────────────────────
+
+// stubMentionDispatcher stands in for AssignmentHandler so a test can choose
+// the dispatch OUTCOME (and count attempts) without starting a container. It
+// returns an empty assignment id on success, which persists as NULL — the
+// column has a foreign key to assignments and a stub has no row to point at.
+type stubMentionDispatcher struct {
+	mu    sync.Mutex
+	calls []string
+	err   error
+}
+
+func (s *stubMentionDispatcher) DispatchMention(_ context.Context, req mentionDispatchRequest) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, req.TargetAgentID)
+	return "", s.err
+}
+
+func (s *stubMentionDispatcher) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.calls)
+}
+
+// useStubDispatcher swaps BOTH doors onto a stub. The real AssignmentHandler
+// is still constructed by the fixture and still drained by its cleanup; it
+// simply never gets called.
+func (f *mentionFixture) useStubDispatcher(err error) *stubMentionDispatcher {
+	s := &stubMentionDispatcher{err: err}
+	f.issues.SetMentionDispatcher(s)
+	f.internal.SetMentionDispatcher(s)
+	return s
+}
+
+// seedAgents adds n more agents to the fixture's own crew and workspace, so a
+// comment can name more of them than any bound would allow.
+func (f *mentionFixture) seedAgents(t *testing.T, n int) []string {
+	t.Helper()
+	ids := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("bulkagent%02d", i)
+		execOrFatal(t, f.db,
+			`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, ?, ?)`,
+			id, f.crewID, f.wsID, fmt.Sprintf("Bulk %02d", i), fmt.Sprintf("bulk-%02d", i))
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// mentionInboxRows counts the inbox rows THIS feature wrote. Scoped by the
+// source_id prefix so an unrelated writer cannot make the assertion pass.
+func (f *mentionFixture) mentionInboxRows(t *testing.T) int {
+	return f.countRows(t, `SELECT COUNT(*) FROM inbox_items WHERE source_id LIKE 'mention%'`)
+}
+
+// markdownActiveNodes returns the kinds of every node in md that a reader can
+// CLICK, or that is markup rather than text: a link, an image, an autolink, raw
+// HTML, emphasis, a code span. This is the honest form of "the name did not
+// become a link" — a substring check on the escaped text would pass for any
+// escaping scheme, including one that escapes nothing the renderer cares about.
+//
+// The notice's own templates emit NO markup of these kinds (the reason is an
+// indented code block, which is a CodeBlock and is not listed), which is what
+// makes "zero of them anywhere in the body" a clean assertion: anything found
+// came from a value somebody else chose.
+func markdownActiveNodes(t *testing.T, md string) []string {
+	t.Helper()
+	src := []byte(md)
+	doc := goldmark.New().Parser().Parse(text.NewReader(src))
+	var found []string
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch n.(type) {
+		case *ast.Link, *ast.Image, *ast.AutoLink, *ast.RawHTML, *ast.HTMLBlock,
+			*ast.Emphasis, *ast.CodeSpan:
+			found = append(found, n.Kind().String())
+		}
+		return ast.WalkContinue, nil
+	})
+	return found
+}
+
+// ── 11. an agent's comment does not notify the whole workspace ─────────────
+//
+// inbox.Item documents an empty TargetUserID as "anyone in workspace", and
+// inboxVisibilityClause makes such a row visible to every member. The notice
+// left the target empty whenever the author was not a user, so an agent
+// mentioning a held agent put "YOUR comment on ENG-1 mentioned Lead" in every
+// person's inbox — for a comment none of them wrote, once per (comment, agent),
+// and pushed to their ntfy/Slack channels with it.
+//
+// The mutation is the second half: a PERSON's identical refusal still reaches
+// that person, so a guard that simply stopped writing the row fails here.
+
+func TestMentions_AgentAuthoredRefusalIsNotBroadcastToTheWorkspace(t *testing.T) {
+	f := setupMentionFixture(t)
+	execOrFatal(t, f.db, `UPDATE agents SET status = 'PENDING_REVIEW' WHERE id = ?`, f.target)
+
+	f.commentAsAgent(t, f.author, "over to you "+mentionToken("lead", f.target))
+
+	// The refusal is still a recorded fact — only the fan-out is gone.
+	var state string
+	if err := f.db.QueryRow(`SELECT dispatch_state FROM mission_comment_mentions`).Scan(&state); err != nil {
+		t.Fatalf("mention row missing: %v", err)
+	}
+	if state != mentionDispatchRefused {
+		t.Fatalf("dispatch_state = %q, want %q", state, mentionDispatchRefused)
+	}
+
+	if n := f.countRows(t, `SELECT COUNT(*) FROM inbox_items
+		 WHERE COALESCE(target_user_id,'') = '' AND COALESCE(target_role,'') = ''`); n != 0 {
+		t.Errorf("workspace-visible inbox rows = %d, want 0 — an agent's comment notified every member", n)
+	}
+	if n := f.mentionInboxRows(t); n != 0 {
+		t.Errorf("mention inbox rows = %d, want 0 — an agent author has no inbox to write to", n)
+	}
+
+	// MUTATION: the identical refusal, written by a PERSON, still reaches them.
+	f.comment(t, "and now from a human "+mentionToken("lead", f.target))
+	var target string
+	if err := f.db.QueryRow(
+		`SELECT COALESCE(target_user_id,'') FROM inbox_items WHERE source_id LIKE 'mention%'`).
+		Scan(&target); err != nil {
+		t.Fatalf("a person's refused mention reached nobody at all: %v", err)
+	}
+	if target != f.userID {
+		t.Errorf("inbox target_user_id = %q, want the comment author %q", target, f.userID)
+	}
+}
+
+// ── 12. a failed dispatch does not print its stack trace at a human ────────
+//
+// The `refused` arm is verbatim on purpose — a gate's sentence is written for
+// the operator and names the setting they would change. The `failed` arm is
+// not a gate sentence: it is whatever error the dispatch happened to wrap, so
+// it leaks driver text, SQL and internal table names into a body that is
+// rendered in the inbox and pushed to ntfy/Slack. The row keeps the raw error
+// for whoever is debugging; the person reading their inbox gets a sentence.
+
+func TestMentions_FailedDispatchDoesNotShowInternalErrorText(t *testing.T) {
+	f := setupMentionFixture(t)
+	const raw = "dispatch mention: lookup target agent: sql: database is locked\n" +
+		"SQL: SELECT system_prompt_legacy FROM agents_private WHERE id = ?"
+	f.useStubDispatcher(errors.New(raw))
+
+	f.comment(t, "please look "+mentionToken("lead", f.target))
+
+	var detail string
+	if err := f.db.QueryRow(
+		`SELECT COALESCE(dispatch_detail,'') FROM mission_comment_mentions`).Scan(&detail); err != nil {
+		t.Fatalf("mention row missing: %v", err)
+	}
+	if !strings.Contains(detail, "database is locked") {
+		t.Errorf("dispatch_detail = %q — the raw error must stay on the row for whoever debugs it", detail)
+	}
+
+	var title, body string
+	if err := f.db.QueryRow(
+		`SELECT title, body_md FROM inbox_items WHERE source_id LIKE 'mention%'`).Scan(&title, &body); err != nil {
+		t.Fatalf("no inbox item for the failed dispatch: %v", err)
+	}
+	for _, leak := range []string{"sql:", "SELECT", "agents_private", "database is locked", "system_prompt_legacy"} {
+		if strings.Contains(title+body, leak) {
+			t.Errorf("inbox item leaks internal error text %q:\ntitle=%q\nbody=%q", leak, title, body)
+		}
+	}
+	// And the blockquote stays a blockquote: a multi-line detail rendered into
+	// "> %s" escapes the quote after its first line.
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "SQL:") {
+			t.Errorf("a continuation line escaped the blockquote:\n%s", body)
+		}
+	}
+}
+
+// ── 12b. a refusal is still reported verbatim ──────────────────────────────
+//
+// The companion to 12, and the mutation that keeps it honest: narrowing the
+// `failed` arm must not also silence the `refused` one, whose whole value is
+// that the operator reads the same sentence the gate wrote.
+
+func TestMentions_RefusalIsStillReportedVerbatim(t *testing.T) {
+	f := setupMentionFixture(t)
+	execOrFatal(t, f.db, `UPDATE agents SET status = 'PENDING_REVIEW' WHERE id = ?`, f.target)
+
+	f.comment(t, "please look "+mentionToken("lead", f.target))
+
+	var body string
+	if err := f.db.QueryRow(
+		`SELECT body_md FROM inbox_items WHERE source_id LIKE 'mention%'`).Scan(&body); err != nil {
+		t.Fatalf("no inbox item for the refusal: %v", err)
+	}
+	// Verbatim means verbatim: the setting an operator would change is spelled
+	// the way the gate spelled it, not escaped into `PENDING\_REVIEW` on every
+	// plain-text channel.
+	if !strings.Contains(body, "PENDING_REVIEW") {
+		t.Errorf("inbox body %q no longer says why nothing ran", body)
+	}
+}
+
+// ── 12c. a verbatim reason stays inside its own block ──────────────────────
+//
+// The reason is the one value that must survive unescaped, so its containment
+// cannot come from escaping — it comes from the shape it is rendered in. A `> `
+// blockquote holds exactly one line, so a multi-line reason continued as
+// ordinary body text; and a line starting `* ` or `# ` inside it would render
+// as a list or a heading in the recipient's inbox.
+//
+// The gate sentences are single-line today. This drives the function directly
+// with one that is not, because "no gate writes a newline yet" is a fact about
+// today's callers, not a property of this code.
+
+func TestMentionNotice_AMultiLineReasonCannotEscapeItsBlock(t *testing.T) {
+	f := setupMentionFixture(t)
+	m := mentionRecorder{db: f.db, logger: newTestLogger()}
+
+	const reason = "the cap refused\n* not a list item\n# not a heading"
+	m.notifyMentionUndelivered(context.Background(), mentionContext{
+		WorkspaceID: f.wsID,
+		MissionID:   f.missionID,
+		Identifier:  "ENG-1",
+		CommentID:   "cmt-multiline",
+		AuthorType:  "user",
+		AuthorID:    f.userID,
+	}, resolvedMention{AgentID: f.target, AgentName: "Lead"},
+		mentionDispatchRefused, reason)
+
+	var body string
+	if err := f.db.QueryRow(
+		`SELECT body_md FROM inbox_items WHERE source_id LIKE 'mention%'`).Scan(&body); err != nil {
+		t.Fatalf("no inbox item written: %v", err)
+	}
+
+	var holding []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "the cap refused") {
+			holding = append(holding, line)
+		}
+	}
+	if len(holding) != 1 {
+		t.Fatalf("the reason occupies %d lines, want 1:\n%s", len(holding), body)
+	}
+	line := holding[0]
+	if !strings.HasPrefix(line, "    ") {
+		t.Errorf("the reason is not inside the indented block:\n%q", line)
+	}
+	for _, frag := range []string{"* not a list item", "# not a heading"} {
+		if !strings.Contains(line, frag) {
+			t.Errorf("the reason lost %q, or it landed on its own line:\n%s", frag, body)
+		}
+	}
+}
+
+// ── 13. an attacker-chosen name cannot become a link ───────────────────────
+//
+// Two values reach the notice raw: agents.name, which the agent that created
+// an agent chooses, and the identifier, whose prefix is crews.issue_prefix —
+// stored verbatim with no charset validation. Both are rendered as markdown in
+// /inbox (inbox-detail.tsx feeds body_md to MarkdownContent) and pushed to
+// external channels as-is.
+//
+// The assertion is on the PARSE, not on the text: a body is safe when the
+// document it produces contains no link, image, autolink or raw HTML node —
+// which is a property of the escaping, not of any particular spelling of it.
+
+func TestMentionNotice_AttackerChosenValuesCannotRenderAsMarkup(t *testing.T) {
+	for _, tc := range []struct{ name, value string }{
+		{"link", "[approve here](https://evil.example)"},
+		{"image", "![x](https://evil.example/pixel.png)"},
+		{"forged mention chip", "[@admin](crewship:agent/someagentid)"},
+		{"raw html", `<a href="https://evil.example">approve</a>`},
+		{"autolink", "<https://evil.example>"},
+		{"emphasis", "**ADMIN**"},
+		{"multi-line", "Robin\n\n# Approved by Crewship\n\n[click](https://evil.example)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupMentionFixture(t)
+			m := mentionRecorder{db: f.db, logger: newTestLogger()}
+
+			// Both untrusted values at once: the agent's display name and the
+			// issue identifier the crew's prefix builds.
+			m.notifyMentionUndelivered(context.Background(), mentionContext{
+				WorkspaceID: f.wsID,
+				MissionID:   f.missionID,
+				Identifier:  tc.value + "-1",
+				CommentID:   "cmt-markup",
+				AuthorType:  "user",
+				AuthorID:    f.userID,
+			}, resolvedMention{AgentID: f.target, AgentName: tc.value},
+				mentionDispatchRefused, "a gate said no")
+
+			var title, body string
+			if err := f.db.QueryRow(
+				`SELECT title, body_md FROM inbox_items WHERE source_id LIKE 'mention%'`).
+				Scan(&title, &body); err != nil {
+				t.Fatalf("no inbox item written: %v", err)
+			}
+			if got := markdownActiveNodes(t, body); len(got) > 0 {
+				t.Errorf("body renders %v — an attacker-chosen value became markup:\n%s", got, body)
+			}
+			if got := markdownActiveNodes(t, title); len(got) > 0 {
+				t.Errorf("title renders %v — an attacker-chosen value became markup:\n%s", got, title)
+			}
+			if strings.Contains(title, "\n") {
+				t.Errorf("title spans lines, so it is not a title:\n%q", title)
+			}
+		})
+	}
+}
+
+// ── 13b. escaping is not deletion ──────────────────────────────────────────
+//
+// The mutation for 13: a fix that dropped the name entirely, or replaced it
+// with a placeholder, would pass every assertion above. An ordinary name must
+// still arrive intact.
+
+func TestMentionNotice_OrdinaryNameSurvivesUnchanged(t *testing.T) {
+	f := setupMentionFixture(t)
+	m := mentionRecorder{db: f.db, logger: newTestLogger()}
+
+	m.notifyMentionUndelivered(context.Background(), mentionContext{
+		WorkspaceID: f.wsID,
+		MissionID:   f.missionID,
+		Identifier:  "ENG-42",
+		CommentID:   "cmt-plain",
+		AuthorType:  "user",
+		AuthorID:    f.userID,
+	}, resolvedMention{AgentID: f.target, AgentName: "Robin Navrátilová"},
+		mentionDispatchRefused, "a gate said no")
+
+	var title, body string
+	if err := f.db.QueryRow(
+		`SELECT title, body_md FROM inbox_items WHERE source_id LIKE 'mention%'`).
+		Scan(&title, &body); err != nil {
+		t.Fatalf("no inbox item written: %v", err)
+	}
+	for _, want := range []string{"Robin Navrátilová", "ENG-42"} {
+		if !strings.Contains(title+body, want) {
+			t.Errorf("notice lost %q — escaping must not be deletion:\ntitle=%q\nbody=%q", want, title, body)
+		}
+	}
+}
+
+// ── 14. the brief clips on rune boundaries ─────────────────────────────────
+//
+// clipForBrief and the body truncation both cut by BYTES, so a Czech or
+// Japanese display name — or an emoji straddling the limit — emitted a partial
+// rune into the fenced block. Those bytes are stored as assignments.task and
+// handed to the CLI adapter; read back over the JSON API, Go substitutes
+// U+FFFD, so the stored brief and the reported brief differ. That is the same
+// audit-trail-does-not-match class the fence nonce fix closed.
+
+func TestMentionTaskBrief_ClipsOnRuneBoundaries(t *testing.T) {
+	// A name whose bytes cross mentionTaskMaxField in the middle of a rune. The
+	// leading ASCII byte is load-bearing: "Ř" is two bytes, so a bare run of
+	// them happens to align with an even byte limit and a byte-slicing clip
+	// would pass by luck. One byte of offset removes the luck.
+	longCzech := "a" + strings.Repeat("Ř", mentionTaskMaxField+50)
+	// An emoji (4 bytes) sitting exactly on the old byte boundary.
+	emojiStraddle := strings.Repeat("a", mentionTaskMaxField-2) + "🎉" + strings.Repeat("b", 50)
+
+	for _, tc := range []struct {
+		name   string
+		req    mentionDispatchRequest
+		target string
+	}{
+		{"multi-byte target name", mentionDispatchRequest{Identifier: "ENG-1"}, longCzech},
+		{"multi-byte author", mentionDispatchRequest{Identifier: "ENG-1", AuthorName: longCzech}, "Lead"},
+		{"multi-byte issue title", mentionDispatchRequest{Identifier: "ENG-1", IssueTitle: longCzech}, "Lead"},
+		{"multi-byte identifier", mentionDispatchRequest{Identifier: longCzech}, "Lead"},
+		{"emoji on the boundary", mentionDispatchRequest{Identifier: "ENG-1"}, emojiStraddle},
+		{"multi-byte body", mentionDispatchRequest{
+			Identifier:  "ENG-1",
+			CommentBody: strings.Repeat("日", mentionTaskMaxBody+100),
+		}, "Lead"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			brief := mentionTaskBrief(tc.req, tc.target)
+			if !utf8.ValidString(brief) {
+				t.Fatalf("brief is not valid UTF-8 — a rune was split by the clip")
+			}
+			// And the clip actually happened, so the test is not passing because
+			// nothing was truncated.
+			if !strings.Contains(brief, "…") {
+				t.Errorf("nothing was clipped; the case does not exercise the bound:\n%s", brief)
+			}
+		})
+	}
+}
+
+// ── 14b. the clip counts runes, and lands on a boundary ────────────────────
+
+func TestClipForBrief_CountsRunesNotBytes(t *testing.T) {
+	t.Run("a name of max runes is not clipped", func(t *testing.T) {
+		s := strings.Repeat("ř", mentionTaskMaxField)
+		if got := clipForBrief(s, mentionTaskMaxField); got != s {
+			t.Errorf("a %d-rune name was clipped: got %d runes, want %d",
+				mentionTaskMaxField, utf8.RuneCountInString(got), mentionTaskMaxField)
+		}
+	})
+	t.Run("one rune over is clipped to exactly max runes", func(t *testing.T) {
+		s := strings.Repeat("ř", mentionTaskMaxField+1)
+		got := clipForBrief(s, mentionTaskMaxField)
+		if !utf8.ValidString(got) {
+			t.Fatalf("clip produced invalid UTF-8: %q", got)
+		}
+		if n := utf8.RuneCountInString(strings.TrimSuffix(got, "…")); n != mentionTaskMaxField {
+			t.Errorf("clipped to %d runes, want %d", n, mentionTaskMaxField)
+		}
+	})
+	t.Run("invalid input cannot make the brief invalid", func(t *testing.T) {
+		// A name that is already invalid UTF-8 in the column (SQLite stores
+		// bytes). The brief must still be valid, or the stored assignment and
+		// the one the API reports differ.
+		got := clipForBrief("Robin\xff\xfe", mentionTaskMaxField)
+		if !utf8.ValidString(got) {
+			t.Errorf("clip passed invalid UTF-8 through: %q", got)
+		}
+	})
+}
+
+// ── 15. a comment cannot mention an unbounded number of agents ─────────────
+//
+// ExtractAgentIDs returns any number of distinct valid ids and
+// resolveMentionedAgents builds an IN list from len(ids), so one comment could
+// produce thousands of resolutions, rows, activity entries and dispatch
+// attempts — and past SQLite's bound-parameter ceiling the resolve fails
+// outright, which drops EVERY mention in the comment silently.
+//
+// The overflow is not silent: the author is told how many were not delivered
+// and what to do about it. Dropping them quietly would repeat the defect the
+// notice exists to close.
+
+func TestMentions_MentionsPerCommentAreBoundedAndTheAuthorIsTold(t *testing.T) {
+	f := setupMentionFixture(t)
+	stub := f.useStubDispatcher(nil)
+
+	over := 3
+	ids := f.seedAgents(t, mentionMaxPerComment+over)
+	var b strings.Builder
+	b.WriteString("all hands:")
+	for i, id := range ids {
+		fmt.Fprintf(&b, " %s", mentionToken(fmt.Sprintf("a%d", i), id))
+	}
+	f.comment(t, b.String())
+
+	if n := f.mentionRows(t); n != mentionMaxPerComment {
+		t.Errorf("mention rows = %d, want %d — the per-comment bound did not hold", n, mentionMaxPerComment)
+	}
+	if n := stub.count(); n != mentionMaxPerComment {
+		t.Errorf("dispatch attempts = %d, want %d", n, mentionMaxPerComment)
+	}
+	if n := f.mentionActivity(t); n != mentionMaxPerComment {
+		t.Errorf("mentioned activity rows = %d, want %d", n, mentionMaxPerComment)
+	}
+
+	// The overflow is reported, once, to the person who wrote the comment.
+	var title, body, target string
+	if err := f.db.QueryRow(
+		`SELECT title, body_md, COALESCE(target_user_id,'') FROM inbox_items
+		  WHERE source_id LIKE 'mention_overflow%'`).Scan(&title, &body, &target); err != nil {
+		t.Fatalf("the dropped mentions were not reported to anyone: %v", err)
+	}
+	if target != f.userID {
+		t.Errorf("overflow notice target_user_id = %q, want the author %q", target, f.userID)
+	}
+	if !strings.Contains(title+body, fmt.Sprint(over)) {
+		t.Errorf("the notice does not say how many were dropped (%d):\ntitle=%q\nbody=%q", over, title, body)
+	}
+	if !strings.Contains(title+body, fmt.Sprint(mentionMaxPerComment)) {
+		t.Errorf("the notice does not name the bound (%d):\ntitle=%q\nbody=%q", mentionMaxPerComment, title, body)
+	}
+	// Exactly one row for the comment, however many were dropped.
+	if n := f.countRows(t, `SELECT COUNT(*) FROM inbox_items WHERE source_id LIKE 'mention_overflow%'`); n != 1 {
+		t.Errorf("overflow notices = %d, want exactly 1 per comment", n)
+	}
+}
+
+// ── 15b. the bound does not fire below the bound ───────────────────────────
+//
+// The mutation for 15: a fix that clipped to a smaller number, or that told
+// the author about an overflow that did not happen, fails here.
+
+func TestMentions_ExactlyTheBoundIsDeliveredAndNotReportedAsOverflow(t *testing.T) {
+	f := setupMentionFixture(t)
+	stub := f.useStubDispatcher(nil)
+
+	ids := f.seedAgents(t, mentionMaxPerComment)
+	var b strings.Builder
+	b.WriteString("all hands:")
+	for i, id := range ids {
+		fmt.Fprintf(&b, " %s", mentionToken(fmt.Sprintf("a%d", i), id))
+	}
+	f.comment(t, b.String())
+
+	if n := f.mentionRows(t); n != mentionMaxPerComment {
+		t.Errorf("mention rows = %d, want %d — the bound clipped a comment that was inside it", n, mentionMaxPerComment)
+	}
+	if n := stub.count(); n != mentionMaxPerComment {
+		t.Errorf("dispatch attempts = %d, want %d", n, mentionMaxPerComment)
+	}
+	if n := f.countRows(t, `SELECT COUNT(*) FROM inbox_items WHERE source_id LIKE 'mention_overflow%'`); n != 0 {
+		t.Errorf("overflow notices = %d, want 0 — nothing was dropped", n)
+	}
+}
+
+// ── 15c. an agent that overflows the bound tells nobody an inbox row ───────
+//
+// Same decision as 11, on the other notice: an agent author has no inbox, so
+// the overflow is logged and left on the record the issue already carries. The
+// assertion is that no workspace-wide row is minted — which is what the naive
+// "tell somebody" fix would do.
+
+func TestMentions_AgentAuthoredOverflowIsNotBroadcast(t *testing.T) {
+	f := setupMentionFixture(t)
+	f.useStubDispatcher(nil)
+
+	ids := f.seedAgents(t, mentionMaxPerComment+2)
+	var b strings.Builder
+	b.WriteString("all hands:")
+	for i, id := range ids {
+		fmt.Fprintf(&b, " %s", mentionToken(fmt.Sprintf("a%d", i), id))
+	}
+	f.commentAsAgent(t, f.author, b.String())
+
+	if n := f.countRows(t, `SELECT COUNT(*) FROM inbox_items
+		 WHERE COALESCE(target_user_id,'') = '' AND COALESCE(target_role,'') = ''`); n != 0 {
+		t.Errorf("workspace-visible inbox rows = %d, want 0", n)
+	}
+	// The bound still held.
+	if n := f.mentionRows(t); n != mentionMaxPerComment {
+		t.Errorf("mention rows = %d, want %d", n, mentionMaxPerComment)
 	}
 }

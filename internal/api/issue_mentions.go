@@ -6,11 +6,15 @@ package api
 // CommonMark AST and hands back UNRESOLVED ids. Its package doc is explicit
 // about what a caller still owes, and this file is that debt paid:
 //
+//	bound     how many mentions ONE comment may carry, before any of them is
+//	          resolved — the parser returns as many as were written
 //	resolve   every id inside the comment's OWN workspace, dropping the rest
 //	persist   the resolved set, so no reader ever parses a body again
 //	audit     one `mentioned` activity per resolved mention
 //	dispatch  through the /assign chokepoint, so a mention inherits the
 //	          delegation caps rather than getting a cap of its own
+//	tell      the author when a mention woke nobody — and tell only the author,
+//	          because an inbox row with no target is a row every member reads
 //
 // Three properties are load-bearing, in the order they matter:
 //
@@ -72,12 +76,54 @@ const (
 // agent is handed. The body is untrusted input of unbounded length, and the
 // agent can read the whole issue for itself; the brief exists to say what it
 // was asked, not to be a second copy of the discussion.
+//
+// Counted in RUNES — see mentionTaskMaxField. That makes the worst-case byte
+// length four times this, which is the right trade: the bound exists to stop
+// the brief becoming a second copy of the discussion, and "how much was said"
+// is measured in characters, not in how expensive the author's alphabet is.
 const mentionTaskMaxBody = 4000
 
 // mentionTaskMaxField bounds each single-line field copied into the brief (the
 // names, the issue title, the identifier). None of the four columns behind them
 // is length-validated at its own door, and a brief is a brief.
+//
+// Counted in RUNES, not bytes. Both bounds here used to slice by byte index,
+// which splits a multi-byte rune: a Czech display name or an emoji straddling
+// the limit put invalid UTF-8 into the fenced block, and those bytes are stored
+// as assignments.task. Read back over the JSON API Go substitutes U+FFFD, so
+// the brief on the audit row and the brief the API reports were different
+// strings — the same class of mismatch the fence-nonce fix closed.
 const mentionTaskMaxField = 200
+
+// mentionMaxPerComment bounds how many distinct agents ONE comment may mention.
+//
+// Nothing bounded the BREADTH of a single comment before this. The delegation
+// caps bound the tree — how deep a chain runs, and how many concurrent runs one
+// dispatcher may have — but ExtractAgentIDs returns as many distinct ids as
+// were written, and resolveMentionedAgents builds an IN list from len(ids). A
+// comment with a few thousand tokens therefore meant a few thousand bound
+// parameters in one statement, then a row, an activity entry and a dispatch
+// attempt each. Past SQLite's parameter ceiling the resolve fails outright and
+// EVERY mention in the comment silently does nothing, which is the worse
+// failure of the two.
+//
+// Ten is above any real comment — it is more agents than a crew usually has,
+// and a comment naming more than ten is a broadcast, not a hand-off — and far
+// below the point where any of the three costs above matters. It is a
+// structural guard rather than an instance setting on purpose: unlike
+// delegation.max_depth there is no workflow on the other side of raising it,
+// and an operator who wants to reach more agents writes a second comment.
+//
+// The overflow is NOT silent. See notifyMentionOverflow.
+const mentionMaxPerComment = 10
+
+// mentionNoticeMaxField bounds one untrusted value interpolated into the
+// human-facing inbox notice, in runes. Shorter than the brief's bound because a
+// notice is a sentence in a list row, not a prompt.
+const mentionNoticeMaxField = 120
+
+// mentionNoticeMaxDetail bounds the quoted reason in the notice, in runes.
+const mentionNoticeMaxDetail = 500
 
 // mentionDispatcher is the narrow slice of AssignmentHandler the trigger needs.
 //
@@ -139,6 +185,19 @@ func (m mentionRecorder) record(ctx context.Context, mc mentionContext) {
 	ids := mentions.ExtractAgentIDs(mc.CommentBody)
 	if len(ids) == 0 {
 		return
+	}
+
+	// The per-comment bound, applied to the IDS rather than to the resolved set:
+	// the unbounded IN list is the sharpest edge (see mentionMaxPerComment), and
+	// it is built before anything is resolved. First-seen order, so which
+	// mentions survive is the order the author wrote them in, not the order
+	// SQLite would have returned.
+	if over := len(ids) - mentionMaxPerComment; over > 0 {
+		ids = ids[:mentionMaxPerComment]
+		// Reported BEFORE the resolve, deliberately: the author is owed this
+		// whether or not the surviving ids resolve, and an early return below
+		// must not swallow it.
+		m.notifyMentionOverflow(ctx, mc, over)
 	}
 
 	resolved, err := m.resolveMentionedAgents(ctx, mc.WorkspaceID, ids)
@@ -340,9 +399,50 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 //
 //	refused  a gate said no (delegation cap, held agent). Reported verbatim.
 //	failed   the dispatch broke. Also reported — a mention that silently
-//	         failed is the same silence as one that was refused.
+//	         failed is the same silence as one that was refused — but NOT
+//	         verbatim; see below.
 //	skipped  a self-mention, or no dispatcher wired. Nobody is waiting on
 //	         either; notifying would be noise on every agent's own comment.
+//
+// WHO IT REACHES. Exactly the person who wrote the comment, and nobody else.
+// The first version left TargetUserID empty whenever the author was not a user,
+// and inbox.Item documents an empty target as "anyone in workspace":
+// inboxVisibilityClause makes such a row visible to every member and
+// notifyroute's resolveAudience pushes it to every member's external channels.
+// So an agent mentioning a held agent put "YOUR comment on ENG-42 mentioned
+// Robin" in the inbox of every person in the workspace, for a comment none of
+// them wrote, once per (comment, agent) — an agent commenting in a loop minting
+// one workspace-wide row per hop.
+//
+// AN AGENT AUTHOR IS TOLD NOTHING HERE, on purpose. Three reasons, in order:
+//
+//   - There is no recipient. The notice's entire content is "your comment did
+//     not do what you meant", and for an agent-authored comment there is no
+//     "you" with an inbox. Picking a human to receive it — the workspace, a
+//     role, the delegation chain's root — is inventing an addressee, and the
+//     first of those is the defect above.
+//   - The fact is not lost. mission_comment_mentions keeps the state and the
+//     verbatim reason, the issue's History carries the `mentioned` activity, and
+//     logf writes the comment id, so "R was mentioned and the gate said no" is
+//     answerable from the issue an operator is already looking at.
+//   - The volume is the point. An agent's mention is exactly the case that
+//     repeats — a chain retrying, a lead looping — and a per-hop notification to
+//     humans who did not ask for it is how an inbox stops being read.
+//
+// What an agent author is still owed is the answer to its OWN request, and that
+// belongs in the comment endpoint's response rather than in a human's inbox.
+// Neither internal comment door returns the mention outcome today; that is
+// noted in the PR rather than fixed here, because both doors live in files this
+// change does not own.
+//
+// WHAT IT PRINTS. The `refused` arm is a gate's sentence, written for an
+// operator and naming the setting they would change, so it is quoted whole. The
+// `failed` arm is not a sentence anybody wrote — it is whatever error the
+// dispatch wrapped, so it carried driver text ("sql: database is locked"),
+// constraint messages naming internal tables, and multiple lines that walked
+// straight out of a one-line blockquote. The raw error stays on the join row
+// and in the log, where whoever is debugging will look; the person reading
+// their inbox gets a sentence that says what to do.
 //
 // Best-effort, like every other write in this file: the comment is already
 // committed and answered, and inbox.Insert logs its own failures.
@@ -353,17 +453,39 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 	if m.db == nil || mc.WorkspaceID == "" {
 		return
 	}
-	targetUser := ""
-	if mc.AuthorType == "user" {
-		targetUser = mc.AuthorID
+	targetUser, ok := mentionNoticeTarget(mc)
+	if !ok {
+		// Logged, not written: see the "an agent author is told nothing" note.
+		// Info rather than Error — this is the designed path for every
+		// agent-authored comment, not a fault.
+		if m.logger != nil {
+			m.logger.Info("mention not delivered, no human author to notify",
+				"comment_id", mc.CommentID, "mission_id", mc.MissionID,
+				"agent_id", mention.AgentID, "dispatch_state", state, "detail", detail)
+		}
+		return
 	}
+
 	issue := mc.Identifier
 	if issue == "" {
 		issue = mc.MissionID
 	}
-	if detail == "" {
-		detail = "the dispatch did not go through"
+	reason := detail
+	if state == mentionDispatchFailed {
+		reason = "The dispatch did not complete. This is a fault on the Crewship side, not a " +
+			"decision about the mention; the details are on the issue's mention record and in " +
+			"the server log, against this comment's id."
 	}
+	if reason == "" {
+		reason = "The dispatch did not go through."
+	}
+
+	name := mentionNoticeValue(mention.AgentName, mentionNoticeMaxField)
+	if name == "" {
+		name = "the agent"
+	}
+	issueLabel := mentionNoticeValue(issue, mentionNoticeMaxField)
+
 	_ = inbox.Insert(ctx, m.db, m.logger, inbox.Item{
 		WorkspaceID: mc.WorkspaceID,
 		Kind:        inbox.KindMessage,
@@ -371,11 +493,11 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 		// identity, so a retried write dedups instead of piling up.
 		SourceID:     "mention_" + mc.CommentID + "_" + mention.AgentID,
 		TargetUserID: targetUser,
-		Title:        fmt.Sprintf("%s was not woken by your mention on %s", mention.AgentName, issue),
-		BodyMD: fmt.Sprintf("Your comment on **%s** mentioned **%s**, but no run was started.\n\n> %s\n\n"+
-			"The mention is recorded on the issue either way; nothing is queued and nothing will "+
+		Title:        "Your mention of " + name + " on " + issueLabel + " did not start a run",
+		BodyMD: "Your comment on " + issueLabel + " mentioned " + name + ", but no run was started.\n\n" +
+			mentionNoticeQuote(reason) + "\n\n" +
+			"The mention is recorded on the issue either way; nothing is queued and nothing will " +
 			"run on its own. Re-mention when the reason above no longer holds.",
-			issue, mention.AgentName, detail),
 		SenderType: "system",
 		SenderName: "Crewship",
 		Priority:   "low",
@@ -388,6 +510,167 @@ func (m mentionRecorder) notifyMentionUndelivered(ctx context.Context, mc mentio
 			"dispatch_state": state,
 		},
 	})
+}
+
+// notifyMentionOverflow tells the author that their comment named more agents
+// than one comment may wake.
+//
+// The bound (mentionMaxPerComment) has to exist; what it must not be is silent.
+// A comment that renders twenty mention chips and produces ten rows, ten
+// activity entries and ten runs is precisely the "something did not happen and
+// nobody was told" shape the undelivered notice above exists to close, and
+// solving one while opening the other would be no fix at all.
+//
+// One row per COMMENT, not per dropped mention — the source id is the comment,
+// so a comment naming a thousand agents is still one notice. Same targeting
+// rule as notifyMentionUndelivered, for the same reasons: an agent author has
+// no inbox, so the overflow is logged instead.
+//
+// It deliberately says nothing about whether the dropped ids named real agents:
+// they were never resolved, and a notice that distinguished "12 ignored" from
+// "12 ignored, 3 of which exist" would be the read side channel
+// resolveMentionedAgents' workspace predicate exists to deny.
+func (m mentionRecorder) notifyMentionOverflow(ctx context.Context, mc mentionContext, dropped int) {
+	if dropped <= 0 || m.db == nil || mc.WorkspaceID == "" {
+		return
+	}
+	if m.logger != nil {
+		m.logger.Warn("mentions over the per-comment bound were ignored",
+			"comment_id", mc.CommentID, "mission_id", mc.MissionID,
+			"dropped", dropped, "limit", mentionMaxPerComment)
+	}
+	targetUser, ok := mentionNoticeTarget(mc)
+	if !ok {
+		return
+	}
+
+	issue := mc.Identifier
+	if issue == "" {
+		issue = mc.MissionID
+	}
+	issueLabel := mentionNoticeValue(issue, mentionNoticeMaxField)
+
+	_ = inbox.Insert(ctx, m.db, m.logger, inbox.Item{
+		WorkspaceID:  mc.WorkspaceID,
+		Kind:         inbox.KindMessage,
+		SourceID:     "mention_overflow_" + mc.CommentID,
+		TargetUserID: targetUser,
+		Title: fmt.Sprintf("%d mentions on %s were not delivered",
+			dropped, issueLabel),
+		BodyMD: fmt.Sprintf(
+			"A comment can mention at most %d agents. Your comment on %s named more than that, "+
+				"so the first %d were delivered and the remaining %d were ignored — no run was "+
+				"started for them and nothing is queued.\n\n"+
+				"Post a follow-up comment mentioning the rest.",
+			mentionMaxPerComment, issueLabel, mentionMaxPerComment, dropped),
+		SenderType: "system",
+		SenderName: "Crewship",
+		Priority:   "low",
+		Category:   notify.CategoryIssuesComment,
+		Payload: map[string]interface{}{
+			"mission_id": mc.MissionID,
+			"comment_id": mc.CommentID,
+			"identifier": mc.Identifier,
+			"dropped":    dropped,
+			"limit":      mentionMaxPerComment,
+		},
+	})
+}
+
+// mentionNoticeTarget returns the one person a mention notice is for, and
+// whether there is one at all.
+//
+// This is the whole targeting rule, in one place, so that neither notice can
+// drift into writing a row with an empty target — which inbox.Item defines as
+// "anyone in workspace" and both the inbox reader and the external-notification
+// router honour literally.
+func mentionNoticeTarget(mc mentionContext) (string, bool) {
+	if mc.AuthorType == "user" && mc.AuthorID != "" {
+		return mc.AuthorID, true
+	}
+	return "", false
+}
+
+// mentionNoticeValue prepares one untrusted value for interpolation into an
+// inbox title or body.
+//
+// Both values that reach these notices are attacker-chosen: agents.name is
+// written by whoever created the agent — which, under guided autonomy, is
+// another agent — and the identifier's prefix is crews.issue_prefix, which
+// crews_update.go stores verbatim with no charset validation. body_md is
+// rendered as Markdown in /inbox (inbox-detail.tsx feeds it to
+// MarkdownContent), so an agent named `[approve here](https://evil.example)`
+// rendered a live link in every recipient's inbox, and `[@admin](crewship:agent/
+// <id>)` rendered a forged mention chip. The same string is pushed verbatim to
+// ntfy/Slack. The brief handed to the LLM was hardened against exactly these
+// two values in the same commit; the human-facing surface was not.
+//
+// Three steps, in order:
+//
+//	valid    invalid UTF-8 is dropped rather than stored and re-encoded;
+//	one line all whitespace collapses to single spaces, which is what makes
+//	         every BLOCK construct impossible — a heading, a list, a table, a
+//	         fence and a blockquote all need to start a line, and after this the
+//	         value cannot contain one. The title stops being a title if it wraps,
+//	         too;
+//	escape   the inline constructs that remain.
+func mentionNoticeValue(s string, max int) string {
+	return escapeInlineMarkdown(clipForBrief(strings.Join(strings.Fields(s), " "), max))
+}
+
+// mentionMarkdownSpecials is the escape set for mentionNoticeValue.
+//
+// It is deliberately not "every ASCII punctuation character": escaping `-` and
+// `.` would render `Jean-Luc` as `Jean\-Luc` on every plain-text channel
+// (shoutrrr pushes body_md as-is, and ntfy does not undo a backslash), for
+// characters that can only matter at the start of a line — which the whitespace
+// collapse above has already made unreachable. What is here is what can still
+// bite mid-sentence:
+//
+//	\        the escape character itself, or the rest of the set is bypassable
+//	[ ]      links, images (`![` needs the `[`), reference links, mention chips
+//	< >      raw HTML and autolinks
+//	` and *  code spans and emphasis — impersonating Crewship's own formatting
+//	_ ~      emphasis and, under GFM, strikethrough
+//
+// `(` and `)` are absent on purpose: a destination is only a destination after
+// a `]`, and `]` is escaped.
+const mentionMarkdownSpecials = "\\`*_[]<>~"
+
+// escapeInlineMarkdown backslash-escapes the characters in
+// mentionMarkdownSpecials. CommonMark defines a backslash before any ASCII
+// punctuation as that literal character, so the value reads exactly as written
+// once rendered.
+func escapeInlineMarkdown(s string) string {
+	if !strings.ContainsAny(s, mentionMarkdownSpecials) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 16)
+	for _, r := range s {
+		if r < 128 && strings.ContainsRune(mentionMarkdownSpecials, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// mentionNoticeQuote renders a reason as an INDENTED CODE BLOCK rather than a
+// blockquote.
+//
+// Two problems, one answer. A `> …` blockquote holds one line, so a multi-line
+// reason continued outside the quote; and a reason is the one value here that
+// must survive verbatim — a gate's sentence names the setting an operator would
+// change, and escaping it would print `delegation.max\_depth` on every
+// plain-text channel. An indented code block parses nothing at all inside
+// itself, so the text needs no escaping to be inert: safety by structure rather
+// than by escaping, for the value where escaping would cost the most.
+//
+// The whitespace collapse keeps it to one line, so the four-space indent cannot
+// be broken by a line the value chose.
+func mentionNoticeQuote(reason string) string {
+	return "    " + clipForBrief(strings.Join(strings.Fields(reason), " "), mentionNoticeMaxDetail)
 }
 
 func (m mentionRecorder) logf(msg string, mc mentionContext, err error) {
@@ -626,9 +909,12 @@ func mentionTaskBrief(req mentionDispatchRequest, targetName string) string {
 	if author == "" {
 		author = "someone"
 	}
-	body := req.CommentBody
-	if len(body) > mentionTaskMaxBody {
-		body = body[:mentionTaskMaxBody] + "\n…(comment truncated)"
+	// Runes, and a rune boundary — the same defect clipForBrief carried, in the
+	// one field where it is likeliest to fire, since a comment is the longest
+	// thing here and the one most often not written in ASCII.
+	body := strings.ToValidUTF8(req.CommentBody, "")
+	if clipped, cut := clipRunes(body, mentionTaskMaxBody); cut {
+		body = clipped + "\n…(comment truncated)"
 	}
 
 	// The labelled header shares the body's fence. An attacker can of course
@@ -659,11 +945,40 @@ func mentionTaskBrief(req mentionDispatchRequest, targetName string) string {
 
 // clipForBrief bounds one interpolated field. The body already has
 // mentionTaskMaxBody; without this, a 40 kB display name would be a brief.
+//
+// Counts RUNES and cuts on a rune boundary. `s[:max]` splits a multi-byte
+// character — every rune of a Czech or Japanese display name is two to four
+// bytes, and an emoji straddling byte 200 is cut in half — which emitted
+// invalid UTF-8 into the fenced block, and from there into assignments.task.
+// See mentionTaskMaxField for why a brief that differs from the brief the API
+// reports is an audit-trail defect and not a display bug.
+//
+// Input that is ALREADY invalid (SQLite stores bytes; nothing validates
+// agents.name on the way in) has its invalid bytes dropped, so the return value
+// is valid UTF-8 unconditionally rather than only when the caller was lucky.
 func clipForBrief(s string, max int) string {
-	if len(s) <= max {
-		return s
+	s = strings.ToValidUTF8(s, "")
+	if clipped, cut := clipRunes(s, max); cut {
+		return clipped + "…"
 	}
-	return s[:max] + "…"
+	return s
+}
+
+// clipRunes returns the first max runes of s, and whether anything was cut.
+// s must already be valid UTF-8: `for i := range s` walks rune START offsets,
+// which is what makes the slice boundary a rune boundary.
+func clipRunes(s string, max int) (string, bool) {
+	if max <= 0 {
+		return "", s != ""
+	}
+	n := 0
+	for i := range s {
+		if n == max {
+			return s[:i], true
+		}
+		n++
+	}
+	return s, false
 }
 
 // ensureMissionChat creates the synthetic chat row an issue dispatch's

@@ -247,6 +247,21 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 //	                  refuse to dispatch to it (assignments_run.go's /assign,
 //	                  issue_mentions.go's @mention, assignments.go's mission
 //	                  task; the shared predicate is refuseHeldAgent).
+//
+//	                  The mission door refuses in TWO places, and the earlier
+//	                  one is the load-bearing half. internal/orchestrator's
+//	                  scheduleTask and dispatchLeadPlanning read the agent's
+//	                  status on the SELECT they already run, and DEFER before
+//	                  writing anything — the task stays PENDING and the tick
+//	                  after approval dispatches it. Refusing only at the door
+//	                  was not enough: the mission engine treats a dispatch
+//	                  error as either "fail this task terminally" or "retry on
+//	                  the next tick", so a hold that is a WAIT was read as a
+//	                  failure by one caller and as a reason to insert a fresh
+//	                  row every 3s by the other. refuseHeldAgent stays at the
+//	                  door for the window between that read and the write; its
+//	                  error carries DispatchDeferred() so the goroutine unwinds
+//	                  the row it already wrote rather than failing the task.
 //	full            → live immediately, with a non-blocking inbox notice.
 //
 // "Created but inert beats refused" is the claim this gate rests on, and it is

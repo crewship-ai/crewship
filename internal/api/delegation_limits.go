@@ -66,16 +66,34 @@ package api
 // What that cost, and what it costs now. A human's mention is filed under the
 // TARGET (a person has no agents.id and assigned_by_id is NOT NULL with a
 // foreign key), so the naive root count charged the mention against every
-// in-flight row that agent owns in the issue's chat — including the ones IT
-// dispatched while leading the mission, which DispatchAssignment writes with
-// the same assigned_by_id, the same chat_id and a NULL parent. A lead running
-// eight tasks on an issue was therefore unmentionable by a human, and the
-// refusal was swallowed into a `refused` row nobody reads. The bucket is now
-// narrowed by dispatchCaller.selfFiled: a human's mention is counted against
-// the rows a human's mentions created (assigned_by = assigned_to = the target),
-// not against that agent's outbound delegations. Same setting, same number,
-// same server-derived count — a different WHERE, so the two kinds of work stop
-// competing for one budget.
+// in-flight row that agent owns in the issue's chat — including the ones the
+// MISSION ENGINE writes on its behalf, which carry the same assigned_by_id,
+// the same chat_id and a NULL parent. A lead running eight tasks on an issue
+// was therefore unmentionable by a human, and the refusal was swallowed into a
+// `refused` row nobody reads.
+//
+// The first attempt at fixing that narrowed the bucket by
+// dispatchCaller.selfFiled — count only rows addressed BACK to the target
+// (assigned_by = assigned_to). It did not work, because that is exactly the
+// shape the mission engine writes for a lead's own planning turn and for every
+// task a lead assigns to itself. The two kinds of work were still in one
+// bucket; the WHERE had just moved.
+//
+// THE DISCRIMINATOR IS `depth`. Every row insertCappedAssignment writes
+// carries the depth enforceDelegationCaps derived, which is 1 at the shallowest
+// (see resolveDelegationScope). The mission engine writes 0 — explicitly, and
+// the migration that added the column says why: "0 is deliberately NOT a valid
+// depth for a new row … so a legacy row can never be mistaken for one this
+// code wrote." So `depth > 0` means "a row one of THESE doors admitted", which
+// is precisely the population this cap is entitled to count. It keeps the
+// property that matters: the number is still derived from server state, from a
+// column no request can write, on the same doors as before.
+//
+// Both ROOT buckets carry it, not just the self-filed one. A mission task is
+// one authored plan, not a delegation hop — this file has always said so, and
+// mission_limits.go bounds that plan on its own door — so a lead's mission
+// rows must not consume its /assign budget either. The children bucket needs
+// no such filter: a row with a parent came from a capped door by construction.
 
 import (
 	"context"
@@ -227,52 +245,67 @@ func resolveDelegationScope(ctx context.Context, db *sql.DB, actorAgentID, works
 	return delegationScope{ParentID: parentID, Depth: parentDepth + 1}, nil
 }
 
+// The three fan-out buckets, as one WHERE clause each.
+//
+// The pre-check (countDelegationSiblings) and the insert-time re-prove
+// (fanoutGuard) answer the same question at two moments, and the file header
+// has always insisted they must not drift. They used to be two hand-copied
+// pairs of SQL strings, which is a promise rather than a mechanism; now both
+// build on these, so a change lands in one place or not at all.
+// TestFanoutPreCheckAndInsertGuardSelectTheSameRows checks the pair over a
+// seeded table rather than by inspection.
+//
+//   - CHILDREN bounds a delegated run's subtree exactly, so every row it ever
+//     created counts, terminal or not. No depth filter: a row with a parent
+//     came from a capped door by construction.
+//   - SELF-FILED is a human's mention of an agent (no acting agent, so the row
+//     is owned by the agent it targets).
+//   - ROOT is a lead working a chat.
+//
+// Both root buckets count only IN-FLIGHT rows — a lead's chat can last hours
+// across many turns, and counting its lifetime output would silently retire it
+// after N tasks — and only rows a capped door wrote (`depth > 0`, see the file
+// header).
+const (
+	fanoutBucketChildren = `parent_assignment_id = ?`
+
+	fanoutBucketSelfFiled = `assigned_by_id = ?
+			   AND assigned_to_id = ?
+			   AND chat_id = ?
+			   AND parent_assignment_id IS NULL
+			   AND depth > 0
+			   AND status IN ('PENDING','QUEUED','RUNNING')`
+
+	fanoutBucketRoot = `assigned_by_id = ?
+			   AND chat_id = ?
+			   AND parent_assignment_id IS NULL
+			   AND depth > 0
+			   AND status IN ('PENDING','QUEUED','RUNNING')`
+)
+
+// fanoutBucket picks the predicate and its arguments for one dispatch.
+func fanoutBucket(scope delegationScope, caller dispatchCaller, chatID string) (string, []any) {
+	switch {
+	case scope.ParentID != "":
+		return fanoutBucketChildren, []any{scope.ParentID}
+	case caller.selfFiled():
+		return fanoutBucketSelfFiled, []any{caller.FanoutSubjectID, caller.FanoutSubjectID, chatID}
+	default:
+		return fanoutBucketRoot, []any{caller.FanoutSubjectID, chatID}
+	}
+}
+
 // countDelegationSiblings returns how many dispatches the caller's run already
-// owns — the number the fan-out cap is compared against.
-//
-// Two shapes, one limit:
-//
-//   - a DELEGATED run is one turn of one sub-agent, so every assignment it ever
-//     created is counted, terminal or not. That bounds the subtree exactly.
-//   - a ROOT run is a lead working a chat that may last hours across many user
-//     turns, so only IN-FLIGHT dispatches count. Counting its lifetime output
-//     would silently retire a lead after N tasks, which is a different (and
-//     wrong) product decision wearing a safety cap's clothes.
-//
-// A SELF-FILED root (a human's mention: no acting agent, so the row is owned by
-// the agent it targets) narrows that second predicate to rows addressed back to
-// the same agent. Without the narrowing a person's mention was measured against
-// the target's own outbound delegations in that chat — see the file header.
+// owns — the number the fan-out cap is compared against. See fanoutBucket for
+// which rows that is and why.
 func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationScope, caller dispatchCaller, chatID string) (int, error) {
 	if db == nil {
 		return 0, nil
 	}
-	var (
-		n   int
-		err error
-	)
-	switch {
-	case scope.ParentID != "":
-		err = db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM assignments WHERE parent_assignment_id = ?`, scope.ParentID).Scan(&n)
-	case caller.selfFiled():
-		err = db.QueryRowContext(ctx, `
-			SELECT COUNT(*) FROM assignments
-			 WHERE assigned_by_id = ?
-			   AND assigned_to_id = ?
-			   AND chat_id = ?
-			   AND parent_assignment_id IS NULL
-			   AND status IN ('PENDING','QUEUED','RUNNING')`,
-			caller.FanoutSubjectID, caller.FanoutSubjectID, chatID).Scan(&n)
-	default:
-		err = db.QueryRowContext(ctx, `
-			SELECT COUNT(*) FROM assignments
-			 WHERE assigned_by_id = ?
-			   AND chat_id = ?
-			   AND parent_assignment_id IS NULL
-			   AND status IN ('PENDING','QUEUED','RUNNING')`, caller.FanoutSubjectID, chatID).Scan(&n)
-	}
-	if err != nil {
+	where, args := fanoutBucket(scope, caller, chatID)
+	var n int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM assignments WHERE `+where, args...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count delegation siblings: %w", err)
 	}
 	return n, nil
@@ -288,25 +321,11 @@ func countDelegationSiblings(ctx context.Context, db *sql.DB, scope delegationSc
 // racing dispatches serialise and the second sees the first's row, the same
 // argument claimCrewSlot rests on (assignments_queue.go).
 //
-// The predicate must stay identical to countDelegationSiblings' three branches;
-// they answer the same question at two moments.
+// It counts the SAME rows as countDelegationSiblings because it is built from
+// the same fanoutBucket — they cannot be edited apart.
 func fanoutGuard(scope delegationScope, caller dispatchCaller, chatID string, maxFanout int) (string, []any) {
-	switch {
-	case scope.ParentID != "":
-		return `(SELECT COUNT(*) FROM assignments WHERE parent_assignment_id = ?) < ?`,
-			[]any{scope.ParentID, maxFanout}
-	case caller.selfFiled():
-		return `(SELECT COUNT(*) FROM assignments
-		          WHERE assigned_by_id = ? AND assigned_to_id = ? AND chat_id = ?
-		            AND parent_assignment_id IS NULL
-		            AND status IN ('PENDING','QUEUED','RUNNING')) < ?`,
-			[]any{caller.FanoutSubjectID, caller.FanoutSubjectID, chatID, maxFanout}
-	default:
-		return `(SELECT COUNT(*) FROM assignments
-		          WHERE assigned_by_id = ? AND chat_id = ? AND parent_assignment_id IS NULL
-		            AND status IN ('PENDING','QUEUED','RUNNING')) < ?`,
-			[]any{caller.FanoutSubjectID, chatID, maxFanout}
-	}
+	where, args := fanoutBucket(scope, caller, chatID)
+	return `(SELECT COUNT(*) FROM assignments WHERE ` + where + `) < ?`, append(args, maxFanout)
 }
 
 // delegationRefusal is a cap saying no, in words the agent can act on.

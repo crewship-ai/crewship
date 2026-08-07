@@ -159,6 +159,22 @@ func (e *agentHeldError) Error() string { return e.msg }
 // enumerating gate types. *delegationRefusal carries the same marker.
 func (e *agentHeldError) dispatchRefused() {}
 
+// DispatchDeferred marks it as PERMANENT UNTIL A HUMAN ACTS, which is a
+// different thing from "refused" and the reason this method is exported.
+//
+// The mission engine (internal/orchestrator) classifies every dispatch error
+// into fail-this-task or retry-next-tick, and a hold is neither: failing it
+// turns the guided ephemeral-hire flow — where PENDING_REVIEW while an
+// operator approves is the SUPPORTED state — into a terminally failed mission
+// task that approval cannot revive, while retrying it spins at the tick rate
+// forever because the answer does not change until somebody clicks approve.
+// The third answer is "wait", and this marker is how a package that cannot
+// import this one recognises it (orchestrator/agent_hold.go).
+//
+// *delegationRefusal deliberately does NOT carry it: a fan-out cap clears on
+// its own as siblings finish, so retrying is exactly right there.
+func (e *agentHeldError) DispatchDeferred() {}
+
 // dispatchRefusal is the set of errors that mean "a gate declined this
 // dispatch", as opposed to "the dispatch broke". A refusal is recorded and
 // reported verbatim to whoever asked; a failure is logged as a bug.
@@ -180,11 +196,22 @@ type dispatchRefusal interface {
 // permissive for the same reason chatbridge's guard does — a status nobody has
 // decided about must not silently become a deny.
 //
-// This does NOT break the legitimate ephemeral hire. A hire only lands in
-// PENDING_REVIEW under guided autonomy, where waiting is the point: the CLI
-// polls exactly this transition (`crewship hire --wait`, cmd_hire.go), and
-// ApproveHire flips the row to IDLE before the hired agent is meant to work. A
-// hire that lands IDLE (trusted/full) never sees this function say no.
+// WHAT THIS COSTS THE LEGITIMATE EPHEMERAL HIRE, and how that is paid for.
+// A hire lands in PENDING_REVIEW under guided autonomy, where waiting is the
+// point: the CLI polls exactly this transition (`crewship hire --wait`,
+// cmd_hire.go), and ApproveHire flips the row to IDLE before the hired agent
+// is meant to work. A hire that lands IDLE (trusted/full) never sees this
+// function say no.
+//
+// But the mission engine can already be holding a task list that names that
+// agent, and it dispatches through DispatchAssignment. The first version of
+// this gate returned an ordinary error there, which the engine recorded as a
+// terminally FAILED task — so the operator's approval arrived at a mission
+// that had given up minutes earlier. Reasoning that the flow was safe is what
+// made that ship; it is not safe by construction, it is safe because the
+// refusal is now a DEFERRAL (see DispatchDeferred) that the engine unwinds and
+// retries, and because TestScheduleReadyTasks_HeldHireWaitsAndCompletesOnceApproved
+// drives the whole held → approved → completed flow rather than arguing about it.
 //
 // Why it exists at all: internal_status.go stages an agent CREATED BY ANOTHER
 // AGENT, with a system prompt that agent wrote, and documents the row as unable
@@ -433,11 +460,23 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 	// carries no dispatch decision. That is true of the CAPS; it is not true of
 	// the hold. A mission's task list can name a held agent — the same agent
 	// another agent just created — so the sentinel has to be honoured here too.
-	// The error marks the mission task FAILED with this sentence
-	// (mission_tasks.go's updateTaskStatus), which is the loud outcome: a
-	// silently skipped task reads as a mission that finished.
+	//
+	// It is NOT the only place it is honoured, and it must not be the first.
+	// The mission engine reads agents.status in the row lookup it already does
+	// and refuses BEFORE it flips a task to IN_PROGRESS or writes an
+	// assignment row (orchestrator/agent_hold.go), because a hold stands until
+	// a human acts and a per-tick retry that writes a row first is a row per
+	// tick forever. What survives here is the race: that read and this write
+	// are not one statement, so an agent staged in between arrives at this
+	// door, and a door that trusts its caller's check is not a door.
+	//
+	// The refusal carries DispatchDeferred (see agentHeldError), so the caller
+	// unwinds the row it wrote and leaves the task PENDING for the next tick
+	// rather than marking it terminally FAILED. Failing it was the bug: it
+	// broke the guided ephemeral hire, whose whole flow is to sit in
+	// PENDING_REVIEW while an operator approves.
 	if held := refuseHeldAgent(target.Slug, target.Status); held != nil {
-		h.logger.Info("mission dispatch refused: target agent is held",
+		h.logger.Info("mission dispatch deferred: target agent is held",
 			"assignment_id", req.AssignmentID, "agent_id", req.AgentID, "status", target.Status)
 		return held
 	}

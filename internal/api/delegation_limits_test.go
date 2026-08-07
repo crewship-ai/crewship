@@ -76,6 +76,20 @@ func (f *delegationFixture) insertDelegatedAssignment(t *testing.T, id, by, to s
 	}
 }
 
+// insertRootDispatch writes the row a ROOT /assign produces: depth 1, no
+// parent. Distinct from insertAssignment (assignments_queue_test.go), which
+// leaves depth at the column default of 0 — the value that marks a row as one
+// NO capped door wrote (a mission-engine row, or one predating the column).
+func (f *delegationFixture) insertRootDispatch(t *testing.T, id, by, to, status string) {
+	t.Helper()
+	if _, err := f.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, created_at)
+		VALUES (?, ?, ?, ?, ?, 'root dispatch', ?, 1, datetime('now'))`,
+		id, f.wsID, f.chat, by, to, status); err != nil {
+		t.Fatalf("insert root dispatch %s: %v", id, err)
+	}
+}
+
 func (f *delegationFixture) setLimit(t *testing.T, key string, v int) {
 	t.Helper()
 	if _, err := f.db.Exec(
@@ -261,8 +275,13 @@ func TestDelegationCaps_FanoutBeyondTheLimitIsRefused(t *testing.T) {
 	t.Run("lead in a chat counts only what is still in flight", func(t *testing.T) {
 		f := setupDelegationFixture(t)
 		f.setLimit(t, SettingDelegationMaxFanout, 2)
-		insertAssignment(t, f.db, "t1", f.wsID, f.chat, f.lead, f.work1, "RUNNING")
-		insertAssignment(t, f.db, "t2", f.wsID, f.chat, f.lead, f.work2, "QUEUED")
+		// depth 1 because that is what insertCappedAssignment writes for a
+		// root dispatch, and the bucket now counts only rows a capped door
+		// wrote (`depth > 0`). A depth-0 row is a mission-engine row or a
+		// pre-migration one; the fixture used to write those and was
+		// simulating /assign output with rows /assign cannot produce.
+		f.insertRootDispatch(t, "t1", f.lead, f.work1, "RUNNING")
+		f.insertRootDispatch(t, "t2", f.lead, f.work2, "QUEUED")
 
 		if w := f.assign(t, f.lead, "w1", nil); w.Code != http.StatusForbidden {
 			t.Fatalf("expected 403 at fan-out 2, got %d (%s)", w.Code, w.Body.String())

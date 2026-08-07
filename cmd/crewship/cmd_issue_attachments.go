@@ -49,7 +49,13 @@ type attachmentItem struct {
 
 // attachmentUploadLimit mirrors the server's cap so an oversized file is
 // refused locally, naming the size, instead of after a full upload.
-const attachmentUploadLimit = 25 << 20
+//
+// var (not const) so the tests that exercise the BOUNDED READ can shrink it —
+// same reason episodicIndexerPoll is a var. Proving "a file that grows past the
+// limit between the stat and the read is refused" against 25 MiB costs a
+// multi-hundred-megabyte round trip per case and proves nothing the same test at
+// 64 bytes does not. Production never assigns it.
+var attachmentUploadLimit int64 = 25 << 20
 
 var issueAttachmentsCmd = &cobra.Command{
 	Use:     "attachments <identifier>",
@@ -127,6 +133,9 @@ Examples:
 		if info.IsDir() {
 			return fmt.Errorf("%s is a directory", localPath)
 		}
+		// The stat is an EARLY refusal, not the enforcement — see the bounded
+		// copy below. It exists so an obviously oversized file is rejected
+		// before the command resolves the issue over the network.
 		if info.Size() > attachmentUploadLimit {
 			return fmt.Errorf("%s is %s — the limit is %s",
 				localPath, binaryBytes(info.Size()), binaryBytes(attachmentUploadLimit))
@@ -151,8 +160,23 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("multipart form: %w", err)
 		}
-		if _, err := io.Copy(fw, fh); err != nil {
+		// Enforce the ceiling WHILE READING, not from the stat above.
+		//
+		// The stat and this read are separated by an open and a round trip to
+		// the server, and the path is not held still across them: a log file
+		// being appended to, a file replaced by a build, or a path an attacker
+		// controls can all be small at the stat and enormous here. Trusting the
+		// stat means the command buffers however much it is handed. The limit is
+		// read as limit+1 so "exactly at the limit" still succeeds and one byte
+		// past it is detectable rather than silently truncated into a corrupt
+		// upload the server would accept.
+		n, err := io.Copy(fw, io.LimitReader(fh, attachmentUploadLimit+1))
+		if err != nil {
 			return fmt.Errorf("multipart copy: %w", err)
+		}
+		if n > attachmentUploadLimit {
+			return fmt.Errorf("%s grew while it was being read and is now over the %s limit",
+				localPath, binaryBytes(attachmentUploadLimit))
 		}
 		if err := mw.Close(); err != nil {
 			return fmt.Errorf("multipart close: %w", err)
@@ -223,10 +247,32 @@ local path is how a download writes outside the directory you ran it in.
 		if err != nil {
 			return fmt.Errorf("create %s: %w", attachmentOutPath, err)
 		}
-		defer out.Close()
+		// A WRITABLE handle's Close is not a formality — a short write and a
+		// full disk are both reported there and nowhere else, so `defer
+		// out.Close()` turns "the download failed" into "the download
+		// succeeded and the file is truncated". Closed explicitly, with the
+		// error returned when nothing else is being returned, and the partial
+		// file removed: this is the same shape `crewship backup download` uses
+		// (cmd_backup_admin.go), for the same reason — a half-written file that
+		// looks complete is worse than no file.
 		n, err := io.Copy(out, body)
 		if err != nil {
-			return err
+			_ = out.Close()
+			_ = os.Remove(attachmentOutPath)
+			return fmt.Errorf("write %s: %w", attachmentOutPath, err)
+		}
+		// The bound is enforced, not merely applied: LimitReader stops at
+		// limit+1, so a body over the ceiling would otherwise be written out
+		// one byte short of itself and reported as a successful download.
+		if n > attachmentUploadLimit {
+			_ = out.Close()
+			_ = os.Remove(attachmentOutPath)
+			return fmt.Errorf("%s is over the %s attachment limit — refusing to write a truncated file",
+				args[1], binaryBytes(attachmentUploadLimit))
+		}
+		if cerr := out.Close(); cerr != nil {
+			_ = os.Remove(attachmentOutPath)
+			return fmt.Errorf("close %s: %w", attachmentOutPath, cerr)
 		}
 		cli.PrintSuccess(fmt.Sprintf("Wrote %s to %s.", binaryBytes(n), attachmentOutPath))
 		return nil

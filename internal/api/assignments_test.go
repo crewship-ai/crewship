@@ -536,8 +536,14 @@ func TestAssignmentCreate_HeldTargetIsNotRun(t *testing.T) {
 // the row already exists. That is true of the delegation CAPS and false of the
 // hold — a plan can name an agent an operator has not approved, and the
 // approval is the only thing standing between that agent's self-written system
-// prompt and a container. The error marks the mission task FAILED, which is the
-// loud outcome; a skipped task would read as a mission that finished.
+// prompt and a container.
+//
+// The mission engine now refuses a hold it can SEE before writing anything
+// (orchestrator/agent_hold.go); this door catches the one staged in the race
+// window between that read and the dispatch. The error must be a DEFERRAL, not
+// a plain failure — the engine reads that marker to decide between "this task
+// is dead" and "wait for the operator", and getting it wrong is what broke the
+// guided ephemeral hire.
 func TestDispatchAssignment_HeldTargetIsRefused(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -564,6 +570,27 @@ func TestDispatchAssignment_HeldTargetIsRefused(t *testing.T) {
 		t.Fatal("DispatchAssignment ran a PENDING_REVIEW agent")
 	}
 	if !strings.Contains(err.Error(), "PENDING_REVIEW") {
-		t.Errorf("error = %q, want the hold named so the failed task says why", err)
+		t.Errorf("error = %q, want the hold named so the waiting task says why", err)
+	}
+	if _, ok := err.(interface{ DispatchDeferred() }); !ok {
+		t.Errorf("error is %T, which does not carry DispatchDeferred — the mission engine will "+
+			"read this hold as a terminal failure and an approved hire will never run", err)
+	}
+
+	// MUTATION: approve the agent and the identical dispatch is admitted past
+	// the hold. (It goes on to fail on the missing crew/chat fixtures, which is
+	// a different error — the assertion is that it is no longer the hold.)
+	execOrFatal(t, db, `UPDATE agents SET status = 'IDLE' WHERE id = 'heldM'`)
+	err = h.DispatchAssignment(context.Background(), orchestrator.DispatchRequest{
+		AssignmentID: "asg-held",
+		AgentID:      "heldM",
+		AgentSlug:    "heldm",
+		CrewID:       "crewM",
+		WorkspaceID:  wsID,
+		ChatID:       "chatM",
+		Task:         "do the thing",
+	})
+	if err != nil && strings.Contains(err.Error(), "PENDING_REVIEW") {
+		t.Errorf("still refused after approval: %v — the guard refuses unconditionally", err)
 	}
 }

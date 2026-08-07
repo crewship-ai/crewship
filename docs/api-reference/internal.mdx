@@ -468,9 +468,15 @@ Two rows block below `full` and two do not, and the split is deliberate. `crew_c
 | Route | Sentinel | Released by |
 |---|---|---|
 | crew | the new crew is pinned to `autonomy_level=strict`, so `agent_create` and `routine_schedule_create` inside it are themselves refused | approval restores the *creating* crew's level |
-| agent | `status = PENDING_REVIEW`; every door that starts an agent refuses it — a chat message, `/assign` (`409`), an `@mention` on an issue, and a mission task | approval flips it to `IDLE` — also reachable via `POST /api/v1/agents/{agentId}/approve-hire` |
+| agent | `status = PENDING_REVIEW`. Refused by a chat message, `/assign` (`409`), an `@mention` on an issue, and a mission task — but **not** by every door: see the note below | approval flips it to `IDLE`. **Not** `POST /api/v1/agents/{agentId}/approve-hire`, which answers `409` for a gate-held agent |
 | schedule | `enabled = 0`; the scheduler only picks up `enabled = 1` rows | approval enables it — also `PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` |
 | mission | stays `PLANNING`; `POST /api/v1/internal/missions/{missionId}/start` answers `403` | approval lets `start` proceed |
+
+<Warning>
+**"Inert" is true for the doors an agent can reach by being named, not for every door in the product.** Three surfaces still resolve an agent and run it without reading `agents.status`: `/query` (peer questions), the webhook trigger, and a routine's agent step. All three predate the autonomy gate and none of them can be reached by mentioning an agent or assigning it work, which is why they are listed rather than claimed closed. The authoritative list lives beside the code, in `internal/api/internal_status.go`.
+
+`POST /api/v1/agents/{agentId}/approve-hire` is **not** a release path for a gate-held agent and answers `409`. It decides *ephemeral hire* rows only. It was briefly widened to decide autonomy-gate rows too, which let a `MANAGER` release a hold the gate addresses to OWNER/ADMIN and let a terminal (denied or timed-out) row be released anyway; narrowing it back is what closed that. The one release surface is `POST /api/v1/approvals/{id}/decide` — `crewship approvals approve <id>`.
+</Warning>
 
 <Note>
 The **schedule** row is no longer reached by any autonomy level — `strict` refuses and everything below it proceeds. It is documented because the machinery is still live in two cases: a pending row written by an instance that ran an earlier build, and the fail-closed fallback when the policy resolver is unwired (which holds even the actions `guided` now allows). The **mission** row applies at `strict` only.

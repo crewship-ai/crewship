@@ -82,6 +82,62 @@ func (h *InternalIssueHandler) logActivity(ctx context.Context, missionID, actor
 	})
 }
 
+// assertAuthorAgentInWorkspace proves the agent named as a comment's author
+// belongs to the caller's workspace, and writes the refusal if it does not.
+// Returns true when the caller may proceed, mirroring the shape of
+// assertInternalTokenWorkspace so both guards read the same at a call site.
+//
+// Both comment doors already scope the ISSUE to the workspace, and both then
+// accepted any non-empty agent_id as the author. That is one guard short: the
+// id is written to mission_comments.author_id and handed to the mention
+// recorder as the author, so a foreign id produced a comment attributed to an
+// agent this tenant does not have.
+//
+// 404, not 403: an agent id that does not resolve here is indistinguishable
+// from one that does not exist, and saying which would answer the question the
+// probe was asking. Same reasoning the issue lookup above it uses.
+func (h *InternalIssueHandler) assertAuthorAgentInWorkspace(w http.ResponseWriter, r *http.Request, workspaceID, agentID string) bool {
+	if agentID == "" {
+		return true // callers reject an empty author separately, with a clearer message
+	}
+	var exists int
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		agentID, workspaceID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeProblem(w, r, http.StatusNotFound, "author agent not found in this workspace")
+		return false
+	}
+	if err != nil {
+		internalError(w, r, h.logger, "resolve comment author", err)
+		return false
+	}
+	return true
+}
+
+// resolveCommentAuthorName reads an agent's display name for the mention
+// brief, scoped to the workspace.
+//
+// The scope is not belt-and-braces even though the callers now prove the
+// binding first. A display name is chosen by whoever created the agent, so an
+// unscoped read here is a way to pull a string out of another tenant through a
+// field nobody thinks of as a read — and it lands inside the task brief handed
+// to the woken agent, which is the one place attacker-chosen text is most
+// worth having. Keeping the predicate on the query means the guard cannot be
+// removed from a caller without this failing too.
+//
+// Best-effort by design: an unreadable name yields "", and the brief renders
+// without it rather than failing a comment that already landed.
+func (h *InternalIssueHandler) resolveCommentAuthorName(ctx context.Context, workspaceID, agentID string) string {
+	if agentID == "" {
+		return ""
+	}
+	var name string
+	_ = h.db.QueryRowContext(ctx,
+		`SELECT name FROM agents WHERE id = ? AND workspace_id = ?`, agentID, workspaceID).Scan(&name)
+	return name
+}
+
 // List handles GET /api/v1/internal/issues
 // Returns issues for a workspace, filtered by crew_id, status, assignee, etc.
 func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -540,6 +596,14 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		writeProblem(w, r, http.StatusBadRequest, "agent_id is required when adding a comment")
 		return
 	}
+	// …and it must be an agent of THIS workspace. The issue is already scoped
+	// (F-4 below); the author was not, so an inline comment could be attributed
+	// to a stranger — see resolveCommentAuthorName for why that is a read of
+	// another tenant and not only a mis-attribution.
+	if req.Comment != nil && *req.Comment != "" &&
+		!h.assertAuthorAgentInWorkspace(w, r, req.WorkspaceID, req.AgentID) {
+		return
+	}
 
 	// Actor identity for the audit trail. The sidecar forwards its trusted
 	// IPC agent identity as agent_id; an empty value means a non-agent
@@ -779,7 +843,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	if inlineCommentID != "" {
 		var issueTitle, authorName string
 		_ = h.db.QueryRowContext(r.Context(), `SELECT title FROM missions WHERE id = ?`, missionID).Scan(&issueTitle)
-		_ = h.db.QueryRowContext(r.Context(), `SELECT name FROM agents WHERE id = ?`, req.AgentID).Scan(&authorName)
+		authorName = h.resolveCommentAuthorName(r.Context(), req.WorkspaceID, req.AgentID)
 		h.mentionRecorder().record(r.Context(), mentionContext{
 			WorkspaceID: req.WorkspaceID,
 			MissionID:   missionID,
@@ -826,6 +890,11 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 	if !assertInternalTokenWorkspace(w, r, req.WorkspaceID) {
 		return
 	}
+	// The AUTHOR needs the same binding the issue has. Without it the id is
+	// accepted on nothing but being non-empty.
+	if !h.assertAuthorAgentInWorkspace(w, r, req.WorkspaceID, req.AgentID) {
+		return
+	}
 
 	var missionID, crewID, issueTitle string
 	err := h.db.QueryRowContext(r.Context(),
@@ -866,7 +935,7 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 	// (A mentions B, B's reply mentions C) is bounded by the depth cap read
 	// off the assignment row A is executing. See issue_mentions.go.
 	var authorName string
-	_ = h.db.QueryRowContext(r.Context(), `SELECT name FROM agents WHERE id = ?`, authorID).Scan(&authorName)
+	authorName = h.resolveCommentAuthorName(r.Context(), req.WorkspaceID, authorID)
 	h.mentionRecorder().record(r.Context(), mentionContext{
 		WorkspaceID: req.WorkspaceID,
 		MissionID:   missionID,

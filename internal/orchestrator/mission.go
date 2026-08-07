@@ -351,7 +351,16 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 					e.logger.Error("count tasks", "mission_id", ms.ID, "error", countErr)
 				} else if taskCount == 0 {
 					if planErr := e.dispatchLeadPlanning(ctx, ms); planErr != nil {
-						e.logger.Error("lead planning failed", "mission_id", ms.ID, "error", planErr)
+						// A deferral is a wait, not a breakage: the lead is
+						// held for an operator and dispatchLeadPlanning wrote
+						// nothing. Logging it at ERROR every three seconds
+						// was how a standing hold read as a broken instance.
+						if isDeferredDispatch(planErr) {
+							e.logger.Info("lead planning is waiting for an operator",
+								"mission_id", ms.ID, "reason", planErr.Error())
+						} else {
+							e.logger.Error("lead planning failed", "mission_id", ms.ID, "error", planErr)
+						}
 					} else {
 						e.mu.Lock()
 						ms.planningDispatched = true
