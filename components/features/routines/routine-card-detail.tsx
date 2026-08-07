@@ -3,9 +3,10 @@
 // The routine detail, as one scrolling surface of cards.
 //
 // Replaces the five-tab shell (Overview / Preview / Runs / Schedules /
-// Advanced). The design was argued on /routines-new against the real
-// renderer before landing here; what follows is that layout wired to
-// real data.
+// Advanced). The design was argued on a throwaway /routines-new preview
+// route against the real renderer before landing here; that route is gone
+// now that this is the shipping layout. What follows is it wired to real
+// data.
 //
 // What went, and why:
 //
