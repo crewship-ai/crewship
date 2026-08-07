@@ -644,6 +644,43 @@ func truncateErrorForList(s string) string {
 	return s[:cut] + "…"
 }
 
+// automationProvenance recovers the automation that caused a run from the
+// run's metadata_json, returning ("", "", "") when no rule did.
+//
+// Why this is read from metadata rather than a column: an automation parks a
+// deferred run in pending_runs, and PendingRunDispatcher fires EVERY deferred
+// run with triggered_via="schedule" (internal/pipeline/pending_dispatcher.go).
+// The enum therefore reports a cron schedule and an automation identically.
+// internal/automation's flusher writes the rule's identity into the pending
+// run's metadata, which is the only place the distinction survives.
+//
+// metadata_json is an opaque, ROUTINE-WRITABLE scratchpad — a step can set
+// {{ run.metadata.X }} — so nothing here may assume a shape. Unparseable
+// metadata, missing keys and non-string values all yield empty results rather
+// than an error: a malformed scratchpad on one row must not sink a list.
+//
+// AutomationName is the gate. A run is reported as rule-fired only when the
+// rule's NAME is present and non-empty, so a cron run whose metadata happens
+// to carry an unrelated key is never promoted to "started by a rule".
+func automationProvenance(metadataJSON string) (id, name, eventType string) {
+	if metadataJSON == "" || metadataJSON == "{}" {
+		return "", "", ""
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(metadataJSON), &meta); err != nil {
+		return "", "", ""
+	}
+	str := func(k string) string {
+		s, _ := meta[k].(string)
+		return s
+	}
+	name = str("automation_name")
+	if name == "" {
+		return "", "", ""
+	}
+	return str("automation_id"), name, str("trigger_event_type")
+}
+
 // parseSmallInt parses a small positive integer without pulling in
 // strconv.Atoi for a single-digit pattern. Worth a few lines because
 // it caps at 999 — enough for `limit` clamps without the overhead of

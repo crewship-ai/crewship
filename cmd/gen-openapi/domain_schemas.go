@@ -46,6 +46,12 @@ func executionSchemaComponents() map[string]any {
 		"started_at": timeString(), "ended_at": timeString(), "current_step_id": str(), "output": str(),
 		"cost_usd": number(), "duration_ms": integer(), "error_message": str(), "failed_at_step": str(),
 		"error_fingerprint": str(), "triggered_via": str(), "triggered_by_id": str(), "idempotency_key": str(),
+		// Composition provenance. chain_depth is always present (0 = a run
+		// somebody started); the rest appear only when they apply, and
+		// automation_* is how a rule-fired run is told apart from a cron —
+		// both arrive with triggered_via="schedule".
+		"chain_depth": integer(), "chain_origin": str(),
+		"automation_id": str(), "automation_name": str(), "trigger_event_type": str(),
 	})
 	schedule := obj(map[string]any{
 		"id": str(), "workspace_id": str(), "name": str(), "target_pipeline_id": str(), "target_pipeline_slug": str(),

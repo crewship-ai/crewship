@@ -9867,6 +9867,18 @@
       },
       "RunRecord": {
         "properties": {
+          "automation_id": {
+            "type": "string"
+          },
+          "automation_name": {
+            "type": "string"
+          },
+          "chain_depth": {
+            "type": "integer"
+          },
+          "chain_origin": {
+            "type": "string"
+          },
           "cost_usd": {
             "type": "number"
           },
@@ -9912,6 +9924,9 @@
             "type": "string"
           },
           "status": {
+            "type": "string"
+          },
+          "trigger_event_type": {
             "type": "string"
           },
           "triggered_by_id": {
