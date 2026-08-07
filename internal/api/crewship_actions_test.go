@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -37,6 +38,17 @@ CREATE TABLE crews (
     autonomy_reason TEXT
 );`); err != nil {
 		t.Fatalf("schema: %v", err)
+	}
+	// The escalation backlog cap counts rows here (crewship_escalation_cap.go).
+	// Present and empty on every fixture so the cap answers "0 pending" rather
+	// than failing closed on a missing table for verbs that never reach it.
+	if _, err := db.Exec(`
+CREATE TABLE escalations (
+    id TEXT PRIMARY KEY,
+    crew_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING'
+);`); err != nil {
+		t.Fatalf("escalations schema: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO crews (id, autonomy_level, behavior_mode) VALUES (?, ?, 'warn')`,
 		crewID, level); err != nil {
@@ -83,7 +95,7 @@ func TestCrewshipActions_InjectedIdentityBeatsAuthoredArgs(t *testing.T) {
 	srv := fakeInternalAPI(t, &calls)
 	db := crewshipPolicyDB(t, "crew_ok", "full")
 
-	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), slog.Default())
+	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
 	if actions == nil {
 		t.Fatal("dispatcher not constructed")
 	}
@@ -147,7 +159,7 @@ func TestCrewshipActions_HeldDecisionRefusesWithoutCalling(t *testing.T) {
 	srv := fakeInternalAPI(t, &calls)
 	db := crewshipPolicyDB(t, "crew_strict", "strict")
 
-	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), slog.Default())
+	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
 	_, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
 		Verb:        "issue.create",
 		Args:        map[string]any{"title": "x"},
@@ -175,7 +187,7 @@ func TestCrewshipActions_NilResolverFailsClosed(t *testing.T) {
 	var calls []capturedCall
 	srv := fakeInternalAPI(t, &calls)
 
-	actions := newCrewshipActions(srv.URL, "master-token", nil, slog.Default())
+	actions := newCrewshipActions(srv.URL, "master-token", nil, nil, slog.Default())
 	if _, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
 		Verb: "issue.create", Args: map[string]any{"title": "x"},
 		WorkspaceID: "ws", CrewID: "crew",
@@ -205,7 +217,7 @@ func TestCrewshipActions_UngovernedVerbRefusedAtDispatch(t *testing.T) {
 	srv := fakeInternalAPI(t, &calls)
 	db := crewshipPolicyDB(t, "crew_full", "full")
 
-	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), slog.Default())
+	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
 	if _, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
 		Verb: ungoverned, Args: map[string]any{"identifier": "ENG-1", "body": "x"},
 		WorkspaceID: "ws", CrewID: "crew_full",
@@ -252,5 +264,180 @@ func TestCrewshipRoutePath(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// Every verb's PolicyAction is a plain string, because internal/pipeline must
+// not import internal/policy. That makes a typo compile — and then fail
+// SILENTLY-ish forever: DecideAction answers its defensive InboxApprove for an
+// action it has never heard of, so the verb refuses at 03:00 with a message
+// about autonomy levels and never says "typo". This is the check the type
+// system cannot do, on the seam where the two packages meet.
+func TestCrewshipVerbs_EveryPolicyActionIsDeclared(t *testing.T) {
+	for _, v := range pipeline.CrewshipVerbs() {
+		name := pipeline.CrewshipVerbPolicyAction(v)
+		if name == "" {
+			continue // declared-but-ungoverned is refused at save, by design
+		}
+		if !policy.IsKnownAction(policy.Action(name)) {
+			t.Errorf("verb %q is gated on policy action %q, which internal/policy does not declare — "+
+				"it would refuse forever on the defensive default", v, name)
+		}
+	}
+}
+
+// The five verbs that shipped refused must now DISPATCH for a crew whose
+// autonomy level allows them. Without this, "the Actions exist" and "the verbs
+// work" are two different claims and only the first is tested.
+func TestCrewshipActions_PreviouslyRefusedVerbsDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		verb string
+		args map[string]any
+		path string
+	}{
+		{"issue.update", map[string]any{"identifier": "ENG-1", "status": "IN_PROGRESS"},
+			"/api/v1/internal/issues/ENG-1"},
+		{"issue.comment", map[string]any{"identifier": "ENG-1", "body": "hi"},
+			"/api/v1/internal/issues/ENG-1/comments"},
+		{"issue.link", map[string]any{"identifier": "ENG-1", "target_identifier": "ENG-2", "relation_type": "relates_to"},
+			"/api/v1/internal/issues/ENG-1/relations"},
+		{"assignment.create", map[string]any{"target_slug": "viktor", "task": "look", "chat_id": "chat_1"},
+			"/api/v1/internal/assignments"},
+		{"escalation.create", map[string]any{"from_slug": "lead", "reason": "stuck", "chat_id": "chat_1"},
+			"/api/v1/internal/escalations"},
+	} {
+		t.Run(tc.verb, func(t *testing.T) {
+			var calls []capturedCall
+			srv := fakeInternalAPI(t, &calls)
+			db := crewshipPolicyDB(t, "crew_full", "full")
+
+			actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
+			if _, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
+				Verb: tc.verb, Args: tc.args,
+				WorkspaceID: "ws_real", CrewID: "crew_full",
+				AgentID: "agent_real", RunID: "run_real",
+			}); err != nil {
+				t.Fatalf("%s must dispatch now that it is governed: %v", tc.verb, err)
+			}
+			if len(calls) != 1 {
+				t.Fatalf("made %d calls, want 1", len(calls))
+			}
+			if calls[0].path != tc.path {
+				t.Errorf("dispatched to %q, want %q", calls[0].path, tc.path)
+			}
+		})
+	}
+}
+
+// The acting agent must come from the RUN under BOTH names the internal routes
+// read it by. agent_id is what issue.comment requires (a comment with no author
+// is a 400), and actor_agent_id is what the delegation cap measures depth from —
+// an authored value there is depth laundering, which is the exact failure
+// delegation_limits.go was written against. This test reddens if either is
+// merged the other way round.
+func TestCrewshipActions_ActingAgentIsInjectedUnderBothNames(t *testing.T) {
+	var calls []capturedCall
+	srv := fakeInternalAPI(t, &calls)
+	db := crewshipPolicyDB(t, "crew_full", "full")
+
+	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
+	if _, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
+		Verb: "assignment.create",
+		Args: map[string]any{
+			"target_slug": "viktor", "task": "look", "chat_id": "chat_1",
+			// A routine author claiming to be somebody shallower in the tree.
+			"agent_id":       "agent_forged",
+			"actor_agent_id": "agent_forged",
+		},
+		WorkspaceID: "ws_real", CrewID: "crew_full", AgentID: "agent_real",
+	}); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("made %d calls, want 1", len(calls))
+	}
+	for _, field := range []string{"agent_id", "actor_agent_id"} {
+		if got, _ := calls[0].body[field].(string); got != "agent_real" {
+			t.Errorf("body[%q] = %q, want %q — the run's acting agent must win over the author's args",
+				field, got, "agent_real")
+		}
+	}
+}
+
+// The escalation backlog cap: the bound the autonomy matrix structurally cannot
+// express. escalation_create is allowed at EVERY autonomy level — including
+// full, used here — so if this number does not hold, nothing does.
+func TestCrewshipActions_EscalationCapRefusesOnABacklog(t *testing.T) {
+	var calls []capturedCall
+	srv := fakeInternalAPI(t, &calls)
+	db := crewshipPolicyDB(t, "crew_full", "full")
+
+	// One under the default: still allowed.
+	for i := 0; i < defaultEscalationMaxPendingPerCrew-1; i++ {
+		if _, err := db.Exec(`INSERT INTO escalations (id, crew_id, status) VALUES (?, 'crew_full', 'PENDING')`,
+			"esc_"+strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
+	req := pipeline.CrewshipRequest{
+		Verb:        "escalation.create",
+		Args:        map[string]any{"from_slug": "lead", "reason": "stuck", "chat_id": "chat_1"},
+		WorkspaceID: "ws_real", CrewID: "crew_full", AgentID: "agent_real",
+	}
+	if _, err := actions.Do(context.Background(), req); err != nil {
+		t.Fatalf("under the cap must still escalate: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("made %d calls, want 1", len(calls))
+	}
+
+	// One more unresolved row puts the crew AT the limit — the next routine
+	// escalation is refused, without a call.
+	if _, err := db.Exec(`INSERT INTO escalations (id, crew_id, status) VALUES ('esc_last', 'crew_full', 'PENDING')`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := actions.Do(context.Background(), req)
+	if err == nil {
+		t.Fatal("a crew at its escalation backlog limit must not raise another from a routine")
+	}
+	if !strings.Contains(err.Error(), SettingEscalationMaxPendingPerCrew) {
+		t.Errorf("the refusal must name the setting an operator would change, got %q", err)
+	}
+	if len(calls) != 1 {
+		t.Errorf("made %d calls — the cap must run BEFORE the write", len(calls))
+	}
+
+	// Resolving the queue gives the budget back. That is the point of counting a
+	// BACKLOG rather than a rate: no window, no timer, nothing to reset.
+	if _, err := db.Exec(`UPDATE escalations SET status = 'RESOLVED' WHERE crew_id = 'crew_full'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := actions.Do(context.Background(), req); err != nil {
+		t.Fatalf("a resolved queue must restore the budget: %v", err)
+	}
+}
+
+// A cap that cannot read its own state has not established that this escalation
+// is inside it. Paging a human anyway is the unbounded behaviour it exists to
+// end, so an unreadable table refuses.
+func TestCrewshipActions_EscalationCapFailsClosedOnUnreadableState(t *testing.T) {
+	var calls []capturedCall
+	srv := fakeInternalAPI(t, &calls)
+	db := crewshipPolicyDB(t, "crew_full", "full")
+	if _, err := db.Exec(`DROP TABLE escalations`); err != nil {
+		t.Fatal(err)
+	}
+
+	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
+	if _, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
+		Verb:        "escalation.create",
+		Args:        map[string]any{"from_slug": "lead", "reason": "stuck", "chat_id": "chat_1"},
+		WorkspaceID: "ws_real", CrewID: "crew_full",
+	}); err == nil {
+		t.Fatal("an unreadable escalation count must refuse, not proceed")
+	}
+	if len(calls) != 0 {
+		t.Errorf("made %d calls despite an unreadable cap", len(calls))
 	}
 }

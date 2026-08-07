@@ -69,6 +69,99 @@ func TestValidate_CrewshipVerbWithoutPolicyActionFailsAtSave(t *testing.T) {
 	}
 }
 
+// The ungoverned refusal is a live mechanism, not scaffolding that the first
+// five verbs consumed. Every verb in the registry carries a policy action now,
+// so the test above skips — which would leave the refusal path unexercised
+// exactly when the next capability is added. Register one, prove it is refused,
+// remove it.
+func TestValidate_CrewshipUngovernedVerbRefusal_StillWorks(t *testing.T) {
+	const name = "widget.detonate"
+	crewshipVerbs[name] = crewshipVerb{
+		Method: "POST", Path: "/api/v1/internal/widgets",
+		Summary: "test-only, no policy action",
+	}
+	defer delete(crewshipVerbs, name)
+
+	// The sentinel, at the function that raises it. Validate flattens its
+	// findings into a path-prefixed multierror, so errors.Is does not survive
+	// the save path — assert the sentinel here and the refusal there.
+	if err := ValidateCrewshipAction("act", name); !errors.Is(err, ErrCrewshipVerbUngoverned) {
+		t.Errorf("expected ErrCrewshipVerbUngoverned, got %v", err)
+	}
+
+	err := Validate(crewshipDSL(name, map[string]any{}), nil, nil)
+	if err == nil {
+		t.Fatal("a verb with no policy action must be refused at save")
+	}
+	if !strings.Contains(err.Error(), "no policy action") {
+		t.Errorf("the save-time error must say WHY, got %q", err)
+	}
+	if !strings.Contains(err.Error(), name) {
+		t.Errorf("the error must name the offending verb, got %q", err)
+	}
+}
+
+// The five verbs that shipped refused must now SAVE — and an unknown one must
+// still fail. Both halves in one test on purpose: "enable everything" and
+// "accept everything" look identical from the first half alone, and the second
+// is what distinguishes a gate that was opened from a gate that was removed.
+func TestValidate_CrewshipPreviouslyRefusedVerbsNowSave(t *testing.T) {
+	// Minimum viable args per verb — the route's own requirements minus the
+	// identity fields the dispatcher injects.
+	args := map[string]map[string]any{
+		"issue.update":      {"identifier": "ENG-1", "status": "IN_PROGRESS"},
+		"issue.comment":     {"identifier": "ENG-1", "body": "the nightly check failed"},
+		"issue.link":        {"identifier": "ENG-1", "target_identifier": "ENG-2", "relation_type": "relates_to"},
+		"assignment.create": {"target_slug": "viktor", "task": "look at ENG-1", "chat_id": "chat_1"},
+		"escalation.create": {"from_slug": "lead", "reason": "needs a human", "chat_id": "chat_1"},
+	}
+	for verb, a := range args {
+		t.Run(verb, func(t *testing.T) {
+			if got := CrewshipVerbPolicyAction(verb); got == "" {
+				t.Fatalf("%s still has no policy action — it cannot save", verb)
+			}
+			if err := Validate(crewshipDSL(verb, a), nil, nil); err != nil {
+				t.Fatalf("%s must save now that it is governed: %v", verb, err)
+			}
+		})
+	}
+
+	// …and the gate is still a gate.
+	if err := Validate(crewshipDSL("issue.annihilate", map[string]any{}), nil, nil); err == nil {
+		t.Error("an unknown verb must still be refused at save")
+	} else if !strings.Contains(err.Error(), "unknown crewship action") {
+		t.Errorf("expected the unknown-verb refusal, got %v", err)
+	}
+	if err := ValidateCrewshipAction("act", "issue.annihilate"); !errors.Is(err, ErrCrewshipVerbUnknown) {
+		t.Errorf("expected ErrCrewshipVerbUnknown for an unknown verb, got %v", err)
+	}
+}
+
+// Every verb's required args must be the route's required fields minus what the
+// dispatcher injects. A verb that saves and then 400s on a field the author was
+// never asked for is the 03:00 failure this registry exists to prevent, and the
+// list is hand-kept — so pin the two that carry the most (both were empty when
+// the verbs shipped refused, which would have been a save-clean 400-at-run).
+func TestCrewshipVerbs_RequiredArgsCoverTheRoute(t *testing.T) {
+	want := map[string][]string{
+		"assignment.create": {"target_slug", "task", "chat_id"},
+		"escalation.create": {"from_slug", "reason", "chat_id"},
+		"issue.link":        {"identifier", "target_identifier", "relation_type"},
+	}
+	for verb, need := range want {
+		have := map[string]bool{}
+		for _, a := range crewshipVerbs[verb].RequiredArgs {
+			have[a] = true
+		}
+		for _, a := range need {
+			if !have[a] {
+				t.Errorf("%s does not require %q, which its internal route rejects the "+
+					"request without — the author would learn that at run time", verb, a)
+			}
+		}
+	}
+}
+
 // A governed verb with its required args saves. The gate must bound the kind,
 // not forbid it — without this, "refuse everything" would pass the two above.
 func TestValidate_CrewshipGovernedVerbSaves(t *testing.T) {
@@ -308,5 +401,33 @@ func TestCrewshipVerbs_RegistryIsCoherent(t *testing.T) {
 	}
 	if err := ValidateCrewshipAction("s", "nope"); !errors.Is(err, ErrCrewshipVerbUnknown) {
 		t.Errorf("an unknown action must wrap ErrCrewshipVerbUnknown, got %v", err)
+	}
+}
+
+// The routine in docs/guides/routines.mdx must actually save. A documented
+// example the validator refuses is worse than no example: it is the first thing
+// an author copies, and the error it produces reads as their mistake.
+func TestValidate_CrewshipDocumentedExampleSaves(t *testing.T) {
+	dsl := &DSL{
+		DSLVersion: "1.0",
+		Name:       "nightly-probe",
+		Inputs:     []InputSpec{{Name: "issue", Type: "string"}},
+		Steps: []Step{
+			{ID: "probe", Type: StepHTTP, HTTP: &HTTPStep{
+				Method: "GET", URL: "https://status.example.com/api/health"}},
+			{ID: "report", Type: StepCrewship, Action: "issue.comment", Args: map[string]any{
+				"identifier": "{{ inputs.issue }}",
+				"body":       "Nightly probe says: {{ steps.probe.output }}",
+			}},
+			{ID: "close_it", Type: StepCrewship, Action: "issue.update",
+				If: "{{ steps.probe.output }}",
+				Args: map[string]any{
+					"identifier": "{{ inputs.issue }}",
+					"status":     "DONE",
+				}},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err != nil {
+		t.Fatalf("the documented crewship example must validate: %v", err)
 	}
 }

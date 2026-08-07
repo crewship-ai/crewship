@@ -119,6 +119,87 @@ const (
 	// that asked for it. No principal either, but the only one of the four
 	// that keeps firing after everyone has stopped looking.
 	ActionRoutineScheduleCreate Action = "routine_schedule_create"
+
+	// The three below are #1791's follow-on: the capabilities a `crewship`
+	// routine step reaches that had no Action at all, so the step kind shipped
+	// with five of its six verbs refused at save rather than dispatched
+	// ungoverned (internal/pipeline/crewship_step.go).
+	//
+	// WHAT THEY ARE NOT. They are not a new restriction on agents. Every one of
+	// these capabilities is already reachable, ungated, by an agent inside a
+	// container: internal/sidecar/issue_verbs.go forwards update/comment/link,
+	// query.go raises escalations, and POST /internal/assignments is the door
+	// behind /assign. None of those handlers consults autonomy_level today.
+	// Declaring an Action does not close that — it makes it CLOSEABLE, which is
+	// the same move #1768 made for the six creation routes, and the enforcement
+	// currently hangs off the routine door only.
+	//
+	// STATE THE GAP RATHER THAN IMPLY IT (delegation_limits.go's rule). At
+	// `strict` the routine door refuses what the agent door still allows, so an
+	// author on a strict crew can reach the same capability through an
+	// `agent_run` step. That asymmetry is the reason to gate the sidecar
+	// adapters on these same Actions next; it is not a reason to weaken the
+	// rows, because the alternative — strict meaning nothing here — trades a
+	// known gap for a silent one.
+
+	// ActionIssueWrite — writing to an issue that ALREADY EXISTS: changing its
+	// fields (issue.update), commenting on it (issue.comment), or relating it
+	// to another (issue.link).
+	//
+	// ONE ACTION FOR THREE VERBS, deliberately, and the test is whether any
+	// property that decides a cell differs between them. None does:
+	//
+	//   - none creates a principal, a schedule, or anything that outlives the
+	//     call;
+	//   - all three are held to the caller's own crew and workspace BEFORE the
+	//     gate (assertBoundCrewWorkspaceDB in issues_internal.go and
+	//     issues_internal_relations.go), so none can widen what the crew
+	//     already reaches;
+	//   - all three land in the issue's own audit trail (#1791) and broadcast
+	//     issue.updated, i.e. they are already recorded where an operator looks
+	//     for them;
+	//   - the one non-inert edge — an @mention waking an agent — is shared by
+	//     comment AND update, because update carries an inline `comment` field
+	//     that runs the same mention trigger.
+	//
+	// Three constants would therefore be three copies of one row, free to drift
+	// apart without anyone choosing to. Splitting later (a separate
+	// ActionIssueComment, say) is an append-only change this package allows;
+	// starting split would be pretending to a distinction that does not exist.
+	//
+	// The property that DOES set this row apart from every other row in the
+	// matrix is frequency. Every other Action here governs a rare, durable
+	// event — a crew, an agent, a cron entry, a plan. A triage routine writes
+	// to thirty issues in one run. That is what decides the guided cell; see
+	// the DecideAction arm.
+	ActionIssueWrite Action = "issue_write"
+
+	// ActionAssignmentCreate — dispatching work to an agent that already
+	// exists (POST /api/v1/internal/assignments, the door behind /assign).
+	//
+	// It is mission_create with the plan taken away: no principal is created,
+	// the target agent was already allowed to run, and the crew is fixed by the
+	// binding before the gate. What it does cost is real — a container start, a
+	// system prompt and a model turn, billed to the workspace.
+	//
+	// The fan-out is bounded on its own door and NOT by this cell:
+	// insertCappedAssignment enforces delegation.max_depth and the per-caller
+	// fan-out cap, both read fresh from app_settings and both counted from
+	// server-side rows rather than from anything the caller wrote
+	// (delegation_limits.go). A routine-fired call has no assignment row of its
+	// own, so it is a root at depth 1 and the fan-out number is what carries
+	// the weight there.
+	ActionAssignmentCreate Action = "assignment_create"
+
+	// ActionEscalationCreate — raising an escalation: a PENDING escalations
+	// row, a blocking high-priority inbox item addressed to every MANAGER, and
+	// a warn-severity journal entry (escalation_handler.go).
+	//
+	// The only Action in this matrix whose cost is paid by a HUMAN rather than
+	// by the machine, which changes what the matrix can usefully say about it.
+	// See the DecideAction arm — the row is flat, and the bound that actually
+	// matters (volume) lives on the door, in crewship_escalation_cap.go.
+	ActionEscalationCreate Action = "escalation_create"
 )
 
 // Decision is the resolved instruction for the caller. Closed set;
@@ -376,6 +457,127 @@ func (p Policy) DecideAction(a Action) Decision {
 		case AutonomyFull:
 			return DecisionAutoJournal
 		}
+	case ActionIssueWrite:
+		// Modify a thing that already exists, create nothing — which is the
+		// shape skill_assign already has, and this row matches it.
+		//
+		// STRICT HOLDS. Strict means "every governable action needs operator
+		// Approve", and an issue write is governable. Not Rejected: that value
+		// is this matrix's marker for "creates a durable principal or keeps
+		// firing" (crew, agent, ephemeral spawn, cron), and a comment is
+		// neither. Rejecting it would rank an issue comment above a memory
+		// write in severity, which it is not.
+		//
+		// GUIDED DOES NOT HOLD, and this is the cell that has to be argued,
+		// because guided's documented meaning is "writes need OK". Two things
+		// override the literal reading:
+		//
+		//  1. The inbox is the wrong instrument at this frequency. One item per
+		//     issue write is how an inbox stops being read — the same argument
+		//     routine_schedule_create's arm already makes for a much rarer
+		//     action — and here the item would be a DUPLICATE: #1791 put every
+		//     issue write in the issue's own activity trail, keyed to the issue,
+		//     which is where an operator looks. A second copy in a stream is
+		//     strictly worse than the first.
+		//
+		//  2. A hold is not a hold on the unattended path. A routine has nobody
+		//     attached to approve it, so InboxApprove IS a refusal there
+		//     (crewship_actions.go says so in as many words). Meanwhile the same
+		//     capability is reachable ungated by an agent_run step in the same
+		//     routine, because the sidecar's issue verbs consult no policy. So
+		//     blocking guided would not stop the write; it would move it to a
+		//     door with no policy row at all.
+		//
+		// What guided keeps is the journal entry and the issue's own trail. What
+		// it gives up is a blocking hold that bought neither containment (the
+		// crew binding does that) nor visibility (the issue does that).
+		switch p.AutonomyLevel {
+		case AutonomyStrict:
+			return DecisionInboxApprove
+		case AutonomyGuided, AutonomyTrusted:
+			return DecisionAutoLogJournal
+		case AutonomyFull:
+			return DecisionAutoJournal
+		}
+	case ActionAssignmentCreate:
+		// The same row as mission_create, because this is mission_create with
+		// the plan removed: delegation to an agent that already exists, in a
+		// crew the caller has been proven to own, creating no principal.
+		//
+		// Strict approves rather than rejects, for mission_create's reason:
+		// approving one assignment approves one bounded unit of work, not every
+		// future one. Nothing durable is granted.
+		//
+		// Guided gets a NOTICE where issue_write gets journal-only, and the
+		// difference is what the action spends. An issue write costs a row; an
+		// assignment costs a container start, a system prompt and a model turn,
+		// and it is the moment a routine stops editing records and starts making
+		// the crew work. That is rare enough to be worth one non-blocking inbox
+		// row and consequential enough to want one.
+		//
+		// Guided does not BLOCK, for the reason it does not block mission_create:
+		// nothing on this path widens what the acting crew could already do, the
+		// fan-out is bounded on the dispatch door itself (delegation_limits.go's
+		// depth + fan-out caps, counted from server state), and a hold on the
+		// routine path is a refusal that pushes the author to an agent_run step
+		// whose agent calls /assign ungated. Same work, no policy row.
+		switch p.AutonomyLevel {
+		case AutonomyStrict:
+			return DecisionInboxApprove
+		case AutonomyGuided:
+			return DecisionAutoLogInbox
+		case AutonomyTrusted:
+			return DecisionAutoLogJournal
+		case AutonomyFull:
+			return DecisionAutoJournal
+		}
+	case ActionEscalationCreate:
+		// A FLAT ROW, and the flatness is the decision rather than a shortcut.
+		//
+		// Everything else in this matrix bounds what the crew may do to the
+		// SYSTEM, and trust is the right axis for that. An escalation's cost is
+		// a human's attention: a blocking, high-priority inbox item for every
+		// MANAGER, plus a PENDING row someone has to resolve. The risk it
+		// carries does not vary with how much the crew is trusted, because it is
+		// not a question of trust — which is why the row does not vary either.
+		// persona_direct_write is already flat for the mirror-image reason.
+		//
+		// BOTH INBOX-SHAPED DECISIONS ARE SELF-DEFEATING HERE, which is what
+		// removes them from the choice:
+		//
+		//   - InboxApprove would interrupt a human to authorise interrupting a
+		//     human. The approval request is the same interrupt as the
+		//     escalation, arriving first and carrying less.
+		//   - AutoLogInbox would write an inbox row ABOUT an inbox row. The
+		//     escalation IS the operator-facing artefact; a notice duplicates it.
+		//
+		// So every arm that proceeds must be journal-only. That leaves one real
+		// question — whether strict REFUSES — and the answer is no, twice over:
+		//
+		//   - A routine can already reach a human at any autonomy level with a
+		//     `notify` step, which carries no policy row at all. Refusing the
+		//     structured, resolvable, audited escalation while leaving the
+		//     unstructured ping open would degrade the record without removing
+		//     the interrupt. That is the ungoverned-door failure in its purest
+		//     form.
+		//   - It is incoherent on strict's own terms. Strict is the level at
+		//     which the operator most wants to be in the loop, and this is the
+		//     one action in the matrix whose entire purpose is to put them there.
+		//     "Ask before you act" cannot sensibly forbid asking.
+		//
+		// WHAT THE MATRIX CANNOT DO, said plainly: it decides per call and
+		// cannot express a rate, and the risk here is volume — a foreach over
+		// 500 issues raising one escalation each. A cell pretending to bound
+		// that would be the cap believed to cover more than it does. The bound
+		// lives on the door instead: escalation.max_pending_per_crew, enforced
+		// on the routine path in internal/api/crewship_escalation_cap.go and
+		// counted from server-side rows.
+		switch p.AutonomyLevel {
+		case AutonomyStrict, AutonomyGuided, AutonomyTrusted:
+			return DecisionAutoLogJournal
+		case AutonomyFull:
+			return DecisionAutoJournal
+		}
 	}
 	// Defensive default: any (action, level) pair we haven't mapped
 	// gets the safest treatment — inbox approval. Adding a new
@@ -410,6 +612,40 @@ func (p Policy) DecideBehaviorDeny() Decision {
 	// is acceptable; the "silently let an agent through that an operator
 	// thought was blocked" risk is not.
 	return DecisionBlockInbox
+}
+
+// knownActions is the closed set of Actions this package declares. It exists
+// so a caller holding an Action as a STRING — internal/pipeline's crewship verb
+// registry stores one, because pipeline must not import this package — can ask
+// whether it names anything real.
+//
+// Without it the failure is quiet rather than loud: DecideAction answers its
+// defensive DecisionInboxApprove for a typo'd action, so a mis-declared verb
+// does not fail open, it simply refuses forever with a message about autonomy
+// levels and never says the word "typo". TestPolicy_KnownActionsMatchesSource
+// derives the same list out of the source so this map cannot fall behind the
+// constants above.
+var knownActions = map[Action]struct{}{
+	ActionMemoryWrite:           {},
+	ActionSkillCreate:           {},
+	ActionSkillAssign:           {},
+	ActionPersonaSuggest:        {},
+	ActionPersonaDirectWrite:    {},
+	ActionNegativeLearning:      {},
+	ActionEphemeralSpawn:        {},
+	ActionCrewCreate:            {},
+	ActionAgentCreate:           {},
+	ActionMissionCreate:         {},
+	ActionRoutineScheduleCreate: {},
+	ActionIssueWrite:            {},
+	ActionAssignmentCreate:      {},
+	ActionEscalationCreate:      {},
+}
+
+// IsKnownAction reports whether a is an Action this package declares.
+func IsKnownAction(a Action) bool {
+	_, ok := knownActions[a]
+	return ok
 }
 
 var validAutonomyLevels = map[AutonomyLevel]struct{}{
