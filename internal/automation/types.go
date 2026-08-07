@@ -166,6 +166,18 @@ type Automation struct {
 	// MaxPerHour caps how many RUNS this automation may cause per rolling
 	// hour window. Over the cap the match is dropped and a single
 	// automation.throttled entry is written for the window.
+	//
+	// It is a BURST BRAKE, not an accounting control. The window is held in
+	// the Registry's memory, so it is scoped to the process and a restart
+	// clears it: a daemon that restarts every ten minutes has no effective
+	// hourly cap. Do not rely on it for billing, quota, or anything where the
+	// number itself has to hold — use it to stop a storm.
+	//
+	// "Per process" and "per instance" are the same sentence today, because
+	// Crewship's store is SQLite (single-writer) and two daemons over one
+	// database is not a supported topology. A shared-store backend would make
+	// the effective cap N× the configured one, silently.
+	// Pinned by TestHourlyBudgetIsPerProcessAndDoesNotSurviveARestart.
 	MaxPerHour int        `json:"max_per_hour"`
 	CreatedBy  string     `json:"created_by,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`

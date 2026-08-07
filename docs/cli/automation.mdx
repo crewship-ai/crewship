@@ -107,7 +107,7 @@ saved as a rule that never fires.
 | `--severity` | `stringSlice` | Only match these severities: `info`, `notice`, `warn`, `error`. Repeatable. |
 | `--payload-equals` | `stringSlice` | Only match when a journal payload field equals this, as `key=value`. Repeatable. A key no emitter writes is accepted and matches nothing — see below. |
 | `--debounce-seconds` | `int` | Hold the enqueued run open this long for further events to coalesce into. Default 10. |
-| `--max-per-hour` | `int` | Cap runs this automation may cause per hour. Default 60. |
+| `--max-per-hour` | `int` | Burst brake: cap runs this automation may cause per hour. Default 60. Counted per server process and cleared by a restart — see [Automations](/guides/automations#max-per-hour). |
 
 A predicate flag you omit is "don't care"; omit all of them and every entry of
 the event type matches.
@@ -159,7 +159,7 @@ matcher somebody edited a moment ago. Accepts the same flags as `create`.
 | `--severity` | `stringSlice` | Replace the severity predicate. Repeatable. |
 | `--payload-equals` | `stringSlice` | Replace the payload predicate, as `key=value`. Repeatable. |
 | `--debounce-seconds` | `int` | Debounce window in seconds. |
-| `--max-per-hour` | `int` | Runs per hour cap. |
+| `--max-per-hour` | `int` | Runs per hour burst brake. Per server process; a restart clears it. |
 
 ---
 

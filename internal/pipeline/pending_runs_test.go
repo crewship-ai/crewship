@@ -29,6 +29,7 @@ CREATE TABLE pending_runs (
     status TEXT NOT NULL DEFAULT 'pending', fired_run_id TEXT,
     triggered_via TEXT,
     chain_depth INTEGER,
+    chain_origin TEXT,
     triggered_by_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','subsec')));

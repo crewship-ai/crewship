@@ -73,7 +73,7 @@ GET /api/v1/automations
 | `action_kind` | string | `routine` in this release. |
 | `action` | object | `routine_slug` plus `inputs`. Input values may reference the triggering entry with `{{ event.mission_id }}`, `{{ event.agent_id }}`, `{{ event.crew_id }}`, `{{ event.run_id }}` and `{{ event.payload.<key> }}`. |
 | `debounce_seconds` | integer | How long the parked run stays open for further matching events to coalesce into. |
-| `max_per_hour` | integer | Cap on runs this rule may cause per rolling hour. Over the cap, matches are dropped and one `automation.throttled` journal entry is written for the window. |
+| `max_per_hour` | integer | Burst brake on runs this rule may cause per rolling hour. Over the cap, matches are dropped and one `automation.throttled` journal entry is written for the window. Counted in the running server's memory: a restart clears it, so this is not a quota. |
 
 **Status codes:** `200` OK · `401` no workspace in context · `500` read failed.
 

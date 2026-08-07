@@ -375,7 +375,7 @@ func init() {
 		c.Flags().StringSlice("severity", nil, "Only match these severities: info|notice|warn|error (repeatable)")
 		c.Flags().StringSlice("payload-equals", nil, "Only match when the journal payload field equals this, as key=value (repeatable)")
 		c.Flags().Int("debounce-seconds", 0, "Hold the enqueued run open this long for further events to coalesce into")
-		c.Flags().Int("max-per-hour", 0, "Cap runs this automation may cause per hour")
+		c.Flags().Int("max-per-hour", 0, "Burst brake: cap runs this automation may cause per hour (per server process; a restart clears it)")
 	}
 
 	automationCmd.AddCommand(automationListCmd)

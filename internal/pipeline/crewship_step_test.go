@@ -52,6 +52,12 @@ func TestValidate_CrewshipVerbWithoutPolicyActionFailsAtSave(t *testing.T) {
 		}
 	}
 	if ungoverned == "" {
+		// SKIP-WAIVER: not debt, and deliberately no tracking issue. This test
+		// guards against a verb shipping WITHOUT a policy action; with every
+		// verb governed there is nothing to refuse, and the honest report is a
+		// skip rather than a green assertion over an empty set. It un-skips by
+		// itself the moment a new ungoverned verb is declared, which is exactly
+		// when it is wanted.
 		t.Skip("every crewship verb now has a policy action — nothing left to refuse")
 	}
 
@@ -351,6 +357,9 @@ func TestExecutor_CrewshipStep_DryRunDoesNotDispatch(t *testing.T) {
 func TestCrewshipVerbs_MatchTheJSONSchema(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
+		// SKIP-WAIVER: permanent platform guard, no tracking issue. runtime.Caller
+		// is how this test finds the schema on disk; without it there is no path
+		// to read. Never taken on any platform CI runs.
 		t.Skip("no caller info")
 	}
 	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "schemas", "routine.v1.json")

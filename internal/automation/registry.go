@@ -25,14 +25,20 @@ type Enqueuer interface {
 	Enqueue(ctx context.Context, pr pipeline.PendingRun) (string, bool, error)
 }
 
-// DepthSource answers how deep the run that produced a triggering entry
-// already was. Read in Flush, never in Observer: Observer is on the journal
-// write path.
+// ChainPos is re-exported from internal/pipeline, which owns both the columns
+// (pipeline_runs.chain_depth / chain_origin) and the single GuardChainDepth
+// that spends against them. Declaring a second one here would be a second
+// answer to "how deep are we", and this package already imports pipeline, so
+// the dependency costs nothing.
+type ChainPos = pipeline.ChainPos
+
+// ChainSource answers where the run that produced a triggering entry already
+// sat. Read in Flush, never in Observer: Observer is on the journal write path.
 //
 // A seam rather than a *sql.DB so the registry stays testable without one,
 // and so the query lives with the rows it reads.
-type DepthSource interface {
-	ChainDepthOf(ctx context.Context, workspaceID, runID string) (int, bool, error)
+type ChainSource interface {
+	ChainOf(ctx context.Context, workspaceID, runID string) (ChainPos, bool, error)
 }
 
 // loader supplies the rule set. The Registry only ever reads, and only off
@@ -74,7 +80,7 @@ type Options struct {
 type Registry struct {
 	store   loader
 	enq     Enqueuer
-	depths  DepthSource
+	chains  ChainSource
 	journal journal.Emitter
 	logger  *slog.Logger
 	now     func() time.Time
@@ -166,10 +172,11 @@ type intent struct {
 // NewRegistry builds a Registry. store may be nil for a registry that is
 // loaded directly with Load (tests, and the proof that Observer never needs
 // a database).
-// SetDepthSource injects the composition-budget reader. Optional: without
-// one every automation hop starts at depth 1, which is the pre-existing
-// behaviour and is stated as such rather than silently assumed safe.
-func (r *Registry) SetDepthSource(d DepthSource) { r.depths = d }
+// SetChainSource injects the composition-budget reader. Optional: without one
+// every automation hop starts at depth 1 and roots its own chain, which is the
+// pre-existing behaviour and is stated as such rather than silently assumed
+// safe.
+func (r *Registry) SetChainSource(c ChainSource) { r.chains = c }
 
 // emitDepthExceeded records a refused hop. Loud on purpose: a cap that
 // refuses silently is a cap nobody can debug, and this entry is how an
@@ -532,16 +539,28 @@ func (r *Registry) Flush(ctx context.Context) int {
 		// The lookup is here, in Flush, and never in Observer — Observer runs on
 		// the journal write path and must not touch the database.
 		depth := 1
-		if it.originRunID != "" && r.depths != nil {
-			if d, ok, err := r.depths.ChainDepthOf(ctx, it.workspaceID, it.originRunID); err != nil {
-				// Fail CLOSED on an unreadable depth. An unknown depth that
+		// Which chain this run joins. Empty means it roots its own, which is
+		// correct for a human-caused entry and wrong for a composed one — see
+		// the origin resolution below.
+		origin := ""
+		if it.originRunID != "" && r.chains != nil {
+			if pos, ok, err := r.chains.ChainOf(ctx, it.workspaceID, it.originRunID); err != nil {
+				// Fail CLOSED on an unreadable position. An unknown depth that
 				// defaults to "shallow" is how a cycle buys itself a fresh
 				// budget every lap.
-				r.logger.Error("automation: chain depth unreadable, refusing the hop",
+				r.logger.Error("automation: chain position unreadable, refusing the hop",
 					"err", err, "automation_id", it.automationID, "origin_run_id", it.originRunID)
 				continue
 			} else if ok {
-				depth = d + 1
+				depth = pos.Depth + 1
+				// A chain has ONE root. Inherit the parent's if it has one;
+				// otherwise the parent IS the root, so name it. Taking the
+				// immediate parent in both cases would renumber the chain
+				// every hop, which is the bug this replaced.
+				origin = pos.Origin
+				if origin == "" {
+					origin = it.originRunID
+				}
 			}
 		}
 		if err := pipeline.GuardChainDepth(depth); err != nil {
@@ -567,6 +586,7 @@ func (r *Registry) Flush(ctx context.Context) int {
 			TriggeredVia:  pipeline.TriggeredViaAutomation,
 			TriggeredByID: it.automationID,
 			ChainDepth:    it.chainDepth,
+			ChainOrigin:   origin,
 		}); err != nil {
 			r.logger.Error("automation: enqueue failed",
 				"err", err, "automation_id", it.automationID,

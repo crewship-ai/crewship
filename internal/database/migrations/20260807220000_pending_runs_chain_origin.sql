@@ -1,0 +1,19 @@
+-- The budget survived the journal hop; the STORY of it did not.
+--
+-- 20260807210000 gave pending_runs a chain_depth, so a composed cycle spends
+-- from one allowance and stops at MaxChainDepth. But pipeline_runs also carries
+-- chain_origin — the run or entry that STARTED the chain — and pending_runs had
+-- nowhere to put it. So every automation-fired run re-rooted at itself, and a
+-- legitimate eight-hop chain read as eight unrelated one-hop runs.
+--
+-- That is the difference between a cap and a topology. The cap is a safety
+-- property and it held; the origin is what lets a person look at a run and see
+-- which chain it belongs to, which is the question the whole causal walk exists
+-- to answer. A chain that renumbers itself every hop is also, incidentally,
+-- what a loop would most like to look like.
+--
+-- Nullable, no default, matching chain_depth: an existing row means "did not
+-- say", and the executor's chainOriginForRun then roots the chain at that run
+-- exactly as it did before. Backfilling a guess would assert a parentage the
+-- rows never recorded.
+ALTER TABLE pending_runs ADD COLUMN chain_origin TEXT;

@@ -32,5 +32,24 @@
 #   120  2026-07-30  −1: #1572 landed. The waived test is unskipped and green,
 #                    the waiver comment is gone, and the debt entry above is
 #                    closed out rather than left standing.
+#   123  2026-08-07  +3 from #1836's composition substrate. None is debt; all
+#                    three are conditional skips that report honestly instead
+#                    of asserting over an empty set, and each carries a
+#                    SKIP-WAIVER comment:
+#                      · crewship_step_test.go — a save-time guard against a
+#                        verb with no policy action. Every verb is governed, so
+#                        there is nothing to refuse; it un-skips itself the day
+#                        an ungoverned verb is declared.
+#                      · crewship_actions_test.go — the dispatch-time twin of
+#                        the same guard, skipping for the same reason.
+#                      · crewship_step_test.go — runtime.Caller guard on the
+#                        schema-parity test. Permanent platform guard, never
+#                        taken on any platform CI runs.
+#                    The branch also REMOVED two skips it had added earlier:
+#                    chain_depth_hop_test.go's pair were marked BROKEN because
+#                    the composition budget did not survive the journal hop.
+#                    It does now (depth) and the chain no longer re-roots every
+#                    hop (origin), so both are unskipped and green rather than
+#                    left standing as documentation of a fixed defect.
 
-120
+123

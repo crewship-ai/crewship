@@ -224,6 +224,11 @@ func TestCrewshipActions_UngovernedVerbRefusedAtDispatch(t *testing.T) {
 		}
 	}
 	if ungoverned == "" {
+		// SKIP-WAIVER: not debt, and deliberately no tracking issue. The
+		// dispatch-time twin of pipeline's save-time guard: it refuses a verb
+		// that has no policy action, and with every verb governed there is
+		// nothing to refuse. It un-skips itself when a new ungoverned verb is
+		// declared, which is the only moment it has anything to say.
 		t.Skip("every crewship verb now has a policy action")
 	}
 	var calls []capturedCall

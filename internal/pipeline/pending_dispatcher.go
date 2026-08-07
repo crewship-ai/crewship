@@ -213,6 +213,10 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		// deferred run is where a composed cycle re-enters the process, so
 		// dropping the depth here is what made the cap unreachable.
 		ChainDepth: pr.ChainDepth,
+		// And which chain it belongs to. Empty stays empty so the executor roots
+		// a scheduled run at itself; a value invented here would claim a parent
+		// that does not exist.
+		ChainOrigin: pr.ChainOrigin,
 		// Thread the enqueuing user through so a notify step's `to: trigger`
 		// in this deferred run resolves to them (issue #842 Phase 1); empty
 		// keeps the workspace-notice fallback.

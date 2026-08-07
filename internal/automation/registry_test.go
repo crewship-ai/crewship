@@ -346,6 +346,65 @@ func TestRateLimitDropsOverCapAndNoticesExactlyOncePerHour(t *testing.T) {
 	}
 }
 
+// The budget is held in memory, per Registry — therefore per PROCESS, and
+// therefore reset by a restart.
+//
+// This test PINS A LIMITATION rather than a guarantee, and is meant to fail if
+// someone makes the counter durable. Read that failure as "update this test",
+// not as a regression.
+//
+// It exists because `max_per_hour` reads like a promise the system cannot keep
+// in the general case, and an unwritten limitation becomes an assumed feature.
+// The scope is honest for the deployment that exists: Crewship's own store is
+// SQLite, which is single-writer, so two daemons sharing one database is not a
+// supported topology and "per process" and "per instance" are the same
+// sentence today. They stop being the same sentence the moment a shared-store
+// backend lands, and the cap would then be N× looser than configured with
+// nothing reporting it.
+//
+// The restart half is the one that bites now: a daemon restarted every ten
+// minutes has no effective hourly cap at all. The cap is a burst brake, not an
+// accounting control, and the field doc says so.
+func TestHourlyBudgetIsPerProcessAndDoesNotSurviveARestart(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+
+	capped := rule("a1", "ws_1", "mission.status_change")
+	capped.MaxPerHour = 2
+	capped.DebounceSeconds = 1
+
+	spend := func(reg *Registry, enq *recordingEnqueuer) int {
+		for i := 0; i < 10; i++ {
+			reg.Observer([]journal.Entry{entry("ws_1", "mission.status_change", missionID(i))})
+		}
+		reg.Flush(context.Background())
+		return enq.n()
+	}
+
+	firstEnq := &recordingEnqueuer{}
+	first := NewRegistry(nil, firstEnq, Options{Journal: &recordingJournal{}, Now: clock})
+	first.Load([]Resolved{capped})
+	if got := spend(first, firstEnq); got != 2 {
+		t.Fatalf("first process enqueued %d, want 2 (max_per_hour)", got)
+	}
+
+	// A second Registry over the same rule and the same frozen hour. This is a
+	// restarted daemon, and — were the topology supported — a second replica.
+	secondEnq := &recordingEnqueuer{}
+	second := NewRegistry(nil, secondEnq, Options{Journal: &recordingJournal{}, Now: clock})
+	second.Load([]Resolved{capped})
+	got := spend(second, secondEnq)
+
+	if got == 0 {
+		t.Fatalf("the budget survived the process boundary — max_per_hour is now durable; " +
+			"that is an improvement, so update this test and the field doc on Automation.MaxPerHour")
+	}
+	if got != 2 {
+		t.Fatalf("second process enqueued %d, want 2 — the budget is per process, so a fresh "+
+			"process gets a fresh cap", got)
+	}
+}
+
 // A refresh reloads the rules; it must NOT reload the counters. Rebuilding
 // the rate map every 60s would reset the hourly budget every 60s, and
 // max_per_hour would be unreachable by construction — a cap that is green in
@@ -535,19 +594,81 @@ func TestFlush_StampsTheAutomationAsTheTrigger(t *testing.T) {
 // not be what makes this test pass. A green run here has to mean the depth cap
 // held.
 
-// enqueuedDepths answers ChainDepthOf out of what the recording enqueuer
-// already holds. In production the depth is read from pipeline_runs, written
-// there when the deferred row fired; here the enqueued row IS the record, so
-// this models the same fact without a database.
+// enqueuedDepths answers ChainOf out of what the recording enqueuer already
+// holds. In production the position is read from pipeline_runs, written there
+// when the deferred row fired; here the enqueued row IS the record, so this
+// models the same fact without a database.
 type enqueuedDepths struct{ enq *recordingEnqueuer }
 
-func (d enqueuedDepths) ChainDepthOf(_ context.Context, _, runID string) (int, bool, error) {
+func (d enqueuedDepths) ChainOf(_ context.Context, _, runID string) (ChainPos, bool, error) {
 	for i := 0; i < d.enq.n(); i++ {
 		if pr := d.enq.at(i); pr.ID == runID {
-			return pr.ChainDepth, true, nil
+			return ChainPos{Depth: pr.ChainDepth, Origin: pr.ChainOrigin}, true, nil
 		}
 	}
-	return 0, false, nil
+	return ChainPos{}, false, nil
+}
+
+// Depth bounds a chain; origin is what makes it READ as one chain. A composed
+// run that re-roots at itself turns eight linked hops into eight unrelated
+// runs — unreadable, and the exact shape a loop would prefer to present.
+//
+// Three cases, and the middle one is the one that is easy to get wrong: when
+// the parent is itself the root it has no origin of its own, so the child's
+// origin is the PARENT'S ID, not the parent's (empty) origin field.
+func TestFlush_ComposedRunsInheritTheChainOrigin(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	enq := &recordingEnqueuer{}
+	reg := NewRegistry(nil, enq, Options{Journal: &recordingJournal{}, Now: func() time.Time { return now }})
+	reg.SetChainSource(enqueuedDepths{enq})
+
+	r := rule("a1", "ws_1", "mission.status_change")
+	r.MaxPerHour = 10000
+	r.DebounceSeconds = 1
+	reg.Load([]Resolved{r})
+
+	// Hop 0 — a human changed the issue. No parent run, so this run starts its
+	// own chain and claims no origin.
+	reg.Observer([]journal.Entry{entry("ws_1", "mission.status_change", "m_1")})
+	reg.Flush(context.Background())
+	if enq.n() != 1 {
+		t.Fatalf("enqueues = %d, want 1", enq.n())
+	}
+	root := enq.at(0)
+	if root.ChainOrigin != "" {
+		t.Errorf("a human-caused run claimed origin %q; it roots its own chain", root.ChainOrigin)
+	}
+
+	// Hop 1 — the run above emits the status change its crewship step made.
+	// The parent is the root, so the child's origin is the parent's ID.
+	now = now.Add(2 * time.Second)
+	e1 := entry("ws_1", "mission.status_change", "m_1")
+	e1.TraceID = root.ID
+	reg.Observer([]journal.Entry{e1})
+	reg.Flush(context.Background())
+	if enq.n() != 2 {
+		t.Fatalf("enqueues = %d, want 2", enq.n())
+	}
+	hop1 := enq.at(1)
+	if hop1.ChainOrigin != root.ID {
+		t.Fatalf("ChainOrigin = %q, want %q — the first composed hop is rooted at the run "+
+			"that caused it", hop1.ChainOrigin, root.ID)
+	}
+
+	// Hop 2 — now the parent HAS an origin, and the grandchild must inherit
+	// that root rather than re-rooting at its immediate parent.
+	now = now.Add(2 * time.Second)
+	e2 := entry("ws_1", "mission.status_change", "m_1")
+	e2.TraceID = hop1.ID
+	reg.Observer([]journal.Entry{e2})
+	reg.Flush(context.Background())
+	if enq.n() != 3 {
+		t.Fatalf("enqueues = %d, want 3", enq.n())
+	}
+	if got := enq.at(2).ChainOrigin; got != root.ID {
+		t.Fatalf("ChainOrigin = %q, want %q — a chain has ONE root; inheriting the immediate "+
+			"parent instead renumbers the chain every hop", got, root.ID)
+	}
 }
 
 func TestObserver_ClosedLoopStopsAtMaxChainDepth(t *testing.T) {
@@ -555,7 +676,7 @@ func TestObserver_ClosedLoopStopsAtMaxChainDepth(t *testing.T) {
 	enq := &recordingEnqueuer{}
 	jrn := &recordingJournal{}
 	reg := NewRegistry(nil, enq, Options{Journal: jrn, Now: func() time.Time { return now }})
-	reg.SetDepthSource(enqueuedDepths{enq})
+	reg.SetChainSource(enqueuedDepths{enq})
 
 	r := rule("a1", "ws_1", "mission.status_change")
 	r.MaxPerHour = 10000

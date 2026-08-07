@@ -196,6 +196,15 @@ crewship journal --type automation.throttled
 One per hour, not one per drop. A rule that trips its cap ten thousand times
 must not write ten thousand rows saying so.
 
+<Warning>
+`max_per_hour` is a **burst brake, not a quota.** The counter is held in the
+running server's memory, so restarting the server clears it — a server that
+restarts every ten minutes has no effective hourly cap.
+
+Use it to stop a runaway rule. Do not use it where the number itself has to
+hold, such as billing or a contractual limit.
+</Warning>
+
 ## Where rules show up in the UI
 
 There is no automation management screen — the CLI above is the whole write
