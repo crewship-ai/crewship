@@ -211,7 +211,23 @@ jobs:
           # on an idle chat — needs no provider credential. Its Tier B block
           # (watching a live run) SKIPs with the reason when no agent replies,
           # so a green square here does NOT claim live delivery was proved.
+          #
+          # The 404-not-403 case needs a SECOND identity: a user who is a
+          # member, gets removed, and must then be told 404 rather than 403 for
+          # a chat that demonstrably exists. That identity comes from `seed
+          # --with-users`, which signs its four RBAC fixtures up through
+          # POST /auth/signup — refused with 403 unless the server was started
+          # with CREWSHIP_ALLOW_SIGNUP=true.
+          #
+          # This square passed neither the flag nor the env, so the fixture
+          # placed nobody, and the assertion that streaming cannot be used as
+          # an existence oracle had never once been evaluated — here or
+          # anywhere (#1829). Both are set below; seed now fails loudly rather
+          # than exiting 0 with an empty fixture, so a regression in either
+          # reddens this square instead of turning back into a ⊘ SKIP.
           - suite: test-run-stream.sh
+            allow_signup: "true"
+            seed_flags: "--with-users"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -254,6 +270,11 @@ jobs:
           DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
           CREWSHIP_NEXTJS_URL: http://localhost:8080
           CREWSHIP_SKIP_SIDECAR: "1"
+          # Per-suite, and OFF for every square that does not name it — an
+          # empty value is not a recognised boolean, so config.go keeps the
+          # default (false) and no square gets an open signup endpoint it did
+          # not ask for. See the matrix comment on test-run-stream.sh.
+          CREWSHIP_ALLOW_SIGNUP: ${{ matrix.allow_signup }}
         run: |
           set -euo pipefail
           mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
@@ -273,6 +294,11 @@ jobs:
       - name: Seed the workspace
         env:
           CREWSHIP_SERVER: http://localhost:8080
+          # Extra seed flags this square needs. Empty for every other suite, so
+          # the seeded fixture is byte-identical to what it was. Read as a
+          # variable rather than interpolated into the script: unquoted below
+          # ON PURPOSE, because it is a flag list and must word-split.
+          SEED_FLAGS: ${{ matrix.seed_flags }}
         # Same bootstrap the e2e-devcontainer nightly uses: `seed` bootstraps
         # demo@crewship.ai, mints the CLI token into the CLI config, and creates
         # 3 crews / 7 agents / routines the suites address by slug.
@@ -287,7 +313,8 @@ jobs:
           set -euo pipefail
           for attempt in 1 2 3; do
             echo "--- seed attempt $attempt ---"
-            if ./crewship seed --skip-issues --server "$CREWSHIP_SERVER"; then
+            # shellcheck disable=SC2086  # SEED_FLAGS is a flag list; splitting is the point
+            if ./crewship seed --skip-issues ${SEED_FLAGS:-} --server "$CREWSHIP_SERVER"; then
               exit 0
             fi
             sleep 5

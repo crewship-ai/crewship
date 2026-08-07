@@ -376,6 +376,72 @@ func (m workspaceMemberRow) fullName() string {
 	return m.FullName
 }
 
+// normalized copies the resolved email/name back onto the flat fields so the
+// machine formats carry what the table prints.
+//
+// Without this, `--format json` re-marshalled the struct exactly as decoded:
+// a top-level `"email": ""` sitting next to a populated `user.email`, because
+// the server (memberResponse, internal/api/workspaces_membership.go) only ever
+// sends the nested shape. A field that is present and always empty is worse
+// than an absent one — an absent key sends a consumer looking for the real
+// one, an empty key makes `select(.email==$e)` come back with nothing and read
+// as "no such member". scripts/test-harness/test-run-stream.sh drew exactly
+// that conclusion and skipped its cross-tenant assertion with a false reason
+// for the whole life of the case (#1829).
+//
+// The nested object is left intact: anything already written against
+// `.user.email` keeps working.
+func (m workspaceMemberRow) normalized() workspaceMemberRow {
+	m.Email = m.email()
+	m.FullName = m.fullName()
+	return m
+}
+
+// resolveWorkspaceMemberID maps a caller-supplied id onto the
+// workspace_members ROW id that PATCH/DELETE /workspaces/{id}/members/{id}
+// consume.
+//
+// `member add` takes a USER id (the API deliberately refuses an email — see
+// addMemberRequest) while `member role` / `member remove` take a MEMBERSHIP
+// id. That asymmetry is invisible at the call site and the server's answer for
+// getting it wrong is a bare 404 "Member not found" — indistinguishable from
+// "that person is not in this workspace". Accept either form here so the
+// obvious call works, and name both columns when neither matches.
+//
+// Best-effort by construction: if the roster cannot be read (permissions, a
+// dead server, an older build) the argument goes through untouched and the
+// server answers as it always did. Resolution is a convenience, never a new
+// failure mode.
+func resolveWorkspaceMemberID(client *cli.Client, wsID, arg string) (string, error) {
+	resp, err := client.Get("/api/v1/workspaces/" + wsID + "/members")
+	if err != nil {
+		return arg, nil
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return arg, nil
+	}
+	var members []workspaceMemberRow
+	if err := cli.ReadJSON(resp, &members); err != nil {
+		return arg, nil
+	}
+	if len(members) == 0 {
+		return arg, nil
+	}
+	for _, m := range members {
+		if m.ID == arg {
+			return arg, nil
+		}
+	}
+	for _, m := range members {
+		if m.UserID != "" && m.UserID == arg {
+			return m.ID, nil
+		}
+	}
+	return "", fmt.Errorf(
+		"no workspace member matches %q: it is neither a MEMBER ID nor a USER ID in 'crewship workspace member list'",
+		arg)
+}
+
 var workspaceMemberListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List workspace members",
@@ -409,7 +475,10 @@ var workspaceMemberListCmd = &cobra.Command{
 		// stays for cross-referencing user-scoped commands.
 		headers := []string{"MEMBER ID", "USER ID", "EMAIL", "NAME", "ROLE", "JOINED"}
 		var rows [][]string
-		for _, m := range members {
+		for i, m := range members {
+			// Normalise in place so json/yaml/ndjson render the same values
+			// the table below prints — see normalized().
+			members[i] = m.normalized()
 			rows = append(rows, []string{m.ID, truncateID(m.UserID, 12), m.email(), m.fullName(), m.Role, m.CreatedAt})
 		}
 		return f.Auto(members, headers, rows)
@@ -453,15 +522,16 @@ var workspaceMemberAddCmd = &cobra.Command{
 }
 
 var workspaceMemberRoleCmd = &cobra.Command{
-	Use:   "role <member-id> <ROLE>",
+	Use:   "role <member-id-or-user-id> <ROLE>",
 	Short: "Change a member's workspace role",
 	Long: `Change a workspace member's role.
 
 MANAGER+ only, subject to the ladder: you can only grant a role below your
 own, you cannot modify a member ranked above you, and the last OWNER
-cannot be demoted. <member-id> is the membership row id from
-'workspace member list'. <ROLE> is one of OWNER, ADMIN, MANAGER, MEMBER,
-VIEWER.`,
+cannot be demoted. The first argument takes either column from
+'workspace member list' — the MEMBER ID (the membership row the API
+consumes) or the USER ID of the person. <ROLE> is one of OWNER, ADMIN,
+MANAGER, MEMBER, VIEWER.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -471,11 +541,14 @@ VIEWER.`,
 			return err
 		}
 
-		memberID := args[0]
 		role := strings.ToUpper(args[1])
 
 		client := newAPIClient()
 		wsID := client.GetWorkspaceID()
+		memberID, err := resolveWorkspaceMemberID(client, wsID, args[0])
+		if err != nil {
+			return err
+		}
 		resp, err := client.Patch("/api/v1/workspaces/"+wsID+"/members/"+memberID, map[string]string{
 			"role": role,
 		})
@@ -493,9 +566,20 @@ VIEWER.`,
 }
 
 var workspaceMemberRemoveCmd = &cobra.Command{
-	Use:   "remove <user-id>",
+	Use:   "remove <member-id-or-user-id>",
 	Short: "Remove a member from the workspace",
-	Args:  cobra.ExactArgs(1),
+	Long: `Remove a member from the workspace.
+
+Takes either column from 'crewship workspace member list': the MEMBER ID
+(the membership row, which is what the API consumes) or the USER ID of the
+person. Both resolve to the same removal.
+
+Accepting both exists to defuse an asymmetry that is invisible at the call
+site: 'member add' takes a USER id, while the endpoint behind 'member
+remove' and 'member role' matches only a membership row. Passing the user id
+used to answer a bare "Member not found", which reads as "that person is not
+in this workspace" rather than "wrong id".`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -509,7 +593,11 @@ var workspaceMemberRemoveCmd = &cobra.Command{
 
 		client := newAPIClient()
 		wsID := client.GetWorkspaceID()
-		resp, err := client.Delete("/api/v1/workspaces/" + wsID + "/members/" + args[0])
+		memberID, err := resolveWorkspaceMemberID(client, wsID, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Delete("/api/v1/workspaces/" + wsID + "/members/" + memberID)
 		if err != nil {
 			return err
 		}

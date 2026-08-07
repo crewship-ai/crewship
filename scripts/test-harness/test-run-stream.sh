@@ -65,15 +65,27 @@ else
   assert_contains "chat stream is in the command manifest" "$MANIFEST" '"chat stream"'
 fi
 
-assert_ok "chat stream --help" bash -c "$CREWSHIP --no-color chat stream --help >/dev/null 2>&1"
+# $CREWSHIP is quoted: the repo path can contain spaces (it does on at least
+# one developer machine), and an unquoted expansion inside `bash -c` turned
+# every one of these into exit 127 — a FAIL that looked like a broken command
+# and was a broken quote.
+assert_ok "chat stream --help" bash -c "'$CREWSHIP' --no-color chat stream --help >/dev/null 2>&1"
 
 section "Discovery"
 
 # Any agent with a chat will do; the contract under test is the transport, not
-# the conversation. Prefer an agent that already has one so the suite does not
-# have to create state. Discovered up front because the tenancy section below
-# needs a chat that genuinely EXISTS.
+# the conversation. Discovered up front because BOTH Tier A sections below need
+# a chat that genuinely EXISTS — the tenancy case to prove a non-member gets a
+# 404 for a real id, the frame-contract case to stream something.
+#
+# Prefer an existing chat so the suite does not have to create state. When
+# there is none, create one: `crewship seed` makes no chat sessions unless
+# --smoke-test runs a real agent, so a fresh CI instance has zero, and both
+# sections used to skip there — i.e. exactly the environment the nightly
+# matrix runs in (#1829). `chat create` needs no provider credential, which
+# `ask` and `run` both do.
 CHAT_ID=""
+CHAT_ID_CREATED=""
 AGENT_SLUGS="$(cs agent list --format json 2>/dev/null | { have jq && jq -r '.[]?.slug // empty' || cat; } 2>/dev/null | head -10)"
 for slug in $AGENT_SLUGS; do
   if have jq; then
@@ -81,7 +93,36 @@ for slug in $AGENT_SLUGS; do
   fi
   [[ -n "$CHAT_ID" ]] && break
 done
-info "chat for transport tests: ${CHAT_ID:-<none>}"
+
+FIRST_AGENT="$(printf '%s\n' "$AGENT_SLUGS" | head -1)"
+if [[ -z "$CHAT_ID" && -n "$FIRST_AGENT" ]]; then
+  info "no existing chat — creating one on $FIRST_AGENT"
+  CHAT_ID="$(cs chat create "$FIRST_AGENT" --format quiet 2>/dev/null | tr -d '\r' | head -1)"
+  [[ -n "$CHAT_ID" ]] && CHAT_ID_CREATED="$CHAT_ID"
+fi
+
+# Clean up only what this suite made. An EXIT trap so a failing assertion (or
+# a crash) still leaves the workspace as it was found.
+#
+# A cleanup that cannot be seen to fail is how a suite quietly starts leaving
+# litter: the id is cleared whether or not the delete landed, and the next
+# reader has no way to tell. Only clear on success, and say so loudly
+# otherwise. This runs from the EXIT trap — after finish() has already printed
+# the summary and set the exit code — so it warns rather than asserting; the
+# operator gets an id they can delete by hand.
+cleanup_created_chat() {
+  [[ -z "$CHAT_ID_CREATED" ]] && return 0
+  local out
+  if out="$(cs chat delete "$CHAT_ID_CREATED" --yes 2>&1)"; then
+    CHAT_ID_CREATED=""
+    return 0
+  fi
+  printf '%s  ! LEFTOVER%s chat %s could not be deleted: %s\n' \
+    "$_C_YEL" "$_C_OFF" "$CHAT_ID_CREATED" "$(printf '%s' "$out" | tr '\n' ' ' | head -c 160)" >&2
+  return 1
+}
+
+info "chat for transport tests: ${CHAT_ID:-<none>}${CHAT_ID_CREATED:+ (created by this suite)}"
 
 section "Tier A - a chat that does not exist is 404"
 
@@ -118,65 +159,159 @@ T2_EMAIL="${RUN_STREAM_T2_EMAIL:-viewer1@crewship.local}"
 T2_PASSWORD="${RUN_STREAM_T2_PASSWORD:-viewerpass12}"
 T2_PROFILE="harness-run-stream-t2"
 T2_USER_ID=""
+T2_MEMBER_ID=""
 T2_ROLE=""
 
+# restore_t2_membership — put the second identity back, and REPORT if it could
+# not be. Returns non-zero on failure so the direct caller can assert on it.
+#
+# `member add` takes the USER id — the asymmetry with `member remove` below is
+# real and is why this suite could not run (#1829). Re-adding an existing
+# member answers 409, which is a success for our purposes (the workspace ends
+# as it started), so that one status is absorbed and nothing else is.
+#
+# It used to swallow every failure. This suite removes a real person from a
+# real workspace; a restore that silently does not happen leaves the slot
+# damaged and the summary green, which is the same shape of lie the whole PR
+# is about.
 restore_t2_membership() {
   [[ -z "$T2_USER_ID" || -z "$T2_ROLE" ]] && return 0
-  # Idempotent: re-adding an existing member is not an error worth reporting
-  # from a trap, and the whole point is that the workspace ends as it started.
-  cs workspace member add "$T2_USER_ID" --role "$T2_ROLE" >/dev/null 2>&1 || true
+  local out
+  if out="$(cs workspace member add "$T2_USER_ID" --role "$T2_ROLE" 2>&1)"; then
+    return 0
+  fi
+  if printf '%s' "$out" | grep -qi "already a member"; then
+    return 0
+  fi
+  T2_RESTORE_ERR="$(printf '%s' "$out" | tr '\n' ' ' | head -c 160)"
+  return 1
 }
-trap restore_t2_membership EXIT
+T2_RESTORE_ERR=""
+
+# One EXIT trap for everything this suite has to undo. Best-effort by
+# necessity — it runs after finish() has set the exit code — but never silent:
+# whatever it could not undo is named on stderr with the id to fix it by hand.
+run_stream_cleanup() {
+  if ! restore_t2_membership; then
+    printf '%s  ! LEFTOVER%s %s is still removed from the workspace (user %s, role %s): %s\n' \
+      "$_C_YEL" "$_C_OFF" "$T2_EMAIL" "$T2_USER_ID" "$T2_ROLE" "$T2_RESTORE_ERR" >&2
+  fi
+  cleanup_created_chat
+}
+trap run_stream_cleanup EXIT
 
 if ! have jq; then
   skip "cross-tenant 404" "needs jq to resolve the second user"
 elif [[ -z "$CHAT_ID" ]]; then
-  skip "cross-tenant 404" "no existing chat to test against"
+  skip "cross-tenant 404" "no chat exists and none could be created (see Discovery above)"
 else
+  # Read BOTH ids. `.id` is the workspace_members ROW id, which is what
+  # `member remove` consumes; `.user_id` is the person, which is what `member
+  # add` consumes. Passing the wrong one answers 404 "Member not found", and
+  # this suite used to read that as "not a member" and skip.
+  #
+  # The email is matched against the flat `email` AND the nested `user.email`.
+  # The server sends only the nested shape; the CLI now normalises the flat one
+  # to match, and reading both means neither an older nor a newer build of
+  # either side turns a shape change into a false skip.
   T2_ROW="$(cs workspace member list --format json 2>/dev/null \
-    | jq -r --arg e "$T2_EMAIL" '.[]? | select(.email==$e) | "\(.user_id // .id)\t\(.role)"' 2>/dev/null | head -1)"
-  T2_USER_ID="$(printf '%s' "$T2_ROW" | cut -f1)"
-  T2_ROLE="$(printf '%s' "$T2_ROW" | cut -f2)"
+    | jq -r --arg e "$T2_EMAIL" \
+        '.[]? | select(((.email // "") | ascii_downcase) == ($e | ascii_downcase)
+                    or ((.user.email // "") | ascii_downcase) == ($e | ascii_downcase))
+              | "\(.id // "")\t\(.user_id // .user.id // "")\t\(.role // "")"' \
+        2>/dev/null | head -1)"
+  T2_MEMBER_ID="$(printf '%s' "$T2_ROW" | cut -f1)"
+  T2_USER_ID="$(printf '%s' "$T2_ROW" | cut -f2)"
+  T2_ROLE="$(printf '%s' "$T2_ROW" | cut -f3)"
 
-  if [[ -z "$T2_USER_ID" || -z "$T2_ROLE" ]]; then
-    skip "cross-tenant 404" "seeded user $T2_EMAIL is not a member of this workspace (re-seed with 'crewship seed --with-users')"
-  elif ! "$CREWSHIP" server add "$T2_PROFILE" --server "$SERVER" >/dev/null 2>&1; then
-    skip "cross-tenant 404" "could not create the $T2_PROFILE server profile"
-  elif ! printf '%s' "$T2_PASSWORD" | "$CREWSHIP" login --profile "$T2_PROFILE" --server "$SERVER" \
-        --email "$T2_EMAIL" --password-stdin >/dev/null 2>&1; then
-    skip "cross-tenant 404" "could not log in as $T2_EMAIL (seeded password changed?)"
+  if [[ -z "$T2_ROW" ]]; then
+    # Say the true thing. The previous wording asserted the user "is not a
+    # member" when the lookup had simply read the wrong field, which sent the
+    # operator off to re-seed and fixed nothing.
+    skip "cross-tenant 404" \
+      "no workspace member has the address $T2_EMAIL — seed one with 'crewship seed --with-users' against a server started with CREWSHIP_ALLOW_SIGNUP=true, or point RUN_STREAM_T2_EMAIL/RUN_STREAM_T2_PASSWORD at an existing non-owner account"
+  elif [[ -z "$T2_MEMBER_ID" || -z "$T2_USER_ID" || -z "$T2_ROLE" ]]; then
+    skip "cross-tenant 404" \
+      "member row for $T2_EMAIL is missing an id or role (got <${T2_ROW//$'\t'/|}>) — 'crewship workspace member list --format json' is not the expected shape"
+  elif [[ "$T2_ROLE" == "OWNER" ]]; then
+    # The server refuses to remove an OWNER, so this identity can never be
+    # made a non-member. That is a configuration problem, not a defect.
+    skip "cross-tenant 404" "$T2_EMAIL is the workspace OWNER and cannot be removed; pick a non-owner via RUN_STREAM_T2_EMAIL"
   else
-    info "second identity $T2_EMAIL ($T2_USER_ID, $T2_ROLE) - removing from the workspace"
-    if ! cs workspace member remove "$T2_USER_ID" --yes >/dev/null 2>&1; then
-      skip "cross-tenant 404" "could not remove $T2_EMAIL from the workspace"
+    # A profile left behind by an interrupted run would make `server add` fail
+    # and skip the case for no reason at all.
+    "$CREWSHIP" server remove "$T2_PROFILE" >/dev/null 2>&1 || true
+    if ! "$CREWSHIP" server add "$T2_PROFILE" --server "$SERVER" >/dev/null 2>&1; then
+      skip "cross-tenant 404" "could not create the $T2_PROFILE server profile"
+    elif ! printf '%s' "$T2_PASSWORD" | "$CREWSHIP" login --profile "$T2_PROFILE" --server "$SERVER" \
+          --email "$T2_EMAIL" --password-stdin >/dev/null 2>&1; then
+      skip "cross-tenant 404" "could not log in as $T2_EMAIL (seeded password changed? override with RUN_STREAM_T2_PASSWORD)"
     else
-      # The chat still exists and is unchanged; only this caller's membership
-      # is gone. `chat stream` needs no workspace, so nothing else is in play.
-      XT_OUT="$("$CREWSHIP" --profile "$T2_PROFILE" --server "$SERVER" --no-color \
-        chat stream "$CHAT_ID" --idle 5 2>&1)"; XT_RC=$?
-
-      # Restore BEFORE asserting, so a failing assertion cannot leave the
-      # workspace altered.
-      restore_t2_membership
-      T2_USER_ID=""; T2_ROLE=""   # the trap now has nothing left to do
-
-      if (( XT_RC == 0 )); then
-        _fail "cross-tenant stream exits non-zero" "exit 0 - a non-member was served chat $CHAT_ID"
+      info "second identity $T2_EMAIL (user $T2_USER_ID, membership $T2_MEMBER_ID, $T2_ROLE) - removing from the workspace"
+      # The MEMBERSHIP row id, not the user id: DELETE
+      # /workspaces/{ws}/members/{memberId} matches only workspace_members.id.
+      RM_OUT="$(cs workspace member remove "$T2_MEMBER_ID" --yes 2>&1)"; RM_RC=$?
+      if (( RM_RC != 0 )) || printf '%s' "$RM_OUT" | grep -qi "API error"; then
+        # Carry the server's own words into the skip. A skip whose reason is a
+        # guess is how this case stayed unevaluated for its whole life.
+        skip "cross-tenant 404" "could not remove $T2_EMAIL from the workspace: $(printf '%s' "$RM_OUT" | tr '\n' ' ' | head -c 160)"
+        # T2_USER_ID / T2_ROLE are deliberately LEFT SET. A reported failure
+        # does not prove the row survived: a DELETE can commit server-side and
+        # still answer an error (timeout, reset after commit). Clearing them
+        # here would leave the trap unable to put the person back in exactly
+        # the case where it matters most. Re-adding a member who never left
+        # answers 409, which restore_t2_membership treats as success.
       else
-        _pass "cross-tenant stream exits non-zero"
-      fi
-      assert_contains "existing chat, non-member caller reports 404" "$XT_OUT" "404"
-      # THE assertion. A 403 is the existence oracle: it says "this chat is
-      # real, you just cannot have it".
-      assert_not_contains "existing chat, non-member caller does NOT leak a 403" "$XT_OUT" "403"
-      # Same wire shape as the nonexistent case - the two must be
-      # indistinguishable, not merely both non-zero. The ids are normalised out
-      # so only the shape of the answer is compared.
-      if [[ "${BOGUS_OUT//cnotarealchatid00000/X}" == "${XT_OUT//$CHAT_ID/X}" ]]; then
-        _pass "cross-tenant and nonexistent answers are indistinguishable"
-      else
-        _fail "cross-tenant and nonexistent answers are indistinguishable" \
-          "missing=<$(printf '%s' "$BOGUS_OUT" | head -c 100)> cross-tenant=<$(printf '%s' "$XT_OUT" | head -c 100)>"
+        # The chat still exists and is unchanged; only this caller's membership
+        # is gone. `chat stream` needs no workspace, so nothing else is in play.
+        XT_OUT="$("$CREWSHIP" --profile "$T2_PROFILE" --server "$SERVER" --no-color \
+          chat stream "$CHAT_ID" --idle 5 2>&1)"; XT_RC=$?
+
+        # Restore BEFORE asserting, so a failing assertion cannot leave the
+        # workspace altered — and assert on the restore itself. This is the
+        # one call site that runs while the summary can still change, so a
+        # workspace left damaged is a FAILED suite, not a warning nobody
+        # scrolls back to.
+        if restore_t2_membership; then
+          T2_USER_ID=""; T2_ROLE=""   # the trap now has nothing left to do
+        else
+          _fail "second identity is restored to the workspace" \
+            "$T2_EMAIL was removed and could not be re-added: $T2_RESTORE_ERR"
+          # Left set on purpose: the EXIT trap gets one more attempt.
+        fi
+
+        if (( XT_RC == 0 )); then
+          _fail "cross-tenant stream exits non-zero" "exit 0 - a non-member was served chat $CHAT_ID"
+        else
+          _pass "cross-tenant stream exits non-zero"
+        fi
+        assert_contains "existing chat, non-member caller reports 404" "$XT_OUT" "404"
+        # THE assertion. A 403 is the existence oracle: it says "this chat is
+        # real, you just cannot have it".
+        assert_not_contains "existing chat, non-member caller does NOT leak a 403" "$XT_OUT" "403"
+        # Same wire shape as the nonexistent case - the two must be
+        # indistinguishable, not merely both non-zero. The ids are normalised
+        # out so only the shape of the answer is compared.
+        #
+        # Equality ALONE has no teeth: a leak that rewrites BOTH arms the same
+        # way keeps them identical and this stays green. Verified — a proxy
+        # turning every 404 from this route into a 403 left the comparison
+        # passing while the two assertions above went red (#1829). So the
+        # comparison is only allowed to pass when the shape it found is the
+        # RIGHT one: a 404 with no 403 anywhere in it. The two explicit
+        # assertions above still carry the property; this one now agrees with
+        # them instead of contradicting them.
+        XT_SHAPE="${XT_OUT//$CHAT_ID/X}"
+        BOGUS_SHAPE="${BOGUS_OUT//cnotarealchatid00000/X}"
+        if [[ "$BOGUS_SHAPE" != "$XT_SHAPE" ]]; then
+          _fail "cross-tenant and nonexistent answers are indistinguishable" \
+            "missing=<$(printf '%s' "$BOGUS_OUT" | head -c 100)> cross-tenant=<$(printf '%s' "$XT_OUT" | head -c 100)>"
+        elif [[ "$XT_SHAPE" != *404* || "$XT_SHAPE" == *403* ]]; then
+          _fail "cross-tenant and nonexistent answers are indistinguishable" \
+            "both arms answer the same, but it is not the 404 shape: <$(printf '%s' "$XT_SHAPE" | head -c 120)>"
+        else
+          _pass "cross-tenant and nonexistent answers are indistinguishable"
+        fi
       fi
     fi
   fi
@@ -186,7 +321,7 @@ fi
 section "Tier A - frame contract on an idle chat"
 
 if [[ -z "$CHAT_ID" ]]; then
-  skip "idle-chat frame contract" "no existing chat in this workspace (seed with --with-memory, or run Tier B first)"
+  skip "idle-chat frame contract" "no agents in this workspace, so no chat could be created either (see Discovery above)"
 else
   info "streaming chat $CHAT_ID with nothing running"
   # --idle is a belt: with no run active the server closes immediately with
@@ -214,7 +349,7 @@ else
   # A resume request against the same idle chat must still be a clean exit —
   # not a hang and not an error. This is what a reconnect loop does.
   assert_ok "resume with --last-seq is accepted" \
-    bash -c "$CREWSHIP --server '$SERVER' chat stream '$CHAT_ID' --last-seq 1 --idle 10 --quiet >/dev/null 2>&1"
+    bash -c "'$CREWSHIP' --server '$SERVER' chat stream '$CHAT_ID' --last-seq 1 --idle 10 --quiet >/dev/null 2>&1"
 fi
 
 # ── Shared between Tier B and Tier C ───────────────────────────────────────
@@ -259,6 +394,47 @@ assert_increasing_seq() {
   fi
 }
 
+# PROVIDER_STATE — can a model in this workspace actually answer?
+#
+# Read ONCE here, before either tier starts anything, because both tiers used
+# to infer it after the fact from a run's stderr and both inferred it badly.
+# The old signal was "no chat row ever appeared", and an EXPIRED credential is
+# not that shape: the run creates its chat, then the agent exits 1 with no
+# output. Tier B hard-FAILED on `live stream exits 0` and `live stream
+# delivered the agent's text`, reporting an unusable environment as a product
+# regression (#1829, dev2's ANTHROPIC_API_KEY); Tier C fell back to grepping
+# the routine log for `no active … credential`, which that failure never says.
+#
+#   "active"     — a model-provider credential is present and ACTIVE
+#   "inactive:…" — one is present but not usable, with name(s) and status
+#   "none"       — no model-provider credential at all
+#   ""           — unknown (no jq, or the credential list could not be read);
+#                  callers must carry on rather than skip on an unknown.
+#
+# The regex is deliberately broad: it only ever decides skip-vs-assert, and a
+# false positive just means the tiers run and report what really happened.
+PROVIDER_RE='ANTHROPIC|OPENAI|GOOGLE|GEMINI|AZURE|OPENROUTER|MISTRAL|OLLAMA|BEDROCK|VERTEX'
+PROVIDER_STATE=""
+if have jq; then
+  PROVIDER_STATE="$(cs credential list --format json 2>/dev/null \
+    | jq -r --arg re "$PROVIDER_RE" \
+        '[.[]? | select((.provider // "") | test($re))] as $p
+         | if ($p | length) == 0 then "none"
+           elif ([$p[] | select((.status // "") == "ACTIVE")] | length) > 0 then "active"
+           else "inactive:" + ([$p[] | "\(.name // .id) is \(.status // "?")"] | join(", "))
+           end' 2>/dev/null)"
+fi
+
+# provider_note — the human half of PROVIDER_STATE, for a skip reason. Empty
+# when a provider is usable (or unknown), so callers can append it blindly.
+provider_note() {
+  case "$PROVIDER_STATE" in
+    none)      printf '%s' "no model-provider credential in this workspace" ;;
+    inactive:*) printf '%s' "no ACTIVE model-provider credential: ${PROVIDER_STATE#inactive:}" ;;
+    *)         printf '' ;;
+  esac
+}
+
 # ── Tier B: a live run ─────────────────────────────────────────────────────
 
 RUN_AGENT="$(printf '%s\n' "$AGENT_SLUGS" | head -1)"
@@ -273,6 +449,32 @@ if [[ -z "$RUN_AGENT" ]]; then
   skip "live run stream" "no agents in this workspace"
   return 0
 fi
+
+# Without jq this tier cannot read an id out of `chat list`, so it has nothing
+# to attach to and cannot read PROVIDER_STATE either. It already ended in a
+# SKIP further down — but only after starting a real agent run and waiting out
+# the attach budget, which on CI is tokens and minutes spent to reach a
+# foregone conclusion. Say it up front, the way Tier C does.
+if ! have jq; then
+  skip "live run stream" "needs jq to discover the run's chat"
+  return 0
+fi
+
+# Tier B asserts the agent's WORDS arrive, so it needs a model that can answer.
+# PROVIDER_STATE (above) is read before anything starts, which is the whole
+# improvement: the old code only skipped when no chat row ever appeared, and an
+# expired key does produce one.
+#
+# `return`, never `finish`: this gates Tier B ONLY. Tier C asserts that the
+# session channel is PUBLISHED at all, and it already handles a run that fails
+# — run_begin + error + done are real frames and prove the channel — so a dead
+# credential must not take #1823's regression signal down with it.
+case "$PROVIDER_STATE" in
+  none|inactive:*)
+    skip "live run stream" "$(provider_note) — Tier B needs one to prove delivery (Tier A and Tier C still run)"
+    return 0
+    ;;
+esac
 
 # Start the run in the background and attach from THIS process — that is the
 # real shape of the feature (the run's owner is somebody else) and it is the
@@ -405,7 +607,13 @@ R_CHAT="$(await_new_chat "$RUN_AGENT" "$R_BEFORE" "$R_PID" "$ROUTINE_STREAM_TIME
 if [[ -z "$R_CHAT" ]]; then
   wait "$R_PID" 2>/dev/null
   REASON="no chat appeared within ${ROUTINE_STREAM_TIMEOUT}s"
-  if grep -qi "no active .* credential\|provider:" "$R_LOG" 2>/dev/null; then
+  # Prefer the workspace's own answer over a grep of the log. The log-sniff
+  # below only matches a run that never reached a provider; an EXPIRED
+  # credential says nothing of the sort (dev2 prints only "agent exited with
+  # code 1"), which is how #1829's mis-report happened one tier up.
+  if [[ -n "$(provider_note)" ]]; then
+    REASON="$REASON — $(provider_note)"
+  elif grep -qi "no active .* credential\|provider:" "$R_LOG" 2>/dev/null; then
     REASON="no provider credential in this workspace — $(head -c 120 "$R_LOG" | tr '\n' ' ')"
   fi
   skip "routine run stream" "$REASON — $(head -c 160 "$R_LOG" | tr '\n' ' ')"
@@ -447,8 +655,25 @@ done
 wait "$R_PID" 2>/dev/null
 
 if (( ! attached )); then
-  _fail "routine-triggered run publishes on the session channel" \
-    "every attach to $R_CHAT answered with no run frames while the routine was executing — this is #1823's failure mode. last stream: $(printf '%s' "$R_OUT" | head -c 200) | routine: $(head -c 200 "$R_LOG" | tr '\n' ' ')"
+  # "No frames" only accuses #1823 when the run had a fair chance to produce
+  # some. Without a usable model the agent step dies on the spot — on dev2 it
+  # is `agent exited with code 1` after ~5s — and an attach that lands after
+  # that sees an idle chat and times out. Blaming the chokepoint for it is the
+  # same mis-report #1829 fixed one tier up, and it is not hypothetical:
+  # pristine main fails this assertion against dev2 today, for exactly that
+  # reason and with exactly this message.
+  #
+  # The assertion is NOT weakened. This skip is reachable only when the
+  # workspace provably cannot run an agent at all. With an ACTIVE provider
+  # credential, an empty transcript is still a hard FAIL — which is the red
+  # this tier exists to produce.
+  if [[ -n "$(provider_note)" ]]; then
+    skip "routine-triggered run publishes on the session channel" \
+      "$(provider_note) — the routine's agent step could not run, so an empty transcript says nothing about the session channel. routine: $(head -c 160 "$R_LOG" | tr '\n' ' ')"
+  else
+    _fail "routine-triggered run publishes on the session channel" \
+      "every attach to $R_CHAT answered with no run frames while the routine was executing — this is #1823's failure mode. last stream: $(printf '%s' "$R_OUT" | head -c 200) | routine: $(head -c 200 "$R_LOG" | tr '\n' ' ')"
+  fi
   rm -f "$R_LOG"
   _tier_c_cleanup
   return 0

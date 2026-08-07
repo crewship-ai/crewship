@@ -61,6 +61,11 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	// returns without ticking the 3 s poll loop.
 	s.OnGet("/api/v1/crews/cseeded0123456789abcdefg/provision",
 		clitest.JSONResponse(200, map[string]string{"status": "completed"}))
+	// The roster --with-users reads back to confirm each fixture user landed.
+	// Without it the phase places nobody, which is now a FAILED seed rather
+	// than a stderr notice next to a zero exit code (#1829) — so this stub is
+	// what makes --with-users actually exercised here instead of tolerated.
+	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
 
 	covSetupRunSeed(t, s)
 	covSetFlag(t, seedCmd, "nuke", "true")
@@ -86,6 +91,16 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	// under the test-scoped $HOME) and writes the demo tier files there.
 	if !strings.Contains(out, "Seeding agent memory tiers...") {
 		t.Errorf("expected memory phase to run:\n%s", out)
+	}
+	// --with-users placed the whole fixture: one signup per demo user, and
+	// the credential table printed for each.
+	if n := len(s.CallsFor("POST", signupPath)); n != len(demoUsers) {
+		t.Errorf("signups = %d, want %d", n, len(demoUsers))
+	}
+	for _, u := range demoUsers {
+		if !strings.Contains(out, u.Email) {
+			t.Errorf("credential table missing %s:\n%s", u.Email, out)
+		}
 	}
 	// --wait-provision polled the status endpoint.
 	if n := len(s.CallsFor("GET", "/api/v1/crews/cseeded0123456789abcdefg/provision")); n == 0 {
@@ -300,8 +315,14 @@ func TestRunSeedCov2_CancelMidPhases(t *testing.T) {
 		skipIss   bool
 		wantOut   string // non-fatal log line expected (empty = none)
 	}{
-		{"rbac users", "/api/v1/auth/signup", true, true,
-			"RBAC user seeding hit an error (continuing)"},
+		// The RBAC phase is no longer one of the "logs and continues" phases:
+		// --with-users is an explicit request for a second identity, and a
+		// caller that asked for one and did not get it is not told the seed
+		// succeeded (#1829). A cancellation therefore aborts AT this phase
+		// instead of being logged and re-surfacing at the next checkpoint, so
+		// there is no non-fatal line to expect — the wrapped error below is
+		// the signal.
+		{"rbac users", "/api/v1/auth/signup", true, true, ""},
 		{"skills import", "/api/v1/workspaces/" + covSeedWSID + "/skills/import", false, true, ""},
 		// Routine seeding no longer has its own inter-phase checkpoint
 		// (that used to be Phase 9b: demo schedules, now removed) — the
@@ -331,6 +352,11 @@ func TestRunSeedCov2_CancelMidPhases(t *testing.T) {
 			})
 			if err == nil || !strings.Contains(err.Error(), "context canceled") {
 				t.Fatalf("want cancellation surfaced; got %v", err)
+			}
+			// A fatal phase must say WHICH phase died, not just that the
+			// context went away.
+			if tc.withUsers && !strings.Contains(err.Error(), "--with-users") {
+				t.Errorf("error %q does not name the phase that aborted", err.Error())
 			}
 			if tc.wantOut != "" && !strings.Contains(out, tc.wantOut) {
 				t.Errorf("missing %q in output:\n%s", tc.wantOut, out)
