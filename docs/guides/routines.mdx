@@ -210,7 +210,7 @@ The main win is a real multiline `prompt` via YAML's literal block scalar (`|`) 
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
 | `guardrails` | object | Per-routine [Lookout](/guides/lookout) policy. `guardrails.input.prompt_injection.action`: `block` (default) \| `sanitize` \| `log`. |
 | `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
-| `agentless` | boolean | Token-zero guarantee: the routine may only contain `http` / `code` / `wait` / `transform` / `notify` steps and can never invoke an LLM. See [Agentless routines](#agentless-routines). |
+| `agentless` | boolean | Token-zero guarantee: the routine may only contain steps that can never invoke an LLM — `agent_run`, `call_pipeline` and `crewship` are rejected. See [Agentless routines](#agentless-routines). |
 
 ### InputSpec
 
@@ -1013,6 +1013,66 @@ Runs the **body** once per element of a JSON array, collecting each item's resul
 
 Within an item the body runs like a mini-pipeline: per-step `retry:`, `validation`, `outcomes`, and tier escalation all apply. **Cost is summed across every item** and attributed to the `foreach` step, so `max_cost_usd` still bounds the whole fan-out. The first item that fails cancels the rest and fails the step (fail-fast). `wait`, `call_pipeline`, and a nested `foreach` are **not allowed** inside the body — the fan-out is a bounded, self-contained unit.
 
+### `crewship` — act on Crewship's own nouns
+
+Every other step kind reaches **outward**: an `http` step to a third party, an
+`agent_run` to a model. `crewship` reaches **inward** — it lets a routine write
+back into the product it runs inside, so the loop *"issue changes → routine
+runs → routine comments on the issue"* closes without an `http` step aimed at
+your own API and a token you have to manage.
+
+```yaml
+- id: file_it
+  type: crewship
+  action: issue.create          # namespaced verb
+  args:
+    title: "Nightly check failed: {{ steps.probe.output }}"
+    priority: high
+```
+
+| Field | Notes |
+| --- | --- |
+| `action` | The verb. Required. See the table below. |
+| `args` | Arguments for the verb, template-substituted (including strings nested inside lists and objects). |
+
+The step's output is the API's JSON response, so a later step can pick a field
+out of it — `transform` with `.identifier` gives you the new issue's key.
+
+#### Verbs
+
+| verb | does | available |
+| --- | --- | --- |
+| `issue.create` | Creates an issue in the routine's author crew. Requires `title`. | **yes** |
+| `issue.update` | Changes an issue's status/fields. | not yet |
+| `issue.comment` | Comments on an issue. | not yet |
+| `issue.link` | Relates two issues. | not yet |
+| `assignment.create` | Delegates work to an agent. | not yet |
+| `escalation.create` | Raises an escalation to a human. | not yet |
+
+**"Not yet" means the routine will not save.** Every `crewship` action is
+bounded by the author crew's **autonomy level**, and five of the six verbs
+describe capabilities Crewship has no autonomy action for yet — deciding what
+a `guided` crew may do unattended is a governance decision, not something a
+step kind gets to assume. Rather than ship them ungoverned, they are declared
+and refused at **save time**, with an error that says why. A routine that saves
+clean and then refuses at 03:00 is worse than one that never saved.
+
+#### What bounds it
+
+- **Autonomy.** The verb is gated on the author crew's `autonomy_level`, the
+  same gate an agent doing this by hand passes. A crew whose level would *hold
+  the action for approval* gets a refusal instead — a routine has nobody
+  attached to approve it. Raise the level with `crewship policy set`.
+- **Identity is not yours to set.** `workspace_id`, `crew_id`,
+  `author_agent_id` and `author_run_id` are injected from the run and override
+  anything in `args`. A routine cannot act as another workspace or a sibling
+  crew.
+- **Chain depth.** Whatever the verb creates records the run that created it,
+  so an automation reacting to it inherits this run's chain budget rather than
+  starting a new one. See [Chain depth](#chain-depth-the-composition-budget).
+- **`dry_run` does not write.** A preview that files a real issue is not a
+  preview; the step reports what it would have called.
+
 ### Conditional `if`
 
 Any step can carry an `if:` gate. Two forms, chosen automatically:
@@ -1144,7 +1204,7 @@ The probe's verdict comes from data reshaping plus a single comparison, not scri
 
 Enforced at two layers:
 
-- **Save time** — validation rejects `agent_run` (direct LLM spend), `call_pipeline` (the target resolves by slug at runtime, so a nested routine could gain an agent step later and silently break the guarantee), and `eval.online` with `sample_rate > 0` (online grading runs a grader agent against the routine's runs).
+- **Save time** — validation rejects `agent_run` (direct LLM spend), `call_pipeline` (the target resolves by slug at runtime, so a nested routine could gain an agent step later and silently break the guarantee), `crewship` (an @mention in an issue body wakes an agent, an assignment dispatches one — whether it happens depends on rendered content, not on anything provable at save time), and `eval.online` with `sample_rate > 0` (online grading runs a grader agent against the routine's runs).
 - **Run time** — the executor independently refuses to dispatch an LLM-capable step inside an agentless run, so even a definition written before the validator existed fails closed.
 
 Everything else works as usual: egress allowlist, credentials, versioning, dry-run, schedules, webhooks. Agentless routines are also the only valid probes for [wake gates](#wake-gates).

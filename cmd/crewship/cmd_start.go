@@ -800,8 +800,11 @@ var startCmd = &cobra.Command{
 						ScriptRunner: ph.ScriptRunner(),
 						Signals:      signalRegistry,
 						RunVerdict:   srv.APIRouter().RunVerdict,
-						// Dispatch gates on the in-process call_pipeline path.
+						// Dispatch gates on the in-process call_pipeline path,
+						// and `crewship` step dispatch — both shared with the
+						// HTTP path so an unattended run behaves identically.
 						Preflight: ph.RunPreflight(),
+						Crewship:  ph.CrewshipActions(),
 						// Share the pipeline handler's verdict WaitGroup so
 						// this boot executor's async verdicts drain at shutdown.
 						VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),
@@ -872,8 +875,11 @@ var startCmd = &cobra.Command{
 						ScriptRunner: ph.ScriptRunner(),
 						Signals:      signalRegistry,
 						RunVerdict:   srv.APIRouter().RunVerdict,
-						// Dispatch gates on the in-process call_pipeline path.
+						// Dispatch gates on the in-process call_pipeline path,
+						// and `crewship` step dispatch — both shared with the
+						// HTTP path so an unattended run behaves identically.
 						Preflight: ph.RunPreflight(),
+						Crewship:  ph.CrewshipActions(),
 						// Share the pipeline handler's verdict WaitGroup so
 						// this resume executor's async verdicts drain at shutdown.
 						VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),
@@ -963,8 +969,11 @@ var startCmd = &cobra.Command{
 					ScriptRunner: ph.ScriptRunner(),
 					Signals:      signalRegistry,
 					RunVerdict:   srv.APIRouter().RunVerdict,
-					// Dispatch gates on the in-process call_pipeline path.
+					// Dispatch gates on the in-process call_pipeline path,
+					// and `crewship` step dispatch — both shared with the
+					// HTTP path so an unattended run behaves identically.
 					Preflight: ph.RunPreflight(),
+					Crewship:  ph.CrewshipActions(),
 					// Share the pipeline handler's verdict WaitGroup so this
 					// scheduler executor's async verdicts drain at shutdown.
 					VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),

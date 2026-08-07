@@ -24,6 +24,11 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// (/internal/pipelines/test_run, dry-run); a real run is just /run.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
 	r.PipelinesHandler = pipes // expose for orchestrator wiring
+	// `crewship` step dispatch — loopback HTTP to our own internal API with
+	// the master token. Options are applied before route registration, so the
+	// loopback URL and token are known here. A deployment without a loopback
+	// URL gets nil and crewship steps fail closed with a wiring hint.
+	pipes.SetCrewshipActions(newCrewshipActions(r.internalLoopbackURL, r.internalToken, r.PolicyResolver(), r.logger))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Get))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", roleCreate, pipes.Run)

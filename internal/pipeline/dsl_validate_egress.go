@@ -141,8 +141,19 @@ func validateStepEgress(st Step) error {
 		if st.Query.WindowHours < 0 {
 			return fmt.Errorf("pipeline: step %q (query) window_hours cannot be negative", st.ID)
 		}
+	case StepCrewship:
+		// The verb must exist AND be governed by a policy action. Both are
+		// save-time refusals on purpose: a routine that saves cleanly and
+		// then refuses every night at 03:00 is worse than one that never
+		// saved, because by then somebody has built on it.
+		if err := ValidateCrewshipAction(st.ID, st.Action); err != nil {
+			return err
+		}
+		if err := ValidateCrewshipArgs(st.ID, st.Action, st.Args); err != nil {
+			return err
+		}
 	default:
-		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify, script, query)", st.ID, st.Type)
+		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify, script, query, crewship)", st.ID, st.Type)
 	}
 	return nil
 }

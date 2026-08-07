@@ -145,6 +145,13 @@ type Executor struct {
 	// step without bumping the routine version. Nil = run as authored.
 	stepOverrides *StepOverrideStore
 
+	// crewship dispatches `crewship` steps — a routine acting on Crewship's
+	// own nouns (issues, assignments, escalations) over loopback HTTP to the
+	// daemon's internal API. Nil = crewship steps fail closed with a wiring
+	// hint, matching codeRunner / scriptRunner: a step that silently did
+	// nothing would be worse than one that stops the run.
+	crewship CrewshipActions
+
 	// signals is the shared in-process registry for run signals (Wave
 	// 4.3). A wait:event step registers here and blocks; the signal
 	// endpoint delivers a payload. Nil = wait:event fails closed.
@@ -417,6 +424,13 @@ func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, scope Run
 // Without it, wait:event steps fail closed.
 func (e *Executor) WithSignalRegistry(s *SignalRegistry) *Executor {
 	e.signals = s
+	return e
+}
+
+// WithCrewshipActions wires the `crewship` step kind's dispatch seam.
+// Without it, crewship steps fail closed with a wiring hint.
+func (e *Executor) WithCrewshipActions(a CrewshipActions) *Executor {
+	e.crewship = a
 	return e
 }
 
@@ -1753,6 +1767,8 @@ func (e *Executor) dispatchStep(
 		return e.runQueryStep(ctx, step, in)
 	case StepForeach:
 		return e.runForeachStep(ctx, step, in, parentRender, runID, pipelineID, emit, depth)
+	case StepCrewship:
+		return e.runCrewshipStep(ctx, step, parentRender, in, runID)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}

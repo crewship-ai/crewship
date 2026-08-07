@@ -71,6 +71,16 @@ type ExecutorDeps struct {
 	// executor_factory_test.go is what keeps that true.
 	Preflight RunPreflight
 
+	// Crewship dispatches `crewship` steps — a routine acting on Crewship's
+	// own nouns over loopback HTTP to the daemon's internal API. Seam for the
+	// same reason Preflight is: the loopback client, the internal token and
+	// the policy resolver all live in internal/api.
+	//
+	// nil → crewship steps fail closed with a wiring hint, matching
+	// CodeRunner / ScriptRunner. Silently doing nothing would be worse: the
+	// whole point of the kind is a side effect.
+	Crewship CrewshipActions
+
 	// ScriptRunner execs type:script steps (bundled scripts) in the crew
 	// container. nil → script steps fail closed with a wiring hint. In
 	// production this is the same OrchestratorRunner passed as Runner
@@ -167,6 +177,9 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 	}
 	if d.Preflight != nil {
 		exec = exec.WithRunPreflight(d.Preflight)
+	}
+	if d.Crewship != nil {
+		exec = exec.WithCrewshipActions(d.Crewship)
 	}
 	// Post-run outcome verdict (#1403) — needs both a DB (feature flag
 	// + journal entries) and a way to reach the run_summary aux slot's
