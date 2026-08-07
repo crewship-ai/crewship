@@ -265,9 +265,10 @@ function OverviewInner({
         const runId = node.id.slice("run:".length)
         onSelectRun(runId)
       }
-      // Issue + Routine clicks navigate via the node-level <Link>
-      // wrapper or are handled at the rail level; canvas does
-      // nothing extra.
+      // Every other prefix — iss: rt: auto: agt: ibx: — navigates via
+      // the node-level <Link> wrapper (routine, agent, inbox), is
+      // handled at the rail level (issue), or has no destination at
+      // all (automation). The canvas does nothing extra for those.
     },
     [onSelectRun],
   )
