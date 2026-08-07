@@ -121,7 +121,7 @@ func TestEnsureImage_LocalCacheTag(t *testing.T) {
 
 			p, pulls := newEnsureImageProvider(t, tt.present)
 
-			err := p.ensureImage(context.Background(), tt.ref)
+			_, err := p.ensureImage(context.Background(), tt.ref)
 
 			if tt.wantErrIs != nil {
 				if !errors.Is(err, tt.wantErrIs) {

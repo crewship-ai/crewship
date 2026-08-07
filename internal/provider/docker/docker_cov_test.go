@@ -308,7 +308,7 @@ func TestEnsureImage_LocalMatchesRemoteDigest_NoPull(t *testing.T) {
 		}
 	})
 
-	if err := p.ensureImage(context.Background(), ref); err != nil {
+	if _, err := p.ensureImage(context.Background(), ref); err != nil {
 		t.Fatalf("ensureImage: %v", err)
 	}
 	mu.Lock()
@@ -339,7 +339,7 @@ func TestEnsureImage_LocalPresentRemoteUnknown_NoPull(t *testing.T) {
 		}
 	})
 
-	if err := p.ensureImage(context.Background(), ref); err != nil {
+	if _, err := p.ensureImage(context.Background(), ref); err != nil {
 		t.Fatalf("ensureImage: %v", err)
 	}
 	mu.Lock()
@@ -373,7 +373,7 @@ func TestEnsureImage_StaleLocal_Repulls(t *testing.T) {
 		}
 	})
 
-	if err := p.ensureImage(context.Background(), ref); err != nil {
+	if _, err := p.ensureImage(context.Background(), ref); err != nil {
 		t.Fatalf("ensureImage: %v", err)
 	}
 	mu.Lock()
@@ -383,7 +383,15 @@ func TestEnsureImage_StaleLocal_Repulls(t *testing.T) {
 	}
 }
 
-func TestEnsureImage_PullFailsButLocalPresent_Proceeds(t *testing.T) {
+// TestEnsureImage_PullFailsButLocalPresent_FailsClosed used to be
+// ...Proceeds and asserted the opposite. #1825 reversed the behaviour
+// deliberately: reaching the pull with a local copy present PROVES the local
+// image is a different manifest than the tag resolves to (the two branches
+// above ensureImage's pull have already excluded "matches" and "remote
+// unknown"), so proceeding runs a known-wrong image. The escape hatch for
+// operators who need availability over integrity is covered in
+// ensure_image_pin_test.go.
+func TestEnsureImage_PullFailsButLocalPresent_FailsClosed(t *testing.T) {
 	t.Parallel()
 
 	p, ref := newCovImageProvider(t, covDigest, func(w http.ResponseWriter, r *http.Request) {
@@ -402,8 +410,8 @@ func TestEnsureImage_PullFailsButLocalPresent_Proceeds(t *testing.T) {
 		}
 	})
 
-	if err := p.ensureImage(context.Background(), ref); err != nil {
-		t.Fatalf("pull failure with a local copy must be tolerated: %v", err)
+	if _, err := p.ensureImage(context.Background(), ref); err == nil {
+		t.Fatal("pull failure with a provably-stale local copy must fail closed")
 	}
 }
 
@@ -422,7 +430,7 @@ func TestEnsureImage_PullFailsNoLocal_Errors(t *testing.T) {
 		}
 	})
 
-	err := p.ensureImage(context.Background(), ref)
+	_, err := p.ensureImage(context.Background(), ref)
 	if err == nil || !strings.Contains(err.Error(), "pull image") {
 		t.Fatalf("expected pull error, got %v", err)
 	}
@@ -448,7 +456,7 @@ func TestEnsureImage_FreshPullSucceeds(t *testing.T) {
 		}
 	})
 
-	if err := p.ensureImage(context.Background(), ref); err != nil {
+	if _, err := p.ensureImage(context.Background(), ref); err != nil {
 		t.Fatalf("ensureImage: %v", err)
 	}
 	mu.Lock()
@@ -477,7 +485,7 @@ func TestEnsureImage_DrainErrorSurfaces(t *testing.T) {
 		}
 	})
 
-	err := p.ensureImage(context.Background(), ref)
+	_, err := p.ensureImage(context.Background(), ref)
 	if err == nil || !strings.Contains(err.Error(), "drain pull stream") {
 		t.Fatalf("expected drain error, got %v", err)
 	}
