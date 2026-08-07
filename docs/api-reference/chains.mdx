@@ -1,6 +1,6 @@
 ---
 title: "Chains"
-description: "Reconstruct the causal graph around one issue, run, routine or assignment in a single call."
+description: "Reconstruct the causal graph around one issue, run, routine, automation or assignment in a single call."
 icon: "share-nodes"
 ---
 
@@ -45,7 +45,7 @@ The workspace comes from the authenticated session, never from the path.
 
 | Param | Description |
 |---|---|
-| `anchor` | An issue identifier (`ENG-4`), an issue id, a run id, a routine id, a routine slug, an assignment id, or an inbox item id. Resolved in that order; the first match wins. |
+| `anchor` | An issue identifier (`ENG-4`), an issue id, a run id, a routine id, a routine slug, an assignment id, an automation id, or an inbox item id. Resolved in that order; the first match wins. |
 
 **Query parameters:**
 
@@ -112,7 +112,7 @@ reports the consequence.
 | `max_depth` | integer | The depth cap actually applied, after clamping. |
 | `max_nodes` | integer | The node cap actually applied, after clamping. |
 | `nodes[].id` | string | Graph key, `"<kind>:<ref>"`. `edges[].from`/`to` reference this. |
-| `nodes[].kind` | string | `issue`, `routine`, `run`, `assignment`, `agent`, `inbox`. Open set — treat an unknown kind as opaque rather than an error. |
+| `nodes[].kind` | string | `issue`, `routine`, `run`, `automation`, `assignment`, `agent`, `inbox`. Open set — treat an unknown kind as opaque rather than an error. |
 | `nodes[].ref` | string | Primary key of the underlying row. |
 | `nodes[].key` | string | Human handle. Unique per workspace for `issue` (identifier), `routine` and `agent` (slug); for `run` it is the routine slug and for `inbox` the item kind, so it is **not** an identifier for those. |
 | `nodes[].label` | string | Title / task text. User- and agent-written; escape before rendering. |
@@ -136,6 +136,8 @@ Every edge is backed by a real column. Nothing is inferred.
 | issue → run | `triggers` | `pipeline_runs.triggered_via='issue'` and `triggered_by_id` = `missions.identifier` |
 | routine → run | `runs` | `pipeline_runs.pipeline_id` (FK) |
 | run → run | `triggers` | `triggered_via='call_pipeline'`, `triggered_by_id` = parent run id |
+| automation → run | `triggers` | `triggered_via='automation'`, `triggered_by_id` = `automations.id` |
+| automation → routine | `triggers` | `automations.action_config_json` → `$.routine_slug`, joined to `pipelines.slug` in the same workspace |
 | issue → assignment | `triggers` | `mission_tasks.assignment_id` |
 | assignment → assignment | `triggers` | `assignments.parent_assignment_id` |
 | agent → assignment | `executes` | `assignments.assigned_to_id` |
@@ -145,7 +147,7 @@ Every edge is backed by a real column. Nothing is inferred.
 | issue ↔ issue | `relates` | `mission_relations` (author-declared, not causal) |
 
 `triggered_by_id` is polymorphic — a schedule id, a webhook id, a parent run
-id, or an issue identifier depending on `triggered_via` — so it is only ever
+id, an automation id, or an issue identifier depending on `triggered_via` — so it is only ever
 dereferenced against the table `triggered_via` names. A schedule id that
 happens to equal a run id is not followed as a parent run.
 
@@ -185,7 +187,7 @@ a dangling reference from a rendering bug of its own.
 | 400 | `anchor` missing from the path. |
 | 401 | No authenticated session, or no workspace resolvable. |
 | 403 | Caller is not a member of the workspace. |
-| 404 | No issue, run, routine, assignment or inbox item matches the anchor **in this workspace**. Deliberately the same answer as an anchor that exists in another workspace — otherwise this endpoint becomes an oracle for identifiers in a tenant the caller cannot read. |
+| 404 | No issue, run, routine, automation, assignment or inbox item matches the anchor **in this workspace**. Deliberately the same answer as an anchor that exists in another workspace — otherwise this endpoint becomes an oracle for identifiers in a tenant the caller cannot read. |
 | 500 | Query failed. |
 
 ## CLI

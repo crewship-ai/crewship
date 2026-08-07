@@ -5,6 +5,7 @@ package main
 //	crewship chain ENG-4          # what an issue set off
 //	crewship chain prn_abc123     # why a run happened, and what it started
 //	crewship chain nightly-deploy # every run of a routine
+//	crewship chain aut_abc123     # what a rule has actually set off
 //
 // The API returns a graph. This renders it as a tree, because a terminal has
 // no second dimension to spend on a graph and a reader following causality
@@ -75,11 +76,12 @@ type chainGraph struct {
 var chainCmd = &cobra.Command{
 	Use:     "chain <anchor>",
 	Aliases: []string{"why"},
-	Short:   "Show what caused what around an issue, run, routine or assignment",
+	Short:   "Show what caused what around an issue, run, routine, automation or assignment",
 	Long: `Reconstruct the causal chain around one anchor and print it as a tree.
 
 The anchor is whatever you have to hand — an issue identifier, an issue id, a
-run id, a routine id or slug, an assignment id, or an inbox item id. The
+run id, a routine id or slug, an assignment id, an automation id, or an inbox
+item id. The
 server resolves it and walks outward across both execution substrates
 (routine runs and agent delegation), so you do not need to know which one your
 anchor lives in.

@@ -199,8 +199,11 @@ func TestBurstOfTwoHundredEntriesProducesOneEnqueue(t *testing.T) {
 		t.Fatalf("enqueues = %d, want exactly 1", got)
 	}
 	pr := enq.at(0)
-	if pr.DebounceKey != "auto:a1:m_1" {
-		t.Errorf("debounce key = %q, want auto:a1:m_1", pr.DebounceKey)
+	// auto:<rule>:<subject-kind>:<subject>. The kind is in the key because the
+	// subject is the most specific identity the entry carries, not always a
+	// mission — see debounceKey.
+	if pr.DebounceKey != "auto:a1:mission:m_1" {
+		t.Errorf("debounce key = %q, want auto:a1:mission:m_1", pr.DebounceKey)
 	}
 	if pr.DebounceMaxAt == nil {
 		t.Error("debounce_max_at is nil; a never-ending storm would defer the run forever")

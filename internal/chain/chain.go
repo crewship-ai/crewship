@@ -35,6 +35,7 @@ const (
 	KindAssignment NodeKind = "assignment" // assignments
 	KindAgent      NodeKind = "agent"      // agents
 	KindInbox      NodeKind = "inbox"      // inbox_items
+	KindAutomation NodeKind = "automation" // automations
 )
 
 // EdgeKind is the relationship an edge asserts. Every kind below is backed by
@@ -338,6 +339,8 @@ func (w *walker) expand(ctx context.Context, n Node) ([]neighbour, error) {
 		return w.expandAssignment(ctx, n)
 	case KindInbox:
 		return w.expandInbox(ctx, n)
+	case KindAutomation:
+		return w.expandAutomation(ctx, n)
 	case KindAgent:
 		// Deliberate leaf — see issueNode/agentNode for the reason carried to
 		// the client.

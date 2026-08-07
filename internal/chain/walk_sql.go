@@ -108,6 +108,29 @@ func inboxPartial(kind string) (bool, string) {
 	}
 }
 
+// automationNode builds the rule node. automations has no status column, so
+// Status is derived: a soft-deleted rule reads "deleted" rather than
+// disappearing, because the runs it fired still point at it and "what caused
+// this" must keep answering after the rule is gone — which is the reason the
+// table soft-deletes at all (AutomationHandler.Delete).
+func automationNode(id, name, eventType string, enabled bool, deleted bool) Node {
+	status := "enabled"
+	switch {
+	case deleted:
+		status = "deleted"
+	case !enabled:
+		status = "disabled"
+	}
+	return Node{
+		ID:     nodeID(KindAutomation, id),
+		Kind:   KindAutomation,
+		Ref:    id,
+		Key:    eventType,
+		Label:  name,
+		Status: status,
+	}
+}
+
 func inboxNode(id, kind, title, state string) Node {
 	partial, reason := inboxPartial(kind)
 	return Node{
@@ -132,10 +155,6 @@ func inboxNode(id, kind, title, state string) Node {
 // ("ENG-4") cannot collide with anything else, run and pipeline ids carry
 // distinct prefixes, and the id lookups come after so a slug that happens to
 // look like an id still resolves the way a human meant it.
-//
-// There is no "automation" case because there is no automations table on this
-// branch — a routine (pipelines row, by id or slug) is the thing that plays
-// that role, and it is accepted here by both.
 func (w *walker) resolveAnchor(ctx context.Context, anchor string) (Node, error) {
 	lookups := []func(context.Context, string) (Node, bool, error){
 		w.lookupIssueByIdentifier,
@@ -144,6 +163,7 @@ func (w *walker) resolveAnchor(ctx context.Context, anchor string) (Node, error)
 		w.lookupRoutineByID,
 		w.lookupRoutineBySlug,
 		w.lookupAssignmentByID,
+		w.lookupAutomationByID,
 		w.lookupInboxByID,
 	}
 	for _, fn := range lookups {
@@ -252,6 +272,29 @@ func (w *walker) lookupAssignmentByID(ctx context.Context, anchor string) (Node,
 		return Node{}, false, err
 	}
 	return assignmentNode(id, task, status), true, nil
+}
+
+// lookupAutomationByID resolves a rule. Deliberately NOT filtered on
+// deleted_at, unlike lookupRoutine: a soft-deleted rule is exactly the one an
+// operator is trying to identify when they ask why a run happened, and hiding
+// it would turn "a deleted rule did this" into "nothing did this".
+func (w *walker) lookupAutomationByID(ctx context.Context, anchor string) (Node, bool, error) {
+	var id, name, eventType string
+	var enabled int
+	var deletedAt sql.NullString
+	err := w.db.QueryRowContext(ctx, `
+		SELECT id, name, event_type, enabled, deleted_at
+		FROM automations
+		WHERE workspace_id = ? AND id = ?`,
+		w.workspaceID, anchor,
+	).Scan(&id, &name, &eventType, &enabled, &deletedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Node{}, false, nil
+	}
+	if err != nil {
+		return Node{}, false, err
+	}
+	return automationNode(id, name, eventType, enabled != 0, deletedAt.Valid), true, nil
 }
 
 func (w *walker) lookupInboxByID(ctx context.Context, anchor string) (Node, bool, error) {
@@ -438,6 +481,36 @@ func (w *walker) expandRoutine(ctx context.Context, n Node) ([]neighbour, error)
 		return nil, err
 	}
 
+	// The reverse of expandAutomation's slug join: which rules start this
+	// routine. Present because direction is a property of the RELATIONSHIP,
+	// not of which end the walk began at — an asymmetric hop would make a
+	// chain anchored on the routine disagree with the same chain anchored on
+	// the rule, which is the whole failure mode `neighbour` carries its own
+	// From/To to prevent. Soft-deleted rules are included for the same reason
+	// lookupAutomationByID includes them.
+	if err := w.collect(ctx, &out, `
+		SELECT a.id, a.name, a.event_type, a.enabled, a.deleted_at
+		FROM automations a
+		JOIN pipelines p
+		  ON p.slug = json_extract(a.action_config_json, '$.routine_slug')
+		 AND p.workspace_id = a.workspace_id
+		WHERE p.id = ? AND a.workspace_id = ? AND json_valid(a.action_config_json)
+		ORDER BY a.id ASC
+		LIMIT ?`,
+		[]any{n.Ref, w.workspaceID, w.fanOutLimit()},
+		func(rows *sql.Rows) (neighbour, error) {
+			var id, name, eventType string
+			var enabled int
+			var deletedAt sql.NullString
+			if err := rows.Scan(&id, &name, &eventType, &enabled, &deletedAt); err != nil {
+				return neighbour{}, err
+			}
+			from := automationNode(id, name, eventType, enabled != 0, deletedAt.Valid)
+			return neighbour{node: from, edge: Edge{From: from.ID, To: n.ID, Kind: EdgeTriggers}}, nil
+		}); err != nil {
+		return nil, err
+	}
+
 	return out, nil
 }
 
@@ -486,6 +559,16 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 			return nil, err
 		} else if ok {
 			out = append(out, neighbour{node: pn, edge: Edge{From: pn.ID, To: n.ID, Kind: EdgeTriggers}})
+		}
+	case triggeredVia == "automation" && triggeredByID != "":
+		// The rule that fired this run. The automation registry stamps
+		// (triggered_via, triggered_by_id) on the pending_runs row and the
+		// dispatcher carries it onto the run, so this is a real column and not
+		// an inference — which is why it is walked rather than declared a gap.
+		if an, ok, err := w.lookupAutomationByID(ctx, triggeredByID); err != nil {
+			return nil, err
+		} else if ok {
+			out = append(out, neighbour{node: an, edge: Edge{From: an.ID, To: n.ID, Kind: EdgeTriggers}})
 		}
 	}
 
@@ -572,6 +655,64 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 		LIMIT ?`,
 		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
 		w.scanInboxNeighbour(n.ID)); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// expandAutomation walks the runs this rule fired
+// (pipeline_runs.triggered_via='automation') and the routine it targets
+// (action_config_json -> routine_slug, resolved against pipelines).
+//
+// Both edges are EdgeTriggers, and they are the same relation at definition
+// and instance level — exactly the pair expandIssue already emits for
+// missions.routine_id and for the runs an issue fired. Naming them differently
+// would make "this rule starts that routine" and "this rule started that run"
+// look like two unrelated facts.
+func (w *walker) expandAutomation(ctx context.Context, n Node) ([]neighbour, error) {
+	var out []neighbour
+
+	if err := w.collect(ctx, &out, `
+		SELECT id, COALESCE(pipeline_slug,''), COALESCE(status,'')
+		FROM pipeline_runs
+		WHERE workspace_id = ? AND triggered_via = 'automation' AND triggered_by_id = ?
+		ORDER BY started_at DESC, id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		func(rows *sql.Rows) (neighbour, error) {
+			var id, slug, status string
+			if err := rows.Scan(&id, &slug, &status); err != nil {
+				return neighbour{}, err
+			}
+			to := runNode(id, slug, status)
+			return neighbour{node: to, edge: Edge{From: n.ID, To: to.ID, Kind: EdgeTriggers}}, nil
+		}); err != nil {
+		return nil, err
+	}
+
+	// The rule names its target by SLUG, so the join is on pipelines.slug with
+	// the workspace on BOTH sides — a slug is only unique per workspace, and
+	// this is precisely the shape that would otherwise pull a foreign routine
+	// into the graph.
+	if err := w.collect(ctx, &out, `
+		SELECT p.id, COALESCE(p.name,''), COALESCE(p.slug,''), COALESCE(p.status,'')
+		FROM automations a
+		JOIN pipelines p
+		  ON p.slug = json_extract(a.action_config_json, '$.routine_slug')
+		 AND p.workspace_id = a.workspace_id
+		 AND p.deleted_at IS NULL
+		WHERE a.id = ? AND a.workspace_id = ? AND json_valid(a.action_config_json)
+		LIMIT ?`,
+		[]any{n.Ref, w.workspaceID, w.fanOutLimit()},
+		func(rows *sql.Rows) (neighbour, error) {
+			var id, name, slug, status string
+			if err := rows.Scan(&id, &name, &slug, &status); err != nil {
+				return neighbour{}, err
+			}
+			to := routineNode(id, name, slug, status)
+			return neighbour{node: to, edge: Edge{From: n.ID, To: to.ID, Kind: EdgeTriggers}}, nil
+		}); err != nil {
 		return nil, err
 	}
 

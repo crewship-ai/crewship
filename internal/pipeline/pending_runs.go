@@ -131,15 +131,26 @@ WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
 	// so it must also adopt its invoking user — otherwise a run that fires
 	// with user B's inputs would notify user A (the original enqueuer) on a
 	// `to: trigger` step. Attribution follows the payload it belongs to.
+	//
+	// triggered_via / triggered_by_id are attribution in the same sense and
+	// move for the same reason. debounce_key is caller-supplied on the
+	// deferred-run endpoint, so an automation's row and a user's defer can
+	// meet on one row in either order; leaving the byline behind meant the
+	// FIRST producer got credit for the LAST one's payload. Both directions
+	// are wrong and only one of them is quiet: a user's inputs firing under a
+	// rule's name is a forged audit trail, and a rule's run reading as a cron
+	// is the exact confusion the columns were added to end.
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE pending_runs
 SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
     priority = ?, fire_at = ?, expires_at = ?, invoking_user_id = ?,
+    triggered_via = ?, triggered_by_id = ?,
     updated_at = datetime('now','subsec')
 WHERE id = ?`,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, fireAt.UTC().Format(time.RFC3339Nano),
-		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID), existingID); err != nil {
+		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID),
+		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), existingID); err != nil {
 		return "", false, fmt.Errorf("pending_runs: coalesce: %w", err)
 	}
 	return existingID, true, nil
