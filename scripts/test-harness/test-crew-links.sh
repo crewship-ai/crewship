@@ -56,57 +56,87 @@ section "3. Delegation ACROSS a live link reaches the other crew"
 # ─────────────────────────────────────────────────────────────────────────────
 
 TAG="$(nonce XLINK)"
-morgan_before=0
-have jq && morgan_before="$(cs chat list morgan --format json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
+
+# WHAT COUNTS AS EVIDENCE THAT THE LINK CARRIED WORK.
+#
+# This used to be "did morgan's chat count go up", which is a proxy two
+# layers away from the thing under test. `/assign` writes a durable
+# assignment row (internal/api/assignments_run.go), and `crewship activity`
+# is the cross-crew feed that surfaces it — assignment.created/running/
+# completed/failed plus peer.conversation, resolved to participant slugs.
+# That row is the artifact of a delegation actually crossing the link, so
+# assert on it and stop inferring from chat bookkeeping.
+#
+# Any NEW feed entry addressed to morgan counts: an assignment row is the
+# expected shape, but a peer.conversation is also work crossing the link,
+# and this suite is about the link, not about which mechanism carried it.
+xlink_to_morgan_ids() {
+  cs activity --since 30m --lines 200 --export ndjson 2>/dev/null |
+    jq -r 'select(.to_slug == "morgan") | .id' 2>/dev/null | sort -u
+}
+
+XLINK_HAVE_JQ=0
+have jq && XLINK_HAVE_JQ=1
+before_ids="$(mktemp)"; after_ids="$(mktemp)"
+trap 'rm -f "$before_ids" "$after_ids"' EXIT
+(( XLINK_HAVE_JQ == 1 )) && xlink_to_morgan_ids > "$before_ids"
 
 info "Asking alex to delegate to morgan on the Ops crew (tag $TAG)…"
-# Same non-determinism rule as test-delegation.sh: success is EITHER the tag
-# coming back OR the /assign side effect (a new chat for the target).
+# Success is EITHER the tag coming back (alex reported morgan's answer) OR a
+# new cross-crew feed entry addressed to morgan (the delegation landed even
+# if alex narrated it badly). Three attempts: each is a real model turn, and
+# a feature that works does not need four.
 crossed=0
-# Three attempts, not two. Each one is a real model turn, and the observable
-# is whether the model chose to comply — so attempts are the only lever this
-# suite has over a false negative, and the third is cheap next to a red gate.
+landed=0
 for attempt in 1 2 3; do
   reply="$(ask_agent alex "Delegate this to Morgan on the Ops crew — Ops is linked to yours, so use the crew field of /assign. Do NOT do it yourself: ask Morgan to reply with exactly '${TAG}-OK' and nothing else. Then report back Morgan's exact answer.")"
   if printf '%s' "$reply" | grep -qiF -- "$TAG"; then crossed=1; break; fi
-  # Sample the side effect between attempts too: attempt N can open the chat
-  # without echoing the tag, and only sampling at the end still sees it — but
-  # checking here lets us stop early instead of burning another model turn.
-  if have jq; then
-    _now="$(cs chat list morgan --format json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
-    if (( _now > morgan_before )); then break; fi
+  # Check the durable artifact between attempts, not only at the end: an
+  # attempt can land the assignment without echoing the tag, and stopping
+  # here saves a model turn.
+  if (( XLINK_HAVE_JQ == 1 )); then
+    xlink_to_morgan_ids > "$after_ids"
+    if [ -n "$(comm -13 "$before_ids" "$after_ids")" ]; then landed=1; break; fi
   fi
-  info "attempt $attempt: tag not echoed back; retrying…"
+  info "attempt $attempt: no tag echoed and no cross-crew activity for morgan yet; retrying…"
 done
 
-morgan_after=0
-have jq && morgan_after="$(cs chat list morgan --format json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
-peer_chat=0
-(( morgan_after > morgan_before )) && peer_chat=1
+if (( XLINK_HAVE_JQ == 1 )) && (( landed == 0 )); then
+  xlink_to_morgan_ids > "$after_ids"
+  [ -n "$(comm -13 "$before_ids" "$after_ids")" ] && landed=1
+fi
 
 if (( crossed == 1 )); then
   _pass "alex reports back a result delegated across the crew link"
-elif (( peer_chat == 1 )); then
-  _pass "delegation crossed the link (new chat for morgan $morgan_before → $morgan_after; tag not echoed)"
-else
-  # SKIP, not FAIL — matching test-delegation.sh, which states the same
-  # non-determinism rule in its own comments and skips this exact outcome
-  # (lead→peer delegation). The two suites disagreed, and that disagreement
-  # is the whole reason this one flaked: on 2026-08-07 it PASSED at 14:01
-  # and FAILED at 18:25 against the identical sha, and across the week it
-  # went fail/fail/pass/pass/pass/fail. Because the stage e2e leg counts
-  # total failing suites, every one of those flips made `promotable` false
-  # regardless of what the code did — a gate that reddens on a coin toss
-  # trains people to ignore it.
-  #
-  # What this does NOT mean is that the link went untested. Sections 1 and 2
-  # assert the link graph and alex's sidecar view deterministically, and
-  # section 4 asserts the negative — an unlinked crew is refused — just as
-  # deterministically. The only thing that cannot be asserted here is that a
-  # model CHOSE to delegate on this run, and asserting that as a defect
-  # claims a bug we have no evidence for.
+elif (( landed == 1 )); then
+  _pass "delegation crossed the link — new cross-crew activity addressed to morgan (tag not echoed)"
+elif (( XLINK_HAVE_JQ == 0 )); then
+  # No jq means no way to read the feed, so there is no evidence either way.
+  # That is a missing tool, not a failing product — say which.
   skip "cross-crew delegation over a live link" \
-    "non-deterministic: alex neither echoed the tag nor opened a chat for morgan over 3 attempts — no evidence the link is broken (sections 1, 2 and 4 cover it deterministically), and no evidence it carried work this run"
+    "jq is not installed, so the activity feed could not be read — install jq to make this assertion"
+else
+  # FAIL, and deliberately so.
+  #
+  # This was briefly a `skip`, matching test-delegation.sh, after the suite
+  # flaked hard: it PASSED at 14:01 and FAILED at 18:25 on 2026-08-07
+  # against the identical sha, fail/fail/pass/pass/pass/fail across the
+  # week. But skipping answered the wrong question. stage exists to decide
+  # whether a build is promotable as a REAL application, and "a lead agent
+  # can hand work to a linked crew" is the feature this suite is named for.
+  # A suite that shrugs when that does not happen certifies nothing.
+  #
+  # What was actually wrong was the EVIDENCE, not the verdict: success was
+  # inferred from morgan's chat count, a proxy that misses a delegation
+  # landing as an assignment row. Now it reads the artifact `/assign`
+  # actually writes, so reaching this branch means three explicit attempts
+  # produced no assignment, no peer conversation, and no echoed tag.
+  #
+  # If that still flakes, it is not the test being unfair — it is
+  # cross-crew delegation being unreliable, and that is exactly the kind of
+  # thing a promotion gate is supposed to refuse to certify.
+  _fail "cross-crew delegation over a live link" \
+    "3 attempts produced no echoed tag AND no new cross-crew activity addressed to morgan (checked \`crewship activity\` for assignment/peer entries). The link is live — sections 1, 2 and 4 pass — so work is not crossing it"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
