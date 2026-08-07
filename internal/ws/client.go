@@ -461,38 +461,28 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			c.hub.cancelMu.Unlock()
 		}()
 
-		// Start (reset) this session's replay buffer for the run, and mark it
-		// ended once the run returns — a client that reconnects mid-run replays
-		// the buffered gap via the "resume" message.
-		startSeq := c.hub.streams.begin(channel)
-		defer c.hub.streams.end(channel)
+		// Start (reset) this session's replay buffer for the run, emit the
+		// run's `run_begin` frame, and mark it ended once the run returns — a
+		// client that reconnects mid-run replays the buffered gap via the
+		// "resume" message.
+		//
+		// This is the SAME recorder every server-initiated run uses (#1823, see
+		// session_run.go). The socket sender is passed as the run's origin
+		// because it may not be subscribed to the channel it just sent on and
+		// must be served directly; everything else about the lifecycle —
+		// sequencing, buffering, fan-out, the run_begin baseline — is shared,
+		// so the WebSocket turn and a routine's turn cannot drift apart.
+		//
+		// The recording deliberately spans MORE than the RunAgent call: the
+		// container-start status events and the terminal error/done pair below
+		// are part of this turn and must be seq'd and replayable too. That is
+		// why the bridge suppresses the orchestrator-level recording for this
+		// path (AgentRunRequest.SuppressSessionStream) instead of the other way
+		// round.
+		run := c.hub.beginSessionRun(payload.ChatID, c)
+		defer run.End()
 
-		// emit stamps a per-session seq on msg, buffers the frame for replay, and
-		// fans out the EXACT bytes to the sender (direct) and every other/returning
-		// subscriber (dispatch), so all recipients see identical seq numbers.
-		emit := func(msg *ServerMessage) {
-			data, ok := c.hub.streams.record(channel, msg)
-			if !ok {
-				return
-			}
-			c.safeSend(data)
-			c.hub.dispatch(channel, data, func(cl *Client) bool { return cl != c })
-		}
-
-		// run_begin is the first frame of the run. It carries the baseline seq
-		// (from_seq = counter before this run) so any client — the sender, a
-		// second tab, or a client that reconnects mid-run and replays the buffer
-		// — can anchor its in-order reassembly without waiting for sequence
-		// numbers that belong to a previous run on the same channel.
-		emit(&ServerMessage{
-			Type:    "run_begin",
-			Channel: channel,
-			Payload: map[string]any{"from_seq": startSeq},
-		})
-
-		streamFn := func(event ChatEvent) {
-			emit(&ServerMessage{Type: "chat_event", Channel: channel, Payload: event})
-		}
+		streamFn := run.Emit
 
 		err := c.hub.chatHandler.HandleChatMessage(
 			runCtx,
