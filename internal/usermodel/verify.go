@@ -86,8 +86,21 @@ const (
 	ReasonNoQuote = "no_evidence_quote"
 
 	// ReasonQuoteTooShort — a span too small to support a claim. Without
-	// a floor the model quotes "I" and hangs anything off it.
+	// a floor the model quotes "I" and hangs anything off it. Under a
+	// profile with AllowShortCompleteSentence this means the span is a
+	// FRAGMENT: shorter than the floor and not a sentence the subject
+	// finished.
 	ReasonQuoteTooShort = "evidence_quote_too_short"
+
+	// ReasonQuoteStatesNothing — the span is a complete sentence the
+	// subject wrote, and short, but it states nothing on its own: "Yes.",
+	// "Ok, do it.". Its content lives in the AGENT's question, so
+	// accepting it would let the assistant's words in under the subject's
+	// name — the exact route ReasonAssistantOrigin closes. Separated from
+	// ReasonQuoteTooShort so the sweep's refusal histogram distinguishes
+	// "the model quoted a fragment" from "the model quoted an assent"
+	// (#1700); they call for opposite fixes.
+	ReasonQuoteStatesNothing = "evidence_quote_states_nothing"
 
 	// ReasonQuoteNotFound — the span is nowhere in the transcript. This
 	// is model-authored prose standing in for evidence.
@@ -143,6 +156,11 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 	// difference between a model that is quoting and a model that is
 	// writing.
 	var subject, others []string
+	// subjectSentences is the same text cut at sentence boundaries, used
+	// only by the short-answer exemption below. Built from the subject's
+	// turns alone, so the exemption can never readmit an agent's or a
+	// third party's short sentence.
+	var subjectSentences []string
 	for _, t := range turns {
 		n := collapseSpaces(t.Content)
 		if n == "" {
@@ -150,6 +168,9 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 		}
 		if t.BySubject && strings.EqualFold(t.Role, "user") {
 			subject = append(subject, n)
+			if p.AllowShortCompleteSentence {
+				subjectSentences = append(subjectSentences, sentences(n)...)
+			}
 			continue
 		}
 		others = append(others, n)
@@ -182,7 +203,17 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 			reason = ReasonNoQuote
 		}
 		if reason == "" && len([]rune(quote)) < p.MinQuoteChars {
-			reason = ReasonQuoteTooShort
+			// Below the floor. That is the right answer for a fragment
+			// and the wrong one for an answer to a direct question —
+			// see Profile.AllowShortCompleteSentence and #1700.
+			switch {
+			case !p.AllowShortCompleteSentence:
+				reason = ReasonQuoteTooShort
+			case !isCompleteSentence(subjectSentences, quote):
+				reason = ReasonQuoteTooShort
+			case !statesSomething(quote):
+				reason = ReasonQuoteStatesNothing
+			}
 		}
 		if reason == "" {
 			needle := collapseSpaces(quote)
@@ -246,6 +277,139 @@ func containsSpan(haystacks []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// sentenceEnders terminate a sentence. Deliberately short: this is a cut
+// for "did the person finish the thought", not a linguistic parse.
+const sentenceEnders = ".!?…"
+
+// sentences cuts one whitespace-collapsed turn into its sentences,
+// terminator included ("UTC+1. Ping me on Slack." → ["UTC+1.", "Ping me
+// on Slack."]). The final span is kept even when the person did not
+// punctuate it, because a turn that ends is a sentence that ended.
+func sentences(turn string) []string {
+	var out []string
+	start := 0
+	rs := []rune(turn)
+	for i := 0; i < len(rs); i++ {
+		if !strings.ContainsRune(sentenceEnders, rs[i]) {
+			continue
+		}
+		// Swallow a run of terminators ("?!", "...") into one boundary.
+		j := i
+		for j+1 < len(rs) && strings.ContainsRune(sentenceEnders, rs[j+1]) {
+			j++
+		}
+		if s := strings.TrimSpace(string(rs[start : j+1])); s != "" {
+			out = append(out, s)
+		}
+		i = j
+		start = j + 1
+	}
+	if s := strings.TrimSpace(string(rs[start:])); s != "" {
+		out = append(out, s)
+	}
+	return out
+}
+
+// isCompleteSentence reports whether the quote IS one of the subject's
+// sentences — not merely contained in one.
+//
+// That is the whole distinction the exemption rests on. "UTC+1." is a
+// sentence the person finished; "I run" and "the day." are cuts out of
+// one, and a cut is what the character floor exists to refuse, because
+// the words on either side of it are the ones that decide what it meant.
+//
+// A missing terminal full stop is tolerated (models drop it constantly),
+// on the same reasoning as the whitespace collapse in containsSpan: it
+// cannot change which words were said. Nothing else is relaxed — case is
+// not folded and no interior punctuation is normalised.
+func isCompleteSentence(subjectSentences []string, quote string) bool {
+	q := strings.TrimRight(collapseSpaces(quote), sentenceEnders)
+	if q == "" {
+		return false
+	}
+	for _, s := range subjectSentences {
+		if strings.TrimRight(s, sentenceEnders) == q {
+			return true
+		}
+	}
+	return false
+}
+
+// statesSomething reports whether a span carries at least one word that
+// says anything on its own.
+//
+// The test is a floor on CONTENT rather than on characters — the third
+// option #1700 lists, applied only where the character floor has been
+// relaxed. It is what stops the exemption from becoming the hole the
+// floor was plugging: "Yes." and "Ok, do it." are complete sentences
+// whose meaning is entirely in the question that preceded them, so
+// admitting them would record the AGENT's proposal as the person's
+// statement. "UTC+1.", "Weekdays." and "Czech." name the thing they are
+// about and stand up without the question.
+//
+// Single characters do not count: a one-letter token is the "I"-class
+// span the floor was written for.
+func statesSomething(s string) bool {
+	for _, f := range strings.Fields(strings.ToLower(s)) {
+		w := strings.TrimFunc(f, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		})
+		if len([]rune(w)) < 2 || contentlessWords[w] {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// contentlessWords are the words that state nothing on their own: bare
+// assent and backchannel, pronouns, articles, auxiliaries, prepositions,
+// conjunctions, and the frequency adverbs that only modify something
+// else. A span made of nothing but these is a span whose meaning came
+// from the other speaker.
+//
+// Over-listing is the safe direction: this set can only WITHHOLD the
+// exemption, and a span it withholds from is refused exactly as it is
+// today. Under-listing is what would let an assent through.
+var contentlessWords = map[string]bool{
+	// assent, dissent, backchannel
+	"yes": true, "yeah": true, "yep": true, "yup": true, "aye": true,
+	"no": true, "nope": true, "nah": true, "not": true,
+	"ok": true, "okay": true, "sure": true, "right": true, "correct": true,
+	"exactly": true, "agreed": true, "agree": true, "indeed": true,
+	"absolutely": true, "definitely": true, "precisely": true, "true": true,
+	"please": true, "thanks": true, "thank": true, "cheers": true,
+	"fine": true, "good": true, "great": true, "cool": true, "perfect": true,
+	"understood": true, "noted": true, "gotcha": true, "maybe": true,
+	"perhaps": true, "hmm": true, "huh": true, "oh": true, "ah": true,
+	"well": true, "yet": true, "still": true,
+	// pronouns and determiners
+	"me": true, "my": true, "mine": true, "we": true, "us": true,
+	"our": true, "ours": true, "you": true, "your": true, "yours": true,
+	"he": true, "him": true, "his": true, "she": true, "her": true,
+	"hers": true, "it": true, "its": true, "they": true, "them": true,
+	"their": true, "theirs": true, "the": true, "an": true, "this": true,
+	"that": true, "these": true, "those": true, "there": true, "here": true,
+	// auxiliaries, conjunctions, prepositions
+	"is": true, "am": true, "are": true, "was": true, "were": true,
+	"be": true, "been": true, "being": true, "do": true, "does": true,
+	"did": true, "done": true, "have": true, "has": true, "had": true,
+	"will": true, "would": true, "can": true, "could": true, "shall": true,
+	"should": true, "may": true, "might": true, "must": true,
+	"and": true, "or": true, "but": true, "if": true, "so": true,
+	"then": true, "than": true, "as": true, "of": true, "to": true,
+	"in": true, "on": true, "at": true, "by": true, "for": true,
+	"with": true, "from": true, "into": true, "about": true,
+	// degree and frequency adverbs — they modify, they do not state
+	"too": true, "very": true, "just": true, "really": true, "quite": true,
+	"more": true, "most": true, "less": true, "all": true, "any": true,
+	"some": true, "none": true, "always": true, "never": true,
+	"usually": true, "often": true, "sometimes": true, "typically": true,
+	"generally": true, "normally": true,
+	// contentless nouns
+	"thing": true, "things": true, "stuff": true, "one": true,
 }
 
 // collapseSpaces reduces every run of Unicode whitespace to a single
