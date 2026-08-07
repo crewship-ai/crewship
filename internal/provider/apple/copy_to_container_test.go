@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,23 +135,25 @@ func TestCopyToContainer_FallsBackToTheCLIOffMount(t *testing.T) {
 	}
 }
 
-// TestCopyToContainer_LeavesTheFileReadableWhenChownFails covers the failure
-// this method exists to prevent, reintroduced one layer down.
+// TestCopyToContainer_KeepsThePathUsableWhenChownFails covers the failure this
+// method exists to prevent, reintroduced one layer down.
 //
-// The file is written 0600 owned by whoever runs the server; the agent in the
-// container is uid 1001. Setting that owner needs root, which the server does
-// not have on a normal macOS install, so the chown fails — and the copy used
-// to return nil anyway. The agent then gets EACCES and reports the config as
-// missing, which is exactly the "MCP config file not found" symptom this path
-// was written to fix, with no error anywhere to act on.
+// The file is written 0600 and the directories 0750, both owned by whoever runs
+// the server; the agent in the container is uid 1001. Handing that ownership
+// over needs root, which the server does not have on a normal macOS install, so
+// the chown fails — and the copy used to return nil anyway. The agent then gets
+// EACCES and reports the config as missing, which is exactly the "MCP config
+// file not found" symptom this path was written to fix, with no error to act on.
 //
-// The containing directory is created 0750, so a readable mode here is not
-// reachable by another local user: they cannot traverse into it.
-func TestCopyToContainer_LeavesTheFileReadableWhenChownFails(t *testing.T) {
+// The chown is injected rather than inferred from the euid. Deriving it made the
+// coverage a property of the CI image: as root the chown succeeds and the
+// fallback is never exercised at all.
+func TestCopyToContainer_KeepsThePathUsableWhenChownFails(t *testing.T) {
 	installFakeContainer(t, `exit 0`)
 	hostCrewDir := t.TempDir()
 
 	p := newTestProvider(Config{})
+	p.chownFn = func(string, int, int) error { return errors.New("operation not permitted") }
 	p.rememberBindMounts("crew-container", map[string]string{"/crew": hostCrewDir})
 
 	if err := p.CopyToContainer(context.Background(), "crew-container", "/crew/agents/casey",
@@ -163,27 +166,52 @@ func TestCopyToContainer_LeavesTheFileReadableWhenChownFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat copied file: %v", err)
 	}
-	// The contract is "the agent can read it", and there are two ways to
-	// satisfy it. As root — or as uid 1001 itself — the chown lands and 0600
-	// is correct, because the owner IS the agent. Otherwise the chown cannot
-	// land and the mode has to carry it instead. Deriving the expectation
-	// from the euid keeps both worlds asserted rather than skipping one.
-	if os.Geteuid() == agentUID {
-		if st.Mode().Perm()&0o400 == 0 {
-			t.Errorf("mode = %#o — not readable by its owner, which is the agent here", st.Mode().Perm())
-		}
-	} else if st.Mode().Perm()&0o044 == 0 {
-		t.Errorf("mode = %#o — the chown to uid %d could not have succeeded from euid %d, so a mode only the owner can read leaves the agent unable to read its own config",
-			st.Mode().Perm(), agentUID, os.Geteuid())
+	if st.Mode().Perm()&0o044 == 0 {
+		t.Errorf("file mode = %#o — only the owner can read it, and the owner is not the agent", st.Mode().Perm())
 	}
 
-	// The directory must stay closed, since that is what makes the readable
-	// file safe.
-	dirSt, err := os.Stat(filepath.Dir(dst))
-	if err != nil {
-		t.Fatalf("stat parent: %v", err)
+	// Reading the file is not enough: the agent has to be able to REACH it.
+	// Every directory this copy created needs the execute bit, or the open
+	// fails with EACCES on the traversal and the copy still reports success.
+	for _, dir := range []string{
+		filepath.Join(hostCrewDir, "agents"),
+		filepath.Join(hostCrewDir, "agents", "casey"),
+	} {
+		dst, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("stat %s: %v", dir, err)
+		}
+		if dst.Mode().Perm()&0o005 == 0 {
+			t.Errorf("directory %s mode = %#o — not traversable by the agent, so the file under it is unreachable",
+				dir, dst.Mode().Perm())
+		}
 	}
-	if dirSt.Mode().Perm()&0o007 != 0 {
-		t.Errorf("parent dir mode = %#o — world-traversable, which makes the readable file reachable", dirSt.Mode().Perm())
+}
+
+// A directory that already existed belongs to whoever made it; the copy must
+// not quietly relax its mode.
+func TestCopyToContainer_LeavesAnExistingDirectoryAlone(t *testing.T) {
+	installFakeContainer(t, `exit 0`)
+	hostCrewDir := t.TempDir()
+	preexisting := filepath.Join(hostCrewDir, "agents")
+	if err := os.MkdirAll(preexisting, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	p := newTestProvider(Config{})
+	p.chownFn = func(string, int, int) error { return errors.New("operation not permitted") }
+	p.rememberBindMounts("crew-container", map[string]string{"/crew": hostCrewDir})
+
+	if err := p.CopyToContainer(context.Background(), "crew-container", "/crew/agents/casey",
+		tarOf(t, map[string]string{".mcp.json": "{}"})); err != nil {
+		t.Fatalf("CopyToContainer: %v", err)
+	}
+
+	st, err := os.Stat(preexisting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o700 {
+		t.Errorf("pre-existing directory mode = %#o; want it left at 0700", st.Mode().Perm())
 	}
 }

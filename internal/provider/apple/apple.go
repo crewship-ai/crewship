@@ -206,9 +206,15 @@ type Provider struct {
 	execs   map[string]*execEntry
 	done    chan struct{}
 	// mounts records each container's bind mounts (container path → host path)
-	// so CopyToContainer can write through them; see hostPathFor.
+	// so CopyToContainer can write through them; see hostPathAndRootFor.
 	mountsMu sync.RWMutex
 	mounts   map[string]map[string]string
+
+	// chownFn is os.Chown, indirected so a test can drive the branch that
+	// only exists because the chown fails. Without this the fallback is
+	// exercised only when the suite happens NOT to run as root, which makes
+	// the coverage a property of the CI image rather than of the test.
+	chownFn func(name string, uid, gid int) error
 
 	// userCache holds each container's run-as user, read from the runtime. Its
 	// own lock: ContainerUser is on the exec hot path and must not queue behind

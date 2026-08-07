@@ -292,10 +292,10 @@ func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstP
 	// and /crew, /workspace and /output are mounts this provider creates, so
 	// their host paths are known and a plain write is both simpler and
 	// checkable. The CLI stays the fallback for anything unmounted.
-	if hostDir, ok := p.hostPathFor(containerID, dstPath); ok {
+	if hostDir, mountRoot, ok := p.hostPathAndRootFor(containerID, dstPath); ok {
 		for _, name := range entries {
 			dst := filepath.Join(hostDir, filepath.FromSlash(name))
-			if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+			if err := p.makeReachableDirs(mountRoot, filepath.Dir(dst)); err != nil {
 				return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
 			}
 			data, err := os.ReadFile(filepath.Join(staging, name)) // #nosec G304 — staging path
@@ -305,24 +305,8 @@ func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstP
 			if err := os.WriteFile(dst, data, 0o600); err != nil {
 				return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
 			}
-			// The agent runs as 1001:1001 and must be able to read it.
-			// Setting that owner needs root, which the server does not have
-			// on a normal macOS install, so this usually fails — and a 0600
-			// file owned by the server user is one the agent cannot read.
-			// Returning nil there reproduces the "config file not found"
-			// symptom this whole path exists to fix, with nothing to act on.
-			//
-			// So when the ownership cannot be handed over, widen the mode
-			// instead of leaving a file nobody can use. The directory above
-			// is created 0750, so this does not expose the file to another
-			// local user: they cannot traverse into it.
-			if err := os.Chown(dst, agentUID, agentGID); err != nil {
-				if chmodErr := os.Chmod(dst, 0o644); chmodErr != nil {
-					return fmt.Errorf("copy %s into %s: could not give the agent access (chown: %v; chmod: %w)",
-						name, dstPath, err, chmodErr)
-				}
-				p.logger.Debug("could not chown copied file to the agent user; widened the mode instead",
-					"path", dst, "error", err)
+			if err := p.giveAgentAccess(dst, 0o644); err != nil {
+				return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
 			}
 		}
 		return nil
@@ -355,9 +339,14 @@ func (p *Provider) rememberBindMounts(containerID string, mounts map[string]stri
 	p.mounts[containerID] = mounts
 }
 
-// hostPathFor maps a container path to its host side, or reports false when it
-// is not inside a known bind mount.
-func (p *Provider) hostPathFor(containerID, containerPath string) (string, bool) {
+// hostPathAndRootFor maps a container path to its host side, or reports false
+// when it is not inside a known bind mount.
+//
+// It returns the host side of the MOUNT as well, which is the boundary for
+// anything that has to walk upwards: the mapped path may be several
+// directories below it, and those directories are the ones a copy has to
+// create — and make reachable.
+func (p *Provider) hostPathAndRootFor(containerID, containerPath string) (hostPath, mountRoot string, ok bool) {
 	p.mountsMu.RLock()
 	defer p.mountsMu.RUnlock()
 
@@ -365,13 +354,13 @@ func (p *Provider) hostPathFor(containerID, containerPath string) (string, bool)
 	for cPath, hPath := range p.mounts[containerID] {
 		cPath = path.Clean(cPath)
 		if clean == cPath {
-			return hPath, true
+			return hPath, hPath, true
 		}
 		if strings.HasPrefix(clean, cPath+"/") {
-			return filepath.Join(hPath, filepath.FromSlash(strings.TrimPrefix(clean, cPath+"/"))), true
+			return filepath.Join(hPath, filepath.FromSlash(strings.TrimPrefix(clean, cPath+"/"))), hPath, true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // unpackTarInto writes the archive's regular files under root and returns
@@ -489,6 +478,64 @@ func unpackTarIntoLimited(root string, content io.Reader, maxEntry, maxTotal int
 	return names, nil
 }
 
+// giveAgentAccess hands a path over to the agent uid, or — when it cannot —
+// widens its mode so the agent can still use it.
+//
+// The agent runs as 1001:1001. Setting that owner needs root, which the server
+// does not have on a normal macOS install, so the chown usually fails, and a
+// 0700/0600 path owned by the server user is one the agent cannot use.
+// Returning nil there reproduces the "config file not found" symptom this whole
+// path exists to fix, with nothing anywhere to act on.
+//
+// The widened mode is a deliberate trade: on a host with other human users they
+// can read a crew's config. That is worse than correct ownership and better
+// than a crew that cannot start, and it only happens where the chown failed —
+// i.e. where the alternative is a file nobody can read at all.
+func (p *Provider) giveAgentAccess(path string, widened os.FileMode) error {
+	if err := p.chown(path, agentUID, agentGID); err == nil {
+		return nil
+	} else if chmodErr := os.Chmod(path, widened); chmodErr != nil {
+		return fmt.Errorf("could not give the agent access to %s (chown: %v; chmod: %w)", path, err, chmodErr)
+	} else {
+		p.logger.Debug("could not chown to the agent user; widened the mode instead",
+			"path", path, "mode", widened.String(), "error", err)
+	}
+	return nil
+}
+
+// makeReachableDirs creates dir under base and makes every directory it had to
+// create reachable by the agent.
+//
+// Widening the file alone is not enough: reaching /crew/agents/<slug>/.mcp.json
+// needs execute on <slug> too, and that directory is created here, owned by the
+// server user, mode 0750. Without this the agent gets EACCES on the traversal
+// and the copy still reports success — the same defect one level up from the
+// one the file-level fallback closes.
+//
+// Only newly created directories are touched. An existing directory belongs to
+// whoever made it, and silently relaxing its mode would be a different kind of
+// surprise.
+func (p *Provider) makeReachableDirs(base, dir string) error {
+	var created []string
+	for cur := dir; strings.HasPrefix(cur, base) && cur != base; cur = filepath.Dir(cur) {
+		if _, err := os.Stat(cur); err == nil {
+			break // this one and everything above it already exists
+		}
+		created = append(created, cur)
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	// Outermost first, so a failure leaves the shallowest path fixed rather
+	// than an unreachable leaf.
+	for i := len(created) - 1; i >= 0; i-- {
+		if err := p.giveAgentAccess(created[i], 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // maxCopyEntryBytes caps a single staged file and maxCopyTotalBytes the
 // archive as a whole. Config files are kilobytes; both are only here so a
 // malformed or hostile archive cannot fill the disk.
@@ -504,3 +551,12 @@ func (p *Provider) Close() error {
 }
 
 // runCLI executes `container <args...>` and returns stdout bytes.
+
+// chown is os.Chown unless a test replaced it. Nil-safe so every existing
+// Provider literal keeps working without naming the field.
+func (p *Provider) chown(name string, uid, gid int) error {
+	if p.chownFn != nil {
+		return p.chownFn(name, uid, gid)
+	}
+	return os.Chown(name, uid, gid)
+}
