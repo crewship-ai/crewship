@@ -35,6 +35,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	appleprovider "github.com/crewship-ai/crewship/internal/provider/apple"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/scheduler"
@@ -629,14 +630,31 @@ func (s *Server) mountAPIRouter(
 	// the devcontainer provisioner (download features, exec installs,
 	// docker commit). If the container provider isn't Docker (or
 	// doesn't expose its client), provisioning returns 503 at runtime.
+	featureCacheDir := ""
+	if cfg.Storage.BasePath != "" {
+		featureCacheDir = cfg.Storage.BasePath + "/feature-cache"
+	}
 	if dp, ok := ctr.(*dockerprovider.Provider); ok {
 		if dc := dp.DockerClient(); dc != nil {
 			opts = append(opts, goapi.WithDockerClient(dc))
-			featureCacheDir := ""
-			if cfg.Storage.BasePath != "" {
-				featureCacheDir = cfg.Storage.BasePath + "/feature-cache"
-			}
 			opts = append(opts, goapi.WithFeatureCacheDir(featureCacheDir))
+		}
+	}
+
+	// Apple Containers has no `commit`, so the container-commit provisioner it
+	// would otherwise inherit has nothing to end with and provisioning was
+	// unavailable on every Mac (#1779). `container build` is real BuildKit —
+	// the `# syntax` frontend and `RUN --mount=type=cache` both work — so the
+	// provisioner builds the image instead. Wired unconditionally for the Apple
+	// provider so a clean macOS install provisions with no flag to discover.
+	if _, ok := ctr.(*appleprovider.Provider); ok {
+		if b := devcontainer.NewAppleContainerBuilder(logger); b.Available() {
+			opts = append(opts, goapi.WithImageBuilder(b))
+			opts = append(opts, goapi.WithFeatureCacheDir(featureCacheDir))
+			logger.Info("apple containers: provisioning via image build (no commit on this runtime)")
+		} else {
+			logger.Warn("apple containers: `container` CLI not on PATH — crews cannot be provisioned",
+				"fix", "install Apple's container CLI, or set container.provider=docker")
 		}
 	}
 

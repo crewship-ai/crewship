@@ -18,7 +18,7 @@ func newTestProvisioningHandler(t *testing.T) *ProvisioningHandler {
 	t.Helper()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	// NewProvisioningHandler spawns a 10-min cleanup ticker on construction;
 	// without Stop() each test call leaks one goroutine that lives for the
 	// rest of the suite. t.Cleanup runs even on test failure.
@@ -99,7 +99,7 @@ func TestProvisionTrigger_NoDockerClient(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	// docker client == nil -> provisioner is nil -> trigger returns 503.
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
@@ -271,7 +271,7 @@ func TestEnqueueForCrew_RateLimitDoesNotPublishGhostJob(t *testing.T) {
 // would actually use it, so the provisioner's deps can be nil.
 func newProvisioningHandlerForRateLimitTest(t *testing.T, db *sql.DB, logger *slog.Logger) *ProvisioningHandler {
 	t.Helper()
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	// NewProvisioningHandler spawns a background cleanup ticker — without
 	// Stop() each test invocation leaks one goroutine for the rest of the
 	// suite. t.Cleanup runs on success and failure alike.
@@ -283,7 +283,7 @@ func newProvisioningHandlerForRateLimitTest(t *testing.T, db *sql.DB, logger *sl
 func TestProvisionStatus_NoCrew(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)

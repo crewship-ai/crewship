@@ -24,7 +24,7 @@ import (
 func TestProvisionStatus_SurfacesBuildFailureFromJournal(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
@@ -114,7 +114,7 @@ func (c *ctxCaptureEmitter) wasCancelled(t journal.EntryType) bool {
 func TestEmitProvisionEvent_BuildFailedDetachesFromCancellation(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	t.Cleanup(h.Stop)
 	capture := &ctxCaptureEmitter{}
 	h.SetJournal(capture)
@@ -151,7 +151,7 @@ func TestEmitProvisionEvent_BuildFailedDetachesFromCancellation(t *testing.T) {
 func TestProvisionStatus_SurfacesPlainFailedWithoutTail(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, nil, "", nil)
 	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)

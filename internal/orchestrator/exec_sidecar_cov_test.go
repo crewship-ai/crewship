@@ -86,7 +86,16 @@ func (c *covContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provid
 			return res, err
 		}
 	}
-	return &provider.ExecResult{ExecID: "cov-default", Reader: io.NopCloser(strings.NewReader(""))}, nil
+	// A container that really runs the merged preflight script ends it by
+	// printing the completion marker; Flush requires that as proof the script
+	// was delivered at all (#1779). Without it this fake would model a runtime
+	// that silently drops stdin — a real failure mode, but not the one these
+	// tests are about.
+	out := ""
+	if stdin != "" && len(cfg.Cmd) == 1 && cfg.Cmd[0] == "sh" {
+		out = preflightDoneMarker + "\n"
+	}
+	return &provider.ExecResult{ExecID: "cov-default", Reader: io.NopCloser(strings.NewReader(out))}, nil
 }
 func (c *covContainer) ExecInspect(_ context.Context, execID string) (bool, int, error) {
 	if c.inspect != nil {

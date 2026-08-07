@@ -186,6 +186,13 @@ The `CrewConfig` struct is passed to `EnsureCrewRuntime` when creating or ensuri
 
 The Apple provider (`internal/provider/apple/apple.go`) uses Apple Containers on macOS Tahoe+. Since there is no Go SDK, all operations shell out to the `container` CLI.
 
+<Note>
+  For the operator's view of this runtime — prerequisites, how provisioning
+  builds the image instead of committing one, build performance, and the limits
+  in one place — see [Apple Containers on macOS](/configuration/apple-containers).
+  This section is the provider's internals.
+</Note>
+
 ```go
 // Apple Containers run each container as a lightweight VM on macOS (Tahoe+).
 // Since there is no Go SDK, all operations shell out to the `container` CLI.
@@ -271,8 +278,6 @@ any more.
 | Crew setting | Behaviour on Apple Containers |
 |---|---|
 | `container_ttl_hours` | No idle auto-stop; the container runs until stopped. |
-| `runtime_image` / provisioned image | Ignored — the container is created from `container.image`, so tools baked into the crew's provisioned image are missing at exec time. |
-| devcontainer `containerEnv` | Not set on the container; only `CREWSHIP_CREW_ID` is. |
 | Captured login `PATH` | Not set, so feature/pipx tool directories are off `PATH` for a non-login exec. |
 | Feature `privileged`, `capAdd`, `securityOpt` | Not applied; features that need them (e.g. docker-in-docker) will not work. |
 | Feature mounts | Not attached; only `/workspace`, `/output`, `/crew` and the delivery mounts above are bound. |
@@ -283,6 +288,14 @@ any more.
 Each of these is logged at `WARN` by the daemon when the crew starts, naming
 the setting and what was lost, and is streamed into the chat as a status line.
 A crew that sets none of them sees nothing.
+
+Two entries came out of this table when the gaps behind them closed, and the
+direction matters: an entry that outlives its gap is not a harmless
+over-report, because it feeds the crew read paths and the agent's own system
+prompt. The container is created from the crew's provisioned image
+(`CachedImage` > `Image` > the provider default, the same chain the Docker
+provider uses), and devcontainer `containerEnv` is passed to `container create`
+as `--env`.
 
 <Note>
 **`network_mode: restricted` is enforced here.** It reaches the container the

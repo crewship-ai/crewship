@@ -190,17 +190,23 @@ func TestUnsupportedCrewConfig_EveryDroppedFieldIsReported(t *testing.T) {
 		// detail fragments the message has to carry to be actionable
 		wants []string
 	}{
-		{"TTLHours", func(c *provider.CrewConfig) { c.TTLHours = 4 }, []string{"idle"}},
-		{"Image", func(c *provider.CrewConfig) { c.Image = "ghcr.io/acme/dev:1" }, []string{"ghcr.io/acme/dev:1"}},
-		{"CachedImage", func(c *provider.CrewConfig) { c.CachedImage = "crewship-cache:abc123" }, []string{"crewship-cache:abc123"}},
-		{"ContainerEnv", func(c *provider.CrewConfig) { c.ContainerEnv = map[string]string{"FOO": "bar"} }, []string{"FOO"}},
-		{"LoginPath", func(c *provider.CrewConfig) { c.LoginPath = "/usr/local/py-utils/bin:/usr/bin" }, []string{"PATH"}},
-		{"Privileged", func(c *provider.CrewConfig) { c.Privileged = true }, []string{"privileged"}},
-		{"CapAdd", func(c *provider.CrewConfig) { c.CapAdd = []string{"SYS_PTRACE"} }, []string{"SYS_PTRACE"}},
+		// TTLHours is deliberately not in this table: idle auto-stop is the
+		// orchestrator's reaper on every provider, and this one now supplies
+		// both provider-side facts it needs (FindCrewContainer and
+		// ContainerStatus.Uptime) — see idle_ttl_test.go, which pins the
+		// absence of the entry along with the facts that earned it.
+		// These four are still reported by the provider and lost their rows in
+		// an earlier edit on this branch. Without them, deleting any of the
+		// four report blocks leaves this suite green — mutation-proven — and a
+		// crew would silently stop being told its isolation was downgraded,
+		// which is the over-quiet direction #1690 exists to prevent.
+		{"Privileged", func(c *provider.CrewConfig) { c.Privileged = true }, []string{"docker-in-docker"}},
+		{"CapAdd", func(c *provider.CrewConfig) { c.CapAdd = []string{"SYS_PTRACE"} }, []string{"SYS_PTRACE", "capabilities"}},
 		{"SecurityOpt", func(c *provider.CrewConfig) { c.SecurityOpt = []string{"seccomp=unconfined"} }, []string{"seccomp=unconfined"}},
 		{"ExtraMounts", func(c *provider.CrewConfig) {
-			c.ExtraMounts = []provider.CrewMount{{Source: "/var/run/docker.sock", Target: "/var/run/docker.sock"}}
+			c.ExtraMounts = []provider.CrewMount{{Target: "/var/run/docker.sock"}}
 		}, []string{"/var/run/docker.sock"}},
+		{"LoginPath", func(c *provider.CrewConfig) { c.LoginPath = "/usr/bin:/bin" }, []string{"PATH"}},
 		{"PostStartCommands", func(c *provider.CrewConfig) { c.PostStartCommands = []string{"./start.sh"} }, []string{"post-start"}},
 		{"InitHookEnabled", func(c *provider.CrewConfig) { c.InitHookEnabled = true }, []string{"/crew/init.sh"}},
 		{"ProvisionSink", func(c *provider.CrewConfig) {

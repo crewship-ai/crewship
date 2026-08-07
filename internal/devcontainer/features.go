@@ -39,6 +39,9 @@ type ResolvedFeature struct {
 	Ref      string
 	Dir      string // local path to extracted feature
 	Metadata FeatureMetadata
+	// Digest is the OCI digest Ref resolved to, recorded so a crew's image can
+	// be audited after the fact. Empty when the cache predates provenance.
+	Digest string
 }
 
 // FeatureMetadata mirrors the devcontainer-feature.json schema.
@@ -291,6 +294,7 @@ func (d *FeatureDownloader) resolveFromCache(ref, dir string) (*ResolvedFeature,
 		Ref:      ref,
 		Dir:      dir,
 		Metadata: meta,
+		Digest:   readFeatureDigest(dir),
 	}, nil
 }
 
@@ -324,6 +328,18 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 	img, err := remote.Image(parsed, remote.WithContext(ctx))
 	if err != nil {
 		return fmt.Errorf("fetching image %q: %w", ref, err)
+	}
+
+	// Resolve the digest now, but do not record it yet. Writing it here — to
+	// destDir, or from a defer — stamps it onto whatever is already cached,
+	// and every failure path below returns while destDir still holds the
+	// *previous* feature. That produces an entry whose content is one
+	// version and whose provenance claims another. It is written into the
+	// temp dir instead, so it arrives with the content it describes or not
+	// at all.
+	var digest string
+	if dg, derr := img.Digest(); derr == nil {
+		digest = dg.String()
 	}
 
 	layers, err := img.Layers()
@@ -370,6 +386,15 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 	}
 	if _, err := os.Stat(filepath.Join(tempDir, "devcontainer-feature.json")); err != nil {
 		return fmt.Errorf("extracted feature %q missing devcontainer-feature.json", ref)
+	}
+
+	// Record provenance inside the staged directory so it moves with the
+	// content in the rename below, rather than as a separate write that
+	// could land — or fail — on its own.
+	if digest != "" {
+		if err := writeFeatureDigest(tempDir, digest); err != nil {
+			return fmt.Errorf("recording digest for %q: %w", ref, err)
+		}
 	}
 
 	// Remove any existing destination before atomic rename.

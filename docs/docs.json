@@ -194,6 +194,7 @@
               "configuration/environment",
               "configuration/yaml-config",
               "configuration/providers",
+              "configuration/apple-containers",
               "configuration/devcontainers",
               "configuration/manifest-schema"
             ]

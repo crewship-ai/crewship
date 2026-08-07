@@ -40925,7 +40925,8 @@
         "cmd/crewship/cmd_root_headless_test.go",
         "cmd/crewship/cmd_start_admission_test.go",
         "cmd/crewship/cmd_start_cov_test.go",
-        "cmd/crewship/cmd_start_provider_order_test.go"
+        "cmd/crewship/cmd_start_provider_order_test.go",
+        "…"
       ],
       "flags": [
         "config",
@@ -42867,6 +42868,7 @@
       "name": "CREWSHIP_CONTAINER_PROVIDER",
       "docs": [
         "docs/cli/start.mdx",
+        "docs/configuration/apple-containers.mdx",
         "docs/configuration/environment.mdx",
         "docs/guides/install.mdx"
       ],
@@ -42875,7 +42877,7 @@
     {
       "name": "CREWSHIP_CREW_ID",
       "docs": [
-        "docs/configuration/providers.mdx"
+        "docs/configuration/environment.mdx"
       ],
       "status": "documented"
     },
@@ -43718,6 +43720,7 @@
         "docs/cli/template.mdx",
         "docs/cli/watch.mdx",
         "docs/concepts.mdx",
+        "docs/configuration/apple-containers.mdx",
         "docs/configuration/devcontainers.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/configuration/providers.mdx",
@@ -44168,9 +44171,9 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3882,
+    "command_references": 3886,
     "api_path_references": 1971,
-    "environment_references": 394,
+    "environment_references": 395,
     "manifest_kind_references": 209,
     "flag_references": 1799,
     "missing_commands": 0,

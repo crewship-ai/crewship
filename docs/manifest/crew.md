@@ -89,12 +89,57 @@ unmodeled keys pass through via `raw:` (typed fields win on collision).
 
 | Field | Type | Notes |
 |---|---|---|
-| `features` | map | feature-id → feature-config (OCI ref → JSON). |
+| `features` | map | feature-id → feature-config (OCI ref → JSON). Refs may be a tag (`…/common-utils:2`) or a digest (`…/common-utils@sha256:…`) — see *Pinning features* below. |
 | `env` | map[string]string | static container env (emitted as `containerEnv`). |
 | `memory_mb` | int | container memory; emitted as `hostRequirements.memory` and forwarded to the `container_memory_mb` column. Between 6 and 262144, or omit / set 0 to use the server default (4096). Below 2048 applies with a warning. |
 | `cpus` | float | container CPUs; emitted as `hostRequirements.cpus` and forwarded to `container_cpus`. Between 0.01 and 512, or omit / set 0 to use the server default (2.0). Below 0.5 applies with a warning. |
 | `post_create_command` | string | shell snippet run once after first build. |
 | `raw` | map | passthrough for any unmodeled key (e.g. `remoteUser`, `customizations`). |
+
+### Pinning features
+
+A ref may name a tag or a digest, and the difference decides whether your crew
+is reproducible.
+
+```yaml
+features:
+  ghcr.io/devcontainers/features/common-utils:2: {}                    # floating
+  ghcr.io/devcontainers/features/github-cli@sha256:4f8b…: {}           # pinned
+```
+
+A tag keeps moving upstream. Crewship's build cache is keyed on the ref **as you
+wrote it**, so when `:2` starts pointing at a newer `2.x` the key is unchanged:
+the crew keeps the image it already has, and nothing announces that a newer one
+exists. That is the right default for stability — a crew does not silently
+change under you — but it means the tag alone does not tell you what you are
+running.
+
+Every build therefore records what each ref resolved to. Read it back with:
+
+```
+crewship crew provision status <crew>
+```
+
+```
+Features:
+  = common-utils     2.5.4      sha256:1e0d9c4a3b2f…
+  ~ github-cli       1.0.14     sha256:9b41f0ce77aa…
+
+  1 of 2 refs are floating (~). Pin them with @sha256:… to make
+  rebuilds reproducible …
+```
+
+`=` is pinned, `~` is floating. The same information appears on the feature
+chips in the Builder popover, where a floating feature is tinted and its tooltip
+carries the resolved digest.
+
+Two caveats worth knowing:
+
+- A feature's **own** options can float independently. `VERSION: latest` installs
+  the newest tool on every rebuild even when the feature ref is pinned to a
+  digest — pin the option too if you need the tool version fixed.
+- Crews provisioned before version tracking existed report
+  `(not recorded — provisioned before version tracking)`. Rebuild to record it.
 
 > `spec.runtime_image` is the canonical image. The legacy
 > `spec.devcontainer.image` is the same thing — set **one only**; a

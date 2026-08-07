@@ -65,6 +65,15 @@ jobs:
       - name: Conformance
         run: go test -tags conformance -run TestRuntimeConformance -v -count=1 ./internal/provider/docker/
 
+      # The shared provider contract suite, live. Its semantic half already runs
+      # on every PR against a fake daemon; this is the half that proves a REAL
+      # runtime does what the provider asked — stdin reaches the process, a
+      # privileged exec is refused, ExecInspect reports a true exit code. The
+      # podman legs are the higher-value ones: it is a runtime we advertise and
+      # had never exec'd against (#1779).
+      - name: Provider contract (live)
+        run: go test -tags conformance -run TestDockerProvider_LiveContractSuite -v -count=1 ./internal/provider/docker/
+
   # There is deliberately NO leg for a current podman here, and the reason is
   # worth writing down so nobody re-adds one.
   #
@@ -169,3 +178,12 @@ jobs:
 
       - name: Conformance
         run: go test -tags conformance -run TestRuntimeConformance -v -count=1 ./internal/provider/docker/
+
+      # The shared provider contract suite, live. Its semantic half already runs
+      # on every PR against a fake daemon; this is the half that proves a REAL
+      # runtime does what the provider asked — stdin reaches the process, a
+      # privileged exec is refused, ExecInspect reports a true exit code. The
+      # podman legs are the higher-value ones: it is a runtime we advertise and
+      # had never exec'd against (#1779).
+      - name: Provider contract (live)
+        run: go test -tags conformance -run TestDockerProvider_LiveContractSuite -v -count=1 ./internal/provider/docker/

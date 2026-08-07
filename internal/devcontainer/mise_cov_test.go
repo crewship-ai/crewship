@@ -159,7 +159,9 @@ func covStepExec(failAt int, exitCode int, withErr bool, calls *[][]string) Exec
 func TestInstallMise_StepFailures(t *testing.T) {
 	t.Parallel()
 
-	// InstallMise performs 3 exec calls: download(0), symlink(1), verify(2).
+	// InstallMise performs 2 exec calls: install(0), verify(1). The symlink
+	// step is gone — mise is installed at /usr/local/bin/mise directly rather
+	// than linked out of root's 0700 home (#1779).
 	tests := []struct {
 		name    string
 		failAt  int
@@ -168,10 +170,8 @@ func TestInstallMise_StepFailures(t *testing.T) {
 	}{
 		{"download error", 0, true, "download"},
 		{"download exit", 0, false, "download exited"},
-		{"symlink error", 1, true, "symlink"},
-		{"symlink exit", 1, false, "symlink exited"},
-		{"verify error", 2, true, "verify"},
-		{"verify exit", 2, false, "verify exited"},
+		{"verify error", 1, true, "verify"},
+		{"verify exit", 1, false, "verify exited"},
 	}
 	for _, tt := range tests {
 		err := InstallMise(context.Background(), "cid", covStepExec(tt.failAt, 9, tt.withErr, nil))

@@ -115,7 +115,7 @@ func TestAppleEnsureCrewRuntime_ReusingRunningContainer_SkipsAdmission(t *testin
 	installFakeContainer(t, `
 case "$1" in
   network) if [ "$2" = "list" ]; then echo '[{"name":"mynet"}]'; fi; exit 0;;
-  list) echo '[{"status":"running","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
+  list) echo '[{"status":{"state":"running"},"configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
 esac
 exit 0`)
 	gate := &appleStubGate{}
@@ -140,7 +140,7 @@ func TestAppleEnsureCrewRuntime_RestartingStoppedContainer_IsAdmitted(t *testing
 	installFakeContainer(t, `
 case "$1" in
   network) if [ "$2" = "list" ]; then echo '[{"name":"mynet"}]'; fi; exit 0;;
-  list) echo '[{"status":"stopped","configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
+  list) echo '[{"status":{"state":"stopped"},"configuration":{"id":"crewship-team-eng-crew1"}}]'; exit 0;;
   start) exit 0;;
 esac
 exit 0`)
