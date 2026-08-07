@@ -39,6 +39,7 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	stepRun := obj(map[string]any{"step_id": str(), "inputs": anyObject(), "step_outputs": map[string]any{"type": "object", "additionalProperties": str()}, "tier_override": str()})
 	save := obj(map[string]any{
 		"slug": str(), "name": str(), "description": str(), "definition": anyValue(), "author_crew_id": str(),
+		"author_agent_id":  str(),
 		"last_test_run_at": str(), "last_test_run_passed": boolean(), "skip_test_gate": boolean(),
 		"skip_governance_gate": boolean(), "save_token": str(), "change_summary": str(),
 	})

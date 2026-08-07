@@ -14,7 +14,10 @@ func TestMatcherFields(t *testing.T) {
 		AgentID:     "a_1",
 		MissionID:   "m_1",
 		Severity:    journal.SeverityWarn,
-		Payload:     map[string]any{"to": "DONE", "count": 3, "flag": true},
+		// `action` + `details` are the real mission.status_change payload
+		// (internal/api/issue_events.go). `count` / `flag` are here for the
+		// non-string comparison arms, not because any emitter writes them.
+		Payload: map[string]any{"action": "status_changed", "details": "TODO → DONE", "count": 3, "flag": true},
 	}
 
 	cases := []struct {
@@ -31,8 +34,11 @@ func TestMatcherFields(t *testing.T) {
 		{"mission miss", Matcher{MissionIDs: []string{"m_9"}}, false},
 		{"severity hit", Matcher{Severities: []string{"warn", "error"}}, true},
 		{"severity miss", Matcher{Severities: []string{"error"}}, false},
-		{"payload string hit", Matcher{PayloadEquals: map[string]any{"to": "DONE"}}, true},
-		{"payload string miss", Matcher{PayloadEquals: map[string]any{"to": "TODO"}}, false},
+		{"payload string hit", Matcher{PayloadEquals: map[string]any{"action": "status_changed"}}, true},
+		{"payload string miss", Matcher{PayloadEquals: map[string]any{"action": "created"}}, false},
+		// The key the docs used to name. It has never existed on any entry;
+		// a rule built on it is saved, listed, and never fires.
+		{"payload key that no emitter writes", Matcher{PayloadEquals: map[string]any{"to": "DONE"}}, false},
 		{"payload bool hit", Matcher{PayloadEquals: map[string]any{"flag": true}}, true},
 		{"payload absent key", Matcher{PayloadEquals: map[string]any{"nope": "x"}}, false},
 		// Every populated field must be satisfied — the fields are ANDed,

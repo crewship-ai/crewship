@@ -122,10 +122,25 @@ crewship routine save \
 | `--name` | ✓ | Human-readable name; slug derived from this |
 | `--description` | | One-line summary shown in `[AVAILABLE ROUTINES]` |
 | `--definition` | ✓ | Path to JSON DSL file |
-| `--author-crew` | ✓ | crew_id that owns this routine |
-| `--author-agent` | | agent_id that authored (optional but recommended) |
+| `--author-crew` | ✓ | crew slug or id that owns this routine |
+| `--author-agent` | | Agent slug or id the routine **acts as**. Must belong to `--author-crew`. Required when the DSL has a `crewship` step using `issue.comment` |
 | `--sample-inputs` | | JSON inputs the test_run uses |
 | `--change-summary` | | One-line note stored on the version row (shown by `routine versions` and the versions UI) |
+
+<Note>
+  `--author-agent` is not a credit line. Every `crewship` step in the routine
+  dispatches under that agent's identity, and `issue.comment` has no other
+  source for one — a comment needs an author it can name. Saving a routine that
+  contains an `issue.comment` step **without** `--author-agent` is refused:
+
+  ```
+  pipeline: step "report" (crewship issue.comment) crewship action needs an
+  acting agent and the routine has none — … Save with --author-agent <slug|id>
+  ```
+
+  The refusal is at save on purpose. The same routine used to save clean and
+  then fail every run with `400: agent_id is required`.
+</Note>
 
 ---
 

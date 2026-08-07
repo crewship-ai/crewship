@@ -49,7 +49,7 @@ func TestAutomationHandlerCreateAndList(t *testing.T) {
 	h.Create(w, automationRequest(t, "POST", "/api/v1/automations", "ws_A", `{
 		"name": "triage on close",
 		"event_type": "mission.status_change",
-		"matcher": {"payload_equals": {"to": "DONE"}},
+		"matcher": {"payload_equals": {"action": "status_changed"}},
 		"action": {"routine_slug": "triage", "inputs": {"issue": "{{ event.mission_id }}"}}
 	}`))
 	if w.Code != http.StatusCreated {
@@ -151,7 +151,7 @@ func TestAutomationHandlerPatchIsSparse(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.Create(w, automationRequest(t, "POST", "/api/v1/automations", "ws_A", `{
 		"name": "triage on close", "event_type": "mission.status_change",
-		"matcher": {"payload_equals": {"to": "DONE"}},
+		"matcher": {"payload_equals": {"action": "status_changed"}},
 		"action": {"routine_slug": "triage"},
 		"max_per_hour": 5
 	}`))
@@ -189,7 +189,7 @@ func TestAutomationHandlerPatchIsSparse(t *testing.T) {
 		t.Error("enabled was not written")
 	}
 	if updated.MaxPerHour != 5 || updated.Action.RoutineSlug != "triage" ||
-		updated.Matcher.PayloadEquals["to"] != "DONE" {
+		updated.Matcher.PayloadEquals["action"] != "status_changed" {
 		t.Errorf("a one-field patch clobbered the rest: %+v", updated)
 	}
 }

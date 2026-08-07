@@ -13,14 +13,17 @@ func TestRenderInputs(t *testing.T) {
 		AgentID:   "a_1",
 		CrewID:    "c_1",
 		TraceID:   "run_1",
-		Payload:   map[string]any{"from": "TODO", "to": "DONE"},
+		// The real mission.status_change payload — see
+		// internal/api/issue_events.go. `details` is prose, which is exactly
+		// why routines interpolate it rather than matching on it.
+		Payload: map[string]any{"action": "status_changed", "details": "TODO → DONE"},
 	}
 	in := map[string]any{
 		"issue":   "{{ event.mission_id }}",
 		"agent":   "{{ event.agent_id }}",
 		"crew":    "{{ event.crew_id }}",
 		"run":     "{{ event.run_id }}",
-		"summary": "{{ event.payload.from }} → {{ event.payload.to }}",
+		"summary": "{{ event.payload.action }}: {{ event.payload.details }}",
 		"nested":  map[string]any{"deep": "{{ event.mission_id }}"},
 		"list":    []any{"{{ event.mission_id }}", "literal"},
 		"number":  7,
@@ -31,7 +34,7 @@ func TestRenderInputs(t *testing.T) {
 		"agent":   "a_1",
 		"crew":    "c_1",
 		"run":     "run_1",
-		"summary": "TODO → DONE",
+		"summary": "status_changed: TODO → DONE",
 		"nested":  map[string]any{"deep": "m_1"},
 		"list":    []any{"m_1", "literal"},
 		"number":  7,

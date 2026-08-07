@@ -13,16 +13,16 @@ debounced run of a routine.
 
 ```bash
 crewship automation create \
-  --name "triage on close" \
+  --name "triage on status change" \
   --event mission.status_change \
-  --payload-equals to=DONE \
-  --routine post-close-triage \
+  --payload-equals action=status_changed \
+  --routine post-status-triage \
   --input issue='{{ event.mission_id }}'
 ```
 
 That is the whole feature. It exists because until now every trigger in
 Crewship was hard-coded: a schedule could start a routine, a webhook could
-start a routine, but "an issue moved to DONE" could not, and there was no
+start a routine, but "an issue changed status" could not, and there was no
 place to say so.
 
 ## What an automation can and cannot do
@@ -63,7 +63,7 @@ ticket waiting to happen. Pick the one type you mean, and confirm it exists
 before you save:
 
 ```bash
-crewship journal --type mission.status_change --limit 5
+crewship journal --type mission.status_change --lines 5
 ```
 
 A typo is accepted by the API — the journal has 117 entry types and no
@@ -84,7 +84,60 @@ care". Setting none means every entry of that type matches.
 | `--payload-equals` | the named journal payload field equals this value |
 
 `--payload-equals` parses its value as JSON when it can, so `count=3` matches
-the number `3` and `to=DONE` matches the string `"DONE"`.
+the number `3` and `action=status_changed` matches the string
+`"status_changed"`.
+
+<Warning>
+  `--payload-equals` has the same silent-failure mode as a typo'd `--event`,
+  and a nastier one: a key **no emitter writes** is accepted, and the rule then
+  matches nothing, forever, with no error anywhere. Read one real entry before
+  writing the predicate:
+
+  ```bash
+  crewship journal --type mission.status_change --lines 1 --format json
+  ```
+
+  and match on a key you can see in its `payload`.
+</Warning>
+
+### What `mission.status_change` actually carries
+
+Every issue event goes through one emitter, and it writes exactly two payload
+keys — whatever happened:
+
+| Key | Value |
+|---|---|
+| `action` | What happened, from a closed set: `status_changed`, `priority_changed`, `review_approved`, `review_changes_requested`, `parent_changed`, `relation_added`, `description_changed`, `attachment_added`, `attachment_removed`, `code_link_added`, `code_link_removed`, `task_completed`, `task_failed`. This is the key to write predicates against. |
+| `details` | Human-readable prose, e.g. `"BACKLOG → TODO"`. For display and for `{{ event.payload.details }}` — **not** for matching. |
+
+Which means: **"fire when an issue moves to DONE" is not expressible as a
+predicate.** The target status appears only inside `details`, which is prose
+and would break the day someone rewords it. Match the action, and let the
+routine read `{{ event.payload.details }}` and decide:
+
+```bash
+crewship automation create \
+  --name "triage on status change" \
+  --event mission.status_change \
+  --payload-equals action=status_changed \
+  --routine post-status-triage \
+  --input issue='{{ event.mission_id }}' \
+  --input transition='{{ event.payload.details }}'
+```
+
+Some actions are precise enough to match on their own — `review_approved` is
+one thing and one thing only:
+
+```bash
+crewship automation create --name "on approval" \
+  --event mission.status_change --payload-equals action=review_approved \
+  --routine post-approval --input issue='{{ event.mission_id }}'
+```
+
+Note that `mission.status_change` is the CATCH-ALL issue entry type, not
+"status changed specifically" — `created`, `assignee_changed`, `commented` and
+`mentioned` have their own entry types, everything else lands here. That is why
+the `action` predicate is usually needed and not redundant.
 
 ### Inputs and the `event` namespace
 
