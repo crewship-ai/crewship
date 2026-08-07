@@ -39,6 +39,58 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_SIDECAR_PATH` | autodetected | Absolute host path to the `crewship-sidecar` Go binary. See [Devcontainers reference](/configuration/devcontainers#environment-variables) for autodetect order. |
 | `CREWSHIP_ENTRYPOINT_PATH` | autodetected | Absolute host path to `entrypoint.sh`. |
 | `CREWSHIP_SKIP_SIDECAR` | (unset) | Set to `1` to bypass fail-fast autodetect (tests only — never set in production). |
+| `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE` | (unset — fail closed) | Set to `1`/`true` to let a crew container start from a **known-stale** local image when the registry pull fails. See [Runtime image pinning](#runtime-image-pinning) below. |
+
+### Runtime image pinning
+
+Before starting a crew container, Crewship resolves the runtime image tag to an
+OCI manifest digest (a registry `HEAD`) and then pulls **that digest**, not the
+tag. A tag can be repointed between the check and the fetch; a digest cannot.
+The digest is recorded on the crew's `provisioning.step` journal entry
+(`payload.digest`, plus `payload.pinned`), stamped with the run's `trace_id`,
+so the audit trail can answer *which image produced this run*.
+
+Read it back with:
+
+```bash
+# every image a crew has started from
+crewship journal --type provisioning.step --crew <slug>
+
+# the image one specific run executed under
+crewship journal --type provisioning.step --trace-id <run-id>
+```
+
+No new endpoint or command was needed for this — the digest rides the existing
+`provisioning.step` payload, which `crewship journal` already returns.
+
+**Offline and air-gapped installs are unaffected.** When the registry cannot be
+reached at all, the digest lookup returns nothing and Crewship keeps using the
+local copy exactly as before — it just logs the local digest alongside, so even
+an offline run is attributable.
+
+**When the pull fails but the registry answered.** This is the one case that
+changed. Reaching a pull with a local copy present means the registry *did*
+answer the digest check and the local image is a **different** manifest than
+the tag now names — provable drift, not a guess. Crewship refuses to start the
+container rather than silently running the wrong image:
+
+```
+pull image ghcr.io/example/runtime:latest: toomanyrequests: rate limit exceeded
+(local copy is sha256:bbbb… but the tag now resolves to sha256:aaaa…;
+refusing to run a known-stale runtime image — set
+CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1 to accept the stale copy)
+```
+
+The most common cause is a registry rate limit (Docker Hub answers `HEAD`
+generously and throttles blob pulls). If you would rather keep running on the
+older image than stop the fleet, set `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1`.
+The journal then records the **local** digest — what actually ran — not the one
+that was wanted, and each start logs a warning naming both.
+
+Locally built devcontainer cache images (`crewship-cache:*`) exist in no
+registry and therefore have no digest. Their `provisioning.step` rows omit the
+`digest` key entirely; their provenance is the base image recorded on the
+build's own steps.
 
 ### Set by Crewship inside the container
 

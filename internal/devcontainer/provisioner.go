@@ -64,8 +64,28 @@ type ProvisionEvent struct {
 	// admission.Reason* token (host_memory, concurrency, …). A field rather
 	// than a prefix inside Detail: the consumer that has to turn the cause
 	// into a sentence should not be parsing one back out of prose.
-	Reason     string `json:"reason,omitempty"`
-	DurationMs int64  `json:"duration_ms,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// Digest is the OCI manifest digest ("sha256:…") of the image this step
+	// concerns. Set on ProvStepImageResolved and carried forward onto
+	// container_create / ready so the audit trail can answer "which image
+	// actually produced this run?" without joining across steps (#1825).
+	//
+	// Empty means "no registry digest" — a locally-built devcontainer cache
+	// image, or a daemon that reports no RepoDigests. Absence is meaningful
+	// and must not be papered over with a placeholder: a reader has to be able
+	// to tell "unpinned" from "pinned to X".
+	Digest string `json:"digest,omitempty"`
+	// Pinned reports whether Digest was established against the REGISTRY on
+	// this start — the pull was addressed by digest, or the local copy matched
+	// the digest the registry had just reported.
+	//
+	// False with a non-empty Digest means we know what ran but nothing
+	// confirmed it this start: an offline host, a wedged credential helper, a
+	// tag pull with no digest to pin to, or an operator-accepted stale copy.
+	// That is a materially weaker claim and the audit trail says so rather than
+	// letting a bare digest imply an assurance nobody made.
+	Pinned     bool  `json:"pinned,omitempty"`
+	DurationMs int64 `json:"duration_ms,omitempty"`
 }
 
 // ProvisionSink receives ProvisionEvents synchronously from Provision. A nil
@@ -80,9 +100,26 @@ const ProvisionPhase = "provision"
 // Stable step constants for ProvisionEvent.Step. Keep these in sync with any
 // journal/WS consumers — they are the audit vocabulary.
 const (
-	ProvStepStart             = "provision.start"
-	ProvStepResolveFeatures   = "resolve_features"
-	ProvStepImageBuildStart   = "image_build_start"
+	ProvStepStart           = "provision.start"
+	ProvStepResolveFeatures = "resolve_features"
+	ProvStepImageBuildStart = "image_build_start"
+	// ProvStepImageResolved records the runtime image the container is about
+	// to be created from, together with the manifest digest it resolved to and
+	// whether the pull was pinned to that digest (#1825). It is emitted after
+	// ensureImage and before container_create, i.e. at the last moment the
+	// answer can still change.
+	//
+	// A step of its own rather than a field bolted onto container_create,
+	// because "which image" and "which container" are separately interesting:
+	// a pull that resolves a digest and then fails to create a container has
+	// still told the audit trail something true.
+	//
+	// SCOPE: emitted on the container-CREATE path only. A warm reuse skips
+	// ensureImage entirely (that is the point of the warm cache), so its
+	// answer comes from the image_resolved row of the create that produced the
+	// container it is reusing. Emitting a per-reuse row would mean an extra
+	// daemon inspect on a path deliberately kept to zero round-trips.
+	ProvStepImageResolved     = "image_resolved"
 	ProvStepFeatureInstall    = "feature_install"
 	ProvStepImageBuildDone    = "image_build_done"
 	ProvStepContainerCreate   = "container_create"

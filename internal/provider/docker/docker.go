@@ -674,19 +674,71 @@ func (p *Provider) ImagePresentLocally(ctx context.Context, ref string) (bool, e
 	return true, nil
 }
 
+// staleImageEscapeHatchEnv opts an operator OUT of the fail-closed decision
+// documented at the pull-failure branch of ensureImage below. Set to a truthy
+// value ("1", "true", "yes") to restore the pre-#1825 behaviour: when the pull
+// fails and a local copy exists, run the local copy anyway.
+//
+// It exists because the fail-closed default trades availability for integrity
+// in exactly one scenario — a registry that answers a manifest HEAD but refuses
+// the blob pull — and that scenario has a boring, extremely common cause:
+// Docker Hub's anonymous pull rate limit (HTTP 429). An operator whose fleet
+// is being throttled needs a way to keep running that does not involve editing
+// Go code, and "the whole crew fleet stops until the rate limit window rolls
+// over" is not an acceptable failure mode to force on a self-hosted product.
+//
+// It is an env var and not a per-crew setting on purpose: this is a
+// host/registry property, not a property of any one crew, and a per-crew knob
+// would let a single manifest quietly downgrade the integrity guarantee for
+// its own runs. The opt-out is a deliberate, host-wide, operator statement.
+const staleImageEscapeHatchEnv = "CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE"
+
+// imageProvenance is what ensureImage learned about the image a container is
+// about to run. It exists so the two facts cannot drift apart: a digest with
+// no idea how it was obtained is not an audit record, it is a number.
+type imageProvenance struct {
+	// Digest is the OCI manifest digest of the image that will execute.
+	// Empty ONLY when the image genuinely has none — a locally-built
+	// crewship-cache:* derivative, or a daemon reporting no RepoDigests.
+	Digest string
+
+	// Verified reports whether Digest was established against the REGISTRY on
+	// this start: either the pull was addressed by digest, or the local copy's
+	// RepoDigests matched the digest the registry had just reported.
+	//
+	// False means the digest is a read-back of local disk state that nothing
+	// confirmed this start — an air-gapped host, a wedged credential helper, a
+	// tag pull that never had a digest to pin to, or an operator-accepted
+	// stale copy. The digest is still worth recording (it says what ran); it
+	// just is not a supply-chain assurance, and the audit trail has to be able
+	// to tell those apart. Deriving it from `Digest != ""` — the shortcut this
+	// struct exists to prevent — would silently promote every one of those
+	// cases to "verified".
+	Verified bool
+}
+
 // ensureImage makes sure the agent runtime image is present locally and, when
 // reachable, matches the current remote manifest digest. Mirrors the
 // provisioner's ensureImage (internal/devcontainer/provisioner.go): a purely
 // tag-based match would silently reuse a stale `:latest` tag across hosts
 // with identical configs, breaking reproducibility for shared base images.
 //
+// It returns the provenance of the image the container will actually execute
+// under. That return value is the whole point of #1825's second half: the
+// digest was already being resolved and compared here, then thrown away, so
+// nothing downstream could record WHICH image produced a run. The caller
+// surfaces it as a ProvisionEvent, which the API layer journals — no schema
+// change, and the tamper-evident hash chain (#1369, migration v152) covers the
+// payload for free.
+//
 // Resolution order:
 //  1. HEAD manifest on remote registry (best-effort, ≤runtimeImageHeadTimeout,
 //     cached for runtimeDigestTTL).
 //  2. ImageInspect locally for RepoDigests.
 //  3. Local present AND RepoDigests contain the remote digest → done.
-//  4. Otherwise → pull. Offline with a local image is accepted (warn + reuse).
-func (p *Provider) ensureImage(ctx context.Context, ref string) error {
+//  4. Otherwise → pull, PINNED to the resolved digest where one exists.
+//     Offline with a local image is accepted (warn + reuse).
+func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance, error) {
 	// Local-only cache images (crewship-cache:<hash>) are built and committed
 	// by the devcontainer provisioner and exist in NO registry. If such a tag
 	// is missing locally (pruned), an ImagePull can never succeed — it fails
@@ -694,11 +746,16 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	// not exist", leaving the crew permanently broken. Short-circuit BEFORE
 	// any registry interaction: present → done; absent → typed sentinel so the
 	// caller can re-provision instead of attempting an impossible pull.
+	//
+	// These have no registry digest to report, and that is correct rather than
+	// a gap: the audit answer for a cache image is its provenance chain
+	// (provisioning.step rows naming the base image it was built FROM), not a
+	// manifest digest that does not exist.
 	if strings.HasPrefix(ref, localCacheImagePrefix) {
 		if p.imagePresentLocally(ctx, ref) {
-			return nil
+			return imageProvenance{}, nil
 		}
-		return fmt.Errorf("%w: %s", ErrCachedImageMissing, ref)
+		return imageProvenance{}, fmt.Errorf("%w: %s", ErrCachedImageMissing, ref)
 	}
 
 	remoteDigest := p.digestResolver.Remote(ctx, ref)
@@ -711,38 +768,182 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	inspect, inspectErr := p.client.ImageInspect(inspectCtx, ref)
 	localPresent := inspectErr == nil
 	if localPresent && remoteDigest != "" && dockerutil.RepoDigestsContain(inspect.RepoDigests, remoteDigest) {
-		return nil
+		// Verified WITHOUT a pull: the registry just told us the digest and the
+		// local copy carries it. That is the same guarantee a digest-addressed
+		// pull would give, so it is reported as verified rather than downgraded
+		// for not having transferred any bytes.
+		return imageProvenance{Digest: remoteDigest, Verified: true}, nil
 	}
 	if localPresent && remoteDigest == "" {
 		// Offline or auth-gated registry; trust local presence. This is a
 		// fail-open: if the digest lookup is *permanently* broken (wedged
 		// credential helper, blocked egress) the user stays pinned to whatever
 		// they pulled last, forever, with no other signal. Warn, don't Debug.
+		//
+		// This is ALSO the branch every air-gapped install takes, which is
+		// what makes the fail-closed decision further down affordable — see
+		// the long comment there.
+		localDigest := dockerutil.LocalRepoDigest(inspect.RepoDigests, ref)
 		p.logger.Warn("runtime image freshness unknown; keeping the local copy without pulling — it may be stale. Check registry reachability and your Docker credential helper (~/.docker/config.json credsStore)",
-			"ref", ref)
-		return nil
+			"ref", ref, "local_digest", localDigest)
+		// Digest known, but read off local disk rather than confirmed against
+		// the registry this start — Verified stays false.
+		return imageProvenance{Digest: localDigest}, nil
 	}
+
+	// Pin the pull to the digest we just resolved. The tag is what FINDS the
+	// image; the digest is what we fetch. Between the HEAD above and this
+	// pull, `docker push :latest` — by an attacker who reached the registry,
+	// or by a teammate who did not know a fleet was mid-start — silently
+	// changes which binary every agent in the fleet executes. Pinning makes
+	// that window unexploitable: the daemon either gets the manifest we
+	// verified or fails.
+	//
+	// PinnedRef degrades to the original ref (ok=false) rather than erroring,
+	// because "we could not pin" must not become "the run does not start".
+	// The caller records `pinned` alongside the digest so an unpinned pull is
+	// visible in the audit trail rather than indistinguishable from a pinned
+	// one.
+	pullRef, pinned := dockerutil.PinnedRef(ref, remoteDigest)
 
 	action := "pulling agent runtime image"
 	if localPresent {
 		action = "local runtime image stale, re-pulling"
 	}
-	p.logger.Info(action, "image", ref, "remote_digest", remoteDigest)
-	reader, err := p.client.ImagePull(ctx, ref, client.ImagePullOptions{})
+	p.logger.Info(action, "image", ref, "pull_ref", pullRef, "pinned", pinned, "remote_digest", remoteDigest)
+	reader, err := p.client.ImagePull(ctx, pullRef, client.ImagePullOptions{})
 	if err != nil {
 		if localPresent {
-			p.logger.Warn("runtime image pull failed; proceeding with local (possibly stale) copy",
-				"image", ref, "error", err)
-			return nil
+			// THE DECISION (#1825). Until this change this whole branch was a
+			// Warn and a `return nil`: a failed pull silently ran whatever was
+			// on disk, for the image that executes agent code with the user's
+			// credentials mounted. Three options were on the table.
+			//
+			// (a) Keep failing open. Rejected. Note WHICH state this branch
+			//     represents: we only get here with localPresent==true after
+			//     the two early returns above have already excluded both
+			//     "local matches remote" and "remote digest unknown". So
+			//     reaching this line means the HEAD SUCCEEDED and the local
+			//     RepoDigests did NOT contain the answer. That is not "the
+			//     copy might be stale" — it is proof that the local image is a
+			//     different manifest than the tag now names. Running it is
+			//     knowingly executing the wrong image, and (now that we
+			//     journal the digest) writing an audit row for a run that
+			//     silently disagrees with the fleet's other hosts.
+			//
+			// (b) Fail closed, no escape hatch. Rejected on availability. A
+			//     registry can answer a HEAD and still refuse the blob pull:
+			//     Docker Hub's anonymous rate limit (429) is the everyday
+			//     case, a transient 5xx or a mid-pull TLS reset are the
+			//     others. Hard-stopping every agent run in a fleet because a
+			//     public registry is throttling is a worse outage than the
+			//     risk it removes, and self-hosters cannot page us about it.
+			//
+			// (c) Fail closed by default, with a documented host-wide opt-out.
+			//     Chosen. The default is the secure one and the operator who
+			//     needs availability more than integrity says so explicitly,
+			//     once, in their environment — a decision that is visible in
+			//     their deployment config instead of buried in our source.
+			//
+			// The air-gap objection does not survive contact with the control
+			// flow: an air-gapped host cannot reach the registry at all, so
+			// its HEAD returns "" and it exits at the `remoteDigest == ""`
+			// branch above, never reaching this line. Failing closed here
+			// costs offline installs nothing.
+			localDigest := dockerutil.LocalRepoDigest(inspect.RepoDigests, ref)
+			if staleRuntimeImageAllowed() {
+				p.logger.Warn("runtime image pull failed; proceeding with the local copy because "+staleImageEscapeHatchEnv+" is set — this crew is running a KNOWN-STALE image",
+					"image", ref, "local_digest", localDigest, "expected_digest", remoteDigest, "error", err)
+				// Report the LOCAL digest, not the one we wanted, and leave
+				// Verified false. The journal has to say what ran; recording
+				// remoteDigest here would put a falsehood into a tamper-evident
+				// log, which is worse than recording nothing.
+				return imageProvenance{Digest: localDigest}, nil
+			}
+			p.logger.Error("runtime image pull failed and the local copy is provably stale; refusing to start the container",
+				"image", ref, "local_digest", localDigest, "expected_digest", remoteDigest, "error", err)
+			return imageProvenance{}, fmt.Errorf(
+				"pull image %s: %w (local copy is %s but the tag now resolves to %s; refusing to run a known-stale runtime image — set %s=1 to accept the stale copy)",
+				ref, err, orNone(localDigest), remoteDigest, staleImageEscapeHatchEnv)
 		}
-		return fmt.Errorf("pull image %s: %w", ref, err)
+		return imageProvenance{}, fmt.Errorf("pull image %s: %w", pullRef, err)
 	}
 	defer reader.Close()
 	if _, err := io.Copy(io.Discard, reader); err != nil {
-		return fmt.Errorf("drain pull stream for %s: %w", ref, err)
+		return imageProvenance{}, fmt.Errorf("drain pull stream for %s: %w", pullRef, err)
 	}
-	p.logger.Info("agent runtime image pulled", "image", ref)
-	return nil
+	p.logger.Info("agent runtime image pulled", "image", ref, "digest", remoteDigest, "pinned", pinned)
+
+	// Restore the local tag. `docker pull repo@sha256:…` fetches the manifest
+	// but does NOT create a `repo:tag` entry in the local image store, and
+	// EVERYTHING downstream of here still addresses the image by tag:
+	// fixBindMountOwnership's init container, buildCrewContainerConfig,
+	// ContainerCreate, and the drift check in reconcileExistingContainer that
+	// compares inspect.Config.Image against the desired tag. Pinning the pull
+	// without this left the image on disk but unnamed, and the next daemon call
+	// failed with "No such image: alpine:latest".
+	//
+	// This does NOT reopen the window pinning closed. The bytes were fetched by
+	// digest, from the manifest we verified; the tag we create afterwards is a
+	// LOCAL alias, written by us, pointing at those exact bytes. A registry that
+	// repoints the remote tag a millisecond later cannot affect it. What we have
+	// bought is the guarantee that `ref` on this host now means the manifest we
+	// checked — which is strictly stronger than what a tag pull gave us.
+	//
+	// Skipped when `ref` was ALREADY digest-addressed (an operator who wrote
+	// `image: repo@sha256:…` into a crew manifest): there is no tag to restore,
+	// and Docker refuses to create one from a digest reference. Checked with
+	// IsDigestRef rather than `pullRef != ref`, because normalization makes
+	// those differ as strings — "alpine@sha256:…" pins to
+	// "index.docker.io/library/alpine@sha256:…" — and the string comparison
+	// would warn on every start for the users doing the most correct thing.
+	//
+	// Best-effort: a tagging failure means the image is present but unnamed, so
+	// the caller's own ImageInspect is the honest place for that to surface,
+	// with the real daemon error rather than one invented here.
+	if pinned && !dockerutil.IsDigestRef(ref) {
+		if _, tagErr := p.client.ImageTag(ctx, client.ImageTagOptions{Source: pullRef, Target: ref}); tagErr != nil {
+			p.logger.Warn("pulled by digest but could not restore the local tag; downstream lookups by tag may fail",
+				"image", ref, "pull_ref", pullRef, "error", tagErr)
+		}
+	}
+
+	if remoteDigest != "" {
+		return imageProvenance{Digest: remoteDigest, Verified: pinned}, nil
+	}
+	// Unpinned pull (registry digest was never resolvable but the image was
+	// also absent locally). Read back what the daemon actually landed so the
+	// audit record is derived from disk rather than from an assumption.
+	postCtx, postCancel := context.WithTimeout(ctx, dockerutil.DefaultHeadTimeout)
+	defer postCancel()
+	post, postErr := p.client.ImageInspect(postCtx, ref)
+	if postErr != nil {
+		return imageProvenance{}, nil
+	}
+	return imageProvenance{Digest: dockerutil.LocalRepoDigest(post.RepoDigests, ref)}, nil
+}
+
+// staleRuntimeImageAllowed reports whether the operator has opted out of the
+// fail-closed stale-image decision. Read per call rather than cached at
+// construction so an operator being rate-limited right now can set it and
+// restart the daemon without a rebuild — and so tests can flip it with
+// t.Setenv.
+func staleRuntimeImageAllowed() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(staleImageEscapeHatchEnv))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// orNone renders an empty digest as a readable token inside an error message.
+// A locally-built or squashed image legitimately has no RepoDigests, and
+// "local copy is  but the tag" reads like a formatting bug.
+func orNone(s string) string {
+	if s == "" {
+		return "(no registry digest)"
+	}
+	return s
 }
 
 // crewResourceName builds a globally-unique, Docker-safe name for a crew's

@@ -74,6 +74,20 @@ func (c *dockerCreateCapture) realCrew() *container.CreateRequest {
 // creates.
 func newEnsureRuntimeFixture(t *testing.T, cfg Config) (*Provider, *dockerCreateCapture) {
 	t.Helper()
+	return newEnsureRuntimeFixtureWithRepoDigests(t, cfg, nil)
+}
+
+// newEnsureRuntimeFixtureWithRepoDigests is newEnsureRuntimeFixture with the
+// fake daemon's ImageInspect reporting the given RepoDigests. Lets a test
+// exercise the "image has a known manifest digest" branches of ensureImage —
+// and the provenance the create path then journals (#1825) — without a real
+// registry. nil keeps the historical empty list.
+func newEnsureRuntimeFixtureWithRepoDigests(t *testing.T, cfg Config, repoDigests []string) (*Provider, *dockerCreateCapture) {
+	t.Helper()
+
+	if repoDigests == nil {
+		repoDigests = []string{}
+	}
 
 	if cfg.OutputBasePath == "" {
 		cfg.OutputBasePath = t.TempDir()
@@ -133,7 +147,7 @@ func newEnsureRuntimeFixture(t *testing.T, cfg Config) (*Provider, *dockerCreate
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"Id":          "sha256:fakeimg",
-				"RepoDigests": []string{},
+				"RepoDigests": repoDigests,
 				"Config":      map[string]any{"Env": []string{}},
 			})
 

@@ -590,9 +590,28 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	defer releaseSlot()
 
 	p.logger.Debug("ensuring image", "image", runtimeImage)
-	if err := p.ensureImage(ctx, runtimeImage); err != nil {
+	imageProv, err := p.ensureImage(ctx, runtimeImage)
+	if err != nil {
+		emitProv(devcontainer.ProvisionEvent{
+			Step: devcontainer.ProvStepImageResolved, Status: devcontainer.ProvStatusFailed,
+			Tag: runtimeImage, Error: err.Error(),
+		})
 		return "", fmt.Errorf("ensure image: %w", err)
 	}
+	// The supply-chain record (#1825). Emitted BEFORE container_create so the
+	// digest is journaled even if the create then fails — a container that
+	// never started still tells you which image the host was about to run, and
+	// on the failure branch above it tells you which one it refused to.
+	//
+	// Both fields come straight off imageProvenance rather than being
+	// re-derived here: only ensureImage knows whether the digest was confirmed
+	// against the registry on this start, and that is precisely the bit an
+	// auditor cares about.
+	runtimeDigest := imageProv.Digest
+	emitProv(devcontainer.ProvisionEvent{
+		Step: devcontainer.ProvStepImageResolved, Status: devcontainer.ProvStatusCompleted,
+		Tag: runtimeImage, Digest: runtimeDigest, Pinned: imageProv.Verified,
+	})
 
 	dirs, err := p.prepareCrewDirs(team)
 	if err != nil {
@@ -628,7 +647,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		// which VM share is missing and how to add it (#1706).
 		return "", fmt.Errorf("container create: %w", p.explainBindFailure(err))
 	}
-	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
+	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepContainerCreate, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 
 	if _, err := p.client.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		return "", fmt.Errorf("container start: %w", err)
@@ -684,7 +703,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	p.runPostStartCommands(ctx, resp.ID, hooks)
 
 	p.setWarm(team.ID, resp.ID)
-	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage})
+	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 	return resp.ID, nil
 }
 
