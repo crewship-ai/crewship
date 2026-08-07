@@ -127,8 +127,15 @@ jobs:
         run: bash scripts/test-harness-integrity-test.sh
       - name: claim-issue.sh (claim parsing + clone detection)
         run: bash scripts/claim-issue-test.sh
-      - name: api-contract gate (budget arithmetic + pacing flags)
+      - name: api-contract gate (budget arithmetic + pacing/advisory flags)
         run: bash scripts/api-contract-gate-test.sh
+      # summary.py decides what counts as a finding and how many operations
+      # were graded — the numbers the advisory exemption is judged on. Its
+      # test file predates any workflow that ran it, which is the same
+      # "green because nothing executed it" shape the steps above exist to
+      # close.
+      - name: api-contract summary classifier
+        run: python3 scripts/api-contract/summary_test.py
 
       # Skip budget ratchet. `go test ./...` prints `ok` for a package whose
       # every test called t.Skip, so a skip is indistinguishable from a pass
@@ -197,11 +204,12 @@ jobs:
       # panics at boot when CREWSHIP_ENV is prod/production. CI does not
       # set CREWSHIP_ENV, so this server is not classified as prod.
       #
-      # Why it is needed: the contract gate below drives 305 read-only
-      # operations x --max-examples 10. Paced to stay under the shipped
-      # 120 req/min limiter that is a ~25-minute floor, inside a 30-minute
-      # job that also has to build, boot, seed and run five harness suites
-      # (#1813). No suite in this job asserts 429 behaviour, so nothing
+      # Why it is needed: the contract gate below probes 231 read-only
+      # operations x --max-examples 10, and Schemathesis paces what it
+      # GENERATES (~8000 cases), not what it sends. Held to the shipped
+      # 120 req/min that is a ~66-minute floor, inside a 30-minute job that
+      # also has to build, boot, seed and run five harness suites (#1813).
+      # No suite in this job asserts 429 behaviour, so nothing
       # here loses coverage by turning the limiter off — the limiter's own
       # tests are Go units in internal/api, and test-keeper-load.sh (which
       # does exercise throttling) is a nightly suite, not part of the PR
@@ -273,15 +281,39 @@ jobs:
       #
       # 600s is ~40x the measured cost of this step against an unthrottled
       # server: 15s for both phases on a runner, 13.3s of it inside
-      # Schemathesis, for the same 305 operations (run 31165903601). It is
+      # Schemathesis, for the same 231 operations (run 31165903601). It is
       # headroom, not a budget to grow into — if this phase ever needs more
       # than a couple of minutes, find out why before raising it.
+      #
+      # ⚠ ADVISORY, TEMPORARILY, AND ONLY FOR FINDINGS — see #1815.
+      #
+      # The `positive` phase runs, reports, uploads its evidence, and does
+      # NOT fail this job. When the phase first became able to finish it
+      # reported 265 findings across 227 graded operations — every one of
+      # them pre-existing, most already tracked as #1583 (the generated
+      # spec documents only 200) and #1489. They were invisible only
+      # because the phase had never once completed, so blocking on them
+      # would fail PRs that did not cause them and cannot fix them.
+      #
+      # What this does NOT excuse, and must never be widened to: a server
+      # that will not boot, a schema that will not load, a Schemathesis
+      # crash, or a blown deadline. Those all still fail the job. That is
+      # why the exemption is a flag run.sh interprets — it passes only on
+      # "exit 1 AND the JUnit report shows operations were graded" — and
+      # NOT `continue-on-error`, which would excuse the lot and turn a gate
+      # into decoration. scripts/api-contract-gate-test.sh fails the build
+      # if that line moves.
+      #
+      # Remove this env var when #1815 closes. Until then the count is
+      # printed in this step's log and in the job summary, so the debt is
+      # read every run rather than filed away in an artifact.
       - name: Run deterministic API contract gate
         timeout-minutes: 12
         env:
           CREWSHIP_BASE_URL: http://localhost:8080
           API_CONTRACT_ARTIFACT_DIR: ${{ github.workspace }}/api-contract-artifacts
           API_CONTRACT_TIMEOUT: "600"
+          API_CONTRACT_ADVISORY: "1"
           # No client-side pacing: the server above boots with its limiter
           # off, so there is nothing to stay under. Only valid paired with
           # CREWSHIP_RATELIMIT_DISABLED on the same job's server — against

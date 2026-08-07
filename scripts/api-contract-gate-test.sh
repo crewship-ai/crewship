@@ -201,6 +201,61 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Part 1b — the advisory escape hatch, and its fence
+# ---------------------------------------------------------------------------
+# The `positive` phase does not block the job while #1815's pre-existing
+# findings are outstanding. That is a deliberate, temporary exemption, and
+# the ways it can rot are all cheap to assert:
+#
+#   - it must excuse FINDINGS only. `continue-on-error` on the step would
+#     excuse a crashed server, an unloadable schema and a blown deadline
+#     too, which is how a gate stops being a gate without anyone deciding
+#     that it should;
+#   - the reason must be readable where the exemption is, naming the issue
+#     that ends it — otherwise the next reader finds a disabled gate with
+#     no expiry;
+#   - the evidence must survive. "Advisory" means "does not fail the job",
+#     not "reports less".
+gate_advisory=0
+printf '%s\n' "$GATE_STEP" | grep -qE 'API_CONTRACT_ADVISORY:[[:space:]]*"?[^"[:space:]]+"?' && gate_advisory=1
+
+if printf '%s\n' "$GATE_STEP" | grep -qE '^[[:space:]]*continue-on-error:[[:space:]]*true'; then
+  fail "the gate step does not use continue-on-error" \
+    "that swallows infrastructure failures too — advisory must come from run.sh classifying findings"
+else
+  pass "the gate step does not use continue-on-error"
+fi
+
+if [[ "$gate_advisory" -eq 1 ]]; then
+  if printf '%s\n' "$JOB_SRC" | grep -q '#1815'; then
+    pass "the advisory exemption names the issue that ends it (#1815)"
+  else
+    fail "the advisory exemption names the issue that ends it (#1815)" \
+      "a gate that stopped gating must say why, and until when, where it is switched off"
+  fi
+else
+  pass "the advisory exemption names the issue that ends it (#1815)"
+fi
+
+UPLOAD_STEP="$(printf '%s\n' "$JOB_SRC" | awk '
+  /^      - name: Upload API contract evidence[[:space:]]*$/ { inside = 1; print; next }
+  inside && /^      - (name|uses):/ { inside = 0 }
+  inside { print }
+')"
+if [[ -n "$UPLOAD_STEP" ]] && printf '%s\n' "$UPLOAD_STEP" | grep -q 'if: always()'; then
+  pass "the evidence upload still runs unconditionally"
+else
+  fail "the evidence upload still runs unconditionally" \
+    "advisory means 'does not fail the job', not 'produces less evidence'"
+fi
+
+if printf '%s\n' "$GATE_STEP" | grep -q 'API_CONTRACT_ARTIFACT_DIR'; then
+  pass "the gate still writes its artifacts"
+else
+  fail "the gate still writes its artifacts" "no API_CONTRACT_ARTIFACT_DIR on the step"
+fi
+
+# ---------------------------------------------------------------------------
 # Part 2 — the flags run.sh actually builds
 # ---------------------------------------------------------------------------
 # A stub Schemathesis records its argv; a static file server stands in for
@@ -216,6 +271,30 @@ JSON
 cat >"$STUB_BIN/schemathesis" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$STUB_ARGV_FILE"
+# Write a JUnit report where the real thing would. That report is how
+# run.sh tells "graded N operations and found M things" from "never got
+# far enough to grade anything" — the distinction advisory mode turns on.
+junit=""
+prev=""
+for arg in "$@"; do
+  [[ "$prev" == "--report-junit-path" ]] && junit="$arg"
+  prev="$arg"
+done
+if [[ -n "$junit" && -n "${STUB_GRADED:-}" ]]; then
+  {
+    printf '<testsuites><testsuite name="stub">'
+    i=0
+    while [[ "$i" -lt "$STUB_GRADED" ]]; do
+      if [[ "$i" -lt "${STUB_FINDINGS:-0}" ]]; then
+        printf '<testcase name="GET /op%s"><failure message="Response violates schema">boom</failure></testcase>' "$i"
+      else
+        printf '<testcase name="GET /op%s"></testcase>' "$i"
+      fi
+      i=$((i + 1))
+    done
+    printf '</testsuite></testsuites>\n'
+  } >"$junit"
+fi
 [[ -n "${STUB_SLEEP:-}" ]] && sleep "$STUB_SLEEP"
 exit "${STUB_EXIT:-0}"
 STUB
@@ -241,6 +320,7 @@ done
 
 # Run run.sh with a stub Schemathesis; echo its exit code. Any
 # API_CONTRACT_* override is passed in by the caller's environment.
+RUNNER_PHASE=positive
 run_runner() {
   local argv_file="$1"
   shift
@@ -250,7 +330,7 @@ run_runner() {
     CREWSHIP_TOKEN=stub-token \
     CREWSHIP_WORKSPACE=stub-workspace \
     "$@" \
-    bash "$RUNNER" positive >"$TMP_ROOT/runner.out" 2>"$TMP_ROOT/runner.err"
+    bash "$RUNNER" "$RUNNER_PHASE" >"$TMP_ROOT/runner.out" 2>"$TMP_ROOT/runner.err"
   echo $?
 }
 
@@ -341,6 +421,145 @@ else
     fail "a deadline without coreutils 'timeout' is refused, not ignored" \
       "rc=$rc, stderr: $(tail -3 "$TMP_ROOT/runner.err")"
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# Part 3 — advisory mode: what it excuses, and what it must not
+# ---------------------------------------------------------------------------
+# The whole value of this mode is the line it draws. "The gate ran and
+# graded 231 operations, 227 of them badly" is a product debt (#1815) and
+# does not block. "The gate could not run" is an infrastructure failure and
+# always does. Schemathesis reports both as a non-zero exit, so run.sh has
+# to tell them apart on evidence — the JUnit report it just produced — not
+# on the exit code alone.
+
+# Advisory run helper. The artifact directory is derived from the label
+# rather than assigned to a variable: run_advisory is called inside a
+# command substitution to capture the exit code, so anything it assigns
+# dies with that subshell.
+adv_dir() { printf '%s/artifacts-adv-%s' "$TMP_ROOT" "$1"; }
+run_advisory() {
+  local label="$1"
+  shift
+  run_runner "$TMP_ROOT/argv-adv-$label" \
+    API_CONTRACT_ADVISORY=1 \
+    API_CONTRACT_ARTIFACT_DIR="$(adv_dir "$label")" \
+    "$@"
+}
+
+# 1. The gate ran, graded operations, found things → does not fail the job.
+rc="$(run_advisory findings STUB_EXIT=1 STUB_GRADED=9 STUB_FINDINGS=7)"
+adv_summary="$(adv_dir findings)/positive-summary.json"
+if [[ "$rc" -eq 0 ]]; then
+  pass "advisory: graded findings do not fail the step"
+else
+  fail "advisory: graded findings do not fail the step" \
+    "rc=$rc, stderr: $(tail -3 "$TMP_ROOT/runner.err")"
+fi
+
+# 2. The count lands in the job log, not only inside an artifact. A phase
+#    that silently reports 227 findings into a file nobody opens is the
+#    same failure as one that reports nothing.
+if grep -qiE 'advisory' "$TMP_ROOT/runner.err" && grep -q '7 finding' "$TMP_ROOT/runner.err"; then
+  pass "advisory: the finding count is printed to the job output"
+else
+  fail "advisory: the finding count is printed to the job output" \
+    "stderr: $(tail -3 "$TMP_ROOT/runner.err")"
+fi
+
+# 3. The artifact still exists, still says the phase failed, and records
+#    both the count and the fact that it was excused. A summary that read
+#    "passed" would launder 227 findings into a green record.
+if [[ -f "$adv_summary" ]]; then
+  if grep -q '"advisory":true' "$adv_summary" \
+    && grep -q '"status":"failed"' "$adv_summary" \
+    && grep -q '"findings":7' "$adv_summary"; then
+    pass "advisory: the summary records failed + advisory + the count"
+  else
+    fail "advisory: the summary records failed + advisory + the count" "$(cat "$adv_summary")"
+  fi
+else
+  fail "advisory: the summary records failed + advisory + the count" "no $adv_summary"
+fi
+
+# 4. A schema/config abort (Schemathesis exit 2) is not a finding. Nothing
+#    was graded; the gate did not run.
+rc="$(run_advisory schemaabort STUB_EXIT=2)"
+if [[ "$rc" -ne 0 ]]; then
+  pass "advisory: a schema/config abort still fails the step"
+else
+  fail "advisory: a schema/config abort still fails the step" "rc=0 — the gate not running was excused"
+fi
+
+# 5. Exit 1 with nothing graded is not a finding either — that is the shape
+#    of a run that died before it could grade anything.
+rc="$(run_advisory ungraded STUB_EXIT=1)"
+if [[ "$rc" -ne 0 ]]; then
+  pass "advisory: exit 1 with an empty report still fails the step"
+else
+  fail "advisory: exit 1 with an empty report still fails the step" \
+    "rc=0 — 'no evidence it ran' was treated as 'ran and found nothing'"
+fi
+
+# 6. The deadline is infrastructure, not a finding.
+if command -v timeout >/dev/null 2>&1; then
+  rc="$(run_advisory deadline API_CONTRACT_TIMEOUT=1 STUB_EXIT=1 STUB_GRADED=3 STUB_FINDINGS=3 STUB_SLEEP=20)"
+  if [[ "$rc" -ne 0 ]]; then
+    pass "advisory: a blown deadline still fails the step"
+  else
+    fail "advisory: a blown deadline still fails the step" "rc=0"
+  fi
+fi
+
+# 7. The auth phase is never advisory: its checks are all reachability and
+#    authorization, and none of them are the debt #1815 tracks.
+RUNNER_PHASE=auth
+rc="$(run_advisory authphase STUB_EXIT=0)"
+RUNNER_PHASE=positive
+if [[ "$rc" -ne 0 ]]; then
+  pass "advisory: the auth phase still fails the step"
+else
+  fail "advisory: the auth phase still fails the step" \
+    "rc=0 — advisory leaked into the phase that checks 401s"
+fi
+
+# 8. Without the flag, findings fail the step exactly as before. Advisory is
+#    opt-in; a checkout that does not ask for it does not get it.
+rc="$(run_runner "$TMP_ROOT/argv-noadv" STUB_EXIT=1 STUB_GRADED=9 STUB_FINDINGS=7)"
+if [[ "$rc" -ne 0 ]]; then
+  pass "findings fail the step when advisory is not requested"
+else
+  fail "findings fail the step when advisory is not requested" "rc=0"
+fi
+
+# ---------------------------------------------------------------------------
+# Part 4 — the selected-operation count is the number actually probed
+# ---------------------------------------------------------------------------
+# The summary reported the size of the EXCLUDED union under the name
+# `selected` (536 catalog, 305 excluded, reported as "selected": 305 while
+# Schemathesis said 231). A coverage number that overstates itself by 74
+# operations is worse than none, because it gets quoted.
+cat >"$DOCROOT/openapi.json" <<'JSON'
+{"openapi":"3.0.3","paths":{
+  "/api/v1/things":{"get":{"responses":{"200":{"description":"ok"}}},
+                    "post":{"responses":{"200":{"description":"ok"}}}},
+  "/api/v1/journal/stream":{"get":{"responses":{"200":{"description":"ok"}}}},
+  "/api/auth/session":{"get":{"responses":{"200":{"description":"ok"}}}},
+  "/api/v1/more":{"get":{"responses":{"200":{"description":"ok"}}}}
+}}
+JSON
+run_runner "$TMP_ROOT/argv-count" STUB_EXIT=0 >/dev/null
+# 5 operations: one mutating, one auth-UI, one non-JSON, two probed.
+if grep -q '"catalog":5' "$TMP_ROOT/runner.out"; then
+  pass "the catalog count is every operation in the document"
+else
+  fail "the catalog count is every operation in the document" "$(cat "$TMP_ROOT/runner.out")"
+fi
+if grep -q '"selected":2' "$TMP_ROOT/runner.out"; then
+  pass "the selected count is what is probed, not what is excluded"
+else
+  fail "the selected count is what is probed, not what is excluded" \
+    "expected 2 of 5 (1 mutating + 1 auth-UI + 1 non-JSON excluded); got: $(cat "$TMP_ROOT/runner.out")"
 fi
 
 printf '\n'

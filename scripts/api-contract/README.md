@@ -91,6 +91,15 @@ for this JSON-focused probe. The exclusions are reported separately from the met
 so a lower selected count is visible rather than silently looking like route
 coverage.
 
+`selected` is the count of operations that survive all three exclusions —
+the complement, not the union. Note the buckets **overlap** (a non-JSON
+download is also a GET; an `/api/auth` route can also be mutating), so
+`catalog - methods - auth_ui - non_json` does not reconstruct it. Until
+#1815 the summary reported the union under that name: 536 in the catalog,
+305 excluded, printed as `"selected": 305` while Schemathesis reported 231
+for the same invocation. It is the complement now, and the shell test pins
+it against a fixture whose answer is known by hand.
+
 ## Pacing and deadlines
 
 Two environment variables tune how the runner spends time. Both default to
@@ -101,6 +110,7 @@ before they existed.
 |---|---|---|
 | `API_CONTRACT_RATE_LIMIT` | `120/m` | Client-side pacing passed to Schemathesis. `off` (or `none`) removes it. |
 | `API_CONTRACT_TIMEOUT` | unset | Seconds before the runner stops Schemathesis itself and exits with a named `runtime` failure. Needs coreutils `timeout` on `PATH`; if it is missing the runner refuses to start rather than silently ignoring the deadline. |
+| `API_CONTRACT_ADVISORY` | unset | Report findings without failing the caller. Findings only — see [Advisory mode](#advisory-mode). |
 
 `120/m` matches the server's shipped `http.api_per_min`, so a run against a
 real instance cannot out-run its limiter — which matters, because a 429 is
@@ -108,15 +118,15 @@ reported as a contract failure for an operation that is in fact fine.
 
 `off` is correct only against an instance that has no limiter of its own. The
 per-PR job's ephemeral server boots with `CREWSHIP_RATELIMIT_DISABLED`
-precisely so the gate can use it: 305 selected operations at
-`--max-examples 10` is a hard ~25-minute floor at 120/m, and that floor does
-not fit a 30-minute job that also builds, boots, seeds, and runs five harness
-suites (#1813). Measured in CI on that job, same 305 operations, same
-`--max-examples`: the whole step — `auth` plus `positive` — takes **15
-seconds** unthrottled, 13.3s of it inside Schemathesis. Throttled, the same
-phase has never once completed: two runs were killed at the 30-minute job
-cap with the step 28 minutes in. The
-pairing (`off` only where the server's limiter is off)
+precisely so the gate can use it: 231 selected operations at
+`--max-examples 10` generate ~8000 test cases, and Schemathesis paces what it
+**generates**, not what it sends — a ~66-minute floor at 120/m, inside a
+30-minute job that also builds, boots, seeds, and runs five harness suites
+(#1813). Measured in CI on that job, same operations, same `--max-examples`:
+the whole step — `auth` plus `positive` — takes **15 seconds** unthrottled,
+13.3s of it inside Schemathesis. Throttled, the same phase has never once
+completed: two runs were killed at the 30-minute job cap with the step 28
+minutes in. The pairing (`off` only where the server's limiter is off)
 and the deadline ordering are asserted by
 `scripts/api-contract-gate-test.sh`, which runs in CI's `shell` job.
 
@@ -126,6 +136,37 @@ which GitHub reports as `cancelled` (indistinguishable from a human pressing
 stop) and which kills the runner before its `EXIT` trap can leave a verdict
 behind. With it, the runner loses the race to itself and still writes the
 summary.
+
+## Advisory mode
+
+`API_CONTRACT_ADVISORY=1` makes the `positive` phase report its findings
+without failing the caller. The per-PR job sets it today, and the reason is
+written next to it in `.github/workflows/ci.yml`: when the phase first
+became able to finish (#1813) it reported 265 findings across 227 graded
+operations, all pre-existing, most already tracked as #1583 and #1489. They
+were invisible only because the phase had never once completed, so blocking
+on them would fail PRs that neither caused them nor can fix them. **Remove
+the flag when #1815 closes.**
+
+What advisory does *not* mean:
+
+- **It is not `continue-on-error`.** The exemption covers findings only.
+  Exit 1 **and** a JUnit report showing operations were graded is the only
+  shape that passes. A schema that will not load (exit 2), a blown
+  deadline, a crash, an unreachable target, and every early `die` still
+  fail the caller — those mean the gate did not run, which is not a debt,
+  it is a broken gate. `continue-on-error` on the step would excuse all of
+  them; `scripts/api-contract-gate-test.sh` fails the build if it appears.
+- **It does not reduce the evidence.** The summary, OpenAPI snapshot,
+  JUnit report and sanitized log are still written and uploaded.
+- **It does not launder the verdict.** The summary still says
+  `"status":"failed"`, plus `"advisory":true` and the finding count, so a
+  reader of the artifact cannot mistake an excused run for a clean one.
+- **It is not silent.** The runner prints the graded/finding counts to
+  stderr, and appends a line to `$GITHUB_STEP_SUMMARY` when running in
+  Actions, so the number is read every run rather than filed away.
+- **It never touches the `auth` phase**, whose checks are reachability and
+  authorization, not contract findings.
 
 Failure triage starts with the summary: `schema` means the OpenAPI document,
 Schemathesis configuration, or declared response schema could not be used;
@@ -137,8 +178,13 @@ regression in the JSON API.
 Example summary:
 
 ```json
-{"failure_class":"none","operations":{"catalog":412,"excluded":{"auth_ui":8,"methods":253,"non_json":11},"selected":140},"phase":"positive","status":"passed","tool":"crewship-api-contract"}
+{"advisory":false,"failure_class":"none","findings":0,"limits":{"max_examples_per_operation":10,"request_timeout_seconds":10,"workers":1},"operations":{"catalog":412,"excluded":{"auth_ui":8,"methods":253,"non_json":11},"graded":140,"selected":140},"phase":"positive","status":"passed","tool":"crewship-api-contract"}
 ```
+
+`selected` is what the runner intended to probe (counted from the catalog);
+`graded` is what Schemathesis actually reached a verdict on (counted from
+its JUnit report). They should agree — a gap between them means the run
+stopped early, and that is the difference advisory mode refuses to excuse.
 
 ## Mutation safety
 
