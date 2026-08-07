@@ -349,6 +349,11 @@ func (s *Server) Start(ctx context.Context) error {
 // would be either flaky or 30s slow. Production never mutates it.
 var episodicIndexerPoll = 30 * time.Second
 
+// episodicProbeTimeout bounds the one boot-time embed probe. Short on
+// purpose: it must not hold up anything, and "did not answer in 10s" is
+// itself the degraded answer.
+var episodicProbeTimeout = 10 * time.Second
+
 // startEpisodicIndexer launches the episodic indexer sweeper when an
 // embedder is configured, or logs the degraded-mode WARN when it isn't.
 // Called from Start() with the run context so the sweeper goroutine
@@ -370,16 +375,78 @@ func (s *Server) startEpisodicIndexer(ctx context.Context) {
 	s.logger.Info("episodic indexer started",
 		"model", s.episodicEmbedder.Model(),
 		"poll", episodicIndexerPoll.String())
+
+	// Probe once, off the boot path. Without this, a misconfigured
+	// embedder is only discovered when something real needs embedding —
+	// and if the journal has nothing embeddable yet, /healthz reports
+	// vector recall on an embedder nobody has ever called. One cheap call
+	// makes the stage failure (Ollama up, model absent) visible at boot
+	// instead of silently at the first sweep that finds work.
+	go s.probeEpisodicEmbedder(ctx)
 }
 
-// episodicMode reports the recall mode for health surfaces: "vector"
-// when an embedder is wired (indexer running, HybridRecall serves
-// vec+BM25), "sparse-only" when recall degrades to keyword/FTS only.
-func (s *Server) episodicMode() string {
-	if s.episodicEmbedder != nil {
-		return "vector"
+// probeEpisodicEmbedder makes one embed call so episodicMode() has
+// evidence to report. It changes nothing on failure beyond the health
+// surfaces and one WARN: a probe failure is not fatal, recall degrades to
+// BM25 and the server is still useful.
+func (s *Server) probeEpisodicEmbedder(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, episodicProbeTimeout)
+	defer cancel()
+
+	if _, err := s.episodicEmbedder.Embed(ctx, "crewship episodic embedder probe"); err != nil {
+		s.logger.Warn("episodic: embedder is configured but not working — "+
+			"vector recall is DEGRADED and the index will not grow; "+
+			"check the Ollama host is serving this model",
+			"model", s.episodicEmbedder.Model(),
+			"err", err)
+		return
 	}
-	return "sparse-only"
+	s.logger.Info("episodic: embedder probe ok", "model", s.episodicEmbedder.Model())
+}
+
+// episodicMode reports the recall mode for health surfaces:
+//
+//	vector           embedder wired and its calls are working — indexer
+//	                 running, HybridRecall serves vec+BM25
+//	vector-degraded  embedder wired but its last call FAILED — the index
+//	                 is not growing and recall is silently BM25-only
+//	sparse-only      no embedder configured at all
+//
+// The middle state used to be indistinguishable from the first. This
+// answered "vector" on `episodicEmbedder != nil`, which server.go sets as
+// soon as Keeper's Ollama URL is present, without ever calling it. On the
+// stage slot on 2026-08-07 that Ollama was up but had no nomic-embed-text
+// model: 4032 consecutive index failures in a day, an empty vector index,
+// and this reporting healthy vector recall throughout. `crewship doctor`
+// reads the same field, so it repeated the claim.
+//
+// An embedder that has not been called yet still reads "vector" — a fresh
+// boot with an empty journal never calls Embed, and flagging a fault on no
+// evidence is its own false alarm. startEpisodicIndexer probes once at
+// boot so the missing-model case does not have to wait for real traffic.
+func (s *Server) episodicMode() string {
+	if s.episodicEmbedder == nil {
+		return "sparse-only"
+	}
+	if obs, ok := s.episodicEmbedder.(*episodic.ObservedEmbedder); ok && obs.Degraded() {
+		return "vector-degraded"
+	}
+	return "vector"
+}
+
+// episodicDetail returns the error behind a "vector-degraded" mode, or ""
+// when there is nothing wrong. A bare mode string sends the operator
+// looking in the wrong place: a missing model, an unreachable host and a
+// timeout all present identically without it.
+func (s *Server) episodicDetail() string {
+	obs, ok := s.episodicEmbedder.(*episodic.ObservedEmbedder)
+	if !ok {
+		return ""
+	}
+	if err := obs.LastError(); err != nil {
+		return err.Error()
+	}
+	return ""
 }
 
 // Shutdown gracefully stops all server subsystems, draining connections and

@@ -515,6 +515,14 @@ func (s *Server) mountAPIRouter(
 	if embedder == nil && cfg.Keeper.Enabled && cfg.Keeper.OllamaURL != "" {
 		embedder = episodic.NewOllamaEmbedder(cfg.Keeper.OllamaURL)
 	}
+	// Wrap so the health surfaces can answer from what the embedder
+	// actually did rather than from the fact that we built one. Being
+	// constructible proves only that a URL was set — see episodicMode().
+	// NewObservedEmbedder(nil) is nil, so "no embedder" stays no embedder
+	// and sparse-only recall is unaffected.
+	if obs := episodic.NewObservedEmbedder(embedder); obs != nil {
+		embedder = obs
+	}
 	// Stashed on Server so Start() can launch the indexer sweeper
 	// and /healthz can report vector vs sparse-only recall mode.
 	s.episodicEmbedder = embedder

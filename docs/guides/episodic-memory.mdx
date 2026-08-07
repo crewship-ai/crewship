@@ -11,6 +11,8 @@ icon: "database"
 
 Without an embedder, episodic recall runs in **sparse-only mode** (keyword/FTS, no vector similarity). That degraded state is never silent: the server logs a WARN at boot, `GET /healthz` reports `"episodic": "sparse-only"` (vs `"vector"`), and `crewship doctor` surfaces it as a WARN with the fix.
 
+A *configured but broken* embedder is reported separately as `"episodic": "vector-degraded"`, with the underlying error in `episodic_error`, and `crewship doctor` FAILs on it. The health surfaces answer from what the embedder actually did, not from the fact that one was constructed — being constructible only proves `KEEPER_OLLAMA_URL` was set. The server also makes one embed probe shortly after boot, so a host that is reachable but not serving `nomic-embed-text` shows up immediately rather than waiting for the first sweep that finds work. Recovery is reported just as promptly: pull the missing model and the next successful embed clears the state, no restart needed.
+
 *Roadmap (v0.2):* the synchronous embed-on-write hook (`Indexer.IndexOne` directly from the journal writer hot path) is not yet wired — until then a freshly written entry can lag recall by up to one sweep interval.
 </Note>
 
@@ -366,6 +368,8 @@ The nudge is advisory — agents can ignore it, and it is stripped from the cont
 The `Indexer` (`internal/episodic/indexer.go`) runs a background sweeper loop on a **30-second poll** (`NewIndexer(..., poll)`), processing up to 64 unindexed embeddable entries per `sweepOnce`.
 
 The server starts this sweeper automatically at boot when an embedder is configured (`startEpisodicIndexer` in `internal/server/server_lifecycle.go`, gated on `KEEPER_OLLAMA_URL`). When no embedder is configured the server instead logs one WARN at boot and reports `"episodic": "sparse-only"` on `/healthz`; `crewship doctor` reads that field and warns with the enable hint.
+
+Alongside the sweeper it fires one bounded embed probe (`probeEpisodicEmbedder`, 10s timeout). A failing probe logs a WARN naming the model and flips `/healthz` to `"vector-degraded"` — it does not stop the indexer or fail the boot, because BM25 recall still works and the server is still useful. Every subsequent embed updates the same state, so the sweeper's own failures keep it current and a recovery clears it.
 
 Hot-path callers that want an embedding ready before the next recall call `Indexer.IndexOne(ctx, entry)` directly — typically right after writing a `summary.generated` entry:
 
