@@ -4,6 +4,8 @@ description: "Sign-in, signup, password recovery, OAuth, sessions, and the CLI t
 icon: "shield-check"
 ---
 
+<!-- docs-inventory: ignore-api /api/v1/auth/google/redirect reason=historical-removed-route -->
+<!-- docs-inventory: ignore-api /api/v1/auth/google/callback reason=historical-removed-route -->
 # Authentication
 
 ## Overview
@@ -216,10 +218,10 @@ this case, in addition to `--email` to skip the email prompt too:
 ```bash
 # Read the password from stdin (docker-login style) — preferred:
 crewship login --server https://crewship.example.com \
-  --email demo@crewship.ai --password-stdin <<< "$CREWSHIP_LOGIN_PASSWORD"
+  --email demo@crewship.ai --password-stdin <<< "$LOGIN_PASSWORD"
 
 # Or via an env var — no stdin involved at all:
-CREWSHIP_PASSWORD="$CREWSHIP_LOGIN_PASSWORD" \
+CREWSHIP_PASSWORD="$LOGIN_PASSWORD" \
   crewship login --server https://crewship.example.com --email demo@crewship.ai
 ```
 

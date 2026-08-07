@@ -13,11 +13,11 @@ and credential **self-service vs. escalation**.
 
 ## Which of these run in CI
 
-Until `.github/workflows/nightly-harness.yml` landed, **none of them did**.
-`ci.yml` runs `scripts/test-harness-lib-test.sh` — a unit test of *this
-directory's library* (`lib.sh` assertion helpers and exit codes). It never
-starts a server and never asserts a product behaviour, so every suite below
-was gated by nothing.
+The CI workflow now has two distinct harness protections. The shell job runs
+`scripts/test-harness-integrity.sh` (ShellCheck plus helper-call resolution)
+and its negative test. The `harness-pr` job builds the binary from the same
+commit, starts one disposable seeded server, and runs the explicit
+no-provider subset below. The full matrix remains nightly.
 
 `nightly-harness.yml` (nightly 03:10 UTC + `workflow_dispatch`) now boots an
 ephemeral instance per matrix square — `crewship start` → `crewship seed
@@ -38,6 +38,12 @@ green night closes the bot's own issue).
 
 All five were driven end-to-end against a clean-DB bootstrap of exactly that
 sequence before the workflow was written.
+
+**PR subset:** `test-keeper.sh`, `test-keeper-config.sh`,
+`test-keeper-aux.sh`, `test-inbox.sh`, and `test-orphan-token-reap.sh`.
+These are the deterministic control-plane suites selected for ordinary PRs;
+provider-backed, external-service, Docker-dependent, and destructive suites
+remain nightly/dev-only for the reasons listed above and in the workflow.
 
 **Not gated yet — the runtime suites.** `test-memory.sh`,
 `test-delegation.sh`, `test-crew-links.sh`, `test-notifications.sh`,
@@ -197,6 +203,28 @@ Two CI-specific notes worth keeping:
 
 ## Run
 
+### Pull-request gate
+
+Every pull request runs the explicit control-plane subset below against a
+fresh server and database built from the same commit:
+
+| Suite | Why it is in the PR gate |
+|---|---|
+| `test-keeper.sh` | CLI governance toggles and validation |
+| `test-keeper-config.sh` | configuration round-trips and fail-closed setup |
+| `test-keeper-aux.sh` | auxiliary keeper configuration contracts |
+| `test-inbox.sh` | waitpoint approval and inbox resolution contract |
+| `test-orphan-token-reap.sh` | non-mutating orphan classifier and CLI parity |
+
+The provider-dependent suites (`test-memory.sh`, `test-delegation.sh`,
+`test-crew-links.sh`, `test-notifications.sh`, `test-orchestration.sh`,
+`test-determinism.sh`, `test-credentials.sh`, `test-keeper-audit-integrity.sh`,
+and `test-keeper-load.sh`) remain nightly because they require an LLM/provider
+credential. GitHub, Ollama, Redis, Shoutrrr, and insider suites remain nightly
+or opt-in because they require external services, Docker, or destructive/shared
+fixture access. The nightly workflow's coverage guard keeps those exclusions
+explicit; none are silently dropped.
+
 ```bash
 cd scripts/test-harness
 
@@ -235,6 +263,7 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 
 | Suite | Validates |
 |---|---|
+| `test-first-projects.sh` | Executes every command printed by `docs/guides/first-projects.mdx`: creates a crew and agent, writes shared output, assigns a credential, recalls crew memory, scaffolds and validates a routine, and reads the Journal. Requires a seeded instance and a provider credential for the agent-backed rungs. |
 | `test-memory.sh` | agent recalls a nonce fact in a **fresh session**; a **crew-tier** fact is readable by a peer in the same crew; it does **not** leak cross-crew; **pins** are always available; `memory search`/`status` corroborate. `--soak N` re-checks durability over N minutes. |
 | `test-delegation.sh` | a **lead delegates** a subtask to a peer and reports the result back (corroborated by a new peer chat session); a lead **hires an ephemeral** specialist (or it lands as an approval waitpoint under guided autonomy). |
 | `test-crew-links.sh` | a **crew link** is real: the graph lists no links to deleted crews, a lead's sidecar reports the crews it can reach, delegation **across** a live link lands in the other crew, and the same delegation is **refused** once the link is removed (then restored). |

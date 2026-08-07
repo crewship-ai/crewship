@@ -1,0 +1,25 @@
+---
+title: "Find your way around Crewship"
+description: "Choose a starting page by the job you want to accomplish instead of by the command or API resource name."
+icon: "map"
+---
+
+# I want to…
+
+| I want to… | Start here |
+|---|---|
+| Run my first agent task | [First projects](/guides/first-projects) |
+| Understand crews, agents, and Keeper | [Concepts and glossary](/concepts) |
+| Give an agent a task that produces a reliable result | [Writing a good task](/guides/writing-good-tasks) |
+| Automate recurring work | [Routines](/guides/routines) and [scheduling](/guides/scheduling) |
+| Give an agent access to an API key safely | [Credentials](/guides/credentials) |
+| See what a run changed | [Crew Journal](/guides/crew-journal) |
+| Describe a workspace declaratively | [Manifest guide](/guides/manifests) |
+| Decide whether Crewship fits the job | [When not to use Crewship](/guides/when-not-to-use) |
+| Find an exact HTTP route or CLI flag | [API reference](/api-reference/overview) or [CLI overview](/cli/overview) |
+
+## Pick the smallest useful path
+
+Start with a direct agent task when you are still learning the workspace and want to inspect one result. Move to a routine when the task has a repeatable definition and a trigger. Add an issue when work needs ownership, status, or a reviewable queue. Add a waitpoint when an external decision must pause execution without losing the run context.
+
+For access questions, read [Concepts](/concepts) first: a workspace owns the tenant-wide boundary, a crew owns the shared runtime, and an agent is the worker. For safety questions, read [Credentials](/guides/credentials), [Keeper](/guides/keeper), and [Harbormaster](/guides/harbormaster) together; no single page describes the entire access decision.

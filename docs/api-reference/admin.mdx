@@ -4,6 +4,7 @@ description: "Workspace administration endpoints for stats, user management, Kee
 icon: "shield-check"
 ---
 
+<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
 # Admin API
 
 The operational surface for OWNER and ADMIN roles: workspace stats, user management, GDPR subject-access and erasure, memory administration, the Keeper security audit log, and a set of cross-cutting system and metrics endpoints. Most endpoints require the OWNER role; the GDPR and memory-admin endpoints require ADMIN or OWNER (manage permission). The Keeper Phase 2 evaluators and three system endpoints have their own auth model, noted inline.

@@ -4,6 +4,7 @@ description: "Complete reference for all environment variables that configure th
 icon: "sliders-horizontal"
 ---
 
+<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
 # Environment Variables
 
 All Crewship configuration can be set via environment variables. These override values from the YAML config file. The mapping is defined in `applyEnvOverrides` in `internal/config/config.go`.
@@ -133,6 +134,25 @@ These are off by default and intended for operators debugging performance.
 |----------|---------|-------------|
 | `CREWSHIP_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `CREWSHIP_LOG_FORMAT` | `json` | Log format: `json` or `text` |
+
+## CLI and runtime context
+
+These names are used by CLI commands, test harnesses, or the agent runtime rather than by the server's main YAML configuration. They are listed here so a deployment or script can distinguish an intentional context variable from a typo.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_CHAT_ID` | (unset) | Chat/session identifier supplied to a command that resumes or inspects one conversation. |
+| `CREWSHIP_CREW_SHARED` | (unset) | Runtime marker selecting the crew-shared memory or filesystem context. |
+| `CREWSHIP_E2E_SKIP_TOKEN_PROBE` | (unset) | Test-only switch that skips the end-to-end token probe when a harness target cannot support it. |
+| `CREWSHIP_INPUT` | (unset) | Input value passed to a CLI or routine step that accepts an environment-backed input. |
+| `CREWSHIP_INPUT_PERIOD` | (unset) | Input period used by recurring routine fixtures and schedule tests. |
+| `CREWSHIP_MEMORY_SCRUBBER_MODE` | (unset) | Runtime memory-scrubber mode used when exercising memory redaction behaviour. |
+| `CREWSHIP_MEMORY_WATCHER` | (unset) | Enables the development memory watcher used by local runtime tooling. |
+| `CREWSHIP_OUTPUT_DIR` | (unset) | Output directory override for a local command or harness run. |
+| `CREWSHIP_SECRETS_DIR` | (unset) | Directory override for runtime secret files in local or test environments. |
+| `CREWSHIP_TOOL_NAME` | (unset) | Tool name carried in agent execution context and diagnostics. |
+| `CREWSHIP_VAR` | (unset) | Generic fixture variable used by command and routine tests. |
+| `CREWSHIP_WORKSPACE_ID` | (unset) | Explicit workspace identifier for a CLI or harness operation when the profile has no default workspace. |
 
 ## Authentication
 

@@ -46,9 +46,9 @@ section "1. Read-path latency baseline under concurrency (${SAMPLES} samples, ${
 lat="$(mktemp -t cs-lat.XXXXXX)"; codes="$(mktemp -t cs-codes.XXXXXX)"
 info "Firing $SAMPLES read requests, up to $CONC concurrent…"
 run_read() {
-  local t0 t1 out rc
+  local t0 t1 rc
   t0=$(perl -MTime::HiRes=time -e 'printf "%d", time()*1000' 2>/dev/null || echo 0)
-  out="$(cs escalation pending-count -f json 2>/dev/null)"; rc=$?
+  cs escalation pending-count -f json >/dev/null 2>&1; rc=$?
   t1=$(perl -MTime::HiRes=time -e 'printf "%d", time()*1000' 2>/dev/null || echo 0)
   echo $(( t1 - t0 )) >> "$lat"; echo "$rc" >> "$codes"
 }
