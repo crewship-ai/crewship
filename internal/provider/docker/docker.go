@@ -890,10 +890,18 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 	// bought is the guarantee that `ref` on this host now means the manifest we
 	// checked — which is strictly stronger than what a tag pull gave us.
 	//
+	// Skipped when `ref` was ALREADY digest-addressed (an operator who wrote
+	// `image: repo@sha256:…` into a crew manifest): there is no tag to restore,
+	// and Docker refuses to create one from a digest reference. Checked with
+	// IsDigestRef rather than `pullRef != ref`, because normalization makes
+	// those differ as strings — "alpine@sha256:…" pins to
+	// "index.docker.io/library/alpine@sha256:…" — and the string comparison
+	// would warn on every start for the users doing the most correct thing.
+	//
 	// Best-effort: a tagging failure means the image is present but unnamed, so
 	// the caller's own ImageInspect is the honest place for that to surface,
 	// with the real daemon error rather than one invented here.
-	if pinned && pullRef != ref {
+	if pinned && !dockerutil.IsDigestRef(ref) {
 		if _, tagErr := p.client.ImageTag(ctx, client.ImageTagOptions{Source: pullRef, Target: ref}); tagErr != nil {
 			p.logger.Warn("pulled by digest but could not restore the local tag; downstream lookups by tag may fail",
 				"image", ref, "pull_ref", pullRef, "error", tagErr)

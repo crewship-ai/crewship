@@ -166,6 +166,49 @@ func TestEnsureImage_PinnedPullRestoresTheLocalTag(t *testing.T) {
 	}
 }
 
+// TestEnsureImage_AlreadyDigestRefIsNotRetagged covers the operator who wrote
+// `image: repo@sha256:…` straight into a crew manifest. There is no tag to
+// restore, and the Docker API refuses to create one from a digest reference
+// ("refusing to create a tag with a digest reference") — so attempting it would
+// log a warning on every single container start for the users who are doing the
+// MOST correct thing. Skip it.
+func TestEnsureImage_AlreadyDigestRefIsNotRetagged(t *testing.T) {
+	t.Parallel()
+
+	var rec pullRecorder
+	p, tagRef := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+			rec.recordTag(path, r.URL.Query())
+			w.WriteHeader(http.StatusCreated)
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+			http.Error(w, `{"message":"No such image"}`, http.StatusNotFound)
+		case strings.HasSuffix(path, "/images/create"):
+			rec.record(r.URL.Query().Get("tag"))
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	digestRef := strings.TrimSuffix(tagRef, ":tag") + "@" + pinRemoteDigest
+
+	prov, err := p.ensureImage(context.Background(), digestRef)
+	if err != nil {
+		t.Fatalf("ensureImage: %v", err)
+	}
+	if tags := rec.tagSnapshot(); len(tags) != 0 {
+		t.Errorf("a digest-addressed ref has no tag to restore; got ImageTag %v", tags)
+	}
+	if prov.Digest != pinRemoteDigest {
+		t.Errorf("digest = %q, want %q", prov.Digest, pinRemoteDigest)
+	}
+	if !prov.Verified {
+		t.Error("an operator-pinned digest ref is the strongest case there is; it must report Verified")
+	}
+}
+
 // TestEnsureImage_UnpinnedPullDoesNotRetag guards the other side: when the
 // pull was already tag-addressed the daemon created the tag itself, and an
 // extra ImageTag would be a pointless round-trip on every cold start.

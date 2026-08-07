@@ -52,6 +52,28 @@ func PinnedRef(ref, digest string) (string, bool) {
 	return pinned.Name(), true
 }
 
+// IsDigestRef reports whether ref is already digest-addressed
+// ("repo@sha256:…", with or without a tag alongside it).
+//
+// Callers use it to decide whether a digest-pinned pull left a local TAG that
+// needs restoring. The tempting shortcut — comparing PinnedRef's output against
+// the input string — is wrong for every reference the registry normalizes:
+// "alpine@sha256:…" pins to "index.docker.io/library/alpine@sha256:…", which
+// differs as a string while being the same already-pinned reference. Acting on
+// that difference means asking Docker to tag a digest reference, which it
+// refuses outright, on every start for the users who pinned properly.
+//
+// An unparseable ref is not digest-addressed: it cannot be pinned either, so
+// the caller's pull is tag-shaped and its tag handling should apply.
+func IsDigestRef(ref string) bool {
+	parsed, err := name.ParseReference(ref)
+	if err != nil {
+		return false
+	}
+	_, ok := parsed.(name.Digest)
+	return ok
+}
+
 // LocalRepoDigest returns the manifest digest that the locally-present image
 // for ref actually carries, read out of the daemon's RepoDigests list. It is
 // RepoDigestsContain run in the other direction: instead of "does the local

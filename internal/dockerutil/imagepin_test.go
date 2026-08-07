@@ -108,6 +108,42 @@ func TestPinnedRef(t *testing.T) {
 	}
 }
 
+// TestIsDigestRef guards a guard. Callers use this to decide whether there is
+// a local tag worth restoring after a digest-addressed pull, and the naive
+// version of that check — comparing the pinned ref against the original
+// string — is WRONG for any ref the registry normalizes. "alpine@sha256:…"
+// pins to "index.docker.io/library/alpine@sha256:…", which differs as a
+// string while being the very same already-pinned reference. Getting this
+// backwards means asking Docker to tag a digest reference, which it refuses,
+// on every container start for the users who pinned their image properly.
+func TestIsDigestRef(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		ref  string
+		want bool
+	}{
+		{"explicit registry digest ref", "ghcr.io/crewship-ai/agent-runtime@" + pinDigestA, true},
+		{"docker hub short digest ref (normalizes)", "alpine@" + pinDigestA, true},
+		{"tagged ref", "ghcr.io/crewship-ai/agent-runtime:latest", false},
+		{"bare ref defaults to a tag", "alpine", false},
+		{"local cache tag", "crewship-cache:0d08da4b8ac3", false},
+		{"unparseable ref is not a digest ref", "NOT A REF", false},
+		{"tag and digest together is still digest-addressed", "alpine:3.20@" + pinDigestA, true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsDigestRef(tt.ref); got != tt.want {
+				t.Errorf("IsDigestRef(%q) = %v, want %v", tt.ref, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestLocalRepoDigest is the read-back half: after a pull the digest we
 // RECORD has to come from the image that is actually on disk, not from the
 // HEAD we did beforehand. It is the same parse as RepoDigestsContain, run in
