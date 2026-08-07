@@ -335,8 +335,8 @@ A Kubernetes provider that runs each crew as a pod (or job) is on the v0.2 roadm
 
 | Provider | Config Value | Description |
 |----------|-------------|-------------|
-| **Local filesystem** | `localfs` | Stores files on the local disk. Default for single-server deployments. |
-| **S3** | `s3` | Amazon S3 or compatible object storage. For distributed deployments. |
+| **Local filesystem** | `localfs` | Stores files on the local disk. The only implemented provider. |
+| **S3** | — | Object storage for distributed deployments. **Not implemented.** `s3` was accepted by config validation until it was found to leave the storage provider unwired at runtime; it is now refused at startup. It will become a valid value again in the commit that implements it. |
 
 ```yaml
 storage:
@@ -375,7 +375,7 @@ var (
         "docker": true, "apple": true, "auto": true,
     }
     validStorageProviders = map[string]bool{
-        "localfs": true, "s3": true,
+        "localfs": true,
     }
     validStateProviders = map[string]bool{
         "bbolt": true,
@@ -430,7 +430,7 @@ Invalid provider values cause a startup error with a descriptive message.
       container_prefix: "host-a"
       sidecar_enabled: true
     storage:
-      provider: "s3"
+      provider: "s3"      # refused at startup today — see Storage Providers
     state:
       provider: "postgres"
     ```

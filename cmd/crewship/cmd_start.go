@@ -1372,8 +1372,20 @@ func initProviders(ctx context.Context, cfg *config.Config, gate provider.Admiss
 		}
 		deps.Storage = fs
 	default:
+		// Unlike Container and State next door, an unrecognised storage
+		// provider is fatal rather than a warning. Those two have callers that
+		// legitimately run with a nil provider (--no-docker leaves Container
+		// nil by design); Storage has no such contract, so warn-and-continue
+		// hands every later caller a nil it does not expect.
+		//
+		// config.Validate() already refuses anything but localfs, which makes
+		// this branch unreachable on a real boot. It stays because the fault it
+		// catches is not a typo — it is adding a value to validStorageProviders
+		// without adding the case here, which is exactly how `s3` shipped
+		// (#1768 item 7). Failing at init names the wiring; a nil surfacing
+		// later names whichever feature happened to dereference it first.
 		if cfg.Storage.Provider != "" {
-			logger.Warn("unknown storage provider", "provider", cfg.Storage.Provider)
+			return nil, fmt.Errorf("storage provider %q is accepted by config validation but not wired in initProviders", cfg.Storage.Provider)
 		}
 	}
 

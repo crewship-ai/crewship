@@ -18,7 +18,11 @@ func TestEnvOverrides_FullSurface(t *testing.T) {
 	t.Setenv("CREWSHIP_CONTAINER_PROVIDER", "auto")
 	t.Setenv("CREWSHIP_CONTAINER_NETWORK", "net-x")
 	t.Setenv("CREWSHIP_CONTAINER_PREFIX", "ci-")
-	t.Setenv("CREWSHIP_STORAGE_PROVIDER", "s3")
+	// `localfs`, not a distinguishing value: Load() validates, and localfs is
+	// now the only storage provider that passes (#1768 item 7). The override
+	// wiring itself is proven by TestEnvOverride_StorageProvider below, which
+	// calls applyEnvOverrides without the validation step.
+	t.Setenv("CREWSHIP_STORAGE_PROVIDER", "localfs")
 	t.Setenv("CREWSHIP_STORAGE_BASE_PATH", "/data/base")
 	t.Setenv("CREWSHIP_LOG_PATH", "/data/logs")
 	t.Setenv("CREWSHIP_STATE_PROVIDER", "bbolt")
@@ -56,7 +60,7 @@ func TestEnvOverrides_FullSurface(t *testing.T) {
 		{"Container.Provider", cfg.Container.Provider, "auto"},
 		{"Container.Network", cfg.Container.Network, "net-x"},
 		{"Container.ContainerPrefix", cfg.Container.ContainerPrefix, "ci-"},
-		{"Storage.Provider", cfg.Storage.Provider, "s3"},
+		{"Storage.Provider", cfg.Storage.Provider, "localfs"},
 		{"Storage.BasePath", cfg.Storage.BasePath, "/data/base"},
 		{"Storage.LogPath", cfg.Storage.LogPath, "/data/logs"},
 		{"State.Provider", cfg.State.Provider, "bbolt"},
