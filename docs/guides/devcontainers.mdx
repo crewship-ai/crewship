@@ -482,6 +482,37 @@ PR #225 extends the devcontainer expansion vocabulary the spec defines:
 ## Troubleshooting
 
 <AccordionGroup>
+  <Accordion title="docker build failed for crewship-feat:… — where is the reason?">
+    It is in the error itself. A failed feature build appends a bounded tail of
+    the daemon's own output, so the message names the failing step rather than
+    only its exit code:
+
+    ```
+    Provision: building feature image: docker build failed for crewship-feat:3d097b41b405: exit status 1
+    docker build output (tail):
+    #5 0.688 E: Unable to locate package definitely-not-a-package
+    #5 ERROR: process "/bin/sh -c apt-get install -y …" did not complete successfully: exit code: 100
+    ERROR: failed to solve: process "/bin/sh -c apt-get install -y …" did not complete successfully: exit code: 100
+    ```
+
+    The tail is the **last** part of the log, because that is where a BuildKit
+    failure reports itself, and it is capped so a multi-megabyte build log never
+    lands whole in an error string. Credential-shaped tokens are redacted on the
+    way out — a `RUN` that echoes a build-arg or an API key shows `[REDACTED]`.
+
+    Need more than the tail? Two places have the rest:
+
+    - `crewship crew provision status <crew>` — the durable
+      `provisioning.build_failed` journal row keeps a larger window, and it
+      survives after the live stream is gone.
+    - Start the server with debug logging to stream every build line as it
+      happens.
+
+    **"the build produced no output"** instead of a tail is its own finding: the
+    `docker` CLI exited without printing anything, which almost always means it
+    never reached a daemon. Check `crewship doctor`.
+  </Accordion>
+
   <Accordion title="sidecar binary not found; run 'make build:sidecar'">
     `autodetectSidecarPaths` in `internal/config/config.go` failed. Run `make build:sidecar` on the host, or set `CREWSHIP_SIDECAR_PATH=/absolute/path/to/crewship-sidecar` and `CREWSHIP_ENTRYPOINT_PATH=/absolute/path/to/entrypoint.sh`. For tests that never launch containers, set `CREWSHIP_SKIP_SIDECAR=1`.
   </Accordion>
