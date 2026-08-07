@@ -377,9 +377,13 @@ func TestAppleBuilder_DoesNotKillAfterTheExportMarker(t *testing.T) {
 //
 // The fixture below is verbatim `container builder status` from 1.2.0.
 func TestBuilderCPUMem_ParsesTheRealStatusOutput(t *testing.T) {
+	// Read, not skipped-if-missing: the fixture is checked in, so its absence
+	// is this test losing its subject — and a skip reports the same "ok" as a
+	// pass, which is exactly the invisible coverage loss scripts/skip-budget.sh
+	// exists to catch.
 	raw, err := os.ReadFile("testdata/builder_status.txt")
 	if err != nil {
-		t.Skipf("no captured builder status to check against: %v", err)
+		t.Fatalf("captured builder status missing: %v", err)
 	}
 	cpus, memMB := parseBuilderCPUMem(string(raw))
 	if cpus <= 0 || memMB <= 0 {
