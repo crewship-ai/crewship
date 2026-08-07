@@ -363,10 +363,33 @@ func (p *Provider) hostPathFor(containerID, containerPath string) (string, bool)
 // their names, refusing any entry that would land outside it.
 //
 // The archive is rendered from operator-supplied config, so a `../` or
-// absolute entry is a path-traversal attempt against the host — the staging
-// directory is the boundary and it is enforced here rather than trusted.
+// absolute entry is a path-traversal attempt against the host. The staging
+// directory is the boundary, and it takes all three layers internal/safepath
+// prescribes to actually hold it:
+//
+//   - safepath.JoinRel for lexical confinement. A hand-rolled path.Clean
+//     check is not equivalent: path.Clean does not treat a backslash as a
+//     separator on unix, so `..\escaped` survives it and then escapes once
+//     the same archive is unpacked on Windows.
+//   - a cumulative byte cap. A per-entry limit alone does not bound an
+//     archive — 40 entries just under a 32 MB cap still write 1.2 GB. This
+//     is the lesson devcontainer/features.go records as Audit M24.
+//   - an *os.Root for the write itself. The lexical layer is textual and
+//     cannot see a symlink: if a directory inside the staging tree is a
+//     symlink pointing out, `out/escaped` is textually in-bounds and still
+//     lands outside. os.Root resolves one component at a time and refuses
+//     to follow a link leaving the root, which is what closes that hole.
 func unpackTarInto(root string, content io.Reader) ([]string, error) {
-	var names []string
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("opening staging root: %w", err)
+	}
+	defer func() { _ = rootFS.Close() }()
+
+	var (
+		names []string
+		total int64
+	)
 	tr := tar.NewReader(content)
 	for {
 		hdr, err := tr.Next()
@@ -377,40 +400,67 @@ func unpackTarInto(root string, content io.Reader) ([]string, error) {
 			return nil, fmt.Errorf("reading archive: %w", err)
 		}
 		if hdr.Typeflag != tar.TypeReg {
-			continue // directories are created by the copy; nothing else travels
+			continue // directories are created below; links never travel
 		}
-		clean := path.Clean("/" + hdr.Name)[1:] // strips ../ and any leading /
-		if clean == "" || clean != hdr.Name {
-			return nil, fmt.Errorf("refusing archive entry %q: escapes the destination", hdr.Name)
+
+		// Lexical confinement. JoinRel validates every segment of the
+		// untrusted name before the join, so traversal is provably
+		// rejected rather than merely cleaned away.
+		abs, err := safepath.JoinRel(root, hdr.Name)
+		if err != nil {
+			return nil, fmt.Errorf("refusing archive entry %q: %w", hdr.Name, err)
 		}
-		target := filepath.Join(root, filepath.FromSlash(clean))
-		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-			return nil, fmt.Errorf("staging %s: %w", clean, err)
+		rel, err := filepath.Rel(root, abs)
+		if err != nil || rel == "." {
+			return nil, fmt.Errorf("refusing archive entry %q: %w", hdr.Name, safepath.ErrUnsafe)
+		}
+
+		// Compare against the declared size before writing: it is the
+		// upper bound on what the bounded copy below can produce.
+		if hdr.Size > maxCopyEntryBytes {
+			return nil, fmt.Errorf("archive entry %q exceeds the per-entry cap (%d > %d)",
+				hdr.Name, hdr.Size, int64(maxCopyEntryBytes))
+		}
+		if total+hdr.Size > maxCopyTotalBytes {
+			return nil, fmt.Errorf("archive exceeds the cumulative size cap (%d > %d) at entry %q",
+				total+hdr.Size, int64(maxCopyTotalBytes), hdr.Name)
+		}
+
+		if dir := filepath.Dir(rel); dir != "." {
+			if err := rootFS.MkdirAll(dir, 0o700); err != nil {
+				return nil, fmt.Errorf("staging %s: %w", rel, err)
+			}
 		}
 		mode := os.FileMode(hdr.Mode).Perm() // #nosec G115 — tar mode is bounded
 		if mode == 0 {
 			mode = 0o600
 		}
-		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode) // #nosec G304 — target is under root
+		f, err := rootFS.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 		if err != nil {
-			return nil, fmt.Errorf("staging %s: %w", clean, err)
+			return nil, fmt.Errorf("staging %s: %w", rel, err)
 		}
 		// Bounded copy: an archive is not a reason to fill the host disk.
-		if _, err := io.Copy(f, io.LimitReader(tr, maxCopyEntryBytes)); err != nil {
+		n, err := io.Copy(f, io.LimitReader(tr, maxCopyEntryBytes))
+		if err != nil {
 			_ = f.Close()
-			return nil, fmt.Errorf("staging %s: %w", clean, err)
+			return nil, fmt.Errorf("staging %s: %w", rel, err)
 		}
 		if err := f.Close(); err != nil {
-			return nil, fmt.Errorf("staging %s: %w", clean, err)
+			return nil, fmt.Errorf("staging %s: %w", rel, err)
 		}
-		names = append(names, clean)
+		total += n
+		names = append(names, rel)
 	}
 	return names, nil
 }
 
-// maxCopyEntryBytes caps a single staged file. Config files are kilobytes;
-// this is only here so a malformed archive cannot fill the disk.
-const maxCopyEntryBytes = 32 << 20
+// maxCopyEntryBytes caps a single staged file and maxCopyTotalBytes the
+// archive as a whole. Config files are kilobytes; both are only here so a
+// malformed or hostile archive cannot fill the disk.
+const (
+	maxCopyEntryBytes = 32 << 20
+	maxCopyTotalBytes = 256 << 20
+)
 
 // Close stops the background gc goroutine and releases resources.
 func (p *Provider) Close() error {
