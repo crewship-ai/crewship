@@ -1059,33 +1059,67 @@ out of it — `transform` with `.identifier` gives you the new issue's key.
 
 #### Verbs
 
-| verb | does | available |
-| --- | --- | --- |
-| `issue.create` | Creates an issue in the routine's author crew. Requires `title`. | **yes** |
-| `issue.update` | Changes an issue's status/fields. | not yet |
-| `issue.comment` | Comments on an issue. | not yet |
-| `issue.link` | Relates two issues. | not yet |
-| `assignment.create` | Delegates work to an agent. | not yet |
-| `escalation.create` | Raises an escalation to a human. | not yet |
+| verb | does | required `args` | policy action |
+| --- | --- | --- | --- |
+| `issue.create` | Creates an issue in the routine's author crew | `title` | `mission_create` |
+| `issue.update` | Changes an issue's status, priority, assignee, labels or due date | `identifier` | `issue_write` |
+| `issue.comment` | Comments on an issue | `identifier`, `body` | `issue_write` |
+| `issue.link` | Relates two issues | `identifier`, `target_identifier`, `relation_type` | `issue_write` |
+| `assignment.create` | Delegates a task to an agent in the author crew | `target_slug`, `task`, `chat_id` | `assignment_create` |
+| `escalation.create` | Raises an escalation to a human | `from_slug`, `reason`, `chat_id` | `escalation_create` |
 
-**"Not yet" means the routine will not save.** Every `crewship` action is
-bounded by the author crew's **autonomy level**, and five of the six verbs
-describe capabilities Crewship has no autonomy action for yet — deciding what
-a `guided` crew may do unattended is a governance decision, not something a
-step kind gets to assume. Rather than ship them ungoverned, they are declared
-and refused at **save time**, with an error that says why. A routine that saves
-clean and then refuses at 03:00 is worse than one that never saved.
+`relation_type` is one of `blocks`, `blocked_by`, `relates_to`, `duplicate_of`,
+`sub_issue_of`. A missing required arg is a **save-time** error, not a 400 at
+03:00 — as is a verb with no policy action behind it, which is how a new
+capability is kept from shipping ungoverned by being forgotten.
+
+The loop the kind exists for, end to end — a probe, a comment on the issue that
+triggered the run, and the issue moved on:
+
+```yaml
+inputs:
+  - name: issue
+    type: string          # e.g. ENG-42, passed by the webhook or schedule
+steps:
+  - id: probe
+    type: http
+    http: { method: GET, url: "https://status.example.com/api/health" }
+  - id: report
+    type: crewship
+    action: issue.comment
+    args:
+      identifier: "{{ inputs.issue }}"
+      body: |
+        Nightly probe says: {{ steps.probe.output }}
+  - id: close_it
+    type: crewship
+    action: issue.update
+    if: "{{ steps.probe.output }}"
+    args:
+      identifier: "{{ inputs.issue }}"
+      status: DONE
+```
 
 #### What bounds it
 
-- **Autonomy.** The verb is gated on the author crew's `autonomy_level`, the
-  same gate an agent doing this by hand passes. A crew whose level would *hold
-  the action for approval* gets a refusal instead — a routine has nobody
-  attached to approve it. Raise the level with `crewship policy set`.
-- **Identity is not yours to set.** `workspace_id`, `crew_id`,
-  `author_agent_id` and `author_run_id` are injected from the run and override
-  anything in `args`. A routine cannot act as another workspace or a sibling
-  crew.
+- **Autonomy.** The verb is gated on the author crew's `autonomy_level`. A crew
+  whose level would *hold the action for approval* gets a refusal instead — a
+  routine has nobody attached to approve it — so on a `strict` crew, issue
+  writes and assignments do not happen. Raise the level with `crewship policy
+  set`. The full per-level table, and the reasoning for each cell, is in
+  [Autonomy → what a routine may do to the board](/guides/autonomy-and-self-learning#what-a-routine-may-do-to-the-board).
+- **Escalation volume.** `escalation.create` is allowed at *every* autonomy
+  level, because an approval to authorise an interrupt is itself the interrupt.
+  What bounds it is a backlog instead: a routine may not escalate while the crew
+  already has `escalation.max_pending_per_crew` (default 10) **unresolved**
+  escalations. Resolving them returns the budget.
+- **Identity is not yours to set.** `workspace_id`, `crew_id`, `agent_id`,
+  `actor_agent_id`, `author_agent_id` and `author_run_id` are injected from the
+  run and override anything in `args`. A routine cannot act as another
+  workspace, a sibling crew, or a different agent — the last one matters
+  because the acting agent is what the delegation depth cap is measured from.
+  A routine with no author agent cannot use `issue.comment`, which needs an
+  author it can name.
 - **Chain depth.** Whatever the verb creates records the run that created it,
   so an automation reacting to it inherits this run's chain budget rather than
   starting a new one. See [Chain depth](#chain-depth-the-composition-budget).

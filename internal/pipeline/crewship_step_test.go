@@ -403,3 +403,31 @@ func TestCrewshipVerbs_RegistryIsCoherent(t *testing.T) {
 		t.Errorf("an unknown action must wrap ErrCrewshipVerbUnknown, got %v", err)
 	}
 }
+
+// The routine in docs/guides/routines.mdx must actually save. A documented
+// example the validator refuses is worse than no example: it is the first thing
+// an author copies, and the error it produces reads as their mistake.
+func TestValidate_CrewshipDocumentedExampleSaves(t *testing.T) {
+	dsl := &DSL{
+		DSLVersion: "1.0",
+		Name:       "nightly-probe",
+		Inputs:     []InputSpec{{Name: "issue", Type: "string"}},
+		Steps: []Step{
+			{ID: "probe", Type: StepHTTP, HTTP: &HTTPStep{
+				Method: "GET", URL: "https://status.example.com/api/health"}},
+			{ID: "report", Type: StepCrewship, Action: "issue.comment", Args: map[string]any{
+				"identifier": "{{ inputs.issue }}",
+				"body":       "Nightly probe says: {{ steps.probe.output }}",
+			}},
+			{ID: "close_it", Type: StepCrewship, Action: "issue.update",
+				If: "{{ steps.probe.output }}",
+				Args: map[string]any{
+					"identifier": "{{ inputs.issue }}",
+					"status":     "DONE",
+				}},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err != nil {
+		t.Fatalf("the documented crewship example must validate: %v", err)
+	}
+}
