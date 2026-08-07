@@ -55,6 +55,13 @@ type fakeSidecarDaemon struct {
 	containers []fakeSidecarContainer
 	volumes    []fakeSidecarVolume
 
+	// refcountVolumes makes DELETE /volumes/{name} answer 409 "volume is in
+	// use" while some container still mounts it — which is what every real
+	// daemon does, force flag or not. Opt-in so the tests that exercise the
+	// teardown in isolation (they remove volumes without first removing the
+	// containers that mount them, deliberately) keep their current shape.
+	refcountVolumes bool
+
 	// recorded, in call order
 	createdNames   []string
 	createdVolumes []string
@@ -69,6 +76,7 @@ type fakeSidecarContainer struct {
 	Image  string
 	State  string
 	Labels map[string]string
+	Mounts []string // volume names this container references
 }
 
 type fakeSidecarVolume struct {
@@ -142,6 +150,17 @@ func (f *fakeSidecarDaemon) handler(t *testing.T) http.HandlerFunc {
 
 		case r.Method == http.MethodDelete && strings.Contains(path, "/volumes/"):
 			name := path[strings.LastIndex(path, "/volumes/")+len("/volumes/"):]
+			if f.refcountVolumes {
+				for _, c := range f.containers {
+					for _, m := range c.Mounts {
+						if m == name {
+							http.Error(w, fmt.Sprintf(`{"message":"remove %s: volume is in use - [%s]"}`, name, c.ID),
+								http.StatusConflict)
+							return
+						}
+					}
+				}
+			}
 			f.removedVolumes = append(f.removedVolumes, name)
 			kept := f.volumes[:0]
 			for _, v := range f.volumes {
@@ -166,11 +185,13 @@ func (f *fakeSidecarDaemon) handler(t *testing.T) http.HandlerFunc {
 			f.nextID++
 			id := fmt.Sprintf("cid-%d", f.nextID)
 			f.createdNames = append(f.createdNames, name)
+			mounts := make([]string, 0, len(req.HostConfig.Mounts))
 			for _, m := range req.HostConfig.Mounts {
 				f.mountSources = append(f.mountSources, m.Source)
+				mounts = append(mounts, m.Source)
 			}
 			f.containers = append(f.containers, fakeSidecarContainer{
-				ID: id, Name: name, Image: req.Image, State: "created", Labels: req.Labels,
+				ID: id, Name: name, Image: req.Image, State: "created", Labels: req.Labels, Mounts: mounts,
 			})
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"Id": id})

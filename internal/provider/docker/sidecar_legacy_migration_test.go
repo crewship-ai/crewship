@@ -254,6 +254,53 @@ func TestLegacySidecarMigration_KeepsLegacyVolumeWhenTheCopyFails(t *testing.T) 
 	}
 }
 
+// The prune has to happen with nothing left holding the legacy volume.
+//
+// Found live, not by review: on OrbStack 29.4.0 the #1732 migration copied the
+// data correctly and then failed to prune the source, twice out of two runs —
+//
+//	WARN C1 migration copied volume data but failed to prune legacy volume
+//	     legacy_volume=cslive-svc-legacy-crew-vol-pg-data
+//	     error="remove cslive-svc-legacy-crew-vol-pg-data: volume is in use - [3319acab4691…]"
+//
+// The container named in that error is the migration's OWN copy helper. It
+// mounts the legacy volume at /from, and its removal is a `defer`, so it does
+// not run until migrateLegacyVolumeLabeled returns — i.e. after the prune. A
+// real daemon refuses to remove a volume any container still references, force
+// flag or not, so the prune could never succeed: every upgraded install leaks
+// its legacy volume, deterministically.
+//
+// It passed on the fake because the fake removed volumes unconditionally.
+// refcountVolumes makes it behave like the daemon that caught this.
+func TestLegacySidecarMigration_PrunesTheLegacyVolumeOnARefcountingDaemon(t *testing.T) {
+	t.Parallel()
+
+	d := &fakeSidecarDaemon{refcountVolumes: true}
+	d.volumes = []fakeSidecarVolume{{Name: "crewship-svc-data-crew-vol-pgdata"}}
+	p := newCovProvider(t, Config{}, d.handler(t))
+
+	if _, err := p.EnsureCrewServices(context.Background(), provider.CrewConfig{
+		ID: tenantACrewID, Slug: sidecarCollidingSlug,
+		Services: []provider.CrewService{legacyPostgresSvc()},
+	}); err != nil {
+		t.Fatalf("EnsureCrewServices: %v", err)
+	}
+
+	_, vols, _, _ := d.snapshot()
+	if containsString(vols, "crewship-svc-data-crew-vol-pgdata") {
+		t.Error("the legacy volume survived the migration: the copy helper still mounted it when the prune " +
+			"ran, so the daemon refused. The data was copied, but every upgraded install is left with an " +
+			"unreferenced legacy volume — and a second crew sharing the slug will migrate that stale copy again")
+	}
+
+	// And the target must still be the authoritative, correctly-labelled one:
+	// a fix that pruned by skipping the copy would be worse than the leak.
+	want := "crewship-svc-data-crew-" + tenantACrewID + "-vol-pgdata"
+	if !containsString(vols, want) {
+		t.Errorf("volumes = %v, want the migrated %q", vols, want)
+	}
+}
+
 // No legacy resources on the daemon: the migration must not remove anything, and
 // must not stop a normal start.
 func TestLegacySidecarMigration_NoOpOnAFreshDaemon(t *testing.T) {
