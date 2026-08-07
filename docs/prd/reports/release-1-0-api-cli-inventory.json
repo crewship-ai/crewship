@@ -25055,7 +25055,8 @@
       "short": "Manage automations: run a routine when a journal event happens",
       "root": "automation",
       "exact_docs": [
-        "docs/cli/automation.mdx"
+        "docs/cli/automation.mdx",
+        "docs/cli/overview.mdx"
       ],
       "root_docs": [
         "docs/cli/automation.mdx"
@@ -25160,7 +25161,8 @@
       "short": "List automations in this workspace",
       "root": "automation",
       "exact_docs": [
-        "docs/cli/automation.mdx"
+        "docs/cli/automation.mdx",
+        "docs/cli/overview.mdx"
       ],
       "root_docs": [
         "docs/cli/automation.mdx"
@@ -25579,7 +25581,8 @@
       ],
       "root": "chain",
       "exact_docs": [
-        "docs/cli/chain.mdx"
+        "docs/cli/chain.mdx",
+        "docs/cli/overview.mdx"
       ],
       "root_docs": [
         "docs/cli/chain.mdx"
@@ -27349,6 +27352,7 @@
         "docs/cli/credential.mdx",
         "docs/cli/crew.mdx",
         "docs/cli/mcp.mdx",
+        "docs/cli/overview.mdx",
         "docs/cli/recipe.mdx",
         "docs/cli/routine.mdx",
         "docs/cli/seed.mdx",
@@ -27594,7 +27598,8 @@
       "short": "Show a crew's runtime container status (running / stopped / …)",
       "root": "crew",
       "exact_docs": [
-        "docs/cli/crew.mdx"
+        "docs/cli/crew.mdx",
+        "docs/cli/overview.mdx"
       ],
       "root_docs": [
         "docs/cli/crew.mdx"
@@ -38981,6 +38986,7 @@
       "short": "List runs for a routine using the pipeline_runs projection (v83)",
       "root": "routine",
       "exact_docs": [
+        "docs/cli/overview.mdx",
         "docs/cli/routine.mdx"
       ],
       "root_docs": [
@@ -44934,7 +44940,7 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3966,
+    "command_references": 3969,
     "api_path_references": 2009,
     "environment_references": 395,
     "manifest_kind_references": 209,

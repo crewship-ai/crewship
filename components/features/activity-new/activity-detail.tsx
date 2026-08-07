@@ -43,6 +43,7 @@ import { relTime } from "@/lib/time"
 
 import { FeedRow } from "./feed-row"
 import { iconFor } from "./activity-overview"
+import { TopologyCard } from "./topology-card"
 
 // React Flow (~200 KB+) loads only when a graph actually renders. /activity
 // made this call deliberately (activity-trace-page.tsx:32) to keep
@@ -307,8 +308,19 @@ export function ActivityDetail({
         </DashboardCard>
       </Appear>
 
-      {/* ── Everything that happened under the same trace ─────────── */}
+      {/* ── How this came about, across features ─────────────────── */}
       <Appear order={3}>
+        <TopologyCard
+          workspaceId={workspaceId}
+          anchor={entry.mission_id || traceID || entry.id}
+          anchorLabel={
+            entry.mission_id ? (labels.issues?.[entry.mission_id] ?? "this issue") : "this run"
+          }
+        />
+      </Appear>
+
+      {/* ── Everything that happened under the same trace ─────────── */}
+      <Appear order={4}>
         <DashboardCard
           title="Chain"
           icon={Layers}
@@ -351,7 +363,7 @@ export function ActivityDetail({
       {/* ── The raw record, last, for when the rendering is not enough ─ */}
       {(entry.payload && Object.keys(entry.payload).length > 0) ||
       (entry.refs && Object.keys(entry.refs).length > 0) ? (
-        <Appear order={4}>
+        <Appear order={5}>
           <DashboardCard title="Record" icon={Coins} hint={entry.id}>
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
@@ -391,7 +403,7 @@ export function ActivityDetail({
         </Appear>
       ) : null}
 
-      <Appear order={5}>
+      <Appear order={6}>
         <div className="flex justify-center">
           <Button size="sm" variant="outline" onClick={onBack}>
             Back to activity
