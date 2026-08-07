@@ -952,8 +952,26 @@ type RunInput struct {
 	// effects on replay; ReplayOf records the source run id.
 	IsReplay bool
 	ReplayOf string
-	pipeline *Pipeline
-	dsl      *DSL
+	// ChainDepth is how many COMPOSED hops separate this run from whatever a
+	// human did: 0 for a run a person started, parent+1 for a routine another
+	// routine called, and event-depth+1 for a run an automation fired off an
+	// event a run emitted. Callers OUTSIDE the executor set it (the automation
+	// dispatcher reads it off the triggering entry's originating run); inside,
+	// buildNestedRunInput propagates it. Bounded by MaxChainDepth — see
+	// GuardChainDepth, which is the one place that answers "how deep are we".
+	//
+	// Exported (unlike callPath) precisely because the chain leaves this
+	// process: an automation-fired run is a NEW top-level Run call, so a
+	// package-private field would silently reset the budget to zero at exactly
+	// the hop that needs it carried.
+	ChainDepth int
+	// ChainOrigin is the id of the run or journal entry that started the
+	// chain. Empty means "this run is the root" and persistRunStart stamps the
+	// run's own id, so every persisted row can answer "what set this off"
+	// without walking parentage.
+	ChainOrigin string
+	pipeline    *Pipeline
+	dsl         *DSL
 
 	// remainingBudget bounds how many additional USD this run (and its
 	// call_pipeline subtree) may spend, as dictated by an ANCESTOR run's
@@ -1702,7 +1720,7 @@ func (e *Executor) dispatchStep(
 	case StepAgentRun:
 		return e.runAgentStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit)
 	case StepCallPipeline:
-		return e.runCallPipelineStep(ctx, step, in, parentRender, depth, runID, priorCostUSD)
+		return e.runCallPipelineStep(ctx, step, in, parentRender, depth, runID, priorCostUSD, emit)
 	case StepHTTP:
 		return e.runHTTPStep(ctx, step, parentRender, in)
 	case StepCode:
@@ -1937,6 +1955,40 @@ func (e *Executor) runAgentStep(
 		fmt.Errorf("%w: %s", errStepOutcomeExhausted, lastValidationReason)
 }
 
+// MaxChainDepth bounds how many COMPOSED hops a chain may take before the
+// next edge is refused. Composition (automation → routine → issue change →
+// automation) makes cycles trivially constructible, and without a shared
+// budget the first user to close one takes their instance down.
+//
+// 8 is deliberately small. It can be raised later; it cannot be lowered once
+// people have built on it, so the conservative number is the reversible one.
+// It is NOT the same ceiling as maxPipelineDepth: that bounds in-process
+// call_pipeline nesting within a single top-level run, resets when the run
+// ends, and is not persisted. This one is carried on the run row and survives
+// the chain leaving the process through the journal and coming back.
+const MaxChainDepth = 8
+
+// ErrChainDepthExceeded is returned by GuardChainDepth. Wrapped, never
+// re-created — callers match it with errors.Is, and the automation dispatcher
+// refuses an enqueue on the same sentinel.
+var ErrChainDepthExceeded = errors.New("composition chain depth exceeded")
+
+// GuardChainDepth is THE answer to "how deep are we" for every composed edge:
+// the call_pipeline step below, and the automation dispatcher deciding whether
+// to enqueue a run. next is the depth the edge WOULD create (parent + 1).
+//
+// One exported function rather than a check inlined at each site, and no
+// second counter anywhere: #1791 was two files each documenting that the other
+// enforced a gate, with the result that neither did. If a new composed edge
+// appears, it calls this — and if it does not, the omission is visible as the
+// absence of a call rather than as a number that quietly disagrees.
+func GuardChainDepth(next int) error {
+	if next > MaxChainDepth {
+		return fmt.Errorf("%w: depth %d exceeds the %d-hop cap", ErrChainDepthExceeded, next, MaxChainDepth)
+	}
+	return nil
+}
+
 // runCallPipelineStep handles a call_pipeline step by looking up the
 // nested pipeline, parsing its DSL, and invoking runDSL recursively
 // with depth+1. Cycle detection at save time prevents loops; the
@@ -1947,8 +1999,23 @@ func (e *Executor) runAgentStep(
 // inputs and step outputs (not against literal placeholders), and
 // (b) recursion depth accumulates across levels — without that the
 // safety ceiling never fires for legitimately deep call chains.
-func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent RunInput, parentRender RenderContext, depth int, parentRunID string, priorCostUSD float64) (string, float64, int64, error) {
+func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent RunInput, parentRender RenderContext, depth int, parentRunID string, priorCostUSD float64, emit *pipelineEmitContext) (string, float64, int64, error) {
 	stepStart := time.Now()
+
+	// Composition depth guard. It lives HERE, immediately above the cycle
+	// guard, because both answer the same question about the same edge —
+	// "should this call happen at all" — and splitting them across two files
+	// is how a repo ends up with two counters that disagree (#1791). The cycle
+	// guard catches a chain that closes on itself; this catches one that never
+	// closes but never stops either, including the shape that leaves the
+	// process (routine → issue change → automation → routine) and so is
+	// invisible to callPath.
+	chainDepth := parent.ChainDepth + 1
+	if err := GuardChainDepth(chainDepth); err != nil {
+		emit.emitDepthExceeded(ctx, chainDepth, chainOrigin(parent, parentRunID),
+			"call_pipeline "+step.PipelineSlug)
+		return "", 0, 0, fmt.Errorf("call_pipeline %q: %w", step.PipelineSlug, err)
+	}
 
 	// Runtime cycle guard (#1427, 2.3). Save-time CycleDetect catches loops
 	// built through already-persisted definitions, but a B→A / A→B pair saved
@@ -2002,7 +2069,7 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 	}
 
 	nestedIn := buildNestedRunInput(parent, target, dsl, nestedInputs, parentRunID,
-		childRemainingBudget(parent, priorCostUSD), callStack)
+		childRemainingBudget(parent, priorCostUSD), callStack, chainDepth)
 	// depth+1 so the runtime safety ceiling fires for legitimately
 	// deep chains (A→B→C→...). Save-time cycle detection catches
 	// loops; this ceiling catches accidental long chains.
@@ -2109,8 +2176,11 @@ func parentRunSlug(in RunInput) string {
 //     without another executor change;
 //   - remainingBudget carries the ancestor's leftover budget so effectiveCostCap
 //     bounds the child (2.4);
-//   - callPath threads the live call stack for the runtime cycle guard (2.3).
-func buildNestedRunInput(parent RunInput, target *Pipeline, dsl *DSL, nestedInputs map[string]any, parentRunID string, remaining float64, callPath []string) RunInput {
+//   - callPath threads the live call stack for the runtime cycle guard (2.3);
+//   - ChainDepth/ChainOrigin carry the composition budget the caller already
+//     checked with GuardChainDepth, so the child spends from the same budget
+//     rather than starting a fresh one.
+func buildNestedRunInput(parent RunInput, target *Pipeline, dsl *DSL, nestedInputs map[string]any, parentRunID string, remaining float64, callPath []string, chainDepth int) RunInput {
 	return RunInput{
 		WorkspaceID:     parent.WorkspaceID,
 		AuthorCrewID:    target.AuthorCrewID, // nested runs in nested pipeline's author context
@@ -2123,11 +2193,35 @@ func buildNestedRunInput(parent RunInput, target *Pipeline, dsl *DSL, nestedInpu
 		TriggeredByID:   parentRunID, // 3.8 — parentage for RunTree (once child rows persist)
 		Inputs:          nestedInputs,
 		Mode:            parent.Mode,
+		ChainDepth:      chainDepth,
+		ChainOrigin:     chainOrigin(parent, parentRunID),
 		remainingBudget: remaining,
 		callPath:        callPath,
 		pipeline:        target,
 		dsl:             dsl,
 	}
+}
+
+// chainOrigin resolves what started the chain this run belongs to: the
+// ancestor's recorded origin when there is one, else the parent run itself
+// (which, having no origin of its own, IS the root). One helper rather than
+// an inline fallback at each site so a composed edge added later cannot
+// accidentally re-root a chain halfway through — a re-rooted chain reads as
+// two short chains, which is exactly what a loop would like to look like.
+func chainOrigin(parent RunInput, parentRunID string) string {
+	if parent.ChainOrigin != "" {
+		return parent.ChainOrigin
+	}
+	return parentRunID
+}
+
+// chainOriginForRun is chainOrigin for the run's OWN row: an inherited origin
+// when the run is part of a chain, else the run's own id.
+func chainOriginForRun(in RunInput, runID string) string {
+	if in.ChainOrigin != "" {
+		return in.ChainOrigin
+	}
+	return runID
 }
 
 // stepPersistEnabled centralises the gate for per-step run-state
@@ -2238,6 +2332,11 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		MetadataJSON:    in.MetadataJSON,
 		IsReplay:        in.IsReplay,
 		ReplayOf:        in.ReplayOf,
+		ChainDepth:      in.ChainDepth,
+		// A run with no inherited origin IS the origin, so stamp its own id
+		// rather than NULL: "what set this off" then has an answer on every
+		// row, including the human-started ones a chain later grows out of.
+		ChainOrigin: chainOriginForRun(in, runID),
 	}
 	if in.pipeline != nil {
 		// Stamp the definition content hash AS OF run start so the

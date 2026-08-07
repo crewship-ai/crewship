@@ -612,6 +612,29 @@ The loop is **cost-aware and predictive**: after each failed attempt it estimate
 
 Composition primitive. Save-time cycle detection rejects loops; runtime depth limit caps at 10 levels.
 
+#### Chain depth — the composition budget
+
+Nesting depth is not the only way a routine can call itself. A routine can act
+on an issue, that change can fire an automation, and the automation can run the
+routine again — a loop that never appears on any one run's call stack, because
+each hop is a *new* top-level run.
+
+Every composed edge therefore also spends from a **chain depth** budget carried
+on the run itself (`chain_depth` on `pipeline_runs`, alongside `chain_origin` —
+the id of whatever started the chain):
+
+- A run a person started is depth **0**.
+- A routine called by `call_pipeline` is parent + 1.
+- A run fired by an automation reacting to an event is that event's run + 1.
+
+**The cap is 8.** The ninth hop is refused before it dispatches: the step fails,
+and an `automation.depth_exceeded` entry lands in the activity feed naming the
+edge that was cut, the depth, and the chain origin — so a loop shows up as a
+readable event rather than as a routine that "sometimes doesn't run".
+
+The number is deliberately small. It can be raised later; it cannot be lowered
+once people have built chains that depend on it.
+
 ### `http`
 
 ```json
