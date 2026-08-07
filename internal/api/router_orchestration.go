@@ -242,6 +242,26 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/checkpoints/{id}/fork", roleCreate, ch.Fork)
 	r.authedMut("DELETE", "/api/v1/checkpoints/{id}", roleCreate, ch.Delete)
 
+	// Automations: workspace rules that turn a journal event into a deferred
+	// routine run (internal/automation). Reads are any authenticated member —
+	// "what fires in this workspace" is not a secret and is the first thing
+	// someone debugging an unexpected run needs. Writes are ADMIN+
+	// (roleManage): creating one grants AUTONOMOUS routine execution across
+	// the workspace on events the author may never produce themselves, which
+	// is an administration capability rather than a create-a-resource one.
+	//
+	// Registered through a local `auh` rather than r.automations directly:
+	// cmd/gen-openapi resolves a handler's concrete type from the
+	// `name := NewXxx(...)` declaration beside the registration, and without
+	// one it falls back to merging the query parameters of EVERY method of
+	// that name in the package — 5.5k lines of spurious spec for four routes.
+	auh := NewAutomationHandler(r.db, r.logger)
+	r.automations = auh
+	r.mux.Handle("GET /api/v1/automations", authed(wsCtx(http.HandlerFunc(auh.List))))
+	r.authedMut("POST", "/api/v1/automations", roleManage, auh.Create)
+	r.authedMut("PATCH", "/api/v1/automations/{id}", roleManage, auh.Patch)
+	r.authedMut("DELETE", "/api/v1/automations/{id}", roleManage, auh.Delete)
+
 	// Notification channels: outbound e-mail / signed-webhook / shoutrrr
 	// (Slack, Discord, Telegram) delivery targets (#850, widened by
 	// #1412). A WORKSPACE-scoped channel write requires MANAGER+ — TIGHTENED

@@ -397,6 +397,20 @@ func (r *Registry) Flush(ctx context.Context) int {
 			"trigger_event_type": it.eventType,
 			"coalesced_events":   it.coalesced,
 		})
+		// TODO(chain-depth): an automation-fired run should inherit
+		// chain_depth = (depth of the run that produced the triggering entry)
+		// + 1, or 0 when a human caused it, and be REFUSED with
+		// journal.EntryAutomationDepthExceeded past the cap. The counter is
+		// deliberately not started here: composition makes cycles trivially
+		// constructible (automation → routine → comment → automation), and
+		// the only thing that keeps them bounded is that every composed edge
+		// joins ONE budget. That budget lives next to runCallPipelineStep's
+		// existing callPath guard in internal/pipeline/executor.go — a second
+		// counter in this package would be a second answer to "how deep are
+		// we", which is the failure mode the single guard exists to prevent.
+		// pending_runs carries no depth column today; when executor.go's
+		// chain_depth / chain_origin land, thread them through PendingRun
+		// rather than reintroducing the count here.
 		maxAt := it.debounceMaxAt
 		if _, _, err := r.enq.Enqueue(ctx, pipeline.PendingRun{
 			ID:            newPendingRunID(),

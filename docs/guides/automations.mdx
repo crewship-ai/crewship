@@ -1,0 +1,174 @@
+---
+title: "Automations"
+description: "Run a routine whenever a journal event happens, without writing any glue."
+icon: "zap"
+---
+
+# Automations
+
+An **automation** is one rule: *when this kind of thing happens in this
+workspace, run that routine.* It watches a single [journal](/guides/crew-journal)
+event type, evaluates a predicate against each entry, and parks a
+debounced run of a routine.
+
+```bash
+crewship automation create \
+  --name "triage on close" \
+  --event mission.status_change \
+  --payload-equals to=DONE \
+  --routine post-close-triage \
+  --input issue='{{ event.mission_id }}'
+```
+
+That is the whole feature. It exists because until now every trigger in
+Crewship was hard-coded: a schedule could start a routine, a webhook could
+start a routine, but "an issue moved to DONE" could not, and there was no
+place to say so.
+
+## What an automation can and cannot do
+
+An automation can **only enqueue**. It never executes a routine inline, never
+writes to an issue, and holds no veto over anything.
+
+That is a deliberate boundary, not a missing feature. Automations are matched
+on the journal **write path** — the moment an event durably commits — so
+anything they did synchronously would be latency added to every write in the
+product. Matching is in-memory; the only thing that reaches the database is a
+single row parked in the deferred-run queue, and even that happens on a
+background flush rather than inline.
+
+<Note>
+  Automations are not [hooks](/guides/hooks). A hook is an **intercept**:
+  crew-scoped, blocking, and able to refuse the thing it fired on. An
+  automation is workspace-scoped, non-blocking, and reacts after the fact.
+  They look similar on paper and guarantee opposite things, which is why
+  they are separate.
+</Note>
+
+## Anatomy of a rule
+
+| Field | Meaning |
+|---|---|
+| `event_type` | One journal entry type, e.g. `mission.status_change`. Exactly one — there is no wildcard. |
+| `matcher` | Narrows which entries of that type match. Empty matches all of them. |
+| `action` | `routine_slug` plus the `inputs` to run it with. |
+| `debounce_seconds` | How long the parked run stays open for further events to fold into. Default `10`. |
+| `max_per_hour` | Cap on runs this rule may cause per hour. Default `60`. |
+| `enabled` | A disabled rule never matches. It is not merely skipped later — it never enters the matcher at all. |
+
+### Choosing an event type
+
+There is no wildcard by design: a rule that fires on "anything" is a support
+ticket waiting to happen. Pick the one type you mean, and confirm it exists
+before you save:
+
+```bash
+crewship journal --type mission.status_change --limit 5
+```
+
+A typo is accepted by the API — the journal has 117 entry types and no
+closed registry to check against — so it produces a rule that is saved,
+listed, and never fires. Checking first costs one command.
+
+### The matcher
+
+Every predicate you set must be satisfied; the ones you leave out are "don't
+care". Setting none means every entry of that type matches.
+
+| Flag | Matches when |
+|---|---|
+| `--crew` | the entry came from one of these crews |
+| `--agent` | the entry came from one of these agents |
+| `--mission` | the entry is on one of these issues |
+| `--severity` | the entry's severity is one of `info`, `notice`, `warn`, `error` |
+| `--payload-equals` | the named journal payload field equals this value |
+
+`--payload-equals` parses its value as JSON when it can, so `count=3` matches
+the number `3` and `to=DONE` matches the string `"DONE"`.
+
+### Inputs and the `event` namespace
+
+Input values are rendered with the **same** template renderer routine steps
+use, against the entry that triggered the rule:
+
+| Reference | Resolves to |
+|---|---|
+| `{{ event.mission_id }}` | the issue the entry is on |
+| `{{ event.agent_id }}` | the agent that produced it |
+| `{{ event.crew_id }}` | the crew it belongs to |
+| `{{ event.run_id }}` | the run it came from, when there was one |
+| `{{ event.payload.<key> }}` | one field of the entry's payload |
+
+An unresolvable reference renders empty, exactly as it does inside a routine.
+
+## Burst control
+
+Two independent controls, and they do different jobs.
+
+**`debounce_seconds`** collapses a storm into one run. Two hundred status
+changes on the same issue inside the debounce window produce a single run
+carrying the most recent event's inputs, not two hundred runs. The parked run
+also has a ceiling, so a stream of events that never stops still fires
+eventually instead of being pushed out forever.
+
+**`max_per_hour`** caps how many runs the rule may cause per rolling hour. It
+is charged per **run**, not per matched event — a burst that coalesces into
+one run costs one unit. Over the cap, matches are dropped and exactly one
+`automation.throttled` entry is written to the journal for that hour:
+
+```bash
+crewship journal --type automation.throttled
+```
+
+One per hour, not one per drop. A rule that trips its cap ten thousand times
+must not write ten thousand rows saying so.
+
+## Watching a rule work
+
+```bash
+crewship automation list
+crewship journal --type automation.throttled     # is it being capped?
+crewship pipeline runs --limit 10                # did the routine actually run?
+```
+
+Every run an automation causes carries the rule's id and how many events
+folded into it in the run metadata, so a run can always explain why it exists.
+
+## Permissions
+
+Reading the list is available to any workspace member — "what fires here" is
+the first thing anyone debugging an unexpected run needs. Creating, editing
+and deleting are **ADMIN or OWNER**: a rule grants autonomous routine
+execution across the workspace, on events its author may never produce
+themselves.
+
+## Deleting
+
+Deletion is soft. The rule stops matching immediately and the row stays in the
+database, because a run it caused is partly explained by the rule that caused
+it — hard-deleting turns those runs into orphans.
+
+## API
+
+| Method | Route | Role |
+|---|---|---|
+| `GET` | `/api/v1/automations` | member |
+| `POST` | `/api/v1/automations` | ADMIN+ |
+| `PATCH` | `/api/v1/automations/{id}` | ADMIN+ |
+| `DELETE` | `/api/v1/automations/{id}` | ADMIN+ |
+
+`PATCH` is sparse: only the fields present in the body are written, so
+toggling `enabled` cannot clobber a matcher somebody edited a moment ago.
+
+Full flag reference: [`crewship automation`](/cli/automation).
+
+## Limits
+
+- One event type per rule. Compose several rules rather than asking for a
+  wildcard.
+- The action kind is `routine` in this release. The stored shape leaves room
+  for others; anything else is rejected at write time rather than silently
+  accepted and never run.
+- A rule whose routine does not exist in the workspace is refused at
+  create/update time, and one whose routine is deleted afterwards stops
+  firing until the routine comes back.

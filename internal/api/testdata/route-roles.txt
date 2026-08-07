@@ -17,6 +17,7 @@ DELETE /api/v1/agents/{agentId}/peers/{userId} roleSelf
 DELETE /api/v1/agents/{agentId}/persona roleCreate
 DELETE /api/v1/agents/{agentId}/skills/{skillId} roleCreate
 DELETE /api/v1/auth/cli-tokens/{tokenId} roleSelf
+DELETE /api/v1/automations/{id} roleManage
 DELETE /api/v1/cache/images/{tag} roleManage
 DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji} roleSelf
 DELETE /api/v1/chats/{chatId}/participants/{userId} roleSelf
@@ -78,6 +79,7 @@ PATCH /api/v1/admin/memory/config roleManage
 PATCH /api/v1/agents/{agentId} roleInline
 PATCH /api/v1/agents/{agentId}/integrations/{integrationId} roleCreate
 PATCH /api/v1/agents/{agentId}/learning roleManage
+PATCH /api/v1/automations/{id} roleManage
 PATCH /api/v1/credentials/{credentialId} roleCreate
 PATCH /api/v1/crews/{crewId} roleManage
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
@@ -143,6 +145,7 @@ POST /api/v1/approvals/{id}/decide roleManage
 POST /api/v1/auth/cli-token roleSelf
 POST /api/v1/auth/pair/start roleSelf
 POST /api/v1/auth/sessions/{id}/revoke roleSelf
+POST /api/v1/automations roleManage
 POST /api/v1/chats/{chatId}/messages/{messageId}/reactions roleSelf
 POST /api/v1/chats/{chatId}/participants roleSelf
 POST /api/v1/chats/{chatId}/steer roleSelf

@@ -157,6 +157,7 @@
               "guides/harbormaster",
               "guides/cartographer",
               "guides/hooks",
+              "guides/automations",
               "guides/quartermaster",
               "guides/watch-roster",
               {
@@ -389,6 +390,7 @@
               "cli/hire",
               "cli/persona",
               "cli/hooks",
+              "cli/automation",
               "cli/checkpoint",
               "cli/keeper"
             ]
@@ -493,6 +495,7 @@
               "api-reference/approvals",
               "api-reference/checkpoints",
               "api-reference/hooks",
+              "api-reference/automations",
               "api-reference/feedback",
               "api-reference/presence",
               "api-reference/memory",
