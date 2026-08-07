@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/automation"
 )
 
 // ---------------------------------------------------------------------------
@@ -51,13 +53,41 @@ func routineNode(id, name, slug, status string) Node {
 	}
 }
 
-func runNode(id, pipelineSlug, status string) Node {
+func runNode(id, pipelineSlug, status string, chainDepth int) Node {
 	return Node{
-		ID:     nodeID(KindRun, id),
-		Kind:   KindRun,
+		ID:         nodeID(KindRun, id),
+		Kind:       KindRun,
+		Ref:        id,
+		Key:        pipelineSlug,
+		Label:      pipelineSlug,
+		Status:     status,
+		ChainDepth: chainDepth,
+	}
+}
+
+// automationNode carries what an automation card draws: the rule's name as the
+// label, the event that arms it as the human key, and whether it is live as the
+// status.
+//
+// Status is the literal "enabled"/"disabled" rather than the raw INTEGER
+// column because Node.Status is a string every other kind fills with a row
+// status, and because the client derives its enabled flag by comparing against
+// "disabled" — a 0/1 here would silently read as enabled.
+func automationNode(id, name, eventType string, enabled bool) Node {
+	status := "disabled"
+	if enabled {
+		status = "enabled"
+	}
+	label := name
+	if label == "" {
+		label = id
+	}
+	return Node{
+		ID:     nodeID(KindAutomation, id),
+		Kind:   KindAutomation,
 		Ref:    id,
-		Key:    pipelineSlug,
-		Label:  pipelineSlug,
+		Key:    eventType,
+		Label:  label,
 		Status: status,
 	}
 }
@@ -133,13 +163,14 @@ func inboxNode(id, kind, title, state string) Node {
 // distinct prefixes, and the id lookups come after so a slug that happens to
 // look like an id still resolves the way a human meant it.
 //
-// There is no "automation" case because there is no automations table on this
-// branch — a routine (pipelines row, by id or slug) is the thing that plays
-// that role, and it is accepted here by both.
+// An automation is anchorable by id: "what is this rule wired to, and what has
+// it actually done" is the question its author asks, and the rule is the only
+// anchor that answers it.
 func (w *walker) resolveAnchor(ctx context.Context, anchor string) (Node, error) {
 	lookups := []func(context.Context, string) (Node, bool, error){
 		w.lookupIssueByIdentifier,
 		w.lookupRunByID,
+		w.lookupAutomationByID,
 		w.lookupIssueByID,
 		w.lookupRoutineByID,
 		w.lookupRoutineBySlug,
@@ -194,19 +225,20 @@ func (w *walker) lookupIssueByID(ctx context.Context, anchor string) (Node, bool
 
 func (w *walker) lookupRunByID(ctx context.Context, anchor string) (Node, bool, error) {
 	var id, slug, status string
+	var chainDepth int
 	err := w.db.QueryRowContext(ctx, `
-		SELECT id, COALESCE(pipeline_slug,''), COALESCE(status,'')
+		SELECT id, COALESCE(pipeline_slug,''), COALESCE(status,''), COALESCE(chain_depth, 0)
 		FROM pipeline_runs
 		WHERE workspace_id = ? AND id = ?`,
 		w.workspaceID, anchor,
-	).Scan(&id, &slug, &status)
+	).Scan(&id, &slug, &status, &chainDepth)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, false, nil
 	}
 	if err != nil {
 		return Node{}, false, err
 	}
-	return runNode(id, slug, status), true, nil
+	return runNode(id, slug, status, chainDepth), true, nil
 }
 
 func (w *walker) lookupRoutineByID(ctx context.Context, anchor string) (Node, bool, error) {
@@ -252,6 +284,33 @@ func (w *walker) lookupAssignmentByID(ctx context.Context, anchor string) (Node,
 		return Node{}, false, err
 	}
 	return assignmentNode(id, task, status), true, nil
+}
+
+// lookupAutomationByID resolves an automations.id inside this workspace.
+//
+// It goes through automation.Store rather than hand-rolling the SELECT, and
+// that is a correctness choice rather than a tidiness one: the store owns what
+// "visible" means for a rule (in this workspace AND deleted_at IS NULL) and
+// decodes action_config_json into the Action this walk needs. A second copy of
+// that predicate here is exactly how a soft-deleted rule ends up drawn in the
+// topology while every other surface reports it gone.
+//
+// It returns the decoded row alongside the node, so expandAutomation can reuse
+// the already-parsed routine_slug instead of re-querying for it.
+func (w *walker) lookupAutomation(ctx context.Context, id string) (automation.Automation, Node, bool, error) {
+	a, err := automation.NewStore(w.db).Get(ctx, w.workspaceID, id)
+	if errors.Is(err, automation.ErrNotFound) {
+		return automation.Automation{}, Node{}, false, nil
+	}
+	if err != nil {
+		return automation.Automation{}, Node{}, false, err
+	}
+	return a, automationNode(a.ID, a.Name, a.EventType, a.Enabled), true, nil
+}
+
+func (w *walker) lookupAutomationByID(ctx context.Context, anchor string) (Node, bool, error) {
+	_, n, ok, err := w.lookupAutomation(ctx, anchor)
+	return n, ok, err
 }
 
 func (w *walker) lookupInboxByID(ctx context.Context, anchor string) (Node, bool, error) {
@@ -316,7 +375,7 @@ func (w *walker) expandIssue(ctx context.Context, n Node) ([]neighbour, error) {
 	// 20260806203901 migration, which is exactly why r.workspace_id is in the
 	// join and not merely in the WHERE.
 	if err := w.collect(ctx, &out, `
-		SELECT r.id, COALESCE(r.pipeline_slug,''), COALESCE(r.status,'')
+		SELECT r.id, COALESCE(r.pipeline_slug,''), COALESCE(r.status,''), COALESCE(r.chain_depth, 0)
 		FROM missions m
 		JOIN pipeline_runs r
 		  ON r.triggered_by_id = m.identifier
@@ -325,14 +384,7 @@ func (w *walker) expandIssue(ctx context.Context, n Node) ([]neighbour, error) {
 		ORDER BY r.started_at DESC, r.id ASC
 		LIMIT ?`,
 		[]any{n.Ref, w.workspaceID, w.fanOutLimit()},
-		func(rows *sql.Rows) (neighbour, error) {
-			var id, slug, status string
-			if err := rows.Scan(&id, &slug, &status); err != nil {
-				return neighbour{}, err
-			}
-			to := runNode(id, slug, status)
-			return neighbour{node: to, edge: Edge{From: n.ID, To: to.ID, Kind: EdgeTriggers}}, nil
-		}); err != nil {
+		w.scanRunNeighbour(n.ID, EdgeTriggers)); err != nil {
 		return nil, err
 	}
 
@@ -403,20 +455,13 @@ func (w *walker) expandRoutine(ctx context.Context, n Node) ([]neighbour, error)
 	var out []neighbour
 
 	if err := w.collect(ctx, &out, `
-		SELECT id, COALESCE(pipeline_slug,''), COALESCE(status,'')
+		SELECT `+runColumns+`
 		FROM pipeline_runs
 		WHERE workspace_id = ? AND pipeline_id = ?
 		ORDER BY started_at DESC, id ASC
 		LIMIT ?`,
 		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
-		func(rows *sql.Rows) (neighbour, error) {
-			var id, slug, status string
-			if err := rows.Scan(&id, &slug, &status); err != nil {
-				return neighbour{}, err
-			}
-			to := runNode(id, slug, status)
-			return neighbour{node: to, edge: Edge{From: n.ID, To: to.ID, Kind: EdgeRuns}}, nil
-		}); err != nil {
+		w.scanRunNeighbour(n.ID, EdgeRuns)); err != nil {
 		return nil, err
 	}
 
@@ -487,24 +532,33 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 		} else if ok {
 			out = append(out, neighbour{node: pn, edge: Edge{From: pn.ID, To: n.ID, Kind: EdgeTriggers}})
 		}
+	case triggeredVia == "automation" && triggeredByID != "":
+		// The origin of a composed chain. triggered_by_id is the automations.id
+		// here, which makes this the one exact, non-inferred link from a run
+		// back to the RULE that started it — without it a topology can draw
+		// "routine -> run -> agent" and never say why any of it began.
+		//
+		// A rule that has since been soft-deleted does not resolve, so the run
+		// simply has no parent rather than gaining a phantom one. The run row
+		// keeps triggered_via='automation', so the fact that a rule started it
+		// is still on the record even when the rule itself is no longer
+		// readable.
+		if an, ok, err := w.lookupAutomationByID(ctx, triggeredByID); err != nil {
+			return nil, err
+		} else if ok {
+			out = append(out, neighbour{node: an, edge: Edge{From: an.ID, To: n.ID, Kind: EdgeTriggers}})
+		}
 	}
 
 	// Nested runs this run started.
 	if err := w.collect(ctx, &out, `
-		SELECT id, COALESCE(pipeline_slug,''), COALESCE(status,'')
+		SELECT `+runColumns+`
 		FROM pipeline_runs
 		WHERE workspace_id = ? AND triggered_via = 'call_pipeline' AND triggered_by_id = ?
 		ORDER BY started_at ASC, id ASC
 		LIMIT ?`,
 		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
-		func(rows *sql.Rows) (neighbour, error) {
-			var id, slug, status string
-			if err := rows.Scan(&id, &slug, &status); err != nil {
-				return neighbour{}, err
-			}
-			to := runNode(id, slug, status)
-			return neighbour{node: to, edge: Edge{From: n.ID, To: to.ID, Kind: EdgeTriggers}}, nil
-		}); err != nil {
+		w.scanRunNeighbour(n.ID, EdgeTriggers)); err != nil {
 		return nil, err
 	}
 
@@ -578,6 +632,30 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 	return out, nil
 }
 
+// runColumns is the run projection, in the order scanRunNeighbour reads it.
+// One constant so a column added to the run node cannot land on some discovery
+// paths and silently miss others — which is exactly how chain_depth would have
+// ended up set on an anchored run and zero on the same run reached from its
+// routine.
+//
+// Two queries cannot use it and spell the same list out: expandIssue needs the
+// `r.` table alias, and lookupRunByID scans a single row. Both must stay in
+// step with this list; scanRunNeighbour's Scan is what fails loudly if they
+// drift.
+const runColumns = `id, COALESCE(pipeline_slug,''), COALESCE(status,''), COALESCE(chain_depth, 0)`
+
+func (w *walker) scanRunNeighbour(fromID string, kind EdgeKind) func(*sql.Rows) (neighbour, error) {
+	return func(rows *sql.Rows) (neighbour, error) {
+		var id, slug, status string
+		var chainDepth int
+		if err := rows.Scan(&id, &slug, &status, &chainDepth); err != nil {
+			return neighbour{}, err
+		}
+		to := runNode(id, slug, status, chainDepth)
+		return neighbour{node: to, edge: Edge{From: fromID, To: to.ID, Kind: kind}}, nil
+	}
+}
+
 func (w *walker) scanInboxNeighbour(fromID string) func(*sql.Rows) (neighbour, error) {
 	return func(rows *sql.Rows) (neighbour, error) {
 		var id, kind, title, state string
@@ -587,6 +665,91 @@ func (w *walker) scanInboxNeighbour(fromID string) func(*sql.Rows) (neighbour, e
 		to := inboxNode(id, kind, title, state)
 		return neighbour{node: to, edge: Edge{From: fromID, To: to.ID, Kind: EdgeProduces}}, nil
 	}
+}
+
+// expandAutomation walks the two things a rule is connected to: the routine it
+// is aimed at (action_config_json -> routine_slug) and the runs it has actually
+// caused (pipeline_runs.triggered_via='automation').
+//
+// # Why a routine does NOT expand back to the rules that name it
+//
+// These two links look symmetrical and are not, and the difference is the
+// whole reason this walk is trustworthy.
+//
+// A run's triggered_by_id is a RECORD: that run exists because that rule fired.
+// A rule's routine_slug is a STANDING INTENT: it says where the rule is aimed,
+// not that it ever went off. One routine can be named by unboundedly many
+// rules, and none of them need ever have fired.
+//
+// So the direction is decided by which end the reader anchored on, because the
+// anchor IS the question:
+//
+//   - Anchored on the RULE, the rule is the subject. "It is aimed at `triage`
+//     and has caused nothing" is the correct, complete answer, and the absence
+//     of run nodes is itself the finding. Config is what was asked for.
+//
+//   - Anchored on a routine or a run, a rule is being offered as an
+//     EXPLANATION. Fanning out to every rule that names the routine would draw
+//     rules that did not fire with the identical `triggers` edge as the one
+//     that did — and the reader has no way to tell them apart. A graph titled
+//     "how this happened" that lists four candidate causes for a run started by
+//     hand is not an incomplete answer, it is a wrong one that looks
+//     authoritative. That is the failure mode this package's whole design rule
+//     exists to avoid.
+//
+// The rules that DID fire are not lost by this: they stay reachable from the
+// routine THROUGH THE RUNS THEY CAUSED (routine -> run -> automation), which is
+// precisely the evidence that they fired. No extra query buys that reachability
+// — it falls out of expandRun. A rule earns its place in the graph by having
+// acted, and the run is the proof.
+//
+// One honest caveat: expanding a rule reaches its routine, and expanding that
+// routine reaches every run of it, including runs this rule did not cause. The
+// edge kinds stay truthful (`triggers` vs `runs`) but a reader composing them
+// could over-read. That is a pre-existing property of the graph — an issue
+// bound to a routine already reaches that routine's cron runs the same way —
+// not something automations introduce, so it is documented rather than
+// special-cased here.
+func (w *walker) expandAutomation(ctx context.Context, n Node) ([]neighbour, error) {
+	a, _, ok, err := w.lookupAutomation(ctx, n.Ref)
+	if err != nil || !ok {
+		return nil, err
+	}
+
+	var out []neighbour
+
+	// The rule's target. Resolved by slug inside this workspace — the same
+	// join the registry uses to arm the rule, so the chain shows the routine
+	// that would actually fire rather than one that merely shares a name.
+	//
+	// A slug that does not resolve (routine renamed or deleted) yields no edge
+	// rather than an error: the rule is still readable, and the missing routine
+	// is visible as its absence, which is usually the thing the author is
+	// debugging.
+	if a.Action.RoutineSlug != "" {
+		if rn, found, err := w.lookupRoutine(ctx, `slug = ?`, a.Action.RoutineSlug); err != nil {
+			return nil, err
+		} else if found {
+			out = append(out, neighbour{node: rn, edge: Edge{From: n.ID, To: rn.ID, Kind: EdgeTriggers}})
+		}
+	}
+
+	// The runs this rule actually caused. Not filtered on enabled: switching a
+	// rule off stops it firing, it does not unmake the runs it already started,
+	// and erasing them would make disabling a rule retroactively rewrite
+	// history.
+	if err := w.collect(ctx, &out, `
+		SELECT `+runColumns+`
+		FROM pipeline_runs
+		WHERE workspace_id = ? AND triggered_via = 'automation' AND triggered_by_id = ?
+		ORDER BY started_at DESC, id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		w.scanRunNeighbour(n.ID, EdgeTriggers)); err != nil {
+		return nil, err
+	}
+
+	return out, nil
 }
 
 // expandAssignment walks assignments.assigned_to_id (the agent doing the

@@ -25063,6 +25063,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_routine_records_provenance_test.go"
       ]
     },
@@ -25575,12 +25576,13 @@
     {
       "path": "chain",
       "use": "chain \u003canchor\u003e",
-      "short": "Show what caused what around an issue, run, routine or assignment",
+      "short": "Show what caused what around an issue, run, routine, assignment or automation",
       "aliases": [
         "why"
       ],
       "root": "chain",
       "exact_docs": [
+        "docs/cli/automation.mdx",
         "docs/cli/chain.mdx",
         "docs/cli/overview.mdx"
       ],
@@ -42441,6 +42443,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_routine_validate_agents_test.go",
         "cmd/crewship/cmd_routine_validate_test.go"
       ]
@@ -44940,8 +44943,8 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3969,
-    "api_path_references": 2009,
+    "command_references": 3975,
+    "api_path_references": 2010,
     "environment_references": 395,
     "manifest_kind_references": 209,
     "flag_references": 1844,

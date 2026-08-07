@@ -1,5 +1,5 @@
 // Package chain reconstructs the causal graph around one anchor — an issue,
-// a run, a routine or an assignment — in a single walk.
+// a run, a routine, an assignment or an automation — in a single walk.
 //
 // Why it exists: "what caused what" is spread across two execution substrates
 // that share no table. `pipeline_runs` is the routine substrate; `assignments`
@@ -35,6 +35,7 @@ const (
 	KindAssignment NodeKind = "assignment" // assignments
 	KindAgent      NodeKind = "agent"      // agents
 	KindInbox      NodeKind = "inbox"      // inbox_items
+	KindAutomation NodeKind = "automation" // automations
 )
 
 // EdgeKind is the relationship an edge asserts. Every kind below is backed by
@@ -67,6 +68,19 @@ type Node struct {
 	Status string   `json:"status,omitempty"`
 	Depth  int      `json:"depth"`
 	Anchor bool     `json:"anchor,omitempty"`
+
+	// ChainDepth is pipeline_runs.chain_depth on a run node: how many COMPOSED
+	// hops separate this run from whatever a human did. Distinct from Depth,
+	// and deliberately named apart from it — Depth is a property of THIS QUERY
+	// (hops from the anchor, so the same run reports different values depending
+	// on where you started), while ChainDepth is a property of the RUN and is
+	// the same whoever asks. A reader seeing chain_depth 3 knows they are
+	// looking at a composed chain rather than a long walk.
+	//
+	// Zero on every other kind, and omitted on the wire, because no other table
+	// carries it — an absent field is a smaller lie than a 0 that reads as
+	// "started by a human".
+	ChainDepth int `json:"chain_depth,omitempty"`
 
 	// Partial marks a node whose outward expansion is known to be incomplete,
 	// with PartialReason naming why. Two causes, deliberately not separated:
@@ -338,6 +352,8 @@ func (w *walker) expand(ctx context.Context, n Node) ([]neighbour, error) {
 		return w.expandAssignment(ctx, n)
 	case KindInbox:
 		return w.expandInbox(ctx, n)
+	case KindAutomation:
+		return w.expandAutomation(ctx, n)
 	case KindAgent:
 		// Deliberate leaf — see issueNode/agentNode for the reason carried to
 		// the client.

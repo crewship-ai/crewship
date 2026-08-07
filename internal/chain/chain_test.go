@@ -103,6 +103,25 @@ func (r *rig) seedRun(t *testing.T, id, wsID, pipelineID, slug, via, byID string
 	return id
 }
 
+// seedAutomation writes an automations row targeting routineSlug. It inserts
+// the raw JSON rather than going through automation.Store so the fixture keeps
+// asserting the SCHEMA (action_config_json's shape is the contract the walk
+// reads) rather than the store that happens to write it today.
+func (r *rig) seedAutomation(t *testing.T, id, wsID, name, eventType, routineSlug string, enabled bool) string {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	en := 0
+	if enabled {
+		en = 1
+	}
+	r.exec(t, `
+		INSERT INTO automations (id, workspace_id, name, enabled, event_type, matcher_json,
+			action_kind, action_config_json, debounce_seconds, max_per_hour, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, '{}', 'routine', ?, 10, 60, ?, ?)`,
+		id, wsID, name, en, eventType, fmt.Sprintf(`{"routine_slug":%q}`, routineSlug), now, now)
+	return id
+}
+
 func (r *rig) seedAssignment(t *testing.T, id, wsID, task, parentID string) string {
 	t.Helper()
 	r.exec(t, `
@@ -171,6 +190,17 @@ func hasEdge(g *Graph, from, to string, kind EdgeKind) bool {
 		}
 	}
 	return false
+}
+
+func nodeByID(t *testing.T, g *Graph, id string) Node {
+	t.Helper()
+	for _, n := range g.Nodes {
+		if n.ID == id {
+			return n
+		}
+	}
+	t.Fatalf("node %s not in graph; nodes = %v", id, nodeIDs(g))
+	return Node{}
 }
 
 func nodeIDs(g *Graph) []string {
@@ -658,6 +688,271 @@ func TestWalk_EscalationInboxAnchorIsAPartialLeaf(t *testing.T) {
 	}
 	if !strings.Contains(g.Nodes[0].PartialReason, "escalations") {
 		t.Errorf("partial_reason = %q, want it to name the table that lacks the column", g.Nodes[0].PartialReason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Automations — the rule that started a chain.
+// ---------------------------------------------------------------------------
+
+// A rule must be an anchor in its own right: "what does this automation do,
+// and what has it actually done" is the question an author asks about a rule
+// they just wrote.
+func TestWalk_AutomationAnchorWalksToItsRoutineAndTheRunsItCaused(t *testing.T) {
+	r := newRig(t, "ws-aut-anchor")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage on failure", "run.failed", "triage", true)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1")
+
+	g := walk(t, r, "aut_1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if g.AnchorNode != "automation:aut_1" {
+		t.Fatalf("anchor_node = %q, want automation:aut_1", g.AnchorNode)
+	}
+	if !hasEdge(g, "automation:aut_1", "routine:p1", EdgeTriggers) {
+		t.Errorf("missing automation -> routine edge (action_config_json.routine_slug); edges: %#v", g.Edges)
+	}
+	if !hasEdge(g, "automation:aut_1", "run:run-1", EdgeTriggers) {
+		t.Errorf("missing automation -> run edge (triggered_via='automation'); edges: %#v", g.Edges)
+	}
+}
+
+// The precise, indexed link back: a run stamped triggered_via='automation'
+// names the automations.id that caused it. Without this the topology can draw
+// "routine -> run -> agent" and never the rule that started it, which is the
+// origin the reader actually wants.
+func TestWalk_RunWalksBackToTheRuleThatFiredIt(t *testing.T) {
+	r := newRig(t, "ws-aut-back")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage on failure", "run.failed", "triage", true)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if !hasNode(g, "automation:aut_1") {
+		t.Fatalf("the rule that fired this run is not in the graph; nodes = %v", nodeIDs(g))
+	}
+	if !hasEdge(g, "automation:aut_1", "run:run-1", EdgeTriggers) {
+		t.Errorf("missing automation -> run edge; edges: %#v", g.Edges)
+	}
+}
+
+// The card the frontend draws needs a name, the event that arms the rule, and
+// whether it is live. `enabled` is derived from status !== "disabled" on the
+// client, so the two spellings are a contract, not cosmetics.
+func TestWalk_AutomationNodeCarriesNameEventTypeAndEnabledState(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		enabled    bool
+		wantStatus string
+	}{
+		{"enabled rule", true, "enabled"},
+		{"disabled rule", false, "disabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := "ws-aut-card-" + tc.wantStatus
+			r := newRig(t, ws)
+			r.seedRoutine(t, "p1", r.ws, "triage")
+			r.seedAutomation(t, "aut_1", r.ws, "Triage on failure", "run.failed", "triage", tc.enabled)
+
+			g := walk(t, r, "aut_1", Options{})
+			n := nodeByID(t, g, "automation:aut_1")
+
+			if n.Kind != KindAutomation {
+				t.Errorf("kind = %q, want %q", n.Kind, KindAutomation)
+			}
+			if n.Label != "Triage on failure" {
+				t.Errorf("label = %q, want the rule name", n.Label)
+			}
+			if n.Key != "run.failed" {
+				t.Errorf("key = %q, want the event_type", n.Key)
+			}
+			if n.Status != tc.wantStatus {
+				t.Errorf("status = %q, want %q", n.Status, tc.wantStatus)
+			}
+		})
+	}
+}
+
+// A disabled rule that already fired still explains the runs it caused. Only
+// enabled rules FIRE; every rule that has fired must remain readable, or the
+// act of switching a rule off would retroactively erase the origin of the runs
+// it started.
+func TestWalk_DisabledRuleStillExplainsTheRunsItAlreadyCaused(t *testing.T) {
+	r := newRig(t, "ws-aut-disabled")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Retired rule", "run.failed", "triage", false)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if !hasEdge(g, "automation:aut_1", "run:run-1", EdgeTriggers) {
+		t.Errorf("disabling a rule erased the origin of a run it had already caused; edges: %#v", g.Edges)
+	}
+}
+
+// THE JUDGEMENT CALL, half one.
+//
+// A rule that has never fired still points at a routine. It must NOT show up
+// when walking that routine. A graph titled "how this happened" that offers a
+// rule which did not fire is not an omission, it is a false cause — and the
+// reader has no way to tell it from the real one, because the real one is
+// drawn with the identical edge.
+func TestWalk_RoutineDoesNotSurfaceRulesThatNeverFired(t *testing.T) {
+	r := newRig(t, "ws-aut-never")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	// Three rules aimed at this routine. None of them has ever fired.
+	r.seedAutomation(t, "aut_1", r.ws, "Rule one", "run.failed", "triage", true)
+	r.seedAutomation(t, "aut_2", r.ws, "Rule two", "issue.created", "triage", true)
+	r.seedAutomation(t, "aut_3", r.ws, "Rule three", "run.completed", "triage", false)
+	// The run that DID happen was started by hand.
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "manual", "")
+
+	g := walk(t, r, "p1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	for _, id := range []string{"automation:aut_1", "automation:aut_2", "automation:aut_3"} {
+		if hasNode(g, id) {
+			t.Errorf("%s never fired but was offered as a cause; nodes = %v", id, nodeIDs(g))
+		}
+	}
+	// And walking the manual run must not acquire a rule either.
+	g2 := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+	for _, n := range g2.Nodes {
+		if n.Kind == KindAutomation {
+			t.Errorf("a hand-started run was attributed to rule %s", n.ID)
+		}
+	}
+}
+
+// THE JUDGEMENT CALL, half two.
+//
+// The rules that DID fire stay reachable from the routine — through the runs
+// they caused, which is the evidence that they fired. No separate query buys
+// this; it falls out of run -> automation. The asymmetry is the point: a rule
+// earns a place in the graph by having acted.
+func TestWalk_RoutineReachesTheRuleThatDidFireThroughItsRun(t *testing.T) {
+	r := newRig(t, "ws-aut-did")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_fired", r.ws, "Fired once", "run.failed", "triage", true)
+	r.seedAutomation(t, "aut_idle", r.ws, "Never fired", "run.failed", "triage", true)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_fired")
+
+	g := walk(t, r, "p1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if !hasNode(g, "automation:aut_fired") {
+		t.Errorf("the rule that actually fired is unreachable from its routine; nodes = %v", nodeIDs(g))
+	}
+	if hasNode(g, "automation:aut_idle") {
+		t.Errorf("a rule that never fired was surfaced alongside one that did; nodes = %v", nodeIDs(g))
+	}
+}
+
+// triggered_by_id is polymorphic. An id that happens to equal an automations.id
+// must not be dereferenced as a rule when triggered_via names another table.
+func TestWalk_AutomationTriggeredByIsNotFollowedBlind(t *testing.T) {
+	r := newRig(t, "ws-aut-poly")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage", "run.failed", "triage", true)
+	// A SCHEDULE-triggered run whose triggered_by_id collides with the rule id.
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "schedule", "aut_1")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasEdge(g, "automation:aut_1", "run:run-1", EdgeTriggers) {
+		t.Error("followed triggered_by_id as an automation although triggered_via is 'schedule'")
+	}
+}
+
+// Automations are workspace-scoped and the walk hops to them on an untyped
+// string column, so a colliding id in another tenant is the realistic leak.
+func TestWalk_AutomationFromAnotherWorkspaceNeverAppears(t *testing.T) {
+	r := newRig(t, "ws-aut-fence")
+	r.seedWorkspace(t, "ws-other", "ws-other-slug")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedRoutine(t, "p-other", "ws-other", "triage")
+	// The rule lives in the OTHER workspace; our run names its id.
+	r.seedAutomation(t, "aut_foreign", "ws-other", "Theirs", "run.failed", "triage", true)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_foreign")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasNode(g, "automation:aut_foreign") {
+		t.Errorf("a rule from another workspace was attached to this run; nodes = %v", nodeIDs(g))
+	}
+	for _, n := range g.Nodes {
+		if n.Ref == "p-other" {
+			t.Errorf("the other workspace's routine leaked in via its rule; nodes = %v", nodeIDs(g))
+		}
+	}
+
+	// And it must not be anchorable from here either.
+	if _, err := Walk(context.Background(), r.db, r.ws, "aut_foreign", Options{}); !errors.Is(err, ErrAnchorNotFound) {
+		t.Fatalf("err = %v, want ErrAnchorNotFound for a foreign automation anchor", err)
+	}
+}
+
+// A soft-deleted rule is not-found everywhere else in the product (the store
+// filters it), so the chain must not resurrect it into a node the reader
+// cannot click through to.
+func TestWalk_SoftDeletedAutomationDoesNotAppear(t *testing.T) {
+	r := newRig(t, "ws-aut-deleted")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Deleted rule", "run.failed", "triage", true)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1")
+	r.exec(t, `UPDATE automations SET deleted_at = ? WHERE id = 'aut_1'`,
+		time.Now().UTC().Format(time.RFC3339Nano))
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasNode(g, "automation:aut_1") {
+		t.Errorf("a soft-deleted rule appeared in the chain; nodes = %v", nodeIDs(g))
+	}
+	// The run itself is still walkable — losing the rule must not lose the run.
+	if !hasNode(g, "run:run-1") {
+		t.Errorf("the run vanished along with its deleted rule; nodes = %v", nodeIDs(g))
+	}
+
+	if _, err := Walk(context.Background(), r.db, r.ws, "aut_1", Options{}); !errors.Is(err, ErrAnchorNotFound) {
+		t.Fatalf("err = %v, want ErrAnchorNotFound for a soft-deleted automation anchor", err)
+	}
+}
+
+// A rule whose routine_slug does not resolve (renamed or deleted routine) is
+// still a valid anchor — it just has no routine to show. Returning an error
+// would make the rule unreadable exactly when the author needs to see why it
+// stopped working.
+func TestWalk_AutomationWithUnresolvableRoutineIsStillAnchorable(t *testing.T) {
+	r := newRig(t, "ws-aut-dangling")
+	r.seedAutomation(t, "aut_1", r.ws, "Points at nothing", "run.failed", "gone", true)
+
+	g := walk(t, r, "aut_1", Options{})
+
+	if g.AnchorNode != "automation:aut_1" {
+		t.Fatalf("anchor_node = %q, want automation:aut_1", g.AnchorNode)
+	}
+	if len(g.Nodes) != 1 {
+		t.Errorf("nodes = %v, want just the rule", nodeIDs(g))
+	}
+}
+
+// chain_depth tells a reader they are looking at a COMPOSED chain — a run that
+// a rule started off another run — which the hop distance from the anchor
+// cannot say, because that is a property of the query, not of the run.
+func TestWalk_RunNodeCarriesChainDepth(t *testing.T) {
+	r := newRig(t, "ws-aut-depth")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage", "run.failed", "triage", true)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1")
+	r.exec(t, `UPDATE pipeline_runs SET chain_depth = 3 WHERE id = 'run-1'`)
+
+	// Reachable both as the anchor and as a discovered neighbour: a field set
+	// on only one path is the bug this covers.
+	for _, anchor := range []string{"run-1", "aut_1", "p1"} {
+		g := walk(t, r, anchor, Options{MaxDepth: 4, MaxNodes: 100})
+		n := nodeByID(t, g, "run:run-1")
+		if n.ChainDepth != 3 {
+			t.Errorf("anchor %q: chain_depth = %d, want 3", anchor, n.ChainDepth)
+		}
 	}
 }
 

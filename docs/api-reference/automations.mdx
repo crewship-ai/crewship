@@ -163,6 +163,16 @@ Soft-delete. The rule stops matching immediately; the row stays in the
 database so a run it caused can still explain where it came from. Deleting an
 id that is already deleted answers `404`.
 
+<Note>
+  A deleted rule is filtered out of every read, including the
+  [chain walk](/api-reference/chains#automations-the-origin-of-a-composed-chain) —
+  a chain will not draw a node you cannot fetch. The runs it caused keep
+  `triggered_via='automation'`, so the record that *a* rule started them
+  survives even though the rule itself is no longer readable. Prefer
+  `disable` over `delete` when you want to stop a rule but keep the origin of
+  its past runs visible in the topology.
+</Note>
+
 **Request:** no body. The automation is named by the `id` path parameter.
 
 **Response:** `200 OK`
@@ -184,5 +194,6 @@ id that is already deleted answers `404`.
 | `POST /api/v1/automations` | `crewship automation create` |
 | `PATCH /api/v1/automations/{id}` | `crewship automation update` / `enable` / `disable` |
 | `DELETE /api/v1/automations/{id}` | `crewship automation delete` |
+| `GET /api/v1/chains/{id}` | `crewship chain <automation-id>` — what the rule is wired to and what it has caused |
 
 Full flag reference: [`crewship automation`](/cli/automation).

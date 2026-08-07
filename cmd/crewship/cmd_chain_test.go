@@ -66,6 +66,59 @@ func TestRenderChainTree_EveryEdgeGetsExactlyOneLine(t *testing.T) {
 	}
 }
 
+// An automation is the origin of a composed chain, so the line that stands
+// for it has to carry what a reader needs to recognise the rule: the event
+// that armed it, its name, and whether it is still live. The rule's id is the
+// handle, because event_type is shared by every rule watching that event.
+func TestRenderChainTree_AutomationLineNamesTheEventAndTheRule(t *testing.T) {
+	g := chainGraph{
+		Anchor:     "aut_1",
+		AnchorNode: "automation:aut_1",
+		MaxDepth:   4,
+		MaxNodes:   200,
+		Nodes: []chainNode{
+			{ID: "automation:aut_1", Kind: "automation", Ref: "aut_1", Key: "run.failed",
+				Label: "Triage on failure", Status: "enabled", Anchor: true},
+			{ID: "routine:p1", Kind: "routine", Ref: "p1", Key: "triage", Label: "Triage", Status: "active", Depth: 1},
+			{ID: "run:run-1", Kind: "run", Ref: "run-1", Key: "triage", Label: "triage", Status: "completed", Depth: 1, ChainDepth: 2},
+		},
+		Edges: []chainEdge{
+			{From: "automation:aut_1", To: "routine:p1", Kind: "triggers"},
+			{From: "automation:aut_1", To: "run:run-1", Kind: "triggers"},
+		},
+	}
+
+	out := strings.Join(renderChainTree(g, false), "\n")
+
+	if !strings.Contains(out, "automation/run.failed") {
+		t.Errorf("the automation line does not name the event that arms it:\n%s", out)
+	}
+	if !strings.Contains(out, "Triage on failure") {
+		t.Errorf("the automation line does not name the rule:\n%s", out)
+	}
+	if !strings.Contains(out, "aut_1") {
+		t.Errorf("the automation line does not carry the rule id as its handle:\n%s", out)
+	}
+	if !strings.Contains(out, "enabled") {
+		t.Errorf("the automation line does not say whether the rule is live:\n%s", out)
+	}
+	// A composed run must announce itself: "depth 2" is the reader's cue that
+	// they are looking at a chain a rule built, not a run someone started.
+	if !strings.Contains(out, "composed depth 2") {
+		t.Errorf("a run with chain_depth 2 did not render as composed:\n%s", out)
+	}
+}
+
+// Every ordinary run carries chain_depth 0, and printing "composed depth 0" on
+// all of them would bury the few that are genuinely composed.
+func TestRenderChainTree_UncomposedRunSaysNothingAboutDepth(t *testing.T) {
+	out := strings.Join(renderChainTree(chainFixture(), false), "\n")
+
+	if strings.Contains(out, "composed depth") {
+		t.Errorf("a hand-started chain advertised a composition depth:\n%s", out)
+	}
+}
+
 // The anchor is usually in the MIDDLE of its chain. Anchored on a run, the
 // routine and issue above it must still be rendered — a children-only walk
 // would strand both and quietly show half the chain.

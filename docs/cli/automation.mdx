@@ -131,8 +131,26 @@ A disabled automation never matches. Both are the same sparse write as
 crewship automation delete aut_9f2c1a04bd77e310
 ```
 
-Soft-delete: the rule stops matching immediately, and the row stays readable
-so a run it caused can still explain where it came from.
+Soft-delete: the rule stops matching immediately, and the row is retained
+rather than dropped, so the runs it caused are never orphaned.
+
+The rule is filtered out of every read once deleted, including
+[`crewship chain`](/cli/chain#automations-where-a-chain-began). Its runs keep
+`triggered_via='automation'`, so the record that *a* rule started them
+survives, but the rule itself no longer appears as a node. Use
+`crewship automation disable <id>` instead when you want to stop a rule and
+keep the origin of its past runs visible in the topology.
+
+---
+
+## Trace what a rule has done
+
+```bash
+crewship chain aut_9f2c1a04bd77e310
+```
+
+Shows the routine the rule is wired to and every run it has caused. See
+[`crewship chain`](/cli/chain#automations-where-a-chain-began).
 
 ---
 

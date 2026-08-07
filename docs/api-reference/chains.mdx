@@ -1,13 +1,14 @@
 ---
 title: "Chains"
-description: "Reconstruct the causal graph around one issue, run, routine or assignment in a single call."
+description: "Reconstruct the causal graph around one issue, run, routine, assignment or automation in a single call."
 icon: "share-nodes"
 ---
 
 A chain answers "what caused what". Given one anchor, it returns the connected
-graph around it — the issue, the routine it is bound to, the runs that fired,
-the nested runs those called, the assignments agents were given, who executed
-them, and the inbox items the whole thing produced.
+graph around it — the automation rule that started it, the issue, the routine
+it is bound to, the runs that fired, the nested runs those called, the
+assignments agents were given, who executed them, and the inbox items the whole
+thing produced.
 
 It exists because that answer is spread across two execution substrates that
 share no table. `pipeline_runs` is the routine substrate, `assignments` is the
@@ -112,12 +113,13 @@ reports the consequence.
 | `max_depth` | integer | The depth cap actually applied, after clamping. |
 | `max_nodes` | integer | The node cap actually applied, after clamping. |
 | `nodes[].id` | string | Graph key, `"<kind>:<ref>"`. `edges[].from`/`to` reference this. |
-| `nodes[].kind` | string | `issue`, `routine`, `run`, `assignment`, `agent`, `inbox`. Open set — treat an unknown kind as opaque rather than an error. |
+| `nodes[].kind` | string | `issue`, `routine`, `run`, `assignment`, `agent`, `inbox`, `automation`. Open set — treat an unknown kind as opaque rather than an error. |
 | `nodes[].ref` | string | Primary key of the underlying row. |
-| `nodes[].key` | string | Human handle. Unique per workspace for `issue` (identifier), `routine` and `agent` (slug); for `run` it is the routine slug and for `inbox` the item kind, so it is **not** an identifier for those. |
+| `nodes[].key` | string | Human handle. Unique per workspace for `issue` (identifier), `routine` and `agent` (slug); for `run` it is the routine slug, for `inbox` the item kind and for `automation` the `event_type`, so it is **not** an identifier for those. |
 | `nodes[].label` | string | Title / task text. User- and agent-written; escape before rendering. |
 | `nodes[].status` | string | Row status, verbatim from its table. |
-| `nodes[].depth` | integer | Shortest distance from the anchor, in hops. |
+| `nodes[].depth` | integer | Shortest distance from the anchor, in hops. A property of **this query**: the same row reports a different value depending on where you started. |
+| `nodes[].chain_depth` | integer | `run` nodes only. `pipeline_runs.chain_depth` — how many **composed** hops separate this run from whatever a human did. A property of **the run**, identical whoever asks. Omitted when zero, so an absent field means "not composed" rather than "unknown". |
 | `nodes[].anchor` | boolean | True on exactly one node. |
 | `nodes[].partial` | boolean | The node's outward expansion is known to be incomplete. |
 | `nodes[].partial_reason` | string | Why. Present whenever `partial` is true. |
@@ -142,12 +144,64 @@ Every edge is backed by a real column. Nothing is inferred.
 | agent → run | `executes` | `journal_entries` where `actor_type='agent'` and (`trace_id` = run id OR `run_id` = run id) |
 | run → inbox | `produces` | `inbox_items.kind='waitpoint'` joined through `pipeline_waitpoints.token` = `source_id` |
 | run → inbox | `produces` | `inbox_items.kind='failed_run'`, `payload_json` → `$.run_id` |
+| automation → run | `triggers` | `pipeline_runs.triggered_via='automation'` and `triggered_by_id` = `automations.id` |
+| automation → routine | `triggers` | `automations.action_config_json` → `$.routine_slug`, resolved against `pipelines.slug` in the same workspace |
 | issue ↔ issue | `relates` | `mission_relations` (author-declared, not causal) |
 
 `triggered_by_id` is polymorphic — a schedule id, a webhook id, a parent run
 id, or an issue identifier depending on `triggered_via` — so it is only ever
 dereferenced against the table `triggered_via` names. A schedule id that
 happens to equal a run id is not followed as a parent run.
+
+### Automations: the origin of a composed chain
+
+An `automation` is a stored rule that turns a journal event into a routine run.
+It is the thing that makes a chain *begin*, so without it a topology can draw
+`routine → run → agent` and never say why any of it happened.
+
+The link back is exact, not inferred: a run a rule started carries
+`triggered_via='automation'` with `triggered_by_id` set to the `automations.id`.
+An automation is also a valid anchor — `GET /api/v1/chains/aut_01hx...` returns
+the routine the rule is wired to and every run it has caused.
+
+An automation node carries the rule's `name` as `label`, its `event_type` as
+`key`, and `"enabled"` / `"disabled"` as `status`.
+
+#### A rule is only drawn where it actually fired
+
+Walking a **routine** does **not** return the rules that merely point at it.
+This is deliberate, and it is the one place where the two automation links are
+not symmetrical:
+
+- `pipeline_runs.triggered_by_id` is a **record** — that run exists because
+  that rule fired.
+- `automations.action_config_json.routine_slug` is a **standing intent** — it
+  says where a rule is aimed, not that it ever went off. One routine can be
+  named by unboundedly many rules, and none of them need ever have fired.
+
+So the direction depends on which end you anchored, because the anchor is the
+question. Anchored on the **rule**, the rule is the subject and its
+configuration is the answer — "aimed at `triage`, has caused nothing" is
+correct and complete, and the absence of run nodes is itself the finding.
+Anchored on a **routine or a run**, a rule is being offered as an
+*explanation*, and a rule that did not fire would be drawn with the identical
+`triggers` edge as the one that did. A graph titled "how this happened" listing
+four candidate causes for a run you started by hand is not an incomplete
+answer, it is a wrong one that looks authoritative.
+
+Nothing is lost by this. The rules that **did** fire stay reachable from a
+routine through the runs they caused (`routine → run → automation`), which is
+precisely the evidence that they fired.
+
+Two consequences worth knowing:
+
+- Disabling a rule does not erase the runs it already caused; those edges
+  remain, so switching a rule off never rewrites history.
+- **Soft-deleting** a rule does remove it from the walk, because a deleted rule
+  is not-found on every other surface and a chain that resurrected it would
+  show a node you cannot click through to. The run keeps
+  `triggered_via='automation'`, so the fact that *a* rule started it survives
+  in the run record even when the rule itself is no longer readable.
 
 ### Links that do not exist
 
@@ -185,7 +239,7 @@ a dangling reference from a rendering bug of its own.
 | 400 | `anchor` missing from the path. |
 | 401 | No authenticated session, or no workspace resolvable. |
 | 403 | Caller is not a member of the workspace. |
-| 404 | No issue, run, routine, assignment or inbox item matches the anchor **in this workspace**. Deliberately the same answer as an anchor that exists in another workspace — otherwise this endpoint becomes an oracle for identifiers in a tenant the caller cannot read. |
+| 404 | No issue, run, routine, assignment, inbox item or automation matches the anchor **in this workspace**. Deliberately the same answer as an anchor that exists in another workspace — otherwise this endpoint becomes an oracle for identifiers in a tenant the caller cannot read. |
 | 500 | Query failed. |
 
 ## CLI

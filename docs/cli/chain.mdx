@@ -1,6 +1,6 @@
 ---
 title: "crewship chain"
-description: "Follow what caused what across issues, routines, runs and delegated assignments from a single anchor."
+description: "Follow what caused what across automations, issues, routines, runs and delegated assignments from a single anchor."
 icon: "share-nodes"
 ---
 
@@ -12,14 +12,15 @@ Reconstruct the causal chain around one anchor and print it as a tree.
 crewship chain ENG-7
 crewship chain prn_01hy
 crewship chain nightly-deploy --depth 6 --limit 400
+crewship chain aut_01hx
 crewship chain ENG-7 --format json
 ```
 
 The anchor is whatever you have to hand — an issue identifier, an issue id, a
-run id, a routine id or slug, an assignment id, or an inbox item id. The
-server resolves it and walks outward across **both** execution substrates
-(routine runs and agent delegation), so you do not have to know which one your
-anchor lives in.
+run id, a routine id or slug, an assignment id, an inbox item id, or an
+automation id. The server resolves it and walks outward across **both**
+execution substrates (routine runs and agent delegation), so you do not have to
+know which one your anchor lives in.
 
 ```
 issue ENG-7  Deploy is flaky on cold start  (IN_PROGRESS) (partial)
@@ -53,6 +54,10 @@ tree and `--format json` describe the same thing.
   it points back up it is a cycle closing.
 - **`(partial)`** marks a node whose expansion stops here, with the reason
   listed under *Not walkable*.
+- **`[composed depth N]`** on a run is `chain_depth`: how many *composed* hops
+  separate it from whatever a human did. It is a property of the run, not of
+  your query — unlike the tree's indentation, it does not change with the
+  anchor you chose. Runs a person started carry 0 and print nothing.
 
 ## Edge kinds
 
@@ -66,6 +71,36 @@ tree and `--format json` describe the same thing.
 
 Every one is backed by a real column; the table of which column is in the
 [Chains API reference](/api-reference/chains#edge-kinds-and-the-columns-behind-them).
+
+## Automations — where a chain began
+
+A rule that turns an event into a routine run is what makes a chain *start*.
+Anchor on one to see what it is wired to and what it has actually done:
+
+```
+automation/run.failed aut_01hx  Triage on failure  (enabled)
+├─ [triggers ->] routine triage  Triage  (active)
+└─ [triggers ->] run prn_01j4  triage  (completed) [composed depth 1]
+
+3 nodes, 2 edges (depth<=4, limit 200)
+```
+
+Anchored on a run instead, the rule appears *above* it, so `crewship chain
+prn_01j4` answers "why did this happen" with the rule rather than stopping at
+the routine.
+
+<Note>
+  **A rule is only shown where it actually fired.** Walking a routine does not
+  list the rules that merely point at it — they would be drawn with the same
+  `triggers` edge as the one that really fired, and a chain offering four
+  candidate causes for a run you started by hand is worse than one offering
+  none. The rules that *did* fire stay reachable through the runs they caused.
+  The reasoning is in the [API reference](/api-reference/chains#a-rule-is-only-drawn-where-it-actually-fired).
+</Note>
+
+Disabling a rule keeps the runs it already caused attached to it. Deleting one
+removes it from the walk — the run still records that an automation started it,
+but the rule itself is no longer readable.
 
 ## What it cannot show you
 

@@ -5,6 +5,7 @@ package main
 //	crewship chain ENG-4          # what an issue set off
 //	crewship chain prn_abc123     # why a run happened, and what it started
 //	crewship chain nightly-deploy # every run of a routine
+//	crewship chain aut_abc123     # what a rule is wired to, and what it has done
 //
 // The API returns a graph. This renders it as a tree, because a terminal has
 // no second dimension to spend on a graph and a reader following causality
@@ -36,13 +37,17 @@ import (
 // the fields this command renders are declared; --format json prints the
 // decoded struct, so a field added server-side needs a field here too.
 type chainNode struct {
-	ID            string `json:"id"`
-	Kind          string `json:"kind"`
-	Ref           string `json:"ref"`
-	Key           string `json:"key"`
-	Label         string `json:"label"`
-	Status        string `json:"status"`
-	Depth         int    `json:"depth"`
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	Ref    string `json:"ref"`
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+	Status string `json:"status"`
+	Depth  int    `json:"depth"`
+	// ChainDepth is the run's own composition depth, not its distance from the
+	// anchor (that is Depth). Rendered only when non-zero, so an ordinary run
+	// reads exactly as it did before.
+	ChainDepth    int    `json:"chain_depth"`
 	Anchor        bool   `json:"anchor"`
 	Partial       bool   `json:"partial"`
 	PartialReason string `json:"partial_reason"`
@@ -75,14 +80,14 @@ type chainGraph struct {
 var chainCmd = &cobra.Command{
 	Use:     "chain <anchor>",
 	Aliases: []string{"why"},
-	Short:   "Show what caused what around an issue, run, routine or assignment",
+	Short:   "Show what caused what around an issue, run, routine, assignment or automation",
 	Long: `Reconstruct the causal chain around one anchor and print it as a tree.
 
 The anchor is whatever you have to hand — an issue identifier, an issue id, a
-run id, a routine id or slug, an assignment id, or an inbox item id. The
-server resolves it and walks outward across both execution substrates
-(routine runs and agent delegation), so you do not need to know which one your
-anchor lives in.
+run id, a routine id or slug, an assignment id, an inbox item id, or an
+automation id. The server resolves it and walks outward across both execution
+substrates (routine runs and agent delegation), so you do not need to know
+which one your anchor lives in.
 
 Edge kinds:
   triggers   the parent caused the child to start
@@ -90,6 +95,20 @@ Edge kinds:
   executes   the parent is the agent carrying the child out
   produces   the parent emitted the child (an inbox approval, a failure alert)
   relates    an author-declared issue<->issue link, not a causal one
+
+Automations are the origin of a composed chain. A run started by a rule is
+linked back to it exactly (pipeline_runs.triggered_via='automation'), so
+"chain <run-id>" names the rule that began it rather than stopping at the
+routine. Anchoring on a rule shows what it is wired to AND the runs it has
+caused.
+
+A rule is only ever drawn where it actually fired. Walking a routine does not
+list the rules that merely point at it: they would be drawn with the same
+edge as the one that really fired, and a chain that offers four candidate
+causes for a run you started by hand is worse than one that offers none. The
+rules that did fire stay reachable through the runs they caused.
+
+Runs that a rule started off another run are marked [composed depth N].
 
 Two links do not exist in the schema and are reported rather than guessed:
 inbox_items carries no issue pointer on any kind, and escalations has neither
@@ -103,6 +122,7 @@ names which one — a short tree is never silently presented as a whole chain.
 Examples:
   crewship chain ENG-4
   crewship chain ENG-4 --depth 6 --limit 400
+  crewship chain aut_01hx...
   crewship chain prn_01hx... --format json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -318,6 +338,12 @@ func chainNodeLine(n chainNode, edgeLabel string) string {
 	if n.Status != "" {
 		fmt.Fprintf(&b, "  %s(%s)%s", cli.Dim, sanitizeTerminal(n.Status), cli.Reset)
 	}
+	// A composed run says so. Printed only above zero: every hand-started run
+	// carries 0, and a "composed 0" on each of them would bury the handful that
+	// are actually composed.
+	if n.ChainDepth > 0 {
+		fmt.Fprintf(&b, " %s[composed depth %d]%s", cli.Dim, n.ChainDepth, cli.Reset)
+	}
 	if n.Partial {
 		fmt.Fprintf(&b, " %s(partial)%s", cli.Yellow, cli.Reset)
 	}
@@ -345,8 +371,14 @@ func chainShortRef(n chainNode) string {
 
 // chainKindLabel qualifies the kind with the sub-kind when there is one, so an
 // inbox item reads "inbox/waitpoint" rather than an undifferentiated "inbox".
+//
+// An automation is qualified by its event_type for the same reason: "what arms
+// this rule" is the first thing a reader wants from a node whose whole job is
+// to explain why a chain began, and it is the only kind whose key is otherwise
+// unprinted (event_type is not unique per workspace, so chainShortRef falls
+// back to the id).
 func chainKindLabel(n chainNode) string {
-	if n.Kind == "inbox" && n.Key != "" {
+	if (n.Kind == "inbox" || n.Kind == "automation") && n.Key != "" {
 		return sanitizeTerminal(n.Kind) + "/" + sanitizeTerminal(n.Key)
 	}
 	return sanitizeTerminal(n.Kind)
