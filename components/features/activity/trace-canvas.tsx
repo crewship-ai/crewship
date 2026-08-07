@@ -23,11 +23,7 @@ import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { PipelineDSL } from "@/lib/trace/types"
 import { buildTraceGraph } from "@/lib/trace/build-trace-graph"
 import { TraceStepNode, TraceTriggerNode } from "./trace-step-node"
-import {
-  OverviewIssueNode,
-  OverviewRoutineNode,
-  OverviewRunNode,
-} from "./overview-nodes"
+import { overviewNodeTypes } from "./overview-nodes"
 import { TraceDataFlowEdge } from "./trace-data-flow-edge"
 import { TraceRoutedEdge } from "./trace-routed-edge"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
@@ -43,12 +39,15 @@ import { minZoomForGraph } from "@/lib/trace/zoom-floor"
 // Inferring step status from run state is centralized in
 // buildTraceGraph; this component is a thin React Flow wrapper.
 
+// The single registration point for every node type this canvas can
+// render. The overview half is spread in from overview-nodes, where it
+// is typed against the same union as the layout's width map — so a new
+// overview node cannot be registered here without a width, which used
+// to mean it ranked correctly and rendered half a card off its column.
 const nodeTypes: NodeTypes = {
   traceStep: TraceStepNode,
   traceTrigger: TraceTriggerNode,
-  overviewIssue: OverviewIssueNode,
-  overviewRoutine: OverviewRoutineNode,
-  overviewRun: OverviewRunNode,
+  ...overviewNodeTypes,
 }
 
 const edgeTypes: EdgeTypes = {
@@ -266,9 +265,10 @@ function OverviewInner({
         const runId = node.id.slice("run:".length)
         onSelectRun(runId)
       }
-      // Issue + Routine clicks navigate via the node-level <Link>
-      // wrapper or are handled at the rail level; canvas does
-      // nothing extra.
+      // Every other prefix — iss: rt: auto: agt: ibx: — navigates via
+      // the node-level <Link> wrapper (routine, agent, inbox), is
+      // handled at the rail level (issue), or has no destination at
+      // all (automation). The canvas does nothing extra for those.
     },
     [onSelectRun],
   )
