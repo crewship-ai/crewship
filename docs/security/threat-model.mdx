@@ -4,7 +4,7 @@ description: "One-page summary of the Crewship trust boundaries: container isola
 icon: "shield-alert"
 ---
 
-<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 # Threat Model
 
 Crewship's security posture rests on five layers that compose into a
@@ -276,7 +276,7 @@ flowchart TD
 
 **Invisible-unicode — class-based** — the scanner flags any codepoint in Unicode's **Cf (Format)** category via `unicode.Is(unicode.Cf, ch)`, which covers every invisible-format codepoint that exists today (zero-width spaces ZWSP/ZWNJ/ZWJ, BIDI overrides LRM/RLM/LRE/RLE/LRO/RLO, directional isolates LRI/RLI/FSI/PDI, byte-order mark, the TAG block, SOFT HYPHEN, ARABIC LETTER MARK, …) and any added in future Unicode revisions — so it never lags a new codepoint the way a curated list would. Three **Hangul filler** codepoints (`U+115F`, `U+1160`, `U+3164`) are added by an explicit allowlist because they render empty but are category Lo, not Cf. Cheap check; runs first.
 
-**Prompt-injection regex (11 rules total, line-anchored, case-insensitive)** — 4 prompt-injection patterns (`ignore previous|all|prior instructions`, `you are now DAN|<role>`, `disregard rules|instructions|the above|system|previous`, `<!-- ignore ... -->` HTML smuggling) plus the 5 exfiltration and 2 persistence patterns below.
+**Prompt-injection regex (11 rules total, line-anchored, case-insensitive)** — 4 prompt-injection patterns (`ignore previous|all|prior instructions`, `you are now DAN|<role>`, `disregard rules|instructions|the above|system|previous`, `{/* ignore ... */}` HTML smuggling) plus the 5 exfiltration and 2 persistence patterns below.
 
 **Exfiltration patterns (5)** — `curl $TOKEN/...`, `cat .env | nc|curl|...`, `aws s3 cp ... .ssh/...|id_rsa`, plus the round-PR-F4 **URL exfil rules** (`https?://...?<param>=$TOKEN|API_KEY|SECRET|...` and `https?://.../$TOKEN|...`). The URL rules catch the "send to attacker.com/?data=$ENV" pattern beyond the existing curl-only rules.
 
