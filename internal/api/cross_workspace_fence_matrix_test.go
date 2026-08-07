@@ -1067,24 +1067,9 @@ func fenceKinds() []fenceKind {
 				{method: "GET", path: "/api/v1/memory/versions?path=" + fenceSharedMemoryPath, mode: probeNoLeak},
 			},
 		},
-		{
-			name:  "notifications",
-			table: "notifications",
-			idKey: "notificationId",
-			seed: func(t *testing.T, db *sql.DB, ten *fenceTenant) {
-				id := "notif-fence-" + ten.tag
-				if _, err := db.Exec(`INSERT INTO notifications
-					(id, workspace_id, user_id, actor_type, actor_id, action, entity_type, entity_id, entity_title)
-					VALUES (?, ?, ?, 'system', 'sys', 'created', 'issue', ?, ?)`,
-					id, ten.wsID, ten.userID, ten.ids["issueId"], ten.marker("notifications")); err != nil {
-					t.Fatalf("seed notification: %v", err)
-				}
-				ten.ids["notificationId"] = id
-			},
-			probes: []fenceProbe{
-				{method: "POST", path: "/api/v1/notifications/{notificationId}/read", mode: probeDeny},
-				{method: "DELETE", path: "/api/v1/notifications/{notificationId}", mode: probeDeny},
-			},
-		},
+		// The entity-scoped `notifications` surface used to be probed here.
+		// It was removed in #1751 (five endpoints over a table nothing wrote
+		// to), so there is no longer a route to fence. The routes staying gone
+		// is pinned by TestNotificationsSurfaceStaysRemoved.
 	}
 }

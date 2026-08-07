@@ -19,7 +19,6 @@ func TestDestructiveCommandsHaveYesFlag(t *testing.T) {
 		cmd  *cobra.Command
 	}{
 		{"pipeline delete", pipelineDeleteCmd},
-		{"notification delete", notificationDeleteCmd},
 		{"token revoke", tokenRevokeCmd},
 		{"session revoke", sessionRevokeCmd},
 		{"expose revoke", exposeRevokeCmd},

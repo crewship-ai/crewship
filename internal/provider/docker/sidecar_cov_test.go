@@ -94,6 +94,11 @@ func newCovProviderTCP(t *testing.T, cfg Config, handler http.HandlerFunc) *Prov
 	return p
 }
 
+// covCrewID is the crew id every sidecar in this file belongs to. Sidecar
+// containers and volumes are namespaced by it (#1732), so it appears in every
+// expected name and in the crewship.crew-id label the lifecycle matches on.
+const covCrewID = "ckalpha0001"
+
 func covRedisSvc() provider.CrewService {
 	return provider.CrewService{
 		Name:    "redis",
@@ -127,11 +132,11 @@ func TestVolumeListOptions_NoFilters(t *testing.T) {
 func TestSidecarContainerName(t *testing.T) {
 	t.Parallel()
 	p := &Provider{cfg: Config{}}
-	if got := p.sidecarContainerName("alpha", "redis"); got != "crewship-svc-alpha-redis" {
+	if got := p.sidecarContainerName(covCrewID, "alpha", "redis"); got != "crewship-svc-alpha-"+covCrewID+"-redis" {
 		t.Errorf("default prefix name = %q", got)
 	}
 	p.cfg.ContainerPrefix = "acme"
-	if got := p.sidecarContainerName("alpha", "redis"); got != "acme-svc-alpha-redis" {
+	if got := p.sidecarContainerName(covCrewID, "alpha", "redis"); got != "acme-svc-alpha-"+covCrewID+"-redis" {
 		t.Errorf("custom prefix name = %q", got)
 	}
 }
@@ -139,11 +144,11 @@ func TestSidecarContainerName(t *testing.T) {
 func TestSidecarVolumeName(t *testing.T) {
 	t.Parallel()
 	p := &Provider{cfg: Config{}}
-	if got := p.sidecarVolumeName("alpha", "data"); got != "crewship-svc-alpha-vol-data" {
+	if got := p.sidecarVolumeName(covCrewID, "alpha", "data"); got != "crewship-svc-alpha-"+covCrewID+"-vol-data" {
 		t.Errorf("default prefix volume = %q", got)
 	}
 	p.cfg.ContainerPrefix = "acme"
-	if got := p.sidecarVolumeName("alpha", "data"); got != "acme-svc-alpha-vol-data" {
+	if got := p.sidecarVolumeName(covCrewID, "alpha", "data"); got != "acme-svc-alpha-"+covCrewID+"-vol-data" {
 		t.Errorf("custom prefix volume = %q", got)
 	}
 }
@@ -222,13 +227,17 @@ func TestEnsureCrewServices_ReusesMatchingRunningSidecar(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"Id":    "cid-redis",
-				"Names": []string{"/crewship-svc-alpha-redis"},
+				"Names": []string{"/crewship-svc-alpha-ckalpha0001-redis"},
 				"Image": "redis:7",
 				"State": "running",
 				"Labels": map[string]string{
 					sidecarSpecHashLabel: hash,
 				},
 			}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/volumes"):
+			// The pre-#1732 sidecar migration enumerates volumes; nothing legacy here.
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Volumes":[],"Warnings":null}`))
 		case strings.HasSuffix(r.URL.Path, "/containers/create"):
 			creates++
 			http.Error(w, `{"message":"should not create"}`, http.StatusInternalServerError)
@@ -239,7 +248,7 @@ func TestEnsureCrewServices_ReusesMatchingRunningSidecar(t *testing.T) {
 	})
 
 	ids, err := p.EnsureCrewServices(context.Background(), provider.CrewConfig{
-		ID: "c1", Slug: "alpha",
+		ID: covCrewID, Slug: "alpha",
 		Services: []provider.CrewService{svc},
 	})
 	if err != nil {
@@ -271,11 +280,14 @@ func TestEnsureCrewServices_StartsStoppedMatchingSidecar(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"Id":     "cid-redis",
-				"Names":  []string{"/crewship-svc-alpha-redis"},
+				"Names":  []string{"/crewship-svc-alpha-ckalpha0001-redis"},
 				"Image":  "redis:7",
 				"State":  "exited",
 				"Labels": map[string]string{sidecarSpecHashLabel: hash},
 			}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/volumes"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Volumes":[],"Warnings":null}`))
 		case strings.HasSuffix(r.URL.Path, "/start"):
 			starts = append(starts, r.URL.Path)
 			w.WriteHeader(http.StatusNoContent)
@@ -286,7 +298,7 @@ func TestEnsureCrewServices_StartsStoppedMatchingSidecar(t *testing.T) {
 	})
 
 	ids, err := p.EnsureCrewServices(context.Background(), provider.CrewConfig{
-		ID: "c1", Slug: "alpha",
+		ID: covCrewID, Slug: "alpha",
 		Services: []provider.CrewService{svc},
 	})
 	if err != nil {
@@ -314,7 +326,7 @@ func TestEnsureSidecar_StartExistingError(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"Id":     "cid-redis",
-				"Names":  []string{"/crewship-svc-alpha-redis"},
+				"Names":  []string{"/crewship-svc-alpha-ckalpha0001-redis"},
 				"Image":  "redis:7",
 				"State":  "exited",
 				"Labels": map[string]string{sidecarSpecHashLabel: hash},
@@ -326,7 +338,7 @@ func TestEnsureSidecar_StartExistingError(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err == nil || !strings.Contains(err.Error(), "start existing sidecar") {
 		t.Fatalf("expected start-existing error, got %v", err)
 	}
@@ -340,7 +352,7 @@ func TestEnsureSidecar_ListError(t *testing.T) {
 		http.Error(w, `{"message":"down"}`, http.StatusInternalServerError)
 	})
 
-	_, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err == nil || !strings.Contains(err.Error(), "list containers") {
 		t.Fatalf("expected list error, got %v", err)
 	}
@@ -365,7 +377,7 @@ func TestEnsureSidecar_RecreateOnSpecDrift(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"Id":     "cid-old",
-				"Names":  []string{"/crewship-svc-alpha-redis"},
+				"Names":  []string{"/crewship-svc-alpha-ckalpha0001-redis"},
 				"Image":  "redis:7",
 				"State":  "running",
 				"Labels": map[string]string{sidecarSpecHashLabel: "stale-hash"},
@@ -402,7 +414,7 @@ func TestEnsureSidecar_RecreateOnSpecDrift(t *testing.T) {
 		}
 	})
 
-	id, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err != nil {
 		t.Fatalf("ensureSidecar: %v", err)
 	}
@@ -428,7 +440,7 @@ func TestEnsureSidecar_RecreateOnImageDrift_RemoveFails(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
 				"Id":     "cid-old",
-				"Names":  []string{"/crewship-svc-alpha-redis"},
+				"Names":  []string{"/crewship-svc-alpha-ckalpha0001-redis"},
 				"Image":  "redis:6",
 				"State":  "running",
 				"Labels": map[string]string{sidecarSpecHashLabel: hash},
@@ -442,7 +454,7 @@ func TestEnsureSidecar_RecreateOnImageDrift_RemoveFails(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err == nil || !strings.Contains(err.Error(), "remove sidecar") {
 		t.Fatalf("expected remove error, got %v", err)
 	}
@@ -516,7 +528,7 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 		}
 	})
 
-	id, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err != nil {
 		t.Fatalf("ensureSidecar: %v", err)
 	}
@@ -527,7 +539,7 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if createName != "crewship-svc-alpha-redis" {
+	if createName != "crewship-svc-alpha-ckalpha0001-redis" {
 		t.Errorf("create name = %q", createName)
 	}
 	cfg := createReq.Config
@@ -561,6 +573,7 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 	}
 	wantLabels := map[string]string{
 		"managed-by":         "crewship",
+		"crewship.crew-id":   covCrewID,
 		"crewship.crew":      "alpha",
 		"crewship.kind":      "sidecar",
 		"crewship.svc":       "redis",
@@ -594,7 +607,7 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 	if hc.RestartPolicy.Name != container.RestartPolicyOnFailure || hc.RestartPolicy.MaximumRetryCount != 3 {
 		t.Errorf("RestartPolicy = %+v", hc.RestartPolicy)
 	}
-	if len(hc.Mounts) != 1 || hc.Mounts[0].Source != "crewship-svc-alpha-vol-data" || hc.Mounts[0].Target != "/data" {
+	if len(hc.Mounts) != 1 || hc.Mounts[0].Source != "crewship-svc-alpha-ckalpha0001-vol-data" || hc.Mounts[0].Target != "/data" {
 		t.Errorf("Mounts = %+v", hc.Mounts)
 	}
 
@@ -606,7 +619,7 @@ func TestEnsureSidecar_CreateBody(t *testing.T) {
 		t.Errorf("aliases = %v, want [redis]", ep.Aliases)
 	}
 
-	if len(volumeCreates) != 1 || volumeCreates[0] != "crewship-svc-alpha-vol-data" {
+	if len(volumeCreates) != 1 || volumeCreates[0] != "crewship-svc-alpha-ckalpha0001-vol-data" {
 		t.Errorf("volume creates = %v", volumeCreates)
 	}
 }
@@ -631,7 +644,7 @@ func TestEnsureSidecar_CreateError(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err == nil || !strings.Contains(err.Error(), "create sidecar") {
 		t.Fatalf("expected create error, got %v", err)
 	}
@@ -660,7 +673,7 @@ func TestEnsureSidecar_StartError(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err == nil || !strings.Contains(err.Error(), "start sidecar") {
 		t.Fatalf("expected start error, got %v", err)
 	}
@@ -688,7 +701,7 @@ func TestEnsureSidecar_VolumeEnsureError(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err == nil || !strings.Contains(err.Error(), `ensure volume "data"`) {
 		t.Fatalf("expected ensure-volume error, got %v", err)
 	}
@@ -858,11 +871,14 @@ func TestEnsureCrewServices_HealthcheckGate(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode([]map[string]any{{
 					"Id":     "cid-redis",
-					"Names":  []string{"/crewship-svc-alpha-redis"},
+					"Names":  []string{"/crewship-svc-alpha-ckalpha0001-redis"},
 					"Image":  "redis:7",
 					"State":  "running",
 					"Labels": map[string]string{sidecarSpecHashLabel: hash},
 				}})
+			case r.Method == http.MethodGet && strings.HasSuffix(path, "/volumes"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"Volumes":[],"Warnings":null}`))
 			case strings.Contains(path, "/containers/cid-redis/json"):
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`{"Id":"cid-redis","State":{"Running":true,"Health":{"Status":"` + healthStatus + `"}}}`))
@@ -876,7 +892,7 @@ func TestEnsureCrewServices_HealthcheckGate(t *testing.T) {
 		t.Parallel()
 		p := newCovProvider(t, Config{}, mkHandler("healthy"))
 		ids, err := p.EnsureCrewServices(context.Background(), provider.CrewConfig{
-			ID: "c1", Slug: "alpha", Services: []provider.CrewService{mkSvc()},
+			ID: covCrewID, Slug: "alpha", Services: []provider.CrewService{mkSvc()},
 		})
 		if err != nil {
 			t.Fatalf("EnsureCrewServices: %v", err)
@@ -890,7 +906,7 @@ func TestEnsureCrewServices_HealthcheckGate(t *testing.T) {
 		t.Parallel()
 		p := newCovProvider(t, Config{}, mkHandler("unhealthy"))
 		_, err := p.EnsureCrewServices(context.Background(), provider.CrewConfig{
-			ID: "c1", Slug: "alpha", Services: []provider.CrewService{mkSvc()},
+			ID: covCrewID, Slug: "alpha", Services: []provider.CrewService{mkSvc()},
 		})
 		if err == nil || !strings.Contains(err.Error(), `sidecar "redis" not healthy`) {
 			t.Fatalf("expected not-healthy error, got %v", err)
@@ -904,12 +920,20 @@ func TestEnsureCrewServices_HealthcheckGate(t *testing.T) {
 func TestEnsureCrewServices_SidecarErrorIsNamed(t *testing.T) {
 	t.Parallel()
 
+	// The daemon answers the container list (so the pre-#1732 migration sweep
+	// finds nothing to do) and then fails everything else, which is what puts
+	// the failure inside a specific sidecar's ensure.
 	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/json") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		http.Error(w, `{"message":"down"}`, http.StatusInternalServerError)
 	})
 
 	_, err := p.EnsureCrewServices(context.Background(), provider.CrewConfig{
-		ID: "c1", Slug: "alpha",
+		ID: covCrewID, Slug: "alpha",
 		Services: []provider.CrewService{{Name: "pg", Image: "postgres:16"}},
 	})
 	if err == nil || !strings.Contains(err.Error(), `sidecar "pg"`) {
@@ -919,10 +943,14 @@ func TestEnsureCrewServices_SidecarErrorIsNamed(t *testing.T) {
 
 func covServiceListJSON() []map[string]any {
 	return []map[string]any{
-		{"Id": "c1", "State": "running", "Labels": map[string]string{"crewship.crew": "alpha", "crewship.kind": "sidecar"}},
-		{"Id": "c2", "State": "exited", "Labels": map[string]string{"crewship.crew": "alpha", "crewship.kind": "sidecar"}},
-		{"Id": "c3", "State": "running", "Labels": map[string]string{"crewship.crew": "beta", "crewship.kind": "sidecar"}},
-		{"Id": "c4", "State": "running", "Labels": map[string]string{"crewship.crew": "alpha", "crewship.kind": "runtime"}},
+		{"Id": "c1", "State": "running", "Labels": map[string]string{"crewship.crew-id": covCrewID, "crewship.crew": "alpha", "crewship.kind": "sidecar"}},
+		{"Id": "c2", "State": "exited", "Labels": map[string]string{"crewship.crew-id": covCrewID, "crewship.crew": "alpha", "crewship.kind": "sidecar"}},
+		{"Id": "c3", "State": "running", "Labels": map[string]string{"crewship.crew-id": "ckbeta00002", "crewship.crew": "beta", "crewship.kind": "sidecar"}},
+		{"Id": "c4", "State": "running", "Labels": map[string]string{"crewship.crew-id": covCrewID, "crewship.crew": "alpha", "crewship.kind": "runtime"}},
+		// Same SLUG as alpha, different workspace: identical crewship.crew,
+		// different crewship.crew-id. Selecting on the slug swept this one too
+		// — that is #1732, and it must never match here again.
+		{"Id": "c5", "State": "running", "Labels": map[string]string{"crewship.crew-id": "ckotherws0003", "crewship.crew": "alpha", "crewship.kind": "sidecar"}},
 	}
 }
 
@@ -947,7 +975,7 @@ func TestStopCrewServices_StopsOnlyRunningCrewSidecars(t *testing.T) {
 		}
 	})
 
-	if err := p.StopCrewServices(context.Background(), "alpha"); err != nil {
+	if err := p.StopCrewServices(context.Background(), covCrewID, "alpha"); err != nil {
 		t.Fatalf("StopCrewServices: %v", err)
 	}
 	mu.Lock()
@@ -972,7 +1000,7 @@ func TestStopCrewServices_AggregatesFailures(t *testing.T) {
 		}
 	})
 
-	err := p.StopCrewServices(context.Background(), "alpha")
+	err := p.StopCrewServices(context.Background(), covCrewID, "alpha")
 	if err == nil || !strings.Contains(err.Error(), `stop 1 sidecar(s) for crew "alpha"`) {
 		t.Fatalf("expected aggregated stop error, got %v", err)
 	}
@@ -983,7 +1011,7 @@ func TestStopCrewServices_ListError(t *testing.T) {
 	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"message":"down"}`, http.StatusInternalServerError)
 	})
-	err := p.StopCrewServices(context.Background(), "alpha")
+	err := p.StopCrewServices(context.Background(), covCrewID, "alpha")
 	if err == nil || !strings.Contains(err.Error(), "list containers") {
 		t.Fatalf("expected list error, got %v", err)
 	}
@@ -1016,7 +1044,7 @@ func TestRemoveCrewServices_RemovesAllCrewSidecarsRegardlessOfState(t *testing.T
 		}
 	})
 
-	if err := p.RemoveCrewServices(context.Background(), "alpha"); err != nil {
+	if err := p.RemoveCrewServices(context.Background(), covCrewID, "alpha"); err != nil {
 		t.Fatalf("RemoveCrewServices: %v", err)
 	}
 	mu.Lock()
@@ -1042,7 +1070,7 @@ func TestRemoveCrewServices_AggregatesFailures(t *testing.T) {
 		}
 	})
 
-	err := p.RemoveCrewServices(context.Background(), "alpha")
+	err := p.RemoveCrewServices(context.Background(), covCrewID, "alpha")
 	if err == nil || !strings.Contains(err.Error(), `remove 2 sidecar(s) for crew "alpha"`) {
 		t.Fatalf("expected aggregated remove error, got %v", err)
 	}
@@ -1053,7 +1081,7 @@ func TestRemoveCrewServices_ListError(t *testing.T) {
 	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"message":"down"}`, http.StatusInternalServerError)
 	})
-	err := p.RemoveCrewServices(context.Background(), "alpha")
+	err := p.RemoveCrewServices(context.Background(), covCrewID, "alpha")
 	if err == nil || !strings.Contains(err.Error(), "list containers") {
 		t.Fatalf("expected list error, got %v", err)
 	}
@@ -1070,8 +1098,16 @@ func TestRemoveCrewServiceVolumes_RemovesOnlyCrewPrefixedVolumes(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/volumes"):
 			w.Header().Set("Content-Type", "application/json")
-			// Includes a null entry (vol == nil guard) and non-matching names.
-			_, _ = w.Write([]byte(`{"Volumes":[null,{"Name":"crewship-svc-alpha-vol-data"},{"Name":"crewship-svc-beta-vol-data"},{"Name":"unrelated"}],"Warnings":null}`))
+			// A null entry (vol == nil guard); another crew's labelled volume;
+			// an unlabelled volume; and — the #1732 case — a volume whose NAME
+			// starts with alpha's own but which another crew owns.
+			_, _ = w.Write([]byte(`{"Volumes":[` +
+				`null,` +
+				`{"Name":"crewship-svc-alpha-ckalpha0001-vol-data","Labels":{"crewship.crew-id":"ckalpha0001","crewship.kind":"sidecar-volume"}},` +
+				`{"Name":"crewship-svc-beta-ckbeta00002-vol-data","Labels":{"crewship.crew-id":"ckbeta00002","crewship.kind":"sidecar-volume"}},` +
+				`{"Name":"crewship-svc-alpha-ckalpha0001-vol-data-extra","Labels":{"crewship.crew-id":"ckother00003","crewship.kind":"sidecar-volume"}},` +
+				`{"Name":"unrelated"}` +
+				`],"Warnings":null}`))
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/volumes/"):
 			parts := strings.Split(r.URL.Path, "/")
 			removed = append(removed, parts[len(parts)-1])
@@ -1081,13 +1117,14 @@ func TestRemoveCrewServiceVolumes_RemovesOnlyCrewPrefixedVolumes(t *testing.T) {
 		}
 	})
 
-	if err := p.RemoveCrewServiceVolumes(context.Background(), "alpha"); err != nil {
+	if err := p.RemoveCrewServiceVolumes(context.Background(), covCrewID, "alpha"); err != nil {
 		t.Fatalf("RemoveCrewServiceVolumes: %v", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(removed) != 1 || removed[0] != "crewship-svc-alpha-vol-data" {
-		t.Errorf("removed = %v, want only the alpha-prefixed volume", removed)
+	if len(removed) != 1 || removed[0] != "crewship-svc-alpha-ckalpha0001-vol-data" {
+		t.Errorf("removed = %v, want only the volume labelled crewship.crew-id=%s — a volume whose "+
+			"NAME extends it belongs to whoever its label says (#1732)", removed, covCrewID)
 	}
 }
 
@@ -1098,7 +1135,8 @@ func TestRemoveCrewServiceVolumes_AggregatesFailures(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/volumes"):
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"Volumes":[{"Name":"crewship-svc-alpha-vol-data"}],"Warnings":null}`))
+			_, _ = w.Write([]byte(`{"Volumes":[{"Name":"crewship-svc-alpha-ckalpha0001-vol-data",` +
+				`"Labels":{"crewship.crew-id":"ckalpha0001","crewship.kind":"sidecar-volume"}}],"Warnings":null}`))
 		case r.Method == http.MethodDelete:
 			http.Error(w, `{"message":"in use"}`, http.StatusConflict)
 		default:
@@ -1106,7 +1144,7 @@ func TestRemoveCrewServiceVolumes_AggregatesFailures(t *testing.T) {
 		}
 	})
 
-	err := p.RemoveCrewServiceVolumes(context.Background(), "alpha")
+	err := p.RemoveCrewServiceVolumes(context.Background(), covCrewID, "alpha")
 	if err == nil || !strings.Contains(err.Error(), `remove 1 sidecar volume(s) for crew "alpha"`) {
 		t.Fatalf("expected aggregated volume error, got %v", err)
 	}
@@ -1117,13 +1155,18 @@ func TestRemoveCrewServiceVolumes_ListError(t *testing.T) {
 	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"message":"down"}`, http.StatusInternalServerError)
 	})
-	err := p.RemoveCrewServiceVolumes(context.Background(), "alpha")
+	err := p.RemoveCrewServiceVolumes(context.Background(), covCrewID, "alpha")
 	if err == nil || !strings.Contains(err.Error(), "list volumes") {
 		t.Fatalf("expected list error, got %v", err)
 	}
 }
 
-func TestRemoveCrewServiceVolumes_CustomPrefix(t *testing.T) {
+// Ownership is the label, not the name. Two volumes here are named exactly as
+// this crew's would be under one prefix or the other; only the one whose
+// crewship.crew-id label says so may be removed. Before #1732 the sweep was a
+// strings.HasPrefix over the name, so a same-slug crew in another workspace
+// (and any crew whose slug extended this one) lost its data directory.
+func TestRemoveCrewServiceVolumes_SelectsByLabelNotName(t *testing.T) {
 	t.Parallel()
 
 	var mu sync.Mutex
@@ -1134,7 +1177,11 @@ func TestRemoveCrewServiceVolumes_CustomPrefix(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/volumes"):
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"Volumes":[{"Name":"acme-svc-alpha-vol-pg"},{"Name":"crewship-svc-alpha-vol-pg"}],"Warnings":null}`))
+			_, _ = w.Write([]byte(`{"Volumes":[` +
+				`{"Name":"acme-svc-alpha-ckalpha0001-vol-pg","Labels":{"crewship.crew-id":"ckalpha0001","crewship.kind":"sidecar-volume"}},` +
+				`{"Name":"crewship-svc-alpha-ckalpha0001-vol-pg","Labels":{"crewship.crew-id":"ckother00003","crewship.kind":"sidecar-volume"}},` +
+				`{"Name":"acme-svc-alpha-vol-pg"}` +
+				`],"Warnings":null}`))
 		case r.Method == http.MethodDelete:
 			parts := strings.Split(r.URL.Path, "/")
 			removed = append(removed, parts[len(parts)-1])
@@ -1144,13 +1191,50 @@ func TestRemoveCrewServiceVolumes_CustomPrefix(t *testing.T) {
 		}
 	})
 
-	if err := p.RemoveCrewServiceVolumes(context.Background(), "alpha"); err != nil {
+	if err := p.RemoveCrewServiceVolumes(context.Background(), covCrewID, "alpha"); err != nil {
 		t.Fatalf("RemoveCrewServiceVolumes: %v", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(removed) != 1 || removed[0] != "acme-svc-alpha-vol-pg" {
-		t.Errorf("removed = %v, want only the acme-prefixed volume", removed)
+	if len(removed) != 1 || removed[0] != "acme-svc-alpha-ckalpha0001-vol-pg" {
+		t.Errorf("removed = %v, want only the volume this crew's label claims", removed)
+	}
+}
+
+// An empty crew id must sweep NOTHING. A caller that could not resolve the crew
+// has no business removing volumes, and a match that treated "" as a wildcard
+// would empty the daemon.
+func TestRemoveCrewServiceVolumes_EmptyCrewIDRemovesNothing(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var removed []string
+	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/volumes"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Volumes":[` +
+				`{"Name":"crewship-svc-alpha-ckalpha0001-vol-data","Labels":{"crewship.crew-id":"ckalpha0001","crewship.kind":"sidecar-volume"}},` +
+				`{"Name":"legacy-unlabelled"}` +
+				`],"Warnings":null}`))
+		case r.Method == http.MethodDelete:
+			parts := strings.Split(r.URL.Path, "/")
+			removed = append(removed, parts[len(parts)-1])
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	if err := p.RemoveCrewServiceVolumes(context.Background(), "", "alpha"); err != nil {
+		t.Fatalf("RemoveCrewServiceVolumes: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(removed) != 0 {
+		t.Errorf("removed = %v with no crew id — an unresolved crew must match nothing", removed)
 	}
 }
 
@@ -1203,7 +1287,7 @@ func TestEnsureSidecar_IgnoresUnrelatedContainers(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"Id": "other", "Names": []string{"/some-other-container"}, "Image": "nginx", "State": "running"},
-				{"Id": "cid-redis", "Names": []string{"/crewship-svc-alpha-redis"}, "Image": "redis:7",
+				{"Id": "cid-redis", "Names": []string{"/crewship-svc-alpha-ckalpha0001-redis"}, "Image": "redis:7",
 					"State": "running", "Labels": map[string]string{sidecarSpecHashLabel: hash}},
 			})
 		default:
@@ -1211,7 +1295,7 @@ func TestEnsureSidecar_IgnoresUnrelatedContainers(t *testing.T) {
 		}
 	})
 
-	id, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	id, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err != nil {
 		t.Fatalf("ensureSidecar: %v", err)
 	}
@@ -1238,7 +1322,7 @@ func TestEnsureSidecar_PullErrorPropagates(t *testing.T) {
 		}
 	})
 
-	_, err := p.ensureSidecar(context.Background(), "alpha", &svc)
+	_, err := p.ensureSidecar(context.Background(), covCrewID, "alpha", &svc)
 	if err == nil || !strings.Contains(err.Error(), "pull redis:7") {
 		t.Fatalf("expected pull error from create path, got %v", err)
 	}

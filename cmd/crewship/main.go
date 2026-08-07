@@ -157,7 +157,6 @@ func init() {
 	rootCmd.AddCommand(runtimesCmd)
 	rootCmd.AddCommand(memoryCmd)
 	rootCmd.AddCommand(personaCmd)
-	rootCmd.AddCommand(notificationCmd)
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(backupCmd)
 	rootCmd.AddCommand(preferencesCmd)

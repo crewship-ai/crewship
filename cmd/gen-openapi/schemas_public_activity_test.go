@@ -7,7 +7,6 @@ func TestPublicActivityCatalogUsesConcreteHandlerShapes(t *testing.T) {
 	want := map[string]string{
 		"GET /api/v1/agents/{agentId}/chats":                     "array",
 		"GET /api/v1/inbox":                                      "rows",
-		"GET /api/v1/notifications":                              "array",
 		"GET /api/v1/audit":                                      "data",
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks": "array",
 	}
