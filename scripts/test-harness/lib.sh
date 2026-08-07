@@ -5,8 +5,8 @@
 # This is NOT a unit-test layer — it drives the *real* `crewship` CLI against a
 # running dev server (per CLAUDE.md: all ops go through the local CLI, never a
 # DB shell or hand-rolled curl). It validates RUNTIME behaviour that can't be
-# unit-tested: agent memory recall, crew-shared memory, notifications landing
-# after a routine run, recipe determinism, agent credential self-service.
+# unit-tested: agent memory recall, crew-shared memory, a routine run's outcome
+# being observable afterwards, recipe determinism, agent credential self-service.
 #
 # Source this from each test-*.sh. It provides:
 #   - cs()              thin `crewship --server <SERVER>` wrapper

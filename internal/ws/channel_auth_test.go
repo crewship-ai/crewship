@@ -71,8 +71,9 @@ func mustVerdict(t *testing.T, a *DBChannelAuthorizer, userID, channel string) b
 // TestDBChannelAuthorizer_UserChannel covers the user:{userId} channel
 // (issue #614): a user may subscribe to their own channel but not another
 // user's, and the check needs no DB membership lookup. Before the fix this
-// channel fell through to default:false so notification.created broadcasts
-// were never delivered over WS.
+// channel fell through to default:false, so nothing broadcast on it was ever
+// delivered over WS — at the time that was `notification.created`, itself
+// removed in #1751. The rule under test is about the identity, not that event.
 func TestDBChannelAuthorizer_UserChannel(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()

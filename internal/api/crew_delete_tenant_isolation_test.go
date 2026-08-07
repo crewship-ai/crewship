@@ -3,126 +3,124 @@ package api
 // Deleting a crew must not delete another tenant's database.
 //
 // crews is UNIQUE(workspace_id, slug) — slugs are unique PER WORKSPACE. Sidecar
-// containers are matched by the label `crewship.crew=<slug>` and their volumes
-// by the name prefix `<prefix>-svc-<slug>-vol-`, and NEITHER carries the crew
-// id. CrewContainerName does carry it, deliberately, "to prevent cross-tenant
-// container collisions — audit C1"; the sidecars never got that treatment.
+// containers used to be matched by the label `crewship.crew=<slug>` and their
+// volumes by the name prefix `<prefix>-svc-<slug>-vol-`, and NEITHER carried
+// the crew id. So workspace A deleting its `data-crew` force-removed workspace
+// B's `data-crew` postgres and deleted its data directory, and the confirmation
+// prompt — which names only the caller's own crew — said nothing.
 //
-// So workspace A deleting its `data-crew` force-removes workspace B's
-// `data-crew` postgres and deletes its data directory, and the confirmation
-// prompt — which names only the caller's own crew — says nothing.
+// #1721 answered that by REFUSING the teardown whenever another crew shared the
+// slug: nothing was destroyed and the response said why. #1732 fixed the cause
+// instead — sidecar containers, volumes and the crewship.crew-id label all
+// carry the globally-unique crew id, and the provider selects on that label by
+// exact equality — so the teardown can no longer reach another crew and the
+// refusal is gone.
 //
-// The fake here models what a slug-keyed daemon actually does: removal by slug
-// takes every crew's resources under that slug. The assertion is therefore
-// about the OTHER tenant's resources still existing, not about which functions
-// were called — a test that deleted one crew and checked its own volumes were
-// gone would pass on the broken code.
+// The fake here therefore models an ID-keyed daemon, which is what the docker
+// provider now is. Each test asserts BOTH halves, because either one alone
+// passes on a broken implementation: the other tenant's resources survive, AND
+// the deleted crew's own are actually removed.
 
 import (
 	"context"
 	"database/sql"
 	"io"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
-// slugKeyedDaemon is a container provider whose sidecar teardown behaves like
-// the real one: it removes by SLUG, so anything any crew owns under that slug
-// goes. Resources are held per (slug, owner) so a test can ask what survived.
-type slugKeyedDaemon struct {
+// idKeyedDaemon is a container provider whose sidecar teardown behaves like the
+// post-#1732 one: it removes by CREW ID, so only the named crew's resources go,
+// whatever any other crew is slugged.
+type idKeyedDaemon struct {
 	mu sync.Mutex
-	// containers/volumes are keyed by slug → owner label ("ws-a", "ws-b").
-	containers map[string][]string
-	volumes    map[string][]string
+	// containers/volumes are keyed by crew id → owner label ("ws-a", "ws-b").
+	containers map[string]string
+	volumes    map[string]string
 }
 
-func newSlugKeyedDaemon() *slugKeyedDaemon {
-	return &slugKeyedDaemon{
-		containers: map[string][]string{},
-		volumes:    map[string][]string{},
+func newIDKeyedDaemon() *idKeyedDaemon {
+	return &idKeyedDaemon{
+		containers: map[string]string{},
+		volumes:    map[string]string{},
 	}
 }
 
-func (d *slugKeyedDaemon) start(slug, owner string) {
+// start records a crew's live sidecar + data volume. The slug is carried only
+// as a display value, exactly as crewship.crew is on the real container.
+func (d *idKeyedDaemon) start(crewID, owner string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.containers[slug] = append(d.containers[slug], owner)
-	d.volumes[slug] = append(d.volumes[slug], owner)
+	d.containers[crewID] = owner
+	d.volumes[crewID] = owner
 }
 
-func (d *slugKeyedDaemon) survivingContainers(slug string) []string {
+func (d *idKeyedDaemon) hasContainer(crewID string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	out := append([]string(nil), d.containers[slug]...)
-	return out
+	_, ok := d.containers[crewID]
+	return ok
 }
 
-func (d *slugKeyedDaemon) survivingVolumes(slug string) []string {
+func (d *idKeyedDaemon) hasVolume(crewID string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	out := append([]string(nil), d.volumes[slug]...)
-	return out
+	_, ok := d.volumes[crewID]
+	return ok
 }
 
-func (d *slugKeyedDaemon) EnsureCrewRuntime(context.Context, provider.CrewConfig) (string, error) {
+func (d *idKeyedDaemon) EnsureCrewRuntime(context.Context, provider.CrewConfig) (string, error) {
 	return "cid", nil
 }
-func (d *slugKeyedDaemon) StopCrewRuntime(context.Context, string) error   { return nil }
-func (d *slugKeyedDaemon) RemoveCrewRuntime(context.Context, string) error { return nil }
-func (d *slugKeyedDaemon) ContainerStatus(context.Context, string) (*provider.ContainerStatus, error) {
+func (d *idKeyedDaemon) StopCrewRuntime(context.Context, string) error   { return nil }
+func (d *idKeyedDaemon) RemoveCrewRuntime(context.Context, string) error { return nil }
+func (d *idKeyedDaemon) ContainerStatus(context.Context, string) (*provider.ContainerStatus, error) {
 	return &provider.ContainerStatus{State: "running"}, nil
 }
-func (d *slugKeyedDaemon) ContainerStats(context.Context, string) (*provider.ContainerMetrics, error) {
+func (d *idKeyedDaemon) ContainerStats(context.Context, string) (*provider.ContainerMetrics, error) {
 	return nil, nil
 }
-func (d *slugKeyedDaemon) Exec(context.Context, provider.ExecConfig) (*provider.ExecResult, error) {
+func (d *idKeyedDaemon) Exec(context.Context, provider.ExecConfig) (*provider.ExecResult, error) {
 	return &provider.ExecResult{Reader: io.NopCloser(nil)}, nil
 }
-func (d *slugKeyedDaemon) ExecInspect(context.Context, string) (bool, int, error) {
+func (d *idKeyedDaemon) ExecInspect(context.Context, string) (bool, int, error) {
 	return false, 0, nil
 }
-func (d *slugKeyedDaemon) CrewContainerName(id, slug string) string {
-	// The id IS in this name — that is audit C1, and the contrast with the
-	// sidecar naming below is the whole finding.
+func (d *idKeyedDaemon) CrewContainerName(id, slug string) string {
+	// The id is in this name — audit C1. Sidecars carry it too now (#1732).
 	return "crewship-crew-" + slug + "-" + id
 }
-func (d *slugKeyedDaemon) CopyToContainer(context.Context, string, string, io.Reader) error {
+func (d *idKeyedDaemon) CopyToContainer(context.Context, string, string, io.Reader) error {
 	return nil
 }
-func (d *slugKeyedDaemon) EnsureCrewServices(context.Context, provider.CrewConfig) (map[string]string, error) {
+func (d *idKeyedDaemon) EnsureCrewServices(context.Context, provider.CrewConfig) (map[string]string, error) {
 	return nil, nil
 }
-func (d *slugKeyedDaemon) StopCrewServices(context.Context, string) error { return nil }
+func (d *idKeyedDaemon) StopCrewServices(context.Context, string, string) error { return nil }
 
-// RemoveCrewServices removes every sidecar labelled with this slug — including
-// the ones another workspace's identically-slugged crew owns.
-func (d *slugKeyedDaemon) RemoveCrewServices(_ context.Context, slug string) error {
+// RemoveCrewServices removes only the sidecars labelled with this crew id.
+func (d *idKeyedDaemon) RemoveCrewServices(_ context.Context, crewID, _ string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	delete(d.containers, slug)
+	delete(d.containers, crewID)
 	return nil
 }
 
-// RemoveCrewServiceVolumes removes by NAME PREFIX, so it also sweeps a crew
-// whose slug begins with "<slug>-vol".
-func (d *slugKeyedDaemon) RemoveCrewServiceVolumes(_ context.Context, slug string) error {
+// RemoveCrewServiceVolumes removes only the volumes labelled with this crew id.
+// No name prefix is involved, so a slug that extends another's cannot widen it.
+func (d *idKeyedDaemon) RemoveCrewServiceVolumes(_ context.Context, crewID, _ string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	for owned := range d.volumes {
-		if owned == slug || strings.HasPrefix(owned, slug+"-vol") {
-			delete(d.volumes, owned)
-		}
-	}
+	delete(d.volumes, crewID)
 	return nil
 }
 
-var _ provider.ContainerProvider = (*slugKeyedDaemon)(nil)
-var _ provider.SidecarProvider = (*slugKeyedDaemon)(nil)
-var _ provider.ServiceVolumeRemover = (*slugKeyedDaemon)(nil)
+var _ provider.ContainerProvider = (*idKeyedDaemon)(nil)
+var _ provider.SidecarProvider = (*idKeyedDaemon)(nil)
+var _ provider.ServiceVolumeRemover = (*idKeyedDaemon)(nil)
 
 // seedSecondWorkspaceCrew creates a crew in a DIFFERENT workspace with the same
 // slug — legal, because crews is UNIQUE(workspace_id, slug).
@@ -141,9 +139,9 @@ func TestCrewDeleteLeavesAnotherWorkspacesIdenticallyNamedCrewAlone(t *testing.T
 	seedCrewWithServices(t, db, "crew-mine", wsID, "data-crew")
 	seedSecondWorkspaceCrew(t, db, "crew-theirs", "data-crew")
 
-	daemon := newSlugKeyedDaemon()
-	daemon.start("data-crew", "ws-mine")
-	daemon.start("data-crew", "ws-other")
+	daemon := newIDKeyedDaemon()
+	daemon.start("crew-mine", "ws-mine")
+	daemon.start("crew-theirs", "ws-other")
 
 	h := NewCrewHandler(db, newTestLogger())
 	h.SetContainer(daemon)
@@ -158,23 +156,29 @@ func TestCrewDeleteLeavesAnotherWorkspacesIdenticallyNamedCrewAlone(t *testing.T
 		t.Fatalf("delete status = %d, body %s", rr.Code, rr.Body.String())
 	}
 
-	if got := daemon.survivingContainers("data-crew"); len(got) == 0 {
-		t.Errorf("deleting one workspace's crew force-removed the OTHER workspace's live sidecars " +
-			"(both carry the label crewship.crew=data-crew). That is a running database in another " +
-			"tenant, killed by a delete in this one.")
+	if !daemon.hasContainer("crew-theirs") {
+		t.Errorf("deleting one workspace's crew force-removed the OTHER workspace's live sidecars. " +
+			"That is a running database in another tenant, killed by a delete in this one.")
 	}
-	if got := daemon.survivingVolumes("data-crew"); len(got) == 0 {
-		t.Errorf("deleting one workspace's crew deleted the OTHER workspace's sidecar data volumes " +
-			"(both are named <prefix>-svc-data-crew-vol-*). Their Postgres data directory is gone.")
+	if !daemon.hasVolume("crew-theirs") {
+		t.Errorf("deleting one workspace's crew deleted the OTHER workspace's sidecar data volumes. " +
+			"Their Postgres data directory is gone.")
 	}
-	// And the operator has to be told the teardown did not happen, or they are
-	// left believing volumes were removed that are still on disk.
-	if !strings.Contains(rr.Body.String(), "sidecar") {
-		t.Errorf("the response says nothing about the skipped sidecar teardown: %s", rr.Body.String())
+	// The other half: sharing a slug must no longer cost this crew its own
+	// cleanup. Before #1732 the teardown refused outright in exactly this case,
+	// leaving a postgres and a volume nothing would ever collect.
+	if daemon.hasContainer("crew-mine") {
+		t.Errorf("the deleted crew's own sidecars survived because ANOTHER workspace happens to use " +
+			"the same slug — an id-keyed teardown has no reason to withhold that (#1732)")
+	}
+	if daemon.hasVolume("crew-mine") {
+		t.Errorf("the deleted crew's own sidecar volumes survived because another workspace uses the " +
+			"same slug (#1732)")
 	}
 }
 
-// The volume sweep is by name PREFIX, so `data` reaches `data-vol-x`.
+// The old volume sweep was by name PREFIX, so deleting `data` also reached
+// `data-vol-x`. Selecting on the crew id label closes it whatever the slugs are.
 func TestCrewDeleteDoesNotSweepACrewWhoseSlugExtendsItsVolumePrefix(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
@@ -183,9 +187,9 @@ func TestCrewDeleteDoesNotSweepACrewWhoseSlugExtendsItsVolumePrefix(t *testing.T
 	mustExec(t, db, `INSERT INTO crews (id, workspace_id, name, slug, services_json)
 		VALUES ('crew-long', ?, 'long', 'data-vol-x', ?)`, wsID, redisServicesJSON)
 
-	daemon := newSlugKeyedDaemon()
-	daemon.start("data", "short")
-	daemon.start("data-vol-x", "long")
+	daemon := newIDKeyedDaemon()
+	daemon.start("crew-short", "short")
+	daemon.start("crew-long", "long")
 
 	h := NewCrewHandler(db, newTestLogger())
 	h.SetContainer(daemon)
@@ -199,14 +203,17 @@ func TestCrewDeleteDoesNotSweepACrewWhoseSlugExtendsItsVolumePrefix(t *testing.T
 	if rr.Code != 200 {
 		t.Fatalf("delete status = %d, body %s", rr.Code, rr.Body.String())
 	}
-	if got := daemon.survivingVolumes("data-vol-x"); len(got) == 0 {
+	if !daemon.hasVolume("crew-long") {
 		t.Error("deleting crew \"data\" swept the volumes of crew \"data-vol-x\" — the volume " +
 			"prefix <prefix>-svc-data-vol- matches <prefix>-svc-data-vol-x-vol-<name>")
 	}
+	if daemon.hasVolume("crew-short") {
+		t.Error("the deleted crew's own sidecar volumes survived its delete (#1709)")
+	}
 }
 
-// A crew whose slug cannot be read cannot have its sidecars removed — the
-// teardown is keyed on the slug — so the delete must not happen at all.
+// A crew whose slug cannot be read cannot have its sidecars named for an
+// operator, so the delete must not happen at all.
 //
 // The alternative is the outcome this whole change is meant to stop: the crew
 // gone from every read surface, {"success":true} on the wire, and a Postgres
@@ -220,7 +227,7 @@ func TestCrewDeleteRefusesWhenTheCrewHasNoSlugToTearDownBy(t *testing.T) {
 	mustExec(t, db, `INSERT INTO crews (id, workspace_id, name, slug, services_json)
 		VALUES ('crew-noslug', ?, 'No Slug', '', ?)`, wsID, redisServicesJSON)
 
-	daemon := newSlugKeyedDaemon()
+	daemon := newIDKeyedDaemon()
 	h := NewCrewHandler(db, newTestLogger())
 	h.SetContainer(daemon)
 
@@ -244,16 +251,16 @@ func TestCrewDeleteRefusesWhenTheCrewHasNoSlugToTearDownBy(t *testing.T) {
 	}
 }
 
-// An unambiguous slug must still be torn down — the guard must not become a
-// blanket refusal that silently reinstates #1709.
+// A crew nobody shares a slug with must still be torn down — the naming change
+// must not become a blanket refusal that silently reinstates #1709.
 func TestCrewDeleteStillRemovesSidecarsWhenTheSlugIsUnambiguous(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 	seedCrewWithServices(t, db, "crew-solo", wsID, "solo-crew")
 
-	daemon := newSlugKeyedDaemon()
-	daemon.start("solo-crew", "mine")
+	daemon := newIDKeyedDaemon()
+	daemon.start("crew-solo", "mine")
 
 	h := NewCrewHandler(db, newTestLogger())
 	h.SetContainer(daemon)
@@ -267,10 +274,10 @@ func TestCrewDeleteStillRemovesSidecarsWhenTheSlugIsUnambiguous(t *testing.T) {
 	if rr.Code != 200 {
 		t.Fatalf("delete status = %d, body %s", rr.Code, rr.Body.String())
 	}
-	if got := daemon.survivingContainers("solo-crew"); len(got) != 0 {
-		t.Errorf("the crew's own sidecars survived its delete: %v (#1709)", got)
+	if daemon.hasContainer("crew-solo") {
+		t.Error("the crew's own sidecars survived its delete (#1709)")
 	}
-	if got := daemon.survivingVolumes("solo-crew"); len(got) != 0 {
-		t.Errorf("the crew's own sidecar volumes survived its delete: %v (#1709)", got)
+	if daemon.hasVolume("crew-solo") {
+		t.Error("the crew's own sidecar volumes survived its delete (#1709)")
 	}
 }

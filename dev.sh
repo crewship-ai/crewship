@@ -364,7 +364,17 @@ start_go() {
   # the health-check budget, causing false "timed out" warnings.
   local binary="/tmp/crewship${S}-dev"
   log "Building crewship..."
-  if ! (cd "$PROJECT_DIR" && go build -o "$binary" ./cmd/crewship) 2>&1; then
+  # Stamp the build with the identity of the tree we are ACTUALLY building
+  # (#1686). A dev slot carries no release ldflags, so `commit` on
+  # GET /api/v1/system/version — and therefore `crewship version --remote` —
+  # would otherwise come entirely from the Go toolchain's vcs.* stamps, and
+  # those describe the enclosing clone when PROJECT_DIR is a git worktree
+  # nested inside one (.claude/worktrees/<name>/). The result was a server
+  # confidently reporting a commit it was not running. build-stamp.sh asks git,
+  # which honours the worktree's `.git` file; see internal/buildinfo.
+  local stamp_ldflags=""
+  stamp_ldflags="$("$PROJECT_DIR/scripts/build-stamp.sh" ldflags "$PROJECT_DIR" 2>/dev/null || true)"
+  if ! (cd "$PROJECT_DIR" && go build -ldflags "$stamp_ldflags" -o "$binary" ./cmd/crewship) 2>&1; then
     err "Go build failed -- check errors above"
     return 1
   fi

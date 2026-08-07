@@ -1,10 +1,13 @@
 package main
 
 // finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog
-// contains the last twenty generic request bodies in the identity-adjacent
-// API surface. The shapes below are based on the concrete handler decoders:
+// contains the last generic request bodies in the identity-adjacent API
+// surface. The shapes below are based on the concrete handler decoders:
 // bodyless actions use an explicit empty object, uploads use multipart form
 // fields, and webhook dispatch remains an intentionally arbitrary JSON value.
+//
+// The two `notifications` entries the function name still advertises were the
+// entity-scoped feed's mark-read pair, removed with their routes in #1751.
 func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	str := func() map[string]any { return map[string]any{"type": "string"} }
 	boolean := func() map[string]any { return map[string]any{"type": "boolean"} }
@@ -71,8 +74,6 @@ func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (
 		"POST /api/v1/integrations/composio/accounts/{accountId}/refresh":        {Request: empty},
 		"POST /api/v1/credentials/{credentialId}/reveal":                         {Request: ref("FinalAuthRevealRequest")},
 		"POST /api/v1/credentials/{credentialId}/test":                           {Request: ref("FinalAuthCredentialTestRequest")},
-		"POST /api/v1/notifications/{notificationId}/read":                       {Request: empty},
-		"POST /api/v1/notifications/read-all":                                    {Request: empty},
 		"POST /api/v1/users/me/avatar":                                           {Request: ref("FinalAuthAvatarUploadRequest")},
 		"PUT /api/v1/users/me/peer-consent":                                      {Request: ref("FinalAuthPeerConsentRequest")},
 		"PUT /api/v1/me/preferences/{key}":                                       {Request: ref("FinalAuthUserPreferenceValue")},
