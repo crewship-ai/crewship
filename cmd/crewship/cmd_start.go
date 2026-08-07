@@ -443,6 +443,11 @@ var startCmd = &cobra.Command{
 				if err := autoReg.Refresh(ctx); err != nil {
 					logger.Error("automation: initial registry load failed", "err", err)
 				}
+				// Without this the registry prices every hop at depth 1 and a
+				// composed cycle re-enters the process with a fresh budget —
+				// which is exactly how a two-rule loop ran 59 hops past a cap
+				// of 8.
+				autoReg.SetDepthSource(pipeline.NewRunDepthReader(deps.DB))
 				autoReg.Start(ctx)
 				defer autoReg.Stop()
 				jw.AddCommitObserver(autoReg.Observer)

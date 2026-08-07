@@ -522,11 +522,28 @@ func TestFlush_StampsTheAutomationAsTheTrigger(t *testing.T) {
 // MaxPerHour is set far above the hop budget on purpose: the rate limiter must
 // not be what makes this test pass. A green run here has to mean the depth cap
 // held.
+
+// enqueuedDepths answers ChainDepthOf out of what the recording enqueuer
+// already holds. In production the depth is read from pipeline_runs, written
+// there when the deferred row fired; here the enqueued row IS the record, so
+// this models the same fact without a database.
+type enqueuedDepths struct{ enq *recordingEnqueuer }
+
+func (d enqueuedDepths) ChainDepthOf(_ context.Context, _, runID string) (int, bool, error) {
+	for i := 0; i < d.enq.n(); i++ {
+		if pr := d.enq.at(i); pr.ID == runID {
+			return pr.ChainDepth, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
 func TestObserver_ClosedLoopStopsAtMaxChainDepth(t *testing.T) {
 	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
 	enq := &recordingEnqueuer{}
 	jrn := &recordingJournal{}
 	reg := NewRegistry(nil, enq, Options{Journal: jrn, Now: func() time.Time { return now }})
+	reg.SetDepthSource(enqueuedDepths{enq})
 
 	r := rule("a1", "ws_1", "mission.status_change")
 	r.MaxPerHour = 10000

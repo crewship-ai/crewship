@@ -209,6 +209,10 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		// automation-fired run reported a cron.
 		TriggeredVia:  triggeredVia,
 		TriggeredByID: triggeredByID,
+		// Spend from the same budget a call_pipeline hop spends from. A
+		// deferred run is where a composed cycle re-enters the process, so
+		// dropping the depth here is what made the cap unreachable.
+		ChainDepth: pr.ChainDepth,
 		// Thread the enqueuing user through so a notify step's `to: trigger`
 		// in this deferred run resolves to them (issue #842 Phase 1); empty
 		// keeps the workspace-notice fallback.

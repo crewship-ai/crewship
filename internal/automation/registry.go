@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -22,6 +23,16 @@ import (
 // dependency would make unobservable.
 type Enqueuer interface {
 	Enqueue(ctx context.Context, pr pipeline.PendingRun) (string, bool, error)
+}
+
+// DepthSource answers how deep the run that produced a triggering entry
+// already was. Read in Flush, never in Observer: Observer is on the journal
+// write path.
+//
+// A seam rather than a *sql.DB so the registry stays testable without one,
+// and so the query lives with the rows it reads.
+type DepthSource interface {
+	ChainDepthOf(ctx context.Context, workspaceID, runID string) (int, bool, error)
 }
 
 // loader supplies the rule set. The Registry only ever reads, and only off
@@ -63,6 +74,7 @@ type Options struct {
 type Registry struct {
 	store   loader
 	enq     Enqueuer
+	depths  DepthSource
 	journal journal.Emitter
 	logger  *slog.Logger
 	now     func() time.Time
@@ -138,6 +150,13 @@ type intent struct {
 	inputsJSON     string
 	fireAt         time.Time
 	debounceMaxAt  time.Time
+	// originRunID is the run whose work produced the triggering entry, taken
+	// from the entry at match time — NOT looked up, because Observer runs on
+	// the journal write path. Flush prices the hop from it, off that path.
+	originRunID string
+	// chainDepth is what the enqueued run will start at: the origin run's
+	// depth + 1, or 1 when a human caused the entry.
+	chainDepth int
 	// coalesced counts how many matched entries folded into this one run.
 	// Carried into the run metadata so "why did this fire once for 200
 	// events" is answerable from the run, not from a log grep.
@@ -147,6 +166,40 @@ type intent struct {
 // NewRegistry builds a Registry. store may be nil for a registry that is
 // loaded directly with Load (tests, and the proof that Observer never needs
 // a database).
+// SetDepthSource injects the composition-budget reader. Optional: without
+// one every automation hop starts at depth 1, which is the pre-existing
+// behaviour and is stated as such rather than silently assumed safe.
+func (r *Registry) SetDepthSource(d DepthSource) { r.depths = d }
+
+// emitDepthExceeded records a refused hop. Loud on purpose: a cap that
+// refuses silently is a cap nobody can debug, and this entry is how an
+// operator finds out a loop exists at all.
+func (r *Registry) emitDepthExceeded(ctx context.Context, it *intent, depth int) {
+	r.logger.Warn("automation: composed chain refused at the depth cap",
+		"automation_id", it.automationID, "routine", it.pipelineSlug,
+		"chain_depth", depth, "origin_run_id", it.originRunID)
+	if r.journal == nil {
+		return
+	}
+	_, _ = r.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: it.workspaceID,
+		Type:        journal.EntryAutomationDepthExceeded,
+		Severity:    journal.SeverityError,
+		ActorType:   journal.ActorSystem,
+		ActorID:     "automation",
+		Summary: fmt.Sprintf("automation %q refused: composed chain would reach depth %d",
+			it.automationName, depth),
+		Payload: map[string]any{
+			"automation_id":   it.automationID,
+			"automation_name": it.automationName,
+			"routine_slug":    it.pipelineSlug,
+			"chain_depth":     depth,
+			"max_chain_depth": pipeline.MaxChainDepth,
+			"origin_run_id":   it.originRunID,
+		},
+	})
+}
+
 func NewRegistry(store loader, enq Enqueuer, opts Options) *Registry {
 	if opts.RefreshInterval <= 0 {
 		opts.RefreshInterval = 60 * time.Second
@@ -422,6 +475,14 @@ func (r *Registry) coalesceLocked(rule Resolved, e journal.Entry, key string, no
 		it.fireAt = it.debounceMaxAt
 	}
 	it.inputsJSON = renderInputsJSON(rule.Action.Inputs, e)
+	// Remember which run produced this entry so Flush can price the hop.
+	// Read here, off the entry, because Observer runs on the journal write
+	// path and must not touch the database; the LOOKUP happens in Flush.
+	// Last writer wins: a coalesced burst fires once, and the deepest
+	// contributor is the honest cost of that one run.
+	if e.TraceID != "" {
+		it.originRunID = e.TraceID
+	}
 }
 
 // Flush drains the coalesced intents into the Enqueuer and emits any queued
@@ -463,20 +524,32 @@ func (r *Registry) Flush(ctx context.Context) int {
 			"trigger_event_type": it.eventType,
 			"coalesced_events":   it.coalesced,
 		})
-		// TODO(chain-depth): an automation-fired run should inherit
-		// chain_depth = (depth of the run that produced the triggering entry)
-		// + 1, or 0 when a human caused it, and be REFUSED with
-		// journal.EntryAutomationDepthExceeded past the cap. The counter is
-		// deliberately not started here: composition makes cycles trivially
-		// constructible (automation → routine → comment → automation), and
-		// the only thing that keeps them bounded is that every composed edge
-		// joins ONE budget. That budget lives next to runCallPipelineStep's
-		// existing callPath guard in internal/pipeline/executor.go — a second
-		// counter in this package would be a second answer to "how deep are
-		// we", which is the failure mode the single guard exists to prevent.
-		// pending_runs carries no depth column today; when executor.go's
-		// chain_depth / chain_origin land, thread them through PendingRun
-		// rather than reintroducing the count here.
+		// Price the hop. The budget is ONE budget: pipeline.GuardChainDepth is
+		// the same answer runCallPipelineStep spends from, so a cycle that leaves
+		// the process through the journal and comes back cannot get a fresh
+		// allowance by changing which door it uses.
+		//
+		// The lookup is here, in Flush, and never in Observer — Observer runs on
+		// the journal write path and must not touch the database.
+		depth := 1
+		if it.originRunID != "" && r.depths != nil {
+			if d, ok, err := r.depths.ChainDepthOf(ctx, it.workspaceID, it.originRunID); err != nil {
+				// Fail CLOSED on an unreadable depth. An unknown depth that
+				// defaults to "shallow" is how a cycle buys itself a fresh
+				// budget every lap.
+				r.logger.Error("automation: chain depth unreadable, refusing the hop",
+					"err", err, "automation_id", it.automationID, "origin_run_id", it.originRunID)
+				continue
+			} else if ok {
+				depth = d + 1
+			}
+		}
+		if err := pipeline.GuardChainDepth(depth); err != nil {
+			r.emitDepthExceeded(ctx, it, depth)
+			continue
+		}
+		it.chainDepth = depth
+
 		maxAt := it.debounceMaxAt
 		if _, _, err := r.enq.Enqueue(ctx, pipeline.PendingRun{
 			ID:            newPendingRunID(),
@@ -493,6 +566,7 @@ func (r *Registry) Flush(ctx context.Context) int {
 			// reverse-engineer out of a scratchpad is provenance that drifts.
 			TriggeredVia:  pipeline.TriggeredViaAutomation,
 			TriggeredByID: it.automationID,
+			ChainDepth:    it.chainDepth,
 		}); err != nil {
 			r.logger.Error("automation: enqueue failed",
 				"err", err, "automation_id", it.automationID,

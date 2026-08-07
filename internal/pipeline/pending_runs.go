@@ -37,6 +37,10 @@ type PendingRun struct {
 	// claiming a schedule.
 	TriggeredVia  TriggeredVia
 	TriggeredByID string
+	// ChainDepth is how many composed hops led here. Threaded so a cycle
+	// that leaves the process through the journal and comes back still
+	// spends from the same budget runCallPipelineStep spends from.
+	ChainDepth int
 }
 
 // effectivePendingTrigger resolves what a fired deferred run should claim.
@@ -88,14 +92,14 @@ func (s *PendingRunStore) Enqueue(ctx context.Context, pr PendingRun) (string, b
 INSERT INTO pending_runs (
     id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     tier_override, priority, debounce_key, fire_at, expires_at, debounce_max_at,
-    invoking_user_id, triggered_via, triggered_by_id, status, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
+    invoking_user_id, triggered_via, triggered_by_id, chain_depth, status, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
 		pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
 		pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
 		nullableStr(pr.InvokingUserID),
-		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID))
+		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.ChainDepth)
 	if err != nil {
 		// Debounce race: a concurrent trigger with the same key inserted
 		// first, so the partial-unique index rejects this one. Both
@@ -180,7 +184,7 @@ func (s *PendingRunStore) DueRuns(ctx context.Context, now time.Time, limit int)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
        COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''),
-       COALESCE(triggered_via,''), COALESCE(triggered_by_id,'')
+       COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0)
 FROM pending_runs
 WHERE status = 'pending' AND fire_at <= ?
 ORDER BY priority DESC, created_at ASC
@@ -194,7 +198,7 @@ LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
 		var pr PendingRun
 		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 			&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
-			&pr.InvokingUserID, &pr.TriggeredVia, &pr.TriggeredByID); err != nil {
+			&pr.InvokingUserID, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth); err != nil {
 			return nil, err
 		}
 		out = append(out, pr)
@@ -271,4 +275,37 @@ func orJSON(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// RunDepthReader answers how deep a run already sat in a composed chain. It
+// satisfies automation.DepthSource, so the registry can price a hop without
+// importing a database handle or knowing the column's name.
+//
+// Lives here rather than in internal/automation because the row is this
+// package's: a second query for pipeline_runs.chain_depth somewhere else is
+// a second answer to "how deep are we", which is the failure the single
+// GuardChainDepth exists to prevent.
+type RunDepthReader struct{ db *sql.DB }
+
+func NewRunDepthReader(db *sql.DB) *RunDepthReader { return &RunDepthReader{db: db} }
+
+// ChainDepthOf returns the run's depth. The false return means "no such run
+// in this workspace", which the caller reads as a human-caused root — an
+// unknown run must not be treated as an ERROR, or a journal entry from any
+// other producer would refuse every rule.
+func (r *RunDepthReader) ChainDepthOf(ctx context.Context, workspaceID, runID string) (int, bool, error) {
+	if r == nil || r.db == nil || workspaceID == "" || runID == "" {
+		return 0, false, nil
+	}
+	var depth sql.NullInt64
+	err := r.db.QueryRowContext(ctx,
+		`SELECT chain_depth FROM pipeline_runs WHERE id = ? AND workspace_id = ?`,
+		runID, workspaceID).Scan(&depth)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("pending_runs: chain depth of %q: %w", runID, err)
+	}
+	return int(depth.Int64), true, nil
 }
