@@ -709,6 +709,33 @@ Config:    current
 (the runtime could not be reached). Backed by
 [`GET /api/v1/crews/{crewId}/container-status`](/api-reference/crews#container-status).
 
+`--format json` (or `yaml`) emits the endpoint's payload as it stands, which is
+how an agent reads the figures behind the `Limits:` block below — including
+fields this command does not print:
+
+```bash
+crewship crew container-status backend --format json
+```
+
+```json
+{
+  "crew_id": "cm...",
+  "status": "running",
+  "runtime_contract": "current",
+  "configured_memory_mb": 8192,
+  "configured_cpus": 2,
+  "effective_memory_mb": 4096,
+  "effective_cpus": 2,
+  "config_drift": [
+    { "field": "container_memory_mb", "configured": 8192, "effective": 4096 }
+  ]
+}
+```
+
+`config_drift` is absent when the container matches its crew, and when the
+provider reported no limits to compare against. An absent `effective_*` is
+"this provider said nothing", never zero.
+
 ### `Config:` — is this container running today's configuration?
 
 A crew container is created once and reused for as long as it keeps running.
@@ -770,12 +797,27 @@ line at all means they agree, or that the provider reported no limits to
 compare — an absent limit is not a limit of zero.
 
 A stopped crew fixes itself here too: a container whose limits no longer match
-its crew is rebuilt rather than restarted the next time the crew is woken. A
-running one is never torn down for a resize — unlike a network-policy change,
-where the stale policy is a live exposure, a stale memory limit is not, and
-killing a run to apply it would cost more than it saves. `crewship crew update`
-says so on the spot when the crew is running, so the gap does not have to be
-discovered here.
+its crew is rebuilt rather than restarted the next time the crew is woken. The
+report says which of the two you are looking at, because the answer to "what do
+I do about it" is different:
+
+```
+Container: stopped
+Limits:    configured, not yet in effect
+           container_memory_mb: 8192 configured, container created with 4096
+           Container limits are applied when the container is created. This container is
+           stopped, so the crew is recreated with the configured limits the next time it starts.
+           No action needed.
+```
+
+No remedy is named there on purpose — `restart-agents` on a stopped crew
+answers `restarted=0`, which reads as the report being wrong.
+
+A running container is never torn down for a resize — unlike a network-policy
+change, where the stale policy is a live exposure, a stale memory limit is not,
+and killing a run to apply it would cost more than it saves. `crewship crew
+update` says so on the spot when the crew is running, so the gap does not have
+to be discovered here.
 
 ---
 
