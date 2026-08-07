@@ -26,13 +26,32 @@ import (
 
 const stampScript = "../../scripts/build-stamp.sh"
 
+// requireStampScript fails — deliberately never skips — when the chokepoint is
+// absent. build-stamp.sh is a tracked file in this repository, not an optional
+// piece of the environment, so "not there" is never a platform condition to
+// tolerate: it means the thing these tests exist to pin has been deleted or
+// renamed, which is exactly the regression they guard against. A skip would
+// report that as `ok`.
+func requireStampScript(t *testing.T) {
+	t.Helper()
+	if _, err := os.Stat(stampScript); err != nil {
+		t.Fatalf("%s missing: the build drivers have nowhere to get a worktree-correct stamp from (#1686): %v", stampScript, err)
+	}
+}
+
 // nestedWorktree builds the exact failing layout: a clone with a linked
 // worktree inside its own working tree, the two on different commits, and the
 // PARENT dirty while the worktree is clean. Returns (parentDir, worktreeDir).
 func nestedWorktree(t *testing.T) (string, string) {
 	t.Helper()
+	// Fail, don't skip. git is a hard requirement of this repo — the Makefile
+	// and dev.sh both shell out to it for the stamp, and every CI job obtains
+	// the tree with it — so its absence means the build tooling is broken, not
+	// that this platform cannot run the test. The repo's other git-plumbing
+	// tests (scripts/lint-migrations, scripts/lint-tsformat) already fail on
+	// the same condition; a skip here would quietly retire #1686's only gate.
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
+		t.Fatalf("git not on PATH: %v", err)
 	}
 	root := t.TempDir()
 	parent := filepath.Join(root, "clone")
@@ -97,9 +116,7 @@ func nestedWorktree(t *testing.T) (string, string) {
 
 func stamp(t *testing.T, field, dir string) string {
 	t.Helper()
-	if _, err := os.Stat(stampScript); err != nil {
-		t.Fatalf("%s missing: the build drivers have nowhere to get a worktree-correct stamp from (#1686): %v", stampScript, err)
-	}
+	requireStampScript(t)
 	out, err := exec.Command(stampScript, field, dir).Output()
 	if err != nil {
 		t.Fatalf("build-stamp.sh %s %s: %v", field, dir, err)
@@ -171,9 +188,7 @@ func TestBuildStamp_UntrackedCountsAsDirty(t *testing.T) {
 // clean. Emitting "false" here would ship a confident wrong answer — the exact
 // failure mode the package was written to avoid.
 func TestBuildStamp_NonRepoIsUnknownNotClean(t *testing.T) {
-	if _, err := os.Stat(stampScript); err != nil {
-		t.Skipf("%s missing: %v", stampScript, err)
-	}
+	requireStampScript(t)
 	dir := t.TempDir()
 	out, err := exec.Command(stampScript, "dirty", dir).Output()
 	if err != nil {
@@ -213,9 +228,7 @@ func TestBuildStamp_LdflagsCarryTheWorktreesIdentity(t *testing.T) {
 // as "stamped" downstream, and buildinfo would have to guess which empty
 // meant what.
 func TestBuildStamp_LdflagsOmitWhatItCannotKnow(t *testing.T) {
-	if _, err := os.Stat(stampScript); err != nil {
-		t.Skipf("%s missing: %v", stampScript, err)
-	}
+	requireStampScript(t)
 	got := stamp(t, "ldflags", t.TempDir())
 
 	if strings.Contains(got, "main.commit") {
