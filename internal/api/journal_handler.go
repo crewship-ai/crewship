@@ -347,7 +347,12 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 		AgentID:     qs.Get("agent_id"),
 		MissionID:   qs.Get("mission_id"),
 		TraceID:     qs.Get("trace_id"),
-		Cursor:      qs.Get("cursor"),
+		// run_id answers "everything that happened during this run",
+		// whichever engine ran it — see journal.Query.RunID. trace_id
+		// alone reaches ad-hoc agent runs only; routine runs correlate
+		// via actor_id and payload.run_id instead.
+		RunID:  qs.Get("run_id"),
+		Cursor: qs.Get("cursor"),
 	}
 	if v := qs.Get("crew_ids"); v != "" {
 		for _, s := range strings.Split(v, ",") {

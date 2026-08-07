@@ -40,10 +40,23 @@ type Query struct {
 	// ActorID: runID on every emit instead) — ActorID is the filter
 	// that reaches those. Combines AND with every other filter.
 	ActorID string
-	Since   time.Time
-	Until   time.Time
-	Cursor  string // opaque — set from a prior page's last entry ID+TS
-	Limit   int
+	// RunID answers "everything that happened during this run", whichever
+	// engine ran it. A run id reaches the journal by three doors and which
+	// one depends on the engine: ad-hoc agent runs stamp trace_id
+	// (internal/api/assignments_run.go), routine runs stamp actor_id
+	// (internal/pipeline/journal.go) AND payload.run_id, the latter surfaced
+	// as the generated column run_id (v120, indexed idx_journal_ws_run).
+	//
+	// TraceID and ActorID already existed but they AND together, so a caller
+	// setting both to the same run id got zero rows — the one shape that
+	// looks most like the right question. RunID ORs the doors instead, which
+	// is the rule internal/api/pipeline_runs.go:452 arrived at independently
+	// for the run-log console. Combines AND with every other filter.
+	RunID  string
+	Since  time.Time
+	Until  time.Time
+	Cursor string // opaque — set from a prior page's last entry ID+TS
+	Limit  int
 
 	// FTSQuery is a free-text search applied via the journal_entries_fts
 	// virtual table (migration 55). When non-empty, List joins the FTS5
@@ -105,6 +118,13 @@ func buildJournalFilters(q Query) (conds []string, args []any) {
 	if q.ActorID != "" {
 		conds = append(conds, "actor_id = ?")
 		args = append(args, q.ActorID)
+	}
+	if q.RunID != "" {
+		// One parenthesised OR, appended as a single condition, so it ANDs
+		// with its neighbours instead of leaking an OR into the WHERE chain
+		// and quietly widening every other filter.
+		conds = append(conds, "(trace_id = ? OR actor_id = ? OR run_id = ?)")
+		args = append(args, q.RunID, q.RunID, q.RunID)
 	}
 	if len(q.Types) > 0 {
 		conds = append(conds, "entry_type IN ("+sqlInPlaceholders(len(q.Types))+")")

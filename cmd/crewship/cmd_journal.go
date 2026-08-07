@@ -37,7 +37,8 @@ Examples:
   crewship journal --mission MIS-42 --format json
   crewship journal --query "OOMKilled" --since 24h
   crewship journal --priority permanent,high
-  crewship journal --trace-id <run-id>       # one run's spans
+  crewship journal --trace-id <run-id>       # one AGENT run's spans
+  crewship journal --run-id <run-id>        # one run, agent or routine
   crewship journal get j_abc                  # single entry
   crewship journal count --severity error    # total matching count`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,6 +55,7 @@ Examples:
 		agentID, _ := cmd.Flags().GetString("agent")
 		missionID, _ := cmd.Flags().GetString("mission")
 		traceID, _ := cmd.Flags().GetString("trace-id")
+		runID, _ := cmd.Flags().GetString("run-id")
 		typeFilter, _ := cmd.Flags().GetString("type")
 		excludeType, _ := cmd.Flags().GetString("exclude-type")
 		severityFilter, _ := cmd.Flags().GetString("severity")
@@ -96,6 +98,9 @@ Examples:
 		}
 		if traceID != "" {
 			q.Set("trace_id", traceID)
+		}
+		if runID != "" {
+			q.Set("run_id", runID)
 		}
 		if typeFilter != "" {
 			q.Set("entry_type", typeFilter)
@@ -249,6 +254,11 @@ func init() {
 	journalCmd.Flags().String("agent", "", "Filter by agent ID")
 	journalCmd.Flags().String("mission", "", "Filter by mission ID")
 	journalCmd.Flags().String("trace-id", "", "Filter by run/trace ID — narrows to one run's spans")
+	// --trace-id only reaches ad-hoc AGENT runs: routine runs never set
+	// trace_id, they stamp actor_id and payload.run_id instead. --run-id
+	// matches all three, so it is the flag that works whichever engine ran
+	// the work. See journal.Query.RunID.
+	journalCmd.Flags().String("run-id", "", "Filter to one run, whichever engine ran it (agent or routine)")
 	journalCmd.Flags().String("type", "", "Comma-separated entry types (peer.conversation,keeper.decision,...)")
 	journalCmd.Flags().String("exclude-type", "", "Comma-separated entry types to exclude (NOT IN); useful for hiding container.metrics noise")
 	journalCmd.Flags().String("severity", "", "Comma-separated severities (info,notice,warn,error)")
@@ -266,6 +276,7 @@ func init() {
 	journalCountCmd.Flags().String("agent", "", "Filter by agent ID")
 	journalCountCmd.Flags().String("mission", "", "Filter by mission ID")
 	journalCountCmd.Flags().String("trace-id", "", "Filter by run/trace ID")
+	journalCountCmd.Flags().String("run-id", "", "Filter to one run, whichever engine ran it (agent or routine)")
 	journalCountCmd.Flags().String("type", "", "Comma-separated entry types")
 	journalCountCmd.Flags().String("exclude-type", "", "Comma-separated entry types to exclude")
 	journalCountCmd.Flags().String("severity", "", "Comma-separated severities")
@@ -628,6 +639,7 @@ func buildCountQuery(cmd *cobra.Command, client *cli.Client) (url.Values, error)
 	agentID, _ := cmd.Flags().GetString("agent")
 	missionID, _ := cmd.Flags().GetString("mission")
 	traceID, _ := cmd.Flags().GetString("trace-id")
+	runID, _ := cmd.Flags().GetString("run-id")
 	typeFilter, _ := cmd.Flags().GetString("type")
 	excludeType, _ := cmd.Flags().GetString("exclude-type")
 	severityFilter, _ := cmd.Flags().GetString("severity")
@@ -663,6 +675,9 @@ func buildCountQuery(cmd *cobra.Command, client *cli.Client) (url.Values, error)
 	}
 	if traceID != "" {
 		q.Set("trace_id", traceID)
+	}
+	if runID != "" {
+		q.Set("run_id", runID)
 	}
 	if typeFilter != "" {
 		q.Set("entry_type", typeFilter)
