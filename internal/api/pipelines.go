@@ -36,6 +36,11 @@ type PipelineHandler struct {
 	codeRunner   pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
 	scriptRunner pipeline.ScriptRunner    // optional; nil → type:script steps fail closed with a wiring hint
 	signals      *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
+	// crewshipActions dispatches `crewship` steps over loopback HTTP to the
+	// daemon's own internal API. Set by the router once the loopback URL and
+	// internal token are known; nil → crewship steps fail closed with a
+	// wiring hint (they are pure side effect — silence would be worse).
+	crewshipActions pipeline.CrewshipActions
 	// runVerdict resolves the post-run outcome verdict's provider+model
 	// (#1403) for routine runs, at the moment a run terminates — same
 	// wiring as internal.InternalHandler's for ad-hoc agent runs, and
@@ -138,6 +143,24 @@ func (h *PipelineHandler) SetSaveTokenSecret(secret []byte) {
 // and list-runs falls back to the legacy scan path.
 func (h *PipelineHandler) SetRunStore(s *pipeline.RunStore) {
 	h.runStore = s
+}
+
+// SetCrewshipActions wires the `crewship` step kind's dispatcher. Called by
+// the router after options are applied, since the loopback URL and internal
+// token arrive that way.
+func (h *PipelineHandler) SetCrewshipActions(a pipeline.CrewshipActions) {
+	h.crewshipActions = a
+}
+
+// CrewshipActions exposes the wired dispatcher (nil until set) so the
+// boot-time executors in cmd/crewship/cmd_start.go share it with the HTTP
+// path — a step kind that works when you click Run and fails at 03:00 is the
+// exact drift NewWiredExecutor exists to prevent.
+func (h *PipelineHandler) CrewshipActions() pipeline.CrewshipActions {
+	if h == nil {
+		return nil
+	}
+	return h.crewshipActions
 }
 
 // SetSignalRegistry wires the shared in-process run-signal registry so
@@ -278,6 +301,11 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 		ScriptRunner: h.scriptRunner,
 		Signals:      h.signals,
 		RunVerdict:   h.runVerdict,
+		// Dispatch gates on the in-process call_pipeline path, so a nested
+		// run faces the same integration/resource/credential preconditions
+		// InternalRun applies to the agent-facing one.
+		Preflight: h.RunPreflight(),
+		Crewship:  h.crewshipActions,
 		// Shared verdict WaitGroup: every ephemeral executor this handler
 		// builds registers its async verdict goroutine here so shutdown can
 		// drain them all (DrainVerdicts) before the journal writer closes.

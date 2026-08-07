@@ -187,7 +187,7 @@ func TestBuildNestedRunInput_Propagation(t *testing.T) {
 	target := &Pipeline{AuthorCrewID: "crew_child", AuthorAgentID: "agent_child", Slug: "child"}
 	dsl := &DSL{Name: "child"}
 	child := buildNestedRunInput(parent, target, dsl, map[string]any{"k": "v"},
-		"run_parent", 0.02, []string{"parent-p"})
+		"run_parent", 0.02, []string{"parent-p"}, 1)
 
 	if child.InvokingUserID != "user_42" {
 		t.Errorf("InvokingUserID not propagated: %q", child.InvokingUserID)

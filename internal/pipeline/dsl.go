@@ -198,6 +198,10 @@ func stepBodyField(t StepType) string {
 		return "notify"
 	case StepScript:
 		return "script"
+	case StepCrewship:
+		// The verb is what a crewship step's body checks are about; args
+		// errors name themselves in the message.
+		return "action"
 	default:
 		return "type"
 	}
@@ -423,6 +427,17 @@ func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}
 
 	// Conditional `if` expression
 	walk(base+"/if", st.If)
+
+	// crewship args. walkForeign, not walk: an issue body or comment is prose
+	// a person wrote, and prose legitimately quotes other people's template
+	// syntax. A ref that names one of OUR namespaces and gets it wrong is
+	// still caught — a comment that renders with a hole in it is the same
+	// silent-hole failure the notify walk exists to prevent, on the surface
+	// that is even more public.
+	_ = walkNestedTemplates(st.Args, func(s string) error {
+		walkForeign(base+"/args", s)
+		return nil // every bad ref, not just the first
+	})
 
 	// HTTP step fields
 	if st.HTTP != nil {

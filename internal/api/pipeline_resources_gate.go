@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -65,20 +66,50 @@ func declaredResources(d *pipeline.DSL) ([]pipeline.DatastoreRef, []pipeline.Too
 // Datastores are identical to resources.datastores, so there is no divergence
 // on the datastore side.
 func (h *PipelineHandler) gateMissingResources(w http.ResponseWriter, r *http.Request, workspaceID, crewID, crewName string, datastores []pipeline.DatastoreRef, tools []pipeline.ToolRef) bool {
+	missing := h.findMissingResources(r.Context(), workspaceID, crewID, datastores, tools)
+	if len(missing) == 0 {
+		return false
+	}
+
+	if crewName == "" {
+		crewName = lookupCrewName(r.Context(), h.db, workspaceID, crewID)
+	}
+	if crewName == "" {
+		crewName = crewID
+	}
+	detail := missingResourcesDetail(missing, crewName)
+
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"type":              "about:blank",
+		"title":             http.StatusText(http.StatusUnprocessableEntity),
+		"status":            http.StatusUnprocessableEntity,
+		"detail":            detail,
+		"instance":          r.URL.Path,
+		"missing_resources": missing,
+	})
+	return true
+}
+
+// findMissingResources is the gate's DECISION with no HTTP in it — see
+// findMissingIntegrations for why the split exists. The fail-open contract
+// lives here so both renderings inherit it identically.
+func (h *PipelineHandler) findMissingResources(ctx context.Context, workspaceID, crewID string, datastores []pipeline.DatastoreRef, tools []pipeline.ToolRef) []missingResource {
 	if len(datastores) == 0 && len(tools) == 0 {
-		return false // no-op fast path
+		return nil // no-op fast path
 	}
 	if h.db == nil || crewID == "" {
 		h.logger.Warn("resource gate: no crew/db to resolve against, allowing run (fail-open)",
 			"workspace_id", workspaceID, "crew_id", crewID)
-		return false
+		return nil
 	}
-	res, err := ResolveCrewResources(r.Context(), h.db, crewID)
+	res, err := ResolveCrewResources(ctx, h.db, crewID)
 	if err != nil {
 		// FAIL-OPEN — see the doc comment. Never block on a resolver bug.
 		h.logger.Warn("resource gate: resolution failed, allowing run (fail-open)",
 			"workspace_id", workspaceID, "crew_id", crewID, "error", err)
-		return false
+		return nil
 	}
 
 	haveDatastore := make(map[string]bool, len(res.Datastores))
@@ -121,32 +152,14 @@ func (h *PipelineHandler) gateMissingResources(w http.ResponseWriter, r *http.Re
 		}
 		missing = append(missing, missingResource{Kind: "tool", Type: typ, Name: name})
 	}
-	if len(missing) == 0 {
-		return false
-	}
+	return missing
+}
 
-	if crewName == "" {
-		crewName = lookupCrewName(r.Context(), h.db, workspaceID, crewID)
-	}
-	if crewName == "" {
-		crewName = crewID
-	}
-
+// missingResourcesDetail is the human sentence both renderings use.
+func missingResourcesDetail(missing []missingResource, crewName string) string {
 	parts := make([]string, 0, len(missing))
 	for _, m := range missing {
 		parts = append(parts, m.Kind+" "+m.Type)
 	}
-	detail := fmt.Sprintf("routine needs %s, not available to crew %q", strings.Join(parts, ", "), crewName)
-
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"type":              "about:blank",
-		"title":             http.StatusText(http.StatusUnprocessableEntity),
-		"status":            http.StatusUnprocessableEntity,
-		"detail":            detail,
-		"instance":          r.URL.Path,
-		"missing_resources": missing,
-	})
-	return true
+	return fmt.Sprintf("routine needs %s, not available to crew %q", strings.Join(parts, ", "), crewName)
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -33,21 +34,50 @@ import (
 // {{ secrets.* }} resolver never fails deep in a runner with an opaque auth
 // error instead of a clear, actionable 422.
 func (h *PipelineHandler) gateMissingCredentials(w http.ResponseWriter, r *http.Request, workspaceID, crewID, crewName string, dsl *pipeline.DSL) bool {
+	missing := h.findMissingCredentials(r.Context(), workspaceID, crewID, dsl)
+	if len(missing) == 0 {
+		return false
+	}
+
+	if crewName == "" {
+		crewName = lookupCrewName(r.Context(), h.db, workspaceID, crewID)
+	}
+	if crewName == "" {
+		crewName = crewID
+	}
+	detail := missingCredentialsDetail(missing, crewName)
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"type":                "about:blank",
+		"title":               http.StatusText(http.StatusUnprocessableEntity),
+		"status":              http.StatusUnprocessableEntity,
+		"detail":              detail,
+		"instance":            r.URL.Path,
+		"missing_credentials": missing,
+	})
+	return true
+}
+
+// findMissingCredentials is the gate's DECISION with no HTTP in it — see
+// findMissingIntegrations for why the split exists. The fail-open contract
+// lives here so both renderings inherit it identically.
+func (h *PipelineHandler) findMissingCredentials(ctx context.Context, workspaceID, crewID string, dsl *pipeline.DSL) []string {
 	required := pipeline.RequiredCredentialTypes(dsl)
 	if len(required) == 0 {
-		return false // no-op fast path
+		return nil // no-op fast path
 	}
 	if h.db == nil {
 		h.logger.Warn("credential gate: no db to probe against, allowing run (fail-open)",
 			"workspace_id", workspaceID, "crew_id", crewID)
-		return false
+		return nil
 	}
 	probe := pipeline.NewVaultCredentialProbe(h.db)
 	llmProbe := pipeline.NewAnthropicLLMCredentialProbe(h.db)
 	scope := pipeline.RunScope{WorkspaceID: workspaceID, AuthorCrewID: crewID}
 	var missing []string
 	for _, credType := range required {
-		ok, err := probe(r.Context(), scope, credType)
+		ok, err := probe(ctx, scope, credType)
 		if err != nil {
 			// FAIL-OPEN — a probe bug must not block runs; bias to availability.
 			h.logger.Warn("credential gate: probe failed, treating as available (fail-open)",
@@ -67,7 +97,7 @@ func (h *PipelineHandler) gateMissingCredentials(w http.ResponseWriter, r *http.
 		// AI_CLI_TOKEN (or a key pinned to a non-author crew) for an api_key
 		// requirement.
 		if pipeline.IsAnthropicLLMCredentialType(credType) {
-			llmOK, llmErr := llmProbe(r.Context(), workspaceID)
+			llmOK, llmErr := llmProbe(ctx, workspaceID)
 			if llmErr != nil {
 				// FAIL-OPEN, same bias to availability as the primary probe.
 				h.logger.Warn("credential gate: anthropic probe failed, treating as available (fail-open)",
@@ -80,30 +110,14 @@ func (h *PipelineHandler) gateMissingCredentials(w http.ResponseWriter, r *http.
 		}
 		missing = append(missing, credType)
 	}
-	if len(missing) == 0 {
-		return false
-	}
+	return missing
+}
 
-	if crewName == "" {
-		crewName = lookupCrewName(r.Context(), h.db, workspaceID, crewID)
-	}
-	if crewName == "" {
-		crewName = crewID
-	}
-	detail := fmt.Sprintf("routine requires credential of type %q not present in the vault for crew %q", missing[0], crewName)
+// missingCredentialsDetail is the human sentence both renderings use.
+func missingCredentialsDetail(missing []string, crewName string) string {
 	if len(missing) > 1 {
-		detail = fmt.Sprintf("routine requires %d credentials not present in the vault for crew %q: %s",
+		return fmt.Sprintf("routine requires %d credentials not present in the vault for crew %q: %s",
 			len(missing), crewName, strings.Join(missing, ", "))
 	}
-	w.Header().Set("Content-Type", "application/problem+json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"type":                "about:blank",
-		"title":               http.StatusText(http.StatusUnprocessableEntity),
-		"status":              http.StatusUnprocessableEntity,
-		"detail":              detail,
-		"instance":            r.URL.Path,
-		"missing_credentials": missing,
-	})
-	return true
+	return fmt.Sprintf("routine requires credential of type %q not present in the vault for crew %q", missing[0], crewName)
 }
