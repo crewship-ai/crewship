@@ -488,3 +488,81 @@ func TestFlush_StampsTheAutomationAsTheTrigger(t *testing.T) {
 			"is what made every rule-fired run indistinguishable from a schedule", pr.TriggeredByID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The composition budget across the automation edge
+// ---------------------------------------------------------------------------
+
+// A closed composition loop must stop at pipeline.MaxChainDepth.
+//
+// This is the shape MaxChainDepth exists for, spelled out in its own doc
+// comment: "automation -> routine -> issue change -> automation". The chain
+// leaves the process through the journal and comes back, so callPath cannot
+// see it and the in-process nesting ceiling never fires. GuardChainDepth is
+// meant to be the ONE budget both composed edges spend from.
+//
+// Today only the call_pipeline edge spends from it. The automation edge parks
+// a PendingRun that carries no depth at all, so every hop is dispatched as a
+// fresh chain root at chain_depth 0 and the cap is unreachable across the very
+// boundary it was written for.
+//
+// Verified on a live instance on 2026-08-07: two rules ping-ponging one issue
+// between TODO and IN_PROGRESS through a crewship issue.update step ran 59
+// hops in five minutes, every run recording chain_depth 0 and its own
+// chain_origin, and zero automation.depth_exceeded entries. The only thing
+// that ever stops such a loop is max_per_hour — a throttle, not a cap, and one
+// whose default (60/hour) a user is free to raise.
+//
+// The loop below is that instance run, in memory: each enqueued run is fed
+// back in as the event it would have caused, with TraceID naming the parent
+// run exactly as journal.prepareEntry sets it. EventContext already reads
+// e.TraceID as "run_id", so the parent pointer this guard needs is present at
+// the match site today — merely unused.
+//
+// MaxPerHour is set far above the hop budget on purpose: the rate limiter must
+// not be what makes this test pass. A green run here has to mean the depth cap
+// held.
+func TestObserver_ClosedLoopStopsAtMaxChainDepth(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	enq := &recordingEnqueuer{}
+	jrn := &recordingJournal{}
+	reg := NewRegistry(nil, enq, Options{Journal: jrn, Now: func() time.Time { return now }})
+
+	r := rule("a1", "ws_1", "mission.status_change")
+	r.MaxPerHour = 10000
+	r.DebounceSeconds = 1
+	reg.Load([]Resolved{r})
+
+	// Hop 0: a human changes the issue. No parent run, so this edge is depth 1.
+	reg.Observer([]journal.Entry{entry("ws_1", "mission.status_change", "m_1")})
+	reg.Flush(context.Background())
+
+	// Every subsequent hop is the run enqueued by the previous one emitting the
+	// status change its crewship step performed, which re-matches the same rule.
+	const hops = 30
+	for i := 0; i < hops; i++ {
+		if enq.n() == 0 {
+			break
+		}
+		parent := enq.at(enq.n() - 1)
+		now = now.Add(2 * time.Second) // past fire_at, so the key is charged afresh
+		next := entry("ws_1", "mission.status_change", "m_1")
+		next.TraceID = parent.ID // journal.prepareEntry: trace_id IS the originating run id
+		reg.Observer([]journal.Entry{next})
+		reg.Flush(context.Background())
+	}
+
+	// One enqueue for the human's change, then at most MaxChainDepth composed
+	// hops on top of it.
+	if want := pipeline.MaxChainDepth + 1; enq.n() > want {
+		t.Fatalf("closed loop produced %d enqueues, want at most %d "+
+			"(1 human-caused + %d composed hops): the automation edge does not spend "+
+			"from the GuardChainDepth budget, so a composition cycle is bounded only "+
+			"by max_per_hour", enq.n(), want, pipeline.MaxChainDepth)
+	}
+	if got := jrn.count(journal.EntryAutomationDepthExceeded); got == 0 {
+		t.Errorf("no %s entry emitted; a refused edge that leaves no trace is "+
+			"indistinguishable from a rule that silently stopped matching",
+			journal.EntryAutomationDepthExceeded)
+	}
+}
