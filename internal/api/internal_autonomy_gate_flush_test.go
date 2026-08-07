@@ -88,7 +88,18 @@ func TestCapturedResponse_FlushKeepsMultiValuedHeaders(t *testing.T) {
 	rr := httptest.NewRecorder()
 	c.flush(rr)
 
-	if got := rr.Header().Values("Set-Cookie"); len(got) != 2 {
-		t.Fatalf("Set-Cookie values = %v, want both preserved", got)
+	// The values, not the count. Counting alone passes a replay that emits
+	// "a=1" twice and drops "b=2" — which is exactly the bug the Set-then-Add
+	// split could introduce, so counting would miss the one thing this test
+	// exists to catch.
+	got := rr.Header().Values("Set-Cookie")
+	want := []string{"a=1", "b=2"}
+	if len(got) != len(want) {
+		t.Fatalf("Set-Cookie = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Set-Cookie[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
+		}
 	}
 }
