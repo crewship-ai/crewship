@@ -150,6 +150,14 @@ type Executor struct {
 	// endpoint delivers a payload. Nil = wait:event fails closed.
 	signals *SignalRegistry
 
+	// preflight runs the integration / resource / credential gates the
+	// agent-facing HTTP dispatch path already applies, on the in-process
+	// call_pipeline path that used to skip them. Nil = the pre-existing
+	// (ungated) behaviour, which is why every production construction site
+	// wires it through NewWiredExecutor rather than opting in. See
+	// RunPreflight.
+	preflight RunPreflight
+
 	// waitpoints persists wait step state so long sleeps survive
 	// process restarts. Nil = wait steps execute in-memory only
 	// (useful for tests; production wiring uses the WaitpointStore
@@ -409,6 +417,14 @@ func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, scope Run
 // Without it, wait:event steps fail closed.
 func (e *Executor) WithSignalRegistry(s *SignalRegistry) *Executor {
 	e.signals = s
+	return e
+}
+
+// WithRunPreflight wires the dispatch gates (integrations / resources /
+// credentials) onto the in-process call_pipeline path so both doors to
+// "run this saved routine" enforce the same preconditions.
+func (e *Executor) WithRunPreflight(p RunPreflight) *Executor {
+	e.preflight = p
 	return e
 }
 
@@ -2050,6 +2066,29 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 	dsl, err := Parse([]byte(target.DefinitionJSON))
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("call_pipeline: parse target: %w", err)
+	}
+
+	// Dispatch preconditions — the integration / resource / credential gates
+	// the agent-facing HTTP path (InternalRun) has always run and this path
+	// never did. Same operation, two doors, one guarded: a routine that could
+	// not be run directly could still be run by being CALLED, and its
+	// {{ secrets.* }} refs then failed deep inside a runner with an opaque
+	// auth error instead of refusing here with an actionable one.
+	//
+	// ModeRun only: dry_run touches no vault and asserts no status, and is
+	// exempt on the HTTP side for exactly that reason (see
+	// gateMissingCredentials). Keeping the exemption identical is the point —
+	// two doors that disagree about the edges are two doors again.
+	if e.preflight != nil && parent.Mode == ModeRun {
+		if perr := e.preflight.Check(ctx, PreflightRequest{
+			WorkspaceID:  parent.WorkspaceID,
+			PipelineID:   target.ID,
+			PipelineSlug: target.Slug,
+			AuthorCrewID: target.AuthorCrewID,
+			DSL:          dsl,
+		}); perr != nil {
+			return "", 0, 0, fmt.Errorf("call_pipeline %q: %w", step.PipelineSlug, perr)
+		}
 	}
 
 	// Render nested input values against the parent's render context

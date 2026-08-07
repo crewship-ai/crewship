@@ -59,6 +59,18 @@ type ExecutorDeps struct {
 	CodeRunner CodeRunner      // nil → type:code steps fail closed with a wiring hint
 	Signals    *SignalRegistry // nil → wait:event fails closed
 
+	// Preflight applies the dispatch gates (integrations / resources /
+	// credentials) to the in-process call_pipeline path, which used to skip
+	// the checks the agent-facing HTTP path (InternalRun) has always run.
+	// It is a SEAM rather than a constructed dep like the stores above:
+	// the resolvers live in internal/api, which pipeline must not import.
+	//
+	// nil → the pre-fix behaviour (nested calls ungated). That is a
+	// degraded mode with a security shape, so unlike the other optionals it
+	// must be passed at EVERY production site — the parity sweep in
+	// executor_factory_test.go is what keeps that true.
+	Preflight RunPreflight
+
 	// ScriptRunner execs type:script steps (bundled scripts) in the crew
 	// container. nil → script steps fail closed with a wiring hint. In
 	// production this is the same OrchestratorRunner passed as Runner
@@ -152,6 +164,9 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 	}
 	if d.Signals != nil {
 		exec = exec.WithSignalRegistry(d.Signals)
+	}
+	if d.Preflight != nil {
+		exec = exec.WithRunPreflight(d.Preflight)
 	}
 	// Post-run outcome verdict (#1403) — needs both a DB (feature flag
 	// + journal entries) and a way to reach the run_summary aux slot's

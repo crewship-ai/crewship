@@ -278,6 +278,10 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 		ScriptRunner: h.scriptRunner,
 		Signals:      h.signals,
 		RunVerdict:   h.runVerdict,
+		// Dispatch gates on the in-process call_pipeline path, so a nested
+		// run faces the same integration/resource/credential preconditions
+		// InternalRun applies to the agent-facing one.
+		Preflight: h.RunPreflight(),
 		// Shared verdict WaitGroup: every ephemeral executor this handler
 		// builds registers its async verdict goroutine here so shutdown can
 		// drain them all (DrainVerdicts) before the journal writer closes.

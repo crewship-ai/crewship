@@ -612,6 +612,15 @@ The loop is **cost-aware and predictive**: after each failed attempt it estimate
 
 Composition primitive. Save-time cycle detection rejects loops; runtime depth limit caps at 10 levels.
 
+A called routine faces the **same dispatch gates** as one run directly: its
+author crew must have the integrations, datastores/tools and credentials the
+called routine declares. If it does not, the `call_pipeline` step fails with
+the same sentence the direct run would have returned (`routine "x": routine
+requires credential of type "stripe" not present in the vault for crew "y"`)
+— calling a routine is not a way around a precondition it does not meet.
+
+`dry_run` is exempt, as it is on the direct path: it touches no vault.
+
 #### Chain depth — the composition budget
 
 Nesting depth is not the only way a routine can call itself. A routine can act
