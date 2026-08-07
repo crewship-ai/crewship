@@ -17,7 +17,10 @@ fi
 
 # Info-level findings (SC1091/SC2016) are useful locally but are deliberately
 # not merge-gate failures. Warnings and errors are.
-if ! shellcheck -x --severity=warning "$HARNESS/lib.sh" "$HARNESS"/test-*.sh; then
+# pr-subset.sh is the runner CI executes, so it is held to the same bar as the
+# suites it launches — it was outside this glob and shipped with a `for` loop
+# that reported only the last suite's status.
+if ! shellcheck -x --severity=warning "$HARNESS/lib.sh" "$HARNESS/pr-subset.sh" "$HARNESS"/test-*.sh; then
   status=1
 fi
 

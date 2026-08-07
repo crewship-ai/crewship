@@ -873,6 +873,35 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"build_contract", want,
 					)
 				}
+				// Per-crew resource drift (#1681). The check above asks whether
+				// this container is OLD; this asks whether it is THIS CREW'S.
+				// Memory and NanoCPUs are applied at ContainerCreate and
+				// nowhere else, so an operator's `crew update --memory-mb`
+				// reaches the runtime only when the container is recreated —
+				// and until #1681 nothing recreated it and nothing said so.
+				//
+				// Same asymmetry, same reasons, as the contract check: a
+				// stopped container is rebuilt, a running one is reported and
+				// left serving. See crew_resource_drift.go for why this is an
+				// observation of the container rather than a second digest.
+				if drift := crewResourceDrift(team, inspect.HostConfig); drift != "" {
+					if crewContainerHoldsNoProcesses(c.State) {
+						p.logger.Info("recreating stopped container (crew resource limits changed)",
+							"container", containerName,
+							"crew_id", team.ID,
+							"drift", drift,
+						)
+						p.forceTeardown(ctx, c.ID, team.ID)
+						break // fall through to create new container
+					}
+					p.logger.Warn("crew container was created with different resource limits and is still serving; "+
+						"the configured limits are NOT in effect on this crew. It will pick them up when the "+
+						"container is next recreated — an idle-TTL stop, or `crewship crew restart-agents <crew>`",
+						"container", containerName,
+						"crew_id", team.ID,
+						"drift", drift,
+					)
+				}
 				if c.State == container.StateRunning {
 					p.setWarm(team.ID, c.ID)
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
@@ -1671,6 +1700,12 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 		state = "error"
 	}
 
+	// The limits this container actually runs under, from the same inspect —
+	// the EFFECTIVE half of the configured-vs-effective gap (#1681). Reported,
+	// never compared here: this function has the container and not the crew,
+	// and whoever holds the crew's configuration does the comparing.
+	memoryMB, cpus := containerCrewLimits(inspect.HostConfig)
+
 	return &provider.ContainerStatus{
 		ID:     containerID,
 		State:  state,
@@ -1679,6 +1714,8 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 		// whether this container predates the current container
 		// configuration costs no extra daemon call (#1642).
 		RuntimeContract: p.runtimeContractStatus(inspect.Config),
+		MemoryMB:        memoryMB,
+		CPUs:            cpus,
 	}, nil
 }
 

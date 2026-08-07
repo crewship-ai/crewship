@@ -452,6 +452,28 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("crew sized below the usable floor", "crew_id", crewID, "slug", c.Slug, "advisory", a)
 	}
 
+	// A resize is stored immediately and takes effect much later (#1681).
+	// container_memory_mb and container_cpus are applied at ContainerCreate and
+	// nowhere else, so a crew whose container is already up keeps its old
+	// cgroup limits while this 200 — and every subsequent `crew get` — reports
+	// the new ones. Said here because the response to the request that made the
+	// change is the one place the operator is certainly looking.
+	//
+	// Only when the crew is actually RUNNING, which costs one bounded IPC call
+	// on a rare request. A stopped crew needs no notice: the provider rebuilds
+	// a stopped container whose limits no longer match on the next wake
+	// (internal/provider/docker/crew_resource_drift.go), so the change is not
+	// pending on anything the operator has to do. Warning regardless would put
+	// a line on every resize, including the ones that are already correct,
+	// which is how a warnings channel stops being read.
+	if fields := crewResizeFields(&req); len(fields) > 0 && h.crewContainerIsRunning(r.Context(), crewID) {
+		advisories = append(advisories, fmt.Sprintf(
+			"%s changed, but this crew's container is already running and keeps the limits it was "+
+				"created with until it is recreated. `crewship crew container-status %s` reports the gap; "+
+				"an idle-TTL stop or `crewship crew restart-agents %s` closes it.",
+			strings.Join(fields, " and "), c.Slug, c.Slug))
+	}
+
 	// Same as Create: computed from the row as it now stands, so switching a
 	// crew TO restricted on an instance that cannot apply it is answered by
 	// the response to the request that switched it.
@@ -501,6 +523,24 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete soft-deletes a crew and all its associated agents.
 // DELETE /api/v1/crews/{crewId}
+
+// crewResizeFields names the container limits a PATCH carried, in the order
+// they appear on the response.
+//
+// Deliberately narrow: only settings that CANNOT be applied to an existing
+// container belong here, because each one produces an advisory on the
+// response, and a notice attached to edits that take effect immediately is
+// boilerplate that teaches its reader to skip the field.
+func crewResizeFields(req *updateCrewRequest) []string {
+	fields := make([]string, 0, 2)
+	if req.ContainerMemoryMB != nil {
+		fields = append(fields, "container_memory_mb")
+	}
+	if req.ContainerCPUs != nil {
+		fields = append(fields, "container_cpus")
+	}
+	return fields
+}
 
 // changedCrewFields names the fields a PATCH actually carried.
 //

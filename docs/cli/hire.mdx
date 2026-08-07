@@ -4,7 +4,7 @@ description: "Spawn a short-lived ephemeral agent into a crew (PR-D F5) and rene
 icon: "user-round"
 ---
 
-<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 # crewship hire / crewship rehire
 
 `hire` provisions a short-lived agent from a template into an existing crew, gives it a TTL, and writes a `hire_reason` audit row. The agent runs like any permanent crew member until its TTL elapses, at which point a background sweeper ghosts it (sets `expired_at`, keeps the row + memory files for audit + rehire).
