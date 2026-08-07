@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Register inserts a new hook row. The caller passes allowedShell=true only
@@ -60,8 +62,8 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 		boolToInt(h.Blocking),
 		boolToInt(h.Enabled),
 		nullableStr(h.CreatedBy),
-		h.CreatedAt.UTC().Format(time.RFC3339Nano),
-		h.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		tsformat.Format(h.CreatedAt),
+		tsformat.Format(h.UpdatedAt),
 	)
 	if err != nil {
 		return "", fmt.Errorf("hooks: insert: %w", err)
@@ -186,7 +188,7 @@ func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowed
 		string(handlerJSON),
 		boolToInt(h.Blocking),
 		boolToInt(h.Enabled),
-		time.Now().UTC().Format(time.RFC3339Nano),
+		tsformat.Format(time.Now()),
 		h.ID,
 		workspaceID,
 	)
@@ -248,7 +250,7 @@ func Delete(ctx context.Context, db *sql.DB, workspaceID, id string) error {
 func SetEnabled(ctx context.Context, db *sql.DB, workspaceID, id string, enabled bool) error {
 	res, err := db.ExecContext(ctx,
 		`UPDATE hooks_config SET enabled = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
-		boolToInt(enabled), time.Now().UTC().Format(time.RFC3339Nano), id, workspaceID)
+		boolToInt(enabled), tsformat.Format(time.Now()), id, workspaceID)
 	if err != nil {
 		return fmt.Errorf("hooks: set enabled: %w", err)
 	}
@@ -400,7 +402,9 @@ func scanHook(r rowScanner) (Hook, error) {
 	return h, nil
 }
 
-// parseTS accepts both the RFC3339Nano form we write and the shorter
+// parseTS accepts both the fixed-width tsformat.Layout we now write, the
+// RFC3339Nano form written before that (time.RFC3339Nano parses both), and the
+// shorter
 // datetime('now') SQLite produces, matching the pattern journal.parseTS
 // uses.
 func parseTS(s string) (time.Time, error) {
