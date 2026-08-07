@@ -12,10 +12,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
-// HooksHandler serves the lifecycle-hook registry endpoints. The
-// registration path is still a config-time operation (see
-// internal/hooks/store.go:Register) — this handler is strictly read +
-// enable/disable for operators.
+// HooksHandler serves the lifecycle-hook registry endpoints: list, create,
+// update, delete, and the enable/disable toggles.
+//
+// Create/Update/Delete are the production callers of hooks.Register /
+// hooks.Update / hooks.Delete. Before them the engine under internal/hooks
+// was fully built and completely unreachable — the only way to register a
+// hook was a Go test or a hand-written INSERT, so the whole lifecycle
+// intercept layer was dormant in every real deployment.
 type HooksHandler struct {
 	db      *sql.DB
 	logger  *slog.Logger

@@ -411,11 +411,18 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedSelfMut("DELETE", "/api/v1/feedback", mfh.Delete)
 
 	// Hooks registry: lifecycle intercepts. List is available to every
-	// workspace member for auditability; enable/disable is OWNER/ADMIN
-	// only because flipping a hook can invoke shell commands.
+	// workspace member for auditability; every write is OWNER/ADMIN
+	// (roleManage) because a hook can invoke shell commands, hit
+	// third-party endpoints, or dispatch subagents. Create/Update layer a
+	// further OWNER-only gate on handler_kind='shell' inside the handler
+	// — that one is not a plain role check (it depends on the body), so
+	// it cannot be declared at the route table.
 	hh := NewHooksHandler(r.db, r.logger)
 	hh.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/hooks", authed(wsCtx(http.HandlerFunc(hh.List))))
+	r.authedMut("POST", "/api/v1/hooks", roleManage, hh.Create)
+	r.authedMut("PATCH", "/api/v1/hooks/{id}", roleManage, hh.Update)
+	r.authedMut("DELETE", "/api/v1/hooks/{id}", roleManage, hh.Delete)
 	r.authedMut("POST", "/api/v1/hooks/{id}/enable", roleManage, hh.Enable)
 	r.authedMut("POST", "/api/v1/hooks/{id}/disable", roleManage, hh.Disable)
 
