@@ -125,6 +125,12 @@ jobs:
         run: bash scripts/test-harness-integrity.sh
       - name: test-harness integrity negative test
         run: bash scripts/test-harness-integrity-test.sh
+      # The per-PR gate's own runner: that it reports every suite's failure and
+      # not just the last one's, and that the one suite whose verdict depends on
+      # what the runner happens to contain reads the CLI's answers correctly.
+      # Server-free — it drives the real scripts against stubs.
+      - name: test-harness PR subset (aggregation + orphan-reap verdicts)
+        run: bash scripts/test-harness-pr-subset-test.sh
       - name: claim-issue.sh (claim parsing + clone detection)
         run: bash scripts/claim-issue-test.sh
 

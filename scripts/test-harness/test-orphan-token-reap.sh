@@ -67,13 +67,41 @@ fi
 # token is the SAME one validating now, so nothing is orphaned. A non-empty
 # "Found N orphaned" here would be a false positive (the detector reaping a
 # healthy container) — exactly what the fail-safe classifier must never do.
-assert_contains "no orphaned containers on a stable-master server" "$dry_out" "No orphaned crew containers found"
+#
+# The CLI has THREE zero-orphan answers and they are not interchangeable
+# (#1390, PR #1458 — this suite predates that split and asserted only the
+# first, which is why it went red the moment CI started running it on a runner
+# with no crew container up):
+#
+#   "No orphaned crew containers found — N of N inspected …"  the sweep looked
+#       and found nothing. The only one that PROVES no false positive.
+#   "No running crew containers to inspect — nothing to reap."  there was
+#       nothing to look at. Says nothing either way about the classifier.
+#   "DETECTOR INERT — …"  there WAS something to look at and not one sidecar
+#       could be classified. "No orphans" is vacuous, and #1390 exists because
+#       reading it as health hid a stale sidecar on a live slot.
+#
+# Collapsing the second into the first is precisely the silent degradation the
+# CLI was changed to prevent, so this suite reports each as what it is.
+if printf '%s' "$dry_out" | grep -qiF "DETECTOR INERT"; then
+  _fail "the orphan detector could classify what it inspected" \
+    "every inspected sidecar advertised no token fingerprint — this sweep cannot detect an orphan at all (#1390); the slot's sidecar binary is probably stale"
+elif printf '%s' "$dry_out" | grep -qiF "No running crew containers to inspect"; then
+  skip "no orphaned containers on a stable-master server" \
+    "nothing to inspect — no crew container was running, so the fail-safe classifier was never exercised and this run does NOT show it avoids false positives"
+else
+  assert_contains "no orphaned containers on a stable-master server" "$dry_out" "No orphaned crew containers found"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "3. Dry-run is non-mutating and idempotent"
 # ─────────────────────────────────────────────────────────────────────────────
 info "Re-running the dry-run — it must stay clean (no state was changed)…"
 dry_out2="$(cs admin reap-orphan-containers 2>&1)"
-assert_contains "dry-run is stable on a second call" "$dry_out2" "No orphaned crew containers found"
+# Assert the two sweeps agree EXACTLY rather than re-grepping one wording. That
+# is the actual non-mutation property — a dry-run that changed something would
+# report differently the second time — and it holds whichever of the three
+# zero-orphan answers this environment produces.
+assert_eq "dry-run is stable on a second call" "$dry_out" "$dry_out2"
 
 finish

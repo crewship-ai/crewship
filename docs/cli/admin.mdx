@@ -278,7 +278,16 @@ No orphaned crew containers found — 2 of 2 inspected container(s) reported a t
 
 # Detector could not look — "no orphans" here means "could not tell"
 DETECTOR INERT — inspected 3 running crew container(s), but NONE advertised a token fingerprint.
+
+# Nothing to look at — no crew container was running at all
+No running crew containers to inspect — nothing to reap.
 ```
+
+The third line is a **third state, not a variant of the first**. It is what you
+get on a workspace whose crews are all idle (and on a CI runner that has a
+docker daemon but never started a crew container): the sweep is clean in the
+sense that nothing was reaped, but it says nothing about whether the classifier
+would have got the answer right, because it never classified anything.
 
 An inert detector is a **deploy defect, not a workspace condition**: the slot's
 sidecar binary was never re-pointed to the freshly built artifact on reconcile
