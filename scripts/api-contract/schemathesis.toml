@@ -4,7 +4,11 @@ base-url = "${CREWSHIP_BASE_URL}"
 headers = { Authorization = "Bearer ${CREWSHIP_TOKEN}", "X-Workspace-ID" = "${CREWSHIP_WORKSPACE}" }
 request-timeout = 10.0
 workers = 1
-rate-limit = "120/m"
+# rate-limit intentionally lives in run.sh, not here: it is the one setting
+# that has to differ between a live instance (stay under the server's
+# http.api_per_min) and CI's hermetic throwaway server (no limiter to stay
+# under). run.sh defaults it to the same 120/m this file used to pin and
+# accepts API_CONTRACT_RATE_LIMIT=off for the CI case (#1813).
 
 [generation]
 max-examples = 10

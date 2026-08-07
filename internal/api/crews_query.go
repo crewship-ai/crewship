@@ -179,6 +179,34 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// The crew's agents go first, and they go the way `agent delete` sends
+	// them: a deleted_at tombstone, not a DELETE (#1712).
+	//
+	// Why they have to go at all: every slug-uniqueness check in this package
+	// is scoped to `deleted_at IS NULL`, so soft-deleting the crew below frees
+	// the CREW slug — and an agent left behind keeps holding its own. The crew
+	// it belonged to no longer exists, nothing can reach it, and re-applying
+	// the manifest that created it answers `409 Agent slug already taken in
+	// this workspace` until someone runs `crewship agent delete` by hand.
+	//
+	// Soft rather than hard, matching the crew's own convention: the row is
+	// referenced by missions, journal entries and chats that outlive it, and
+	// agents_create.go already knows how to rename a soft-deleted agent out of
+	// the way (`slug || '_deleted_' || id`) when the slug is claimed again. A
+	// third deletion convention here would be a third thing to keep in step.
+	//
+	// FIRST in the cascade, and a hard failure rather than a logged warning:
+	// everything below this line destroys rows, so a failure here leaves the
+	// crew wholly intact and the operator can retry. Half-deleting a crew and
+	// reporting {"success":true} is what makes the slug namespace drift in the
+	// first place.
+	if _, err := h.db.ExecContext(r.Context(),
+		"UPDATE agents SET deleted_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
+		now, crewID); err != nil {
+		replyInternalError(w, h.logger, "cascade soft-delete crew agents", err)
+		return
+	}
+
 	// Cascade: hard-delete orphan-prone children before soft-deleting the crew.
 	// Missions carry a UNIQUE(workspace_id, identifier) constraint (#1733 — it
 	// used to be global, which was a cross-tenant bug), and issue_counters is

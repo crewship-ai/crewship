@@ -15,9 +15,18 @@ memory, a routine run's outcome being **observable** afterwards, recipe
 
 The CI workflow now has two distinct harness protections. The shell job runs
 `scripts/test-harness-integrity.sh` (ShellCheck plus helper-call resolution)
-and its negative test. The `harness-pr` job builds the binary from the same
-commit, starts one disposable seeded server, and runs the explicit
+and its negative test, plus `scripts/test-harness-pr-subset-test.sh`, which
+covers the PR runner itself. The `harness-pr` job builds the binary from the
+same commit, starts one disposable seeded server, and runs the explicit
 no-provider subset below. The full matrix remains nightly.
+
+**`pr-subset.sh` reports every suite, not the last one.** A bare `for … done`
+exits with the status of the last command it ran, so the runner's first draft
+gated on whichever suite ended the list and swallowed a failure in any earlier
+one — a green `Harness PR subset` with a red suite inside it. It now collects
+every non-zero suite (and every `timeout` kill) and prints them in a closing
+summary. `scripts/test-harness-pr-subset-test.sh` drives the real runner
+against stub suites to keep that true.
 
 `nightly-harness.yml` (nightly 03:10 UTC + `workflow_dispatch`) now boots an
 ephemeral instance per matrix square — `crewship start` → `crewship seed
@@ -33,7 +42,7 @@ green night closes the bot's own issue).
 | `test-keeper.sh` | 18 assertions, 0 fail |
 | `test-keeper-ingress-fence.sh` | 53 assertions, 0 fail (5 non-fatal findings) |
 | `test-keeper-toctou.sh` | 15 assertions, 0 fail |
-| `test-orphan-token-reap.sh` | 1 assertion + 1 self-SKIP (no docker provider) |
+| `test-orphan-token-reap.sh` | 1 assertion + 1 self-SKIP (no docker provider) — and see the coverage note below for what it does and does not prove on a PR runner |
 | `test-attack-surface.sh` | 4 assertions (Tier A), Tier B SKIPs by design |
 
 All five were driven end-to-end against a clean-DB bootstrap of exactly that
@@ -44,6 +53,26 @@ sequence before the workflow was written.
 These are the deterministic control-plane suites selected for ordinary PRs;
 provider-backed, external-service, Docker-dependent, and destructive suites
 remain nightly/dev-only for the reasons listed above and in the workflow.
+
+**What `test-orphan-token-reap.sh` proves on a PR runner — and what it does
+not.** The CLI has three distinct zero-orphan answers and they mean different
+things (#1390 / PR #1458 introduced the split, and the point of that work was
+that collapsing them hid a stale sidecar on a live slot):
+
+| CLI says | Means | Suite verdict |
+|---|---|---|
+| `No orphaned crew containers found — N of N inspected …` | the sweep looked and found nothing | **PASS** — the fail-safe classifier produced no false positive |
+| `No running crew containers to inspect — nothing to reap.` | there was nothing to look at | **SKIP**, with the reason spelled out |
+| `DETECTOR INERT — …` | there was something to look at and not one sidecar could be classified | **FAIL**, naming #1390 |
+
+A GitHub PR runner has a docker daemon but never starts a crew container
+(`CREWSHIP_SKIP_SIDECAR=1`, no provisioning), so it lands in the middle row:
+on CI this suite gates API↔CLI parity, a clean exit code, and dry-run
+stability, and it says out loud that it did **not** exercise the classifier.
+The classifier's no-false-positive property is proved on a dev slot with live
+crew containers, not here. Syncing the assertion to whichever string CI
+happens to print would have bought a green tick and thrown that distinction
+away — which is why the suite branches on it instead.
 
 **Not gated yet — the runtime suites.** `test-memory.sh`,
 `test-delegation.sh`, `test-crew-links.sh`, `test-notifications.sh`,
@@ -279,7 +308,7 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 | `test-realworld-github.sh` | an agent uses the in-container **`gh`** CLI against a public repo (read-only); SKIPs if `gh` isn't authenticated. |
 | `test-gitlink-realworld.sh` | **the link-first Git integration against a REAL forge** — the one thing `internal/gitlink`'s fixtures cannot do. Attaches real, public, long-lived objects to a throwaway issue via `crewship issue link` and asserts the **parse**, not the 200: a **MERGED** PR/MR reads MERGED (on GitHub only a non-null `merged_at` distinguishes it — `state` says `closed`), a **closed-not-merged** object from the same repo reads CLOSED (the GitLab default has a **null `closed_at`**, so CLOSED can only have come from `state`), and **author / source branch / target branch** carry through — i.e. `user.login`+`head.ref`+`base.ref` and `author.username`+`source_branch`+`target_branch`, the exact keys an upstream rename would break. Then the two failures fixtures cannot honestly simulate: a **repository that does not exist** (real 404) and a **credential the provider rejects** (real 401/403), both asserted on Crewship's own **RFC 7807 `type` URI + `code`** rather than the status, because three different remedies share 502. Also: `relink` re-reads the provider and clears `last_sync_error`. **Read-only against the forge**; everything it writes is one Crewship issue + up to two credentials per provider, nonce-named and removed on exit (including on Ctrl-C). Enabled per provider by `GITLINK_GITHUB_TOKEN` / `GITLINK_GITLAB_TOKEN`; with neither it SKIPs before contacting anything. |
 | `test-secretless-github.sh` | **the secretless claim, end to end** (PRD-CREDENTIALS-V2 §4.3, T-H1…T-H9): a credential assigned to a **crew** reaches the crew's agent (proved by a synthetic **canary** whose fingerprint the agent reports back) and makes **`gh auth status`** work with **no step inside the container**; `gh auth login` **never ran** (no `hosts.yml`, nothing in shell history); **zero-disk** — the canary value appears in **no file** under `$HOME`, `/home/agent`, `/secrets`, `/tmp`; private-repo **clone + commit + push** over HTTPS leaves **no `.git-credentials`**; **`docker login ghcr.io`** with the same PAT; **git over SSH** from an `SSH_KEY` credential; **revocation** — after `credential delete` the agent's next `gh` exec **fails** (the proof no dried copy survived); **cross-crew isolation** — crew B's agent has neither the value nor a file. Filesystem facts come from a token-zero `script` routine running in the crew container (the `test-redteam-insider.sh` pattern), never from the model. **Every section SKIPs on its own missing input** — with none of `SEED_GITHUB_TOKEN` / `SEED_GITHUB_TOKEN_CLASSIC` / `SEED_GITHUB_SSH_KEY` / `SEED_GITHUB_TEST_REPO` you still get the fanout, zero-disk and isolation legs. Opt-in: `WITH_SECRETLESS=1 ./run-all.sh`. **Dev slots only.** |
-| `test-orphan-token-reap.sh` | the **#1385 stable-master** remediation lever: `admin reap-orphan-containers` is wired (API↔CLI parity), and a **dry-run sweep against the running server finds ZERO orphans** — proving the fail-safe classifier never false-positives a healthy container — and is **non-mutating + idempotent**. Self-**SKIPs** when the provider isn't docker (503). The restart-invalidation property itself is locked by the Go unit tests. |
+| `test-orphan-token-reap.sh` | the **#1385 stable-master** remediation lever: `admin reap-orphan-containers` is wired (API↔CLI parity), and a **dry-run sweep against the running server finds ZERO orphans** — proving the fail-safe classifier never false-positives a healthy container — and is **non-mutating + idempotent** (the two sweeps must agree byte-for-byte, whichever answer this environment produces). Self-**SKIPs** when the provider isn't docker (503), and again when docker is present but **no crew container is running** — that is "nothing to inspect", not a clean sweep, and the suite refuses to report it as one. An **inert detector** (#1390) is a hard FAIL, not a skip. The restart-invalidation property itself is locked by the Go unit tests. |
 | `test-keeper-ingress-fence.sh` | the **internal keeper HTTP surface** rejects every request with no token / forged / zero / spoofed-XFF (fence holds), across a **method matrix** (GET/PUT/DELETE/PATCH/OPTIONS), a **malformed-token fuzz** (empty, 8 KB, CRLF, SQL/shell/path-ish), an **oversized body**, and **other `/internal/*`** routes; asserts **no info leak** in rejections and that the **public API still needs auth**; runs a **constant-time timing probe**; flags whether the **network-origin gate** is defeated behind the proxy (off-host → 403 not 404 ⇒ static `X-Internal-Token` is the sole guard). *The one suite that uses raw `curl` — the internal channel has no CLI by design.* |
 | `test-keeper-toctou.sh` | a decision reflects **injection-time** state, not approval-time: `rotate --grace-seconds 0` scrubs the stale value now, **grace-window rotate + rotation-cancel** scrubs early, a **concurrent rotate race** leaves the credential coherent + `ACTIVE`, `unassign`/`reassign` toggles the binding the keeper requires, **delete-while-assigned** revokes cleanly, **peer value** is never exposed; **SKIPs** the container-only deferred race (T2) and the token-only double-execute (T10). |
 | `test-keeper-audit-integrity.sh` | decisions leave a **durable, monotonic trace**: lifecycle events grow the `credential audit` timeline, **REVOKE** on delete, a granted escalation resolves off `PENDING` (**approve** path) and a **denied** one is recorded (deny path), `system keeper` exposes scrubber + model; the journal **hash-chain** verifies clean and detects an out-of-band row mutation; keeper decisions are **append-only** — `keeper history` shows every transition, 1-based and gap-free, starting at `PENDING`, tail matching the current decision, each with an actor; an **authorised priority edit does not break the chain** (pin → verify → revert → verify). **SKIPs** the load-only fail-silent drop (T6) and the token-only returned-vs-persisted mismatch (T7); the DB-trigger and raw-flip legs print `sqlite3` commands to run on dev2 with `CREWSHIP_DB` set. |
