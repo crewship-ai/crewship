@@ -21,6 +21,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/admission"
 	api "github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/automation"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/chatnotify"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -424,6 +425,40 @@ var startCmd = &cobra.Command{
 			apiRouter.SetBuild(version, commit, date)
 			if ph := apiRouter.Provisioning(); ph != nil {
 				bridge.SetProvisioningEnqueuer(provisioningAdapter{h: ph})
+			}
+		}
+
+		// Automations: the third journal commit observer. It matches committed
+		// entries against the workspace's automation rules in memory and parks
+		// a debounced run in pending_runs — completing the trigger path
+		// journal → observer → pending_runs, whose only missing hop was this
+		// one. AddCommitObserver for the same reason the two above use it.
+		if deps.DB != nil {
+			if jw := srv.JournalWriter(); jw != nil {
+				autoReg := automation.NewRegistry(
+					automation.NewStore(deps.DB),
+					pipeline.NewPendingRunStore(deps.DB),
+					automation.Options{Journal: jw, Logger: logger},
+				)
+				if err := autoReg.Refresh(ctx); err != nil {
+					logger.Error("automation: initial registry load failed", "err", err)
+				}
+				autoReg.Start(ctx)
+				defer autoReg.Stop()
+				jw.AddCommitObserver(autoReg.Observer)
+				// A rule saved through the API must fire on the NEXT event,
+				// not up to a minute later — otherwise the first thing an
+				// author sees after saving is nothing happening.
+				if apiRouter := srv.APIRouter(); apiRouter != nil {
+					if ah := apiRouter.Automations(); ah != nil {
+						ah.SetRefresh(func(c context.Context) {
+							if err := autoReg.Refresh(c); err != nil {
+								logger.Error("automation: registry refresh after write failed", "err", err)
+							}
+						})
+					}
+				}
+				logger.Info("automation registry wired (journal commit → pending_runs)")
 			}
 		}
 

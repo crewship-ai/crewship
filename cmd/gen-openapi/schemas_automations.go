@@ -1,0 +1,78 @@
+package main
+
+// automationSchemaCatalog describes the /api/v1/automations surface — the
+// workspace rules that turn a journal event into a deferred routine run.
+//
+// The shapes mirror internal/automation's wire types rather than the table:
+// `matcher` and `action` are objects on the wire and TEXT columns in SQLite,
+// and publishing the storage form would tell a client to send a JSON string
+// where the handler expects an object.
+func automationSchemaCatalog() map[string]DomainSchema {
+	str := func() map[string]any { return map[string]any{"type": "string"} }
+	integer := func() map[string]any { return map[string]any{"type": "integer"} }
+	boolean := func() map[string]any { return map[string]any{"type": "boolean"} }
+	arr := func(item map[string]any) map[string]any { return map[string]any{"type": "array", "items": item} }
+	obj := func(props map[string]any) map[string]any {
+		return map[string]any{"type": "object", "properties": props}
+	}
+
+	matcher := obj(map[string]any{
+		"crew_ids":    arr(str()),
+		"agent_ids":   arr(str()),
+		"mission_ids": arr(str()),
+		"severities":  arr(str()),
+		"payload_equals": map[string]any{
+			"type": "object", "additionalProperties": true,
+			"description": "Every pair must equal the corresponding journal payload field. Empty matches every entry of the event type.",
+		},
+	})
+	action := obj(map[string]any{
+		"routine_slug": str(),
+		"inputs": map[string]any{
+			"type": "object", "additionalProperties": true,
+			"description": "Values may reference the triggering entry with {{ event.mission_id }}, {{ event.agent_id }}, {{ event.crew_id }}, {{ event.run_id }} and {{ event.payload.<key> }}.",
+		},
+	})
+	automation := obj(map[string]any{
+		"id":           str(),
+		"workspace_id": str(),
+		"name":         str(),
+		"enabled":      boolean(),
+		"event_type": map[string]any{"type": "string",
+			"description": "A journal entry type, e.g. mission.status_change. Exactly one per rule."},
+		"matcher":     matcher,
+		"action_kind": map[string]any{"type": "string", "enum": []string{"routine"}},
+		"action":      action,
+		"debounce_seconds": map[string]any{"type": "integer",
+			"description": "How long the enqueued run stays open for further matching events to coalesce into."},
+		"max_per_hour": map[string]any{"type": "integer",
+			"description": "Cap on runs this rule may cause per rolling hour. Over the cap, matches are dropped and one automation.throttled journal entry is written for the window."},
+		"created_by": str(),
+		"created_at": map[string]any{"type": "string", "format": "date-time"},
+		"updated_at": map[string]any{"type": "string", "format": "date-time"},
+	})
+	// The write body. Every field is optional on both POST and PATCH: a
+	// create fills the burst controls from the documented defaults, and a
+	// patch is sparse so `automation disable` writes one field without
+	// clobbering a matcher edited a moment earlier.
+	writeBody := obj(map[string]any{
+		"name": str(), "enabled": boolean(), "event_type": str(),
+		"matcher": matcher, "action": action,
+		"debounce_seconds": integer(), "max_per_hour": integer(),
+	})
+
+	return map[string]DomainSchema{
+		"GET /api/v1/automations": {
+			Response: obj(map[string]any{"automations": arr(automation), "count": integer()}),
+		},
+		"POST /api/v1/automations": {
+			Request: writeBody, Response: automation,
+		},
+		"PATCH /api/v1/automations/{id}": {
+			Request: writeBody, Response: automation,
+		},
+		"DELETE /api/v1/automations/{id}": {
+			Response: obj(map[string]any{"status": str(), "id": str()}),
+		},
+	}
+}
