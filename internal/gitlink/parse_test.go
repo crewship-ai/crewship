@@ -230,6 +230,31 @@ func TestRef_APIEndpointFor(t *testing.T) {
 			raw:  "https://gitlab.com/acme/platform/billing/-/merge_requests/7",
 			want: "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fbilling/merge_requests/7",
 		},
+		{
+			// www.gitlab.com is a real host that answers 308 to the bare
+			// domain. Sending the API request there produced a redirect to a
+			// DIFFERENT host, which Fetch's CheckRedirect refuses by design
+			// (it will not carry a credential across a host boundary) — so a
+			// perfectly ordinary paste failed with "cross-host-redirect"
+			// every time. github.com already had this branch
+			// (www.github.com → api.github.com); GitLab was simply missing
+			// its half.
+			//
+			// Verified live 2026-08-06: GET https://www.gitlab.com/api/v4/...
+			// → 308 Location: https://gitlab.com/api/v4/...
+			name: "www.gitlab.com resolves to the bare SaaS host, not a redirect",
+			raw:  "https://www.gitlab.com/acme/platform/billing/-/merge_requests/7",
+			want: "https://gitlab.com/api/v4/projects/acme%2Fplatform%2Fbilling/merge_requests/7",
+		},
+		{
+			// The counterpart guard: a self-hosted host that merely STARTS
+			// with "www." is not gitlab.com and must keep its own host.
+			// Rewriting it would send someone's intranet MR — with their
+			// credential — to gitlab.com.
+			name: "a self-hosted www host is left alone",
+			raw:  "https://www.git.acme.example/acme/billing/-/merge_requests/7",
+			want: "https://www.git.acme.example/api/v4/projects/acme%2Fbilling/merge_requests/7",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -284,6 +309,49 @@ func TestRef_APIEndpointFor_UsesTheSuppliedHostNotTheParsedOne(t *testing.T) {
 			raw:    "http://gitlab.acme.internal/acme/billing/-/merge_requests/7",
 			vetted: "gitlab.acme.internal",
 			want:   "http://gitlab.acme.internal/api/v4/projects/acme%2Fbilling/merge_requests/7",
+		},
+		// The vetted host arrives from a credential's account_label, which is
+		// operator-typed. Fetch admits it with strings.EqualFold against
+		// ref.Host and then passes it through UNCHANGED, so every SaaS branch
+		// below has to survive whatever case that operator used. DNS is
+		// case-insensitive, so these are the same hosts — but an exact ==
+		// comparison does not know that, and each miss lands somewhere wrong.
+		{
+			name:   "mixed-case github.com still resolves to the api subdomain",
+			raw:    "https://github.com/crewship-ai/crewship/pull/7",
+			vetted: "GitHub.com",
+			want:   "https://api.github.com/repos/crewship-ai/crewship/pulls/7",
+		},
+		{
+			// The worst of the set: missing this branch does not fail, it
+			// silently builds the GitHub ENTERPRISE layout (/api/v3) against
+			// the SaaS host, which answers 404 for every link.
+			name:   "upper-case github.com does not fall through to the Enterprise layout",
+			raw:    "https://github.com/crewship-ai/crewship/pull/7",
+			vetted: "GITHUB.COM",
+			want:   "https://api.github.com/repos/crewship-ai/crewship/pulls/7",
+		},
+		{
+			name:   "mixed-case www.gitlab.com still resolves to the bare SaaS host",
+			raw:    "https://www.gitlab.com/acme/billing/-/merge_requests/7",
+			vetted: "WWW.GitLab.com",
+			want:   "https://gitlab.com/api/v4/projects/acme%2Fbilling/merge_requests/7",
+		},
+		{
+			name:   "mixed-case www.github.com still resolves to the api subdomain",
+			raw:    "https://www.github.com/crewship-ai/crewship/pull/7",
+			vetted: "WWW.GITHUB.COM",
+			want:   "https://api.github.com/repos/crewship-ai/crewship/pulls/7",
+		},
+		{
+			// The guard on the canonicalisation: a self-hosted host must keep
+			// its own name. Lower-casing it is safe (DNS is case-insensitive);
+			// rewriting it to a SaaS host would send an intranet merge request,
+			// with its credential, to gitlab.com.
+			name:   "a mixed-case self-hosted host is lower-cased, never rewritten",
+			raw:    "https://GitLab.ACME.internal/acme/billing/-/merge_requests/7",
+			vetted: "GitLab.ACME.internal",
+			want:   "https://gitlab.acme.internal/api/v4/projects/acme%2Fbilling/merge_requests/7",
 		},
 	}
 	for _, tt := range tests {

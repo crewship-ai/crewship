@@ -267,6 +267,27 @@ func TestFetch_ErrorMapping(t *testing.T) {
 			detailHas: "rate limit",
 		},
 		{
+			// GitHub's SECONDARY rate limit (the abuse/burst limiter) answers
+			// 403 with `retry-after` — and, per its own documentation,
+			// x-ratelimit-remaining only "may be 0". So a 403 that carries a
+			// Retry-After is a "come back later", never a scope problem, and
+			// reading it as ErrForbidden sends the user to rotate a token that
+			// was fine. Documented at
+			// docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
+			// ("if the retry-after response header is present, you should not
+			// retry your request until after that many seconds has elapsed").
+			// Not reachable from a fixture of the payload — it lives entirely
+			// in the headers, which is why the shape of this case is a header
+			// map and an empty body.
+			name:      "403 github secondary rate limit (retry-after, remaining not 0)",
+			status:    403,
+			headers:   map[string]string{"Retry-After": "60", "X-RateLimit-Remaining": "17"},
+			want:      ErrRateLimited,
+			wantRetry: 60 * time.Second,
+			provider:  ProviderGitHub,
+			detailHas: "rate limit",
+		},
+		{
 			name:      "429 with Retry-After",
 			status:    429,
 			headers:   map[string]string{"Retry-After": "42"},

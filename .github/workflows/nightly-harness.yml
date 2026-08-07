@@ -59,6 +59,14 @@ name: Nightly Harness
 #   test-redteam-insider.sh       attacks the instance from inside a crew
 #                                 container and carries xfail assertions for
 #                                 open issues (#1368); needs provisioned crews
+#   test-gitlink-realworld.sh     makes REAL requests to api.github.com and
+#                                 gitlab.com and needs a per-forge PAT
+#                                 (GITLINK_GITHUB_TOKEN / GITLINK_GITLAB_TOKEN).
+#                                 It SKIPs cleanly with none, so it is excluded
+#                                 for honesty rather than safety: a suite that
+#                                 can only ever skip here would report green
+#                                 while proving nothing about the forges it
+#                                 exists to check (#1768)
 #
 # `run-all.sh` is deliberately not used: it is a flat sequential loop with no
 # per-suite timeout, so one wedged `ask` burns the whole job's budget and the
@@ -90,6 +98,7 @@ env:
   # there is nothing to keep in sync.
   EXCLUDED_SUITES: >-
     test-datastore-redis-auth.sh
+    test-gitlink-realworld.sh
     test-notifications-shoutrrr.sh
     test-ollama-local.sh
     test-realworld-github.sh
