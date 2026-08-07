@@ -14,9 +14,9 @@
 // rendered as the graph rather than described in prose.
 
 import * as React from "react"
+import dynamic from "next/dynamic"
 import { ArrowLeft, Clock, Coins, GitBranch, Layers, ListTree } from "lucide-react"
 
-import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { Appear, FieldLabel, Pill } from "@/components/ui/detail"
@@ -43,6 +43,23 @@ import { relTime } from "@/lib/time"
 
 import { FeedRow } from "./feed-row"
 import { iconFor } from "./activity-overview"
+
+// React Flow (~200 KB+) loads only when a graph actually renders. /activity
+// made this call deliberately (activity-trace-page.tsx:32) to keep
+// @xyflow/react out of its initial route chunk; importing it statically here
+// put it straight back into activity-new's, for a card most visits never open.
+const TraceCanvas = dynamic(
+  () => import("@/components/features/activity/trace-canvas").then((m) => m.TraceCanvas),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+        Loading execution graph…
+      </div>
+    ),
+  },
+)
+
 
 // Two refinements the detail does not wire yet: inline waitpoint decisions
 // and heatmap shading. Empty maps are the canvas's documented "nothing to
