@@ -141,6 +141,7 @@ func (v *validator) checkCrewSpec(meta Metadata, spec *CrewSpec, wsCreds map[str
 	v.checkSkills(crewLabel, spec.Skills)
 	v.checkMCPServers(crewLabel, spec.MCPServers, mergeCredIndex(wsCreds, spec.Credentials))
 	v.checkServices(crewLabel, spec.Services, mergeCredIndex(wsCreds, spec.Credentials))
+	v.checkAutoManagedCollisions(crewLabel, spec, mergeCredIndex(wsCreds, spec.Credentials))
 	v.checkFiles(crewLabel, spec.Files)
 
 	if len(spec.Agents) == 0 {
@@ -379,6 +380,53 @@ func (v *validator) checkAutoCredentials(scope string, s *Service, creds map[str
 			v.errf("%s service %q: auto_credential %q length %d is below the %d-byte minimum",
 				scope, s.Name, ac.Name, ac.Length, minAutoCredentialBytes)
 		}
+	}
+}
+
+// checkAutoManagedCollisions rejects a manifest that declares, by hand, a
+// credential the auto-managed path would generate for one of its own services
+// (#1712).
+//
+// checkAutoCredentials above already refuses this for entries the operator
+// WRITES OUT. The case that reached users is the one nobody writes: a
+// `postgres:*` service earns a POSTGRES_PASSWORD auto-credential from the
+// sidecar catalog with no auto_credentials block anywhere in the file. Declare
+// POSTGRES_PASSWORD in credentials[] as well and the manifest validates
+// cleanly, then fails part-way through apply — after the crew, its agents and
+// the manual credential row exist — with "credential already exists with
+// provider=NONE". The repo's own python-with-services example shipped in that
+// state.
+//
+// It asks the expander what it WOULD create rather than re-deriving the
+// catalog's answer. That matters: whether a name is generated depends on
+// whether the operator has taken ownership of the auth channel (a pinned auth
+// env, or a command carrying --requirepass), and a second copy of that rule
+// here would be free to drift from the one apply actually runs — reporting a
+// conflict that will not happen, or missing one that will. The probe runs on a
+// deep copy because expansion's whole job is writing generated secrets into
+// the spec.
+//
+// Expansion errors are dropped, not reported: they are the plan path's to
+// raise (it produces the same error with the same words a moment later), and a
+// manifest that cannot expand has no auto-credential names to collide with
+// anyway.
+func (v *validator) checkAutoManagedCollisions(scope string, spec *CrewSpec, creds map[string]Credential) {
+	if spec == nil || len(spec.Services) == 0 || len(creds) == 0 {
+		return
+	}
+	probe := deepCopyCrewSpec(spec)
+	planned, err := expandAutoCredentialsInCrewSpec(&probe, "")
+	if err != nil {
+		return
+	}
+	for _, ac := range planned {
+		if _, clash := creds[ac.Name]; !clash {
+			continue
+		}
+		v.errf("%s service %q: %s is generated automatically for this service, but the manifest also "+
+			"declares it in credentials[] — drop the declaration (and any env_refs to it; agents in the "+
+			"crew are wired to the auto-managed credential for you), or rename one of the two",
+			scope, ac.ProvisionedForService, ac.Name)
 	}
 }
 

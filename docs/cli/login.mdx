@@ -4,7 +4,7 @@ description: "Authenticate the CLI against a Crewship server — interactive cre
 icon: "log-in"
 ---
 
-<!-- docs-inventory: ignore-api /api/v1/auth/google/redirect reason=historical-removed-route -->
+{/* docs-inventory: ignore-api /api/v1/auth/google/redirect reason=historical-removed-route */}
 # Login, Logout, Whoami
 
 Three commands defined in `cmd/crewship/cmd_login.go` cover every way the CLI authenticates against a Crewship server. The token lands in `~/.crewship/cli-config.yaml` (or the selected profile); subsequent commands pick it up from there. Login and the other top-level commands respect the global `--server` and `--profile` flags. `--workspace` is a global context flag for workspace-scoped commands; login does not select a workspace.

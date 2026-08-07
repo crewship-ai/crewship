@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -36,9 +37,19 @@ func covCCSNewHandler(t *testing.T) *CrewHandler {
 }
 
 // startFakeIPC serves an HTTP handler on a unix socket and returns its path.
+//
+// The directory is a short os.MkdirTemp rather than t.TempDir: a unix socket
+// path is capped at ~104 bytes on macOS, and t.TempDir embeds the test's NAME,
+// so a descriptively-named test fails with `bind: invalid argument` — an error
+// about the socket that is really about the length of the test name.
 func startFakeIPC(t *testing.T, handler http.Handler) string {
 	t.Helper()
-	sock := filepath.Join(t.TempDir(), "ipc.sock")
+	dir, err := os.MkdirTemp("", "cs")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	sock := filepath.Join(dir, "ipc.sock")
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatalf("listen unix: %v", err)

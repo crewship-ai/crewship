@@ -4,7 +4,7 @@ description: "How Crewship runs AI coding agents — one Linux container per cre
 icon: "building"
 ---
 
-<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 # Architecture
 
 Crewship is a self-hosted runtime that gives every crew of AI coding agents a shared Linux container — a real machine where they can install services, run databases, and build a complete working system. The runtime is shipped as a single Go binary with the Next.js UI embedded in it, an embedded SQLite database (PostgreSQL on the v0.2 roadmap), and a sidecar proxy that handles credential access without exposing keys to the agent process.

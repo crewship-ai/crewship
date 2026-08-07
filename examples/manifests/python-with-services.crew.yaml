@@ -6,6 +6,19 @@
 # network. Agents reach them by service name — `redis:6379`,
 # `postgres:5432`. Volumes are per-crew named volumes; nothing is
 # published to the host.
+#
+# The sidecar passwords are NOT declared here. Both images are in the
+# auto-managed-credential catalog, so `crewship apply` generates
+# POSTGRES_PASSWORD and REDIS_PASSWORD, boots each sidecar with its own
+# secret, stores them as AUTO_MANAGED credentials and adds both to every
+# agent in the crew. The only secret you supply is the LLM key:
+#
+#   crewship apply --file python-with-services.crew.yaml \
+#     --secrets-file secrets.env --yes      # secrets.env: ANTHROPIC_API_KEY=…
+#
+# See docs/guides/auto-managed-credentials.mdx. Declaring one of those
+# names in `credentials:` as well is rejected at validate time — the two
+# would race for the same workspace credential row.
 
 apiVersion: crewship/v1
 kind: Crew
@@ -20,35 +33,44 @@ metadata:
 spec:
   devcontainer:
     image: mcr.microsoft.com/devcontainers/python:3.12
+    # Host and database name only. These values are container ENV, and
+    # container ENV is not re-expanded by the shell that reads it, so a
+    # ${POSTGRES_PASSWORD} written here would reach the agent as those
+    # literal characters. The agent assembles the URL from the password
+    # env the auto-managed credential delivers (see the prompt below).
     env:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/app
-      REDIS_URL: redis://redis:6379
+      DATABASE_HOST: postgres
+      DATABASE_NAME: app
+      DATABASE_USER: postgres
+      REDIS_HOST: redis
 
   credentials:
     - env: ANTHROPIC_API_KEY
       provider: ANTHROPIC
       type: API_KEY
-    - env: POSTGRES_PASSWORD
-      provider: NONE
-      type: GENERIC_SECRET
-      label: Postgres root password
 
   services:
     - name: redis
       image: redis:7-alpine
       ports: ["6379"]
+      # The generated secret reaches this sidecar as
+      # `redis-server --requirepass …`, never as an env var, so the probe
+      # cannot authenticate. It does not need to: a server that answers
+      # NOAUTH is up AND enforcing auth, which is exactly what a liveness
+      # probe is asking. A bare `redis-cli ping` would report the
+      # password-protected server as unhealthy.
       healthcheck:
-        test: ["CMD", "redis-cli", "ping"]
+        test: ["CMD-SHELL", "redis-cli ping 2>&1 | grep -qE 'PONG|NOAUTH'"]
         interval: 5s
         timeout: 3s
         retries: 5
 
     - name: postgres
       image: postgres:16-alpine
+      # POSTGRES_USER comes from the catalog and POSTGRES_PASSWORD is
+      # generated, so only the database name is left to say.
       env:
         POSTGRES_DB: app
-        POSTGRES_USER: postgres
-      env_refs: [POSTGRES_PASSWORD]
       ports: ["5432"]
       volumes:
         - name: pg-data
@@ -71,10 +93,14 @@ spec:
         model: claude-haiku-4-5
       tool_profile: CODING
       memory_enabled: true
-      env_refs: [ANTHROPIC_API_KEY, POSTGRES_PASSWORD]
+      # POSTGRES_PASSWORD and REDIS_PASSWORD are appended here by apply,
+      # one per auto-managed sidecar credential.
+      env_refs: [ANTHROPIC_API_KEY]
       prompt: |
-        You are Pavel, a Python backend engineer. The crew runtime
-        has a Redis cache reachable at redis:6379 and a Postgres
-        database at postgres:5432 (database "app", user "postgres",
-        password in $POSTGRES_PASSWORD). Use them for any work that
+        You are Pavel, a Python backend engineer. The crew runtime has a
+        Redis cache at redis:6379 and a Postgres database at
+        postgres:5432 (database "app", user "postgres"). Both require
+        authentication: connect with
+        postgresql://postgres:$POSTGRES_PASSWORD@postgres:5432/app and
+        redis://:$REDIS_PASSWORD@redis:6379. Use them for any work that
         needs persistence or shared state.

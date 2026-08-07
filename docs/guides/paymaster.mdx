@@ -4,7 +4,7 @@ description: "Cost ledger and hierarchical budget enforcement for every LLM call
 icon: "credit-card"
 ---
 
-<!-- docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI -->
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 # Paymaster
 
 Paymaster owns cost accounting and budget enforcement. It is the read/write side of the `cost_ledger` and `budget_limits` tables (migration 52, extended by migration 62) and it ships as middleware on the [LLM call stack](/guides/llm-middleware). Every priced LLM round-trip produces exactly one `cost_ledger` row plus a `llm.call` journal entry; metered rows additionally emit `cost.incurred`, and either side can emit `budget.warning` / `budget.exceeded` when limits are hit.
