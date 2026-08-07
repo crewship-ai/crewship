@@ -18,7 +18,7 @@ import (
 // TestListCrewServices_FiltersByLabelAndReadsName is the load-bearing
 // case: given a mixed bag of containers (the crew's own runtime, another
 // crew's sidecar, and this crew's two sidecars — one running, one
-// stopped), only the containers carrying this crew's crewship.crew +
+// stopped), only the containers carrying this crew's crewship.crew-id +
 // crewship.kind=sidecar labels come back, and Name is read from the
 // authoritative crewship.svc label (== the manifest's service name).
 func TestListCrewServices_FiltersByLabelAndReadsName(t *testing.T) {
@@ -43,34 +43,46 @@ func TestListCrewServices_FiltersByLabelAndReadsName(t *testing.T) {
 					"Names":  []string{"/crewship-team-alpha-crew1"},
 					"Image":  "crewship/agent:latest",
 					"State":  "running",
-					"Labels": map[string]any{"crewship.crew": "alpha"},
+					"Labels": map[string]any{"crewship.crew-id": "ckalpha01", "crewship.crew": "alpha"},
 				},
 				{
 					// Another crew's sidecar — must NOT be picked up
-					// (crewship.crew label is "beta", not "alpha").
+					// (crewship.crew-id is beta's, not alpha's).
 					"Id":     "other-cid",
-					"Names":  []string{"/crewship-svc-beta-redis"},
+					"Names":  []string{"/crewship-svc-beta-ckbeta02-redis"},
 					"Image":  "redis:7-alpine",
 					"State":  "running",
-					"Labels": map[string]any{"crewship.crew": "beta", "crewship.kind": "sidecar", "crewship.svc": "redis"},
+					"Labels": map[string]any{"crewship.crew-id": "ckbeta02", "crewship.crew": "beta", "crewship.kind": "sidecar", "crewship.svc": "redis"},
+				},
+				{
+					// A crew in ANOTHER WORKSPACE with the IDENTICAL slug —
+					// legal, because crews is UNIQUE(workspace_id, slug). Its
+					// crewship.crew label is byte-identical to alpha's, so a
+					// slug-keyed listing showed one tenant another tenant's
+					// running services (#1732).
+					"Id":     "twin-cid",
+					"Names":  []string{"/crewship-svc-alpha-ckotherws03-redis"},
+					"Image":  "redis:5.0.0",
+					"State":  "running",
+					"Labels": map[string]any{"crewship.crew-id": "ckotherws03", "crewship.crew": "alpha", "crewship.kind": "sidecar", "crewship.svc": "redis"},
 				},
 				{
 					"Id":     "redis-cid",
-					"Names":  []string{"/crewship-svc-alpha-redis"},
+					"Names":  []string{"/crewship-svc-alpha-ckalpha01-redis"},
 					"Image":  "redis:7-alpine",
 					"State":  "running",
 					"Status": "Up 2 hours",
 					"Ports":  []map[string]any{{"PrivatePort": 6379, "Type": "tcp"}},
-					"Labels": map[string]any{"crewship.crew": "alpha", "crewship.kind": "sidecar", "crewship.svc": "redis"},
+					"Labels": map[string]any{"crewship.crew-id": "ckalpha01", "crewship.crew": "alpha", "crewship.kind": "sidecar", "crewship.svc": "redis"},
 				},
 				{
 					"Id":     "pg-cid",
-					"Names":  []string{"/crewship-svc-alpha-postgres"},
+					"Names":  []string{"/crewship-svc-alpha-ckalpha01-postgres"},
 					"Image":  "postgres:16",
 					"State":  "exited",
 					"Status": "Exited (0) 3 minutes ago",
 					"Ports":  []map[string]any{{"PrivatePort": 5432, "Type": "tcp"}},
-					"Labels": map[string]any{"crewship.crew": "alpha", "crewship.kind": "sidecar", "crewship.svc": "postgres"},
+					"Labels": map[string]any{"crewship.crew-id": "ckalpha01", "crewship.crew": "alpha", "crewship.kind": "sidecar", "crewship.svc": "postgres"},
 				},
 			})
 		case strings.Contains(r.URL.Path, "/containers/") && strings.HasSuffix(r.URL.Path, "/json"):
@@ -89,12 +101,18 @@ func TestListCrewServices_FiltersByLabelAndReadsName(t *testing.T) {
 	defer cleanup()
 	p.cfg.ContainerPrefix = "crewship"
 
-	got, err := p.ListCrewServices(context.Background(), "alpha")
+	got, err := p.ListCrewServices(context.Background(), "ckalpha01", "alpha")
 	if err != nil {
 		t.Fatalf("ListCrewServices: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("expected 2 services for crew alpha, got %d: %+v", len(got), got)
+		t.Fatalf("expected 2 services for crew alpha, got %d: %+v — an identically-slugged crew in "+
+			"another workspace must not appear (#1732)", len(got), got)
+	}
+	for _, svc := range got {
+		if svc.Image == "redis:5.0.0" {
+			t.Errorf("cross-TENANT leak: the same-slug crew in another workspace surfaced (%+v)", svc)
+		}
 	}
 
 	byName := map[string]provider.CrewServiceStatus{}
@@ -160,9 +178,10 @@ func TestListCrewServices_NoCrossCrewPrefixLeak(t *testing.T) {
 					"State":  "running",
 					"Status": "Up 1 hour",
 					"Labels": map[string]any{
-						"crewship.crew": "alpha",
-						"crewship.kind": "sidecar",
-						"crewship.svc":  "redis",
+						"crewship.crew-id": "ckalpha01",
+						"crewship.crew":    "alpha",
+						"crewship.kind":    "sidecar",
+						"crewship.svc":     "redis",
 					},
 				},
 				{
@@ -176,9 +195,10 @@ func TestListCrewServices_NoCrossCrewPrefixLeak(t *testing.T) {
 					"Status": "Up 5 days",
 					"Ports":  []map[string]any{{"PrivatePort": 6379, "Type": "tcp"}},
 					"Labels": map[string]any{
-						"crewship.crew": "alpha-foo",
-						"crewship.kind": "sidecar",
-						"crewship.svc":  "redis",
+						"crewship.crew-id": "ckalphafoo04",
+						"crewship.crew":    "alpha-foo",
+						"crewship.kind":    "sidecar",
+						"crewship.svc":     "redis",
 					},
 				},
 			})
@@ -198,7 +218,7 @@ func TestListCrewServices_NoCrossCrewPrefixLeak(t *testing.T) {
 	defer cleanup()
 	p.cfg.ContainerPrefix = "crewship"
 
-	got, err := p.ListCrewServices(context.Background(), "alpha")
+	got, err := p.ListCrewServices(context.Background(), "ckalpha01", "alpha")
 	if err != nil {
 		t.Fatalf("ListCrewServices: %v", err)
 	}
@@ -213,19 +233,19 @@ func TestListCrewServices_NoCrossCrewPrefixLeak(t *testing.T) {
 	}
 }
 
-// TestListCrewServices_EmptySlug_Errors guards against a caller
-// accidentally scoping the daemon-wide list by an empty prefix, which
-// would match everything.
-func TestListCrewServices_EmptySlug_Errors(t *testing.T) {
+// TestListCrewServices_EmptyCrewID_Errors guards against a caller
+// accidentally scoping the daemon-wide list by an empty crew id, which a
+// looser matcher would treat as "everything".
+func TestListCrewServices_EmptyCrewID_Errors(t *testing.T) {
 	t.Parallel()
 
 	p, cleanup := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Error("should not reach the daemon with an empty slug")
+		t.Error("should not reach the daemon with an empty crew id")
 	})
 	defer cleanup()
 
-	if _, err := p.ListCrewServices(context.Background(), ""); err == nil {
-		t.Fatal("expected error for empty crew slug")
+	if _, err := p.ListCrewServices(context.Background(), "", "alpha"); err == nil {
+		t.Fatal("expected error for empty crew id")
 	}
 }
 
@@ -241,7 +261,7 @@ func TestListCrewServices_NoMatches_EmptySlice(t *testing.T) {
 	defer cleanup()
 	p.cfg.ContainerPrefix = "crewship"
 
-	got, err := p.ListCrewServices(context.Background(), "lonely")
+	got, err := p.ListCrewServices(context.Background(), "cklonely05", "lonely")
 	if err != nil {
 		t.Fatalf("ListCrewServices: %v", err)
 	}
@@ -260,7 +280,7 @@ func TestListCrewServices_ListError_Wraps(t *testing.T) {
 	})
 	defer cleanup()
 
-	_, err := p.ListCrewServices(context.Background(), "alpha")
+	_, err := p.ListCrewServices(context.Background(), "ckalpha01", "alpha")
 	if err == nil {
 		t.Fatal("expected error")
 	}

@@ -59,11 +59,6 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"second_approver_required": boolean(), "second_approver_by_workspace": boolean(),
 		"second_approver_by_tier": boolean(), "security_level_label": str(), "evidence": anyObject(),
 	})
-	notification := object(map[string]any{
-		"id": str(), "actor_type": str(), "actor_id": str(), "actor_name": nullable(str()),
-		"action": str(), "entity_type": str(), "entity_id": nullable(str()),
-		"entity_title": nullable(str()), "read_at": nullable(str()), "created_at": str(),
-	})
 	auditEntry := object(map[string]any{
 		"id": str(), "workspace_id": str(), "user_id": nullable(str()), "action": str(),
 		"entity_type": str(), "entity_id": nullable(str()), "metadata": nullable(str()),
@@ -116,12 +111,6 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"DELETE /api/v1/inbox":               {Response: object(map[string]any{"deleted": integer()})},
 		"GET /api/v1/agents/{agentId}/inbox": {Response: object(map[string]any{"approvals_pending": integer(), "assignments_open": integer(), "escalations_open": integer(), "peer_messages": array(anyObject()), "cost_usd_this_month": map[string]any{"type": "number"}, "llm_calls_this_month": integer(), "tokens_used_this_month": integer()})},
 	}
-	notifications := map[string]DomainSchema{
-		"GET /api/v1/notifications":                        {Response: array(notification)},
-		"GET /api/v1/notifications/count":                  {Response: object(map[string]any{"unread": integer()})},
-		"POST /api/v1/notifications/{notificationId}/read": {Response: object(map[string]any{"status": str()})},
-		"POST /api/v1/notifications/read-all":              {Response: object(map[string]any{"updated": integer()})},
-	}
 	audit := map[string]DomainSchema{
 		"GET /api/v1/audit": {Response: object(map[string]any{"data": array(auditEntry), "pagination": pagination})},
 	}
@@ -133,7 +122,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 	}
 	return map[string]map[string]DomainSchema{
 		"public-activity-chats": chatDomain, "public-activity-conversations": conversations,
-		"public-activity-inbox": inbox, "public-activity-notifications": notifications,
+		"public-activity-inbox": inbox,
 		"public-activity-audit": audit, "public-activity-webhooks": webhooks,
 	}
 }

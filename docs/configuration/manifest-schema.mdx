@@ -216,7 +216,7 @@ Sidecar container that runs alongside the agent on the crew's bridge network. Ag
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `name` | string | Per-crew namespaced internally as `crewship-svc-{crew-slug}-vol-{name}`. Two crews can both declare `pg-data` and get isolated stores. |
+| `name` | string | Per-crew namespaced internally as `crewship-svc-{crew-slug}-{crew-id}-vol-{name}`. Two crews can both declare `pg-data` and get isolated stores — including two crews with the *same slug* in different workspaces, which is why the crew id is in the name (#1732). |
 | `mount` | string | Absolute path inside the sidecar (e.g. `/var/lib/postgresql/data`). |
 
 ### `ServiceHealthcheck`

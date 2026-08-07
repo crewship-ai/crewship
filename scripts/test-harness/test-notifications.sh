@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash source=lib.sh
-# Notifications & inbox — "run a routine, does the notification land?"
+# Notifications & inbox — "run a routine, is the outcome observable?"
 #
 # Validates the runtime feedback loop a real operator depends on:
 #   - a routine RUN actually completes (exit code + records status)
 #   - a completion event is observable on the activity rail (routine watch)
-#   - a notification lands in the feed referencing that routine run
 #   - a FAILED run surfaces a `failed_run` inbox item (best-effort: only if we
 #     can induce a failure on this workspace)
 #
@@ -64,16 +63,14 @@ section "3. Routine completion is observable (activity rail is the canonical sur
 # ─────────────────────────────────────────────────────────────────────────────
 # A successful routine completion is recorded on the activity rail
 # (pipeline.run.completed — asserted in section 2 via `watch --once`) and in
-# `routine records`. The notification FEED is reserved for attention-worthy
-# events (escalations, approvals, mentions); routine completions are NOT pushed
-# there by design — otherwise scheduled runs would drown the feed. So the feed
-# is a best-effort bonus check; its absence is NOT a failure.
-if have jq && "$CREWSHIP" --server "$SERVER" notification list --format json 2>/dev/null \
-     | jq -e '[.[] | select((.entity_type=="routine") or (.action|tostring|test("routine|pipeline|run";"i")))] | length>0' >/dev/null 2>&1; then
-  _pass "routine event present in the notification feed (bonus)"
-else
-  skip "routine notification in feed" "by design: completions surface on the activity rail (verified §2) + records, not the notification feed"
-fi
+# `routine records`. It is deliberately NOT pushed at a human: routine
+# completions are not attention-worthy, and scheduled runs would drown whatever
+# surface they landed on.
+#
+# This section used to also poke `crewship notification list` as a "bonus"
+# check. That command and the table behind it were removed in #1751 — nothing
+# ever wrote to it, so the bonus could only ever skip.
+skip "routine completion pushed at a human" "by design: completions surface on the activity rail (verified §2) and in routine records (verified §1), not in a feed"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "4. Failed run is observable (records); failed_run inbox is scheduled-only"

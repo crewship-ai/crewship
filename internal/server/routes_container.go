@@ -150,7 +150,7 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 	// response, since the agent is already down and the only
 	// remaining work is releasing some MB of Postgres memory.
 	if sp, ok := s.container.(provider.SidecarProvider); ok && slug != "" {
-		if err := sp.StopCrewServices(r.Context(), slug); err != nil {
+		if err := sp.StopCrewServices(r.Context(), id, slug); err != nil {
 			s.logger.Warn("sidecar stop failed", "crew_id", id, "error", err)
 		}
 	}

@@ -145,7 +145,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"keeper_request_events": IntentExcludeRuntime,
 	"rate_buckets":          IntentExcludeRuntime,
 	"agent_status":          IntentExcludeRuntime, // live status; agent boots IDLE
-	"notifications":         IntentExcludeRuntime, // transient; resend on the new instance
+	// `notifications` sat here until #1751 dropped the table: it was the
+	// entity-scoped in-app feed, and nothing outside a test ever inserted a
+	// row. A classification for a table that no longer exists is a claim the
+	// totality guard cannot check, so it goes with the table.
 
 	// === Outbound notifications (#1412) =============================
 	// These tables carry only a plain workspace_id column (no FK to

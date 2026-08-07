@@ -269,6 +269,15 @@ func (p *Provider) PruneLegacyCrewResources(ctx context.Context, crews []provide
 // exit) returns an actionable error and leaves the legacy volume untouched.
 // Data loss is the cardinal sin here.
 func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, image string) error {
+	return p.migrateLegacyVolumeLabeled(ctx, legacy, target, image, nil)
+}
+
+// migrateLegacyVolumeLabeled is migrateLegacyVolume with extra labels stamped
+// on the TARGET volume. Docker cannot label a volume after creation, so a
+// migrated volume that is later matched by label (sidecar volumes, #1732) has
+// to be labelled here — otherwise the migration would produce a volume its own
+// teardown can no longer find.
+func (p *Provider) migrateLegacyVolumeLabeled(ctx context.Context, legacy, target, image string, labels map[string]string) error {
 	failSafe := func(stage string, cause error) error {
 		return fmt.Errorf("C1 migration of legacy slug-scoped volume %q into %q failed at %s: %w; "+
 			"the legacy volume was NOT removed — its data is intact. Migrate it manually or prune it once confirmed stale (dev: nuke + reseed)",
@@ -290,7 +299,7 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 	copySucceeded := false
 	if _, err := p.client.VolumeCreate(ctx, client.VolumeCreateOptions{
 		Name:   target,
-		Labels: map[string]string{"managed-by": "crewship"},
+		Labels: volumeLabels(labels),
 	}); err != nil {
 		return failSafe("create target volume", err)
 	}
@@ -341,8 +350,31 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 	if err != nil {
 		return failSafe("create copy helper", err)
 	}
-	// Always clean up the helper, success or failure.
-	defer func() { _, _ = p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}) }()
+	// Always clean up the helper, success or failure — and clean it up BEFORE
+	// the legacy volume is pruned, which is why this is a named function the
+	// success path calls explicitly rather than a bare defer.
+	//
+	// The helper mounts the legacy volume at /from. A real daemon refuses to
+	// remove a volume that any container still references — `force` does not
+	// override that — and a deferred removal does not run until this function
+	// returns, i.e. after the prune. Live on OrbStack 29.4.0 that made the
+	// prune fail every single time ("volume is in use - [<helper id>]"), so
+	// the migration copied the data and then leaked its source volume on every
+	// upgraded install. Removing the helper twice is harmless: the second call
+	// 404s and is ignored.
+	helperRemoved := false
+	removeHelper := func() {
+		if helperRemoved {
+			return
+		}
+		helperRemoved = true
+		if _, err := p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}); err != nil {
+			p.logger.Warn("C1 migration could not remove its copy helper; it still references the legacy volume, "+
+				"so the prune below may be refused — operator may remove both by hand",
+				"helper_container", created.ID, "legacy_volume", legacy, "target_volume", target, "error", err)
+		}
+	}
+	defer removeHelper()
 
 	if _, err := p.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return failSafe("start copy helper", err)
@@ -377,6 +409,10 @@ func (p *Provider) migrateLegacyVolume(ctx context.Context, legacy, target, imag
 	// The copy completed with exit 0: the target volume is authoritative now, so
 	// suppress the rollback defer before we prune the legacy source.
 	copySucceeded = true
+
+	// Drop the helper first — it holds a reference to the legacy volume, and
+	// the daemon will not remove a referenced volume.
+	removeHelper()
 
 	if _, err := p.client.VolumeRemove(ctx, legacy, client.VolumeRemoveOptions{Force: true}); err != nil {
 		// The data was copied successfully; failing to prune the legacy volume
