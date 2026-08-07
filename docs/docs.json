@@ -364,6 +364,7 @@
             "expanded": false,
             "pages": [
               "cli/activity",
+              "cli/chain",
               "cli/logs",
               "cli/metrics",
               "cli/presence"
@@ -489,6 +490,7 @@
               "api-reference/runtime",
               "api-reference/port-expose",
               "api-reference/journal",
+              "api-reference/chains",
               "api-reference/paymaster",
               "api-reference/approvals",
               "api-reference/checkpoints",

@@ -1,23 +1,23 @@
 {
   "summary": {
-    "api_operations": 535,
-    "api_exact_docs": 535,
+    "api_operations": 536,
+    "api_exact_docs": 536,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 728,
-    "cli_exact_docs": 728,
-    "cli_root_docs_present": 728,
+    "cli_operations": 729,
+    "cli_exact_docs": 729,
+    "cli_root_docs_present": 729,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 400,
-    "api_with_concrete_response_schemas": 521,
+    "api_with_test_signals": 401,
+    "api_with_concrete_response_schemas": 522,
     "api_generic_response_schemas": 0,
     "api_with_request_bodies": 224,
     "api_with_concrete_json_requests": 220,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 714,
-    "cli_with_flags": 342,
-    "cli_with_all_flags_documented": 342,
+    "cli_with_test_signals": 715,
+    "cli_with_flags": 343,
+    "cli_with_all_flags_documented": 343,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 99,
@@ -5779,6 +5779,42 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "source_file": "internal/api/router_crews.go"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/chains/{anchor}",
+      "operation_id": "get_api_v1_chains_anchor",
+      "tag": "chains",
+      "exact_docs": [
+        "docs/api-reference/chains.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/chains.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/schemas_observability_payments_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "test_signals": [
+            "cmd/gen-openapi/schemas_observability_payments_test.go"
+          ]
         }
       }
     },
@@ -25034,6 +25070,36 @@
       ]
     },
     {
+      "path": "chain",
+      "use": "chain \u003canchor\u003e",
+      "short": "Show what caused what around an issue, run, routine or assignment",
+      "aliases": [
+        "why"
+      ],
+      "root": "chain",
+      "exact_docs": [
+        "docs/cli/chain.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/chain.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
+        "cmd/crewship/cmd_pipeline_cov_test.go"
+      ],
+      "flags": [
+        "depth",
+        "gaps",
+        "limit"
+      ],
+      "documented_flags": [
+        "depth",
+        "gaps",
+        "limit"
+      ]
+    },
+    {
       "path": "chat",
       "use": "chat \u003cchat-id\u003e",
       "short": "Show the full message history of a chat session",
@@ -25796,6 +25862,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_consolidate_cov_test.go",
         "cmd/crewship/cmd_consolidate_test.go",
         "cmd/crewship/cmd_keeper_review_test.go",
@@ -28045,6 +28112,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_escalation_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_inbox_cov_test.go"
@@ -28455,13 +28523,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_eval_baseline_cov2_test.go",
         "cmd/crewship/cmd_eval_baseline_cov_test.go",
         "cmd/crewship/cmd_eval_baseline_test.go",
         "cmd/crewship/cmd_eval_compare_cov_test.go",
         "cmd/crewship/cmd_eval_cov_test.go",
         "cmd/crewship/cmd_eval_get_cov_test.go",
-        "cmd/crewship/cmd_eval_scenarios_cov_test.go",
         "…"
       ],
       "flags": [
@@ -29249,6 +29317,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_files_cov2_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_inbox_cov_test.go",
         "cmd/crewship/cmd_inbox_foureyes_test.go",
         "cmd/crewship/cmd_notification_removed_test.go",
@@ -30335,6 +30404,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
@@ -30359,12 +30429,12 @@
       "test_signals": [
         "cmd/crewship/cmd_admin_sessions_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_crew_relations_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "cmd/crewship/cmd_integration_agent_cov_test.go",
         "cmd/crewship/cmd_integration_cov2_test.go",
         "cmd/crewship/cmd_integration_cov_test.go",
-        "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
       ]
     },
@@ -30961,6 +31031,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_issue_attachments_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
@@ -35552,6 +35623,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_files_cov2_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_notification_removed_test.go",
         "cmd/crewship/cmd_nuke_test.go",
         "cmd/crewship/cmd_open_test.go"
@@ -37293,6 +37365,7 @@
       "root": "routine",
       "exact_docs": [
         "docs/cli/ask.mdx",
+        "docs/cli/chain.mdx",
         "docs/cli/diff.mdx",
         "docs/cli/digest.mdx",
         "docs/cli/explain.mdx",
@@ -37309,6 +37382,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_commands_test.go",
         "cmd/crewship/cmd_root_headless_multiarg_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
@@ -37316,7 +37390,6 @@
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
         "…"
       ]
     },
@@ -37335,12 +37408,12 @@
       "test_signals": [
         "cmd/crewship/cmd_admin_sessions_test.go",
         "cmd/crewship/cmd_agent_lifecycle_cov_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_crew_relations_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "cmd/crewship/cmd_milestone_cov_test.go",
         "cmd/crewship/cmd_pipeline_cov_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
-        "cmd/crewship/cmd_routine_bench_cov_test.go",
         "…"
       ]
     },
@@ -39247,6 +39320,7 @@
       "short": "Show a run and its child runs (call_pipeline / deferred / replay)",
       "root": "routine",
       "exact_docs": [
+        "docs/cli/chain.mdx",
         "docs/cli/routine.mdx"
       ],
       "root_docs": [
@@ -39721,6 +39795,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_consolidate_test.go",
         "cmd/crewship/cmd_keeper_review_test.go",
         "cmd/crewship/cmd_pipeline_cov_test.go",
@@ -39728,7 +39803,6 @@
         "cmd/crewship/cmd_run_cov_test.go",
         "cmd/crewship/cmd_run_id_namespace_test.go",
         "cmd/crewship/cmd_run_insights_test.go",
-        "cmd/crewship/cmd_run_metadata_test.go",
         "…"
       ],
       "flags": [
@@ -44171,11 +44245,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3886,
-    "api_path_references": 1971,
+    "command_references": 3899,
+    "api_path_references": 1973,
     "environment_references": 395,
     "manifest_kind_references": 209,
-    "flag_references": 1799,
+    "flag_references": 1806,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,
