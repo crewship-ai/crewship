@@ -131,6 +131,25 @@ func validateStepEgress(st Step) error {
 		if _, err := resolveInterpreter(st.Script.Interpreter, abs); err != nil {
 			return fmt.Errorf("pipeline: step %q (script) %w", st.ID, err)
 		}
+	case StepForeach:
+		// A foreach is a wrapper: the loop itself reaches nothing, its BODY
+		// does. Recursing here is what keeps egress rules applying to what
+		// actually runs — without it, wrapping an http step in a foreach
+		// would have been a way around them.
+		//
+		// This case was missing entirely, so every foreach step hit the
+		// default arm and was refused at save with "unsupported type" —
+		// while validateForeachStep existed and ran, and the schema and the
+		// StepType both declared the kind. Nothing caught it because the
+		// foreach tests build Step structs directly and never call Validate.
+		if st.Foreach == nil {
+			return fmt.Errorf("pipeline: step %q (foreach) missing foreach body", st.ID)
+		}
+		for _, inner := range st.Foreach.Steps {
+			if err := validateStepEgress(inner); err != nil {
+				return err
+			}
+		}
 	case StepQuery:
 		if st.Query == nil {
 			return fmt.Errorf("pipeline: step %q (query) missing query body", st.ID)
@@ -153,7 +172,7 @@ func validateStepEgress(st Step) error {
 			return err
 		}
 	default:
-		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify, script, query, crewship)", st.ID, st.Type)
+		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify, script, query, foreach, crewship)", st.ID, st.Type)
 	}
 	return nil
 }

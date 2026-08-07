@@ -70413,6 +70413,66 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "blocking": {
+                    "type": "boolean"
+                  },
+                  "crew_id": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "event": {
+                    "type": "string"
+                  },
+                  "handler_config": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "handler_kind": {
+                    "description": "shell runs a command on the HOST and is OWNER-only, on create and on any edit that leaves a hook shell.",
+                    "enum": [
+                      "shell",
+                      "http",
+                      "subagent"
+                    ],
+                    "type": "string"
+                  },
+                  "matcher": {
+                    "properties": {
+                      "agent_ids": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "crew_ids": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "severities": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "tools": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "when": {
+                        "description": "Reserved for a future expression predicate. Accepted and ignored today.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -70423,6 +70483,85 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "blocking": {
+                      "description": "A blocking hook runs synchronously and may veto the intercepted action.",
+                      "type": "boolean"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_by": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "event": {
+                      "description": "One of the declared lifecycle events; an unknown value is rejected and the error lists the valid ones.",
+                      "type": "string"
+                    },
+                    "handler_config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "handler_kind": {
+                      "description": "shell runs a command on the HOST and is OWNER-only, on create and on any edit that leaves a hook shell.",
+                      "enum": [
+                        "shell",
+                        "http",
+                        "subagent"
+                      ],
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "matcher": {
+                      "properties": {
+                        "agent_ids": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "crew_ids": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "severities": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "tools": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "when": {
+                          "description": "Reserved for a future expression predicate. Accepted and ignored today.",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -70433,6 +70572,85 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "blocking": {
+                      "description": "A blocking hook runs synchronously and may veto the intercepted action.",
+                      "type": "boolean"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_by": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "event": {
+                      "description": "One of the declared lifecycle events; an unknown value is rejected and the error lists the valid ones.",
+                      "type": "string"
+                    },
+                    "handler_config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "handler_kind": {
+                      "description": "shell runs a command on the HOST and is OWNER-only, on create and on any edit that leaves a hook shell.",
+                      "enum": [
+                        "shell",
+                        "http",
+                        "subagent"
+                      ],
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "matcher": {
+                      "properties": {
+                        "agent_ids": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "crew_ids": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "severities": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "tools": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "when": {
+                          "description": "Reserved for a future expression predicate. Accepted and ignored today.",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -70564,6 +70782,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -70752,6 +70978,66 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "blocking": {
+                    "type": "boolean"
+                  },
+                  "crew_id": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "event": {
+                    "type": "string"
+                  },
+                  "handler_config": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "handler_kind": {
+                    "description": "shell runs a command on the HOST and is OWNER-only, on create and on any edit that leaves a hook shell.",
+                    "enum": [
+                      "shell",
+                      "http",
+                      "subagent"
+                    ],
+                    "type": "string"
+                  },
+                  "matcher": {
+                    "properties": {
+                      "agent_ids": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "crew_ids": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "severities": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "tools": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "when": {
+                        "description": "Reserved for a future expression predicate. Accepted and ignored today.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
                 "type": "object"
               }
             }
@@ -70762,6 +71048,85 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "blocking": {
+                      "description": "A blocking hook runs synchronously and may veto the intercepted action.",
+                      "type": "boolean"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_by": {
+                      "type": "string"
+                    },
+                    "crew_id": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "event": {
+                      "description": "One of the declared lifecycle events; an unknown value is rejected and the error lists the valid ones.",
+                      "type": "string"
+                    },
+                    "handler_config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "handler_kind": {
+                      "description": "shell runs a command on the HOST and is OWNER-only, on create and on any edit that leaves a hook shell.",
+                      "enum": [
+                        "shell",
+                        "http",
+                        "subagent"
+                      ],
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "matcher": {
+                      "properties": {
+                        "agent_ids": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "crew_ids": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "severities": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "tools": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "when": {
+                          "description": "Reserved for a future expression predicate. Accepted and ignored today.",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "workspace_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }

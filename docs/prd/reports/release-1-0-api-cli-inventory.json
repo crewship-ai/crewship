@@ -9,16 +9,16 @@
     "cli_root_docs_present": 740,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 406,
-    "api_with_concrete_response_schemas": 526,
-    "api_generic_response_schemas": 3,
+    "api_with_concrete_response_schemas": 529,
+    "api_generic_response_schemas": 0,
     "api_with_request_bodies": 229,
-    "api_with_concrete_json_requests": 223,
-    "api_generic_json_requests": 2,
+    "api_with_concrete_json_requests": 225,
+    "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
     "cli_with_test_signals": 720,
     "cli_with_flags": 348,
-    "cli_with_all_flags_documented": 346,
-    "cli_missing_flag_docs": 2,
+    "cli_with_all_flags_documented": 348,
+    "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 99,
     "environment_variables_missing": 0,
@@ -12176,11 +12176,11 @@
         "cmd/crewship/cmd_routine_webhooks_cov_test.go",
         "…"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "request_body_present": true,
-      "concrete_json_request": false,
-      "generic_json_request": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -12226,8 +12226,8 @@
         "internal/hooks/store_write_test.go",
         "internal/manifest/kinds/hook_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "request_body_present": false,
       "concrete_json_request": false,
       "generic_json_request": false,
@@ -12270,11 +12270,11 @@
         "internal/hooks/store_write_test.go",
         "internal/manifest/kinds/hook_test.go"
       ],
-      "concrete_response_schema": false,
-      "generic_response_schema": true,
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
       "request_body_present": true,
-      "concrete_json_request": false,
-      "generic_json_request": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
       "contract": {
         "structural": {
           "canonical_method_path": true,
@@ -32458,13 +32458,11 @@
         "mission",
         "priority",
         "query",
+        "run-id",
         "severity",
         "since",
         "trace-id",
         "type"
-      ],
-      "missing_flags": [
-        "run-id"
       ]
     },
     {
@@ -32513,14 +32511,12 @@
         "mission",
         "priority",
         "query",
+        "run-id",
         "severity",
         "since",
         "trace-id",
         "type",
         "until"
-      ],
-      "missing_flags": [
-        "run-id"
       ]
     },
     {
@@ -44857,11 +44853,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3949,
+    "command_references": 3950,
     "api_path_references": 2006,
     "environment_references": 395,
     "manifest_kind_references": 209,
-    "flag_references": 1834,
+    "flag_references": 1835,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,
