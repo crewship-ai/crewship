@@ -141,12 +141,19 @@ function dataFor(n: ChainNode): Record<string, unknown> {
     case "inbox":
       return { ...common, itemId: n.ref, kind: n.key ?? "message", title: n.label }
     case "automation":
+      // internal/chain spells three states into `status`: "enabled",
+      // "disabled" and "deleted". Deriving one boolean from that with
+      // `status !== "disabled"` made a tombstone read as ENABLED — a live
+      // green badge on a rule that no longer exists. Deleted therefore gets
+      // its own field, and `enabled` is derived positively so a spelling this
+      // adapter has never heard of fails closed rather than open.
       return {
         ...common,
         automationId: n.ref,
         name: n.label,
         eventType: n.key ?? "",
-        enabled: n.status !== "disabled",
+        enabled: n.status === "enabled",
+        deleted: n.status === "deleted",
         routineSlug: "",
       }
     default:

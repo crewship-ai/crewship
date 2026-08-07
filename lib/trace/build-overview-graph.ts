@@ -115,6 +115,15 @@ export interface OverviewAutomationNodeData {
   /** The event that fires it, e.g. `issue.created`. */
   eventType: string
   enabled: boolean
+  /**
+   * A soft-deleted rule, shown only by the causal chain: it explains runs it
+   * already caused and will never fire again. Distinct from `!enabled`, which
+   * is one toggle away from live — offering "off" for a rule that is gone
+   * advertises a control that does not exist.
+   *
+   * Absent on the workspace overview, which draws live wiring only.
+   */
+  deleted?: boolean
   /** Slug of the routine it fires — the edge target. */
   routineSlug: string
   [key: string]: unknown

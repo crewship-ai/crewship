@@ -69,14 +69,22 @@ func runNode(id, pipelineSlug, status string, chainDepth int) Node {
 // label, the event that arms it as the human key, and whether it is live as the
 // status.
 //
-// Status is the literal "enabled"/"disabled" rather than the raw INTEGER
-// column because Node.Status is a string every other kind fills with a row
-// status, and because the client derives its enabled flag by comparing against
-// "disabled" — a 0/1 here would silently read as enabled.
-func automationNode(id, name, eventType string, enabled bool) Node {
+// Status is the literal "enabled"/"disabled"/"deleted" rather than the raw
+// INTEGER column because Node.Status is a string every other kind fills with a
+// row status, and because the client derives its enabled flag by comparing
+// against "disabled" — a 0/1 here would silently read as enabled.
+//
+// "deleted" outranks the enabled bit and is its own spelling rather than a
+// flavour of "disabled". They are different facts: a disabled rule is one
+// toggle from firing again, a deleted one will never fire and cannot be
+// edited. Collapsing them offers the reader a control that no longer exists.
+func automationNode(id, name, eventType string, enabled, deleted bool) Node {
 	status := "disabled"
 	if enabled {
 		status = "enabled"
+	}
+	if deleted {
+		status = "deleted"
 	}
 	label := name
 	if label == "" {
@@ -286,26 +294,37 @@ func (w *walker) lookupAssignmentByID(ctx context.Context, anchor string) (Node,
 	return assignmentNode(id, task, status), true, nil
 }
 
-// lookupAutomationByID resolves an automations.id inside this workspace.
+// lookupAutomationByID resolves an automations.id inside this workspace,
+// INCLUDING one that has been soft-deleted.
 //
 // It goes through automation.Store rather than hand-rolling the SELECT, and
 // that is a correctness choice rather than a tidiness one: the store owns what
-// "visible" means for a rule (in this workspace AND deleted_at IS NULL) and
-// decodes action_config_json into the Action this walk needs. A second copy of
-// that predicate here is exactly how a soft-deleted rule ends up drawn in the
-// topology while every other surface reports it gone.
+// "visible" means for a rule and decodes action_config_json into the Action
+// this walk needs. A second copy of that predicate here is how the two drift.
+//
+// It deliberately asks the store's HISTORICAL question rather than its
+// operational one. Every other surface wants "what is wired right now", where
+// a deleted rule is simply gone. A chain answers "how did this happen", and
+// there the delete is not the end of the story: pipeline_runs keeps
+// triggered_via='automation' forever, so filtering the rule out leaves a run
+// that records being started by a rule, next to no rule — and the reader
+// concludes nobody started it. That is the one inference this package exists
+// to prevent, which is why gaps are rendered rather than swallowed.
+//
+// The node is marked (Status "deleted") so the distinction survives to the
+// client. History stays legible; it does not pass itself off as live wiring.
 //
 // It returns the decoded row alongside the node, so expandAutomation can reuse
 // the already-parsed routine_slug instead of re-querying for it.
 func (w *walker) lookupAutomation(ctx context.Context, id string) (automation.Automation, Node, bool, error) {
-	a, err := automation.NewStore(w.db).Get(ctx, w.workspaceID, id)
+	a, err := automation.NewStore(w.db).GetIncludingDeleted(ctx, w.workspaceID, id)
 	if errors.Is(err, automation.ErrNotFound) {
 		return automation.Automation{}, Node{}, false, nil
 	}
 	if err != nil {
 		return automation.Automation{}, Node{}, false, err
 	}
-	return a, automationNode(a.ID, a.Name, a.EventType, a.Enabled), true, nil
+	return a, automationNode(a.ID, a.Name, a.EventType, a.Enabled, a.DeletedAt != nil), true, nil
 }
 
 func (w *walker) lookupAutomationByID(ctx context.Context, anchor string) (Node, bool, error) {

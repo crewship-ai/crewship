@@ -122,6 +122,15 @@ func (r *rig) seedAutomation(t *testing.T, id, wsID, name, eventType, routineSlu
 	return id
 }
 
+// softDeleteAutomation stamps deleted_at the way automation.Store.Delete does.
+// Written as raw SQL for the same reason seedAutomation is: the walk reads the
+// schema, so the fixture asserts against the schema.
+func (r *rig) softDeleteAutomation(t *testing.T, id string) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	r.exec(t, `UPDATE automations SET deleted_at = ?, updated_at = ? WHERE id = ?`, now, now, id)
+}
+
 func (r *rig) seedAssignment(t *testing.T, id, wsID, task, parentID string) string {
 	t.Helper()
 	r.exec(t, `
@@ -737,6 +746,83 @@ func TestWalk_RunWalksBackToTheRuleThatFiredIt(t *testing.T) {
 	}
 }
 
+// Deleting a rule must not make the past unexplainable.
+//
+// automations.Delete is a SOFT delete, and pipeline_runs keeps
+// triggered_via='automation' forever — so after a rule is deleted the run row
+// still says "a rule started me" while the rule itself stops resolving. That
+// combination is the worst of both: the fact is on the record, the name is
+// hidden, and the topology draws a run with no origin. A reader then concludes
+// "nobody started this", which is precisely the inference the gaps machinery
+// exists to prevent.
+//
+// The walk resolves a deleted rule and marks it. Its history is what a chain
+// is FOR.
+func TestWalk_ADeletedRuleStillExplainsTheRunsItCaused(t *testing.T) {
+	r := newRig(t, "ws-aut-tombstone")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage on failure", "run.failed", "triage", true)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1")
+	r.softDeleteAutomation(t, "aut_1")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if !hasNode(g, "automation:aut_1") {
+		t.Fatalf("a deleted rule dropped out of the chain, leaving the run with no origin; nodes = %v", nodeIDs(g))
+	}
+	if !hasEdge(g, "automation:aut_1", "run:run-1", EdgeTriggers) {
+		t.Errorf("missing automation -> run edge after delete; edges: %#v", g.Edges)
+	}
+	n := nodeByID(t, g, "automation:aut_1")
+	if n.Label != "Triage on failure" {
+		t.Errorf("label = %q, want the rule name it had when it fired", n.Label)
+	}
+}
+
+// "deleted" and "disabled" are not the same fact and must not share a spelling.
+// A disabled rule is one toggle from firing again; a deleted one will never
+// fire again and cannot be edited. The client renders from this string, so
+// collapsing them would offer a reader a control that does not exist.
+func TestWalk_ADeletedRuleIsNotSpelledTheSameAsADisabledOne(t *testing.T) {
+	r := newRig(t, "ws-aut-tombstone-spelling")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	// Seeded DISABLED, then deleted: if the walk reported enabled-state alone,
+	// this row would be indistinguishable from a rule someone merely paused.
+	r.seedAutomation(t, "aut_1", r.ws, "Triage on failure", "run.failed", "triage", false)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1")
+	r.softDeleteAutomation(t, "aut_1")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+	n := nodeByID(t, g, "automation:aut_1")
+
+	if n.Status != "deleted" {
+		t.Errorf("status = %q, want %q — a deleted rule read as merely disabled invites a reader to re-enable something that is gone", n.Status, "deleted")
+	}
+}
+
+// A deleted rule explains history; it must not still be presented as live
+// wiring. Anchoring on it answers "what did this rule do", not "what will it
+// do", and the status is what carries that distinction.
+func TestWalk_ADeletedRuleIsStillAnchorableAsHistory(t *testing.T) {
+	r := newRig(t, "ws-aut-tombstone-anchor")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage on failure", "run.failed", "triage", true)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1")
+	r.softDeleteAutomation(t, "aut_1")
+
+	g := walk(t, r, "aut_1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if g.AnchorNode != "automation:aut_1" {
+		t.Fatalf("anchor_node = %q, want automation:aut_1", g.AnchorNode)
+	}
+	if !hasEdge(g, "automation:aut_1", "run:run-1", EdgeTriggers) {
+		t.Errorf("a deleted rule must still show the runs it caused; edges: %#v", g.Edges)
+	}
+	if n := nodeByID(t, g, "automation:aut_1"); n.Status != "deleted" {
+		t.Errorf("status = %q, want %q", n.Status, "deleted")
+	}
+}
+
 // The card the frontend draws needs a name, the event that arms the rule, and
 // whether it is live. `enabled` is derived from status !== "disabled" on the
 // client, so the two spellings are a contract, not cosmetics.
@@ -891,29 +977,53 @@ func TestWalk_AutomationFromAnotherWorkspaceNeverAppears(t *testing.T) {
 	}
 }
 
-// A soft-deleted rule is not-found everywhere else in the product (the store
-// filters it), so the chain must not resurrect it into a node the reader
-// cannot click through to.
-func TestWalk_SoftDeletedAutomationDoesNotAppear(t *testing.T) {
+// REVERSED. This assertion used to be its opposite — "a soft-deleted rule must
+// not appear" — on the reasoning that the rule is not-found on every other
+// surface, so the chain should agree with them.
+//
+// That reasoning applied an operational predicate to a historical question.
+// pipeline_runs keeps triggered_via='automation' forever, so under the old
+// behaviour a deleted rule left a run that RECORDS being started by a rule
+// with no rule beside it, and the reader concludes nobody started it. Hiding
+// only the rule's name while the fact of it stays on the row is the worst of
+// both: see TestWalk_ADeletedRuleStillExplainsTheRunsItCaused.
+//
+// What survives from the original is the assertion below that the run does not
+// vanish with its rule — that was right then and is right now.
+func TestWalk_ADeletedRuleDoesNotTakeItsRunWithIt(t *testing.T) {
 	r := newRig(t, "ws-aut-deleted")
 	r.seedRoutine(t, "p1", r.ws, "triage")
 	r.seedAutomation(t, "aut_1", r.ws, "Deleted rule", "run.failed", "triage", true)
 	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1")
-	r.exec(t, `UPDATE automations SET deleted_at = ? WHERE id = 'aut_1'`,
-		time.Now().UTC().Format(time.RFC3339Nano))
+	r.softDeleteAutomation(t, "aut_1")
 
 	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
 
-	if hasNode(g, "automation:aut_1") {
-		t.Errorf("a soft-deleted rule appeared in the chain; nodes = %v", nodeIDs(g))
-	}
-	// The run itself is still walkable — losing the rule must not lose the run.
 	if !hasNode(g, "run:run-1") {
 		t.Errorf("the run vanished along with its deleted rule; nodes = %v", nodeIDs(g))
 	}
+	if !hasNode(g, "routine:p1") {
+		t.Errorf("the routine vanished along with the deleted rule; nodes = %v", nodeIDs(g))
+	}
+}
 
-	if _, err := Walk(context.Background(), r.db, r.ws, "aut_1", Options{}); !errors.Is(err, ErrAnchorNotFound) {
-		t.Fatalf("err = %v, want ErrAnchorNotFound for a soft-deleted automation anchor", err)
+// The workspace fence is NOT relaxed along with the liveness filter. Reading a
+// deleted rule crosses one boundary deliberately; crossing the tenant boundary
+// with it would turn a history feature into a cross-tenant read.
+func TestWalk_ADeletedRuleInAnotherWorkspaceStaysInvisible(t *testing.T) {
+	r := newRig(t, "ws-aut-deleted-fence")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_foreign", "ws-somebody-else", "Theirs", "run.failed", "triage", true)
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "automation", "aut_foreign")
+	r.softDeleteAutomation(t, "aut_foreign")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasNode(g, "automation:aut_foreign") {
+		t.Errorf("a deleted rule from another workspace leaked into the chain; nodes = %v", nodeIDs(g))
+	}
+	if _, err := Walk(context.Background(), r.db, r.ws, "aut_foreign", Options{}); !errors.Is(err, ErrAnchorNotFound) {
+		t.Fatalf("err = %v, want ErrAnchorNotFound for a foreign deleted automation anchor", err)
 	}
 }
 

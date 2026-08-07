@@ -26,9 +26,12 @@ type Store struct {
 // NewStore wraps a DB handle.
 func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 
+// deleted_at is selected even though Get and List filter it out, because
+// GetIncludingDeleted does not — and a struct whose DeletedAt is always nil
+// would make "is this a tombstone" unanswerable for the one caller that asks.
 const automationColumns = `id, workspace_id, name, enabled, event_type, matcher_json,
 	action_kind, action_config_json, debounce_seconds, max_per_hour,
-	COALESCE(created_by, ''), created_at, updated_at`
+	COALESCE(created_by, ''), created_at, updated_at, deleted_at`
 
 // Create inserts a validated automation and returns the stored row.
 func (s *Store) Create(ctx context.Context, a Automation) (Automation, error) {
@@ -69,6 +72,37 @@ func (s *Store) Get(ctx context.Context, workspaceID, id string) (Automation, er
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+automationColumns+` FROM automations
 		 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`, id, workspaceID)
+	a, err := scanAutomation(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Automation{}, ErrNotFound
+	}
+	return a, err
+}
+
+// GetIncludingDeleted returns one automation inside workspaceID whether or not
+// it was soft-deleted. The workspace fence still applies; only the liveness
+// predicate is lifted.
+//
+// This exists so the store keeps owning BOTH definitions of "visible" rather
+// than a caller hand-rolling the second one. Two questions are being asked of
+// this table and they want different answers:
+//
+//   - "what is wired right now" — every operational surface, and Get. A deleted
+//     rule is gone: it cannot fire, be edited, or be listed.
+//   - "how did this happen" — internal/chain. pipeline_runs keeps
+//     triggered_via='automation' forever, so after a delete the run still
+//     records that a rule started it while the rule stops resolving. Answering
+//     the historical question with the operational predicate draws a run with
+//     no origin, and a reader takes that to mean nobody started it.
+//
+// Callers answering the first question must use Get. Reaching for this one to
+// dodge a not-found is how a deleted rule gets presented as live wiring; the
+// caller is responsible for marking what it renders (chain spells the status
+// "deleted", distinct from "disabled").
+func (s *Store) GetIncludingDeleted(ctx context.Context, workspaceID, id string) (Automation, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+automationColumns+` FROM automations
+		 WHERE id = ? AND workspace_id = ?`, id, workspaceID)
 	a, err := scanAutomation(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Automation{}, ErrNotFound
@@ -257,10 +291,11 @@ func scanAutomation(sc rowScanner) (Automation, error) {
 		actionRaw  string
 		createdAt  string
 		updatedAt  string
+		deletedAt  sql.NullString
 	)
 	if err := sc.Scan(&a.ID, &a.WorkspaceID, &a.Name, &enabled, &a.EventType, &matcherRaw,
 		&a.ActionKind, &actionRaw, &a.DebounceSeconds, &a.MaxPerHour,
-		&a.CreatedBy, &createdAt, &updatedAt); err != nil {
+		&a.CreatedBy, &createdAt, &updatedAt, &deletedAt); err != nil {
 		return Automation{}, err
 	}
 	a.Enabled = enabled != 0
@@ -268,6 +303,13 @@ func scanAutomation(sc rowScanner) (Automation, error) {
 	decodeJSON(actionRaw, &a.Action)
 	a.CreatedAt = parseTS(createdAt)
 	a.UpdatedAt = parseTS(updatedAt)
+	// Nil rather than a zero Time for a live row: a caller testing DeletedAt !=
+	// nil must not be told every rule is a tombstone, and an unparseable stamp
+	// still means deleted — the row is only written by Delete.
+	if deletedAt.Valid && deletedAt.String != "" {
+		t := parseTS(deletedAt.String)
+		a.DeletedAt = &t
+	}
 	return a, nil
 }
 

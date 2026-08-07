@@ -237,6 +237,50 @@ describe("the contract with the walker", () => {
     expect(g.nodes[0].data.enabled).toBe(false)
   })
 
+  // The third spelling. `enabled` was derived as `status !== "disabled"`, so a
+  // tombstone — status "deleted" — read as ENABLED: the card drew a live green
+  // "on" badge for a rule that no longer exists and cannot be switched off.
+  // Deriving one boolean from a three-state string is what made that possible,
+  // so the tombstone gets its own field rather than a cleverer comparison.
+  it("reads a deleted rule as deleted, and never as enabled", () => {
+    const g = buildChainGraph(
+      chain({
+        nodes: [
+          {
+            id: "automation:a1",
+            kind: "automation",
+            ref: "a1",
+            key: "mission.status_change",
+            label: "triage on close",
+            status: "deleted",
+            depth: 0,
+          },
+        ],
+      }),
+    )
+    expect(g.nodes[0].data.deleted).toBe(true)
+    expect(g.nodes[0].data.enabled).toBe(false)
+  })
+
+  it("does not mark a live rule as deleted", () => {
+    const g = buildChainGraph(
+      chain({
+        nodes: [
+          {
+            id: "automation:a1",
+            kind: "automation",
+            ref: "a1",
+            key: "mission.status_change",
+            label: "triage on close",
+            status: "enabled",
+            depth: 0,
+          },
+        ],
+      }),
+    )
+    expect(g.nodes[0].data.deleted).toBe(false)
+  })
+
   it("reads an enabled rule as enabled", () => {
     const g = buildChainGraph(
       chain({

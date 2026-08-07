@@ -174,13 +174,19 @@ function AutomationNodeBase({ data: d }: NodeProps<Node<OverviewAutomationNodeDa
     <div
       role="button"
       tabIndex={0}
-      aria-label={`Automation ${d.name}, on ${d.eventType}, ${d.enabled ? "enabled" : "disabled"}`}
+      aria-label={`Automation ${d.name}, on ${d.eventType}, ${
+        d.deleted ? "deleted" : d.enabled ? "enabled" : "disabled"
+      }`}
       onKeyDown={activateOnEnterOrSpace}
       className={cn(
         "relative w-[200px] rounded-lg border border-gold/25 bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold/80",
         // A disabled rule stays on the graph — "wired up but off" is a
         // fact worth seeing — but reads as inert rather than live.
         !d.enabled && "opacity-60",
+        // A deleted rule appears only in a causal chain, explaining runs it
+        // already caused. Dashed rather than merely dimmed, because "off" and
+        // "gone" must not be told apart by opacity alone.
+        d.deleted && "border-dashed border-muted-foreground/40",
       )}
     >
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-gold/40" isConnectable={false} />
@@ -192,10 +198,14 @@ function AutomationNodeBase({ data: d }: NodeProps<Node<OverviewAutomationNodeDa
         <span
           className={cn(
             "ml-auto rounded px-1 py-0 text-[9px] font-medium uppercase tracking-wide",
-            d.enabled ? "bg-success/15 text-success" : "bg-muted-foreground/10 text-muted-foreground",
+            d.deleted
+              ? "bg-muted-foreground/10 text-muted-foreground line-through"
+              : d.enabled
+                ? "bg-success/15 text-success"
+                : "bg-muted-foreground/10 text-muted-foreground",
           )}
         >
-          {d.enabled ? "on" : "off"}
+          {d.deleted ? "deleted" : d.enabled ? "on" : "off"}
         </span>
       </div>
       <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground/70">
