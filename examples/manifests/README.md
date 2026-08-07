@@ -192,13 +192,20 @@ The same value gets injected into every crew agent's env as
 `POSTGRES_PASSWORD` automatically — no `env_refs:` to author by
 hand.
 
-Catalog (v98): `postgres`, `mariadb`, `mysql`, `mongo`, `rabbitmq`,
-`elasticsearch`. `redis` is included with no auto-credentials (the
-default deployment doesn't require AUTH on a crew-private bridge).
-Operators who want full control still get to write everything by
-hand — see `auto_credentials:` for explicit declarations.
+Catalog: `postgres`, `mariadb`, `mysql`, `mongo`, `redis`,
+`rabbitmq`, `elasticsearch`. `redis` is in it too — it takes its
+secret as `redis-server --requirepass <generated>` rather than an env
+var, because bridge isolation is not the gate; agents still receive
+`REDIS_PASSWORD`.
 
-For full control, the long form is also still supported:
+Do **not** also declare one of those names in `credentials:`: the
+manual row and the generated one would race for the same workspace
+credential, and the manifest is rejected at validate time. Operators
+who want to own a secret outright pin it on the service instead
+(`env: { POSTGRES_PASSWORD: … }`, or your own `command:`), which
+suppresses generation for that service.
+
+The long form spells out what the catalog fills in:
 
 ```yaml
 spec:
@@ -206,7 +213,6 @@ spec:
     - name: postgres
       image: postgres:16
       env: { POSTGRES_DB: app, POSTGRES_USER: postgres }
-      env_refs: [POSTGRES_PASSWORD]   # value comes from credentials vault
       ports: ["5432"]
       volumes:
         - { name: pg-data, mount: /var/lib/postgresql/data }

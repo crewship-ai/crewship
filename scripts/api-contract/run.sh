@@ -25,6 +25,11 @@ RUN_LOG=""
 FAILURE_CLASS=""
 FAILURE_MESSAGE=""
 ARTIFACT_DIR="${API_CONTRACT_ARTIFACT_DIR:-}"
+# Set when the script deliberately exits 0 on a run that did not pass, so
+# the summary still records the real verdict instead of the exit code the
+# caller sees. Only advisory mode sets it (see the exit path below).
+SUMMARY_EXIT=""
+ADVISORY_ARGS=()
 
 BASE_URL="${BASE_URL%/}"
 SCHEMA_URL="${BASE_URL}/openapi.json"
@@ -41,6 +46,10 @@ die() { fail runtime "$@"; }
 
 emit_summary() {
   local rc=$?
+  # An advisory run exits 0 on purpose. The artifact must not inherit that
+  # and read "passed" — 227 graded operations with findings is a failed
+  # phase that was excused, and the record has to say both.
+  [[ -n "$SUMMARY_EXIT" ]] && rc="$SUMMARY_EXIT"
   [[ -n "$RUN_DIR" ]] || return 0
   if [[ -n "$ARTIFACT_DIR" ]]; then
     mkdir -p "$ARTIFACT_DIR" || true
@@ -58,6 +67,7 @@ emit_summary() {
     --excluded-auth-count "$EXCLUDED_AUTH_COUNT"
     --excluded-non-json-count "$EXCLUDED_NON_JSON_COUNT"
     --excluded-method-count "$EXCLUDED_METHOD_COUNT"
+    ${ADVISORY_ARGS[@]+"${ADVISORY_ARGS[@]}"}
   )
   if [[ -n "$ARTIFACT_DIR" ]]; then
     python3 "$SCRIPT_DIR/summary.py" "${summary_args[@]}" \
@@ -116,7 +126,17 @@ count_operations() {
       ($ops | map(select(.method | IN("post", "put", "patch", "delete"))) | length),
       ($ops | map(select(.path | test($auth))) | length),
       ($ops | map(select(.path | test($nonjson))) | length),
-      ($ops | map(select((.method | IN("post", "put", "patch", "delete")) or (.path | test($auth)) or (.path | test($nonjson)))) | length)
+      # SELECTED is the COMPLEMENT of the exclusions, not their union. It
+      # used to be the union: 536 in the catalog, 305 excluded, and the
+      # summary reported `"selected": 305` while Schemathesis reported 231
+      # for the same invocation — overstating what was probed by 74
+      # operations, in the one artifact a reviewer trusts (#1815).
+      #
+      # Note the three exclusion buckets OVERLAP (a non-JSON download is
+      # usually also a GET, an /api/auth route can be mutating), so
+      # catalog - methods - auth_ui - non_json does NOT reconstruct this
+      # number. Only the complement does.
+      ($ops | map(select(((.method | IN("post", "put", "patch", "delete")) or (.path | test($auth)) or (.path | test($nonjson))) | not)) | length)
     ] | @tsv
   ' "$SCHEMA_FILE"
 }
@@ -192,17 +212,116 @@ scope_args=(
   --exclude-path-regex "$NON_JSON_PATH_REGEX"
 )
 
+# Client-side pacing, at the call site for the same reason the method
+# deny-list is: a live instance must not be out-run by its own contract
+# check. The default matches the server's shipped `http.api_per_min`
+# (120), so a run against a real instance stays under that limiter
+# instead of collecting 429s — which Schemathesis reports as contract
+# failures for operations that are in fact fine.
+#
+# `off` (or `none`) drops the throttle entirely. That is correct ONLY
+# against an instance whose own limiter is off — CI's ephemeral,
+# single-client server boots with CREWSHIP_RATELIMIT_DISABLED for
+# exactly this. Anywhere else it buys 429s, not speed.
+#
+# Why it is worth having: with 305 selected operations x
+# --max-examples 10, 120/m is a hard ~25-minute floor per run, one that
+# grows with every route we add and that the PR job's 30-minute budget
+# cannot absorb (#1813). The throttle is protecting a throwaway server
+# from its only client.
+RATE_LIMIT="${API_CONTRACT_RATE_LIMIT:-120/m}"
+rate_limit_args=(--rate-limit "$RATE_LIMIT")
+case "$RATE_LIMIT" in
+  off | none) rate_limit_args=() ;;
+esac
+
+# Deadline for the Schemathesis process itself. Unset by default: a local
+# or nightly run takes whatever time it takes.
+#
+# CI sets it so THIS script owns the kill. A job-level `timeout-minutes`
+# reap reports the job as `cancelled` (indistinguishable from someone
+# pressing stop), fells the process before the EXIT trap can classify
+# anything, and leaves no summary artifact behind — which is precisely
+# the "a check that dies without recording why" failure mode this
+# runner is built to avoid.
+DEADLINE="${API_CONTRACT_TIMEOUT:-}"
+deadline_args=()
+if [[ -n "$DEADLINE" ]]; then
+  command -v timeout >/dev/null 2>&1 \
+    || die "API_CONTRACT_TIMEOUT=$DEADLINE is set but coreutils 'timeout' is not on PATH (macOS: brew install coreutils, or unset the variable)"
+  deadline_args=(timeout "$DEADLINE")
+fi
+
+# `${arr[@]+"${arr[@]}"}` rather than a bare `"${arr[@]}"`: these two
+# arrays can be empty, and bash 3.2 (what macOS ships) treats an empty
+# array expansion as an unbound variable under `set -u`.
+#
 # Keep the output contract small and bounded. The full Schemathesis log stays
 # in the temporary directory only long enough for summary.py to classify it.
-schemathesis --config-file "$SCRIPT_DIR/schemathesis.toml" run \
+${deadline_args[@]+"${deadline_args[@]}"} \
+  schemathesis --config-file "$SCRIPT_DIR/schemathesis.toml" run \
   "$SCHEMA_FILE" "${phase_args[@]}" "${safe_method_args[@]}" "${scope_args[@]}" \
+  ${rate_limit_args[@]+"${rate_limit_args[@]}"} \
   --max-examples 10 \
   --report junit --report-junit-path "$JUNIT_FILE" \
   --output-sanitize true >"$RUN_LOG" 2>&1
 rc=$?
+if [[ -n "$DEADLINE" && "$rc" -eq 124 ]]; then
+  tail -n 8 "$RUN_LOG" >&2
+  fail runtime "schemathesis exceeded API_CONTRACT_TIMEOUT=$DEADLINE on the $PHASE phase ($SELECTED_COUNT operations selected, rate limit ${RATE_LIMIT})"
+fi
 if [[ "$rc" -eq 2 ]]; then
   FAILURE_CLASS=schema
 fi
+
+# How many operations did this run actually grade, and how many did it
+# grade badly? Both come from the JUnit report Schemathesis just wrote,
+# via summary.py so there is one implementation of "what counts as a
+# finding" rather than two that drift.
+GRADED_COUNT=0
+FINDINGS_COUNT=0
+read -r GRADED_COUNT FINDINGS_COUNT \
+  <<<"$(python3 "$SCRIPT_DIR/summary.py" --count-junit "$JUNIT_FILE" 2>/dev/null)" \
+  || true
+[[ "$GRADED_COUNT" =~ ^[0-9]+$ ]] || GRADED_COUNT=0
+[[ "$FINDINGS_COUNT" =~ ^[0-9]+$ ]] || FINDINGS_COUNT=0
+
+# Advisory mode (API_CONTRACT_ADVISORY): the phase reports its findings
+# and does not fail the caller. It exists for one situation — a body of
+# pre-existing findings that predates the changes being gated, where
+# blocking would punish the wrong PRs (#1815) — and it is deliberately
+# narrow:
+#
+#   - it excuses FINDINGS ONLY. Schemathesis exit 1 *and* a JUnit report
+#     showing operations were graded is the only shape that qualifies;
+#   - a schema/config abort (exit 2), a blown deadline (124), a crash, an
+#     unreachable target, and every `die` path above stay fatal. Those
+#     mean the gate did not run, which advisory mode says nothing about;
+#   - exit 1 with nothing graded is the same thing wearing a findings
+#     exit code, and is treated as "did not run";
+#   - the auth phase never reaches here, so it is never advisory.
+#
+# The step is NOT marked continue-on-error for the same reason: that
+# would excuse all of the above too, which is how a gate quietly stops
+# being one. The distinction is asserted in
+# scripts/api-contract-gate-test.sh.
+ADVISORY="${API_CONTRACT_ADVISORY:-}"
+if [[ -n "$ADVISORY" ]]; then
+  ADVISORY_ARGS=(--advisory)
+fi
+
+if [[ -n "$ADVISORY" && "$rc" -eq 1 && "$GRADED_COUNT" -gt 0 && "$FINDINGS_COUNT" -gt 0 ]]; then
+  tail -n 8 "$RUN_LOG" >&2
+  printf 'api-contract: ADVISORY — the %s phase graded %s operations and reported %s finding(s); NOT failing the job (#1815). Evidence: %s-summary.json / %s-junit.xml\n' \
+    "$PHASE" "$GRADED_COUNT" "$FINDINGS_COUNT" "$PHASE" "$PHASE" >&2
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '**API contract (%s phase, advisory):** %s finding(s) across %s graded operations — not failing the job while #1815 is open.\n' \
+      "$PHASE" "$FINDINGS_COUNT" "$GRADED_COUNT" >>"$GITHUB_STEP_SUMMARY"
+  fi
+  SUMMARY_EXIT="$rc"
+  exit 0
+fi
+
 [[ "$rc" -eq 0 ]] || {
   tail -n 8 "$RUN_LOG" >&2
   exit "$rc"

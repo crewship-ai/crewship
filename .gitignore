@@ -143,3 +143,13 @@ audit-final/
 mockups/
 .pentest-*/
 audit/
+
+# Byte-compiled Python from the api-contract harness (summary.py and its
+# test are run directly, so nothing else creates these).
+__pycache__/
+
+# Schemathesis drops a per-project cache directory in the working dir when
+# scripts/api-contract/run.sh is run from the repo root (the toml's
+# in-memory example database does not cover it). Build artifact, not input.
+.schemathesis/
+api-contract-artifacts/
