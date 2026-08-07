@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -264,6 +265,43 @@ func candidateSocketsFor(goos, home string, uid int) []socketCandidate {
 	// It speaks gRPC, not the Docker REST API, so probing it can only ever burn
 	// a dial and produce a misleading "tried everything" failure.
 	return candidates
+}
+
+// RuntimeLabels returns every runtime label auto-detection can attach to a
+// socket, on any host OS, sorted. It is the vocabulary of
+// DetectResult.Runtime for the Docker path. "apple" is not in here: Apple
+// Containers is not a Docker-API daemon and comes from
+// internal/provider/apple on its own path.
+//
+// It exists so the surfaces that NAME runtimes in prose — `crewship system
+// info`'s "nothing answered" hint, `crewship doctor`'s no-runtime detail, the
+// preflight installed-runtime scan — can be pinned to the list the detector
+// actually probes rather than to each other's wording. containerd/nerdctl
+// survived its removal from that list in three separate strings (#1687,
+// #1689) precisely because nothing tied them to it, and a user on a
+// containerd host was told to start a daemon that was already running.
+//
+// Derived from candidateSocketsFor rather than written out again — a second
+// copy of the list is exactly what drifted.
+func RuntimeLabels() []string {
+	seen := map[string]bool{}
+	// Both uids are needed: the rootless-podman candidate is offered only for
+	// a non-negative uid, and Windows reports -1.
+	for _, goos := range []string{"darwin", "linux", "windows"} {
+		for _, uid := range []int{-1, 1000} {
+			for _, c := range candidateSocketsFor(goos, "/home/u", uid) {
+				if c.runtime != "" {
+					seen[c.runtime] = true
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for label := range seen {
+		out = append(out, label)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // socketPingTimeout is the per-socket timeout for the Docker Ping call.

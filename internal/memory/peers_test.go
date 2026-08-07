@@ -1,6 +1,9 @@
 package memory
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
@@ -129,6 +132,72 @@ func TestPeerCard_EmptyUserIDRejected(t *testing.T) {
 	p := PeerPaths{AgentDir: dir}
 	if err := WritePeerCard(p, "", "ws1", "anything"); err == nil {
 		t.Errorf("expected error when user_id is empty")
+	}
+}
+
+// The peer card is on the identical GDPR path as the user model, and had
+// the identical leak (#1701): the card went, `<slug>.md.lock` stayed.
+func TestPeerCard_DeleteLeavesNothingNamedAfterTheSubject(t *testing.T) {
+	dir := t.TempDir()
+	p := PeerPaths{AgentDir: dir}
+	if err := WritePeerCard(p, "u1", "ws1", "terse, Czech"); err != nil {
+		t.Fatalf("WritePeerCard: %v", err)
+	}
+	slug := UserSlug("u1", "ws1")
+	if err := DeletePeerCard(p, "u1", "ws1"); err != nil {
+		t.Fatalf("DeletePeerCard: %v", err)
+	}
+	entries, err := os.ReadDir(p.PeersDir())
+	if err != nil {
+		t.Fatalf("ReadDir(peers): %v", err)
+	}
+	var left []string
+	for _, e := range entries {
+		left = append(left, e.Name())
+		if strings.Contains(e.Name(), slug) {
+			t.Errorf("erasure left a per-subject artefact behind: %q", e.Name())
+		}
+	}
+	if len(left) != 0 {
+		t.Errorf("peers/ not empty after erasure: %v", left)
+	}
+}
+
+// Worse on this side than on the user-model side: the peer purge has no
+// existence check, so an Art. 17 cascade — which runs once per AGENT in
+// the workspace — used to CREATE `<slug>.md.lock` under every agent that
+// had never held a card for that person, minting the marker the erasure
+// exists to remove.
+func TestPeerCard_DeleteForANeverWrittenCardCreatesNothing(t *testing.T) {
+	dir := t.TempDir()
+	p := PeerPaths{AgentDir: dir}
+
+	// No peers/ directory at all — the common case for an agent this
+	// operator never spoke to.
+	if err := DeletePeerCard(p, "u1", "ws1"); err != nil {
+		t.Fatalf("DeletePeerCard with no peers/ dir: %v", err)
+	}
+	if _, err := os.Stat(p.PeersDir()); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("purge created peers/ where nothing was ever written (err=%v)", err)
+	}
+
+	// peers/ exists (another operator has a card) but this subject has
+	// none: the directory must gain no entry named after them.
+	if err := WritePeerCard(p, "other", "ws1", "someone else"); err != nil {
+		t.Fatalf("WritePeerCard(other): %v", err)
+	}
+	if err := DeletePeerCard(p, "u1", "ws1"); err != nil {
+		t.Fatalf("DeletePeerCard: %v", err)
+	}
+	slug := UserSlug("u1", "ws1")
+	entries, err := os.ReadDir(p.PeersDir())
+	if err != nil {
+		t.Fatalf("ReadDir(peers): %v", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), slug) {
+			t.Errorf("purge minted a marker for a subject with no card: %q", e.Name())
+		}
 	}
 }
 
