@@ -80,6 +80,10 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "pipeline.step.validation_failed",
       "pipeline.schedule.circuit_breaker_tripped",
       "pipeline.schedule.missed_occurrences",
+      // An automation exists to fire a routine, so a person asking "why
+      // did my routine not run" looks here — not under System.
+      "automation.throttled",
+      "automation.depth_exceeded",
     ],
   },
   {

@@ -147,6 +147,13 @@ export const JOURNAL_ENTRY_TYPES = [
   // Runs (extended)
   "run.agent_span",
   "agent.error",
+  // Automations — the composition substrate. Both mean work did NOT
+  // happen: throttled is a rule over its hourly cap, depth_exceeded is a
+  // composed chain refused at the shared ceiling. Someone asking "why did
+  // my routine not run" needs to find these, so they live under Routines
+  // rather than in System where they would be filed and forgotten.
+  "automation.throttled",
+  "automation.depth_exceeded",
 ] as const
 
 export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number]
