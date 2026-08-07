@@ -128,19 +128,30 @@ func TestUnpackTarIntoRefusesEscape(t *testing.T) {
 func TestUnpackTarIntoRefusesTarBomb(t *testing.T) {
 	root := t.TempDir()
 
+	// Injected caps, not the production ones. A tar writer materialises
+	// every declared byte, so proving a 256 MB limit at its real value means
+	// allocating more than that to build the fixture — the first version of
+	// this test peaked at 3.7 GB, passed on a workstation, and killed the
+	// arm64 CI jobs, which compile several packages at once. The ratio is
+	// what is under test, not the constants.
+	const (
+		testEntryCap = 1 << 10
+		testTotalCap = 4 << 10
+	)
+
 	// Each entry declares just under the per-entry cap; together they
-	// blow past any sane total.
+	// blow past the total.
 	var entries []tarEntry
 	for i := 0; i < 40; i++ {
 		entries = append(entries, tarEntry{
 			name:     filepath.Join("bomb", string(rune('a'+i%26))+string(rune('a'+i/26))),
 			body:     "x",
-			declared: maxCopyEntryBytes - 1,
+			declared: testEntryCap - 1,
 		})
 	}
 
-	if _, err := unpackTarInto(root, tarWith(t, entries...)); err == nil {
-		t.Fatal("accepted an archive declaring ~1.2 GB; want refusal on the cumulative cap")
+	if _, err := unpackTarIntoLimited(root, tarWith(t, entries...), testEntryCap, testTotalCap); err == nil {
+		t.Fatal("accepted an archive declaring far past the cumulative cap; want refusal")
 	} else if !strings.Contains(err.Error(), "cumulative") {
 		t.Errorf("error = %v; want it to name the cumulative cap", err)
 	}

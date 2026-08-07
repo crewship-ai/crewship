@@ -395,6 +395,16 @@ func (p *Provider) hostPathFor(containerID, containerPath string) (string, bool)
 //     lands outside. os.Root resolves one component at a time and refuses
 //     to follow a link leaving the root, which is what closes that hole.
 func unpackTarInto(root string, content io.Reader) ([]string, error) {
+	return unpackTarIntoLimited(root, content, maxCopyEntryBytes, maxCopyTotalBytes)
+}
+
+// unpackTarIntoLimited is unpackTarInto with the caps injected. Exercising the
+// caps at their production values means *building* an archive that exceeds
+// them, and a tar writer has to materialise every declared byte — the first
+// version of the cumulative-cap test allocated 3.7 GB to prove a limit of
+// 256 MB, which is fine on a workstation and fatal on a CI runner compiling
+// several packages at once.
+func unpackTarIntoLimited(root string, content io.Reader, maxEntry, maxTotal int64) ([]string, error) {
 	rootFS, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, fmt.Errorf("opening staging root: %w", err)
@@ -432,13 +442,13 @@ func unpackTarInto(root string, content io.Reader) ([]string, error) {
 
 		// Compare against the declared size before writing: it is the
 		// upper bound on what the bounded copy below can produce.
-		if hdr.Size > maxCopyEntryBytes {
+		if hdr.Size > maxEntry {
 			return nil, fmt.Errorf("archive entry %q exceeds the per-entry cap (%d > %d)",
-				hdr.Name, hdr.Size, int64(maxCopyEntryBytes))
+				hdr.Name, hdr.Size, maxEntry)
 		}
-		if total+hdr.Size > maxCopyTotalBytes {
+		if total+hdr.Size > maxTotal {
 			return nil, fmt.Errorf("archive exceeds the cumulative size cap (%d > %d) at entry %q",
-				total+hdr.Size, int64(maxCopyTotalBytes), hdr.Name)
+				total+hdr.Size, maxTotal, hdr.Name)
 		}
 
 		if dir := filepath.Dir(rel); dir != "." {
@@ -460,15 +470,15 @@ func unpackTarInto(root string, content io.Reader) ([]string, error) {
 		// half-written .mcp.json is worse than a refusal: the copy reports
 		// success and the consumer fails later on a parse error that names
 		// nothing about the real cause.
-		n, err := io.Copy(f, io.LimitReader(tr, maxCopyEntryBytes+1))
+		n, err := io.Copy(f, io.LimitReader(tr, maxEntry+1))
 		if err != nil {
 			_ = f.Close()
 			return nil, fmt.Errorf("staging %s: %w", rel, err)
 		}
-		if n > maxCopyEntryBytes {
+		if n > maxEntry {
 			_ = f.Close()
 			return nil, fmt.Errorf("archive entry %q streamed more than its declared size and exceeds the per-entry cap (%d)",
-				hdr.Name, int64(maxCopyEntryBytes))
+				hdr.Name, maxEntry)
 		}
 		if err := f.Close(); err != nil {
 			return nil, fmt.Errorf("staging %s: %w", rel, err)
