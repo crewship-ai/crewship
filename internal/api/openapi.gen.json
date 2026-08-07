@@ -12265,14 +12265,6 @@
           },
           {
             "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
             "name": "kind",
             "required": false,
             "schema": {
@@ -18959,14 +18951,6 @@
           {
             "in": "query",
             "name": "io_step",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "key",
             "required": false,
             "schema": {
               "type": "string"
@@ -37006,14 +36990,6 @@
           },
           {
             "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
             "name": "kind",
             "required": false,
             "schema": {
@@ -40657,14 +40633,6 @@
           {
             "in": "query",
             "name": "io_step",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "key",
             "required": false,
             "schema": {
               "type": "string"
@@ -94097,14 +94065,6 @@
           {
             "in": "query",
             "name": "io_step",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "key",
             "required": false,
             "schema": {
               "type": "string"

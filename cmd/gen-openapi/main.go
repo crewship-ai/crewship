@@ -761,14 +761,31 @@ var statusNames = map[string]string{"StatusOK": "200", "StatusCreated": "201", "
 var selectorPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)`)
 var functionPattern = regexp.MustCompile(`func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
 
-// directQueryPattern matches a query read taken straight off the request:
-// r.URL.Query().Get("cursor") and its Has/Values siblings.
-var directQueryPattern = regexp.MustCompile(`URL\.Query\(\)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
+// inboundRequestParamPattern matches a `*http.Request` parameter declaration —
+// the handler's own request, or one taken by a closure declared inside it.
+// This is the only way a request enters a handler from the outside; anything
+// the handler builds itself (http.NewRequest, http.NewRequestWithContext) is
+// outbound and carries no API query surface.
+var inboundRequestParamPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s+\*http\.Request\b`)
 
-// queryValuesBindingPattern matches a local bound to the request's decoded
-// query values — `q := r.URL.Query()` — so the far more common
-// `q.Get("cursor")` two lines later is still recognised.
-var queryValuesBindingPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*[A-Za-z_][A-Za-z0-9_.]*\.URL\.Query\(\)`)
+// derivedRequestPattern matches a request derived from another request, as a
+// whole statement: `stripped := r.Clone(r.Context())`, `scoped := r.WithContext(ctx)`,
+// or a bare alias `req := r`. Provenance travels across these — journal Count
+// reads its real `limit`/`cursor` off an r.Clone, so a rule that accepted only
+// the literal `r` would drop them from the spec.
+var derivedRequestPattern = regexp.MustCompile(`(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*([A-Za-z_][A-Za-z0-9_]*)(?:\.(?:Clone|WithContext)\([^\n]*\))?\s*$`)
+
+// requestQueryPattern matches a query read taken straight off a request:
+// r.URL.Query().Get("cursor") and its Has/Values siblings. The receiver is
+// captured because `.URL.Query()` alone does not mean the API's query string —
+// an outbound *http.Request has the same method.
+var requestQueryPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.URL\.Query\(\)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
+
+// queryValuesBindingPattern matches a local bound to a request's decoded query
+// values — `q := r.URL.Query()` — so the far more common `q.Get("cursor")` two
+// lines later is still recognised. The request receiver is captured for the
+// same reason as above.
+var queryValuesBindingPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*([A-Za-z_][A-Za-z0-9_]*)\.URL\.Query\(\)`)
 
 // accessorPattern matches any `<ident>.Get|Has|Values("name")`. url.Values is
 // not the only type with that shape: r.Header, r.Trailer, r.Form, r.PostForm
@@ -778,11 +795,40 @@ var queryValuesBindingPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\s
 // example, `?Authorization=` to every agent that drives the API from the spec.
 var accessorPattern = regexp.MustCompile(`\b([A-Za-z_][A-Za-z0-9_]*)\.(?:Get|Has|Values)\(\s*"([^"]+)"`)
 
-// queryParamNames returns the query parameter names read by a handler body.
-func queryParamNames(body string) []string {
+// inboundRequests returns the identifiers that hold the request the server was
+// handed, plus every request derived from one. Provenance is a whitelist on
+// purpose: an identifier of unknown origin is not an inbound request, so it
+// contributes nothing rather than being guessed into the published contract.
+func inboundRequests(signature, body string) map[string]bool {
+	inbound := map[string]bool{}
+	for _, decl := range []string{signature, body} {
+		for _, m := range inboundRequestParamPattern.FindAllStringSubmatch(decl, -1) {
+			inbound[m[1]] = true
+		}
+	}
+	// Derivations chain (`a := r.Clone(...)`, then `b := a`), so propagate to a
+	// fixed point rather than one hop.
+	for changed := true; changed; {
+		changed = false
+		for _, m := range derivedRequestPattern.FindAllStringSubmatch(body, -1) {
+			if inbound[m[2]] && !inbound[m[1]] {
+				inbound[m[1]] = true
+				changed = true
+			}
+		}
+	}
+	return inbound
+}
+
+// queryParamNames returns the query parameter names a handler reads off the
+// inbound request. signature is the handler's parameter list, body its source.
+func queryParamNames(signature, body string) []string {
+	inbound := inboundRequests(signature, body)
 	bound := map[string]bool{}
 	for _, m := range queryValuesBindingPattern.FindAllStringSubmatch(body, -1) {
-		bound[m[1]] = true
+		if inbound[m[2]] {
+			bound[m[1]] = true
+		}
 	}
 	seen := map[string]bool{}
 	var names []string
@@ -793,8 +839,10 @@ func queryParamNames(body string) []string {
 		seen[name] = true
 		names = append(names, name)
 	}
-	for _, m := range directQueryPattern.FindAllStringSubmatch(body, -1) {
-		add(m[1])
+	for _, m := range requestQueryPattern.FindAllStringSubmatch(body, -1) {
+		if inbound[m[1]] {
+			add(m[2])
+		}
 	}
 	for _, m := range accessorPattern.FindAllStringSubmatch(body, -1) {
 		if bound[m[1]] {
@@ -851,7 +899,7 @@ func inferHandlerInfo(rt route) handlerInfo {
 			if body == "" {
 				continue
 			}
-			for _, name := range queryParamNames(body) {
+			for _, name := range queryParamNames(functionSignature(candidate, m[1]), body) {
 				info.query[name] = "string"
 			}
 			for name, code := range statusNames {
@@ -865,6 +913,17 @@ func inferHandlerInfo(rt route) handlerInfo {
 		}
 	}
 	return info
+}
+
+// functionSignature returns the parameter list between `from` — the index just
+// past a function's opening parenthesis — and the brace that opens its body.
+// That text is where the inbound `*http.Request` is declared.
+func functionSignature(src string, from int) string {
+	open := strings.IndexByte(src[from:], '{')
+	if open < 0 {
+		return ""
+	}
+	return src[from : from+open]
 }
 
 func functionBody(src string, from int) string {

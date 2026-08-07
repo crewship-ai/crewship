@@ -105,6 +105,11 @@ func TestGeneratedSpecNeverDocumentsHeadersAsQueryParameters(t *testing.T) {
 	}
 }
 
+// handlerSignature is the parameter list every handler in internal/api has —
+// the text functionSignature hands to queryParamNames, and the only place the
+// inbound request is declared.
+const handlerSignature = `w http.ResponseWriter, r *http.Request) `
+
 // TestQueryParamNamesIgnoresNonQueryReceivers pins the inference itself: only
 // values that came from r.URL.Query() count. An unrecognised receiver must
 // fail safe (no parameter), never be guessed into the spec.
@@ -131,10 +136,93 @@ func TestQueryParamNamesIgnoresNonQueryReceivers(t *testing.T) {
 		_ = tags
 	}`
 
-	got := queryParamNames(body)
+	got := queryParamNames(handlerSignature, body)
 	sort.Strings(got)
 	want := []string{"cursor", "include_deleted", "range", "status", "tag"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("queryParamNames = %v, want %v", got, want)
+	}
+}
+
+// TestQueryParamNamesIgnoresOutboundRequests covers the residual of the same
+// class: narrowing to `.URL.Query()` is not enough, because an outbound
+// *http.Request has that method too. Only the request the server was handed —
+// and requests derived from it — carries API query parameters.
+func TestQueryParamNamesIgnoresOutboundRequests(t *testing.T) {
+	body := `{
+		limit := r.URL.Query().Get("limit")
+		upstream, _ := http.NewRequestWithContext(ctx, "GET", target, nil)
+		upstream.URL.RawQuery = signed.Encode()
+		_ = upstream.URL.Query().Get("upstream_token")
+		outQ := upstream.URL.Query()
+		_ = outQ.Get("upstream_signature")
+		probe, _ := http.NewRequest("GET", target, nil)
+		_ = probe.URL.Query().Get("probe_nonce")
+		_ = limit
+	}`
+
+	got := queryParamNames(handlerSignature, body)
+	sort.Strings(got)
+	want := []string{"limit"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("queryParamNames = %v, want %v — an outbound request is not the API's query surface", got, want)
+	}
+}
+
+// TestQueryParamNamesKeepsRequestsDerivedFromTheInboundOne is the guard against
+// over-narrowing. internal/api/journal_handler.go:492 reads its query off
+// `stripped := r.Clone(r.Context())`; those are genuine inbound parameters, and
+// a rule that accepted only the literal receiver `r` would silently drop them.
+func TestQueryParamNamesKeepsRequestsDerivedFromTheInboundOne(t *testing.T) {
+	body := `{
+		stripped := r.Clone(r.Context())
+		if rawQ := stripped.URL.Query(); rawQ.Has("limit") || rawQ.Has("cursor") {
+			rawQ.Del("limit")
+		}
+		scoped := r.WithContext(ctx)
+		_ = scoped.URL.Query().Get("workspace_id")
+	}`
+
+	got := queryParamNames(handlerSignature, body)
+	sort.Strings(got)
+	want := []string{"cursor", "limit", "workspace_id"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("queryParamNames = %v, want %v", got, want)
+	}
+}
+
+// TestGeneratedSpecKeepsJournalCountPagination pins the same guard against the
+// real spec rather than a fixture: GET /api/v1/journal/count reads `limit` and
+// `cursor` only through the r.Clone-derived request, so it is the operation
+// that disappears first if the inference is narrowed to the literal `r`.
+func TestGeneratedSpecKeepsJournalCountPagination(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "api", "openapi.gen.json"))
+	if err != nil {
+		t.Fatalf("read generated spec: %v", err)
+	}
+	var spec struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name string `json:"name"`
+				In   string `json:"in"`
+			} `json:"parameters"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse generated spec: %v", err)
+	}
+	op, ok := spec.Paths["/api/v1/journal/count"]["get"]
+	if !ok {
+		t.Fatal("GET /api/v1/journal/count missing from the generated spec")
+	}
+	var query []string
+	for _, param := range op.Parameters {
+		if param.In == "query" {
+			query = append(query, param.Name)
+		}
+	}
+	sort.Strings(query)
+	if strings.Join(query, ",") != "cursor,limit" {
+		t.Fatalf("GET /api/v1/journal/count query params = %v, want [cursor limit]", query)
 	}
 }
