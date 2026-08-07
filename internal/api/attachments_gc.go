@@ -115,7 +115,15 @@ func StartAttachmentBlobGC(ctx context.Context, db *sql.DB, logger *slog.Logger,
 	if interval <= 0 {
 		interval = attachmentGCInterval
 	}
+	// Registered rather than listed as an exception. This goroutine deletes
+	// FILES, so a test that finishes while a sweep is mid-pass has its temp
+	// storage root removed underneath the walk — and the failure would surface
+	// in whichever unrelated test happened to be running next. Draining it is
+	// also cheap: every wait point is either the ticker or ctx.Done(), and a
+	// pass is bounded by the directory tree it walks.
+	done := beginBackgroundWork()
 	go func() {
+		defer done()
 		sweepAttachmentBlobs(ctx, db, logger, root)
 		t := time.NewTicker(interval)
 		defer t.Stop()
