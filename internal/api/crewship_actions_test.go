@@ -441,3 +441,50 @@ func TestCrewshipActions_EscalationCapFailsClosedOnUnreadableState(t *testing.T)
 		t.Errorf("made %d calls despite an unreadable cap", len(calls))
 	}
 }
+
+// The case the injection comment argues for and no test pinned: an EMPTY
+// acting agent.
+//
+// buildCrewshipBody defends the forged-identity case twice — it deletes the
+// author's identity keys, then sets its own unconditionally. With a non-empty
+// AgentID either layer alone is enough, so removing one changes nothing a test
+// can see, and both were removable with the suite still green.
+//
+// The empty case is where they stop being redundant. A routine with no author
+// agent that sets these keys itself is exactly the shape where forging one is
+// worth something: `actor_agent_id` is what the delegation cap measures depth
+// from, so a surviving author value is depth laundering — the failure
+// delegation_limits.go exists in order not to have.
+func TestCrewshipActions_ForgedIdentityDiesEvenWithNoActingAgent(t *testing.T) {
+	var calls []capturedCall
+	srv := fakeInternalAPI(t, &calls)
+	db := crewshipPolicyDB(t, "crew_full", "full")
+
+	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
+	if _, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
+		Verb: "assignment.create",
+		Args: map[string]any{
+			"target_slug": "viktor", "task": "look", "chat_id": "chat_1",
+			"agent_id":       "agent_forged",
+			"actor_agent_id": "agent_forged",
+		},
+		WorkspaceID: "ws_real", CrewID: "crew_full",
+		// No acting agent — a schedule-fired routine with no author.
+		AgentID: "",
+	}); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("made %d calls, want 1", len(calls))
+	}
+	for _, field := range []string{"agent_id", "actor_agent_id"} {
+		got, _ := calls[0].body[field].(string)
+		if got == "agent_forged" {
+			t.Errorf("body[%q] kept the author's forged value — with no acting agent to overwrite it, "+
+				"the delete is the only thing standing between a routine and laundered delegation depth", field)
+		}
+		if got != "" {
+			t.Errorf("body[%q] = %q, want empty: there is no acting agent to claim", field, got)
+		}
+	}
+}
