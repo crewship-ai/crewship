@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
 
@@ -56,7 +57,14 @@ type SkillProposedHandler struct {
 	// bind source (#1663).
 	storageBasePath string
 	importer        *skills.Importer
+	// policyResolver runs the #1768 policy.ActionSkillCreate gate on the
+	// agent-facing Author route. nil → the conservative guided default.
+	policyResolver *policy.Resolver
 }
+
+// SetPolicyResolver wires the shared per-crew autonomy resolver used by the
+// agent-facing Author route (#1768).
+func (h *SkillProposedHandler) SetPolicyResolver(r *policy.Resolver) { h.policyResolver = r }
 
 // NewSkillProposedHandler constructs the handler with stub journal.
 // Call SetJournal, SetStorageBasePath, and SetImporter at router-mount

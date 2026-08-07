@@ -31,6 +31,18 @@ const (
 	// waitpoints show up in the standard approvals surface instead of
 	// being decidable only through `hire approve`.
 	KindEphemeralHire Kind = "ephemeral_hire"
+	// KindAutonomyGate is a creation an agent made through the sidecar's
+	// internal API that the crew's autonomy_level held for operator review
+	// (#1768) — a crew, a persistent agent, a mission, a cron schedule. Like
+	// KindEphemeralHire it is NOT enqueued by Gate(): the backend adapter
+	// writes it directly, alongside a blocking inbox item, so the hold shows
+	// up on the standard approvals surface. Deciding it releases the
+	// sentinel that keeps the created row inert (see
+	// internal/api/internal_autonomy_gate.go).
+	//
+	// approvals_queue.kind carries no CHECK constraint, so this value needs
+	// no migration; renaming it would strand rows written by an older build.
+	KindAutonomyGate Kind = "autonomy_gate"
 )
 
 // Status mirrors the CHECK constraint on approvals_queue.status. Callers

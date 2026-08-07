@@ -195,6 +195,22 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Autonomy-gate rows (#1768) are the same shape one level up: a
+	// creation an agent made through the internal API that the crew's
+	// autonomy_level staged INERT. Approving releases the sentinel
+	// (PENDING_REVIEW agent → IDLE, disabled schedule → enabled, strict-
+	// pinned crew → its parent's level); denying leaves it inert. It rides
+	// this transaction for the #1247 reason above.
+	if row != nil && row.Kind == harbormaster.KindAutonomyGate {
+		if err := applyAutonomyGateDecisionTx(r.Context(), tx, workspaceID, row,
+			status == harbormaster.StatusApproved, user.ID); err != nil {
+			h.logger.Error("approvals decide: apply autonomy gate side effect",
+				"err", err, "approval_id", id)
+			replyError(w, http.StatusInternalServerError, "decide failed")
+			return
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("approvals decide: commit", "err", err, "approval_id", id)
 		replyError(w, http.StatusInternalServerError, "decide failed")

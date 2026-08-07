@@ -202,6 +202,18 @@ func (s *Server) Start(ctx context.Context) error {
 		s.startEpisodicIndexer(ctx)
 	}
 
+	// Attachment blob collector (#1768 item 7): every hour, unlink blobs
+	// under <storage>/attachments/ that no row names. It is the ONLY
+	// caller of the sweep, and the only thing that ever collects blobs
+	// whose rows SQLite removed by FK cascade — a crew wipe, a workspace
+	// wipe, a comment cascade — none of which run any Go. Without it
+	// those bytes are permanent: unreachable, unaccounted for, and not
+	// removable through any API. See internal/api/attachments_gc.go for
+	// what it collects and what it deliberately does not.
+	if s.db != nil {
+		goapi.StartAttachmentBlobGC(ctx, s.db, s.logger, s.cfg.Storage.BasePath, 0)
+	}
+
 	// Crew Journal background workers. Each is a small goroutine that
 	// only runs when s.db and the journal writer are live — early init
 	// paths that come up without DB (tests, --dry-run) skip silently.

@@ -1,0 +1,214 @@
+---
+title: "Issue attachments"
+description: "Attach files to an issue — and let the agent working it actually read them."
+icon: "paperclip"
+---
+
+# Issue attachments
+
+A crash log, a screenshot, a repro bundle, a diff. Attach it to the issue, and
+the agent working that issue can read it.
+
+That second half is the point. An attachment an agent cannot read is decoration:
+before this existed, the only way a file reached an agent was a human pasting its
+contents into a comment, which does not work for a 20 MB log and does not work at
+all for a screenshot.
+
+```bash
+crewship issue attach BE-42 ./crash.log
+crewship issue attachments BE-42
+crewship issue attachment BE-42 <attachment-id> -o ./local-copy.log
+crewship issue detach BE-42 <attachment-id>
+```
+
+The HTTP surface is documented in the
+[Issues API reference](/api-reference/issues#attachments).
+
+## What an agent sees
+
+An agent reaches the same files through its sidecar, on the loopback port inside
+its own container. Three verbs, all needing the same `fd-3` bearer-token form
+every other sidecar call uses:
+
+```bash
+# What is attached?
+curl -s http://localhost:9119/issue/BE-42/attachments -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+
+# Read one.
+curl -s http://localhost:9119/issue/BE-42/attachments/<id> -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+
+# Attach something the agent produced.
+curl -s -X POST http://localhost:9119/issue/BE-42/attachments \
+  -H "Content-Type: application/json" \
+  -d '{"filename":"report.md","content_base64":"IyBmaW5kaW5ncwo="}' \
+  -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+```
+
+Listing is metadata only — id, filename, content type, size, digest, whether a
+human or an agent attached it. Reading is a second, explicit call, so an issue
+carrying four log files does not push all four into the agent's context whether
+or not it wanted any of them.
+
+A read comes back in one of two shapes:
+
+```json
+{ "encoding": "text",   "content": "<untrusted source=\"attachment\" …>…</untrusted …>", "truncated": false }
+{ "encoding": "base64", "content": "iVBORw0KGgo…",                                       "truncated": true  }
+```
+
+- **`encoding: "text"`** for text-ish types. The content arrives already wrapped
+  in a nonce-delimited `<untrusted>` block, and so does the **filename**. Budget:
+  128 KiB.
+- **`encoding: "base64"`** for everything else. Deliberately *not* fenced: an
+  agent that asked for bytes is going to decode them and write a file, and a
+  wrapper it has to strip first is a bug waiting to happen. Budget: 512 KiB.
+- **`truncated: true`** means you are looking at a prefix. Say so rather than
+  concluding from a partial file — the flag is always present so that ignoring it
+  is a choice rather than an accident.
+
+An agent may attach up to **6 MiB** per call, lower than the 25 MiB a human gets:
+the agent door carries the file as base64 inside a JSON body, so the bytes are
+buffered three times over on the request path of a process that also holds the
+crew's credentials. The human door is multipart and streams.
+
+The workspace is never the caller's to choose. The sidecar fills it in from its
+own IPC identity, and the server checks it against the workspace the internal
+token is cryptographically bound to — a mismatch is a `403`, on the read verbs and
+the attach verb alike. An agent naming another tenant's issue identifier gets a
+refusal, not that tenant's file.
+
+## Why the content is fenced
+
+An uploaded file is attacker-controlled input. On a self-hosted instance anyone
+who can comment on an issue can attach to it, and the content lands directly in
+an agent's context — the ingress prompt-injection surface
+([OWASP LLM01](https://owasp.org/www-project-top-10-for-large-language-model-applications/))
+that Crewship's trust fence (`internal/untrusted`) exists for.
+
+Both the **filename** and the **content** go through the fence. The filename
+matters as much as the body: `ignore previous instructions.txt` is a shorter and
+likelier payload than the file itself, and it appears in every listing whether or
+not anyone reads the file.
+
+## Types, and why the allowlist is short
+
+The type is resolved from the file's extension against an allowlist. The
+request's own `Content-Type` header is discarded entirely — that header is chosen
+by whoever is uploading, and honouring it is how a stored file becomes stored XSS
+served from your own origin.
+
+Allowed: `.txt` `.log` `.md` `.csv` `.tsv` `.json` `.yaml` `.yml` `.toml` `.xml`
+`.diff` `.patch` `.png` `.jpg` `.jpeg` `.gif` `.webp` `.avif` `.pdf` `.zip` `.gz`
+`.tgz`.
+
+`.html` and `.svg` are absent on purpose rather than by oversight: both are
+script-bearing document formats a browser executes, and serving one from your own
+origin is script execution however it is labelled. Archives are allowed because a
+repro bundle is a real use case and an archive is inert until something extracts
+it. Adding a type is a one-line change to `attachmentTypes` in
+`internal/api/attachments.go`, and a deliberate one.
+
+Downloads are served with the resolved type, `X-Content-Type-Options: nosniff`
+and `Content-Disposition: attachment`, so even a type we got wrong is downloaded
+rather than rendered.
+
+## Storage, de-duplication and deletion
+
+Files are stored by **content**, under the storage root:
+
+```
+<storage-root>/attachments/<workspace-id>/<sha256[0:2]>/<sha256>
+```
+
+Every component of that path is derived from bytes Crewship computed. The
+uploaded filename is a display label in the database and never a path component,
+so a filename of `../../../etc/passwd` is recorded as `passwd` and the bytes land
+exactly where every other attachment's do. Path traversal is not refused here —
+it is not expressible.
+
+Consequences worth knowing:
+
+- **Identical bytes in one workspace share one copy.** Two issues carrying the
+  same log cost one file on disk and two records.
+- **De-duplication stops at the workspace.** Identical bytes in two different
+  workspaces are two separate files. A shared blob would make "erase this
+  workspace" undecidable, and would turn write-time de-duplication into an
+  existence oracle — upload a file, observe whether the store already had it, and
+  you have learned that some other tenant holds those exact bytes.
+- **Attaching the same file to the same issue twice is one attachment.** "The
+  same file" means the same bytes *under the same name*: the second call returns
+  `200` with the existing record, not `201` and not `409`. Retries are safe and do
+  not add a second timeline entry.
+- **The same bytes under a different name are a different attachment.**
+  `crash-before-fix.log` and `crash-after-fix.log` can be byte-identical and mean
+  opposite things, so both are attached, both get `201`, both appear on the
+  timeline — and they share one copy on disk.
+- **Deletion is reference-counted.** Removing an attachment deletes its record,
+  and deletes the stored bytes only when no other record *stored at the same
+  content-addressed path* still references them. Chat attachments are counted out
+  deliberately: their blobs are not content-addressed (see
+  [chat sessions](/guides/chat-sessions)), so a chat file that happens to hash the
+  same is a different file in a different place and must not keep an issue
+  attachment's bytes alive after you delete it. The question asked of every other
+  record is "would downloading it read this file?" — an issue or comment
+  attachment always resolves its bytes from the content-addressed path, so a
+  record restored from a backup into a *new* workspace still keeps its file
+  alive even though the path recorded on it names the workspace the backup came
+  from.
+
+<Warning>
+**Bulk deletes leave reclaimable bytes.** When an issue is hard-deleted (a
+`BACKLOG` or `CANCELLED` issue removed outright), or a crew or workspace is
+wiped, SQLite removes the attachment records by cascade without the application
+seeing it — so the reference count never runs and the stored bytes stay on disk.
+They are unreachable, not exposed: nothing points at them any more.
+
+Deleting an issue through `crewship issue delete` reclaims them straight away: it
+reads the digests the issue is carrying *before* the delete and unlinks exactly
+those. The crew-wipe and workspace-wipe paths do not, and nothing on a request
+path could — SQLite removes those records without the application ever running.
+They are collected instead by a background pass that runs **once when the server
+starts and then every hour**, across every workspace under the storage root. It
+needs no operator action and has no switch.
+
+A wiped tenant is included. The pass walks the directories under the storage
+root rather than the workspace records, so a workspace whose records are all gone
+is still visited and its files still reclaimed — which is the case that motivated
+the pass, since it is also the largest. Chat attachment files are not in that
+tree and are not its job; they belong to the crew files surface.
+
+The pass checks each stored file individually against the database while holding
+that file's own lock — the same lock an upload holds across writing its bytes and
+recording them — so it cannot delete a file belonging to an upload that is one
+statement from committing. It is idempotent and safe to run at any time on **one**
+server. It is not safe to run two Crewship servers against one storage root: the
+lock is in-process, nothing in the store arbitrates between processes, and that is
+a limitation of the whole attachment design rather than of the reclaim pass.
+
+Files in the blob tree that are not named like a digest are never removed, and a
+half-written temp file is removed only after it has sat untouched for an hour.
+</Warning>
+
+## Audit trail
+
+Every attach and detach writes to the issue's activity timeline **and** to the
+crew journal, which is what makes it notifiable — Crewship routes notifications
+per journal entry type, so an event that reaches only `mission_activity` is an
+event nobody is told about.
+
+The recorded detail is the filename, the content type and the size. Never the
+content: an audit row is read back into the timeline, exported by backup, and
+truncated into a notification body, and file content belongs in none of those.
+
+## Backup
+
+Attachment **records** ride in the database dump. The **stored bytes** ride with
+the file half of a bundle. A restored record whose bytes are missing degrades to a
+`404` on download rather than to a corrupt read — the `sha256` column is what
+lets a verify pass tell "bytes missing" from "bytes corrupt".

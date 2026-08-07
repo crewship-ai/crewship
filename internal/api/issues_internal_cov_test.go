@@ -493,7 +493,10 @@ func TestCovII2Mission_Create_FullFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
 	rr := httptest.NewRecorder()
 	h.Create(rr, req)
-	if rr.Code != http.StatusCreated {
+	// #1768 contract change: mission_create is policy-gated; with no resolver
+	// wired the conservative guided default holds the mission — the rows are
+	// still written (asserted below), the status is 202 not 201.
+	if rr.Code != http.StatusAccepted {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp struct {

@@ -50,11 +50,16 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up current status.
+	// Look up current status — and the current description, which is what
+	// makes "the description actually changed" answerable. Without it the
+	// handler could only see that a description was SENT, and a client that
+	// PATCHes the whole issue on every keystroke-blur would stamp an
+	// audit row per save with nothing behind it.
 	var missionID, currentStatus string
+	var currentDescription sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, status FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
-		ident, crewID, wsID).Scan(&missionID, &currentStatus)
+		`SELECT id, status, description FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
+		ident, crewID, wsID).Scan(&missionID, &currentStatus, &currentDescription)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -293,24 +298,42 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Log activity for significant changes
+	// Log activity for significant changes. Collected into one batch so the
+	// whole PATCH produces exactly one issue.updated broadcast, the way it
+	// did when the broadcast was a separate line below.
 	user := UserFromContext(r.Context())
 	actorType := "user"
 	actorID := user.ID
 
-	if req.Status != nil {
-		h.logActivity(r.Context(), missionID, actorType, actorID, "status_changed",
-			fmt.Sprintf("%s → %s", currentStatus, *req.Status))
-	}
-	if req.AssigneeID != nil {
-		h.logActivity(r.Context(), missionID, actorType, actorID, "assignee_changed",
-			fmt.Sprintf("assignee_id: %s", *req.AssigneeID))
-	}
-	if req.Priority != nil {
-		h.logActivity(r.Context(), missionID, actorType, actorID, "priority_changed", *req.Priority)
+	var evs []issueEvent
+	ev := func(action issueAction, details string) {
+		evs = append(evs, issueEvent{
+			MissionID: missionID, ActorType: actorType, ActorID: actorID,
+			Action: action, Details: details,
+		})
 	}
 
-	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID})
+	if req.Status != nil {
+		ev(actionStatusChanged, fmt.Sprintf("%s → %s", currentStatus, *req.Status))
+	}
+	if req.AssigneeID != nil {
+		ev(actionAssigneeChanged, fmt.Sprintf("assignee_id: %s", *req.AssigneeID))
+	}
+	if req.Priority != nil {
+		ev(actionPriorityChanged, *req.Priority)
+	}
+	// A description rewrite used to leave NO trace at all: the field was
+	// accepted and written a hundred lines above, and none of the three
+	// branches over it logged anything. On a board where agents and humans
+	// share issues, silently rewriting the statement of the work is exactly
+	// the change someone needs to be able to see happened.
+	//
+	// Gated on the value actually differing — see the SELECT at the top.
+	if req.Description != nil && *req.Description != currentDescription.String {
+		ev(actionDescriptionChanged, describeDescriptionChange(currentDescription.String, *req.Description))
+	}
+
+	h.events().record(r.Context(), wsID, map[string]string{"id": missionID}, evs...)
 
 	// Return updated issue
 	issue, err := scanIssueRow(h.db.QueryRowContext(r.Context(),
@@ -333,6 +356,22 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
+
+	// The digests this delete is ABOUT to orphan, read while the rows still
+	// exist (#1768 item 7). After the DELETE they are gone — SQLite cascades
+	// them without the application seeing it — so this is the only moment the
+	// application can learn what it is orphaning. A failure here is not fatal:
+	// the sweep below is the fallback, and the delete itself must not depend on
+	// the storage bookkeeping succeeding.
+	var orphaned []string
+	var orphanErr error
+	if h.storagePath != "" {
+		orphaned, orphanErr = attachmentDigestsOfIssue(r.Context(), h.db, wsID, crewID, ident)
+		if orphanErr != nil {
+			h.logger.Warn("read attachment digests before issue delete",
+				"identifier", ident, "workspace_id", wsID, "error", orphanErr)
+		}
+	}
 
 	// Only allow deletion of BACKLOG or CANCELLED issues
 	res, err := h.db.ExecContext(r.Context(),
@@ -362,6 +401,44 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 		writeProblem(w, r, http.StatusBadRequest, "Only BACKLOG or CANCELLED issues can be deleted")
 		return
+	}
+
+	// Reclaim the attachment blobs the cascade just orphaned (#1768 item 7).
+	//
+	// The DELETE above cascades attachments' rows away inside SQLite, so the
+	// application never sees them go and the refcounted unlink in
+	// unlinkAttachmentBlobIfUnreferenced never runs. Without this the stored
+	// bytes of every file attached to the issue stay on disk, unreachable and
+	// unaccounted for.
+	//
+	// It reclaims the DIGESTS READ ABOVE rather than sweeping the workspace. The
+	// two differ in what they can get wrong: reclaiming a known set asks "does
+	// anything still reference this specific blob" and deletes only on a zero
+	// answer, while a sweep deletes on absence and therefore has to be defended
+	// against every upload in flight. The sweep is now defended (see
+	// reclaimAttachmentBlobs), but a delete of one issue has no business walking
+	// every blob in the tenant to find three files.
+	//
+	// The sweep is the fallback for the one case the targeted path cannot cover:
+	// the digest read failed, so we do not know what was orphaned.
+	//
+	// Deliberately best-effort and AFTER the response decision: the delete the
+	// user asked for has already committed, and a filesystem hiccup must not turn
+	// it into a 500.
+	if h.storagePath != "" {
+		if orphanErr != nil {
+			if n, rerr := reclaimAttachmentBlobs(r.Context(), h.db, h.storagePath, wsID); rerr != nil {
+				h.logger.Warn("reclaim attachment blobs after issue delete",
+					"identifier", ident, "workspace_id", wsID, "error", rerr)
+			} else if n > 0 {
+				h.logger.Info("reclaimed attachment blobs after issue delete (workspace sweep)",
+					"identifier", ident, "workspace_id", wsID, "blobs", n)
+			}
+		} else if n := reclaimAttachmentDigests(
+			r.Context(), h.db, h.logger, h.storagePath, wsID, orphaned); n > 0 {
+			h.logger.Info("reclaimed attachment blobs after issue delete",
+				"identifier", ident, "workspace_id", wsID, "blobs", n)
+		}
 	}
 
 	h.broadcastIssueEvent(wsID, "issue.deleted", map[string]string{"identifier": ident})

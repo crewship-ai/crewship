@@ -62,8 +62,11 @@ func TestSecMissInt_SameCrewLeadSucceeds(t *testing.T) {
 	rr := httptest.NewRecorder()
 	mh.Create(rr, req)
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for in-crew lead, got %d body=%s", rr.Code, rr.Body.String())
+	// #1768 contract change: mission_create is policy-gated; an in-crew lead
+	// is still ACCEPTED (the row is written and the id returned), but held for
+	// operator approval under the conservative guided default, so 202.
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for in-crew lead, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp map[string]interface{}
 	json.Unmarshal(rr.Body.Bytes(), &resp)

@@ -148,42 +148,8 @@ func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) 
 		model = "claude-sonnet-4-6"
 	}
 
-	provider, err := h.resolveAnthropicProvider(r.Context(), wsID)
-	if err != nil {
-		if errors.Is(err, errNoActiveAnthropicCredential) {
-			writeProblem(w, r, http.StatusPreconditionFailed,
-				"skill generation needs an Anthropic API key (provider=ANTHROPIC, type=API_KEY). "+
-					"Workspaces with only an AI_CLI_TOKEN (OAuth from Claude Code login) won't work — that token is a Bearer for claude.ai, not the Messages API. "+
-					"Add an x-api-key (sk-ant-…) under Settings › Credentials and retry.")
-			return
-		}
-		h.logger.Error("resolve anthropic provider", "error", err, "ws_id", wsID)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-	defer cancel()
-
-	resp, err := provider.Complete(ctx, llm.Request{
-		Model:     model,
-		System:    skillCreatorSystemPrompt,
-		MaxTokens: 4096,
-		Messages: []llm.Message{{
-			Role:    llm.RoleUser,
-			Content: fmt.Sprintf("Slug: %s\n\nIntent:\n%s", body.Slug, body.Prompt),
-		}},
-	})
-	if err != nil {
-		h.logger.Warn("skill generate llm call", "error", err, "slug", body.Slug)
-		writeProblem(w, r, http.StatusBadGateway, "skill generation failed: "+err.Error())
-		return
-	}
-
-	rawSkill := strings.TrimSpace(resp.Content)
-	if !strings.HasPrefix(rawSkill, "---") {
-		writeProblem(w, r, http.StatusBadGateway,
-			"generated content does not start with YAML frontmatter — model output: "+truncateForError(rawSkill, 200))
+	rawSkill, ok := h.produceSkillMD(w, r, wsID, body.Slug, body.Prompt, model)
+	if !ok {
 		return
 	}
 
@@ -266,6 +232,59 @@ func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) 
 		// response.
 		Quality: nullableString(descQuality),
 	})
+}
+
+// produceSkillMD runs the LLM half of generation: resolve the workspace's
+// Anthropic API key, call the model with the skill-creator prompt, and return
+// the raw SKILL.md. It writes its own error responses and returns ok=false —
+// callers early-return on that, exactly like requireRoleOrCapabilityOrForbid.
+//
+// Split out of Generate for #1768: the internal (sidecar) route needs the
+// same generation but a different destination when the crew's autonomy_level
+// holds the creation — the raw document goes to the crew's .proposed review
+// queue instead of straight into the live skills registry. Producing the
+// document and REGISTERING it are separate acts, and only the second one is
+// what the policy gate holds.
+func (h *SkillGenerateHandler) produceSkillMD(w http.ResponseWriter, r *http.Request, wsID, slug, prompt, model string) (string, bool) {
+	provider, err := h.resolveAnthropicProvider(r.Context(), wsID)
+	if err != nil {
+		if errors.Is(err, errNoActiveAnthropicCredential) {
+			writeProblem(w, r, http.StatusPreconditionFailed,
+				"skill generation needs an Anthropic API key (provider=ANTHROPIC, type=API_KEY). "+
+					"Workspaces with only an AI_CLI_TOKEN (OAuth from Claude Code login) won't work — that token is a Bearer for claude.ai, not the Messages API. "+
+					"Add an x-api-key (sk-ant-…) under Settings › Credentials and retry.")
+			return "", false
+		}
+		h.logger.Error("resolve anthropic provider", "error", err, "ws_id", wsID)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return "", false
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+
+	resp, err := provider.Complete(ctx, llm.Request{
+		Model:     model,
+		System:    skillCreatorSystemPrompt,
+		MaxTokens: 4096,
+		Messages: []llm.Message{{
+			Role:    llm.RoleUser,
+			Content: fmt.Sprintf("Slug: %s\n\nIntent:\n%s", slug, prompt),
+		}},
+	})
+	if err != nil {
+		h.logger.Warn("skill generate llm call", "error", err, "slug", slug)
+		writeProblem(w, r, http.StatusBadGateway, "skill generation failed: "+err.Error())
+		return "", false
+	}
+
+	rawSkill := strings.TrimSpace(resp.Content)
+	if !strings.HasPrefix(rawSkill, "---") {
+		writeProblem(w, r, http.StatusBadGateway,
+			"generated content does not start with YAML frontmatter — model output: "+truncateForError(rawSkill, 200))
+		return "", false
+	}
+	return rawSkill, true
 }
 
 func nullableString(v interface{}) string {

@@ -111,6 +111,10 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// the parent handler skip the mirror entirely.
 	if pipes != nil {
 		routineAdapter := NewRoutineInternalAdapter(pipes)
+		// #1768: the autonomy gate. Without this the adapter falls back to
+		// the conservative guided default (every schedule staged disabled),
+		// which is safe but not what an operator on trusted/full configured.
+		routineAdapter.SetAutonomyGate(r.PolicyResolver(), r.Journal())
 		r.mux.Handle("POST /api/v1/internal/routines/schedules", internalAuth(http.HandlerFunc(routineAdapter.CreateSchedule)))
 
 		// The two READ tools (#1763). list_routines and
@@ -133,9 +137,15 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	}
 	if r.skillGenHandler != nil {
 		skillAdapter := NewSkillInternalAdapter(r.skillGenHandler)
+		// #1768: the held arm stages the generated SKILL.md into the crew's
+		// .proposed queue, so the adapter needs the proposed handler as well
+		// as the resolver. A nil skillPropHandler leaves the held arm with
+		// nowhere to stage and it fails closed (403) rather than registering.
+		skillAdapter.SetAutonomyGate(r.PolicyResolver(), r.skillPropHandler)
 		r.mux.Handle("POST /api/v1/internal/skills/generate", internalAuth(http.HandlerFunc(skillAdapter.Generate)))
 	}
 	if r.skillPropHandler != nil {
+		r.skillPropHandler.SetPolicyResolver(r.PolicyResolver())
 		authorAdapter := NewSkillAuthorAdapter(r.skillPropHandler)
 		r.mux.Handle("POST /api/v1/internal/skills/author", internalAuth(http.HandlerFunc(authorAdapter.Author)))
 	}
@@ -192,18 +202,53 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 		missionEngineForInternal = mc
 	}
 	internalMissions := NewInternalMissionHandler(r.db, r.hub, missionEngineForInternal, r.logger)
+	// #1768: mission_create gate + the Start-side hold check.
+	internalMissions.SetAutonomyGate(r.PolicyResolver(), r.Journal())
 	r.mux.Handle("POST /api/v1/internal/missions", internalAuth(http.HandlerFunc(internalMissions.Create)))
 	r.mux.Handle("GET /api/v1/internal/missions/{missionId}", internalAuth(http.HandlerFunc(internalMissions.Get)))
 	r.mux.Handle("POST /api/v1/internal/missions/{missionId}/start", internalAuth(http.HandlerFunc(internalMissions.Start)))
 
 	// Internal issue routes (called by sidecar on behalf of agents)
 	internalIssues := NewInternalIssueHandler(r.db, r.hub, r.logger)
+	// Same emitter the public issue handler gets (router_orchestration.go).
+	// Without it an agent's issue change wrote a mission_activity row and
+	// nothing else, and since notifications route per journal entry type
+	// (internal/notifyroute), nothing an agent did to the board could ever
+	// notify anyone — #1768 F1.
+	internalIssues.SetJournal(r.Journal())
+	// #1768 item 3: an @mention in an agent's comment wakes the mentioned
+	// agent through the /assign chokepoint, so it inherits the delegation
+	// depth + fan-out caps instead of getting a cap of its own. Same
+	// AssignmentHandler instance the sidecar's /assign uses.
+	if oh.assign != nil {
+		internalIssues.SetMentionDispatcher(oh.assign)
+	}
 	r.mux.Handle("GET /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.List)))
 	r.mux.Handle("GET /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.Get)))
 	r.mux.Handle("POST /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.Create)))
 	r.mux.Handle("PATCH /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.UpdateStatus)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/comments", internalAuth(http.HandlerFunc(internalIssues.CreateComment)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/relations", internalAuth(http.HandlerFunc(internalIssues.CreateRelation)))
+
+	// Internal attachment routes (#1768 item 7) — the half that makes the
+	// feature real. A person drops a stack trace on an issue so the agent
+	// working it can read the stack trace; before these three routes the agent's
+	// issue surface could see a title, a description, comments and linked pull
+	// requests, and no files at all.
+	//
+	// The handler WRAPS the public one (registerOrchestrationRoutes, retained on
+	// the Router) rather than constructing a second: the filename sanitisation,
+	// the content-type allowlist, the content addressing and the de-duplication
+	// have to be the same on both doors, and two handlers is how they stop
+	// being. nil is the test-router case, where the orchestration group did not
+	// run — skipping is right there, since a second instance built here would be
+	// the exact drift the sharing exists to prevent.
+	if r.attachmentHandler != nil {
+		internalAttach := NewInternalAttachmentHandler(r.attachmentHandler)
+		r.mux.Handle("GET /api/v1/internal/issues/{identifier}/attachments", internalAuth(http.HandlerFunc(internalAttach.List)))
+		r.mux.Handle("GET /api/v1/internal/issues/{identifier}/attachments/{attachmentId}", internalAuth(http.HandlerFunc(internalAttach.Read)))
+		r.mux.Handle("POST /api/v1/internal/issues/{identifier}/attachments", internalAuth(http.HandlerFunc(internalAttach.Attach)))
+	}
 
 	// Query routes (peer-to-peer communication, standup summaries, escalations).
 	// Internal-auth side; public counterparts are registered in

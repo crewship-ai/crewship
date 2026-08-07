@@ -49,6 +49,23 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 		"credential_id": nullable(str()), "last_synced_at": nullable(str()),
 		"last_sync_error": nullable(str()),
 	})
+	// A file attached to an issue (#1768 item 7). sha256 is part of the
+	// contract, not an implementation leak: it is how a client verifies what it
+	// downloaded, how a backup verify pass tells "blob missing" from "blob
+	// corrupt", and how an agent decides it has already read this exact file.
+	// storage_key is deliberately absent — publishing the on-disk layout invites
+	// clients to construct paths instead of asking for resources.
+	//
+	// The uploader is TWO nullable columns rather than one polymorphic pair,
+	// because exactly one of them is set and a client rendering "who attached
+	// this" needs to know which kind it is looking at.
+	attachment := obj(map[string]any{
+		"id": str(), "workspace_id": str(), "owner_type": str(), "owner_id": str(),
+		"filename": str(), "content_type": str(), "size_bytes": integer(), "sha256": str(),
+		"uploaded_by_user_id": nullable(str()), "uploaded_by_agent_id": nullable(str()),
+		"uploaded_by_name": nullable(str()),
+		"created_at":       str(),
+	})
 	return map[string]DomainSchema{
 		"GET /api/v1/recurring-issues": {Response: arr(recurringIssue)}, "POST /api/v1/recurring-issues": {Response: recurringIssue}, "PATCH /api/v1/recurring-issues/{recurringId}": {Response: recurringIssue},
 		"GET /api/v1/triage-rules": {Response: arr(triageRule)}, "POST /api/v1/triage-rules": {Response: triageRule}, "PATCH /api/v1/triage-rules/{ruleId}": {Response: triageRule}, "POST /api/v1/triage/process": {Response: obj(map[string]any{"processed": integer(), "matched": integer()})},
@@ -57,7 +74,24 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 		"POST /api/v1/crews/{crewId}/issues/{identifier}/code-links":                  {Request: obj(map[string]any{"url": str()}), Response: codeLink},
 		"POST /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh": {Request: obj(map[string]any{}), Response: codeLink},
 		"DELETE /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}":       {Response: obj(map[string]any{"status": str()})},
-		"GET /api/v1/crews/{crewId}/issues/{identifier}/relations":                    {Response: arr(relation)}, "POST /api/v1/crews/{crewId}/issues/{identifier}/relations": {Response: obj(map[string]any{"id": str(), "status": str()})}, "DELETE /api/v1/relations/{relationId}": {Response: obj(map[string]any{"status": str()})},
+		// Attachments. The upload is multipart/form-data with one `file` part —
+		// declaring that rather than letting it default to application/json is
+		// the difference between a spec a client can drive and one it cannot.
+		// The download's response is binary and its media type is whatever the
+		// server RESOLVED from the extension, so the list enumerates the
+		// allowlist's families rather than claiming one.
+		"GET /api/v1/crews/{crewId}/issues/{identifier}/attachments": {Response: arr(attachment)},
+		"POST /api/v1/crews/{crewId}/issues/{identifier}/attachments": {
+			Request:      obj(map[string]any{"file": map[string]any{"type": "string", "format": "binary"}}),
+			RequestMedia: []string{"multipart/form-data"},
+			Response:     attachment,
+		},
+		"GET /api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}": {
+			Response:      map[string]any{"type": "string", "format": "binary"},
+			ResponseMedia: []string{"application/octet-stream", "text/plain", "application/json", "image/png", "image/jpeg", "application/pdf"},
+		},
+		"DELETE /api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}": {Response: obj(map[string]any{"status": str()})},
+		"GET /api/v1/crews/{crewId}/issues/{identifier}/relations":                     {Response: arr(relation)}, "POST /api/v1/crews/{crewId}/issues/{identifier}/relations": {Response: obj(map[string]any{"id": str(), "status": str()})}, "DELETE /api/v1/relations/{relationId}": {Response: obj(map[string]any{"status": str()})},
 		"GET /api/v1/crews/{crewId}/issues/{identifier}/comments": {Response: arr(comment)}, "POST /api/v1/crews/{crewId}/issues/{identifier}/comments": {Response: comment}, "GET /api/v1/crews/{crewId}/issues/{identifier}/activity": {Response: arr(activity)}, "GET /api/v1/crews/{crewId}/issues/{identifier}/runs": {Response: arr(issueRun)}, "GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks": {Response: arr(issue)},
 		"POST /api/v1/crews/{crewId}/issues": {Response: ref("Issue")}, "GET /api/v1/crews/{crewId}/issues/{identifier}": {Response: ref("Issue")}, "PATCH /api/v1/crews/{crewId}/issues/{identifier}": {Response: ref("Issue")},
 		"POST /api/v1/crews/{crewId}/issues/{identifier}/review": {Response: obj(map[string]any{"status": str(), "action": str()})}, "POST /api/v1/crews/{crewId}/issues/{identifier}/start": {Response: obj(map[string]any{"status": str(), "identifier": str()})}, "POST /api/v1/crews/{crewId}/issues/{identifier}/stop": {Response: obj(map[string]any{"status": str(), "identifier": str()})}, "PATCH /api/v1/issues/bulk": {Response: obj(map[string]any{"updated": integer()})},

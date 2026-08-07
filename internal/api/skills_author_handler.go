@@ -17,6 +17,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
 
@@ -40,6 +41,22 @@ func skillProposalInboxSource(crewID, fileName string) string {
 // middleware on the route is the trust boundary that keeps this off the public
 // API. The crew comes from the sidecar's IPC config (stamped onto the query by
 // SkillAuthorAdapter), so an agent cannot author into another crew's namespace.
+//
+// #1768 — the policy.ActionSkillCreate gate runs here too, but this route was
+// the one entry in sidecarRoutesAwaitingPolicyGate that was ALREADY inert:
+// staging plus a blocking, ADMIN-addressed inbox item is exactly the
+// "created but cannot act until an operator approves" shape the other five
+// routes had to be given. So the gate adds the DecisionRejected arm (which
+// the matrix never returns for skill_create today, but would if the matrix
+// changes) and stamps the decision onto the journal payload; the staging
+// behaviour itself is unchanged at every level.
+//
+// It is deliberately NOT relaxed at full autonomy, where the matrix says
+// AutoLogInbox (proceed with a non-blocking notice). Proceeding here would
+// mean promoting the skill into the live registry from an agent call, and
+// this route has no promotion path — `skills proposed approve` does. Adding
+// one would be granting a new capability under the banner of adding a gate,
+// so the route stays at its stricter behaviour and the decision is recorded.
 func (h *SkillProposedHandler) Author(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	if wsID == "" {
@@ -49,6 +66,12 @@ func (h *SkillProposedHandler) Author(w http.ResponseWriter, r *http.Request) {
 	crewID := r.URL.Query().Get("crew_id")
 	if crewID == "" {
 		replyError(w, http.StatusBadRequest, "crew_id required")
+		return
+	}
+
+	gate, ok := gateInternalAction(w, r, h.policyResolver, h.logger, crewID,
+		policy.ActionSkillCreate, "Skill authoring")
+	if !ok {
 		return
 	}
 
@@ -83,10 +106,13 @@ func (h *SkillProposedHandler) Author(w http.ResponseWriter, r *http.Request) {
 		Severity:    journal.SeverityNotice,
 		Summary:     "skill authored by agent: " + staged.Slug,
 		Payload: map[string]any{
-			"slug":        staged.Slug,
-			"file_name":   fileName,
-			"scan_status": staged.Scan.Status,
-			"scan_reason": staged.Scan.Reason,
+			"slug":           staged.Slug,
+			"file_name":      fileName,
+			"scan_status":    staged.Scan.Status,
+			"scan_reason":    staged.Scan.Reason,
+			"decision":       string(gate.Decision),
+			"autonomy_level": string(gate.Level),
+			"policy_action":  string(gate.Action),
 		},
 	}); emitErr != nil {
 		h.logger.Warn("skill author emit", "err", emitErr)
@@ -122,11 +148,73 @@ func (h *SkillProposedHandler) Author(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"file_name":   fileName,
-		"slug":        staged.Slug,
-		"scan_status": staged.Scan.Status,
-		"scan_reason": staged.Scan.Reason,
+		"file_name":      fileName,
+		"slug":           staged.Slug,
+		"scan_status":    staged.Scan.Status,
+		"scan_reason":    staged.Scan.Reason,
+		"decision":       string(gate.Decision),
+		"autonomy_level": string(gate.Level),
+		// Always true: this route only ever stages. Named explicitly so a
+		// caller can rely on the same field across all six gated routes.
+		"pending_review": true,
 	})
+}
+
+// stageProposedSkill stages content under the crew's .proposed directory and
+// announces it the way Author does (journal entry + blocking, ADMIN-addressed
+// inbox item that `skills proposed approve/reject` resolves).
+//
+// Extracted so the #1768 held arm of the internal /skills/generate route can
+// land its LLM output in the same review queue instead of writing straight
+// into the live skills registry. Returns the staged file name and slug.
+func (h *SkillProposedHandler) stageProposedSkill(ctx context.Context, wsID, crewID, content, origin string) (fileName, slug, scanStatus, scanReason string, err error) {
+	dir, derr := h.proposedDirForCrew(ctx, wsID, crewID)
+	if derr != nil {
+		return "", "", "", "", derr
+	}
+	staged, serr := skills.StageAuthoredSkill(dir, content)
+	if serr != nil {
+		return "", "", "", "", serr
+	}
+	fileName = filepath.Base(staged.Path)
+	if _, emitErr := h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: wsID,
+		CrewID:      crewID,
+		Type:        journal.EntryMemorySkillProposed,
+		ActorType:   journal.ActorAgent,
+		Severity:    journal.SeverityNotice,
+		Summary:     "skill " + origin + " by agent: " + staged.Slug,
+		Payload: map[string]any{
+			"slug":        staged.Slug,
+			"file_name":   fileName,
+			"origin":      origin,
+			"scan_status": staged.Scan.Status,
+			"scan_reason": staged.Scan.Reason,
+		},
+	}); emitErr != nil {
+		h.logger.Warn("skill stage emit", "err", emitErr, "origin", origin)
+	}
+	_ = inbox.Insert(ctx, h.db, h.logger, inbox.Item{
+		WorkspaceID: wsID,
+		Kind:        inbox.KindEscalation,
+		SourceID:    skillProposalInboxSource(crewID, fileName),
+		TargetRole:  "ADMIN",
+		Title:       "Skill proposed for review: " + staged.Slug,
+		BodyMD:      "An agent " + origin + " a new skill. Approve it to add it to the crew, or reject it.",
+		SenderType:  "agent",
+		SenderName:  "Agent skill author",
+		Priority:    "high",
+		Blocking:    true,
+		Payload: map[string]interface{}{
+			"kind":        "skill_proposal",
+			"crew_id":     crewID,
+			"file_name":   fileName,
+			"slug":        staged.Slug,
+			"origin":      origin,
+			"scan_status": staged.Scan.Status,
+		},
+	})
+	return fileName, staged.Slug, staged.Scan.Status, staged.Scan.Reason, nil
 }
 
 // SkillAuthorAdapter wraps SkillProposedHandler.Author for the internal sidecar

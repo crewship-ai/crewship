@@ -9,6 +9,64 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+
+- **Attachments on issues — and the agent working the issue can read them
+  (#1768).** Attach a crash log, a screenshot, a repro bundle or a diff to an
+  issue over the API (`GET`/`POST` `…/issues/{ident}/attachments`,
+  `GET`/`DELETE` `…/{attachmentId}`), over the CLI (`crewship issue attach` /
+  `attachments` / `attachment` / `detach`), or from an agent through its
+  sidecar (`GET`/`POST /issue/{ident}/attachments`,
+  `GET /issue/{ident}/attachments/{id}`). The agent half is the point: a file
+  an agent cannot read is decoration, and until now the only way one reached an
+  agent was a human pasting its contents into a comment. Every attach and detach
+  goes through the shared issue-event emitter, so it lands on the timeline **and**
+  in the journal — which is what makes it notifiable.
+
+  Content reaching an agent is treated as attacker-controlled: both the file's
+  **text** and its **filename** are wrapped by `internal/untrusted` before they
+  leave the handler (`ignore previous instructions.txt` is a shorter payload than
+  the file, and it shows up in every listing). Binary comes back base64, budgeted
+  at 512 KiB, text at 128 KiB, both with an explicit `truncated` flag — a silent
+  truncation is worse than a refusal.
+
+  The type is resolved from the file's **extension** against an allowlist; the
+  request's own `Content-Type` is discarded, because honouring it is how a stored
+  file becomes stored XSS served from your own origin. `.html` and `.svg` are
+  absent deliberately. Downloads carry the resolved type plus `nosniff` and
+  `Content-Disposition: attachment`.
+
+  Blobs are content-addressed at
+  `attachments/<workspace>/<sha[0:2]>/<sha>` — every component derived from bytes
+  we computed, so a filename of `../../../etc/passwd` is stored as the label
+  `passwd` and path traversal is not expressible rather than merely refused.
+  Identical bytes are de-duplicated **within a workspace and never across one**:
+  a cross-tenant shared blob would make workspace erasure undecidable and would
+  turn write-time de-duplication into an existence oracle. Deletion is
+  reference-counted, so removing a file from one issue never removes it from
+  another that carries the same file. Cascade deletes (an issue hard-deleted)
+  never reach that refcount, so `crewship issue delete` runs a reclaim pass
+  derived purely from the table.
+
+### Changed
+
+- **One attachments table, and `chat_attachments` is gone (#1768).** The schema
+  carried two attachment tables that no product code had ever read or written —
+  `chat_attachments` and `workspace_files` (both migration v57) — while the chat
+  composer's live attachment path wrote blobs and **no metadata row at all**, so
+  a chat attachment had no recorded size, checksum, MIME type or uploader and
+  could not be listed or deleted through any API. The new `attachments` table
+  replaces `chat_attachments` (dropped in the same migration) and holds all owner
+  kinds through an exclusive-arc foreign key, so a row can never decay into an id
+  that resolves to nothing. `ProxyHandler.AgentChatAttachment` now writes its row;
+  the chat blob's location is deliberately unchanged, because
+  `/output/<agentSlug>/attachments/…` is the agent-visible contract.
+
+  `workspace_files` is **not** dropped here: it is a path→metadata index rather
+  than an attachments table, and three v144 timestamp-regression guards use it as
+  their canary. Removing it belongs with #1768 item 8, together with moving those
+  guards.
+
 ### Security
 
 - **Internal tokens are now bound to a crew, closing the
@@ -66,6 +124,105 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   as "deliberately not listed", which is why those handlers validated nothing),
   and `fkInWorkspaceOrReject` makes a call site one line. Found by the new
   cross-workspace fence matrix rather than by review.
+
+- **An agent could escape its crew's `autonomy_level` by creating a new crew
+  (#1768).** Six `/api/v1/internal/*` routes let an agent create something that
+  keeps acting after the request ends — a crew, a persistent agent, a mission,
+  a cron schedule, a skill — and none of them consulted the calling crew's
+  policy. Each handler justified skipping the check with a claim about its
+  caller ("enforced upstream") rather than a check; nothing ran it. The sharpest
+  consequence: `POST /internal/crews` never set `autonomy_level`, so the new
+  crew took `DEFAULT 'guided'` (migration v101) — an agent held to `strict`
+  could create a `guided` crew, create an agent inside it, and act there
+  unbounded. **Two things close that, and neither is the blocking:** `strict`
+  now refuses `crew_create` outright, and an allowed crew **inherits the
+  creating crew's autonomy level** instead of the column default, so no created
+  crew is ever more permissive than its creator. That property — not any
+  particular cell of the decision matrix — is what closes the escape, and
+  `TestAutonomyInvariant_ChildCrewNeverOutranksCreator` pins it across all four
+  levels of the creating crew so a future re-tuning of the matrix cannot
+  silently reopen it. Every arm (refused, held, allowed) writes an audit row
+  carrying `decision`, `autonomy_level` and `policy_action`; there is no silent
+  allow. When the policy resolver is unwired the gate holds rather than
+  proceeding — a wiring bug fails closed.
+
+### Changed
+
+- **Agent-driven creation is now gated on the crew's `autonomy_level`, and on
+  the default level (`guided`) some of it blocks (#1768).** This is a
+  behaviour change on default settings, not only a bug fix — a crew that has
+  never had its policy touched will see agents stopped where they previously
+  were not.
+
+  On `guided`, **`POST /internal/crews` and `POST /internal/agents` are
+  blocking**. The row is still written, but inert: a new crew is pinned to
+  `autonomy_level=strict` (so nothing can be created inside it) and a new agent
+  is written `status=PENDING_REVIEW` (so the chat bridge will not start it).
+  The call answers `202 Accepted` with `pending_review: true` and an
+  `approval_id`. The operator gets a **blocking, ADMIN-addressed inbox
+  waitpoint** and a row on the approvals queue.
+
+  Release a held item with `crewship approvals approve <id>` (or deny it, or
+  the `/approvals` page — `POST /api/v1/approvals/{id}/decide`, OWNER/ADMIN).
+  Approving flips the sentinel: the agent becomes `IDLE`, the crew is restored
+  to **the creating crew's** level — never higher. **Denying does not delete
+  anything**, it just never releases, and so does letting the hold lapse: the
+  seven-day timeout leaves the artefact inert rather than turning into a green
+  light.
+
+  On `guided`, **missions and cron schedules are not blocking**. They proceed
+  and leave a non-blocking inbox notice: a mission creates no principal and is
+  pinned to the caller's own crew, and a schedule stays an operator-editable
+  row (`PATCH .../pipeline-schedules/{scheduleId}`), so in both cases a hold
+  bought the same visibility a notice does while stopping ordinary work. At
+  `strict` a mission is held (it can be planned, not started) and a schedule is
+  refused outright.
+
+  To tighten or loosen this per crew:
+
+  ```bash
+  crewship policy set --crew <slug> --level strict  --reason "…"  # refuse crew/agent/schedule creation
+  crewship policy set --crew <slug> --level trusted --reason "…"  # unchanged for crew/agent; missions + schedules go journal-only
+  crewship policy set --crew <slug> --level full    --reason "…"  # nothing blocks; crew/agent still leave a notice
+  ```
+
+  `strict` refuses `crew_create`, `agent_create` and `routine_schedule_create`
+  with a structured `403` naming the level, so the CLI can suggest the
+  `policy set` that would unblock it. `full` blocks nothing but still leaves a
+  non-blocking notice for a new crew or agent — full autonomy is still
+  autonomous, but a new permanent principal is the change an operator wants to
+  see having happened.
+
+- **Agent-created missions are now bounded by two live instance settings
+  (#1768).** Letting `guided` — the default level — start a mission without a
+  hold rested on missions being bounded by the #1757 delegation caps. They are
+  not: the mission engine dispatches its task list through a path that never
+  passes the delegation insert, and both files say so. `POST /mission/create`
+  now answers `403` past either of:
+
+  | Setting | Default | Bounds |
+  |---|---|---|
+  | `mission.max_tasks` | `16` | Tasks one agent-created mission may carry. `0` allows task-less missions only. |
+  | `mission.max_active_per_crew` | `6` | Agent-created missions one crew may have in a non-terminal state. `0` switches agent-driven mission creation off. |
+
+  The refusal body names the `setting` an operator would change, and no mission
+  or task row is written. Both are read live from `app_settings`, so
+  `crewship instance settings set mission.max_tasks 24` applies to the next
+  call, not the next restart, and neither number can be raised from the request
+  — there is no such field on the route.
+
+  The second number is the one that matters, because **mission creation
+  recurses**: a mission created with no tasks makes the engine run its lead as
+  a planning turn, that turn is the one dispatch shape that keeps the sidecar,
+  and the planning brief we send it offers "create a new sub-mission" as an
+  option. A per-mission task cap alone would have bounded nothing. The crew's
+  live-mission budget does, because every mission an agent creates lands in the
+  crew its token is bound to.
+
+  Scope, stated rather than implied: this covers the **agent** door only.
+  Missions created through the dashboard/JWT API are neither capped nor counted
+  against the agents' budget — an operator planning work is making a decision —
+  and issues (which share the `missions` table) never count.
 
 ### Fixed
 

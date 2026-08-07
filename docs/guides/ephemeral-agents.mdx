@@ -25,7 +25,7 @@ This page is the operator playbook for the four-state lifecycle: **hire → live
 | **Permanent** | `ephemeral=0` | Default. Agent stays until soft-deleted via `DELETE /api/v1/agents/{id}`. |
 | **Live (ephemeral)** | `ephemeral=1, expires_at=<future>, expired_at IS NULL` | Counts against `crews.max_ephemeral_agents` quota. |
 | **Ghost** | `ephemeral=1, expires_at=<past>, expired_at IS NOT NULL` | TTL elapsed. Does NOT count against quota. Stays in the agents table for audit + rehire. |
-| **Pending review** | `status='PENDING_REVIEW'` | Guided-crew hire that hasn't been operator-approved yet. Chatbridge refuses to start the agent until status flips to `IDLE`. |
+| **Pending review** | `status='PENDING_REVIEW'` | Guided-crew hire that hasn't been operator-approved yet. Nothing starts the agent until status flips to `IDLE`: not a chat message, not `/assign`, not an `@mention`, not a mission task. |
 
 The state machine derives from two columns rather than a single `lifecycle` enum because we wanted the schema to be queryable without an enum dance — `WHERE ephemeral=1 AND expired_at IS NULL` is the canonical "live ephemerals" query and a single integer comparison is faster than any enum string check. The trade-off (the state is reconstructed in the query layer) is documented as drift §10.5 in `PRD-AGENT-EVOLUTION-2026.md`.
 

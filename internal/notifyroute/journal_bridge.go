@@ -46,6 +46,31 @@ var journalCategories = map[journal.EntryType]string{
 	journal.EntryMissionStatus:   notify.CategoryIssuesState,
 	journal.EntryMissionAssigned: notify.CategoryIssuesAssigned,
 	journal.EntryMissionComment:  notify.CategoryIssuesComment,
+	// agent.mentioned had a producer as of #1768 item 3 (the @mention trigger)
+	// and no category, which meant a mention journalled and never notified —
+	// the exact "audited but unnotifiable" gap that PR's F1 exists to close.
+	//
+	// It routes to issues.comment rather than to a fifteenth category, and that
+	// is a decision, not a shortcut:
+	//
+	//   * a mention ONLY ever arrives inside an issue comment. There is no
+	//     other producer and no plan for one, so a dedicated toggle would
+	//     always be a strictly narrower duplicate of the one next to it;
+	//   * the user intent the matrix models is "tell me when there is talk on
+	//     my issues". Someone who muted issue comments and then received a
+	//     mention would read that as the mute being broken;
+	//   * the taxonomy is closed on purpose. Its last change (v169 /
+	//     notify_taxonomy) had to REWRITE every stored user_notification_prefs
+	//     cell and every notification_channels allowlist to keep opted-in users
+	//     opted in. That cost is worth paying for a category with a real,
+	//     distinct producer; it is not worth paying to split one producer in
+	//     two, and a new row would default to whatever the migration chose
+	//     rather than to what each user actually wanted.
+	//
+	// If mentions ever get a producer OUTSIDE a comment — a mention in an issue
+	// description, or in chat — the calculus changes and a real category with a
+	// real preference migration becomes the right answer.
+	journal.EntryAgentMentioned: notify.CategoryIssuesComment,
 
 	// Agents. keeper.request is absent — it already becomes an inbox
 	// escalation, so mapping it here would double-deliver.

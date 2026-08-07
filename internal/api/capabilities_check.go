@@ -312,10 +312,18 @@ func requireRoleOrCapabilityOrForbid(
 // Behaviour matrix:
 //
 //   - userID == "": treated as autonomous-agent call. Returns true
-//     unconditionally; the autonomy_level check in the handler is
-//     the authoritative gate for that path. This branch is what
-//     keeps the sidecar-vouched / X-Caller-User-Id-absent path
-//     working — never wrong-deny a legit autonomous agent.
+//     unconditionally — a capability is a property of a USER, and this
+//     path has none, so there is nothing here to check. It is not the
+//     end of enforcement for that path: the caller runs
+//     gateInternalAction (internal_autonomy_gate.go) against the
+//     crew's autonomy_level, which is what decides whether the action
+//     is refused, staged inert for operator approval, or allowed.
+//     Every route that takes this branch does so — internal_routines.go
+//     CreateSchedule and internal_skills.go Generate are the two
+//     callers. Until #1768 that gate did not exist anywhere and this
+//     comment described enforcement that was never written; if a new
+//     caller adds this branch without an autonomy gate beside it, the
+//     hole is back.
 //   - DB error during lookup: 500 + log. NOT 403 — transient
 //     SQLITE_BUSY masquerading as "Forbidden" is the bug that
 //     drove the E-variant lookup.
@@ -338,8 +346,10 @@ func requireCapabilityOrForbid(
 	workspaceID, callerUserID, capability, action, resource string,
 ) bool {
 	// Autonomous agent path: the handler caller decided this isn't
-	// user-attributed. We grant and rely on the autonomy_level gate
-	// the handler runs separately.
+	// user-attributed, so there is no user whose capabilities could be
+	// checked. Enforcement for this path is the caller's
+	// gateInternalAction on the crew's autonomy_level (#1768) — see the
+	// behaviour matrix above.
 	if callerUserID == "" {
 		return true
 	}

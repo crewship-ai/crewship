@@ -31,6 +31,7 @@ DELETE /api/v1/crews/{crewId}/escalations roleManage
 DELETE /api/v1/crews/{crewId}/files/delete roleCreate
 DELETE /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
 DELETE /api/v1/crews/{crewId}/issues/{identifier} roleCreate
+DELETE /api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId} roleCreate
 DELETE /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId} roleCreate
 DELETE /api/v1/crews/{crewId}/members/{memberId} roleManage
 DELETE /api/v1/crews/{crewId}/missions/{missionId} roleCreate
@@ -169,6 +170,7 @@ POST /api/v1/crews/{crewId}/integrations roleCreate
 POST /api/v1/crews/{crewId}/integrations/{integrationId}/test roleCreate
 POST /api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh roleManage
 POST /api/v1/crews/{crewId}/issues roleInline
+POST /api/v1/crews/{crewId}/issues/{identifier}/attachments roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/code-links roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/comments roleCreate

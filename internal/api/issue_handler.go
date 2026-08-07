@@ -31,6 +31,11 @@ type IssueHandler struct {
 	// construction; unset means the hook no-ops (status transition still
 	// works fine).
 	storagePath string
+	// mentionDispatch wakes an agent named by an @mention in a comment.
+	// Wired by the router (SetMentionDispatcher) to the AssignmentHandler, so
+	// the mention inherits the delegation caps rather than getting its own.
+	// nil = mentions are recorded and audited but dispatch nothing.
+	mentionDispatch mentionDispatcher
 }
 
 // NewIssueHandler creates a new IssueHandler.
@@ -134,70 +139,42 @@ func (h *IssueHandler) SetJournal(j journal.Emitter) {
 	h.journal = j
 }
 
-// logActivity inserts a row into mission_activity AND emits a journal entry.
-// Errors are logged but not returned — activity logging is best-effort and
-// should not fail the caller. The journal emit is fire-and-forget via the
-// batched writer so the caller never waits on a DB round-trip here.
-func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
-	actID := generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := h.db.ExecContext(ctx,
-		`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		actID, missionID, actorType, actorID, action, details, now); err != nil {
-		h.logger.Error("insert mission activity", "action", action, "mission_id", missionID, "error", err)
-	}
-
-	// The mission row carries workspace_id; we grab it here rather than
-	// threading it through every logActivity caller. One extra light
-	// query per activity is cheap compared with the benefit of a
-	// single-argument signature at every call site.
-	var workspaceID, crewID string
-	_ = h.db.QueryRowContext(ctx, `SELECT workspace_id, crew_id FROM missions WHERE id = ?`, missionID).
-		Scan(&workspaceID, &crewID)
-	if workspaceID == "" {
-		// Mission may not exist yet (some callers pass chatID as missionID
-		// legacy). Journal write needs workspace_id, so skip silently.
-		return
-	}
-	actor := journal.ActorType(actorType)
-	if actor != journal.ActorAgent && actor != journal.ActorUser && actor != journal.ActorSystem {
-		actor = journal.ActorSystem
-	}
-	_, _ = h.journal.Emit(ctx, journal.Entry{
-		WorkspaceID: workspaceID,
-		CrewID:      crewID,
-		MissionID:   missionID,
-		Type:        journalTypeForIssueAction(action),
-		Severity:    journal.SeverityInfo,
-		ActorType:   actor,
-		ActorID:     actorID,
-		Summary:     action + ": " + truncate(details, 120),
-		Payload:     map[string]any{"action": action, "details": details},
-		Refs:        map[string]any{"mission_id": missionID, "activity_id": actID},
-	})
+// events builds the shared issue-event emitter (issue_events.go) from the
+// fields this handler already holds. Built per call rather than stored so a
+// journal wired after construction via SetJournal is picked up.
+func (h *IssueHandler) events() issueEvents {
+	return issueEvents{db: h.db, hub: h.hub, logger: h.logger, journal: h.journal}
 }
 
-// journalTypeForIssueAction picks the journal entry type for an issue
-// activity action. Everything used to land as mission.status_change, which
-// made "was assigned" and "was created" indistinguishable from "moved to In
-// Review" — both on the Activity timeline (one icon for all three) and to the
-// notification router, which routes per entry type. Splitting them is what
-// lets a user subscribe to assignments without also getting every status
-// change.
-//
-// Unrecognised actions keep the historical type: it stays the honest
-// catch-all for "something about this issue changed".
-func journalTypeForIssueAction(action string) journal.EntryType {
-	switch action {
-	case "created":
-		return journal.EntryMissionCreated
-	case "assignee_changed":
-		return journal.EntryMissionAssigned
-	case "commented":
-		return journal.EntryMissionComment
-	default:
-		return journal.EntryMissionStatus
-	}
+// SetMentionDispatcher wires the @mention trigger's dispatch door (#1768
+// item 3). Optional, and nil is a supported configuration: every test that
+// builds this handler directly leaves it unset, and a mention there is still
+// resolved, persisted and audited — it simply wakes nobody. See
+// mentionDispatcher's doc for why that is the right degradation.
+func (h *IssueHandler) SetMentionDispatcher(d mentionDispatcher) {
+	h.mentionDispatch = d
+}
+
+// mentionRecorder builds the shared mention write path from the fields this
+// handler already holds. Per call, like events(), so a dispatcher wired after
+// construction is picked up.
+func (h *IssueHandler) mentionRecorder() mentionRecorder {
+	return mentionRecorder{db: h.db, logger: h.logger, events: h.events(), dispatcher: h.mentionDispatch}
+}
+
+// logActivity is the compatibility shim for the call sites that still pass a
+// bare action string (issue_handler_create.go, _workflow.go, _bulk.go). It
+// records the mission_activity row and the journal entry via the shared
+// emitter but does not broadcast — those call sites own their own broadcast.
+// Best-effort: errors are logged, never returned.
+func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
+	h.events().log(ctx, issueEvent{
+		MissionID: missionID,
+		ActorType: actorType,
+		ActorID:   actorID,
+		Action:    issueAction(action),
+		Details:   details,
+	})
 }
 
 // broadcastIssueEvent sends a workspace-scoped WebSocket event.

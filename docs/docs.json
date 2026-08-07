@@ -116,6 +116,7 @@
               "guides/ephemeral-agents",
               "guides/integrations",
               "guides/git-links",
+              "guides/issue-attachments",
               "guides/templates",
               {
                 "group": "Memory",

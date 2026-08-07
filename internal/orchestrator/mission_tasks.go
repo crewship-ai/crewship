@@ -356,11 +356,25 @@ func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState
 	}
 
 	for _, task := range ready {
-		if err := e.scheduleTask(ctx, ms, task, allTasks); err != nil {
-			e.logger.Error("schedule task", "task_id", task.ID, "error", err)
-			// Mark task as FAILED so the loop doesn't retry endlessly
-			e.updateTaskStatus(ctx, ms, task.ID, "FAILED", err.Error())
+		err := e.scheduleTask(ctx, ms, task, allTasks)
+		if err == nil {
+			continue
 		}
+		// A DEFERRAL is not a failure. The target is staged for an operator's
+		// decision — under guided autonomy that is the ephemeral-hire flow
+		// working as designed — so the task stays exactly where it was
+		// (PENDING, unlinked, no assignment row) and the next tick asks
+		// again. Failing it here made the approval arrive at a task that had
+		// already been marked terminal, which retries nothing. See
+		// agent_hold.go.
+		if isDeferredDispatch(err) {
+			e.logger.Info("task deferred — target agent is held for an operator's approval",
+				"task_id", task.ID, "mission_id", ms.ID, "reason", err.Error())
+			continue
+		}
+		e.logger.Error("schedule task", "task_id", task.ID, "error", err)
+		// Mark task as FAILED so the loop doesn't retry endlessly
+		e.updateTaskStatus(ctx, ms, task.ID, "FAILED", err.Error())
 	}
 	return nil
 }
@@ -383,19 +397,36 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Resolve the target agent's crew for cross-crew support
-	var agentCrewID, agentCrewSlug, agentSlug string
+	// Resolve the target agent's crew for cross-crew support. agents.status
+	// comes along because this is where the work is ADMITTED — the row below
+	// and the IN_PROGRESS flip above it are what a hold has to prevent, and
+	// asking here costs nothing on a query that already runs.
+	var agentCrewID, agentCrewSlug, agentSlug, agentStatus string
 	err := e.db.QueryRowContext(ctx, `
-		SELECT a.slug, a.crew_id, c.slug
+		SELECT a.slug, a.crew_id, c.slug, COALESCE(a.status,'')
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ? AND a.deleted_at IS NULL`,
-		*task.AssignedAgentID).Scan(&agentSlug, &agentCrewID, &agentCrewSlug)
+		*task.AssignedAgentID).Scan(&agentSlug, &agentCrewID, &agentCrewSlug, &agentStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("assigned agent %s not found (deleted or invalid)", *task.AssignedAgentID)
 		}
 		return fmt.Errorf("resolve agent crew: %w", err)
+	}
+
+	// The target is staged for an operator's decision. Return BEFORE the
+	// IN_PROGRESS flip and BEFORE the assignment INSERT, so a hold that
+	// stands for an hour costs zero rows and leaves the task exactly as the
+	// next tick expects to find it. Callers read this as "wait", never as
+	// "fail" — agent_hold.go explains why that third answer is the only
+	// correct one here.
+	if agentHeldForDispatch(agentStatus) {
+		return &heldAgentDeferral{msg: fmt.Sprintf(
+			"agent %s is %s: it was created or hired by an agent and is held until an operator "+
+				"approves it, so this task waits rather than failing. Approve it from the inbox "+
+				"(or with `crewship hire approve <agent-id>`) and the next tick dispatches it.",
+			agentSlug, AgentStatusPendingReview)}
 	}
 
 	// For cross-crew tasks, verify the crews are connected
@@ -444,11 +475,19 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		"has_assignment", strings.Contains(taskBrief, "[YOUR ASSIGNMENT]"),
 	)
 
-	// Create assignment record — store full brief for audit trail
+	// Create assignment record — store full brief for audit trail.
+	//
+	// depth is written EXPLICITLY as 0 rather than left to the column default.
+	// It is the discriminator delegation_limits.go uses to tell a mission row
+	// from one of its own capped doors' rows (`depth > 0`): a mission task is
+	// one authored plan, not a delegation hop, and counting it as one made a
+	// busy lead unmentionable. Pinned by
+	// TestMissionAssignmentRowsCarryDepthZero — do not stamp a depth here
+	// without changing that file too.
 	assignmentID := generateID()
 	_, err = e.db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?)`,
 		assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, *task.AssignedAgentID,
 		taskBrief,
 		ms.ID, // group_id = mission_id for grouping
@@ -490,6 +529,19 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 				CreatedByUserID: ms.CreatedByUserID,
 			})
 			if dispatchErr != nil {
+				// The door said "wait for an operator". The admission check
+				// above already refuses a hold it can see, but the read and
+				// this write are not one statement, so an agent staged in
+				// between arrives here — with the row and the IN_PROGRESS
+				// flip already done. Unwind both: the task goes back to the
+				// state the next tick expects, and the row does not linger
+				// PENDING in the ledger forever.
+				if isDeferredDispatch(dispatchErr) {
+					e.logger.Info("mission dispatch deferred — target agent is held for an operator's approval",
+						"assignment_id", assignmentID, "task_id", task.ID, "reason", dispatchErr.Error())
+					e.unwindDeferredTaskDispatch(dispatchCtx, ms, task.ID, assignmentID, dispatchErr.Error())
+					return
+				}
 				e.logger.Error("dispatch assignment failed",
 					"assignment_id", assignmentID,
 					"error", dispatchErr,
@@ -512,6 +564,52 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	)
 
 	return nil
+}
+
+// unwindDeferredTaskDispatch puts a task back the way scheduleTask found it
+// after the dispatch door deferred (agent_hold.go).
+//
+// Both halves are load-bearing:
+//
+//   - the assignment row is CANCELLED, not left PENDING. A PENDING row that
+//     nothing will ever run is a permanent entry in the chat's ledger and, on
+//     the /assign side, was the row that quietly consumed a slot of the
+//     fan-out budget forever.
+//   - the task goes back to PENDING with its started_at and assignment_id
+//     cleared, which is exactly the shape resolveReadyFromTasks re-selects.
+//     Leaving it IN_PROGRESS would park the mission until the two-hour
+//     timeout with nothing running.
+//
+// Both writes are conditional on the state this function believes it is
+// unwinding, so a run that started concurrently (or a completion that raced
+// in) is never clobbered.
+func (e *MissionEngine) unwindDeferredTaskDispatch(ctx context.Context, ms *missionState, taskID, assignmentID, reason string) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	e.cancelDeferredAssignment(ctx, assignmentID, reason)
+	res, err := e.db.ExecContext(ctx, `
+		UPDATE mission_tasks
+		   SET status = 'PENDING', started_at = NULL, assignment_id = NULL, updated_at = ?
+		 WHERE id = ? AND status = 'IN_PROGRESS'`, now, taskID)
+	if err != nil {
+		e.logger.Error("unwind deferred task", "task_id", taskID, "error", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		e.broadcastTaskStatus(ms, taskID, "PENDING")
+	}
+}
+
+// cancelDeferredAssignment retires the PENDING row a deferred dispatch left
+// behind. Conditional on PENDING so a row a concurrent claim already moved to
+// RUNNING is never cancelled out from under a live run.
+func (e *MissionEngine) cancelDeferredAssignment(ctx context.Context, assignmentID, reason string) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := e.db.ExecContext(ctx, `
+		UPDATE assignments
+		   SET status = 'CANCELLED', finished_at = ?, error_message = ?
+		 WHERE id = ? AND status = 'PENDING'`, now, reason, assignmentID); err != nil {
+		e.logger.Error("cancel deferred assignment", "assignment_id", assignmentID, "error", err)
+	}
 }
 
 // areCrewsConnected checks if two crews have an active connection.

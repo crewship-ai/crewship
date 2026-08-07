@@ -106,10 +106,26 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// inherits the same `crews:write` route scope instead of needing a new
 	// entry in scopeForRoute.
 	codeLinks := NewCodeLinkHandler(r.db, r.hub, r.logger)
+	codeLinks.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/code-links", authed(wsCtx(http.HandlerFunc(codeLinks.List))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/code-links", roleCreate, codeLinks.Attach)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}/refresh", roleCreate, codeLinks.Refresh)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}/issues/{identifier}/code-links/{linkId}", roleCreate, codeLinks.Delete)
+
+	// Issue attachments (#1768 item 7). Nested under the crew/issue path for the
+	// same reason code links are — it inherits `crews:write` rather than needing
+	// a new route scope. The handler is retained on the Router so the INTERNAL
+	// (agent) twin registered in router_internal.go shares this instance: both
+	// doors must write through one attachBytes, or the type allowlist and the
+	// content addressing are only true of whichever door someone remembered.
+	attachments := NewAttachmentHandler(r.db, r.hub, r.logger)
+	attachments.SetJournal(r.Journal())
+	attachments.SetStoragePath(r.storagePath)
+	r.attachmentHandler = attachments
+	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/attachments", authed(wsCtx(http.HandlerFunc(attachments.List))))
+	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/attachments", roleCreate, attachments.Upload)
+	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}", authed(wsCtx(http.HandlerFunc(attachments.Download))))
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}", roleCreate, attachments.Delete)
 
 	// Issue Relations
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/relations", authed(wsCtx(http.HandlerFunc(issues.ListRelations))))
@@ -626,6 +642,11 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Stash on the Router so the server boot path can start the
 	// stuck-QUEUED sweeper on this same instance (Assignments()).
 	r.assignmentHandler = assign
+	// #1768 item 3: an @mention in an issue comment wakes the mentioned agent.
+	// Wired here rather than at NewIssueHandler because the dispatch has to be
+	// the SAME AssignmentHandler /assign uses — that is what makes a mention
+	// inherit the delegation caps rather than acquire a second, weaker set.
+	issues.SetMentionDispatcher(assign)
 	if r.missionCallback != nil {
 		assign.SetMissionCallback(r.missionCallback)
 		// Wire AssignmentHandler as the TaskDispatcher so the MissionEngine

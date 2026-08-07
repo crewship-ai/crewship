@@ -158,12 +158,14 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	e.db.QueryRowContext(ctx,
 		`SELECT title, description FROM missions WHERE id = ?`, ms.ID).Scan(&title, &desc)
 
-	// Resolve lead agent details and check lead_mode
-	var agentSlug string
+	// Resolve lead agent details and check lead_mode. agents.status rides
+	// along on the query that already runs, because this function is where
+	// the planning work is ADMITTED — see the hold check below.
+	var agentSlug, agentStatus string
 	var leadMode sql.NullString
 	err := e.db.QueryRowContext(ctx,
-		`SELECT slug, lead_mode FROM agents WHERE id = ? AND deleted_at IS NULL`,
-		ms.LeadAgentID).Scan(&agentSlug, &leadMode)
+		`SELECT slug, lead_mode, COALESCE(status,'') FROM agents WHERE id = ? AND deleted_at IS NULL`,
+		ms.LeadAgentID).Scan(&agentSlug, &leadMode, &agentStatus)
 	if err != nil {
 		e.logger.Error("lead planning: resolve lead agent", "error", err, "mission_id", ms.ID)
 		return fmt.Errorf("resolve lead agent: %w", err)
@@ -173,6 +175,20 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	if leadMode.Valid && leadMode.String == "passive" {
 		e.logger.Info("lead is passive, skipping autonomous planning", "mission_id", ms.ID, "agent", agentSlug)
 		return nil
+	}
+
+	// The lead is staged for an operator's decision. Refuse BEFORE the
+	// INSERT below: the caller answers a dispatch error by clearing
+	// planningDispatched and trying again on the next tick, and a hold's
+	// answer does not change until a human acts — so inserting first meant a
+	// fresh PENDING row (and an ERROR line) every three seconds for the life
+	// of the mission. Returning a deferral instead writes nothing and tells
+	// runMissionLoop this is a wait, not a broken dispatch (agent_hold.go).
+	if agentHeldForDispatch(agentStatus) {
+		return &heldAgentDeferral{msg: fmt.Sprintf(
+			"lead %s is %s: it is held until an operator approves it, so mission planning waits. "+
+				"Approve it from the inbox (or with `crewship hire approve <agent-id>`) and the "+
+				"next tick dispatches the planning turn.", agentSlug, AgentStatusPendingReview)}
 	}
 
 	// Build the planning prompt. Pre-size and use fmt.Fprintf so the three
@@ -218,12 +234,18 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	b.WriteString("After creating tasks or completing the work, the system will handle the rest.\n")
 	b.WriteString("[END PLANNING REQUEST]")
 
-	// Create a planning assignment
+	// Create a planning assignment.
+	//
+	// depth 0 is written explicitly for the same reason scheduleTask writes
+	// it: this row has the exact shape of a human's mention of the lead
+	// (assigned_by = assigned_to = the lead, chat = the mission, no parent),
+	// and `depth > 0` is what keeps delegation_limits.go from counting it as
+	// one. See TestMissionAssignmentRowsCarryDepthZero.
 	now := time.Now().UTC().Format(time.RFC3339)
 	assignmentID := generateID()
 	_, err = e.db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?)`,
 		assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, ms.LeadAgentID,
 		"[PLANNING] "+title.String,
 		ms.ID,
@@ -269,11 +291,24 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 				CreatedByUserID: ms.CreatedByUserID,
 			})
 			if dispatchErr != nil {
-				e.logger.Error("lead planning dispatch failed",
-					"assignment_id", assignmentID,
-					"error", dispatchErr,
-				)
-				// Reset planningDispatched so the loop will retry on next tick
+				deferred := isDeferredDispatch(dispatchErr)
+				if deferred {
+					// The lead was staged between the admission read above
+					// and this call. Cancel the row we already wrote so the
+					// retry below does not accumulate one per tick.
+					e.logger.Info("lead planning deferred — the lead is held for an operator's approval",
+						"assignment_id", assignmentID, "mission_id", ms.ID, "reason", dispatchErr.Error())
+					e.cancelDeferredAssignment(dispatchCtx, assignmentID, dispatchErr.Error())
+				} else {
+					e.logger.Error("lead planning dispatch failed",
+						"assignment_id", assignmentID,
+						"error", dispatchErr,
+					)
+				}
+				// Reset planningDispatched so the loop will retry on next tick.
+				// For a deferral that retry is the resume path — the admission
+				// check refuses before the INSERT while the hold stands, so the
+				// loop costs one indexed read per tick and nothing else.
 				e.mu.Lock()
 				ms.planningDispatched = false
 				e.mu.Unlock()

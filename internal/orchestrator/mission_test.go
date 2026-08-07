@@ -26,7 +26,8 @@ func setupTestDB(t *testing.T) *sql.DB {
 		CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT, slug TEXT);
 		CREATE TABLE crews (id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT, slug TEXT, escalation_config TEXT);
 		CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, name TEXT, slug TEXT,
-			agent_role TEXT DEFAULT 'AGENT', lead_mode TEXT DEFAULT 'active', deleted_at TEXT);
+			agent_role TEXT DEFAULT 'AGENT', lead_mode TEXT DEFAULT 'active', status TEXT DEFAULT 'IDLE',
+			deleted_at TEXT);
 		CREATE TABLE missions (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT,
 			trace_id TEXT UNIQUE, title TEXT, description TEXT, status TEXT DEFAULT 'PLANNING',
 			plan TEXT, workflow_template TEXT, total_token_count INTEGER, total_estimated_cost REAL,
@@ -44,7 +45,8 @@ func setupTestDB(t *testing.T) *sql.DB {
 		CREATE TABLE assignments (id TEXT PRIMARY KEY, workspace_id TEXT, chat_id TEXT,
 			assigned_by_id TEXT, assigned_to_id TEXT, task TEXT, status TEXT DEFAULT 'PENDING',
 			started_at TEXT, finished_at TEXT, result_summary TEXT, error_message TEXT,
-			group_id TEXT, created_at TEXT);
+			group_id TEXT, created_at TEXT,
+			depth INTEGER NOT NULL DEFAULT 0, parent_assignment_id TEXT);
 		CREATE TABLE chats (id TEXT PRIMARY KEY, agent_id TEXT, workspace_id TEXT);
 	`
 	if _, err := db.Exec(schema); err != nil {

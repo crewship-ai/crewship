@@ -73,10 +73,17 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"PATCH /issue/":         guardHandlerIdentity,
 	"POST /issue/ /comment": guardHandlerIdentity,
 	"POST /issue/ /link":    guardHandlerIdentity,
-	"POST /expose-port":     guardHandlerIdentity,
-	"POST /keeper/request":  guardHandlerIdentity,
-	"POST /keeper/execute":  guardHandlerIdentity,
-	"POST /mcp/routines":    guardHandlerIdentity,
+	// Attachments (#1768 item 7). The READ arms are guardHandlerIdentity for
+	// the same reason the rest of the issue reads are, and one more besides:
+	// these return FILE CONTENT, so a token-less sibling falling back to the
+	// boot agent's identity would be reading files, not just metadata.
+	"GET /issue/ /attachments":  guardHandlerIdentity,
+	"GET /issue/ /attachments/": guardHandlerIdentity,
+	"POST /issue/ /attachments": guardHandlerIdentity,
+	"POST /expose-port":         guardHandlerIdentity,
+	"POST /keeper/request":      guardHandlerIdentity,
+	"POST /keeper/execute":      guardHandlerIdentity,
+	"POST /mcp/routines":        guardHandlerIdentity,
 	// notify_send is authorised by the agent↔channel pairing on the server,
 	// which keys on the ACTING agent — so this route must resolve identity or
 	// the grant model means nothing.
@@ -85,6 +92,15 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"POST /pipelines/ /run":       guardHandlerIdentity,
 	"POST /connections/ /message": guardHandlerIdentity,
 	"POST /report-confidence":     guardHandlerIdentity,
+	// Both of these sat at guardNone while their handlers resolved identity.
+	// /assign grew the check in #1757 (assignment.go:59) and /mission/create
+	// has carried it since #812 (mission.go:125) — neither entry was updated,
+	// and the one-directional assertion could not see it. The converse in
+	// TestSidecarRoutes_IdentityCoverage is what caught them; keep them here
+	// rather than "fixing" the test, since the CODE is right in both cases and
+	// it was the table that lied.
+	"POST /assign":         guardHandlerIdentity,
+	"POST /mission/create": guardHandlerIdentity,
 
 	// --- no per-agent identity decision --------------------------------
 	// Crew-scoped routes: they act on a resource owned by the CREW, forward
@@ -99,10 +115,8 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"GET /connections/ /files":    guardNone,
 	"POST /connections/ /files":   guardNone,
 
-	"POST /assign":                    guardNone,
 	"GET /results/":                   guardNone,
 	"GET /standup":                    guardNone,
-	"POST /mission/create":            guardNone,
 	"GET /mission/templates":          guardNone,
 	"GET /mission/":                   guardNone,
 	"GET /crews":                      guardNone,
@@ -110,9 +124,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"POST /agent/create":              guardNone,
 	"POST /spawn":                     guardNone,
 	"GET /credentials":                guardNone,
-	"POST /agent-credentials":         guardNone,
 	"GET /crew-connections":           guardNone,
-	"POST /crew-connections":          guardNone,
 	"GET /manifest":                   guardNone,
 	"PATCH /manifest":                 guardNone,
 	"GET /pipelines":                  guardNone,
@@ -127,6 +139,52 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"GET /mcp/status":                 guardNone,
 	"GET /connections":                guardNone,
 }
+
+// A NOTE ON THE OTHER QUESTION, and where it is answered.
+//
+// The table above asks "whose identity is this?". It never asked "may they?",
+// and #1768 exists because the second question had no enforcement anywhere
+// while every layer believed another layer was asking it. This block records
+// how that was resolved, because the belief is the interesting part and a
+// reader who only sees today's working code will not know it was ever there.
+//
+// The belief was written down on both sides, which is the only reason it
+// survived. internal_routines.go said the autonomy gate "is enforced
+// upstream of this handler in the /spawn-style entry; this surface receives
+// only post-autonomy calls from the sidecar". routine_schedule.go — the
+// sidecar handler that is that caller — said "the sidecar does not inspect
+// role, capability, or caller identity beyond passing the headers through
+// … keeping enforcement in one place avoids drift". Each file named the other
+// as the enforcement point. Neither enforced. capabilities_check.go made the
+// same move a third time for its userID=="" branch. All three claims have
+// been rewritten to describe enforcement that now exists.
+//
+// The gate could not live here. The sidecar has no transport for
+// autonomy_level: it is absent from IPCConfig and from every
+// /api/v1/internal route, and the only exposure is the JWT-authed public
+// /api/v1/crews/{id}/policy, which a sidecar cannot reach. A boot-time copy
+// would be worse than none — it could never be invalidated when an operator
+// lowers the level, which is exactly what policy.Resolver.Invalidate exists
+// to do. So the gate went to the backend adapters, where it also covers every
+// other holder of the internal token rather than just this one.
+//
+// All six routes are now gated on the crew's autonomy_level, in
+// internal/api/internal_autonomy_gate.go and its callers:
+//
+//	POST /crew/create               → policy.ActionCrewCreate
+//	POST /agent/create              → policy.ActionAgentCreate
+//	POST /mission/create            → policy.ActionMissionCreate
+//	POST /routines/schedules/create → policy.ActionRoutineScheduleCreate
+//	POST /skills/generate           → policy.ActionSkillCreate
+//	POST /skills/author             → policy.ActionSkillCreate
+//
+// The enumeration that used to sit here is gone deliberately rather than
+// inverted into a "these are gated" list: such a list could only assert that
+// the routes still exist, which is not the property worth defending. The
+// property worth defending is that each handler still refuses — and that is
+// pinned behaviourally, one test per route and per decision arm, in
+// internal/api/internal_autonomy_gate_test.go. A source-shaped table here
+// would go green against a handler whose gate had been gutted.
 
 var (
 	caseLineRe  = regexp.MustCompile(`^\s*case\s+(.*)$`)
@@ -276,6 +334,12 @@ var identityHelpers = []string{
 // delegate to.
 var serverMethodCall = regexp.MustCompile(`s\.([A-Za-z0-9_]+)\(`)
 
+// identityWalkDepth is how many delegation hops the identity search follows.
+// Both directions of the classification assertion use it, and they must: a
+// route proved "identity-resolving" at one depth and "not" at another would
+// let a handler be simultaneously mis-classifiable both ways.
+const identityWalkDepth = 2
+
 func resolvesActingIdentity(name string, bodies map[string]string, depth int) bool {
 	return handlerCalls(name, bodies, depth, identityHelpers)
 }
@@ -332,16 +396,43 @@ func TestSidecarRoutes_IdentityCoverage(t *testing.T) {
 			unclassified = append(unclassified, rt.key)
 			continue
 		}
-		if kind != guardHandlerIdentity {
+		if kind == guardMemoryChokepoint {
+			// Asserted behaviourally, not structurally, by
+			// TestSidecarRoutes_MemoryChokepointRefusesTokenless.
 			continue
 		}
 		if _, ok := bodies[rt.handler]; !ok {
 			t.Errorf("route %q: handler %q not found in package source", rt.key, rt.handler)
 			continue
 		}
-		if !resolvesActingIdentity(rt.handler, bodies, 2) {
-			t.Errorf("route %q is classified guardHandlerIdentity but %s resolves no acting identity",
-				rt.key, rt.handler)
+		resolves := resolvesActingIdentity(rt.handler, bodies, identityWalkDepth)
+		switch kind {
+		case guardHandlerIdentity:
+			if !resolves {
+				t.Errorf("route %q is classified guardHandlerIdentity but %s resolves no acting identity",
+					rt.key, rt.handler)
+			}
+		case guardNone:
+			// The converse. Without it the table asserts in one direction
+			// only: "identity routes do resolve identity". A route that
+			// GAINS an identity check keeps its guardNone entry and CI stays
+			// green, so the table stops describing the router and starts
+			// describing whoever last remembered to edit it. #1757 did
+			// exactly that — assignment.go:59 grew an actingAgentID call and
+			// "POST /assign" sat at guardNone for a full release, which is
+			// how nobody noticed the classification had gone stale.
+			//
+			// Direction matters more than tidiness here. guardNone is read by
+			// the next auditor as "checked; carries no per-agent decision",
+			// and that reading is what makes the remaining guardNone rows a
+			// short, credible list worth auditing. One row that silently
+			// became an identity route devalues every other row on it.
+			if resolves {
+				t.Errorf("route %q is classified guardNone but %s DOES resolve an acting identity (%v). "+
+					"Reclassify it guardHandlerIdentity — guardNone means 'no per-agent identity decision', "+
+					"and a stale guardNone is how the table drifts from the router without CI noticing.",
+					rt.key, rt.handler, identityHelpers)
+			}
 		}
 	}
 	if len(unclassified) > 0 {

@@ -147,7 +147,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// target lookup, so a refusal costs one indexed read rather than a row plus
 	// a container. scope is what the new assignment will be STORED with: the
 	// next hop is measured from a depth this server derived.
-	scope, delegationLim, capErr := enforceDelegationCaps(r.Context(), h.db, assignedByID, body.WorkspaceID, body.ChatID)
+	scope, delegationLim, capErr := enforceDelegationCaps(r.Context(), h.db, agentCaller(assignedByID), body.WorkspaceID, body.ChatID)
 	if capErr != nil {
 		var refusal *delegationRefusal
 		if errors.As(capErr, &refusal) {
@@ -184,7 +184,8 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var target targetAgentInfo
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt_legacy,''),
-		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug
+		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug,
+		       COALESCE(a.status,'')
 		FROM agents a
 		JOIN crews c ON c.id = a.crew_id
 		WHERE a.slug = ? AND a.crew_id = ? AND a.deleted_at IS NULL
@@ -192,6 +193,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		&target.ID, &target.Slug, &target.Name, &target.RoleTitle,
 		&target.SystemPrompt, &target.CLIAdapter, &target.LLMModel,
 		&target.ToolProfile, &target.TimeoutSeconds, &target.MemoryEnabled, &target.CrewSlug,
+		&target.Status,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -202,51 +204,41 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A staged agent is not assignable. This is the pre-existing half of the
+	// PENDING_REVIEW hole (see refuseHeldAgent): the sentinel was honoured only
+	// by chatbridge, so a lead could hand work straight to an agent an operator
+	// has not approved — including one another agent created for itself.
+	//
+	// 409, not 403: the target is not forbidden to this caller, it is in a state
+	// that cannot accept work yet, and the answer changes the moment somebody
+	// approves it. Same code ApproveHire returns for the mirror-image conflict.
+	if held := refuseHeldAgent(target.Slug, target.Status); held != nil {
+		h.logger.Info("assignment refused: target agent is held",
+			"actor_agent_id", assignedByID, "target", target.Slug, "status", target.Status)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": held.Error()})
+		return
+	}
+
 	// Create assignment record in PENDING state (group_id = chat_id for mission linkage)
-	assignmentID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
-	// depth/parent_assignment_id come from the scope resolved above, never from
-	// the request — see delegation_limits.go. A root dispatch stores NULL for
-	// the parent so the fan-out count for a lead's chat keeps working off the
-	// in-flight predicate rather than a self-referential chain.
-	var parentVal any
-	if scope.ParentID != "" {
-		parentVal = scope.ParentID
-	}
-	// The fan-out headroom is re-proved INSIDE the insert (fanoutGuard). The
-	// check above produced the readable refusal; this is the one that holds
-	// when a run fires ten /assign calls at once, which is the whole scenario
-	// the cap exists for. Same shape as claimCrewSlot: predicate + write in one
-	// statement, so SQLite serialises the racers instead of admitting them all.
-	guardSQL, guardArgs := fanoutGuard(scope, assignedByID, body.ChatID, delegationLim.MaxFanout)
-	insertArgs := append([]any{
-		assignmentID, body.WorkspaceID, body.ChatID, assignedByID, target.ID,
-		body.Task, body.ChatID, scope.Depth, parentVal, now,
-	}, guardArgs...)
-	res, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, created_at)
-		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?
-		 WHERE `+guardSQL, insertArgs...)
-	if err != nil {
-		replyInternalError(w, h.logger, "create assignment", err)
-		return
-	}
-	if n, raErr := res.RowsAffected(); raErr != nil {
-		replyInternalError(w, h.logger, "create assignment rows affected", raErr)
-		return
-	} else if n == 0 {
-		// Lost the fan-out race: between the check and the write, concurrent
-		// dispatches from this same run filled the budget. Answer with the same
-		// refusal the pre-check would have written.
-		h.logger.Info("assignment refused by delegation fan-out cap at insert",
-			"actor_agent_id", assignedByID, "chat_id", body.ChatID, "parent_assignment_id", scope.ParentID)
-		writeJSON(w, http.StatusForbidden, map[string]string{
-			"error": fmt.Sprintf(
-				"delegation refused: this run is at its limit of %d concurrent sub-agent task(s) "+
-					"(fan-out limit, instance setting %s). Wait for one to finish and read it with "+
-					"/results/<assignment_id>, or do the remaining work yourself.",
-				delegationLim.MaxFanout, SettingDelegationMaxFanout),
+	assignmentID, err := insertCappedAssignment(r.Context(), h.db, scope, delegationLim,
+		agentCaller(assignedByID), cappedAssignment{
+			WorkspaceID: body.WorkspaceID,
+			ChatID:      body.ChatID,
+			TargetID:    target.ID,
+			Task:        body.Task,
+			GroupID:     body.ChatID,
+			CreatedAt:   now,
 		})
+	if err != nil {
+		var refusal *delegationRefusal
+		if errors.As(err, &refusal) {
+			h.logger.Info("assignment refused by delegation fan-out cap at insert",
+				"actor_agent_id", assignedByID, "chat_id", body.ChatID, "parent_assignment_id", scope.ParentID)
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": refusal.Error()})
+			return
+		}
+		replyInternalError(w, h.logger, "create assignment", err)
 		return
 	}
 

@@ -138,10 +138,16 @@ type Router struct {
 	// fields like the SkillGenerateHandler's per-workspace LLM
 	// credential cache). nil-safe — adapters skip registration when
 	// the parent handler isn't wired (test routers, early init).
-	credentialHandler      *CredentialHandler
-	skillGenHandler        *SkillGenerateHandler
-	skillPropHandler       *SkillProposedHandler
-	hybridSearchHandler    *MemoryHybridSearchHandler
+	credentialHandler   *CredentialHandler
+	skillGenHandler     *SkillGenerateHandler
+	skillPropHandler    *SkillProposedHandler
+	hybridSearchHandler *MemoryHybridSearchHandler
+	// attachmentHandler is retained so the internal (agent) attachment routes
+	// registered in router_internal.go wrap the SAME instance the public routes
+	// use. Both doors share one write path on purpose — see
+	// issue_attachments_internal.go. nil when registerOrchestrationRoutes has
+	// not run (test routers); the internal routes then skip registration.
+	attachmentHandler      *AttachmentHandler
 	storagePath            string // base path for crew file storage
 	catalogFetcher         *devcontainer.CatalogFetcher
 	runtimeFetcher         *devcontainer.RuntimeFetcher

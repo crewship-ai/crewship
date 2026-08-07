@@ -41,6 +41,45 @@ Per-crew, four-state enum stored as `crews.autonomy_level` (migration v101). Def
 
 The matrix is the contract — extending it requires updating `internal/policy/types.go::DecideAction` AND the test matrix in `types_test.go` in lockstep, so silent drift becomes a test failure rather than a behavior change nobody notices.
 
+Every row is also **monotonic**: raising a crew's autonomy level never makes an action harder. `TestPolicy_DecideAction_MonotonicInAutonomy` reads the actions out of the source and checks the whole matrix, so a tuning pass that relaxes `guided` while leaving `trusted` blocking — a dial where turning trust *up* turns capability *down* — fails rather than shipping.
+
+### What an agent may create on its own
+
+The same dial governs the `/api/v1/internal/*` routes an agent reaches through its sidecar. **This is a behaviour change on the default level**: on `guided`, a crew that has never had its policy touched will now see agents stopped where they previously were not.
+
+| Level | Create a crew | Create an agent | Create a mission | Create a cron schedule |
+|---|---|---|---|---|
+| `strict` | **Rejected** | **Rejected** | Inbox approve | **Rejected** |
+| `guided` | **Inbox approve** | **Inbox approve** | Auto + non-blocking inbox | Auto + non-blocking inbox |
+| `trusted` | **Inbox approve** | **Inbox approve** | Auto-log to journal | Auto-log to journal |
+| `full` | Auto + non-blocking inbox | Auto + non-blocking inbox | Auto + journal | Auto-log to journal |
+
+**Why crews and agents block where missions and schedules do not.** A crew and an agent are *durable principals* — each one will act again tomorrow, on its own. Creating an agent additionally writes a caller-supplied `system_prompt`, which is persona authorship reached through an INSERT; direct persona writes are refused at *every* level, so an agent quietly acquiring a permanent colleague whose prompt it wrote itself is exactly what an operator wants to see before it happens. A mission creates no principal and is pinned to the acting agent's own crew, and a schedule stays an operator-editable row — for both, a blocking hold bought the same visibility a notice does while stopping ordinary work.
+
+Note that this is an **oversight** decision, not a security one. The autonomy escape it was introduced alongside — an agent in a `strict` crew creating a `guided` one and acting there — is closed by two other things: `strict` refuses crew creation outright, and a created crew **inherits its creator's autonomy level** rather than the column default, so no child crew is ever more permissive than its parent. Loosening the `guided` cells would cost visibility, not containment.
+
+**Held (`202 Accepted`)** means the row is written but inert until an operator decides:
+
+- a held **crew** is pinned to `autonomy_level=strict`, so nothing can be created inside it; approving restores the *creating* crew's level, never higher
+- a held **agent** is `status=PENDING_REVIEW`; nothing starts it — not a chat message, not `/assign`, not an `@mention` on an issue, not a mission task
+
+  A mission task assigned to a held agent **waits**; it is not failed. The mission engine checks before it writes anything, so a hold that stands for an hour costs no rows and no error log, and the tick after an operator approves picks the task up and runs it. That matters because a hold is a *wait for a human*, and the alternative — reporting the task as failed — would make approving it useless: nothing retries a terminally failed task. The same applies to a held lead: the mission simply does not plan until it is released.
+- a held **mission** stays `PLANNING` and cannot be started
+
+Holds land on the approvals queue and are mirrored as a blocking, ADMIN-addressed inbox waitpoint:
+
+```bash
+crewship approvals list
+crewship approvals approve <id>     # releases the sentinel
+crewship approvals deny <id>        # leaves it inert — nothing is deleted
+```
+
+The approvals queue is the **only** door, and `crewship approvals approve` requires OWNER or ADMIN — which is why the waitpoint is addressed to ADMIN rather than to MANAGER. In particular, `crewship hire approve` does **not** release a held agent: that command decides *ephemeral* hires an operator asked for with `crewship hire`, a MANAGER-tier action. An agent-created agent arrives with a system prompt another agent wrote, so releasing it is an OWNER/ADMIN decision. Pointing `hire approve` at one answers `409` and prints the `crewship approvals approve <id>` that does work.
+
+**Denying does not delete anything, and neither does a lapsed hold.** The seven-day timeout leaves the artefact inert rather than turning into a green light — the gate fails closed. So does an unwired policy resolver: if the gate is not wired, everything holds.
+
+Every arm — refused, held or allowed — writes an audit row carrying `decision`, `autonomy_level` and `policy_action`. There is no silent allow.
+
 ### Strict-mode use cases
 
 - Compliance-bound workspaces (financial services, healthcare, regulated build pipelines) where every agent action has to be operator-traceable to an explicit approval
