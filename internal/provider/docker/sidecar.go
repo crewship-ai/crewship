@@ -15,10 +15,26 @@ package docker
 //                              preserved unless RemoveCrewVolumes
 //                              is also called).
 //
-// Naming convention: <prefix>-svc-<crew_slug>-<service_name>. The
-// crew slug + service name pair are both DNS-label-validated at
-// the API layer, so the resulting docker name is always
-// container-name-safe.
+// Naming convention: <prefix>-svc-<crew_slug>-<crew_id>-<service_name>,
+// built through crewResourceName so it matches CrewContainerName's
+// scheme exactly. The globally-unique crew id is load-bearing, not
+// decoration: `crews` is UNIQUE(workspace_id, slug), so a slug names
+// a crew only WITHIN a workspace while one crewshipd serves every
+// workspace against one daemon. Keyed on the slug alone (as this was
+// until #1732) two tenants who both call a crew `data-crew` resolved
+// to ONE sidecar container and ONE data volume. The crew slug, crew
+// id and service name are all DNS-label-validated upstream, so the
+// resulting docker name is always container-name-safe.
+//
+// Ownership is stamped in labels, and labels — never name prefixes —
+// are what the stop/remove/list paths match on:
+//
+//	crewship.crew-id  the globally-unique crew id   (the authority)
+//	crewship.crew     the crew slug                 (human-readable)
+//	crewship.kind     "sidecar" | "sidecar-volume"
+//	crewship.svc      the manifest service name
+//
+// See sidecarMatchesCrew for why a name prefix is not usable here.
 //
 // Network model: every sidecar attaches to the same configured
 // network as the agent (p.cfg.Network). The container is registered
@@ -40,7 +56,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -57,6 +72,23 @@ import (
 // healthcheck) — not just image. Image is checked separately so the
 // error path can name "image drift" specifically.
 const sidecarSpecHashLabel = "crewship.svc.spec_hash"
+
+// Ownership labels stamped on every sidecar container and every sidecar
+// volume. crewCrewIDLabel is the one that carries tenancy: it holds the
+// globally-unique crew id, and it is the only value the stop / remove /
+// list paths are allowed to match on (#1732). crewCrewLabel keeps the slug
+// for operators reading `docker ps`, exactly as the agent-runtime container
+// does — it is a display value, never an identity check.
+const (
+	crewCrewIDLabel     = "crewship.crew-id"
+	crewCrewLabel       = "crewship.crew"
+	crewKindLabel       = "crewship.kind"
+	sidecarSvcLabel     = "crewship.svc"
+	sidecarVolNameLabel = "crewship.svc.volume"
+
+	sidecarKind       = "sidecar"
+	sidecarVolumeKind = "sidecar-volume"
+)
 
 // Default resource caps applied to every crew service (sidecar) container
 // (audit F6). Sidecars run untrusted, tenant-declared images on the shared
@@ -135,18 +167,81 @@ func volumeListOptions() client.VolumeListOptions {
 	return client.VolumeListOptions{}
 }
 
-// sidecarContainerName returns the docker container name for one
-// sidecar. Kept short enough (crew slug ≤50, svc name ≤32) to stay
-// under docker's 64-char container-name limit even with a prefix.
-func (p *Provider) sidecarContainerName(crewSlug, serviceName string) string {
+// sidecarContainerName returns the docker container name for one sidecar:
+// "<prefix>-svc-<slug>-<crew_id>-<service>". Built on crewResourceName so it
+// carries the globally-unique crew id the same way CrewContainerName does
+// (audit C1 / #1732) — two workspaces with an identically-slugged crew get
+// distinct containers.
+func (p *Provider) sidecarContainerName(crewID, crewSlug, serviceName string) string {
+	return p.crewResourceName("svc", crewID, crewSlug) + "-" + serviceName
+}
+
+// sidecarVolumeName returns the per-crew docker volume name for a service's
+// named volume: "<prefix>-svc-<slug>-<crew_id>-vol-<volume>". Two crews that
+// declare `pg-data` get distinct volumes even when they share a slug across
+// workspaces — sidecars never share state across crews or tenants.
+func (p *Provider) sidecarVolumeName(crewID, crewSlug, volumeName string) string {
+	return p.crewResourceName("svc", crewID, crewSlug) + "-vol-" + volumeName
+}
+
+// legacySidecarContainerName / legacySidecarVolumeName reproduce the pre-#1732
+// slug-only names. They exist for exactly one purpose: the one-time migration
+// in migrateLegacySidecarResources, which is the only thing allowed to look a
+// sidecar up by a name that carries no crew id.
+func (p *Provider) legacySidecarContainerName(crewSlug, serviceName string) string {
 	return p.namePrefix() + "-svc-" + crewSlug + "-" + serviceName
 }
 
-// sidecarVolumeName returns the per-crew docker volume name for a
-// service's named volume. Two crews that declare `pg-data` get
-// distinct volumes — sidecars never share state across crews.
-func (p *Provider) sidecarVolumeName(crewSlug, volumeName string) string {
+func (p *Provider) legacySidecarVolumeName(crewSlug, volumeName string) string {
 	return p.namePrefix() + "-svc-" + crewSlug + "-vol-" + volumeName
+}
+
+// sidecarContainerLabels / sidecarVolumeLabels are the single definition of a
+// sidecar resource's ownership stamp. Keeping them in one place means the
+// create path and the match path cannot drift apart.
+func sidecarContainerLabels(crewID, crewSlug, serviceName, specHash string) map[string]string {
+	return map[string]string{
+		"managed-by":         "crewship",
+		crewCrewIDLabel:      crewID,
+		crewCrewLabel:        crewSlug,
+		crewKindLabel:        sidecarKind,
+		sidecarSvcLabel:      serviceName,
+		sidecarSpecHashLabel: specHash,
+	}
+}
+
+func sidecarVolumeLabels(crewID, crewSlug, serviceName, volumeName string) map[string]string {
+	return map[string]string{
+		crewCrewIDLabel:     crewID,
+		crewCrewLabel:       crewSlug,
+		crewKindLabel:       sidecarVolumeKind,
+		sidecarSvcLabel:     serviceName,
+		sidecarVolNameLabel: volumeName,
+	}
+}
+
+// sidecarMatchesCrew reports whether a labelled docker object (container or
+// volume) belongs to crewID's sidecars.
+//
+// It matches the crew ID label EXACTLY and nothing else. Two weaker matches
+// were both live bugs:
+//
+//   - by `crewship.crew` (the slug): slugs are UNIQUE(workspace_id, slug), so
+//     one workspace's teardown reached another workspace's live Postgres and
+//     deleted its data volume (#1732).
+//   - by name prefix: slugs are DNS-label-shaped and may contain hyphens, so
+//     crew "data"'s volume prefix "<prefix>-svc-data-vol-" also prefixes crew
+//     "data-vol-x"'s volumes. Adding the crew id narrows that but does not
+//     close it — a slug may itself contain "-vol-". A label equality check has
+//     no such ambiguity.
+//
+// An empty crewID never matches: a caller that could not resolve the crew id
+// must sweep nothing, not everything.
+func sidecarMatchesCrew(labels map[string]string, crewID, kind string) bool {
+	if crewID == "" {
+		return false
+	}
+	return labels[crewCrewIDLabel] == crewID && labels[crewKindLabel] == kind
 }
 
 // EnsureCrewServices ensures every declared sidecar is running for
@@ -170,6 +265,15 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 	if team.Slug == "" {
 		return nil, fmt.Errorf("docker: EnsureCrewServices requires a crew slug")
 	}
+	// Fail closed on a missing crew id rather than degrade to the pre-#1732
+	// slug-only names: crewResourceName drops empty segments, so an id-less
+	// call would silently rebuild the very namespace two tenants used to
+	// share. Every caller has the id (it is the crew's primary key).
+	if team.ID == "" {
+		return nil, fmt.Errorf("docker: EnsureCrewServices requires a crew id — " +
+			"sidecar containers and volumes are namespaced by it so two workspaces " +
+			"with the same crew slug never share one")
+	}
 
 	// All sidecars share the agent's bridge network so DNS resolves
 	// service names without exposing host ports. ensureNetwork is
@@ -184,10 +288,21 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 	mu.Lock()
 	defer mu.Unlock()
 
+	// Re-key any sidecars this crew created under the pre-#1732 slug-only
+	// names before we go looking for the id-scoped ones. Silently creating a
+	// fresh id-scoped postgres next to a still-running legacy one would leave
+	// two containers claiming the same `postgres` DNS alias on the crew
+	// bridge — the agent would round-robin between its real database and an
+	// empty one. Same reasoning, and the same fail-safe copy, as the C1
+	// migration in migrateLegacyCrewResources.
+	if err := p.migrateLegacySidecarResources(ctx, team.ID, team.Slug, team.Services); err != nil {
+		return nil, err
+	}
+
 	ids := make(map[string]string, len(team.Services))
 	for i := range team.Services {
 		svc := &team.Services[i]
-		id, err := p.ensureSidecar(ctx, team.Slug, svc)
+		id, err := p.ensureSidecar(ctx, team.ID, team.Slug, svc)
 		if err != nil {
 			return ids, fmt.Errorf("sidecar %q: %w", svc.Name, err)
 		}
@@ -220,8 +335,8 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 // (image, command, env, ports, volumes, healthcheck) triggers a
 // stop + remove + recreate so apply is true sync for sidecars,
 // not just "fresh creates work."
-func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *provider.CrewService) (string, error) {
-	name := p.sidecarContainerName(crewSlug, svc.Name)
+func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, svc *provider.CrewService) (string, error) {
+	name := p.sidecarContainerName(crewID, crewSlug, svc.Name)
 	desiredHash := computeSidecarSpecHash(svc)
 
 	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
@@ -288,8 +403,9 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 	// volumes that we then can't clean up.
 	mounts := make([]mount.Mount, 0, len(svc.Volumes))
 	for _, vol := range svc.Volumes {
-		fullName := p.sidecarVolumeName(crewSlug, vol.Name)
-		if err := p.ensureVolume(ctx, fullName); err != nil {
+		fullName := p.sidecarVolumeName(crewID, crewSlug, vol.Name)
+		if err := p.ensureVolumeLabeled(ctx, fullName,
+			sidecarVolumeLabels(crewID, crewSlug, svc.Name, vol.Name)); err != nil {
 			return "", fmt.Errorf("ensure volume %q: %w", vol.Name, err)
 		}
 		mounts = append(mounts, mount.Mount{
@@ -336,14 +452,8 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 		Image:        svc.Image,
 		Env:          envSlice,
 		ExposedPorts: exposed,
-		Labels: map[string]string{
-			"managed-by":         "crewship",
-			"crewship.crew":      crewSlug,
-			"crewship.kind":      "sidecar",
-			"crewship.svc":       svc.Name,
-			sidecarSpecHashLabel: desiredHash,
-		},
-		Healthcheck: hc,
+		Labels:       sidecarContainerLabels(crewID, crewSlug, svc.Name, desiredHash),
+		Healthcheck:  hc,
 	}
 	if len(svc.Command) > 0 {
 		cfg.Cmd = svc.Command
@@ -411,7 +521,8 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewSlug string, svc *prov
 	if _, err := p.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return "", fmt.Errorf("start sidecar: %w", err)
 	}
-	p.logger.Info("sidecar started", "crew", crewSlug, "service", svc.Name, "container", created.ID, "image", svc.Image)
+	p.logger.Info("sidecar started", "crew", crewSlug, "crew_id", crewID,
+		"service", svc.Name, "container", created.ID, "image", svc.Image)
 	return created.ID, nil
 }
 
@@ -487,7 +598,7 @@ func (p *Provider) waitSidecarHealthy(ctx context.Context, containerID string) e
 // circuiting on the first failure would leave the rest of the
 // crew's sidecars running, which is the worst outcome (the agent
 // is gone but its dependents linger).
-func (p *Provider) StopCrewServices(ctx context.Context, crewSlug string) error {
+func (p *Provider) StopCrewServices(ctx context.Context, crewID, crewSlug string) error {
 	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
@@ -495,7 +606,7 @@ func (p *Provider) StopCrewServices(ctx context.Context, crewSlug string) error 
 	timeout := 10
 	var failures []error
 	for _, c := range listResult.Items {
-		if c.Labels["crewship.crew"] != crewSlug || c.Labels["crewship.kind"] != "sidecar" {
+		if !sidecarMatchesCrew(c.Labels, crewID, sidecarKind) {
 			continue
 		}
 		if c.State != "running" {
@@ -516,14 +627,14 @@ func (p *Provider) StopCrewServices(ctx context.Context, crewSlug string) error 
 // crew. Volumes are NOT removed — call RemoveCrewServiceVolumes if
 // you want a full teardown. Like StopCrewServices, attempts every
 // container and aggregates failures.
-func (p *Provider) RemoveCrewServices(ctx context.Context, crewSlug string) error {
+func (p *Provider) RemoveCrewServices(ctx context.Context, crewID, crewSlug string) error {
 	listResult, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
 		return fmt.Errorf("list containers: %w", err)
 	}
 	var failures []error
 	for _, c := range listResult.Items {
-		if c.Labels["crewship.crew"] != crewSlug || c.Labels["crewship.kind"] != "sidecar" {
+		if !sidecarMatchesCrew(c.Labels, crewID, sidecarKind) {
 			continue
 		}
 		if _, err := p.client.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false}); err != nil {
@@ -541,18 +652,26 @@ func (p *Provider) RemoveCrewServices(ctx context.Context, crewSlug string) erro
 // the crew's sidecars. Call AFTER RemoveCrewServices so docker
 // doesn't refuse with "volume in use". Per-volume failures are
 // aggregated; the rest of the volumes are still attempted.
-func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewSlug string) error {
-	wantPrefix := p.namePrefix() + "-svc-" + crewSlug + "-vol-"
+//
+// Volumes are selected by an EXACT match on the crew id label, never by
+// name prefix. The prefix this used to sweep — "<prefix>-svc-<slug>-vol-" —
+// was wrong twice over (#1732): it carried no crew id, so deleting one
+// workspace's `data-crew` deleted another workspace's data directory; and
+// being a prefix it also reached crew `data-vol-x`'s volumes when crew
+// `data` was deleted. Adding the id to the name narrows the second problem
+// but cannot close it, because a slug may itself contain "-vol-". Label
+// equality closes both.
+func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewID, crewSlug string) error {
 	// List by filter is preferable but docker's volume list filter
 	// API treats `label=managed-by=crewship` consistently; we list
-	// all and filter by name prefix in code to keep this simple.
+	// all and filter by ownership label in code to keep this simple.
 	volList, err := p.client.VolumeList(ctx, volumeListOptions())
 	if err != nil {
 		return fmt.Errorf("list volumes: %w", err)
 	}
 	var failures []error
 	for _, vol := range volList.Items {
-		if !strings.HasPrefix(vol.Name, wantPrefix) {
+		if !sidecarMatchesCrew(vol.Labels, crewID, sidecarVolumeKind) {
 			continue
 		}
 		if _, err := p.client.VolumeRemove(ctx, vol.Name, client.VolumeRemoveOptions{Force: true}); err != nil {

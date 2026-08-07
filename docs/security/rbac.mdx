@@ -61,7 +61,7 @@ requireRoleMW(role)`. The declared role is one of:
 
 - **`create`** — `MANAGER`+ (the create/update tier). A `MEMBER`/`VIEWER` is refused `403`.
 - **`manage`** — `ADMIN`+ (the manage/delete tier, e.g. workspace/member administration, feature flags, backups, approvals, hooks, GDPR data deletion).
-- **`self`** — self-scoped: the handler enforces ownership by `user_id` (own preferences, reactions, notifications, a saved view the caller owns, inbox items the caller can see).
+- **`self`** — self-scoped: the handler enforces ownership by `user_id` (own preferences, reactions, a saved view the caller owns, inbox items the caller can see).
 - **`inline`** — the handler runs a layered gate the middleware must not pre-empt: the role-**or**-capability gate (a `MEMBER` holding an explicit capability passes) or the per-agent owner / per-crew-elevation gate. The middleware guarantees workspace membership and passes through; the handler decides.
 
 Control-plane mutations gated at `MANAGER`+ include crew-template deploy, crew

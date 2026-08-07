@@ -59,8 +59,10 @@ func (p *brokenSidecarProvider) CopyToContainer(context.Context, string, string,
 func (p *brokenSidecarProvider) EnsureCrewServices(context.Context, provider.CrewConfig) (map[string]string, error) {
 	return nil, errors.New("pull access denied for redis:7-alpine")
 }
-func (p *brokenSidecarProvider) StopCrewServices(context.Context, string) error   { return nil }
-func (p *brokenSidecarProvider) RemoveCrewServices(context.Context, string) error { return nil }
+func (p *brokenSidecarProvider) StopCrewServices(context.Context, string, string) error { return nil }
+func (p *brokenSidecarProvider) RemoveCrewServices(context.Context, string, string) error {
+	return nil
+}
 
 var _ provider.ContainerProvider = (*brokenSidecarProvider)(nil)
 var _ provider.SidecarProvider = (*brokenSidecarProvider)(nil)

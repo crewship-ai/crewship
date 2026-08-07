@@ -8,21 +8,38 @@
 // The subtlety is that the answer has two sources and neither covers every
 // build path this repo has:
 //
-//	build path                     ldflags            vcs.* stamped
-//	-----------------------------  -----------------  --------------
-//	goreleaser (releases)          version/commit/date  yes
-//	Makefile (`make build`)        version/commit/date  yes
-//	Dockerfile                     ARG defaults or CI   no (.git not in context)
-//	dev.sh (dev slots, `go build`) NONE                 yes
-//	`go run` / `go install` proxy  NONE                 no
+//	build path                     ldflags                     vcs.* stamped
+//	-----------------------------  --------------------------  --------------
+//	goreleaser (releases)          version/commit/date         yes
+//	Makefile (`make build`)        version/commit/date + dirty yes
+//	Dockerfile                     ARG defaults or CI          no (.git not in context)
+//	dev.sh (dev slots)             commit/date + dirty         yes
+//	bare `go build` by hand        NONE                        yes
+//	`go run` / `go install` proxy  NONE                        no
 //
-// The row that matters is the last-but-one: dev.sh (line 367) builds the dev
-// slots with a bare `go build`, so main.version/commit/date keep their
-// in-source defaults "dev"/"none"/"unknown". A build-identity field sourced
-// from ldflags alone would read "none" in the exact situation the feature
-// exists for. The Go toolchain does stamp vcs.revision / vcs.time /
-// vcs.modified for a plain `go build` (verified on this repo, including under
-// -trimpath and inside a git worktree), so that is the fallback.
+// The row that matters is dev.sh: it builds the dev slots, so `commit` on
+// GET /api/v1/system/version — and therefore `crewship version --remote` —
+// comes from whatever that build stamped. A build-identity field sourced from
+// ldflags alone would read "none" in the exact situation the feature exists
+// for, so the toolchain's vcs.* stamps are the fallback.
+//
+// # The vcs.* stamps are not trustworthy in a nested git worktree (#1686)
+//
+// cmd/go recognises a repository root by a `.git` DIRECTORY
+// (vcs.vcsGit.RootNames is rootName{".git", isDir: true}, and isVCSRoot
+// requires fi.IsDir() to match). A linked worktree's `.git` is a FILE
+// ("gitdir: …"), so the worktree is not recognised and the search walks up to
+// the enclosing clone. Every stamp — revision, time, modified — then describes
+// a tree that was never built. This repo's agent worktrees live at
+// .claude/worktrees/<name>/, i.e. inside the parent clone's working tree, so
+// it fires on every build made in one: measured here, a worktree with one
+// modified file was stamped vcs.modified=false from a clean parent.
+//
+// Git itself honours the `.git` file, so the fix is for the build drivers to
+// ask git and stamp the answer: scripts/build-stamp.sh is that one place, and
+// dev.sh and the Makefile both route through it. A bare `go build` by hand
+// still inherits the toolchain's answer — nothing in this package can repair
+// that after the fact.
 //
 // Rules: ldflags win when they carry a real value; placeholders are treated as
 // absent and erased rather than shipped; and "was the tree dirty" is a
@@ -80,6 +97,23 @@ func stamped(v string) string {
 	return v
 }
 
+// buildDirty is the build driver's own answer to "was the tree dirty?",
+// injected at link time as
+//
+//	-X github.com/crewship-ai/crewship/internal/buildinfo.buildDirty=true|false
+//
+// It exists because vcs.modified cannot be trusted in a nested git worktree
+// (#1686, see the package comment). Values other than "true"/"false" — most
+// importantly the empty default — mean nobody stamped it, and fall through to
+// vcs.modified.
+//
+// A package var rather than a fourth argument to Resolve: the server's answer
+// on GET /api/v1/system/version is resolved inside internal/api, which has no
+// main package to inject into, so a parameter would need plumbing through
+// every caller to reach the one place it matters. Same shape as
+// internal/license.publicKey and internal/crashreport.DSN.
+var buildDirty string
+
 // Resolve merges the ldflags-injected strings with this binary's embedded
 // VCS stamps and the running toolchain's facts.
 func Resolve(ldVersion, ldCommit, ldDate string) Info {
@@ -87,7 +121,7 @@ func Resolve(ldVersion, ldCommit, ldDate string) Info {
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		settings = bi.Settings
 	}
-	info := resolve(ldVersion, ldCommit, ldDate, settings)
+	info := resolve(ldVersion, ldCommit, ldDate, buildDirty, settings)
 	info.GoVersion = runtime.Version()
 	info.OS = runtime.GOOS
 	info.Arch = runtime.GOARCH
@@ -96,7 +130,7 @@ func Resolve(ldVersion, ldCommit, ldDate string) Info {
 
 // resolve is the pure core, separated so the build paths in the table above
 // can be tested without actually producing five binaries.
-func resolve(ldVersion, ldCommit, ldDate string, settings []debug.BuildSetting) Info {
+func resolve(ldVersion, ldCommit, ldDate, ldDirty string, settings []debug.BuildSetting) Info {
 	var vcsRevision, vcsTime, vcsModified string
 	for _, s := range settings {
 		switch s.Key {
@@ -124,13 +158,23 @@ func resolve(ldVersion, ldCommit, ldDate string, settings []debug.BuildSetting) 
 		info.BuildTime = strings.TrimSpace(vcsTime)
 	}
 
-	switch strings.TrimSpace(vcsModified) {
-	case "true":
-		dirty := true
-		info.Dirty = &dirty
-	case "false":
-		dirty := false
-		info.Dirty = &dirty
+	// Dirty has two sources and the explicit one wins. ldDirty was written by a
+	// build driver that asked git in the directory it was building; vcs.modified
+	// is the toolchain's answer about whichever directory ITS search landed on,
+	// which in a nested worktree is the enclosing clone (#1686). Anything other
+	// than "true"/"false" — above all the empty default — means nobody stamped
+	// it, and must fall through rather than be read as "clean".
+	for _, v := range []string{ldDirty, vcsModified} {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true":
+			dirty := true
+			info.Dirty = &dirty
+			return info
+		case "false":
+			dirty := false
+			info.Dirty = &dirty
+			return info
+		}
 	}
 
 	return info

@@ -1,13 +1,16 @@
 package api
 
-// Coverage tests for notification_handler.go, saved_view_handler.go, and
-// standup_handler.go. Covers auth failures, invalid JSON (400), not-found
-// (404), forbidden (403), and happy paths asserting DB state.
+// Coverage tests for saved_view_handler.go and standup_handler.go. Covers
+// auth failures, invalid JSON (400), not-found (404), forbidden (403), and
+// happy paths asserting DB state.
+//
+// The notification_handler.go half of this file went with the handler in
+// #1751 — it covered five endpoints reading a table nothing wrote to.
 //
 // Skipped (not testable without an LLM / network, or require DB-fault
 // injection for the 500 branches): none of the standup handler needs an
 // LLM (it formats SQL data only), so no LLM branches were skipped. The
-// DB-error 500 branches in all three handlers are skipped because they
+// DB-error 500 branches in both handlers are skipped because they
 // require a closed/faulted *sql.DB.
 
 import (
@@ -19,30 +22,6 @@ import (
 )
 
 // ── shared helpers (prefixed covNSV) ────────────────────────────────────────
-
-func covNSVNotifHandler(t *testing.T) (*NotificationHandler, string, string) {
-	t.Helper()
-	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-	return NewNotificationHandler(db, nil, newTestLogger()), userID, wsID
-}
-
-func covNSVSeedNotification(t *testing.T, h *NotificationHandler, id, wsID, userID, action string, read bool) {
-	t.Helper()
-	var readAt interface{}
-	if read {
-		readAt = time.Now().UTC().Format(time.RFC3339)
-	}
-	_, err := h.db.Exec(`
-		INSERT INTO notifications (id, workspace_id, user_id, actor_type, actor_id,
-		    action, entity_type, entity_id, entity_title, read_at, created_at)
-		VALUES (?, ?, ?, 'system', 'sys', ?, 'mission', 'e1', 'Title', ?, ?)`,
-		id, wsID, userID, action, readAt, time.Now().UTC().Format(time.RFC3339))
-	if err != nil {
-		t.Fatalf("seed notification %s: %v", id, err)
-	}
-}
 
 func covNSVSavedViewHandler(t *testing.T) (*SavedViewHandler, string, string) {
 	t.Helper()
@@ -104,214 +83,6 @@ func covNSVSeedEscalation(t *testing.T, q *QueryHandler, id, wsID, crewID, fromI
 		id, wsID, crewID, fromID, reason, status, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		t.Fatalf("seed escalation %s: %v", id, err)
-	}
-}
-
-// ── notification_handler.go ──────────────────────────────────────────────────
-
-func TestCovNSVNotificationListUnauthorized(t *testing.T) {
-	h, _, _ := covNSVNotifHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/notifications", nil)
-	rec := httptest.NewRecorder()
-	h.List(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("want 401, got %d", rec.Code)
-	}
-}
-
-func TestCovNSVNotificationListHappyAndEmpty(t *testing.T) {
-	h, userID, wsID := covNSVNotifHandler(t)
-
-	// Empty first.
-	req := withWorkspaceUser(httptest.NewRequest(http.MethodGet, "/api/v1/notifications", nil), userID, wsID, "OWNER")
-	rec := httptest.NewRecorder()
-	h.List(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("empty list want 200, got %d", rec.Code)
-	}
-	if strings.TrimSpace(rec.Body.String()) != "[]" {
-		t.Fatalf("empty list want [], got %q", rec.Body.String())
-	}
-
-	// Now seed two: one read, one unread, and filter both ways.
-	covNSVSeedNotification(t, h, "n1", wsID, userID, "created", false)
-	covNSVSeedNotification(t, h, "n2", wsID, userID, "updated", true)
-
-	req = withWorkspaceUser(httptest.NewRequest(http.MethodGet, "/api/v1/notifications", nil), userID, wsID, "OWNER")
-	rec = httptest.NewRecorder()
-	h.List(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "n1") || !strings.Contains(rec.Body.String(), "n2") {
-		t.Fatalf("list want both, got %d %q", rec.Code, rec.Body.String())
-	}
-
-	// read=false filter → only n1.
-	req = withWorkspaceUser(httptest.NewRequest(http.MethodGet, "/api/v1/notifications?read=false", nil), userID, wsID, "OWNER")
-	rec = httptest.NewRecorder()
-	h.List(rec, req)
-	if !strings.Contains(rec.Body.String(), "n1") || strings.Contains(rec.Body.String(), "n2") {
-		t.Fatalf("read=false want only n1, got %q", rec.Body.String())
-	}
-
-	// read=true filter → only n2.
-	req = withWorkspaceUser(httptest.NewRequest(http.MethodGet, "/api/v1/notifications?read=true", nil), userID, wsID, "OWNER")
-	rec = httptest.NewRecorder()
-	h.List(rec, req)
-	if strings.Contains(rec.Body.String(), `"id":"n1"`) || !strings.Contains(rec.Body.String(), "n2") {
-		t.Fatalf("read=true want only n2, got %q", rec.Body.String())
-	}
-}
-
-func TestCovNSVNotificationMarkReadUnauthorized(t *testing.T) {
-	h, _, _ := covNSVNotifHandler(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/n1/read", nil)
-	req.SetPathValue("notificationId", "n1")
-	rec := httptest.NewRecorder()
-	h.MarkRead(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("want 401, got %d", rec.Code)
-	}
-}
-
-func TestCovNSVNotificationMarkReadNotFound(t *testing.T) {
-	h, userID, wsID := covNSVNotifHandler(t)
-	req := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/api/v1/notifications/nope/read", nil), userID, wsID, "OWNER")
-	req.SetPathValue("notificationId", "nope")
-	rec := httptest.NewRecorder()
-	h.MarkRead(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("want 404, got %d", rec.Code)
-	}
-}
-
-func TestCovNSVNotificationMarkReadHappy(t *testing.T) {
-	h, userID, wsID := covNSVNotifHandler(t)
-	covNSVSeedNotification(t, h, "n1", wsID, userID, "created", false)
-
-	req := withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/api/v1/notifications/n1/read", nil), userID, wsID, "OWNER")
-	req.SetPathValue("notificationId", "n1")
-	rec := httptest.NewRecorder()
-	h.MarkRead(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d", rec.Code)
-	}
-	var readAt interface{}
-	if err := h.db.QueryRow(`SELECT read_at FROM notifications WHERE id='n1'`).Scan(&readAt); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if readAt == nil {
-		t.Fatalf("read_at should be set after MarkRead")
-	}
-
-	// Already-read row: affected==0 but exists → still 200 (not 404).
-	req = withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/api/v1/notifications/n1/read", nil), userID, wsID, "OWNER")
-	req.SetPathValue("notificationId", "n1")
-	rec = httptest.NewRecorder()
-	h.MarkRead(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("re-mark want 200, got %d", rec.Code)
-	}
-}
-
-func TestCovNSVNotificationMarkAllRead(t *testing.T) {
-	h, userID, wsID := covNSVNotifHandler(t)
-
-	// Unauthorized.
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/read-all", nil)
-	rec := httptest.NewRecorder()
-	h.MarkAllRead(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("want 401, got %d", rec.Code)
-	}
-
-	covNSVSeedNotification(t, h, "n1", wsID, userID, "a", false)
-	covNSVSeedNotification(t, h, "n2", wsID, userID, "b", false)
-
-	req = withWorkspaceUser(httptest.NewRequest(http.MethodPost, "/api/v1/notifications/read-all", nil), userID, wsID, "OWNER")
-	rec = httptest.NewRecorder()
-	h.MarkAllRead(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"updated":2`) {
-		t.Fatalf("want 200 updated:2, got %d %q", rec.Code, rec.Body.String())
-	}
-	var unread int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM notifications WHERE user_id=? AND read_at IS NULL`, userID).Scan(&unread); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if unread != 0 {
-		t.Fatalf("want 0 unread, got %d", unread)
-	}
-}
-
-func TestCovNSVNotificationDelete(t *testing.T) {
-	h, userID, wsID := covNSVNotifHandler(t)
-
-	// Unauthorized.
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/notifications/n1", nil)
-	req.SetPathValue("notificationId", "n1")
-	rec := httptest.NewRecorder()
-	h.Delete(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("want 401, got %d", rec.Code)
-	}
-
-	// Not found.
-	req = withWorkspaceUser(httptest.NewRequest(http.MethodDelete, "/api/v1/notifications/nope", nil), userID, wsID, "OWNER")
-	req.SetPathValue("notificationId", "nope")
-	rec = httptest.NewRecorder()
-	h.Delete(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("want 404, got %d", rec.Code)
-	}
-
-	// Happy.
-	covNSVSeedNotification(t, h, "n1", wsID, userID, "a", false)
-	req = withWorkspaceUser(httptest.NewRequest(http.MethodDelete, "/api/v1/notifications/n1", nil), userID, wsID, "OWNER")
-	req.SetPathValue("notificationId", "n1")
-	rec = httptest.NewRecorder()
-	h.Delete(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("want 204, got %d", rec.Code)
-	}
-	var cnt int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM notifications WHERE id='n1'`).Scan(&cnt); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if cnt != 0 {
-		t.Fatalf("row should be deleted, count=%d", cnt)
-	}
-}
-
-func TestCovNSVNotificationCount(t *testing.T) {
-	h, userID, wsID := covNSVNotifHandler(t)
-
-	// Unauthorized.
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/notifications/count", nil)
-	rec := httptest.NewRecorder()
-	h.Count(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("want 401, got %d", rec.Code)
-	}
-
-	covNSVSeedNotification(t, h, "n1", wsID, userID, "a", false)
-	covNSVSeedNotification(t, h, "n2", wsID, userID, "b", true)
-
-	req = withWorkspaceUser(httptest.NewRequest(http.MethodGet, "/api/v1/notifications/count", nil), userID, wsID, "OWNER")
-	rec = httptest.NewRecorder()
-	h.Count(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"unread":1`) {
-		t.Fatalf("want 200 unread:1, got %d %q", rec.Code, rec.Body.String())
-	}
-}
-
-func TestCovNSVCreateNotificationHelper(t *testing.T) {
-	h, userID, wsID := covNSVNotifHandler(t)
-	// nil hub is fine — broadcastChannelEvent tolerates a nil hub.
-	CreateNotification(h.db, nil, wsID, userID, "system", "sys", "created", "mission", "m1", "Title")
-	var cnt int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM notifications WHERE user_id=? AND action='created'`, userID).Scan(&cnt); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if cnt != 1 {
-		t.Fatalf("want 1 notification, got %d", cnt)
 	}
 }
 

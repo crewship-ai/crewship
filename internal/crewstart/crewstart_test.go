@@ -69,8 +69,8 @@ func (s *sidecarRuntime) EnsureCrewServices(_ context.Context, cfg provider.Crew
 	}
 	return ids, nil
 }
-func (s *sidecarRuntime) StopCrewServices(context.Context, string) error   { return nil }
-func (s *sidecarRuntime) RemoveCrewServices(context.Context, string) error { return nil }
+func (s *sidecarRuntime) StopCrewServices(context.Context, string, string) error   { return nil }
+func (s *sidecarRuntime) RemoveCrewServices(context.Context, string, string) error { return nil }
 
 var _ provider.ContainerProvider = (*fakeRuntime)(nil)
 var _ provider.SidecarProvider = (*sidecarRuntime)(nil)

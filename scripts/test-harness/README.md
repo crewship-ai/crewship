@@ -4,8 +4,8 @@ Runtime, end-to-end tests that drive the **real `crewship` CLI** against a
 running dev server — the way a real operator (and a real agent) uses it. These
 complement the Go/Vitest unit suites: they validate behaviour that only exists
 at runtime and can't be pre-seeded — agent **memory** recall, **crew-shared**
-memory, **notifications** landing after a routine run, recipe **determinism**,
-and credential **self-service vs. escalation**.
+memory, a routine run's outcome being **observable** afterwards, recipe
+**determinism**, and credential **self-service vs. escalation**.
 
 > Per project policy, all operations go through the local CLI pointed at your
 > clone's dev target — never a DB shell or hand-rolled `curl`. Dogfooding the
@@ -229,7 +229,7 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 | `test-memory.sh` | agent recalls a nonce fact in a **fresh session**; a **crew-tier** fact is readable by a peer in the same crew; it does **not** leak cross-crew; **pins** are always available; `memory search`/`status` corroborate. `--soak N` re-checks durability over N minutes. |
 | `test-delegation.sh` | a **lead delegates** a subtask to a peer and reports the result back (corroborated by a new peer chat session); a lead **hires an ephemeral** specialist (or it lands as an approval waitpoint under guided autonomy). |
 | `test-crew-links.sh` | a **crew link** is real: the graph lists no links to deleted crews, a lead's sidecar reports the crews it can reach, delegation **across** a live link lands in the other crew, and the same delegation is **refused** once the link is removed (then restored). |
-| `test-notifications.sh` | a routine **run completes** (exit code + records status); the **completion event** is observable via `routine watch --once`; a **notification lands** in the feed; a **failed run** surfaces a `failed_run` inbox item (best-effort). |
+| `test-notifications.sh` | a routine **run completes** (exit code + records status); the **completion event** is observable via `routine watch --once`; a **failed run** surfaces a `failed_run` inbox item (best-effort). |
 | `test-inbox.sh` | the **inbox as a decision surface**: fires `approval-gate-demo` to mint a REAL waitpoint, asserts the row carries the fields the UI renders (`timeout_at` for the countdown, `pipeline_run_id` for run progress, `blocking`, `target_role`), approves it through the **source** endpoint and proves the row is `resolved` server-side — the cascade the UI depends on and must never duplicate. Also dismisses a message and checks `resolved_action` + `resolved_by_user_id` are recorded, and that the kind vocabulary the UI codes against is the one in the data. |
 | `test-notifications-shoutrrr.sh` | **#1412 category preference matrix**: a fake local webhook receiver gets **exactly ONE** delivery from a personal channel with `chat.replies=immediate`, and **ZERO** from a channel muted via the `*` category, for the SAME triggering event (an `ask` reply); the delivery-log entry shows `status=sent` (admin-only, best-effort). Opt-in: `WITH_NOTIFICATIONS_SHOUTRRR=1 ./run-all.sh` — see the script header for why it uses `chat.replies` rather than `runs.failed`, and the network-reachability note when `SERVER` is a remote devN. |
 | `test-orchestration.sh` | the seeded **cron schedules** are present + enabled; an **agentless** routine runs at **token-zero cost**; a **HITL approval gate** pauses → is approved via CLI → resumes; **cross-tier** eval returns structured results (`EVAL=0` to skip the token-heavy block). |

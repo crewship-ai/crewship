@@ -341,7 +341,6 @@
             "expanded": false,
             "pages": [
               "cli/inbox",
-              "cli/notification",
               "cli/notify",
               "cli/notifychannel",
               "cli/digest"
@@ -475,7 +474,6 @@
               "api-reference/conversations",
               "api-reference/preferences",
               "api-reference/privacy",
-              "api-reference/notifications",
               "api-reference/notification-channels",
               "api-reference/inbox",
               "api-reference/webhooks",

@@ -127,6 +127,34 @@ type Profile struct {
 	// fact. Without a floor the model can quote "I" and hang any claim
 	// off it, which makes the byte-equality check ornamental.
 	MinQuoteChars int
+
+	// AllowShortCompleteSentence admits a span BELOW MinQuoteChars when
+	// it is a complete sentence the subject wrote and that sentence
+	// states something on its own.
+	//
+	// The floor is right about a fragment and wrong about an answer.
+	// Measured under #1698 against a real claude-haiku-4-5: of 57
+	// candidates, the only four refusals were this floor firing on
+	// "UTC+1." (6 chars) and "Weekdays." (9), both true facts the person
+	// had stated in reply to a direct question — while "reach via Slack,
+	// not email", from the same sentence, stored every time. The
+	// information density of an answer is inversely related to its
+	// length, so a character floor systematically loses the fields that
+	// are answered in one word: timezone, language, short-form prefers.
+	//
+	// Lowering the number instead would readmit the "I"-class span the
+	// floor exists to refuse. The distinguishing property is not length
+	// but completeness: a sentence the person finished is not a fragment
+	// cherry-picked to support a claim. Bare assent is excluded on top of
+	// that, because "Yes." is complete and still takes its content from
+	// the AGENT's question — the laundering route the assistant-turn
+	// exclusion closes.
+	//
+	// False keeps MinQuoteChars absolute. Every other check — subject
+	// origin, byte equality, the closed key set, imperative phrasing,
+	// trend language — applies unchanged either way; this relaxes the
+	// length gate and nothing else.
+	AllowShortCompleteSentence bool
 }
 
 // SettingProfile is the app_settings key selecting the extraction
@@ -161,8 +189,9 @@ var ProfileStatedTechnical = Profile{
 		{"language", `the language the person said they want to be addressed in — "answer me in Czech"`},
 		{"contact", `how the person said they want to be reached about work — "ping me on Slack, not email"`},
 	},
-	MaxValueChars: 160,
-	MinQuoteChars: 12,
+	MaxValueChars:              160,
+	MinQuoteChars:              12,
+	AllowShortCompleteSentence: true,
 }
 
 // ProfileOff writes nothing. It is a real profile rather than a nil

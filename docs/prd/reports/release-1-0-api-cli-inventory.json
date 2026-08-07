@@ -1,23 +1,23 @@
 {
   "summary": {
-    "api_operations": 540,
-    "api_exact_docs": 540,
+    "api_operations": 535,
+    "api_exact_docs": 535,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 734,
-    "cli_exact_docs": 734,
-    "cli_root_docs_present": 734,
+    "cli_operations": 728,
+    "cli_exact_docs": 728,
+    "cli_root_docs_present": 728,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 405,
-    "api_with_concrete_response_schemas": 526,
+    "api_with_test_signals": 400,
+    "api_with_concrete_response_schemas": 521,
     "api_generic_response_schemas": 0,
-    "api_with_request_bodies": 226,
-    "api_with_concrete_json_requests": 222,
+    "api_with_request_bodies": 224,
+    "api_with_concrete_json_requests": 220,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 720,
-    "cli_with_flags": 344,
-    "cli_with_all_flags_documented": 344,
+    "cli_with_test_signals": 714,
+    "cli_with_flags": 342,
+    "cli_with_all_flags_documented": 342,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 99,
@@ -12085,6 +12085,7 @@
       "source_file": "cmd/crewship/cmd_seed_data_nuke.go",
       "exact_docs": [
         "docs/api-reference/inbox.mdx",
+        "docs/api-reference/openapi.mdx",
         "docs/cli/inbox.mdx",
         "docs/cli/nuke.mdx",
         "docs/guides/inbox.mdx"
@@ -12142,6 +12143,7 @@
       "source_file": "cmd/crewship/cmd_seed_data_nuke.go",
       "exact_docs": [
         "docs/api-reference/inbox.mdx",
+        "docs/api-reference/openapi.mdx",
         "docs/cli/inbox.mdx",
         "docs/cli/nuke.mdx",
         "docs/guides/inbox.mdx"
@@ -12245,6 +12247,7 @@
       "source_file": "cmd/crewship/cmd_inbox.go",
       "exact_docs": [
         "docs/api-reference/inbox.mdx",
+        "docs/api-reference/openapi.mdx",
         "docs/cli/inbox.mdx"
       ],
       "resource_docs": [
@@ -14431,7 +14434,8 @@
       "test_signals": [
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
-        "internal/api/notification_prefs_test.go"
+        "internal/api/notification_prefs_test.go",
+        "internal/api/notifications_surface_removed_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -14452,7 +14456,8 @@
           "test_signals": [
             "cmd/crewship/cmd_notify_prefs_cov_test.go",
             "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
-            "internal/api/notification_prefs_test.go"
+            "internal/api/notification_prefs_test.go",
+            "internal/api/notifications_surface_removed_test.go"
           ]
         }
       }
@@ -14470,7 +14475,8 @@
       "test_signals": [
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
         "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
-        "internal/api/notification_prefs_test.go"
+        "internal/api/notification_prefs_test.go",
+        "internal/api/notifications_surface_removed_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -14491,7 +14497,8 @@
           "test_signals": [
             "cmd/crewship/cmd_notify_prefs_cov_test.go",
             "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
-            "internal/api/notification_prefs_test.go"
+            "internal/api/notification_prefs_test.go",
+            "internal/api/notifications_surface_removed_test.go"
           ]
         }
       }
@@ -15722,7 +15729,8 @@
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
         "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
-        "internal/api/notification_providers_test.go"
+        "internal/api/notification_providers_test.go",
+        "internal/api/notifications_surface_removed_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -15744,7 +15752,8 @@
             "cmd/crewship/cmd_notifychannel_cov_test.go",
             "cmd/crewship/cmd_notifychannel_providers_category_test.go",
             "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
-            "internal/api/notification_providers_test.go"
+            "internal/api/notification_providers_test.go",
+            "internal/api/notifications_surface_removed_test.go"
           ]
         }
       }
@@ -15901,231 +15910,6 @@
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "internal/api/notification_outbound_handlers_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/notifications",
-      "operation_id": "get_api_v1_notifications",
-      "tag": "notifications",
-      "source_file": "cmd/crewship/cmd_notification.go",
-      "exact_docs": [
-        "docs/api-reference/notifications.mdx",
-        "docs/api-reference/openapi.mdx",
-        "docs/api-reference/websocket.mdx"
-      ],
-      "resource_docs": [
-        "docs/api-reference/notifications.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_notification_cov_test.go",
-        "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
-        "cmd/gen-openapi/schemas_public_activity_test.go",
-        "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
-        "internal/api/dberr_issues_cov_test.go",
-        "internal/api/internal_notifications_test.go",
-        "internal/api/notif_savedview_standup_cov_test.go",
-        "…"
-      ],
-      "concrete_response_schema": true,
-      "generic_response_schema": false,
-      "request_body_present": false,
-      "concrete_json_request": false,
-      "generic_json_request": false,
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "cmd/crewship/cmd_notification.go",
-          "test_signals": [
-            "cmd/crewship/cmd_notification_cov_test.go",
-            "cmd/crewship/cmd_notifychannel_providers_toggle_test.go",
-            "cmd/gen-openapi/schemas_public_activity_test.go",
-            "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
-            "internal/api/dberr_issues_cov_test.go",
-            "internal/api/internal_notifications_test.go",
-            "internal/api/notif_savedview_standup_cov_test.go",
-            "…"
-          ]
-        }
-      }
-    },
-    {
-      "method": "GET",
-      "path": "/api/v1/notifications/count",
-      "operation_id": "get_api_v1_notifications_count",
-      "tag": "notifications",
-      "source_file": "cmd/crewship/cmd_notification.go",
-      "exact_docs": [
-        "docs/api-reference/notifications.mdx",
-        "docs/api-reference/openapi.mdx"
-      ],
-      "resource_docs": [
-        "docs/api-reference/notifications.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_notification_cov_test.go",
-        "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
-        "internal/api/dberr_issues_cov_test.go",
-        "internal/api/notif_savedview_standup_cov_test.go",
-        "internal/api/openapi_conformance_test.go"
-      ],
-      "concrete_response_schema": true,
-      "generic_response_schema": false,
-      "request_body_present": false,
-      "concrete_json_request": false,
-      "generic_json_request": false,
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "cmd/crewship/cmd_notification.go",
-          "test_signals": [
-            "cmd/crewship/cmd_notification_cov_test.go",
-            "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
-            "internal/api/dberr_issues_cov_test.go",
-            "internal/api/notif_savedview_standup_cov_test.go",
-            "internal/api/openapi_conformance_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/notifications/read-all",
-      "operation_id": "post_api_v1_notifications_read-all",
-      "tag": "notifications",
-      "source_file": "cmd/crewship/cmd_notification.go",
-      "exact_docs": [
-        "docs/api-reference/notifications.mdx"
-      ],
-      "resource_docs": [
-        "docs/api-reference/notifications.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_notification_cov_test.go",
-        "internal/api/dberr_issues_cov_test.go",
-        "internal/api/notif_savedview_standup_cov_test.go"
-      ],
-      "concrete_response_schema": true,
-      "generic_response_schema": false,
-      "request_body_present": true,
-      "concrete_json_request": true,
-      "generic_json_request": false,
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "cmd/crewship/cmd_notification.go",
-          "test_signals": [
-            "cmd/crewship/cmd_notification_cov_test.go",
-            "internal/api/dberr_issues_cov_test.go",
-            "internal/api/notif_savedview_standup_cov_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/v1/notifications/{notificationId}",
-      "operation_id": "delete_api_v1_notifications_notificationId",
-      "tag": "notifications",
-      "source_file": "internal/api/router_orchestration.go",
-      "exact_docs": [
-        "docs/api-reference/notifications.mdx"
-      ],
-      "resource_docs": [
-        "docs/api-reference/notifications.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "internal/api/cross_workspace_fence_matrix_test.go",
-        "internal/api/notification_savedview_test.go"
-      ],
-      "concrete_response_schema": true,
-      "generic_response_schema": false,
-      "request_body_present": false,
-      "concrete_json_request": false,
-      "generic_json_request": false,
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/router_orchestration.go",
-          "test_signals": [
-            "internal/api/cross_workspace_fence_matrix_test.go",
-            "internal/api/notification_savedview_test.go"
-          ]
-        }
-      }
-    },
-    {
-      "method": "POST",
-      "path": "/api/v1/notifications/{notificationId}/read",
-      "operation_id": "post_api_v1_notifications_notificationId_read",
-      "tag": "notifications",
-      "source_file": "internal/api/router_orchestration.go",
-      "exact_docs": [
-        "docs/api-reference/notifications.mdx"
-      ],
-      "resource_docs": [
-        "docs/api-reference/notifications.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "internal/api/cross_workspace_fence_matrix_test.go",
-        "internal/api/notification_savedview_test.go"
-      ],
-      "concrete_response_schema": true,
-      "generic_response_schema": false,
-      "request_body_present": true,
-      "concrete_json_request": true,
-      "generic_json_request": false,
-      "contract": {
-        "structural": {
-          "canonical_method_path": true,
-          "auth": true,
-          "request": true,
-          "response": true,
-          "statuses": true
-        },
-        "semantic_runtime": {
-          "openapi_operation": true,
-          "source_file": "internal/api/router_orchestration.go",
-          "test_signals": [
-            "internal/api/cross_workspace_fence_matrix_test.go",
-            "internal/api/notification_savedview_test.go"
           ]
         }
       }
@@ -17917,8 +17701,8 @@
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/dberr_issues_cov_test.go",
-        "internal/api/notif_savedview_standup_cov_test.go",
         "internal/api/saved_view_handler_cov_test.go",
+        "internal/api/savedview_standup_cov_test.go",
         "internal/manifest/kinds/saved_view_test.go"
       ],
       "concrete_response_schema": true,
@@ -17943,8 +17727,8 @@
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/dberr_issues_cov_test.go",
-            "internal/api/notif_savedview_standup_cov_test.go",
             "internal/api/saved_view_handler_cov_test.go",
+            "internal/api/savedview_standup_cov_test.go",
             "internal/manifest/kinds/saved_view_test.go"
           ]
         }
@@ -17971,8 +17755,8 @@
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
         "internal/api/cross_workspace_fence_matrix_test.go",
         "internal/api/dberr_issues_cov_test.go",
-        "internal/api/notif_savedview_standup_cov_test.go",
         "internal/api/saved_view_handler_cov_test.go",
+        "internal/api/savedview_standup_cov_test.go",
         "internal/manifest/kinds/saved_view_test.go"
       ],
       "concrete_response_schema": true,
@@ -17997,8 +17781,8 @@
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
             "internal/api/cross_workspace_fence_matrix_test.go",
             "internal/api/dberr_issues_cov_test.go",
-            "internal/api/notif_savedview_standup_cov_test.go",
             "internal/api/saved_view_handler_cov_test.go",
+            "internal/api/savedview_standup_cov_test.go",
             "internal/manifest/kinds/saved_view_test.go"
           ]
         }
@@ -18481,6 +18265,7 @@
         "cmd/crewship/cmd_admin_stats_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
         "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
         "internal/api/route_read_scope_invariant_test.go"
@@ -18505,6 +18290,7 @@
             "cmd/crewship/cmd_admin_stats_test.go",
             "cmd/crewship/cmd_system_cov_test.go",
             "cmd/crewship/cmd_system_format_test.go",
+            "cmd/crewship/cmd_system_inuse_test.go",
             "cmd/crewship/cmd_system_runtime_test.go",
             "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
             "internal/api/route_read_scope_invariant_test.go"
@@ -18529,12 +18315,12 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
         "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/admin_authz_floor_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/runtime_install_links_test.go",
-        "internal/api/system_runtime_inventory_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -18556,12 +18342,12 @@
           "test_signals": [
             "cmd/crewship/cmd_system_cov_test.go",
             "cmd/crewship/cmd_system_format_test.go",
+            "cmd/crewship/cmd_system_inuse_test.go",
             "cmd/crewship/cmd_system_runtime_test.go",
             "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/admin_authz_floor_test.go",
             "internal/api/route_read_scope_invariant_test.go",
             "internal/api/runtime_install_links_test.go",
-            "internal/api/system_runtime_inventory_test.go",
             "…"
           ]
         }
@@ -18666,6 +18452,7 @@
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/system_build_test.go",
         "internal/api/system_version_test.go",
+        "internal/buildinfo/build_stamp_test.go",
         "internal/update/nightly_upgrade_test.go"
       ],
       "concrete_response_schema": true,
@@ -18689,6 +18476,7 @@
             "internal/api/route_read_scope_invariant_test.go",
             "internal/api/system_build_test.go",
             "internal/api/system_version_test.go",
+            "internal/buildinfo/build_stamp_test.go",
             "internal/update/nightly_upgrade_test.go"
           ]
         }
@@ -28223,7 +28011,8 @@
         "cmd/crewship/cmd_doctor_legacy_test.go",
         "cmd/crewship/cmd_doctor_migration_expectation_test.go",
         "cmd/crewship/cmd_doctor_security_test.go",
-        "cmd/crewship/cmd_doctor_test.go"
+        "cmd/crewship/cmd_doctor_test.go",
+        "cmd/crewship/cmd_system_runtime_vocabulary_test.go"
       ],
       "flags": [
         "fix",
@@ -29457,6 +29246,7 @@
         "cmd/crewship/cmd_agent_files_cov2_test.go",
         "cmd/crewship/cmd_inbox_cov_test.go",
         "cmd/crewship/cmd_inbox_foureyes_test.go",
+        "cmd/crewship/cmd_notification_removed_test.go",
         "cmd/crewship/cmd_open_test.go"
       ]
     },
@@ -31171,8 +30961,7 @@
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go",
-        "cmd/crewship/cmd_notification_cov_test.go"
+        "cmd/crewship/cmd_issue_workflow_cov_test.go"
       ]
     },
     {
@@ -34922,142 +34711,6 @@
       ]
     },
     {
-      "path": "notification",
-      "use": "notification",
-      "short": "Manage notifications for the current user",
-      "aliases": [
-        "notifications",
-        "notif"
-      ],
-      "root": "notification",
-      "exact_docs": [
-        "docs/cli/inbox.mdx",
-        "docs/cli/notification.mdx"
-      ],
-      "root_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_notification_cov_test.go"
-      ]
-    },
-    {
-      "path": "notification count",
-      "use": "count",
-      "short": "Show the number of unread notifications",
-      "root": "notification",
-      "exact_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "root_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_activity_cov_test.go",
-        "cmd/crewship/cmd_admin_prune_test.go",
-        "cmd/crewship/cmd_admin_reap_orphan_test.go",
-        "cmd/crewship/cmd_approvals_cov_test.go",
-        "cmd/crewship/cmd_approvals_test.go",
-        "cmd/crewship/cmd_chat_cov2_test.go",
-        "cmd/crewship/cmd_chat_cov_test.go",
-        "cmd/crewship/cmd_checkpoint_cov_test.go",
-        "…"
-      ]
-    },
-    {
-      "path": "notification delete",
-      "use": "delete \u003cid\u003e",
-      "short": "Delete a notification",
-      "aliases": [
-        "remove",
-        "rm"
-      ],
-      "root": "notification",
-      "exact_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "root_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_notification_cov_test.go",
-        "cmd/crewship/cmd_safety_guards_test.go"
-      ],
-      "flags": [
-        "yes"
-      ],
-      "documented_flags": [
-        "yes"
-      ]
-    },
-    {
-      "path": "notification list",
-      "use": "list",
-      "short": "List notifications for the current user",
-      "root": "notification",
-      "exact_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "root_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_admin_extras_test.go",
-        "cmd/crewship/cmd_agent_mcp_cov_test.go",
-        "cmd/crewship/cmd_approvals_test.go",
-        "cmd/crewship/cmd_chat_cov2_test.go",
-        "cmd/crewship/cmd_checkpoint_cov_test.go",
-        "cmd/crewship/cmd_checkpoint_test.go",
-        "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
-        "…"
-      ],
-      "flags": [
-        "limit",
-        "unread"
-      ],
-      "documented_flags": [
-        "limit",
-        "unread"
-      ]
-    },
-    {
-      "path": "notification read",
-      "use": "read \u003cid\u003e",
-      "short": "Mark a notification as read",
-      "root": "notification",
-      "exact_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "root_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_notification_cov_test.go"
-      ]
-    },
-    {
-      "path": "notification read-all",
-      "use": "read-all",
-      "short": "Mark all notifications as read",
-      "root": "notification",
-      "exact_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "root_docs": [
-        "docs/cli/notification.mdx"
-      ],
-      "status": "documented_exact",
-      "test_signals": [
-        "cmd/crewship/cmd_notification_cov_test.go"
-      ]
-    },
-    {
       "path": "notify",
       "use": "notify",
       "short": "Manage desktop notifications",
@@ -35065,6 +34718,7 @@
       "exact_docs": [
         "docs/cli/digest.mdx",
         "docs/cli/escalation.mdx",
+        "docs/cli/inbox.mdx",
         "docs/cli/notify.mdx",
         "docs/cli/notifychannel.mdx",
         "docs/cli/overview.mdx"
@@ -35410,6 +35064,7 @@
       "root": "notifychannel",
       "exact_docs": [
         "docs/cli/digest.mdx",
+        "docs/cli/inbox.mdx",
         "docs/cli/notify.mdx",
         "docs/cli/notifychannel.mdx"
       ],
@@ -35418,6 +35073,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_notification_removed_test.go",
         "cmd/crewship/cmd_notifychannel_cov_test.go",
         "cmd/crewship/cmd_notifychannel_deliveries_test.go",
         "cmd/crewship/cmd_notifychannel_providers_category_test.go",
@@ -35891,6 +35547,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_files_cov2_test.go",
+        "cmd/crewship/cmd_notification_removed_test.go",
         "cmd/crewship/cmd_nuke_test.go",
         "cmd/crewship/cmd_open_test.go"
       ],
@@ -35917,6 +35574,7 @@
         "cmd/crewship/cmd_nuke_test.go",
         "cmd/crewship/cmd_runtimes_cov_test.go",
         "cmd/crewship/cmd_runtimes_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_runtime_test.go"
       ]
     },
@@ -40191,6 +39849,7 @@
       "test_signals": [
         "cmd/crewship/cmd_runtimes_cov_test.go",
         "cmd/crewship/cmd_runtimes_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_runtime_test.go"
       ]
     },
@@ -41245,6 +40904,7 @@
         "docs/cli/overview.mdx",
         "docs/cli/seed.mdx",
         "docs/cli/start.mdx",
+        "docs/cli/system.mdx",
         "docs/cli/telemetry.mdx",
         "docs/cli/version.mdx"
       ],
@@ -41316,11 +40976,12 @@
         "cmd/crewship/cli_route_contract_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_test.go"
+        "…"
       ]
     },
     {
@@ -41340,10 +41001,10 @@
         "cmd/crewship/cmd_project_cov_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
-        "cmd/crewship/cmd_system_runtime_test.go",
         "…"
       ]
     },
@@ -41410,11 +41071,13 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_test.go"
+        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
+        "…"
       ]
     },
     {
@@ -41464,11 +41127,13 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_test.go"
+        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
+        "…"
       ]
     },
     {
@@ -41486,11 +41151,13 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_test.go"
+        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
+        "…"
       ]
     },
     {
@@ -41508,11 +41175,13 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_test.go"
+        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
+        "…"
       ],
       "flags": [
         "agent",
@@ -41577,11 +41246,13 @@
       "test_signals": [
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_test.go"
+        "cmd/crewship/cmd_system_runtime_vocabulary_test.go",
+        "…"
       ],
       "flags": [
         "out"
@@ -41607,11 +41278,12 @@
         "cmd/crewship/cmd_project_cov_test.go",
         "cmd/crewship/cmd_system_cov_test.go",
         "cmd/crewship/cmd_system_format_test.go",
+        "cmd/crewship/cmd_system_inuse_test.go",
         "cmd/crewship/cmd_system_keeper_integration_test.go",
         "cmd/crewship/cmd_system_observability_test.go",
         "cmd/crewship/cmd_system_openapi_test.go",
         "cmd/crewship/cmd_system_runtime_test.go",
-        "cmd/crewship/cmd_system_test.go"
+        "…"
       ]
     },
     {
@@ -43993,7 +43665,6 @@
         "docs/api-reference/journal.mdx",
         "docs/api-reference/memory.mdx",
         "docs/api-reference/missions.mdx",
-        "docs/api-reference/notifications.mdx",
         "docs/api-reference/paymaster.mdx",
         "docs/api-reference/policies.mdx",
         "docs/api-reference/presence.mdx",
@@ -44492,11 +44163,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3883,
-    "api_path_references": 1982,
+    "command_references": 3874,
+    "api_path_references": 1969,
     "environment_references": 394,
     "manifest_kind_references": 209,
-    "flag_references": 1800,
+    "flag_references": 1797,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

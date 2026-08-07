@@ -4,8 +4,8 @@ import "testing"
 
 func TestFinalAuthSurfaceCatalogCoversAllBodies(t *testing.T) {
 	routes, components := finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog()
-	if len(routes) != 19 {
-		t.Fatalf("route count = %d, want 19", len(routes))
+	if len(routes) != 17 {
+		t.Fatalf("route count = %d, want 17", len(routes))
 	}
 	for route, contract := range routes {
 		if contract.Request == nil || contract.Request["$ref"] == nil {
