@@ -84,8 +84,13 @@ func TestOpenKeepsPoolWarm(t *testing.T) {
 // test. A behavioural assertion here would pass against any expiry long enough
 // to matter, so it would have no teeth. Read the fields instead: reflect can
 // read an unexported field's value through a typed accessor (only Interface()
-// and Set are blocked), and the test skips itself if a future stdlib renames
-// them, so it can fail loudly but never falsely.
+// and Set are blocked).
+//
+// If a future stdlib renames the fields this fails rather than skipping. A
+// skip would leave the guard silently doing nothing, which is the failure mode
+// scripts/skip-budget.sh exists to price; and the trigger is not flaky — it
+// can only fire on a deliberate Go toolchain bump, which is exactly when
+// someone should re-derive this against the new database/sql.
 func TestOpenLeavesConnLifetimeUnset(t *testing.T) {
 	dir := t.TempDir()
 	db, err := Open("file:" + filepath.Join(dir, "lifetime.db"))
@@ -102,8 +107,9 @@ func TestOpenLeavesConnLifetimeUnset(t *testing.T) {
 	} {
 		v := reflect.ValueOf(db.DB).Elem().FieldByName(tc.field)
 		if !v.IsValid() || v.Kind() != reflect.Int64 {
-			t.Skipf("database/sql no longer has an int64 %q field; "+
-				"re-derive this guard against the current stdlib", tc.field)
+			t.Fatalf("database/sql no longer has an int64 %q field, so this guard "+
+				"is no longer guarding anything — re-derive it against the current "+
+				"stdlib rather than deleting it (#1817)", tc.field)
 		}
 		if got := time.Duration(v.Int()); got != 0 {
 			t.Errorf("%s = %v, want unset: %s (#1817)", tc.setter, got, tc.why)
