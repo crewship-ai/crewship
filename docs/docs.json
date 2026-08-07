@@ -306,7 +306,8 @@
               "cli/routine",
               "cli/pipeline",
               "cli/webhook",
-              "cli/waitpoint"
+              "cli/waitpoint",
+              "cli/signal"
             ]
           },
           {

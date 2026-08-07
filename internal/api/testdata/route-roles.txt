@@ -259,6 +259,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run roleCreate
+POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
 POST /api/v1/workspaces/{workspaceId}/skills/import roleCreate
