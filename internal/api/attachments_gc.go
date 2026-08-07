@@ -80,6 +80,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -179,9 +180,15 @@ func sweepAttachmentBlobs(ctx context.Context, db *sql.DB, logger *slog.Logger, 
 		n, err := reclaimAttachmentBlobs(ctx, db, root, e.Name())
 		removed += n
 		workspaces++
-		if err != nil && logger != nil {
+		if err != nil && logger != nil && !errors.Is(err, context.Canceled) {
 			// Truthful rather than tidy: some blobs may have gone even on the
 			// error path, and the count says how many.
+			//
+			// context.Canceled is excluded because it is not a failure — it is
+			// shutdown. Logging it as one puts a WARN in every clean stop, and
+			// an operator who learns to skip that line will skip the real ones
+			// printed beside it. A sweep interrupted mid-walk resumes from
+			// scratch on the next boot; nothing is lost by staying quiet.
 			logger.Warn("attachment blob GC: sweep failed",
 				"workspace_id", e.Name(), "removed", n, "error", err)
 		}

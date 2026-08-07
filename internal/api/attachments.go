@@ -269,6 +269,17 @@ func attachmentBlobPath(root, workspaceID, sha string) (string, error) {
 	if !isAttachmentDigest(sha) {
 		return "", fmt.Errorf("attachment digest is not lowercase hex")
 	}
+	// The workspace component is validated here too, not only by JoinUnder's
+	// containment. reclaimAttachmentBlobs already did this before walking a
+	// directory; doing it at the single point every attachment path is built
+	// from keeps the guarantee local to this function instead of split between
+	// it and one of its callers. A future caller then cannot reach the
+	// filesystem with a component nobody checked — including one read back from
+	// a row an operator edited or a bundle restored, which the comment above
+	// says must not be trusted on our say-so.
+	if _, err := safepath.ValidateComponent(workspaceID); err != nil {
+		return "", fmt.Errorf("attachment workspace id is not a safe path component: %w", err)
+	}
 	return safepath.JoinUnder(root, "attachments", workspaceID, sha[:2], sha)
 }
 

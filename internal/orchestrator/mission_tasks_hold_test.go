@@ -305,8 +305,13 @@ func TestScheduleTask_DoorDeferralUnwindsTheRowAndLeavesTheTaskPending(t *testin
 		t.Fatalf("task status after a deferral from the door = %q, want PENDING — "+
 			"a wait was recorded as a terminal failure", got)
 	}
+	// COALESCE + MAX rather than a bare scan: an unwind that DELETES the row
+	// is an acceptable outcome too, and a plain QueryRow would then fail with
+	// "sql: no rows in result set" — a message that reads like the test could
+	// not run, on a run where the code did the right thing. What must not
+	// happen is a row left PENDING, so ask exactly that.
 	var status string
-	if err := db.QueryRow(`SELECT status FROM assignments`).Scan(&status); err != nil {
+	if err := db.QueryRow(`SELECT COALESCE(MAX(status),'<deleted>') FROM assignments`).Scan(&status); err != nil {
 		t.Fatalf("read assignment: %v", err)
 	}
 	if status == "PENDING" {

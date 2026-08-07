@@ -773,7 +773,15 @@ func markdownActiveNodes(t *testing.T, md string) []string {
 		}
 		switch n.(type) {
 		case *ast.Link, *ast.Image, *ast.AutoLink, *ast.RawHTML, *ast.HTMLBlock,
-			*ast.Emphasis, *ast.CodeSpan:
+			*ast.Emphasis, *ast.CodeSpan,
+			// Heading is here because the whitespace collapse is what makes
+			// every BLOCK construct unreachable — a heading, a list, a table and
+			// a fence all have to start a line, and a collapsed value cannot.
+			// That is load-bearing, so it is asserted rather than reasoned
+			// about: the "multi-line" case feeds a value containing
+			// "# not a heading", and without this arm it would render as one
+			// and the test would still pass.
+			*ast.Heading, *ast.List, *ast.Blockquote, *ast.FencedCodeBlock:
 			found = append(found, n.Kind().String())
 		}
 		return ast.WalkContinue, nil
