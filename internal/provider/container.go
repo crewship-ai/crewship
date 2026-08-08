@@ -471,3 +471,104 @@ type ServiceLister interface {
 	// another workspace (#1732).
 	ListCrewServices(ctx context.Context, crewID, crewSlug string) ([]CrewServiceStatus, error)
 }
+
+// CrewImageState answers "is the image this crew is actually running still the
+// image its tag names?" for one crew — the read half of #1845.
+//
+// It is deliberately a REPORT and never an action. A crew container is created
+// once and reused for as long as the crew is alive, so the digest check that
+// ensureImage performs at create time is the last time anything looks; a
+// long-lived container silently becomes a snapshot of whatever the registry
+// held on the day it was born. That is the condition self-hosters hit and
+// nobody notices, and nothing measured it.
+//
+// Every field is descriptive so a caller can render the situation without
+// re-deriving it. Behind is the single boolean anything downstream keys off,
+// and Reason exists so "not behind" can distinguish "confirmed current" from
+// "could not tell" — collapsing those two is how a freshness check quietly
+// becomes a check that always passes.
+type CrewImageState struct {
+	// Image is the reference the crew is configured to run, resolved through
+	// the same CachedImage > Image > provider-default chain EnsureCrewRuntime
+	// uses. Re-deriving it anywhere else would be free to disagree with what
+	// actually starts.
+	Image string
+
+	// ContainerID is the live crew container, or "" when none exists. No
+	// container means nothing is running a stale image: the next start pulls.
+	ContainerID string
+
+	// Running distinguishes a container that is up from one that exists but is
+	// stopped. A stopped container gets RESTARTED, not recreated, so it carries
+	// its old image forward and is still worth reporting on.
+	Running bool
+
+	// RunningDigest is the registry manifest digest of the image the live
+	// container was created from, read back off the daemon. Empty when that
+	// image has no registry digest at all — a locally built crewship-cache:*
+	// derivative, or a daemon reporting no RepoDigests.
+	RunningDigest string
+
+	// ResolvedDigest is what Image resolves to on the registry right now.
+	// Empty when the registry could not be reached (air-gapped host, wedged
+	// credential helper, throttling).
+	ResolvedDigest string
+
+	// Behind is true ONLY when both digests are known and they differ. An
+	// unknown on either side is never reported as behind — see Reason.
+	Behind bool
+
+	// Reason explains a false Behind that was not a clean match: "registry
+	// unreachable", "no container", "image has no registry digest". Empty when
+	// Behind is true, or when the two digests were compared and agreed.
+	Reason string
+}
+
+// CrewImageRefresh is what a refresh actually did.
+type CrewImageRefresh struct {
+	// Image is the reference that was refreshed.
+	Image string
+
+	// PreviousDigest is what the crew's container was running before, and
+	// NewDigest what the tag resolves to after the pull. Both may be empty for
+	// the same reasons CrewImageState's are.
+	PreviousDigest string
+	NewDigest      string
+
+	// ContainerRemoved reports whether the crew's runtime container was
+	// dropped so the next agent exec recreates it from the fresh image. False
+	// when there was no container to drop.
+	//
+	// Recreating it eagerly here would start a container nobody asked for, on
+	// a host that may be at its admission limit, for a crew that may then sit
+	// idle for days. Dropping it IS the remediation: EnsureCrewRuntime is the
+	// only thing that creates crew containers, and it always ensures the image
+	// first.
+	ContainerRemoved bool
+}
+
+// CrewImageFreshness is the optional capability behind #1845's delivery half:
+// report whether a crew's container is behind its image tag, and refresh it.
+//
+// Optional, and discovered by type assertion at the call site, for the same
+// reason ServiceLister is: the apple-container provider has no registry digest
+// story, and adding a method to ContainerProvider would silently demote every
+// implementation (including every test fake) to "not a ContainerProvider" with
+// nothing failing to compile.
+//
+// Both methods take the full CrewConfig rather than an id+slug pair because
+// the image a crew runs comes off that struct (CachedImage > Image > default);
+// passing less would force callers to re-implement the chain EnsureCrewRuntime
+// owns.
+type CrewImageFreshness interface {
+	// CrewImageState reports on the crew's live container. It is read-only: it
+	// never pulls, never creates and never removes. A registry lookup failure
+	// is reported through CrewImageState.Reason, not as an error — errors are
+	// reserved for a daemon that could not be talked to at all.
+	CrewImageState(ctx context.Context, team CrewConfig) (*CrewImageState, error)
+
+	// RefreshCrewImage pulls the crew's image and drops its container so the
+	// next agent exec starts from the fresh copy. Idempotent: refreshing a
+	// crew that is already current transfers nothing.
+	RefreshCrewImage(ctx context.Context, team CrewConfig) (*CrewImageRefresh, error)
+}

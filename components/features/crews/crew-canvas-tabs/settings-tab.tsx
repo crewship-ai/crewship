@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { useAbilities } from "@/hooks/use-abilities"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewRuntimeConfig } from "@/components/features/crews/crew-runtime-config"
+import { CrewImageFreshness } from "@/components/features/crews/crew-image-freshness"
 import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
 import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
 import { CrewMCPConfig } from "@/components/features/crews/crew-mcp-config"
@@ -49,6 +50,10 @@ export function SettingsTab({
   // and eat a 403 on save.
   const { role } = useAbilities()
   const isAdmin = role === "OWNER" || role === "ADMIN"
+  // #1845: POST /refresh-image is roleCreate server-side ("update" — MANAGER+).
+  // Mirrored here so a MEMBER or VIEWER sees the verdict, which is a read, but
+  // is not offered a button that would 403.
+  const canEditRuntime = isAdmin || role === "MANAGER"
 
   // Saving a network policy stops the crew container so it's recreated with
   // the new policy on the next agent run. Without feedback that restart was
@@ -221,6 +226,14 @@ export function SettingsTab({
           title="Container image &amp; features"
           summary={crew.runtime_image ?? "debian:trixie-slim"}
         >
+          {/* #1845: whether the RUNNING container is still on the image this
+              section configures. It belongs here rather than next to the cache
+              status above it — that one answers "was the devcontainer built?",
+              this one answers "has the base image moved since?", and the two
+              have different fixes. */}
+          <div className="mb-4">
+            <CrewImageFreshness crewId={crew.id} workspaceId={workspaceId} canEdit={canEditRuntime} />
+          </div>
           <CrewRuntimeConfig
             crewId={crew.id}
             workspaceId={workspaceId}

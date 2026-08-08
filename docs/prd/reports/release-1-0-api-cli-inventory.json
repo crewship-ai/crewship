@@ -1,21 +1,21 @@
 {
   "summary": {
-    "api_operations": 536,
-    "api_exact_docs": 536,
+    "api_operations": 538,
+    "api_exact_docs": 538,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 730,
-    "cli_exact_docs": 730,
-    "cli_root_docs_present": 730,
+    "cli_operations": 732,
+    "cli_exact_docs": 732,
+    "cli_root_docs_present": 732,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 406,
-    "api_with_concrete_response_schemas": 522,
+    "api_with_concrete_response_schemas": 524,
     "api_generic_response_schemas": 0,
-    "api_with_request_bodies": 224,
-    "api_with_concrete_json_requests": 220,
+    "api_with_request_bodies": 225,
+    "api_with_concrete_json_requests": 221,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 716,
+    "cli_with_test_signals": 718,
     "cli_with_flags": 343,
     "cli_with_all_flags_documented": 343,
     "cli_missing_flag_docs": 0,
@@ -9123,6 +9123,38 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/crews/{crewId}/image-status",
+      "operation_id": "get_api_v1_crews_crewId_image-status",
+      "tag": "crews",
+      "source_file": "cmd/gen-openapi/schemas_remaining_crew_agent.go",
+      "exact_docs": [
+        "docs/api-reference/provisioning.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/crews.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/gen-openapi/schemas_remaining_crew_agent.go"
+        }
+      }
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/crews/{crewId}/integrations",
       "operation_id": "get_api_v1_crews_crewId_integrations",
       "tag": "crews",
@@ -11161,6 +11193,38 @@
       "exact_docs": [
         "docs/api-reference/provisioning.mdx",
         "docs/configuration/devcontainers.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/crews.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/gen-openapi/schemas_final_request_crews_agents_workspaces_chats.go"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/crews/{crewId}/refresh-image",
+      "operation_id": "post_api_v1_crews_crewId_refresh-image",
+      "tag": "crews",
+      "source_file": "cmd/gen-openapi/schemas_final_request_crews_agents_workspaces_chats.go",
+      "exact_docs": [
+        "docs/api-reference/provisioning.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/crews.mdx"
@@ -27597,6 +27661,30 @@
       ]
     },
     {
+      "path": "crew image-status",
+      "use": "image-status \u003cslug-or-id\u003e",
+      "short": "Report whether a crew's container is behind its image tag",
+      "root": "crew",
+      "exact_docs": [
+        "docs/cli/crew.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/crew.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/crewship/cmd_crew_cache_cov_test.go",
+        "cmd/crewship/cmd_crew_config_cov_test.go",
+        "cmd/crewship/cmd_crew_container_cov_test.go",
+        "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_cov_test.go",
+        "cmd/crewship/cmd_crew_credential_readiness_test.go",
+        "cmd/crewship/cmd_crew_delete_prompt_test.go",
+        "…"
+      ]
+    },
+    {
       "path": "crew list",
       "use": "list",
       "short": "List all crews in the workspace",
@@ -27881,6 +27969,30 @@
       ],
       "documented_flags": [
         "no-watch"
+      ]
+    },
+    {
+      "path": "crew refresh-image",
+      "use": "refresh-image \u003cslug-or-id\u003e",
+      "short": "Pull the crew's current image and drop its container so agents pick it up",
+      "root": "crew",
+      "exact_docs": [
+        "docs/cli/crew.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/crew.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/crewship/cmd_crew_cache_cov_test.go",
+        "cmd/crewship/cmd_crew_config_cov_test.go",
+        "cmd/crewship/cmd_crew_container_cov_test.go",
+        "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_cov_test.go",
+        "cmd/crewship/cmd_crew_credential_readiness_test.go",
+        "cmd/crewship/cmd_crew_delete_prompt_test.go",
+        "…"
       ]
     },
     {
@@ -43872,6 +43984,7 @@
         "docs/guides/cli/claude-code.mdx",
         "docs/guides/conversation-search.mdx",
         "docs/guides/credentials.mdx",
+        "docs/guides/crew-image-freshness.mdx",
         "docs/guides/crew-journal.mdx",
         "docs/guides/ephemeral-agents.mdx",
         "docs/guides/files-and-output.mdx",
@@ -44013,6 +44126,7 @@
         "docs/guides/chat-sessions.mdx",
         "docs/guides/consolidate.mdx",
         "docs/guides/conversation-search.mdx",
+        "docs/guides/crew-image-freshness.mdx",
         "docs/guides/crew-journal.mdx",
         "docs/guides/devcontainers.mdx",
         "docs/guides/docker-socket-proxy.mdx",
@@ -44453,11 +44567,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3920,
-    "api_path_references": 1984,
+    "command_references": 3931,
+    "api_path_references": 1988,
     "environment_references": 401,
     "manifest_kind_references": 209,
-    "flag_references": 1814,
+    "flag_references": 1817,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

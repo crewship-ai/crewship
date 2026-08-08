@@ -8789,6 +8789,55 @@
         },
         "type": "object"
       },
+      "RemainingCrewImageRefreshedV1": {
+        "properties": {
+          "container_removed": {
+            "type": "boolean"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "new_digest": {
+            "type": "string"
+          },
+          "previous_digest": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "RemainingCrewImageStatusV1": {
+        "properties": {
+          "behind": {
+            "type": "boolean"
+          },
+          "container_id": {
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "resolved_digest": {
+            "type": "string"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "running_digest": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "RemainingCrewIssueCommentCreatedV1": {
         "properties": {
           "message": {
@@ -49190,6 +49239,146 @@
         ]
       }
     },
+    "/api/v1/crews/{crewId}/image-status": {
+      "get": {
+        "operationId": "get_api_v1_crews_crewId_image-status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemainingCrewImageStatusV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      }
+    },
     "/api/v1/crews/{crewId}/integrations": {
       "get": {
         "operationId": "get_api_v1_crews_crewId_integrations",
@@ -59867,6 +60056,116 @@
               }
             },
             "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      }
+    },
+    "/api/v1/crews/{crewId}/refresh-image": {
+      "post": {
+        "operationId": "post_api_v1_crews_crewId_refresh-image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemainingCrewImageRefreshedV1"
+                }
+              }
+            },
+            "description": "OK"
           },
           "401": {
             "content": {

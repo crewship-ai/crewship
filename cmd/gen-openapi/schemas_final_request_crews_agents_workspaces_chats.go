@@ -87,6 +87,10 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 	add("POST", "/api/v1/crews/{crewId}/provision", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/crews/{crewId}/rebuild", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/crews/{crewId}/restart-agents", "FinalCoreEmptyRequest")
+	// #1845: refresh-image takes no body — the crew id in the path is the
+	// whole request. Declared rather than left to the generic JSON fallback so
+	// a client is told there is nothing to send.
+	add("POST", "/api/v1/crews/{crewId}/refresh-image", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/inbox/bulk", "FinalCoreInboxBulkRequest")
 	add("POST", "/api/v1/onboarding/complete", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/workspaces/{workspaceId}/invitations", "FinalCoreInvitationRequest")

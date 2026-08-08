@@ -494,6 +494,10 @@ var startCmd = &cobra.Command{
 				// routine being skipped with an info log, never a hard
 				// failure that would defer the rest of startup.
 				srv.RegisterKeeperRoutines(sched)
+				// #1845: the daily crew-image freshness sweep. Same cron
+				// engine, same leader gate; skipped with an info log when
+				// the container provider cannot report image digests.
+				srv.RegisterImageFreshnessRoutine(sched)
 			}
 		}
 
