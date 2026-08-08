@@ -120,6 +120,11 @@ func (r *Router) registerAuthRoutes() {
 	// the credential, single-use, 10-min TTL.
 	pairH := NewCliPairHandler(r.db, r.logger)
 	r.authedSelfMut("POST", "/api/v1/auth/pair/start", pairH.Start)
+	// #1824. Poll 400s without ?code, but the emptiness is decided inside
+	// normalizePairingCode — a helper the inference will not look into, because
+	// `f("") == ""` is a fact about that function rather than a property of the
+	// shape. Declared here instead, and pinned like every inferred one.
+	// openapi: query code:string!
 	r.mux.Handle("GET /api/v1/auth/pair/poll", authed(http.HandlerFunc(pairH.Poll)))
 	r.mux.HandleFunc("POST /api/v1/auth/pair/redeem", pairH.Redeem)
 
