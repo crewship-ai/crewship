@@ -1,0 +1,79 @@
+---
+title: "Signal Commands"
+description: "Wake every routine run parked on a named event, without knowing which runs they are."
+icon: "radio"
+---
+
+# crewship signal
+
+A routine `wait` step of `kind: event` parks its run durably until a named
+event arrives. `crewship signal` delivers that event **by topic**: every run in
+the workspace waiting on the `event_type` wakes at once, each receiving the
+payload as its wait step's output.
+
+```bash
+crewship signal send --event-type <type> [--payload <string>]
+```
+
+## Which command do I want?
+
+| You have | Command |
+|---|---|
+| A run id (you started the run and kept it) | [`crewship routine signal <run_id>`](/cli/routine#crewship-routine-signal-run_id) |
+| An event that happened, and no idea who cares | `crewship signal send` |
+
+The two are the same act addressed differently. Reach for the topic form
+whenever the sender is *announcing* something rather than *answering* a
+specific run — that is the normal position for anything emitting events, and
+it is the only form that works when several routines subscribe to one event.
+
+---
+
+## `crewship signal send`
+
+Deliver an event to every run in the workspace parked on it.
+
+```bash
+crewship signal send --event-type deploy.finished --payload "v1.4.2"
+crewship signal send --event-type mission.status_change --payload '{"status":"done"}'
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--event-type` | string | | **Required.** The `event_type` the `wait: event` steps are waiting on. Free-form — no registry, no enum |
+| `--payload` | string | | String payload that becomes each woken wait step's output |
+
+Backed by `POST /api/v1/workspaces/{ws}/signals`. Requires MANAGER+, the same
+tier as the per-run signal.
+
+**Output** — the runs it woke, so you can follow them:
+
+```
+Signal "deploy.finished" delivered to 2 run(s):
+  run_cmox3k9a10001e93x8f2p
+  run_cmox3k9a10002e93xq7bt
+```
+
+Nothing waiting is a normal outcome, not an error — the command prints
+`delivered to 0 runs (nothing is waiting on that event)` and exits 0. An event
+source emits whether or not a routine happens to be listening; treating that as
+a failure would teach every caller to ignore the exit code.
+
+## Guarantees
+
+- **Workspace-fenced.** A topic delivery never reaches a run in another
+  workspace. The workspace is the one your CLI session is scoped to
+  (`crewship workspace`).
+- **Claimed once.** Each parked wait is claimed by exactly one delivery, so two
+  people (or two producers) sending the same event at the same instant wake
+  disjoint sets of runs — no run resumes its wait step twice.
+- **Durable.** Delivery is recorded before the run is resumed, so a signal
+  landing while the server restarts is not lost: the parked run reads it back
+  at boot. See [Durability and restart
+  recovery](/guides/routines#durability-and-restart-recovery).
+
+## See also
+
+- [`wait` step](/guides/routines#wait) — authoring the step that parks
+- [`crewship routine signal`](/cli/routine#crewship-routine-signal-run_id) — the per-run form
+- [Routines API](/api-reference/pipelines) — the endpoint behind this command

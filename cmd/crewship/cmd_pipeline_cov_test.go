@@ -254,6 +254,9 @@ func TestPipelineSaveRunE(t *testing.T) {
 		stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{
 			{"id": "ccrewa000000000000001", "slug": "crew_a"},
 		}))
+		stub.OnGet("/api/v1/agents", clitest.JSONResponse(200, []map[string]string{
+			{"id": "cagenta00000000000001", "slug": "ag_1"},
+		}))
 		stub.OnPost(pipelinesPathCov()+"/test_run", clitest.JSONResponse(200, map[string]any{
 			"status": "DRY_RUN_OK", "save_token": "mint-abc123",
 		}))
@@ -298,6 +301,15 @@ func TestPipelineSaveRunE(t *testing.T) {
 		// --author-crew took the slug "crew_a"; the body carries the resolved CUID (#997).
 		if saveBody["author_crew_id"] != "ccrewa000000000000001" {
 			t.Errorf("save body author_crew_id: got %v want the resolved CUID", saveBody["author_crew_id"])
+		}
+		// --author-agent is a real flag, not a decoration. It used to be read
+		// and thrown away (`_ = authorAgent`), so every CLI-authored routine
+		// saved with author_agent_id = "" — and a `crewship` step's
+		// issue.comment verb, whose acting agent comes from exactly that
+		// column, 400'd on every run. Like --author-crew it is sent as the
+		// resolved CUID, because the save endpoint binds it by id.
+		if saveBody["author_agent_id"] != "cagenta00000000000001" {
+			t.Errorf("save body author_agent_id: got %v want the resolved CUID (the flag must not be a no-op)", saveBody["author_agent_id"])
 		}
 		// The minted token is forwarded as the proof — body-trust fields gone.
 		if saveBody["save_token"] != "mint-abc123" {

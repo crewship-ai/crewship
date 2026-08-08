@@ -84,7 +84,7 @@
     },
     "agentless": {
       "type": "boolean",
-      "description": "Token-zero guarantee: the routine may only contain http/code/wait/transform/notify steps and can never invoke an LLM. See Agentless routines in docs/guides/routines."
+      "description": "Token-zero guarantee: the routine may only contain http/code/wait/transform/notify/script/query steps and can never invoke an LLM. agent_run, call_pipeline and crewship are rejected. See Agentless routines in docs/guides/routines."
     },
     "parallelism": {
       "type": "string",
@@ -192,7 +192,7 @@
         },
         "type": {
           "type": "string",
-          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify", "script", "query", "foreach"]
+          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify", "script", "query", "foreach", "crewship"]
         },
         "complexity": {
           "type": "string",
@@ -233,6 +233,16 @@
           "description": "Used by call_pipeline. Inputs forwarded to the nested routine."
         },
         "pipeline_slug": { "type": "string", "description": "Used by call_pipeline." },
+        "action": {
+          "type": "string",
+          "enum": ["issue.create", "issue.update", "issue.comment", "issue.link", "assignment.create", "escalation.create"],
+          "description": "Used by crewship. The namespaced verb this step performs against Crewship's own API. Every verb is bounded by a policy action resolved against the author crew's autonomy_level; a verb declared without one is refused at save time. All six are available."
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Used by crewship. Arguments for the verb, template-substituted before dispatch. Identity fields (workspace_id, crew_id, author_agent_id, author_run_id) are injected from the run and cannot be set here."
+        },
         "retry": { "$ref": "#/$defs/RetryPolicy" },
         "hooks": { "$ref": "#/$defs/StepHooks" },
         "http": { "$ref": "#/$defs/HTTPStep" },
@@ -289,6 +299,10 @@
         {
           "if": { "properties": { "type": { "const": "foreach" } } },
           "then": { "required": ["foreach"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "crewship" } } },
+          "then": { "required": ["action"] }
         }
       ]
     },

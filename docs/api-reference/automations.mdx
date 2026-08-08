@@ -1,0 +1,260 @@
+---
+title: "Automations"
+description: "Rules that enqueue a routine run when a matching journal event commits."
+icon: "zap"
+---
+
+An automation watches one [journal](/guides/crew-journal) entry type in a
+workspace and, when an entry matches its predicate, parks a debounced run of a
+routine. It can only enqueue — it never executes anything inline and holds no
+veto over the event it fired on. See the
+[Automations guide](/guides/automations) for the concepts and burst controls.
+
+<Note>
+  All endpoints require authentication and are workspace-scoped (the workspace
+  comes from the session or `X-Workspace-ID`). Reads are available to any
+  member; every mutation requires `OWNER` or `ADMIN`, because a rule grants
+  autonomous routine execution across the workspace.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/automations`](#list-automations) | List automations in the workspace |
+| POST | [`/api/v1/automations`](#create-an-automation) | Create an automation |
+| PATCH | [`/api/v1/automations/{id}`](#update-an-automation) | Sparse update, including enable/disable |
+| DELETE | [`/api/v1/automations/{id}`](#delete-an-automation) | Soft-delete an automation |
+
+---
+
+## List automations
+
+```
+GET /api/v1/automations
+```
+
+**Authentication:** session or bearer token; any workspace member.
+
+**Request:** no body, no query parameters.
+
+**Response:** `200 OK`
+
+```json
+{
+  "automations": [
+    {
+      "id": "aut_9f2c1a04bd77e310",
+      "workspace_id": "ws_123",
+      "name": "triage on status change",
+      "enabled": true,
+      "event_type": "mission.status_change",
+      "matcher": { "payload_equals": { "action": "status_changed" } },
+      "action_kind": "routine",
+      "action": {
+        "routine_slug": "post-status-triage",
+        "inputs": { "issue": "{{ event.mission_id }}" }
+      },
+      "debounce_seconds": 10,
+      "max_per_hour": 60,
+      "created_by": "user_123",
+      "created_at": "2026-08-07T16:00:00.000000000Z",
+      "updated_at": "2026-08-07T16:00:00.000000000Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `event_type` | string | A journal entry type. Exactly one per rule; there is no wildcard. |
+| `matcher` | object | `crew_ids`, `agent_ids`, `mission_ids`, `severities`, `payload_equals`. Every populated field must be satisfied; `{}` matches every entry of the type. A `payload_equals` key that no emitter writes is accepted and matches nothing — `mission.status_change` carries only `action` and `details` (see [Automations](/guides/automations)). |
+| `action_kind` | string | `routine` in this release. |
+| `action` | object | `routine_slug` plus `inputs`. Input values may reference the triggering entry with `{{ event.mission_id }}`, `{{ event.agent_id }}`, `{{ event.crew_id }}`, `{{ event.run_id }}` and `{{ event.payload.<key> }}`. |
+| `debounce_seconds` | integer | How long the parked run stays open for further matching events to coalesce into. |
+| `max_per_hour` | integer | Burst brake on runs this rule may cause per rolling hour. Over the cap, matches are dropped and one `automation.throttled` journal entry is written for the window. Counted in the running server's memory: a restart clears it, so this is not a quota. |
+
+**Status codes:** `200` OK · `401` no workspace in context · `500` read failed.
+
+---
+
+## Create an automation
+
+```
+POST /api/v1/automations
+```
+
+**Authentication:** `OWNER` or `ADMIN`.
+
+**Request body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Required. Human-readable name. |
+| `event_type` | string | Required. Journal entry type, e.g. `mission.status_change`. |
+| `action` | object | Required. `{"routine_slug": "...", "inputs": {...}}`. The routine must exist in this workspace. |
+| `matcher` | object | Optional predicate. Defaults to match-all for the event type. |
+| `enabled` | boolean | Optional, defaults `true`. |
+| `debounce_seconds` | integer | Optional, defaults `10`. |
+| `max_per_hour` | integer | Optional, defaults `60`. |
+
+```json
+{
+  "name": "triage on status change",
+  "event_type": "mission.status_change",
+  "matcher": { "payload_equals": { "action": "status_changed" } },
+  "action": {
+    "routine_slug": "post-status-triage",
+    "inputs": { "issue": "{{ event.mission_id }}" }
+  }
+}
+```
+
+**Response:** `201 Created` — the stored automation, in the shape shown above.
+
+**Status codes:** `201` created · `400` malformed body, an `event_type` that is
+not shaped like a journal entry type, or a `routine_slug` that does not exist
+in this workspace · `401` no workspace · `403` below `ADMIN` · `500` write
+failed.
+
+---
+
+## Update an automation
+
+```
+PATCH /api/v1/automations/{id}
+```
+
+**Authentication:** `OWNER` or `ADMIN`.
+
+**Path parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `id` | string | Automation id. An id from another workspace answers `404`. |
+
+**Request body:** the same fields as create, all optional. The write is
+**sparse** — only fields present in the body are applied, so toggling
+`enabled` cannot clobber a matcher edited a moment earlier. `action` is
+written as a whole: sending `inputs` without `routine_slug` would blank the
+target.
+
+```json
+{ "enabled": false }
+```
+
+**Response:** `200 OK` — the updated automation.
+
+**Status codes:** `200` OK · `400` invalid field · `401` no workspace ·
+`403` below `ADMIN` · `404` unknown id in this workspace · `500` write failed.
+
+---
+
+## Delete an automation
+
+```
+DELETE /api/v1/automations/{id}
+```
+
+**Authentication:** `OWNER` or `ADMIN`.
+
+Soft-delete. The rule stops matching immediately; the row stays in the
+database so a run it caused can still explain where it came from. Deleting an
+id that is already deleted answers `404`.
+
+<Note>
+  A deleted rule is filtered out of every read, including the
+  [chain walk](/api-reference/chains#automations-the-origin-of-a-composed-chain) —
+  a chain will not draw a node you cannot fetch. The runs it caused keep
+  `triggered_via='automation'`, so the record that *a* rule started them
+  survives even though the rule itself is no longer readable. Prefer
+  `disable` over `delete` when you want to stop a rule but keep the origin of
+  its past runs visible in the topology.
+</Note>
+
+**Request:** no body. The automation is named by the `id` path parameter.
+
+**Response:** `200 OK`
+
+```json
+{ "status": "deleted", "id": "aut_9f2c1a04bd77e310" }
+```
+
+**Status codes:** `200` OK · `401` no workspace · `403` below `ADMIN` ·
+`404` unknown id in this workspace · `500` write failed.
+
+---
+
+## Preview what a rule would catch
+
+```
+POST /api/v1/automations/preview
+```
+
+**Authentication:** session or bearer token; `create` permission.
+
+Replays recent journal history against a matcher and reports what it would
+have caught. Nothing is saved and no run is started, so this is safe against a
+live workspace.
+
+A matcher is otherwise written blind — save it, wait, and notice nothing
+happened. When nothing matches, the reply names the clause that excluded the
+most entries and what was actually there.
+
+**Request:** either name a saved rule, or describe a candidate.
+
+```json
+{ "automation_id": "aut_9f2c1a04bd77e310" }
+```
+
+```json
+{
+  "event_type": "mission.status_change",
+  "matcher": { "payload_equals": { "action": "status_changed" } }
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "event_type": "mission.status_change",
+  "window_hours": 168,
+  "scanned": 6,
+  "matched": 0,
+  "samples": [],
+  "top_rejection": {
+    "clause": "payload_equals.status",
+    "count": 6,
+    "detail": "the entry carries no key \"status\"; keys present: action, details, from, to",
+    "key_absent": true
+  }
+}
+```
+
+`scanned` is entries of this event type in the window. **Zero means there is
+nothing to judge the rule against — not that the rule is wrong**, and the two
+must not be confused: a quiet workspace would otherwise send you to edit a
+predicate that is correct.
+
+`key_absent` marks the one failure no value change can fix: the predicate
+names a payload key the event does not carry.
+
+**Status codes:** `200` OK · `400` neither `automation_id` nor `event_type` ·
+`401` no workspace · `403` below `create` · `404` unknown `automation_id` ·
+`500` journal read failed.
+
+---
+
+## CLI equivalents
+
+| API | CLI |
+|---|---|
+| `GET /api/v1/automations` | `crewship automation list` |
+| `POST /api/v1/automations` | `crewship automation create` |
+| `PATCH /api/v1/automations/{id}` | `crewship automation update` / `enable` / `disable` |
+| `DELETE /api/v1/automations/{id}` | `crewship automation delete` |
+| `GET /api/v1/chains/{id}` | `crewship chain <automation-id>` — what the rule is wired to and what it has caused |
+
+Full flag reference: [`crewship automation`](/cli/automation).

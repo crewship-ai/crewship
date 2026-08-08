@@ -106,6 +106,11 @@ func fullExecutorDeps(t *testing.T, db *sql.DB, runner AgentRunner) ExecutorDeps
 		CodeRunner:   NewMultiCodeRunner(),
 		Signals:      NewSignalRegistry(),
 		ScriptRunner: &fakeScriptRunner{},
+		// The dispatch-gate seam (integrations / resources / credentials).
+		// A stub here, the api-side implementation in production — what the
+		// factory has to prove is that SOMETHING lands on every executor.
+		Preflight: &stubPreflight{},
+		Crewship:  &recordingCrewship{},
 		RunVerdict: func() (llm.Provider, string) {
 			return &stubVerdictProviderForFactoryTest{}, "claude-haiku-4-5"
 		},
@@ -170,6 +175,8 @@ func TestNewWiredExecutor_WiresEveryDependency(t *testing.T) {
 		"egressAllowed":    exec.egressAllowed != nil,
 		"credentialByType": exec.credentialByType != nil,
 		"runVerdict":       exec.runVerdict != nil,
+		"preflight":        exec.preflight != nil,
+		"crewship":         exec.crewship != nil,
 	}
 	for field, ok := range checks {
 		if !ok {
@@ -231,7 +238,8 @@ func TestNewWiredExecutor_NilOptionalsDegrade(t *testing.T) {
 	if exec.waitpoints != nil || exec.ws != nil || exec.runs != nil ||
 		exec.idempotency != nil || exec.stepOverrides != nil ||
 		exec.runStore != nil || exec.codeRunner != nil || exec.signals != nil ||
-		exec.egressAllowed != nil || exec.credentialByType != nil {
+		exec.egressAllowed != nil || exec.credentialByType != nil ||
+		exec.preflight != nil || exec.crewship != nil {
 		t.Error("optional deps left nil must stay nil (documented degraded behaviour)")
 	}
 }

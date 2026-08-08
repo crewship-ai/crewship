@@ -1,0 +1,150 @@
+---
+title: "crewship chain"
+description: "Follow what caused what across automations, issues, routines, runs and delegated assignments from a single anchor."
+icon: "share-nodes"
+---
+
+# `crewship chain`
+
+Reconstruct the causal chain around one anchor and print it as a tree.
+
+```bash
+crewship chain ENG-7
+crewship chain prn_01hy
+crewship chain nightly-deploy --depth 6 --limit 400
+crewship chain aut_01hx
+crewship chain ENG-7 --format json
+```
+
+The anchor is whatever you have to hand — an issue identifier, an issue id, a
+run id, a routine id or slug, an assignment id, an inbox item id, or an
+automation id. The server resolves it and walks outward across **both**
+execution substrates (routine runs and agent delegation), so you do not have to
+know which one your anchor lives in.
+
+```
+issue ENG-7  Deploy is flaky on cold start  (IN_PROGRESS) (partial)
+├─ [triggers ->] routine deploy  Deploy  (active)
+│  └─ [runs ->] run prn_01hy  deploy  (failed)
+│     ├─ [triggers ->] run prn_01hz  deploy  (failed)
+│     │  └─ [produces ->] inbox/failed_run ibx_01j2  deploy failed  (unread)
+│     └─ [<- executes] agent viktor  Viktor  (IDLE)
+└─ [triggers ->] run prn_01hy (shown above)
+
+6 nodes, 6 edges (depth<=4, limit 200)
+
+Not walkable (the schema carries no link here):
+  ENG-7: inbox items raised while this issue was worked cannot be linked to it: inbox_items carries no mission/issue column.
+  viktor: agents are chain leaves: this agent's other assignments are not part of this chain.
+```
+
+## Reading the tree
+
+The API returns a **graph**; a terminal has one dimension to spend, so this
+renders a tree. Every edge in the response still gets exactly one line, so the
+tree and `--format json` describe the same thing.
+
+- **Direction is on the edge, not in the nesting.** The layout walks the graph
+  undirected, because the anchor is usually in the *middle* of its chain —
+  `crewship chain <run-id>` has to show the routine and the issue above the run
+  as well as the nested runs below it. `[triggers ->]` means the parent line
+  caused the child; `[<- executes]` means the child line executes the parent.
+- **`(shown above)`** is a second edge into a node that is already on the page.
+  It is not a duplicate: it is the edge that makes the graph a graph, and when
+  it points back up it is a cycle closing.
+- **`(partial)`** marks a node whose expansion stops here, with the reason
+  listed under *Not walkable*.
+- **`[composed depth N]`** on a run is `chain_depth`: how many *composed* hops
+  separate it from whatever a human did. It is a property of the run, not of
+  your query — unlike the tree's indentation, it does not change with the
+  anchor you chose. Runs a person started carry 0 and print nothing.
+
+## Edge kinds
+
+| Kind | Meaning |
+|---|---|
+| `triggers` | The parent caused the child to start. |
+| `runs` | The parent is the routine definition, the child is one run of it. |
+| `executes` | The parent is the agent carrying the child out. |
+| `produces` | The parent emitted the child — an inbox approval, a failure alert. |
+| `relates` | An author-declared issue↔issue link, not a causal one. |
+
+Every one is backed by a real column; the table of which column is in the
+[Chains API reference](/api-reference/chains#edge-kinds-and-the-columns-behind-them).
+
+## Automations — where a chain began
+
+A rule that turns an event into a routine run is what makes a chain *start*.
+Anchor on one to see what it is wired to and what it has actually done:
+
+```
+automation/run.failed aut_01hx  Triage on failure  (enabled)
+├─ [triggers ->] routine triage  Triage  (active)
+└─ [triggers ->] run prn_01j4  triage  (completed) [composed depth 1]
+
+3 nodes, 2 edges (depth<=4, limit 200)
+```
+
+Anchored on a run instead, the rule appears *above* it, so `crewship chain
+prn_01j4` answers "why did this happen" with the rule rather than stopping at
+the routine.
+
+<Note>
+  **A rule is only shown where it actually fired.** Walking a routine does not
+  list the rules that merely point at it — they would be drawn with the same
+  `triggers` edge as the one that really fired, and a chain offering four
+  candidate causes for a run you started by hand is worse than one offering
+  none. The rules that *did* fire stay reachable through the runs they caused.
+  The reasoning is in the [API reference](/api-reference/chains#a-rule-is-only-drawn-where-it-actually-fired).
+</Note>
+
+Disabling a rule keeps the runs it already caused attached to it. Deleting one
+removes it from the walk — the run still records that an automation started it,
+but the rule itself is no longer readable.
+
+## What it cannot show you
+
+Two links the product implies do not exist in the schema, and this command
+reports them rather than guessing:
+
+- **Inbox items cannot be traced to an issue.** `inbox_items` has no mission
+  column on any kind, so the approvals and failure alerts raised while an issue
+  was worked are not reachable from it.
+- **Escalations cannot be traced to a run or an issue.** `escalations` carries
+  only crew, chat and from-agent, so an escalation cannot be attached to what
+  provoked it.
+
+Pass `--gaps` to print the full text of both.
+
+## Truncation
+
+The walk is bounded on two axes, and both caps are enforced server-side. When
+one bites, the footer says so and names the flag that would widen it:
+
+```
+12 nodes, 14 edges (depth<=2, limit 200)
+Truncated: the depth cap was reached, so this is NOT the whole chain. Raise --depth.
+```
+
+A short tree is never silently presented as a complete chain.
+
+## Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--depth` | server default `4`, ceiling `10` | How many hops from the anchor to walk. |
+| `--limit` | server default `200`, ceiling `1000` | Maximum nodes to return. |
+| `--gaps` | off | Print the full text of the links the data model cannot carry. |
+
+Global flags apply as usual — `--format json|yaml|ndjson` emits the raw graph
+(nodes, edges, `truncated`, `gaps`) for a script to consume.
+
+## Aliases
+
+`crewship why <anchor>` is an alias for `crewship chain <anchor>`.
+
+## See also
+
+- [Chains API reference](/api-reference/chains)
+- [`crewship routine tree`](/cli/routine) — nested runs only, without the issue
+  and delegation substrates.

@@ -25,6 +25,8 @@ package hooks
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -87,6 +89,35 @@ var AllEvents = []Event{
 	EventOnApprovalRequested,
 	EventOnBudgetExceeded,
 	EventOnGuardrailTriggered,
+}
+
+// ValidateEvent reports whether e is one of the events declared above.
+//
+// Nothing in the schema constrains hooks_config.event — the CHECK covers
+// handler_kind only — so a misspelled event is accepted by SQLite, never
+// selected by ListByEvent, and therefore never fires. The failure is
+// completely silent: the hook lists, enables, and looks healthy. That is
+// why the error message enumerates every legal value rather than just
+// saying "invalid": the caller who typo'd "PreToolUse" needs to see
+// "pre_tool_call" without reading the source.
+func ValidateEvent(e Event) error {
+	for _, known := range AllEvents {
+		if e == known {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %q (valid events: %s)", ErrUnknownEvent, string(e),
+		strings.Join(EventNames(), ", "))
+}
+
+// EventNames renders AllEvents as strings in the same stable order, for
+// error messages, CLI help text, and API validation responses.
+func EventNames() []string {
+	out := make([]string, 0, len(AllEvents))
+	for _, e := range AllEvents {
+		out = append(out, string(e))
+	}
+	return out
 }
 
 // HandlerKind enumerates the three dispatch backends the platform supports.
@@ -169,10 +200,13 @@ type Result struct {
 // Register when a non-OWNER caller tries to create a shell hook.
 // ErrSubagentHandlerNotConfigured is returned by Dispatch when a subagent
 // hook fires but the orchestrator hasn't injected a handler yet.
+// ErrUnknownEvent is returned by ValidateEvent (and therefore by Register /
+// Update) for an event name outside AllEvents.
 var (
 	ErrShellHookNotAllowed          = errors.New("hooks: shell handlers require OWNER role")
 	ErrSubagentHandlerNotConfigured = errors.New("hooks: subagent handler not configured")
 	ErrUnknownHandlerKind           = errors.New("hooks: unknown handler kind")
+	ErrUnknownEvent                 = errors.New("hooks: unknown event")
 )
 
 // BlockedError is returned by Dispatch when a blocking hook fires a Block

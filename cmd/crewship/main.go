@@ -137,6 +137,7 @@ func init() {
 	rootCmd.AddCommand(consolidateCmd)
 	rootCmd.AddCommand(evalCmd)
 	rootCmd.AddCommand(hooksCmd)
+	rootCmd.AddCommand(automationCmd)
 	rootCmd.AddCommand(presenceCmd)
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(completionCmd)

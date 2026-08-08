@@ -12,9 +12,21 @@ import {
   AlertTriangle,
   Ban,
   BookmarkCheck,
+  Bot,
+  Boxes,
   Brain,
   Briefcase,
   CheckCircle,
+  Eye,
+  FilePen,
+  FilePlus,
+  FileX,
+  Gauge,
+  KeyRound,
+  Search,
+  SkipForward,
+  Trash2,
+  UserMinus,
   ClipboardCheck,
   ClipboardList,
   ClipboardX,
@@ -148,6 +160,86 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "notification.delivered": Webhook,
   "notification.failed": Webhook,
   "notification.dropped": Webhook,
+
+  // ── Routine engine ────────────────────────────────────────────────
+  // Deliberately the same glyphs as the run.* family above. A reader
+  // scanning the feed is asking "did this work", not "which engine ran
+  // it", and giving the pipeline engine its own vocabulary would make
+  // one product concept read as two.
+  "pipeline.run.started": Play,
+  "pipeline.run.completed": CheckCircle,
+  "pipeline.run.failed": XCircle,
+  "pipeline.step.started": Play,
+  "pipeline.step.completed": CheckCircle,
+  "pipeline.step.failed": XCircle,
+  "pipeline.step.validation_failed": ClipboardX,
+  "pipeline.step.skipped": SkipForward,
+  "pipeline.step.retrying": RotateCcw,
+  "pipeline.step.container_ready": Boxes,
+  "pipeline.dry_run": Microscope,
+  "pipeline.schedule.circuit_breaker_tripped": ShieldAlert,
+  "pipeline.schedule.missed_occurrences": Clock,
+  "pipeline.runs_swept": Trash2,
+
+  // ── Automation ────────────────────────────────────────────────────
+  // Both are a rule being REFUSED, and the distinction matters: one is
+  // "too often" (raise the cap or debounce it), the other is "too deep"
+  // (you have built a cycle). One glyph for both would hide which.
+  "automation.throttled": Gauge,
+  "automation.depth_exceeded": ShieldAlert,
+
+  // ── Chat ──────────────────────────────────────────────────────────
+  "chat.user_message": MessageSquare,
+  "chat.agent_response": Bot,
+  "conversation.compacted": RotateCcw,
+
+  // ── Provisioning ──────────────────────────────────────────────────
+  "provisioning.queued": Clock,
+  "provisioning.building": Hammer,
+  "provisioning.step": Hammer,
+  "provisioning.complete": CheckCircle,
+  "provisioning.failed": XCircle,
+  "provisioning.build_failed": XCircle,
+  "sidecar.stale": AlertTriangle,
+
+  // ── Credentials ───────────────────────────────────────────────────
+  "credential.revealed": Eye,
+  "credential.lease_issued": KeyRound,
+  "credential.reveal_policy_changed": ShieldCheck,
+  "credential.sensitivity_lowered": ShieldAlert,
+  "credential.auto_assign_failed": XCircle,
+  "credential.auto_assign_empty": Ban,
+
+  // ── Skills ────────────────────────────────────────────────────────
+  "skill.imported": PackageOpen,
+  "skill.deleted": Trash2,
+  "skill.assigned": UserPlus,
+  "skill.unassigned": UserMinus,
+  "skill.invoked": Sparkles,
+
+  // ── Audit ─────────────────────────────────────────────────────────
+  // Four distinct ACTIONS, unlike the notification family above, which
+  // is one action with three outcomes. Created and deleted are opposites
+  // and must not share a glyph.
+  "audit.entity_created": FilePlus,
+  "audit.entity_updated": FilePen,
+  "audit.entity_deleted": FileX,
+  "audit.entity_restored": RotateCcw,
+
+  // ── Memory ────────────────────────────────────────────────────────
+  "memory.searched": Search,
+  "memory.write_rejected": Ban,
+  "memory.write_verifier_blocked": ShieldOff,
+  "memory.consolidation_proposed": Wand2,
+  "memory.versions_swept": Trash2,
+  "memory.config_updated": Database,
+  "memory.skill_proposed": Sparkles,
+  "memory.skill_approved": CheckCircle,
+  "memory.skill_rejected": XCircle,
+
+  // ── Agent ─────────────────────────────────────────────────────────
+  "run.agent_span": Activity,
+  "agent.error": AlertTriangle,
 }
 
 /**

@@ -552,6 +552,12 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		DueDate      *string   `json:"due_date"`
 		Estimate     *int      `json:"estimate"`
 		Labels       *[]string `json:"labels"`
+		// The routine run making this call. crewshipBody has always sent it;
+		// this struct did not decode it, so it was dropped on the floor and
+		// the resulting journal entry named no cause. That is what made the
+		// composition depth cap unreachable — see
+		// TestInternalIssue_UpdateStatus_StampsTheCausingRunOnTheJournalEntry.
+		AuthorRunID string `json:"author_run_id"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -819,12 +825,22 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	ev := func(action issueAction, details string) {
 		evs = append(evs, issueEvent{
 			MissionID: missionID, ActorType: actorType, ActorID: actorID,
+			RunID:  req.AuthorRunID,
 			Action: action, Details: details,
 		})
 	}
 	if !ub.Empty() {
 		if statusChanged {
-			ev(actionStatusChanged, currentStatus+" → "+req.Status)
+			evs = append(evs, issueEvent{
+				MissionID: missionID, ActorType: actorType, ActorID: actorID,
+				// The run that caused it. This is the pointer the composition
+				// depth cap resolves; without it every automation hop opens a
+				// fresh budget and the cap is unreachable.
+				RunID:   req.AuthorRunID,
+				Action:  actionStatusChanged,
+				Details: currentStatus + " → " + req.Status,
+				From:    currentStatus, To: req.Status,
+			})
 		}
 		if req.Priority != "" {
 			ev(actionPriorityChanged, req.Priority)

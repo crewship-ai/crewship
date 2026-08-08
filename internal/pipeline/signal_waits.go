@@ -33,6 +33,20 @@ type SignalWaitStore interface {
 	// contract the in-memory registry offered.
 	Deliver(ctx context.Context, runID, eventType, payload string) (armed bool, err error)
 
+	// DeliverTopic persists payload against EVERY pending wait in
+	// workspaceID matching eventType, and returns the ids of the runs it
+	// claimed so the caller can un-park each one.
+	//
+	// This is the run_id-less door Deliver cannot be. An internal event
+	// source ("a mission changed status") knows a workspace and an event
+	// type; it never knows which runs are parked on them, and asking it
+	// to find out would make every producer re-implement this lookup.
+	//
+	// An empty result is NOT an error: an event nobody waits on is the
+	// normal case for a producer that emits regardless of listeners.
+	// Callers that need "did anyone hear me" read len(runIDs).
+	DeliverTopic(ctx context.Context, workspaceID, eventType, payload string) (runIDs []string, err error)
+
 	// ConsumeDelivered returns the payload for a delivered-but-not-yet-
 	// consumed wait at (runID, stepID) and marks it consumed in the same
 	// call (so two concurrent consumers — a live goroutine racing a
@@ -89,6 +103,69 @@ WHERE id = (
 		return false, fmt.Errorf("signal_waits: deliver rows: %w", err)
 	}
 	return n > 0, nil
+}
+
+// maxTopicFanout bounds one DeliverTopic call. The loop below terminates on
+// its own — every iteration flips exactly one row out of 'pending', and only
+// Arm puts rows back in — so this is not the termination condition, it is a
+// guard against a producer that arms faster than one delivery can drain
+// (which would otherwise turn a single HTTP request into an unbounded loop).
+// A workspace with 10k runs parked on one topic at the same instant is a
+// pathology worth reporting rather than serving.
+const maxTopicFanout = 10000
+
+// ErrTopicFanoutTruncated reports that a topic delivery hit maxTopicFanout.
+// The run ids returned alongside it WERE delivered and must still be resumed;
+// the rest are untouched and a second call will claim them.
+var ErrTopicFanoutTruncated = errors.New("signal_waits: topic fan-out exceeded the per-call cap")
+
+func (s *SQLSignalWaitStore) DeliverTopic(ctx context.Context, workspaceID, eventType, payload string) ([]string, error) {
+	if workspaceID == "" || eventType == "" {
+		return nil, fmt.Errorf("signal_waits: deliver topic: workspace_id and event_type are required")
+	}
+	now := tsformat.Format(time.Now().UTC()) // fixed-width for consistency with created_at (#990)
+	runIDs := make([]string, 0, 4)
+	seen := make(map[string]bool, 4)
+	for i := 0; i < maxTopicFanout; i++ {
+		// One row per statement, claimed by the same discipline Deliver
+		// uses: the UPDATE's own WHERE requires status='pending', so the
+		// row transition IS the claim and two concurrent callers cannot
+		// both take it. Draining one row at a time (rather than a single
+		// multi-row UPDATE) keeps each claim a self-contained statement,
+		// which is what makes the concurrent case partition cleanly
+		// instead of depending on how the driver streams a RETURNING
+		// cursor while the write lock is held.
+		var runID string
+		err := s.db.QueryRowContext(ctx, `
+UPDATE pipeline_signal_waits
+SET status = 'delivered', payload = ?, delivered_at = ?
+WHERE id = (
+    SELECT id FROM pipeline_signal_waits
+    WHERE workspace_id = ? AND event_type = ? AND status = 'pending'
+    ORDER BY created_at ASC LIMIT 1
+)
+RETURNING run_id`,
+			payload, now, workspaceID, eventType,
+		).Scan(&runID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return runIDs, nil
+		}
+		if err != nil {
+			// Partial progress is real progress: return what was already
+			// claimed so the caller resumes those runs rather than
+			// leaving them delivered-but-parked.
+			return runIDs, fmt.Errorf("signal_waits: deliver topic: %w", err)
+		}
+		// A run can hold more than one pending wait (two branches parked
+		// on the same event). Each row is claimed, but the run is woken
+		// once — resuming the same run twice is the double-execution this
+		// whole claim discipline exists to prevent.
+		if !seen[runID] {
+			seen[runID] = true
+			runIDs = append(runIDs, runID)
+		}
+	}
+	return runIDs, ErrTopicFanoutTruncated
 }
 
 func (s *SQLSignalWaitStore) ConsumeDelivered(ctx context.Context, runID, stepID string) (string, bool, error) {

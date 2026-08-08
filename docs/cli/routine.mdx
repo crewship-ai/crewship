@@ -47,7 +47,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Runs | `tree <run_id>` | Show a run and its child runs (call_pipeline / deferred / replay) |
 | Runs | `replay <run_id>` | Re-run a prior run with its original inputs (marked `is_replay`) |
 | Runs | `metadata <run_id>` | Mutate a run's metadata scratchpad (set / increment / append) |
-| Runs | `signal <run_id>` | Deliver a payload to a running run's `wait:event` step |
+| Runs | `signal <run_id>` | Deliver a payload to a running run's `wait:event` step (topic-wide: [`crewship signal send`](/cli/signal)) |
 | Failures | `errors` | List failed runs grouped by error fingerprint |
 | Failures | `bulk-replay` | Replay all failed runs under a fingerprint (after a fix) |
 | Deferred | `pending ...` | List or cancel deferred (delayed/debounced) routine triggers |
@@ -122,10 +122,25 @@ crewship routine save \
 | `--name` | ✓ | Human-readable name; slug derived from this |
 | `--description` | | One-line summary shown in `[AVAILABLE ROUTINES]` |
 | `--definition` | ✓ | Path to JSON DSL file |
-| `--author-crew` | ✓ | crew_id that owns this routine |
-| `--author-agent` | | agent_id that authored (optional but recommended) |
+| `--author-crew` | ✓ | crew slug or id that owns this routine |
+| `--author-agent` | | Agent slug or id the routine **acts as**. Must belong to `--author-crew`. Required when the DSL has a `crewship` step using `issue.comment` |
 | `--sample-inputs` | | JSON inputs the test_run uses |
 | `--change-summary` | | One-line note stored on the version row (shown by `routine versions` and the versions UI) |
+
+<Note>
+  `--author-agent` is not a credit line. Every `crewship` step in the routine
+  dispatches under that agent's identity, and `issue.comment` has no other
+  source for one — a comment needs an author it can name. Saving a routine that
+  contains an `issue.comment` step **without** `--author-agent` is refused:
+
+  ```
+  pipeline: step "report" (crewship issue.comment) crewship action needs an
+  acting agent and the routine has none — … Save with --author-agent <slug|id>
+  ```
+
+  The refusal is at save on purpose. The same routine used to save clean and
+  then fail every run with `400: agent_id is required`.
+</Note>
 
 ---
 
@@ -561,6 +576,46 @@ crewship routine records eval-extract-emails --json | jq '.[] | select(.cost_usd
 | `--json` | Emit JSON for scripting |
 
 Falls back with a clear message to `crewship routine runs <slug>` when the server predates v83.
+
+### Reading the TRIGGER and CHAIN columns
+
+`TRIGGER` is not a verbatim print of the row's `triggered_via`. Every *deferred*
+run — cron schedules and [automations](/guides/automations) alike — is fired by
+the same dispatcher and stored with `triggered_via: "schedule"`, so the raw
+field cannot tell the two apart. When a run carries an `automation_name`, the
+column reads `automation` and `SOURCE` names the rule that started it:
+
+```text
+RUN ID            STATUS     MODE  TRIGGER     SOURCE            DURATION  COST     STARTED
+crun_9f2c…        completed  live  automation  Triage new bugs   4.1s      $0.0031  2026-08-07 08:00
+crun_71ab…        completed  live  schedule    sch_nightly       12.4s     $0.0180  2026-08-07 07:00
+crun_2d40…        completed  live  manual      —                 1.2s      $0.0004  2026-08-07 06:41
+```
+
+`CHAIN` appears **only when some run on the page was composed** rather than
+started directly — a routine that another routine called, or one an automation
+fired from an event a run emitted. The number is `chain_depth`: hops from
+whatever a human did, capped at 8. A workspace where nothing composes never
+sees the column.
+
+Structured output (`--format json|yaml|ndjson`) always carries the underlying
+fields, whether or not the table drew them:
+
+| Field | Meaning |
+|-------|---------|
+| `chain_depth` | Composed hops from a human action. `0` = a run somebody started. Always present. |
+| `chain_origin` | The run or journal entry that started the chain. Absent on a chain root. |
+| `automation_id` / `automation_name` | The rule that fired this run. Absent unless an automation did. |
+| `trigger_event_type` | The journal event type that matched the rule. |
+
+```bash
+# Every run a rule started, and which rule
+crewship routine records daily-triage --format json \
+  | jq '.[] | select(.automation_name) | {id, automation_name, trigger_event_type}'
+
+# Anything approaching the depth ceiling
+crewship routine records daily-triage --format json | jq '.[] | select(.chain_depth >= 6)'
+```
 
 ---
 
@@ -1107,6 +1162,10 @@ crewship routine signal run_cmox... --event approval-received --payload "shipit"
 | `--payload` | string | | String payload that becomes the wait step's output |
 
 Backed by `POST /api/v1/workspaces/{ws}/pipeline-runs/{run_id}/signal`.
+
+Needs a run id, so it only works when you already have one. To wake **every**
+run parked on an event without knowing which they are, use
+[`crewship signal send`](/cli/signal) instead.
 
 ---
 

@@ -1,0 +1,255 @@
+---
+title: "Chains"
+description: "Reconstruct the causal graph around one issue, run, routine, assignment or automation in a single call."
+icon: "share-nodes"
+---
+
+A chain answers "what caused what". Given one anchor, it returns the connected
+graph around it — the automation rule that started it, the issue, the routine
+it is bound to, the runs that fired, the nested runs those called, the
+assignments agents were given, who executed them, and the inbox items the whole
+thing produced.
+
+It exists because that answer is spread across two execution substrates that
+share no table. `pipeline_runs` is the routine substrate, `assignments` is the
+delegation substrate, and `missions` (issues) sits above both pointing at each
+with an untyped string column. Without this endpoint a client makes five calls
+and re-implements the join rules itself — including the non-obvious one where
+`pipeline_runs.triggered_by_id` holds the issue **identifier**, not the mission
+id.
+
+<Note>
+  Read-only and workspace-scoped. Every query in the walk carries the caller's
+  workspace, which matters more here than usual: the walk hops between tables
+  on untyped string columns, and issue identifiers have only been unique per
+  workspace since the `20260806203901` migration.
+</Note>
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/chains/{anchor}`](#get-a-chain) | The causal graph around one anchor |
+
+---
+
+## Get a chain
+
+```
+GET /api/v1/chains/{anchor}?depth=4&limit=200
+```
+
+**Auth:** bearer token, workspace-scoped (`RequireAuth` + `RequireWorkspace`).
+The workspace comes from the authenticated session, never from the path.
+
+**Path parameters:**
+
+| Param | Description |
+|---|---|
+| `anchor` | An issue identifier (`ENG-4`), an issue id, a run id, a routine id, a routine slug, an assignment id, or an inbox item id. Resolved in that order; the first match wins. |
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `depth` | integer | Maximum hops from the anchor. Default `4`, ceiling `10`. |
+| `limit` | integer | Maximum nodes returned. Default `200`, ceiling `1000`. |
+
+Both are clamped server-side. An unparseable or out-of-range value falls back
+to the default or the ceiling rather than returning `400`, and `truncated`
+reports the consequence.
+
+**Request:** no body.
+
+**Response:** `200 OK`
+
+```json
+{
+  "anchor": "ENG-7",
+  "anchor_node": "issue:mis_01hx",
+  "max_depth": 4,
+  "max_nodes": 200,
+  "nodes": [
+    {
+      "id": "issue:mis_01hx",
+      "kind": "issue",
+      "ref": "mis_01hx",
+      "key": "ENG-7",
+      "label": "Deploy is flaky on cold start",
+      "status": "IN_PROGRESS",
+      "depth": 0,
+      "anchor": true,
+      "partial": true,
+      "partial_reason": "inbox items raised while this issue was worked cannot be linked to it: inbox_items carries no mission/issue column."
+    },
+    {
+      "id": "run:prn_01hy",
+      "kind": "run",
+      "ref": "prn_01hy",
+      "key": "deploy",
+      "label": "deploy",
+      "status": "failed",
+      "depth": 1
+    }
+  ],
+  "edges": [
+    { "from": "issue:mis_01hx", "to": "run:prn_01hy", "kind": "triggers" }
+  ],
+  "truncated": false,
+  "gaps": [
+    {
+      "from": "inbox",
+      "to": "issue",
+      "reason": "inbox_items has no mission/issue column on any kind — source_id is polymorphic over waitpoint token, escalation id and run id only."
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `anchor` | string | The anchor string as supplied. |
+| `anchor_node` | string | The `id` of the node the anchor resolved to. |
+| `max_depth` | integer | The depth cap actually applied, after clamping. |
+| `max_nodes` | integer | The node cap actually applied, after clamping. |
+| `nodes[].id` | string | Graph key, `"<kind>:<ref>"`. `edges[].from`/`to` reference this. |
+| `nodes[].kind` | string | `issue`, `routine`, `run`, `assignment`, `agent`, `inbox`, `automation`. Open set — treat an unknown kind as opaque rather than an error. |
+| `nodes[].ref` | string | Primary key of the underlying row. |
+| `nodes[].key` | string | Human handle. Unique per workspace for `issue` (identifier), `routine` and `agent` (slug); for `run` it is the routine slug, for `inbox` the item kind and for `automation` the `event_type`, so it is **not** an identifier for those. |
+| `nodes[].label` | string | Title / task text. User- and agent-written; escape before rendering. |
+| `nodes[].status` | string | Row status, verbatim from its table. |
+| `nodes[].depth` | integer | Shortest distance from the anchor, in hops. A property of **this query**: the same row reports a different value depending on where you started. |
+| `nodes[].chain_depth` | integer | `run` nodes only. `pipeline_runs.chain_depth` — how many **composed** hops separate this run from whatever a human did. A property of **the run**, identical whoever asks. Omitted when zero, so an absent field means "not composed" rather than "unknown". |
+| `nodes[].anchor` | boolean | True on exactly one node. |
+| `nodes[].partial` | boolean | The node's outward expansion is known to be incomplete. |
+| `nodes[].partial_reason` | string | Why. Present whenever `partial` is true. |
+| `edges[].kind` | string | See the edge table below. Open set. |
+| `truncated` | boolean | A cap stopped the walk. **Always present**, including when false. |
+| `truncated_by` | string | `"depth"` or `"nodes"` — the cap that bit first. Absent when not truncated. |
+| `gaps[]` | array | Links the schema cannot carry. Always returned. |
+
+### Edge kinds and the columns behind them
+
+Every edge is backed by a real column. Nothing is inferred.
+
+| Edge | Kind | Column |
+|---|---|---|
+| issue → routine | `triggers` | `missions.routine_id` (a `pipelines.id`; no FK) |
+| issue → run | `triggers` | `pipeline_runs.triggered_via='issue'` and `triggered_by_id` = `missions.identifier` |
+| routine → run | `runs` | `pipeline_runs.pipeline_id` (FK) |
+| run → run | `triggers` | `triggered_via='call_pipeline'`, `triggered_by_id` = parent run id |
+| issue → assignment | `triggers` | `mission_tasks.assignment_id` |
+| assignment → assignment | `triggers` | `assignments.parent_assignment_id` |
+| agent → assignment | `executes` | `assignments.assigned_to_id` |
+| agent → run | `executes` | `journal_entries` where `actor_type='agent'` and (`trace_id` = run id OR `run_id` = run id) |
+| run → inbox | `produces` | `inbox_items.kind='waitpoint'` joined through `pipeline_waitpoints.token` = `source_id` |
+| run → inbox | `produces` | `inbox_items.kind='failed_run'`, `payload_json` → `$.run_id` |
+| automation → run | `triggers` | `pipeline_runs.triggered_via='automation'` and `triggered_by_id` = `automations.id` |
+| automation → routine | `triggers` | `automations.action_config_json` → `$.routine_slug`, resolved against `pipelines.slug` in the same workspace |
+| issue ↔ issue | `relates` | `mission_relations` (author-declared, not causal) |
+
+`triggered_by_id` is polymorphic — a schedule id, a webhook id, a parent run
+id, or an issue identifier depending on `triggered_via` — so it is only ever
+dereferenced against the table `triggered_via` names. A schedule id that
+happens to equal a run id is not followed as a parent run.
+
+### Automations: the origin of a composed chain
+
+An `automation` is a stored rule that turns a journal event into a routine run.
+It is the thing that makes a chain *begin*, so without it a topology can draw
+`routine → run → agent` and never say why any of it happened.
+
+The link back is exact, not inferred: a run a rule started carries
+`triggered_via='automation'` with `triggered_by_id` set to the `automations.id`.
+An automation is also a valid anchor — `GET /api/v1/chains/aut_01hx...` returns
+the routine the rule is wired to and every run it has caused.
+
+An automation node carries the rule's `name` as `label`, its `event_type` as
+`key`, and `"enabled"` / `"disabled"` as `status`.
+
+#### A rule is only drawn where it actually fired
+
+Walking a **routine** does **not** return the rules that merely point at it.
+This is deliberate, and it is the one place where the two automation links are
+not symmetrical:
+
+- `pipeline_runs.triggered_by_id` is a **record** — that run exists because
+  that rule fired.
+- `automations.action_config_json.routine_slug` is a **standing intent** — it
+  says where a rule is aimed, not that it ever went off. One routine can be
+  named by unboundedly many rules, and none of them need ever have fired.
+
+So the direction depends on which end you anchored, because the anchor is the
+question. Anchored on the **rule**, the rule is the subject and its
+configuration is the answer — "aimed at `triage`, has caused nothing" is
+correct and complete, and the absence of run nodes is itself the finding.
+Anchored on a **routine or a run**, a rule is being offered as an
+*explanation*, and a rule that did not fire would be drawn with the identical
+`triggers` edge as the one that did. A graph titled "how this happened" listing
+four candidate causes for a run you started by hand is not an incomplete
+answer, it is a wrong one that looks authoritative.
+
+Nothing is lost by this. The rules that **did** fire stay reachable from a
+routine through the runs they caused (`routine → run → automation`), which is
+precisely the evidence that they fired.
+
+Two consequences worth knowing:
+
+- Disabling a rule does not erase the runs it already caused; those edges
+  remain, so switching a rule off never rewrites history.
+- **Soft-deleting** a rule does remove it from the walk, because a deleted rule
+  is not-found on every other surface and a chain that resurrected it would
+  show a node you cannot click through to. The run keeps
+  `triggered_via='automation'`, so the fact that *a* rule started it survives
+  in the run record even when the rule itself is no longer readable.
+
+### Links that do not exist
+
+Two links the product implies are not in the schema, and are reported rather
+than guessed. Every response carries them in `gaps[]`, and the nodes at those
+boundaries carry `partial: true` with the same reason.
+
+| Missing link | Why |
+|---|---|
+| inbox → issue | `inbox_items` has no mission or issue column on any kind. `source_id` is polymorphic over waitpoint token, escalation id and run id only. An issue therefore cannot reach the approvals and failure alerts raised while it was worked. |
+| escalation → run / issue | `escalations` has only `crew_id`, `chat_id` and `from_agent_id`. An escalation cannot be attached to what provoked it, so inbox items of kind `escalation` are chain leaves. |
+
+Guessing either one produces confident nonsense — matching an escalation to a
+run by crew and timestamp is wrong the moment two runs overlap — so the
+endpoint states the hole instead. `agent` nodes are also marked `partial`, for
+a different reason: expanding one would pull in that agent's entire assignment
+history, which is not part of this chain.
+
+### Truncation
+
+`truncated` is always on the wire, so a short chain is never silently
+presented as a complete one. When it is true, `truncated_by` names which cap
+bit first — the first one, not the last, because once the node cap has stopped
+the walk the depth cap is never reached and reporting that would send you to
+raise the wrong limit.
+
+Edges are only returned when both endpoints are in `nodes[]`. An edge to a
+node the cap dropped is dropped with it, so a client never has to distinguish
+a dangling reference from a rendering bug of its own.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | `anchor` missing from the path. |
+| 401 | No authenticated session, or no workspace resolvable. |
+| 403 | Caller is not a member of the workspace. |
+| 404 | No issue, run, routine, assignment, inbox item or automation matches the anchor **in this workspace**. Deliberately the same answer as an anchor that exists in another workspace — otherwise this endpoint becomes an oracle for identifiers in a tenant the caller cannot read. |
+| 500 | Query failed. |
+
+## CLI
+
+The same data, rendered as a tree:
+
+```
+crewship chain ENG-7
+crewship chain ENG-7 --depth 6 --limit 400 --gaps
+crewship chain prn_01hy --format json
+```
+
+See [`crewship chain`](/cli/chain).

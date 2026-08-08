@@ -17,6 +17,7 @@ DELETE /api/v1/agents/{agentId}/peers/{userId} roleSelf
 DELETE /api/v1/agents/{agentId}/persona roleCreate
 DELETE /api/v1/agents/{agentId}/skills/{skillId} roleCreate
 DELETE /api/v1/auth/cli-tokens/{tokenId} roleSelf
+DELETE /api/v1/automations/{id} roleManage
 DELETE /api/v1/cache/images/{tag} roleManage
 DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji} roleSelf
 DELETE /api/v1/chats/{chatId}/participants/{userId} roleSelf
@@ -39,6 +40,7 @@ DELETE /api/v1/crews/{crewId}/persona roleCreate
 DELETE /api/v1/feature-flags/{key} roleManage
 DELETE /api/v1/feature-flags/{key}/override roleManage
 DELETE /api/v1/feedback roleSelf
+DELETE /api/v1/hooks/{id} roleManage
 DELETE /api/v1/inbox roleManage
 DELETE /api/v1/instance/settings/{key} roleManage
 DELETE /api/v1/integrations/composio/accounts/{accountId} roleManage
@@ -78,6 +80,7 @@ PATCH /api/v1/admin/memory/config roleManage
 PATCH /api/v1/agents/{agentId} roleInline
 PATCH /api/v1/agents/{agentId}/integrations/{integrationId} roleCreate
 PATCH /api/v1/agents/{agentId}/learning roleManage
+PATCH /api/v1/automations/{id} roleManage
 PATCH /api/v1/credentials/{credentialId} roleCreate
 PATCH /api/v1/crews/{crewId} roleManage
 PATCH /api/v1/crews/{crewId}/integrations/{integrationId} roleManage
@@ -88,6 +91,7 @@ PATCH /api/v1/crews/{crewId}/missions/{missionId} roleCreate
 PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId} roleCreate
 PATCH /api/v1/escalations/{escalationId}/resolve roleCreate
 PATCH /api/v1/feature-flags/{key} roleManage
+PATCH /api/v1/hooks/{id} roleManage
 PATCH /api/v1/inbox/{id} roleSelf
 PATCH /api/v1/integrations/{integrationId} roleManage
 PATCH /api/v1/issues/bulk roleCreate
@@ -143,6 +147,8 @@ POST /api/v1/approvals/{id}/decide roleManage
 POST /api/v1/auth/cli-token roleSelf
 POST /api/v1/auth/pair/start roleSelf
 POST /api/v1/auth/sessions/{id}/revoke roleSelf
+POST /api/v1/automations roleManage
+POST /api/v1/automations/preview roleCreate
 POST /api/v1/chats/{chatId}/messages/{messageId}/reactions roleSelf
 POST /api/v1/chats/{chatId}/participants roleSelf
 POST /api/v1/chats/{chatId}/steer roleSelf
@@ -194,6 +200,7 @@ POST /api/v1/eval/regression roleManage
 POST /api/v1/eval/replay roleManage
 POST /api/v1/feature-flags roleManage
 POST /api/v1/feedback roleSelf
+POST /api/v1/hooks roleManage
 POST /api/v1/hooks/{id}/disable roleManage
 POST /api/v1/hooks/{id}/enable roleManage
 POST /api/v1/inbox/bulk roleSelf
@@ -260,6 +267,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run roleCreate
+POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
 POST /api/v1/workspaces/{workspaceId}/skills/import roleCreate

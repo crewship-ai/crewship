@@ -481,6 +481,12 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range finalWorkflowIssueSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range automationSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range hookSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, name := range executionResponseSchemas() {
 		result[key] = mergeDomainSchema(result[key], DomainSchema{Response: ref(name)})
 	}

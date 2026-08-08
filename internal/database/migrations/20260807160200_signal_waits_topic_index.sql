@@ -1,0 +1,31 @@
+-- pipeline_signal_waits: make a wait addressable by TOPIC, not only by run.
+--
+-- v154 shipped one index, (run_id, event_type, status), which is exactly the
+-- shape the delivery path had at the time: "find the oldest pending wait for
+-- THIS run and this event". That works for an external caller holding a run id
+-- it was handed back at trigger time. It cannot serve an internal event source,
+-- which knows a workspace and an event and never a run id — the whole point of
+-- "wake every run waiting on mission.status_change" is that the producer does
+-- not know who is listening.
+--
+-- SQLite can only use a composite index from its leftmost column inward, so a
+-- WHERE workspace_id = ? AND event_type = ? AND status = 'pending' cannot use
+-- an index that starts with run_id: it degrades to a full table scan of every
+-- wait ever armed, on every internal event. The table only grows (delivered and
+-- consumed rows are kept as the audit trail of what woke what), so that scan
+-- gets slower for the life of the instance.
+--
+-- Column order is the query's: workspace_id first because it is the tenant
+-- fence and is always an equality, event_type second (equality), status third
+-- (equality on 'pending', and it keeps the index covering enough that the
+-- delivery claim does not have to visit rows for topics nobody is parked on).
+--
+-- Not a partial index (WHERE status = 'pending'): the same three columns answer
+-- "what is waiting on this topic" for diagnosis at any status, and the table is
+-- small enough that the narrower index buys nothing worth the second shape.
+--
+-- The v154 index stays. Deliver() is still run-keyed and still the path a
+-- per-run signal takes; this adds a second way in, it does not replace one.
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_signal_waits_topic
+    ON pipeline_signal_waits (workspace_id, event_type, status);

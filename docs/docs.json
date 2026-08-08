@@ -159,6 +159,7 @@
               "guides/harbormaster",
               "guides/cartographer",
               "guides/hooks",
+              "guides/automations",
               "guides/quartermaster",
               "guides/watch-roster",
               {
@@ -309,7 +310,8 @@
               "cli/routine",
               "cli/pipeline",
               "cli/webhook",
-              "cli/waitpoint"
+              "cli/waitpoint",
+              "cli/signal"
             ]
           },
           {
@@ -367,6 +369,7 @@
             "expanded": false,
             "pages": [
               "cli/activity",
+              "cli/chain",
               "cli/logs",
               "cli/metrics",
               "cli/presence"
@@ -392,6 +395,7 @@
               "cli/hire",
               "cli/persona",
               "cli/hooks",
+              "cli/automation",
               "cli/checkpoint",
               "cli/keeper"
             ]
@@ -492,10 +496,12 @@
               "api-reference/runtime",
               "api-reference/port-expose",
               "api-reference/journal",
+              "api-reference/chains",
               "api-reference/paymaster",
               "api-reference/approvals",
               "api-reference/checkpoints",
               "api-reference/hooks",
+              "api-reference/automations",
               "api-reference/feedback",
               "api-reference/presence",
               "api-reference/memory",

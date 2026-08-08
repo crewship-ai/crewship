@@ -1,21 +1,22 @@
 ---
 title: "Hooks Commands"
-description: "List and toggle lifecycle hooks. Registration is config-time only."
+description: "Register, edit, remove, and toggle lifecycle hooks."
 icon: "webhook"
 ---
 
 # crewship hooks
 
-Manage the lifecycle-hook registry -- scripts or webhooks that fire on platform events (`pre_agent_start`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 15-event catalog and the three handler kinds (`shell`, `http`, `subagent`).
+Manage the lifecycle-hook registry -- shell commands, HTTP webhooks, or subagents that fire on platform events (`pre_tool_call`, `post_agent_stop`, `on_approval_requested`, ...). See the [Hooks guide](/guides/hooks) for the full 15-event catalog and the three handler kinds.
 
 ```bash
 crewship hooks <subcommand> [flags]
+crewship hook  <subcommand> [flags]   # singular alias
 ```
 
 <Note>
-  There is no `register` subcommand by design. Hook registration is a
-  config-time operation (seeded at provision or written directly via
-  `hooks.Register`). The CLI and API are strictly read + enable/disable.
+  Every write requires `OWNER` or `ADMIN`. Creating or editing a **shell**
+  hook requires `OWNER` -- a shell handler runs its command on the
+  crewshipd host, outside container isolation.
 </Note>
 
 ## Subcommands
@@ -23,11 +24,14 @@ crewship hooks <subcommand> [flags]
 | Command | Description |
 |---|---|
 | `list` | List registered hooks. |
+| `create` | Register a new hook (OWNER/ADMIN). |
+| `update <id>` | Patch an existing hook (OWNER/ADMIN). |
+| `delete <id>` | Remove a hook permanently (OWNER/ADMIN). |
 | `enable <id>` | Enable a registered hook (OWNER/ADMIN). |
 | `disable <id>` | Disable a registered hook (OWNER/ADMIN). |
 
-`hooks list` honours the global `--format` flag (`json`/`yaml`/`ndjson`) — see
-[Output Formats](/cli/overview#output-formats).
+`hooks list`, `create`, and `update` honour the global `--format` flag
+(`json`/`yaml`/`ndjson`) — see [Output Formats](/cli/overview#output-formats).
 
 ---
 
@@ -45,13 +49,95 @@ crewship hooks list --crew backend-team
 Sample output:
 
 ```
-ID                 EVENT                     HANDLER    TARGET                                      ENABLED  CREATED
-hk_abc123          on_approval_requested     http       https://hooks.slack.com/services/...       yes      2026-03-01T09:00Z
-hk_def456          post_agent_stop           shell      /usr/local/bin/after-agent.sh              yes      2026-03-15T14:22Z
-hk_ghi789          on_budget_exceeded        subagent   oncall-router                              no       2026-04-01T10:10Z
+ID                 EVENT                     HANDLER    TARGET                                      ENABLED  BLOCKING  CREATED
+hk_abc123          on_approval_requested     http       https://hooks.slack.com/services/...       yes      no        2026-03-01T09:00Z
+hk_def456          post_agent_stop           shell      /usr/local/bin/after-agent.sh              yes      no        2026-03-15T14:22Z
+hk_ghi789          on_budget_exceeded        subagent   oncall-router                              no       yes       2026-04-01T10:10Z
 ```
 
-Columns: ID, event, handler kind, target (URL for http, command for shell, subagent name for subagent, truncated to 40 chars), enabled, created_at.
+TARGET is derived from `handler_config`: the URL for `http`, the command for `shell`, the agent for `subagent`, truncated to 40 characters.
+
+---
+
+## `crewship hooks create`
+
+```bash
+crewship hooks create --event <event> --handler <kind> [target flag] [flags]
+```
+
+Requires `--event` and `--handler`, plus a target for that handler kind.
+New hooks are **enabled** unless you pass `--disabled`.
+
+| Flag | Type | Description |
+|---|---|---|
+| `--event` | `string` | Lifecycle event. Validated locally against the 15 declared events — an unknown value errors before any request is sent, and the message lists the valid names. |
+| `--handler` | `string` | `shell`, `http`, or `subagent`. |
+| `--url` | `string` | http handler: destination URL. |
+| `--command` | `string` | shell handler: command run on the host (`OWNER` only). |
+| `--subagent` | `string` | subagent handler: agent slug or ID to dispatch. |
+| `--handler-config` | `string` | Raw `handler_config` JSON. Escape hatch for keys the flags above don't cover (`method`, `hmac_secret`, `timeout_secs`, ...). Wins over `--url`/`--command`/`--subagent`. |
+| `--crew` | `string` | Scope to one crew (slug or ID). Omit for workspace-wide. |
+| `--matcher` | `string` | Raw matcher JSON. Wins over the `--matcher-*` flags. |
+| `--matcher-tools` | `string` | Comma-separated tool-name regexes. |
+| `--matcher-agents` | `string` | Comma-separated agent IDs. |
+| `--matcher-crews` | `string` | Comma-separated crew IDs. |
+| `--matcher-severities` | `string` | Comma-separated severities. |
+| `--blocking` | `bool` | Run synchronously; a `block` outcome cancels the triggering operation. |
+| `--disabled` | `bool` | Register without arming the hook. |
+
+```bash
+# Slack notification on every approval request
+crewship hooks create --event on_approval_requested --handler http \
+    --url https://hooks.slack.com/services/XXX
+
+# Blocking shell gate on Bash and Write, for one crew (OWNER only)
+crewship hooks create --event pre_tool_call --handler shell \
+    --command /usr/local/bin/gate.sh \
+    --matcher-tools 'Bash,Write' --crew backend-team --blocking
+
+# Anything the convenience flags don't cover
+crewship hooks create --event pre_llm_call --handler http \
+    --handler-config '{"url":"https://x.test/h","method":"PUT","hmac_secret":"..."}' \
+    --matcher '{"agent_ids":["ag_1"],"severities":["warn","error"]}'
+```
+
+Sample output:
+
+```
+Created hook hk_abc123
+  event    pre_tool_call
+  handler  shell → /usr/local/bin/gate.sh
+  crew     crw_backend
+  state    enabled, blocking
+```
+
+---
+
+## `crewship hooks update <id>`
+
+```bash
+crewship hooks update hk_abc123 --url https://new.test/hook
+crewship hooks update hk_abc123 --matcher-tools 'Bash,Write'
+crewship hooks update hk_abc123 --disabled
+```
+
+Takes the same flags as `create`, all optional. **Only the flags you pass are sent** — an omitted flag keeps its current server-side value, so changing the event does not quietly clear your matcher or blocking flag. Passing no flags at all is an error rather than an empty patch.
+
+Converting a hook to `--handler shell`, or editing one that is already shell, requires `OWNER`.
+
+---
+
+## `crewship hooks delete <id>`
+
+```bash
+crewship hooks delete hk_abc123 --yes
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--yes` | `bool` | Required. Deletion is permanent and there is no undo. |
+
+Without `--yes` the command refuses and points at `crewship hooks disable`, which stops the hook firing while keeping its definition.
 
 ---
 
@@ -83,8 +169,9 @@ Same auth and audit semantics as enable.
 
 | Exit | Meaning |
 |---|---|
+| 400 | Unknown event or handler kind, or a handler with no target. Most of these are caught locally before a request is sent. |
 | 401 | Not authenticated. |
-| 403 | Logged in but not `OWNER` / `ADMIN`. |
+| 403 | Logged in but not `OWNER` / `ADMIN`; or a non-`OWNER` touching a shell hook. |
 | 404 | Hook ID not found in your workspace (also returned for cross-tenant IDs). |
 
 ## Currently-dispatched events

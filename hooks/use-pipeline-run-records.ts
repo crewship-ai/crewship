@@ -28,9 +28,26 @@ export interface PipelineRunRecord {
   error_message?: string
   failed_at_step?: string
   error_fingerprint?: string
-  triggered_via: "manual" | "schedule" | "webhook" | "call_pipeline"
+  // Mirrors internal/pipeline/runs.go TriggeredVia. "issue" and "wake_check"
+  // were missing here while the backend has emitted both for some time — a
+  // run started from an issue's Run button rendered as an unhandled value.
+  triggered_via: "manual" | "schedule" | "webhook" | "call_pipeline" | "issue" | "wake_check"
   triggered_by_id?: string
   idempotency_key?: string
+  // chain_depth is how many COMPOSED hops separate this run from whatever a
+  // person did: 0 = somebody started it, 1 = a routine called it, 2 = an
+  // automation fired it from an event that run emitted. Server-capped at 8.
+  // Always present on a current server; optional here so a page rendered
+  // against an older one degrades to "not composed" instead of NaN.
+  chain_depth?: number
+  chain_origin?: string
+  // The RULE behind a rule-fired run. NOT derivable from triggered_via: every
+  // deferred run — cron and automation alike — is stored as "schedule", so
+  // this is the only thing that tells them apart. See the run-provenance
+  // section of docs/api-reference/pipelines.
+  automation_id?: string
+  automation_name?: string
+  trigger_event_type?: string
 }
 
 // isActiveRunStatus mirrors the backend's in-flight set — RunStore
