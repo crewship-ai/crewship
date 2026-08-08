@@ -110,6 +110,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "chat.agent_response",
   // Provisioning
   "sidecar.stale",
+  "image.stale",
   "provisioning.queued",
   "provisioning.building",
   "provisioning.complete",

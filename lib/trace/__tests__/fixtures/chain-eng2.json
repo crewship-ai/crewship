@@ -1,0 +1,121 @@
+{
+  "anchor": "ENG-2",
+  "anchor_node": "issue:cmsizloqf006d926674d2",
+  "max_depth": 4,
+  "max_nodes": 200,
+  "nodes": [
+    {
+      "id": "issue:cmsizloqf006d926674d2",
+      "kind": "issue",
+      "ref": "cmsizloqf006d926674d2",
+      "key": "ENG-2",
+      "label": "Rewrite the Harborlight README so a newcomer can follow it",
+      "status": "REVIEW",
+      "depth": 0,
+      "anchor": true,
+      "partial": true,
+      "partial_reason": "inbox items raised while this issue was worked cannot be linked to it: inbox_items carries no mission/issue column."
+    },
+    {
+      "id": "assignment:m_19fdca0976aa09933352d3d",
+      "kind": "assignment",
+      "ref": "m_19fdca0976aa09933352d3d",
+      "key": "",
+      "label": "[MISSION]\nName: Rewrite the Harborlight README so a newcomer can follow it\nGoal: \u003cuntrusted source=\"mission_task\" id=\"2f16cdb05af52280cf688678160d4d96\" suspicion=\"none\"\u003e\nOur README grew by accretion and buries the lede. Rewrite it for clarity\nand save the result to /crew/shared/harborlight/README.md.\n\nRaw source to refactor (keep the facts, cut the filler):\n---\nharborlight is a thing for watching your self hosted stuff, it does\ndashboards. install: clone the repo then maybe docker compose up but you\nmight need to set PORT first (default 8321) and HL_DB_PATH if you want\nsqlite somewhere else. there is also HL_POLL_SECONDS (default 30). auth\nis basic auth, set HL_USER/HL_PASS or it runs open which is bad. probes:\nhttp probe checks a url returns 200, tcp probe checks a port, disk probe\nwarns at 90%. alerts go to a webhook you set with HL_WEBHOOK_URL.\ntroubleshooting: if the dashboard is blank check the db path is\nwritable, if probes never fire check HL_POLL_SECONDS isnt 0.\n---\nStructure it as: What it is / Quick start / Configuration (a table) /\nProbes / Troubleshooting. Finish with a two-line summary of what you\nchanged and why.\n\u003c/untrusted id=\"2f16cdb05af52280cf688678160d4d96\"\u003e\nTasks in pipeline: 1\n    #1 Rewrite the Harborlight README so a newcomer can follow it (@sam, PENDING)\n\n[YOUR ASSIGNMENT]\nTask: Rewrite the Harborlight README so a newcomer can follow it\nInstructions: \u003cuntrusted source=\"mission_task\" id=\"7362d9756eca3427a06736740577a1a2\" suspicion=\"none\"\u003e\nOur README grew by accretion and buries the lede. Rewrite it for clarity\nand save the result to /crew/shared/harborlight/README.md.\n\nRaw source to refactor (keep the facts, cut the filler):\n---\nharborlight is a thing for watching your self hosted stuff, it does\ndashboards. install: clone the repo then maybe docker compose up but you\nmight need to set PORT first (default 8321) and HL_DB_PATH if you want\nsqlite somewhere else. there is also HL_POLL_SECONDS (default 30). auth\nis basic auth, set HL_USER/HL_PASS or it runs open which is bad. probes:\nhttp probe checks a url returns 200, tcp probe checks a port, disk probe\nwarns at 90%. alerts go to a webhook you set with HL_WEBHOOK_URL.\ntroubleshooting: if the dashboard is blank check the db path is\nwritable, if probes never fire check HL_POLL_SECONDS isnt 0.\n---\nStructure it as: What it is / Quick start / Configuration (a table) /\nProbes / Troubleshooting. Finish with a two-line summary of what you\nchanged and why.\n\u003c/untrusted id=\"7362d9756eca3427a06736740577a1a2\"\u003e\n\n[OUTPUT FORMAT]\nWhen you complete this task, end your response with a structured summary block:\n---HANDOFF---\nsummary: \u003c1-3 sentences describing what you did and the result\u003e\nconfidence: \u003clow|medium|high\u003e\nartifacts: \u003ccomma-separated list of files created/modified, or \"none\"\u003e\n---END HANDOFF---\nThis block is REQUIRED. It helps the next agent in the pipeline understand your output.\n",
+      "status": "COMPLETED",
+      "depth": 1,
+      "anchor": false,
+      "partial": false,
+      "partial_reason": ""
+    },
+    {
+      "id": "issue:cmsizlooi0068e8e6dcfe",
+      "kind": "issue",
+      "ref": "cmsizlooi0068e8e6dcfe",
+      "key": "ENG-1",
+      "label": "Coordinate the Harborlight launch page — delegate copy and build",
+      "status": "DONE",
+      "depth": 1,
+      "anchor": false,
+      "partial": true,
+      "partial_reason": "inbox items raised while this issue was worked cannot be linked to it: inbox_items carries no mission/issue column."
+    },
+    {
+      "id": "agent:cmsizlobt000cb28bb1eb",
+      "kind": "agent",
+      "ref": "cmsizlobt000cb28bb1eb",
+      "key": "sam",
+      "label": "Sam",
+      "status": "IDLE",
+      "depth": 2,
+      "anchor": false,
+      "partial": true,
+      "partial_reason": "agents are chain leaves: this agent's other assignments are not part of this chain."
+    },
+    {
+      "id": "issue:cmsizlp4i009346ed142f",
+      "kind": "issue",
+      "ref": "cmsizlp4i009346ed142f",
+      "key": "ENG-5",
+      "label": "Build a single-file interactive changelog page",
+      "status": "BACKLOG",
+      "depth": 2,
+      "anchor": false,
+      "partial": true,
+      "partial_reason": "inbox items raised while this issue was worked cannot be linked to it: inbox_items carries no mission/issue column."
+    },
+    {
+      "id": "issue:cmsizlp99009fba6fdd14",
+      "kind": "issue",
+      "ref": "cmsizlp99009fba6fdd14",
+      "key": "QUA-3",
+      "label": "Triage raw beta feedback into a prioritized fix list",
+      "status": "BACKLOG",
+      "depth": 2,
+      "anchor": false,
+      "partial": true,
+      "partial_reason": "inbox items raised while this issue was worked cannot be linked to it: inbox_items carries no mission/issue column."
+    }
+  ],
+  "edges": [
+    {
+      "from": "issue:cmsizloqf006d926674d2",
+      "to": "assignment:m_19fdca0976aa09933352d3d",
+      "kind": "triggers"
+    },
+    {
+      "from": "issue:cmsizloqf006d926674d2",
+      "to": "issue:cmsizlooi0068e8e6dcfe",
+      "kind": "relates"
+    },
+    {
+      "from": "agent:cmsizlobt000cb28bb1eb",
+      "to": "assignment:m_19fdca0976aa09933352d3d",
+      "kind": "executes"
+    },
+    {
+      "from": "issue:cmsizlp4i009346ed142f",
+      "to": "issue:cmsizlooi0068e8e6dcfe",
+      "kind": "relates"
+    },
+    {
+      "from": "issue:cmsizlp99009fba6fdd14",
+      "to": "issue:cmsizlooi0068e8e6dcfe",
+      "kind": "relates"
+    }
+  ],
+  "truncated": false,
+  "truncated_by": "",
+  "gaps": [
+    {
+      "from": "inbox",
+      "to": "issue",
+      "reason": "inbox_items has no mission/issue column on any kind — source_id is polymorphic over waitpoint token, escalation id and run id only — so an issue cannot reach the inbox items raised while it was worked, and an inbox item cannot name the issue it belongs to."
+    },
+    {
+      "from": "escalation",
+      "to": "run",
+      "reason": "escalations has neither a run nor a mission column (only crew_id, chat_id, from_agent_id), so an escalation cannot be attached to the run or issue that provoked it. Inbox items of kind 'escalation' are therefore chain leaves."
+    }
+  ]
+}
