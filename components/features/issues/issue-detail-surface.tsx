@@ -26,6 +26,8 @@ import { apiFetch } from "@/lib/api-fetch"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { usePipelines } from "@/hooks/use-pipelines"
+import { useAutomations } from "@/hooks/use-automations"
+import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { Skeleton } from "@/components/ui/skeleton"
 import { RunActivityTimeline, RUN_WORK_ENTRY_TYPES } from "@/components/features/activity/run-activity-timeline"
 import { IssueCardDetail, type IssueRun } from "@/components/features/issues/issue-card-detail"
@@ -102,6 +104,13 @@ export function IssueDetailSurface({
   const [busy, setBusy] = React.useState(false)
 
   const { pipelines } = usePipelines(workspaceId)
+  // The workspace's rules, narrowed to this issue inside the card — the
+  // predicate belongs next to the type it reads, not here.
+  const { automations } = useAutomations(workspaceId)
+  // Recent runs of the routine bound to this issue, purely so the card can say
+  // HOW they started. Null slug short-circuits inside the hook, so an issue
+  // with nothing bound makes no request.
+  const { records: routineRuns } = usePipelineRunRecords(workspaceId, issue?.routine_slug ?? null)
 
   const crewId = issue?.crew_id
   const projectId = issue?.project_id
@@ -610,6 +619,8 @@ export function IssueDetailSurface({
       subIssues={subIssues}
       codeLinks={codeLinks}
       codeLinkEdit={codeLinkEdit}
+      automations={automations}
+      routineRuns={routineRuns}
       project={project}
       agents={roster.agents}
       onSubmitComment={editable ? postComment : undefined}

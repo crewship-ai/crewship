@@ -151,24 +151,11 @@ func gateInternalAction(
 	action policy.Action,
 	what string,
 ) (autonomyDecision, bool) {
-	d := autonomyDecision{
-		Decision: policy.DecisionInboxApprove,
-		Level:    policy.AutonomyGuided,
-		CrewID:   autonomySubjectCrew(r, requestCrewID),
-		Action:   action,
-	}
-	if resolver != nil {
-		pol, err := resolver.Resolve(r.Context(), d.CrewID)
-		if err != nil {
-			if logger != nil {
-				logger.Error("autonomy gate: resolve policy",
-					"crew_id", d.CrewID, "action", string(action), "error", err)
-			}
-			replyError(w, http.StatusInternalServerError, "Internal server error")
-			return d, false
-		}
-		d.Decision = pol.DecideAction(action)
-		d.Level = pol.AutonomyLevel
+	d, err := decideInternalAction(r.Context(), resolver, logger,
+		autonomySubjectCrew(r, requestCrewID), action)
+	if err != nil {
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return d, false
 	}
 	if d.Decision == policy.DecisionRejected {
 		// Same structured shape agents_hire.go:418 returns, because the
@@ -185,6 +172,49 @@ func gateInternalAction(
 		return d, false
 	}
 	return d, true
+}
+
+// decideInternalAction is gateInternalAction's DECISION with no HTTP in it:
+// resolve the subject crew's policy, ask the matrix, return the outcome.
+// Extracted so a non-HTTP caller — a routine's `crewship` step, which has no
+// ResponseWriter and no inbound request — asks the SAME question through the
+// same code rather than re-deriving the answer. Two callers, one matrix.
+//
+// The nil-resolver fallback (guided/InboxApprove) stays the literal it has
+// always been and is documented at length on gateInternalAction: a nil
+// resolver means THE GATE IS NOT WIRED, which is a different question from
+// what a guided crew may do, and deriving one from the other would turn a
+// wiring bug into a fail-open.
+//
+// A resolver error returns an error rather than a decision, because an
+// unanswerable policy question is not an allow.
+func decideInternalAction(
+	ctx context.Context,
+	resolver *policy.Resolver,
+	logger *slog.Logger,
+	crewID string,
+	action policy.Action,
+) (autonomyDecision, error) {
+	d := autonomyDecision{
+		Decision: policy.DecisionInboxApprove,
+		Level:    policy.AutonomyGuided,
+		CrewID:   crewID,
+		Action:   action,
+	}
+	if resolver == nil {
+		return d, nil
+	}
+	pol, err := resolver.Resolve(ctx, d.CrewID)
+	if err != nil {
+		if logger != nil {
+			logger.Error("autonomy gate: resolve policy",
+				"crew_id", d.CrewID, "action", string(action), "error", err)
+		}
+		return d, err
+	}
+	d.Decision = pol.DecideAction(action)
+	d.Level = pol.AutonomyLevel
+	return d, nil
 }
 
 // autonomyHold describes the blocking record a held creation leaves behind:

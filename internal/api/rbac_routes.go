@@ -138,6 +138,11 @@ func scopeForRoute(pattern string) string {
 		// one person's rewording reaches everyone, so this is administration
 		// rather than a delivery-target write.
 		return "workspace:admin"
+	case "automations":
+		// A rule that fires routines autonomously across the workspace, on
+		// events its author may never produce. That is administration, not a
+		// delivery target or a resource write.
+		return "workspace:admin"
 	case "notification-providers":
 		// Instance-wide provider enable/disable toggle (#1412) — an
 		// administration action, not a webhook-delivery-target write.

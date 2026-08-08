@@ -46,6 +46,24 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	missionSpend := object(map[string]any{"mission_id": str(), "cost_usd": number(), "call_count": integer(), "input_tokens": integer(), "output_tokens": integer(), "first_ts": dateTime(), "last_ts": dateTime()})
 	topPaymaster := object(map[string]any{"scope_kind": str(), "scope_id": str(), "cost_usd": number(), "call_count": integer()})
 	subscription := object(map[string]any{"subscription_plan": str(), "provider": str(), "call_count": integer(), "input_tokens": integer(), "output_tokens": integer(), "last_ts": dateTime()})
+	// Chain graph (GET /api/v1/chains/{anchor}). Flat node/edge lists rather
+	// than a nested tree, because the underlying data is a graph: a run
+	// reached from both its routine and its issue has two parents, and any
+	// tree encoding would have to drop one of those edges.
+	chainNode := object(map[string]any{
+		"id": str(), "kind": str(), "ref": str(), "key": str(), "label": str(),
+		"status": str(), "depth": integer(), "anchor": boolean(),
+		"partial": boolean(), "partial_reason": str(),
+	})
+	chainEdge := object(map[string]any{"from": str(), "to": str(), "kind": str()})
+	// gaps names the links the schema does not carry, so a client can tell
+	// "nothing is attached" apart from "we cannot see what is attached".
+	chainGap := object(map[string]any{"from": str(), "to": str(), "reason": str()})
+	chainGraph := object(map[string]any{
+		"anchor": str(), "anchor_node": str(), "max_depth": integer(), "max_nodes": integer(),
+		"nodes": array(chainNode), "edges": array(chainEdge),
+		"truncated": boolean(), "truncated_by": str(), "gaps": array(chainGap),
+	})
 	flag := object(map[string]any{
 		"id": str(), "key": str(), "description": nullableString(), "enabled": boolean(), "percentage": integer(),
 		"created_at": dateTime(), "updated_at": dateTime(), "override_enabled": map[string]any{"type": "boolean", "nullable": true},
@@ -108,6 +126,7 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"GET /api/v1/paymaster/spend/by-mission/{missionId}": {Response: object(map[string]any{"row": missionSpend, "mission_id": str()})},
 		"GET /api/v1/paymaster/top-spenders":                 {Response: object(map[string]any{"rows": array(topPaymaster), "limit": integer(), "since": dateTime()})},
 		"GET /api/v1/paymaster/subscriptions":                {Response: object(map[string]any{"rows": array(subscription), "since": dateTime(), "until": dateTime()})},
+		"GET /api/v1/chains/{anchor}":                        {Response: chainGraph},
 		"GET /api/v1/metrics/timeseries":                     {Response: timeseries},
 		"GET /api/v1/mission-metrics":                        {Response: missionMetrics},
 		"GET /api/v1/feature-flags":                          {Response: array(flag)},

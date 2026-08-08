@@ -50,6 +50,8 @@ CREATE TABLE pipeline_runs (
     is_replay           INTEGER NOT NULL DEFAULT 0,
     replay_of           TEXT,
     warnings_json       TEXT NOT NULL DEFAULT '[]',
+    chain_depth         INTEGER NOT NULL DEFAULT 0,
+    chain_origin        TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );

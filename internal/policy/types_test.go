@@ -104,6 +104,36 @@ func TestPolicy_DecideAction_Matrix(t *testing.T) {
 		{AutonomyGuided, ActionMissionCreate, DecisionAutoLogInbox},
 		{AutonomyTrusted, ActionMissionCreate, DecisionAutoLogJournal},
 		{AutonomyFull, ActionMissionCreate, DecisionAutoJournal},
+
+		// Issue writes (update / comment / link): modify a thing that already
+		// exists, create nothing — the skill_assign shape, and the same row.
+		// Guided is journal-only rather than a hold because the write is
+		// already recorded on the issue itself (#1791), because one inbox item
+		// per issue write is how an inbox stops being read, and because a hold
+		// on the unattended path is a refusal that moves the write to the
+		// sidecar's ungated door rather than stopping it.
+		{AutonomyStrict, ActionIssueWrite, DecisionInboxApprove},
+		{AutonomyGuided, ActionIssueWrite, DecisionAutoLogJournal},
+		{AutonomyTrusted, ActionIssueWrite, DecisionAutoLogJournal},
+		{AutonomyFull, ActionIssueWrite, DecisionAutoJournal},
+
+		// Assignment creation: mission_create with the plan removed, so the
+		// same row. Guided gets a non-blocking NOTICE where issue_write gets
+		// journal-only — this one spends a container start and a model turn.
+		{AutonomyStrict, ActionAssignmentCreate, DecisionInboxApprove},
+		{AutonomyGuided, ActionAssignmentCreate, DecisionAutoLogInbox},
+		{AutonomyTrusted, ActionAssignmentCreate, DecisionAutoLogJournal},
+		{AutonomyFull, ActionAssignmentCreate, DecisionAutoJournal},
+
+		// Escalation: a FLAT row on purpose. The cost is a human's attention,
+		// not the system's, so trust is not the axis; and both inbox-shaped
+		// decisions are self-defeating (an approval to authorise an interrupt
+		// IS the interrupt; a notice about an escalation duplicates it).
+		// Volume — the real risk — is bounded on the door, not here.
+		{AutonomyStrict, ActionEscalationCreate, DecisionAutoLogJournal},
+		{AutonomyGuided, ActionEscalationCreate, DecisionAutoLogJournal},
+		{AutonomyTrusted, ActionEscalationCreate, DecisionAutoLogJournal},
+		{AutonomyFull, ActionEscalationCreate, DecisionAutoJournal},
 	}
 
 	for _, tc := range cases {
@@ -285,6 +315,187 @@ func TestPolicy_EveryActionIsMapped(t *testing.T) {
 		t.Errorf("Action constants absent from TestPolicy_DecideAction_Matrix:\n  %s\n"+
 			"Every cell of the matrix is the contract; an untested row can be changed without "+
 			"anything going red.", strings.Join(untested, "\n  "))
+	}
+}
+
+// decideActionArms slices DecideAction's outer switch into (action name → the
+// lines of its case arm). Outer case arms are indented one tab inside the
+// function; the inner per-level switches are indented two, which is what makes
+// the split reliable without parsing Go.
+func decideActionArms(t *testing.T) map[string][]string {
+	t.Helper()
+	src, err := os.ReadFile("types.go")
+	if err != nil {
+		t.Fatalf("read types.go: %v", err)
+	}
+	lines := strings.Split(string(src), "\n")
+	start, end := -1, -1
+	for i, l := range lines {
+		if strings.Contains(l, "func (p Policy) DecideAction(") {
+			start = i
+		}
+		if start >= 0 && strings.Contains(l, "Defensive default") {
+			end = i
+			break
+		}
+	}
+	if start < 0 || end < 0 {
+		t.Fatal("could not locate DecideAction's switch in types.go — update this test")
+	}
+
+	// Collect (names on the case line, body lines) in source order first, then
+	// fan out to the map — several actions can share one arm (crew_create and
+	// agent_create do), and each must be checked against that shared body.
+	type arm struct {
+		names []string
+		body  []string
+	}
+	var collected []*arm
+	var current *arm
+	for i := start; i < end; i++ {
+		l := lines[i]
+		if strings.HasPrefix(l, "\tcase ") {
+			current = &arm{names: decideCaseRe.FindAllString(l, -1)}
+			collected = append(collected, current)
+			continue
+		}
+		if current != nil {
+			current.body = append(current.body, l)
+		}
+	}
+
+	arms := map[string][]string{}
+	for _, a := range collected {
+		for _, n := range a.names {
+			arms[n] = a.body
+		}
+	}
+	return arms
+}
+
+// TestPolicy_EveryActionCoversEveryAutonomyLevel is the "no implicit default"
+// gate, and it is a different question from TestPolicy_EveryActionIsMapped.
+//
+// That test asks whether an Action has a case arm at all. This one asks whether
+// the arm DECIDES all four levels. An arm that switches on three of them falls
+// through to the defensive DecisionInboxApprove for the fourth, which is
+// invisible from the outside — the value is a legitimate answer for most rows,
+// so nothing looks wrong until someone later relaxes the row and one level
+// silently does not move. The failure mode this catches is precisely the one
+// the defensive default's docstring admits it buys safety but not visibility
+// for.
+//
+// An arm with no autonomy level in it at all is a deliberate flat row
+// (persona_direct_write returns Rejected unconditionally) and passes.
+func TestPolicy_EveryActionCoversEveryAutonomyLevel(t *testing.T) {
+	arms := decideActionArms(t)
+	if len(arms) < 10 {
+		t.Fatalf("recovered only %d case arms from DecideAction — the parser is broken", len(arms))
+	}
+	want := map[string]bool{
+		"AutonomyStrict": true, "AutonomyGuided": true,
+		"AutonomyTrusted": true, "AutonomyFull": true,
+	}
+	levelRe := regexp.MustCompile(`\bAutonomy(Strict|Guided|Trusted|Full)\b`)
+
+	for action, body := range arms {
+		t.Run(action, func(t *testing.T) {
+			seen := map[string]bool{}
+			for _, l := range body {
+				// Only the case labels of the inner switch decide levels; a
+				// level named in a comment is prose, not a decision.
+				code := l
+				if idx := strings.Index(code, "//"); idx >= 0 {
+					code = code[:idx]
+				}
+				for _, m := range levelRe.FindAllString(code, -1) {
+					seen[m] = true
+				}
+			}
+			if len(seen) == 0 {
+				return // flat row, decided unconditionally
+			}
+			var missing []string
+			for lvl := range want {
+				if !seen[lvl] {
+					missing = append(missing, lvl)
+				}
+			}
+			if len(missing) > 0 {
+				sort.Strings(missing)
+				t.Errorf("%s decides only %d of 4 autonomy levels — missing %s.\n"+
+					"The unlisted level falls through to the defensive DecisionInboxApprove, "+
+					"which is indistinguishable from a row somebody chose. Decide it explicitly.",
+					action, len(seen), strings.Join(missing, ", "))
+			}
+		})
+	}
+}
+
+// TestPolicy_KnownActionsMatchesSource keeps IsKnownAction's map from falling
+// behind the constants. The map is hand-written (a closed set callers can ask
+// about); the constants are the contract. Deriving the check from source is the
+// same trick TestPolicy_EveryActionIsMapped uses, for the same reason: a list
+// that has to be remembered is a list that drifts.
+func TestPolicy_KnownActionsMatchesSource(t *testing.T) {
+	src, err := os.ReadFile("types.go")
+	if err != nil {
+		t.Fatalf("read types.go: %v", err)
+	}
+	var declared []Action
+	for _, l := range strings.Split(string(src), "\n") {
+		if m := actionValueRe.FindStringSubmatch(l); m != nil {
+			declared = append(declared, Action(m[1]))
+		}
+	}
+	if len(declared) < 10 {
+		t.Fatalf("recovered only %d Action values from types.go — the parser is broken", len(declared))
+	}
+	for _, a := range declared {
+		if !IsKnownAction(a) {
+			t.Errorf("Action %q is declared but missing from knownActions — "+
+				"a caller holding it as a string cannot tell it from a typo", a)
+		}
+	}
+	if len(knownActions) != len(declared) {
+		t.Errorf("knownActions has %d entries, types.go declares %d Action constants",
+			len(knownActions), len(declared))
+	}
+}
+
+// TestPolicy_StrictCrew_RefusesTheUnattendedWrites is the operator-facing half
+// of the #1791 follow-on rows, stated as behaviour rather than as a table cell.
+//
+// On the routine path a held decision is a REFUSAL — nobody is attached to a
+// 03:00 run to approve anything (internal/api/crewship_actions.go). So
+// "InboxApprove at strict" means, in the only place these Actions are enforced
+// today: a strict crew's routine does not write to issues and does not dispatch
+// work. This test says that in those words, so relaxing either cell has to be a
+// deliberate edit to a test that describes the promise, not a quiet change to a
+// row in a matrix.
+//
+// escalation_create is deliberately NOT in this list and is asserted the other
+// way: strict may still raise one. Refusing it would forbid asking for help at
+// the level whose whole purpose is to ask before acting, while the unpoliced
+// `notify` step reaches the same human anyway.
+func TestPolicy_StrictCrew_RefusesTheUnattendedWrites(t *testing.T) {
+	strict := Policy{AutonomyLevel: AutonomyStrict, BehaviorMode: BehaviorWarn}
+
+	for _, a := range []Action{ActionIssueWrite, ActionAssignmentCreate} {
+		got := strict.DecideAction(a)
+		if got == DecisionAutoJournal || got == DecisionAutoLogJournal || got == DecisionAutoLogInbox {
+			t.Errorf("strict × %s = %s — a strict crew must not do this unattended", a, got)
+		}
+		if got != DecisionInboxApprove {
+			t.Errorf("strict × %s = %s, want %s (held for an operator, which the "+
+				"unattended path reports as a refusal)", a, got, DecisionInboxApprove)
+		}
+	}
+
+	if got := strict.DecideAction(ActionEscalationCreate); got != DecisionAutoLogJournal {
+		t.Errorf("strict × %s = %s, want %s — asking a human for help is the one "+
+			"thing 'ask before you act' cannot coherently forbid",
+			ActionEscalationCreate, got, DecisionAutoLogJournal)
 	}
 }
 

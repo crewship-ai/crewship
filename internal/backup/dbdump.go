@@ -112,6 +112,13 @@ var BackupTables = []string{
 	"budget_limits",
 	"cost_ledger",
 	"hooks_config",
+	// automations: user-authored "when this happens, run that" rules. Listed
+	// explicitly for the same reason hooks_config is — the table carries a
+	// plain workspace_id COLUMN and no FOREIGN KEY into the workspaces chain,
+	// so the reverse-FK walk never reaches it. That is precisely the shape
+	// that lost data in #1437 and #1444, and it is why the totality guard
+	// caught this one before a bundle did.
+	"automations",
 	"issue_counters",
 	"subscriptions",
 	"inbox_items",

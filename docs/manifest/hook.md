@@ -3,22 +3,28 @@
 ## What it is
 
 `kind: Hook` is the **toggle-only** manifest kind. A `Hook` document
-flips the `enabled` boolean on a hook that is already registered in
-code; it can **never create a new hook**.
+flips the `enabled` boolean on a hook that already exists; it can
+**never create a new hook**.
 
 Hooks are part of the runtime control plane — they fire on lifecycle
-events (`pre_run`, `post_run`, …) and can run shell commands, dispatch
-sub-agents, or call HTTP endpoints. Because that surface is sensitive
-(arbitrary shell, third-party network egress), hook *registration* is
-deliberately a build-time concern: a developer wires the hook in
-Go code (see `internal/hooks/store.go:Register`) and only then can an
-operator decide whether to switch it on for a given environment.
+events (`pre_tool_call`, `post_agent_stop`, …) and can run shell
+commands, dispatch sub-agents, or call HTTP endpoints. Because that
+surface is sensitive (arbitrary shell, third-party network egress),
+registration is kept out of the manifest and behind an explicit
+role gate: `crewship hooks create` / `POST /api/v1/hooks` (OWNER or
+ADMIN; shell handlers OWNER only), or `hooks.Register` from Go.
 
 The manifest therefore exposes exactly one verb: **toggle**. If the
 hook does not exist server-side, `crewship apply` fails with
 `hook "X" is not registered — register it in code first`, which is
-the explicit prompt to add the registration in code rather than in
-YAML.
+the prompt to register it out-of-band and re-apply.
+
+> **Note.** Earlier revisions of this page said the manifest was
+> toggle-only *because there was no create endpoint at all*. There is
+> one now (`POST /api/v1/hooks`). The manifest is still toggle-only,
+> but by choice rather than by absence — giving YAML create authority
+> over shell handlers is a separate design question, unresolved. See
+> "Why this kind is special" below.
 
 ## YAML schema
 
@@ -112,10 +118,10 @@ break-glass / one-off toggles in production.
 | `crewship apply -f hooks.yaml`       | Toggle hooks declaratively.                   |
 | `crewship export workspace`          | Includes `kind: Hook` docs for every hook.    |
 
-There is no `crewship hooks create` because hooks are registered in
-code, not over REST. Attempting to apply a `kind: Hook` document for
-an unregistered hook is the error path — the CLI message tells the
-operator to add the registration in Go and rebuild.
+`crewship hooks create` exists, but it is imperative and role-gated —
+it is not reachable through `crewship apply`. Applying a `kind: Hook`
+document for a hook that does not exist is still the error path; the
+CLI message tells the operator to register it first.
 
 ## REST endpoint mapping
 
@@ -214,8 +220,10 @@ deliberately don't, because:
 1. **Shell hooks execute arbitrary commands.** A hook registered in
    YAML would let any operator with manifest-apply rights smuggle
    shell commands into the supervisor — an obvious privilege
-   escalation. The code-registration gate forces a code-review,
-   build, and deploy cycle for new shell hooks.
+   escalation. `POST /api/v1/hooks` gates that on OWNER explicitly;
+   `crewship apply` has no comparable per-document role check, so
+   routing creation through it would launder an OWNER-only grant
+   through a weaker gate.
 2. **HTTP hooks egress sensitive workspace state.** Same reasoning —
    any new HTTP destination needs to go through the egress-allowlist
    review in code.

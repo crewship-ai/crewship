@@ -34,30 +34,7 @@ const crewIntegrationsWildcard = "*"
 //     to availability and lean on the explicit-missing path below for the
 //     real signal.
 func (h *PipelineHandler) gateMissingIntegrations(w http.ResponseWriter, r *http.Request, workspaceID, crewID, crewName string, required []string) bool {
-	if len(required) == 0 {
-		return false // no-op fast path
-	}
-	if h.db == nil || crewID == "" {
-		h.logger.Warn("integration gate: no crew/db to resolve against, allowing run (fail-open)",
-			"workspace_id", workspaceID, "crew_id", crewID)
-		return false
-	}
-	available, err := resolveCrewIntegrations(r.Context(), h.db, workspaceID, crewID)
-	if err != nil {
-		// FAIL-OPEN — see the doc comment. Never block on a resolver bug.
-		h.logger.Warn("integration gate: resolution failed, allowing run (fail-open)",
-			"workspace_id", workspaceID, "crew_id", crewID, "error", err)
-		return false
-	}
-	if available[crewIntegrationsWildcard] {
-		return false
-	}
-	var missing []string
-	for _, want := range required {
-		if !available[want] {
-			missing = append(missing, want)
-		}
-	}
+	missing := h.findMissingIntegrations(r.Context(), workspaceID, crewID, required)
 	if len(missing) == 0 {
 		return false
 	}
@@ -68,11 +45,7 @@ func (h *PipelineHandler) gateMissingIntegrations(w http.ResponseWriter, r *http
 	if crewName == "" {
 		crewName = crewID
 	}
-	detail := fmt.Sprintf("routine requires integration %q not connected for crew %q", missing[0], crewName)
-	if len(missing) > 1 {
-		detail = fmt.Sprintf("routine requires %d integrations not connected for crew %q: %s",
-			len(missing), crewName, strings.Join(missing, ", "))
-	}
+	detail := missingIntegrationsDetail(missing, crewName)
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -84,6 +57,51 @@ func (h *PipelineHandler) gateMissingIntegrations(w http.ResponseWriter, r *http
 		"missing_integrations": missing,
 	})
 	return true
+}
+
+// findMissingIntegrations is the gate's DECISION, with no HTTP in it: which of
+// the routine's declared integrations the author crew has not connected.
+// Extracted so the in-process dispatch path (pipeline.RunPreflight) reaches
+// the same answer as the HTTP path instead of re-deriving it — one gate with
+// two renderings, not two gates.
+//
+// The fail-open contract lives here, so both callers inherit it identically.
+func (h *PipelineHandler) findMissingIntegrations(ctx context.Context, workspaceID, crewID string, required []string) []string {
+	if len(required) == 0 {
+		return nil // no-op fast path
+	}
+	if h.db == nil || crewID == "" {
+		h.logger.Warn("integration gate: no crew/db to resolve against, allowing run (fail-open)",
+			"workspace_id", workspaceID, "crew_id", crewID)
+		return nil
+	}
+	available, err := resolveCrewIntegrations(ctx, h.db, workspaceID, crewID)
+	if err != nil {
+		// FAIL-OPEN — see the doc comment. Never block on a resolver bug.
+		h.logger.Warn("integration gate: resolution failed, allowing run (fail-open)",
+			"workspace_id", workspaceID, "crew_id", crewID, "error", err)
+		return nil
+	}
+	if available[crewIntegrationsWildcard] {
+		return nil
+	}
+	var missing []string
+	for _, want := range required {
+		if !available[want] {
+			missing = append(missing, want)
+		}
+	}
+	return missing
+}
+
+// missingIntegrationsDetail is the human sentence both renderings use, so the
+// 422 body and the in-process step error say the same thing.
+func missingIntegrationsDetail(missing []string, crewName string) string {
+	if len(missing) > 1 {
+		return fmt.Sprintf("routine requires %d integrations not connected for crew %q: %s",
+			len(missing), crewName, strings.Join(missing, ", "))
+	}
+	return fmt.Sprintf("routine requires integration %q not connected for crew %q", missing[0], crewName)
 }
 
 // resolveCrewIntegrations returns the set of third-party integration slugs

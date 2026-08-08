@@ -52,6 +52,7 @@ import {
   UserCircle2,
   Users,
   XCircle,
+  Zap,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -96,6 +97,10 @@ import {
 } from "@/components/features/issues/issue-code-links-card"
 import { getCrewIconDef } from "@/lib/entities"
 import { issueFacts, issuePriorityTone, issueStatusTone } from "@/lib/issue-facts"
+import { automationsForIssue, type Automation } from "@/lib/automations"
+import { runProvenance } from "@/lib/run-provenance"
+import { AutomationList } from "@/components/features/automations/automation-list"
+import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import type {
   IssueActivity,
   IssueCodeLink,
@@ -172,6 +177,19 @@ interface Props {
    * is not the thing that should own either.
    */
   runActivity?: React.ReactNode
+  /**
+   * Every automation rule in the workspace. Narrowed HERE, to the ones whose
+   * event type and matcher put this issue in scope — the host has no reason to
+   * know that predicate, and two callers narrowing it separately is two places
+   * for the answer to drift.
+   */
+  automations?: Automation[]
+  /**
+   * Recent runs of the routine bound to this issue, newest first, as
+   * `/pipelines/{slug}/run-records` returns them. Absent when nothing is
+   * bound. Used only to say HOW those runs started.
+   */
+  routineRuns?: PipelineRunRecord[]
 }
 
 type FootTab = "comments" | "history"
@@ -192,10 +210,26 @@ export function IssueCardDetail({
   codeLinks = [],
   codeLinkEdit,
   runActivity,
+  automations = [],
+  routineRuns = [],
 }: Props) {
   const [footTab, setFootTab] = React.useState<FootTab>("comments")
 
   const mentions = React.useMemo(() => mentionDirectory(agents ?? []), [agents])
+
+  // The rules an event from THIS issue could set off. See lib/automations.ts
+  // for why only mission_ids and crew_ids are treated as exclusions.
+  const myAutomations = React.useMemo(
+    () => automationsForIssue(automations, { missionId: issue.id, crewId: issue.crew_id }),
+    [automations, issue.id, issue.crew_id],
+  )
+  // How the bound routine's recent runs started, grouped. Only meaningful
+  // when something IS bound — otherwise these runs belong to no routine this
+  // issue has any relationship with.
+  const runSources = React.useMemo(
+    () => (issue.routine_slug ? groupRunSources(routineRuns) : []),
+    [issue.routine_slug, routineRuns],
+  )
 
   const labels = issue.labels ?? []
   const facts = React.useMemo(
@@ -550,11 +584,51 @@ export function IssueCardDetail({
                     {issue.assignee_name ?? "whoever is assigned"} directly.
                   </p>
                 )}
+                {/* …and who else starts it. "Starting this issue runs that
+                    routine" is true and incomplete: the same routine also runs
+                    on a clock and on rules, and an operator wondering why it
+                    ran at 03:00 has nowhere else on this page to look. */}
+                <RunSourceBreakdown sources={runSources} />
               </div>
             </DetailCard>
           </Appear>
 
-          <Appear order={7}>
+          {/* What is watching this issue.
+
+              Its own card rather than a line in Routine, because these rules
+              do not have to target the bound routine — an issue's status
+              change can start something else entirely, and filing that under
+              "Routine" would say the opposite. Absent when nothing is in
+              scope: most issues have no rule watching them and must not carry
+              a card saying so. */}
+          {myAutomations.length > 0 && (
+            <Appear order={7}>
+              <DetailCard
+                title="Automations"
+                icon={Zap}
+                subtitle={String(myAutomations.length)}
+              >
+                <div data-testid="issue-automations" className="space-y-2.5">
+                  <AutomationList
+                    automations={myAutomations}
+                    note={
+                      // Deliberately hedged. The matcher's agent_ids,
+                      // severities and payload_equals narrow further and none
+                      // of them can be decided before the event happens, so
+                      // "will fire" would be a promise this page cannot keep.
+                      <p className="text-[11px] text-muted-foreground">
+                        These could fire on a change to this issue. A rule may
+                        narrow further on the agent, severity or payload of the
+                        event itself.
+                      </p>
+                    }
+                  />
+                </div>
+              </DetailCard>
+            </Appear>
+          )}
+
+          <Appear order={8}>
             <DetailCard title="Project" icon={FolderKanban}>
               <div className="space-y-2.5">
                 {edit ? (
@@ -598,7 +672,7 @@ export function IssueCardDetail({
             </DetailCard>
           </Appear>
 
-          <Appear order={8}>
+          <Appear order={9}>
             <DetailCard
               title="Labels"
               icon={Tag}
@@ -751,6 +825,74 @@ export function IssueCardDetail({
           </dl>
         </DetailCard>
       </Appear>
+    </div>
+  )
+}
+
+/** One way the bound routine gets started, and how often it did. */
+interface RunSource {
+  /** "issue" | "manual" | "schedule" | "automation" | … */
+  label: string
+  /** Which rule / schedule / issue, when the run named one. */
+  source?: string
+  count: number
+}
+
+/**
+ * Groups a routine's recent runs by how each was started.
+ *
+ * Grouped, not listed: the reader is asking "does this thing run without me",
+ * which is a question about SOURCES, and eight rows of run ids in a 280px rail
+ * answers a question nobody asked.
+ *
+ * The label comes from runProvenance, not from `triggered_via`. Every deferred
+ * run — cron and automation alike — is stored as "schedule", so counting the
+ * enum would fold a rule into the cron bucket and report that a schedule did
+ * something a rule did.
+ */
+function groupRunSources(runs: PipelineRunRecord[]): RunSource[] {
+  const byKey = new Map<string, RunSource>()
+  for (const r of runs) {
+    const { label, source } = runProvenance(r)
+    // An automation is keyed by its rule; a schedule and a manual start are
+    // keyed by kind alone. Keying a schedule by its id would produce a row per
+    // cron entry, which is detail this card is not for.
+    const key = label === "automation" ? `automation:${source ?? ""}` : label
+    const existing = byKey.get(key)
+    if (existing) {
+      existing.count += 1
+      continue
+    }
+    byKey.set(key, { label, source: label === "automation" ? source : undefined, count: 1 })
+  }
+  return [...byKey.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+}
+
+/** The grouped sources, or nothing at all when there is nothing to group. */
+function RunSourceBreakdown({ sources }: { sources: RunSource[] }) {
+  if (sources.length === 0) return null
+  return (
+    <div data-testid="issue-routine-provenance" className="space-y-1 pt-1">
+      <p className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+        Recent runs started by
+      </p>
+      <ul className="space-y-1">
+        {sources.map((s) => (
+          <li
+            key={`${s.label}:${s.source ?? ""}`}
+            data-testid={`issue-routine-source-${s.label}`}
+            className="flex items-baseline gap-2 text-[11px]"
+          >
+            <span className="text-foreground/85">{s.label}</span>
+            {s.source && (
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">{s.source}</span>
+            )}
+            <span className={cn("tabular-nums text-muted-foreground", !s.source && "ml-auto")}>
+              {s.count}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

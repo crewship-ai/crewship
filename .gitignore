@@ -61,6 +61,13 @@ lib/generated/
 
 # SQLite
 *.db
+# …and the migration backups the server writes beside it. `*.db` does not
+# match a name ending in `.bak`, so a `git add -A` after running a server
+# from the repo root swept 27 MB of real developer databases — users,
+# credentials, chat history — into a commit.
+*.db.bak
+*.db.*.bak
+crewship.db.pre-migrate-*
 *.sqlite
 *.sqlite3
 

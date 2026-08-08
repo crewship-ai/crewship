@@ -662,12 +662,12 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 	parent := RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun}
 	render := RenderContext{Inputs: map[string]any{"x": "rendered-val"}}
 
-	if _, _, _, err := exec.runCallPipelineStep(ctx, Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "bad-child"}, parent, render, 0, "run_test", 0); err == nil || !strings.Contains(err.Error(), "parse target") {
+	if _, _, _, err := exec.runCallPipelineStep(ctx, Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "bad-child"}, parent, render, 0, "run_test", 0, nil); err == nil || !strings.Contains(err.Error(), "parse target") {
 		t.Errorf("bad child: %v", err)
 	}
 
 	// Generic lookup error (not ErrNotFound).
-	if _, _, _, err := exec.runCallPipelineStep(ctx, Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "ghost"}, parent, render, 0, "run_test", 0); err == nil || !strings.Contains(err.Error(), "lookup") {
+	if _, _, _, err := exec.runCallPipelineStep(ctx, Step{ID: "s", Type: StepCallPipeline, PipelineSlug: "ghost"}, parent, render, 0, "run_test", 0, nil); err == nil || !strings.Contains(err.Error(), "lookup") {
 		t.Errorf("lookup error: %v", err)
 	}
 
@@ -676,7 +676,7 @@ func TestExecutor_CallPipeline_NestedBranches(t *testing.T) {
 	out, _, _, err := exec.runCallPipelineStep(ctx, Step{
 		ID: "s", Type: StepCallPipeline, PipelineSlug: "good-child",
 		NestedInputs: map[string]any{"a": "{{ inputs.x }}", "b": 42},
-	}, parent, render, 0, "run_test", 0)
+	}, parent, render, 0, "run_test", 0, nil)
 	if err != nil {
 		t.Fatalf("nested run: %v", err)
 	}
@@ -722,6 +722,8 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     is_replay           INTEGER NOT NULL DEFAULT 0,
     replay_of           TEXT,
     warnings_json       TEXT NOT NULL DEFAULT '[]',
+    chain_depth         INTEGER NOT NULL DEFAULT 0,
+    chain_origin        TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );

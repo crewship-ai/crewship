@@ -31,6 +31,42 @@ type PendingRun struct {
 	// `to: trigger` to a real recipient (issue #842 Phase 1). Empty for
 	// service/token triggers → `to: trigger` falls back to a workspace notice.
 	InvokingUserID string
+	// TriggeredVia / TriggeredByID are what actually started this deferred
+	// run. Empty means "did not say" — effectivePendingTrigger applies the
+	// dispatcher's documented default — which is a different fact from
+	// claiming a schedule.
+	TriggeredVia  TriggeredVia
+	TriggeredByID string
+	// ChainDepth is how many composed hops led here. Threaded so a cycle
+	// that leaves the process through the journal and comes back still
+	// spends from the same budget runCallPipelineStep spends from.
+	//
+	// It is the depth this run IS at, already priced by whoever enqueued the
+	// row (Registry.Flush for an automation). The dispatcher passes it through
+	// rather than adding one: two places incrementing is how a cap silently
+	// becomes half its stated size.
+	ChainDepth int
+	// ChainOrigin is the run or journal entry that started the chain this run
+	// belongs to. Empty means "did not say", and the executor then roots the
+	// chain at the fired run itself — which is right for a scheduled run and
+	// wrong for a composed one, so a composed producer must set it.
+	//
+	// Depth is the safety property; this is the legibility one. Without it a
+	// legitimate eight-hop chain reads as eight unrelated runs, which is both
+	// unreadable and the shape a loop would prefer to present.
+	ChainOrigin string
+}
+
+// effectivePendingTrigger resolves what a fired deferred run should claim.
+//
+// One function so the default lives in one place: the dispatcher used to
+// inline it, which is why an attributed producer had nowhere to put its
+// answer even once it had one.
+func effectivePendingTrigger(pr PendingRun) (TriggeredVia, string) {
+	if pr.TriggeredVia != "" {
+		return pr.TriggeredVia, pr.TriggeredByID
+	}
+	return TriggeredViaSchedule, pr.ID
 }
 
 // PendingRunStore is the DB access layer for deferred dispatch.
@@ -70,13 +106,15 @@ func (s *PendingRunStore) Enqueue(ctx context.Context, pr PendingRun) (string, b
 INSERT INTO pending_runs (
     id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     tier_override, priority, debounce_key, fire_at, expires_at, debounce_max_at,
-    invoking_user_id, status, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
+    invoking_user_id, triggered_via, triggered_by_id, chain_depth, chain_origin, status, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
 		pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
 		pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
-		nullableStr(pr.InvokingUserID))
+		nullableStr(pr.InvokingUserID),
+		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.ChainDepth,
+		nullableStr(pr.ChainOrigin))
 	if err != nil {
 		// Debounce race: a concurrent trigger with the same key inserted
 		// first, so the partial-unique index rejects this one. Both
@@ -112,15 +150,26 @@ WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
 	// so it must also adopt its invoking user — otherwise a run that fires
 	// with user B's inputs would notify user A (the original enqueuer) on a
 	// `to: trigger` step. Attribution follows the payload it belongs to.
+	//
+	// triggered_via / triggered_by_id are attribution in the same sense and
+	// move for the same reason. debounce_key is caller-supplied on the
+	// deferred-run endpoint, so an automation's row and a user's defer can
+	// meet on one row in either order; leaving the byline behind meant the
+	// FIRST producer got credit for the LAST one's payload. Both directions
+	// are wrong and only one of them is quiet: a user's inputs firing under a
+	// rule's name is a forged audit trail, and a rule's run reading as a cron
+	// is the exact confusion the columns were added to end.
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE pending_runs
 SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
     priority = ?, fire_at = ?, expires_at = ?, invoking_user_id = ?,
+    triggered_via = ?, triggered_by_id = ?,
     updated_at = datetime('now','subsec')
 WHERE id = ?`,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, fireAt.UTC().Format(time.RFC3339Nano),
-		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID), existingID); err != nil {
+		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID),
+		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), existingID); err != nil {
 		return "", false, fmt.Errorf("pending_runs: coalesce: %w", err)
 	}
 	return existingID, true, nil
@@ -149,7 +198,9 @@ func (s *PendingRunStore) DueRuns(ctx context.Context, now time.Time, limit int)
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
-       COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,'')
+       COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''),
+       COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0),
+       COALESCE(chain_origin,'')
 FROM pending_runs
 WHERE status = 'pending' AND fire_at <= ?
 ORDER BY priority DESC, created_at ASC
@@ -163,7 +214,8 @@ LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
 		var pr PendingRun
 		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 			&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
-			&pr.InvokingUserID); err != nil {
+			&pr.InvokingUserID, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
+			&pr.ChainOrigin); err != nil {
 			return nil, err
 		}
 		out = append(out, pr)
@@ -240,4 +292,61 @@ func orJSON(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// ChainPos is where a run already sits in a composed chain: how much budget has
+// been spent, and which chain it belongs to.
+//
+// The two travel together because they are read together, and answering one
+// without the other is what shipped first — the cap held while every hop
+// re-rooted, so a bounded chain was still unreadable.
+//
+// Declared in this package because this package owns both columns and the
+// single GuardChainDepth that spends against them; internal/automation aliases
+// it rather than declaring a second.
+type ChainPos struct {
+	// Depth is how many composed hops led to that run.
+	Depth int
+	// Origin is the run or entry that started its chain. Empty means the run IS
+	// the root, in which case a child's origin is that run's own id.
+	Origin string
+}
+
+// RunChainReader answers where a run already sat in a composed chain. It
+// satisfies automation.ChainSource, so the registry can price a hop without
+// importing a database handle or knowing the columns' names.
+//
+// Lives here rather than in internal/automation because the row is this
+// package's: a second query for pipeline_runs.chain_depth somewhere else is
+// a second answer to "how deep are we", which is the failure the single
+// GuardChainDepth exists to prevent.
+type RunChainReader struct{ db *sql.DB }
+
+func NewRunChainReader(db *sql.DB) *RunChainReader { return &RunChainReader{db: db} }
+
+// ChainOf returns the run's depth and the root of its chain. The false return
+// means "no such run in this workspace", which the caller reads as a
+// human-caused root — an unknown run must not be treated as an ERROR, or a
+// journal entry from any other producer would refuse every rule.
+//
+// An empty origin on a row that EXISTS is not missing data: it means that run
+// is itself the root, and the caller names it as the child's origin.
+func (r *RunChainReader) ChainOf(ctx context.Context, workspaceID, runID string) (ChainPos, bool, error) {
+	if r == nil || r.db == nil || workspaceID == "" || runID == "" {
+		return ChainPos{}, false, nil
+	}
+	var (
+		depth  sql.NullInt64
+		origin sql.NullString
+	)
+	err := r.db.QueryRowContext(ctx,
+		`SELECT chain_depth, chain_origin FROM pipeline_runs WHERE id = ? AND workspace_id = ?`,
+		runID, workspaceID).Scan(&depth, &origin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ChainPos{}, false, nil
+	}
+	if err != nil {
+		return ChainPos{}, false, fmt.Errorf("pending_runs: chain position of %q: %w", runID, err)
+	}
+	return ChainPos{Depth: int(depth.Int64), Origin: origin.String}, true, nil
 }

@@ -1,0 +1,214 @@
+---
+title: "Automation Commands"
+description: "Create and manage rules that run a routine when a journal event happens."
+icon: "zap"
+---
+
+# crewship automation
+
+Manage automations — the workspace rules that turn a journal event into a
+deferred routine run. See the [Automations guide](/guides/automations) for the
+concepts, the burst controls and the `{{ event.* }}` template namespace.
+
+```bash
+crewship automation <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `list` | List automations in this workspace. |
+| `create` | Create an automation (ADMIN/OWNER). |
+| `update <id>` | Change fields on an automation (ADMIN/OWNER). |
+| `enable <id>` | Enable an automation (ADMIN/OWNER). |
+| `disable <id>` | Disable an automation without deleting it (ADMIN/OWNER). |
+| `delete <id>` | Soft-delete an automation (ADMIN/OWNER). |
+
+Every subcommand honours the global `--format` flag (`json`/`yaml`/`ndjson`) —
+see [Output Formats](/cli/overview#output-formats).
+
+---
+
+## `crewship automation preview`
+
+Replay recent history against a rule and see what it would have caught —
+without saving anything and without starting a run.
+
+```bash
+# a candidate, before committing to it
+crewship automation preview --event mission.status_change \
+  --payload-equals action=status_changed
+
+# a rule that is already saved
+crewship automation preview aut_1234
+```
+
+A matcher is otherwise written blind: you save it, wait, and notice nothing
+happened. When a preview finds nothing, it names the clause that excluded the
+most entries and what was actually there:
+
+```
+mission.status_change · last 168h
+  would NOT have fired: 0 of 6 entries matched
+  payload_equals.status excluded 6 of them — the entry carries no key "status"; keys present: action, details, from, to
+  that key is absent, so no value will match; predicate on a key the event carries
+```
+
+The fix is in the last line: the event spells the new status `to`, not
+`status`. Re-run with `--payload-equals to=DONE` and the preview fires.
+
+<Note>
+  **"no entries in the window" is not a verdict on the rule.** A quiet
+  workspace has nothing to judge a matcher against; the output says so rather
+  than reporting zero matches, which would send you to edit a predicate that
+  may be perfectly correct.
+</Note>
+
+
+## `crewship automation list`
+
+```bash
+crewship automation list
+crewship automation list --format json
+```
+
+Sample output:
+
+```
+ID                    NAME              EVENT                   ROUTINE             ENABLED  DEBOUNCE  MAX/HOUR
+aut_9f2c1a04bd77e310  triage on close   mission.status_change   post-close-triage   true     10s       60
+aut_5b81dd0e3f4a2c96  page on budget    budget.exceeded         page-oncall         false    30s       12
+```
+
+---
+
+## `crewship automation create`
+
+```bash
+crewship automation create \
+  --name "triage on status change" \
+  --event mission.status_change \
+  --payload-equals action=status_changed \
+  --routine post-status-triage \
+  --input issue='{{ event.mission_id }}'
+```
+
+`--name`, `--event` and `--routine` are required. The routine must already
+exist in this workspace; a slug that does not resolve is refused rather than
+saved as a rule that never fires.
+
+| Flag | Type | Description |
+|---|---|---|
+| `--name` | `string` | Human-readable name. Required. |
+| `--event` | `string` | Journal entry type to watch, e.g. `mission.status_change`. Exactly one. Required. |
+| `--routine` | `string` | Routine slug to run when an entry matches. Required. |
+| `--input` | `stringSlice` | Routine input as `key=value`; values may use `{{ event.* }}`. Repeatable. |
+| `--crew` | `stringSlice` | Only match entries from these crew IDs. Repeatable. |
+| `--agent` | `stringSlice` | Only match entries from these agent IDs. Repeatable. |
+| `--mission` | `stringSlice` | Only match entries on these mission IDs. Repeatable. |
+| `--severity` | `stringSlice` | Only match these severities: `info`, `notice`, `warn`, `error`. Repeatable. |
+| `--payload-equals` | `stringSlice` | Only match when a journal payload field equals this, as `key=value`. Repeatable. A key no emitter writes is accepted and matches nothing — see below. |
+| `--debounce-seconds` | `int` | Hold the enqueued run open this long for further events to coalesce into. Default 10. |
+| `--max-per-hour` | `int` | Burst brake: cap runs this automation may cause per hour. Default 60. Counted per server process and cleared by a restart — see [Automations](/guides/automations#max-per-hour). |
+
+A predicate flag you omit is "don't care"; omit all of them and every entry of
+the event type matches.
+
+<Warning>
+  Check the payload before you match on it. A `--payload-equals` key that no
+  emitter writes is accepted, saved, listed — and matches nothing, forever,
+  with no error anywhere:
+
+  ```bash
+  crewship journal --type mission.status_change --lines 1 --format json
+  ```
+
+  `mission.status_change` carries exactly two keys: `action` (a closed set —
+  `status_changed`, `review_approved`, `task_failed`, …) and `details` (prose,
+  e.g. `"BACKLOG → TODO"`). Match on `action`; read `details` inside the
+  routine via `{{ event.payload.details }}`. "Moved to DONE" is not
+  expressible as a predicate — the target status lives only in that prose. See
+  [Automations → what `mission.status_change` actually carries](/guides/automations).
+</Warning>
+
+---
+
+## `crewship automation update <id>`
+
+```bash
+crewship automation update aut_9f2c1a04bd77e310 --max-per-hour 10
+crewship automation update aut_9f2c1a04bd77e310 \
+  --routine post-close-triage --input issue='{{ event.mission_id }}'
+```
+
+Sparse: only the flags you pass are sent, so changing the cap cannot clobber a
+matcher somebody edited a moment ago. Accepts the same flags as `create`.
+
+<Note>
+  The action is written as a whole, so `--input` requires `--routine`.
+  Sending inputs alone would blank the rule's target.
+</Note>
+
+| Flag | Type | Description |
+|---|---|---|
+| `--name` | `string` | Human-readable name. |
+| `--event` | `string` | Journal entry type to watch. |
+| `--routine` | `string` | Routine slug to run when an entry matches. |
+| `--input` | `stringSlice` | Routine input as `key=value`. Repeatable; requires `--routine`. |
+| `--crew` | `stringSlice` | Replace the crew ID predicate. Repeatable. |
+| `--agent` | `stringSlice` | Replace the agent ID predicate. Repeatable. |
+| `--mission` | `stringSlice` | Replace the mission ID predicate. Repeatable. |
+| `--severity` | `stringSlice` | Replace the severity predicate. Repeatable. |
+| `--payload-equals` | `stringSlice` | Replace the payload predicate, as `key=value`. Repeatable. |
+| `--debounce-seconds` | `int` | Debounce window in seconds. |
+| `--max-per-hour` | `int` | Runs per hour burst brake. Per server process; a restart clears it. |
+
+---
+
+## `crewship automation enable <id>` / `disable <id>`
+
+```bash
+crewship automation disable aut_9f2c1a04bd77e310
+crewship automation enable aut_9f2c1a04bd77e310
+```
+
+A disabled automation never matches. Both are the same sparse write as
+`update --enabled`, exposed as verbs because that is how they are used.
+
+---
+
+## `crewship automation delete <id>`
+
+```bash
+crewship automation delete aut_9f2c1a04bd77e310
+```
+
+Soft-delete: the rule stops matching immediately, and the row is retained
+rather than dropped, so the runs it caused are never orphaned.
+
+The rule is filtered out of every read once deleted, including
+[`crewship chain`](/cli/chain#automations-where-a-chain-began). Its runs keep
+`triggered_via='automation'`, so the record that *a* rule started them
+survives, but the rule itself no longer appears as a node. Use
+`crewship automation disable <id>` instead when you want to stop a rule and
+keep the origin of its past runs visible in the topology.
+
+---
+
+## Trace what a rule has done
+
+```bash
+crewship chain aut_9f2c1a04bd77e310
+```
+
+Shows the routine the rule is wired to and every run it has caused. See
+[`crewship chain`](/cli/chain#automations-where-a-chain-began).
+
+---
+
+## Exit codes
+
+Standard [CLI exit codes](/cli/overview#exit-codes). A routine slug that does
+not exist in the workspace, a malformed `--event`, or a `key=value` flag
+without an `=` are all client errors, reported before anything is written.

@@ -41,7 +41,7 @@ The canvas is small but every visual element has a specific meaning — getting 
 | **Waitpoint** | A `wait` step parked on a Harbormaster gate. Renders inline **Approve** / **Deny** in its body; mirrored as an `inbox_items` row so Inbox and Activity stay in lock-step. |
 | **Saved view** | A pinned snapshot of `(filter, sort, group, search)` on the left rail. Per-user, persisted, re-opens by name. |
 | **Heatmap mode** | A toolbar segmented control (Off / Cost / Time). Colours each node's border by the percentile bucket of its cost or duration in the run. Persisted per user. |
-| **Overview mode** | What the canvas shows when no run is selected — issues, their bound routines, and the last run of each chain. Click a last-run node to flip into trace mode for that run. |
+| **Overview mode** | What the canvas shows when no run is selected — the cross-feature chain: the automation or issue that triggers a routine, the routine, the last run of it, the agent that executed that run, and anything the run left in the inbox. Click a last-run node to flip into trace mode for that run. |
 | **Trace selection** | URL state (`?run=<id>&step=<id>`) that uniquely identifies a single node + side panel. Copy-paste reconstructs the exact view on another machine. |
 
 ## Usage
@@ -210,9 +210,28 @@ So a copy-paste of the URL recreates the exact view you were on. Shared with a p
 
 ## Overview mode
 
-With **no run selected**, the canvas switches to overview mode: a "what's bound to what" snapshot showing issues that have a routine bound to them, the routines themselves, and the most recent run of each chain. Clicking an issue node jumps to `/issues/<id>`; clicking a routine node opens it in `/routines`; clicking the last-run node sets `?run=<id>` and the canvas flips into trace mode.
+With **no run selected**, the canvas switches to overview mode: a "what's wired to what" snapshot of the chain a piece of work actually travels, left to right.
 
-This is the answer to "I just opened /activity, what should I look at" — the overview surfaces the chains the workspace is currently running on, without forcing you to pick a run blindly from the rail.
+```
+automation ─┐
+            ├─▶ routine ─▶ run ─┬─▶ agent
+issue      ─┘                   └─▶ inbox item
+```
+
+| Node | What it shows | Where clicking it goes |
+|------|---------------|------------------------|
+| **Automation** | The rule that fires a routine — its name, the event it listens for (`issue.created`, …), and whether it is enabled. A disabled rule still appears, dimmed: "wired up but off" is worth seeing. | Nowhere — the surface that edits it is the routine it fires, one node to the right. |
+| **Issue** | An issue that binds a routine (`routine_id`). Issues with no routine binding are left off — there is no chain to draw. | Nowhere from the canvas; the issue opens from the rail row. |
+| **Routine** | The routine itself, with its slug and invocation count. Surfaces if an issue binds it, an automation fires it, or it has run. | `/routines?slug=<slug>` |
+| **Run** | The most recent run of that routine, with status, trigger source, and an "awaiting" badge when it is parked on a waitpoint. | Sets `?run=<id>` — the canvas flips into trace mode. |
+| **Agent** | The agent that executed the run, with its real avatar and its crew. | `/crews?agent=<slug>` |
+| **Inbox item** | What the run left for a human — a waitpoint, an escalation, a message — with its kind and title, ringed when it is blocking. | `/inbox?item=<id>` |
+
+Solid edges mean *this happened* (routine → run → agent); dashed edges mean *this is wired* or *this is waiting* (automation → routine, issue → routine, run → inbox item).
+
+This is the answer to "I just opened /activity, what should I look at" — the overview surfaces the chains the workspace is currently running on, and where each one is currently stuck, without forcing you to pick a run blindly from the rail.
+
+Every column past the first three is drawn only when the page has the data for it: an agent appears when the run can be attributed to one, an inbox item when it names the run that produced it. Nothing is invented to fill a column.
 
 ## Heatmap shading
 
@@ -253,6 +272,7 @@ The single-canvas trace view is intentionally a step back from that fragmentatio
 - **Group-by axis is single-level.** "Group by crew then by routine" isn't possible in one pass — the rail picks the most-asked-for axis (`source` by default). Need a second level? Filter first, then group.
 - **No multi-run overlay on the canvas.** Comparing two runs requires opening them in two browser tabs side-by-side. An overlay-on-canvas mode is a follow-up, not shipping today.
 - **WebSocket drop ≠ stale canvas, but only if reconnect succeeds.** The trace hook (`hooks/use-trace.ts`) refetches on every `pipeline.*` event, so a brief disconnect that reconnects within a few seconds catches up automatically. A *failed* reconnect (laptop sleep, VPN flap) leaves the canvas frozen with the last-seen state — there's no "stale data" banner today. If a run looks suspiciously inactive, hard-refresh.
+- **A new overview node type needs a registered width, not just a component.** The overview layout hands dagre a width per node type and converts the centre dagre returns back into a top-left position — so the same number has to be used twice. Both reads go through `OVERVIEW_NODE_WIDTH` in `lib/trace/build-overview-graph.ts`, and `overviewNodeTypes` (`components/features/activity/overview-nodes.tsx`) is typed against the same union, so a component registered without a width fails to compile. It used to be two parallel ternaries that both fell back to the run width, and a new node type ranked correctly while rendering half a card off its column, silently.
 - **Filter dimensions are computed client-side.** With ~5k runs in the rail, every filter chip toggle runs `lib/activity/run-filters.ts` over the whole list. Performance is fine at current data volume; if you're testing against a 50k-run workspace, expect a noticeable hitch on filter changes.
 
 ## Activity Bar (toolbar)

@@ -824,7 +824,12 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 	}
 	if !ub.Empty() {
 		if statusChanged {
-			ev(actionStatusChanged, currentStatus+" → "+req.Status)
+			evs = append(evs, issueEvent{
+				MissionID: missionID, ActorType: actorType, ActorID: actorID,
+				Action:  actionStatusChanged,
+				Details: currentStatus + " → " + req.Status,
+				From:    currentStatus, To: req.Status,
+			})
 		}
 		if req.Priority != "" {
 			ev(actionPriorityChanged, req.Priority)

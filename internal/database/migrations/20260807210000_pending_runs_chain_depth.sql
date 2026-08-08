@@ -1,0 +1,15 @@
+-- The composition budget did not survive the journal hop.
+--
+-- GuardChainDepth had one caller — runCallPipelineStep — so it bounded
+-- routine→routine, which maxPipelineDepth already bounded. The path the cap
+-- was built for (routine → crewship step → issue event → automation →
+-- routine) went through pending_runs, which had no depth to carry, so every
+-- automation hop dispatched as a fresh chain root at depth 0.
+--
+-- Measured: two rules ping-ponging one issue ran 59 hops in 5 minutes, past
+-- a cap of 8, with zero automation.depth_exceeded. The only bound was
+-- max_per_hour — a throttle the cycle's own author picks.
+--
+-- Nullable, no default: an existing row means "did not say", and the
+-- dispatcher treats that as 0 exactly as it did before.
+ALTER TABLE pending_runs ADD COLUMN chain_depth INTEGER;
