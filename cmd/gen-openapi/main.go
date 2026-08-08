@@ -751,10 +751,16 @@ func problemSchema() map[string]any {
 
 // An annotation is intentionally small and local to a route. Example:
 //
-//	// openapi: query page:integer limit:integer; responses 200,400,401,403,500
+//	// openapi: query page:integer limit:integer metric:string!; responses 200,400
 //
 // It is an escape hatch for handlers whose query parsing is delegated to a
 // helper, or whose status is produced outside the handler body.
+//
+// Grammar: `query <field>...` where a field is `name`, `name:type`, or either
+// with a trailing `!` marking the parameter required. Type defaults to string
+// and must be one of integer, number, boolean, string — an unrecognised type
+// drops the field rather than guessing. `responses <codes>` is a comma list.
+// Both clauses are optional and separated by `;`.
 func applyAnnotation(info *handlerInfo, annotation string) {
 	if annotation == "" {
 		return
@@ -765,6 +771,20 @@ func applyAnnotation(info *handlerInfo, annotation string) {
 			part = part[:end]
 		}
 		for _, field := range strings.Fields(part) {
+			// A trailing `!` declares the parameter required: `metric:string!`,
+			// or `metric!` when the type is left implicit. It is the escape
+			// hatch #1824 asks for, for the handlers whose validation lives in
+			// a helper the body scan cannot see — GET /api/v1/metrics/timeseries
+			// rejects an absent ?metric inside parseTimeseriesParams, and
+			// GET /api/v1/auth/pair/poll inside normalizePairingCode.
+			//
+			// It is a claim a human made after reading the handler, so it is
+			// held to the same standard as an inferred one: every parameter
+			// carrying it is pinned by
+			// TestGeneratedSpecMarksExactlyTheVerifiedParametersRequired, and
+			// each must have a test showing the 4xx on omission.
+			required := strings.HasSuffix(field, "!")
+			field = strings.TrimSuffix(field, "!")
 			bits := strings.Split(field, ":")
 			typ := "string"
 			if len(bits) > 1 {
@@ -772,10 +792,12 @@ func applyAnnotation(info *handlerInfo, annotation string) {
 			}
 			switch typ {
 			case "integer", "number", "boolean", "string":
-				// Keep any requiredness already inferred from the handler:
-				// the annotation declares the type, not the obligation.
+				// Keep any requiredness already inferred from the handler: the
+				// annotation declares the type, and may add the obligation, but
+				// never removes one the handler was seen to enforce.
 				param := info.query[bits[0]]
 				param.typ = typ
+				param.required = param.required || required
 				info.query[bits[0]] = param
 			}
 		}
@@ -894,10 +916,54 @@ func queryParamNames(signature, body string) []string {
 // level of a handler body: `filePath := r.URL.Query().Get("path")` or, when the
 // decoded values were bound first, `since := qs.Get("since")`. The receiver is
 // captured so the caller can check it is really the inbound request's query.
-// One leading tab, and the read as the whole statement, is deliberate — see
-// requiredQueryParams.
+// One leading tab, and the read as the whole right-hand side, is deliberate —
+// see requiredQueryParams.
 var queryReadAssignmentPattern = regexp.MustCompile(
-	`^\t([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*([A-Za-z_][A-Za-z0-9_]*)(\.URL\.Query\(\))?\.Get\(\s*"([^"]+)"\s*\)\s*$`)
+	`^\t([A-Za-z_][A-Za-z0-9_]*)\s*:?=\s*(.+?)\s*$`)
+
+// bareQueryReadPattern matches the read itself, once any emptiness-preserving
+// wrapper has been peeled off it.
+var bareQueryReadPattern = regexp.MustCompile(
+	`^([A-Za-z_][A-Za-z0-9_]*)(\.URL\.Query\(\))?\.Get\(\s*"([^"]+)"\s*\)$`)
+
+// emptinessPreservingWrappers are the string functions for which f("") == ""
+// holds by definition, so a value wrapped in them is empty exactly when the
+// query parameter was absent. That equivalence is the whole reason the
+// requiredness rule may look through them.
+//
+// The list is a whitelist and stays one. `code := normalizePairingCode(
+// r.URL.Query().Get("code"))` in cli_pair.go is followed by a textbook
+// reject-on-empty guard and ?code genuinely is required — but only because
+// that helper happens to return "" for a code of the wrong length. A wrapper
+// that returned a fallback instead would make the guard unreachable and the
+// parameter optional, and marking it required would tell a client a request
+// will fail when it will succeed. Establishing which of the two a given helper
+// is means reading its body, i.e. the interprocedural analysis this generator
+// deliberately does not do; the `!` annotation is the escape hatch for it.
+var emptinessPreservingWrappers = []string{
+	"strings.TrimSpace(",
+	"strings.ToLower(",
+	"strings.ToUpper(",
+}
+
+// unwrapEmptinessPreserving peels those wrappers off an expression, innermost
+// last: `strings.ToLower(strings.TrimSpace(r.URL.Query().Get("x")))` becomes
+// `r.URL.Query().Get("x")`. An expression wrapped in anything else is returned
+// as-is, and then fails to match the bare read — no parameter, which is the
+// safe direction.
+func unwrapEmptinessPreserving(expr string) string {
+	for peeled := true; peeled; {
+		peeled = false
+		for _, wrapper := range emptinessPreservingWrappers {
+			if strings.HasPrefix(expr, wrapper) && strings.HasSuffix(expr, ")") {
+				expr = strings.TrimSpace(expr[len(wrapper) : len(expr)-1])
+				peeled = true
+				break
+			}
+		}
+	}
+	return expr
+}
 
 // emptyCheckPattern matches the emptiness test itself, in the two spellings
 // this codebase uses.
@@ -919,6 +985,12 @@ func emptyCheckPattern(name string) *regexp.Regexp {
 //	    <4xx write>
 //	    return
 //	}
+//
+// The read may be wrapped in an emptiness-preserving string function —
+// `toolkit := strings.TrimSpace(r.URL.Query().Get("toolkit"))` — because f("")
+// is "" for every entry in emptinessPreservingWrappers, so the guard still
+// fires exactly when the parameter was absent. Any other wrapper is refused:
+// see the comment on that list.
 //
 // A `||` chain marks every emptiness-tested parameter in it, because any one
 // of them being absent produces the 4xx on its own. It never fires when the
@@ -948,7 +1020,11 @@ func requiredQueryParams(signature, body string) map[string]bool {
 		if m == nil {
 			continue
 		}
-		local, receiver, viaURL, name := m[1], m[2], m[3] != "", m[4]
+		read := bareQueryReadPattern.FindStringSubmatch(unwrapEmptinessPreserving(m[2]))
+		if read == nil {
+			continue
+		}
+		local, receiver, viaURL, name := m[1], read[1], read[2] != "", read[3]
 		// `r.URL.Query().Get(…)` must come off an inbound request; a bare
 		// `x.Get(…)` only counts when x was bound to one's decoded values.
 		// Anything else (r.Header, an outbound request, a plain url.Values)

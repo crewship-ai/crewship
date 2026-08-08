@@ -60,6 +60,11 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/missions", authed(wsCtx(http.HandlerFunc(missions.ListAll))))
 	r.mux.Handle("GET /api/v1/mission-metrics", authed(wsCtx(http.HandlerFunc(missions.Metrics))))
 	metricsH := NewMetricsHandler(r.db, r.logger)
+	// #1844 + #1824. parseTimeseriesParams (metrics_handler.go) reads all four
+	// and 400s on an absent ?metric — an empty string is not in validMetrics —
+	// which TestMetricsTimeseries_ParamValidation/"missing metric" pins. window,
+	// bucket and group_by each default, so only metric carries the `!`.
+	// openapi: query metric:string! window:string bucket:string group_by:string
 	r.mux.Handle("GET /api/v1/metrics/timeseries", authed(wsCtx(http.HandlerFunc(metricsH.Timeseries))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/missions", authed(wsCtx(http.HandlerFunc(missions.List))))
 	r.authedMut("POST", "/api/v1/crews/{crewId}/missions", roleCreate, missions.Create)
@@ -210,8 +215,18 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Crew Journal: workspace-wide event stream. Reads only — writes are
 	// internal via journal.Writer emits from handlers across the codebase.
 	jh := NewJournalHandler(r.db, r.logger, r.Journal())
+	// #1844. List, Stream and Count parse their filters in parseJournalQuery
+	// (journal_handler.go), so the generator's handler-body scan sees none of
+	// them and these three operations documented no query string at all. The
+	// annotation is the declared escape hatch for a delegated parser.
+	// openapi: query actor_type:string agent_id:string agent_ids:string crew_id:string crew_ids:string cursor:string entry_type:string exclude_entry_type:string limit:integer mission_id:string priority:string q:string severity:string since:string trace_id:string until:string
 	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
+	// openapi: query actor_type:string agent_id:string agent_ids:string crew_id:string crew_ids:string cursor:string entry_type:string exclude_entry_type:string limit:integer mission_id:string priority:string q:string severity:string since:string trace_id:string until:string
 	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
+	// Count parses the same grammar off a clone with ?limit and ?cursor
+	// deleted, so neither is declared here — the handler body's own reads
+	// (rawQ.Has) still document them as accepted-and-ignored.
+	// openapi: query actor_type:string agent_id:string agent_ids:string crew_id:string crew_ids:string entry_type:string exclude_entry_type:string mission_id:string priority:string q:string severity:string since:string trace_id:string until:string
 	r.mux.Handle("GET /api/v1/journal/count", authed(wsCtx(http.HandlerFunc(jh.Count))))
 	// Cost rollup (#1404) — literal path, must be registered before the
 	// {id} wildcard below (same "literal wins over pattern" ordering
@@ -316,10 +331,22 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// rollup queries. Writes to the ledger happen inside the LLM
 	// middleware chain, not through this handler.
 	ph := NewPaymasterHandler(r.db, r.logger)
+	// #1844. The windowing params are parsed in parseWindow (paymaster_handler.go),
+	// one call below the handler's first line, so the body scan never sees them
+	// and ?range — the one the dashboard actually sends — was documented on no
+	// operation anywhere in the spec.
+	// openapi: query range:string since:string until:string
 	r.mux.Handle("GET /api/v1/paymaster/spend/by-crew", authed(wsCtx(http.HandlerFunc(ph.SpendByCrew))))
+	// openapi: query range:string since:string until:string
 	r.mux.Handle("GET /api/v1/paymaster/spend/by-agent/{crewId}", authed(wsCtx(http.HandlerFunc(ph.SpendByAgent))))
+	// SpendByMission takes no window at all — it reports one mission's total.
 	r.mux.Handle("GET /api/v1/paymaster/spend/by-mission/{missionId}", authed(wsCtx(http.HandlerFunc(ph.SpendByMission))))
+	// TopSpenders discards parseWindow's second return (`since, _ :=`), so
+	// ?until is parsed and then ignored. Declaring it would advertise a filter
+	// that does not filter; ?limit is read inline and already inferred.
+	// openapi: query range:string since:string
 	r.mux.Handle("GET /api/v1/paymaster/top-spenders", authed(wsCtx(http.HandlerFunc(ph.TopSpenders))))
+	// openapi: query range:string since:string until:string
 	r.mux.Handle("GET /api/v1/paymaster/subscriptions", authed(wsCtx(http.HandlerFunc(ph.SubscriptionUsage))))
 
 	// Harbor Master: HITL approvals inbox. Enqueue side runs inside
@@ -615,7 +642,12 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 
 	// MCP Registry (public browsing, auth required; manual sync requires workspace member)
 	mcpRegistry := NewMCPRegistryHandler(r.db, r.logger)
+	// #1844. Both operations delegate their filters to parseRegistryFilters and
+	// their paging to parsePagination (helpers.go), so neither ?trust_tier nor
+	// ?featured reached the spec. Search additionally reads ?q inline.
+	// openapi: query trust_tier:string featured:string limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/mcp-registry", authed(http.HandlerFunc(mcpRegistry.List)))
+	// openapi: query trust_tier:string featured:string limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/mcp-registry/search", authed(http.HandlerFunc(mcpRegistry.Search)))
 	r.authedMut("POST", "/api/v1/mcp-registry/sync", roleManage, mcpRegistry.Sync)
 

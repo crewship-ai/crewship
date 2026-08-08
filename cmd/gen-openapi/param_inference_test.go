@@ -178,6 +178,91 @@ func TestRequiredQueryParamsRecognisesOnlyRejectOnEmpty(t *testing.T) {
 			"}",
 		want: []string{"name"},
 	}, {
+		// #1824, second slice. The read is wrapped in a string function that
+		// maps "" to "", so an absent parameter still reaches the guard as
+		// empty and still produces the 4xx. Eleven handlers in internal/api
+		// spell it this way — GET /api/v1/integrations/composio/tools and
+		// DELETE /api/v1/feedback among them.
+		name: "trimmed at the point of read",
+		body: "{\n" +
+			"\ttoolkit := strings.TrimSpace(r.URL.Query().Get(\"toolkit\"))\n" +
+			"\tif toolkit == \"\" {\n" +
+			"\t\twriteProblem(w, r, http.StatusBadRequest, \"toolkit is required\")\n" +
+			"\t\treturn\n" +
+			"\t}\n" +
+			"}",
+		want: []string{"toolkit"},
+	}, {
+		name: "case-folded as well as trimmed",
+		body: "{\n" +
+			"\tslug := strings.ToLower(strings.TrimSpace(r.URL.Query().Get(\"slug\")))\n" +
+			"\tif slug == \"\" {\n" +
+			"\t\treplyError(w, http.StatusBadRequest, \"slug is required\")\n" +
+			"\t\treturn\n" +
+			"\t}\n" +
+			"}",
+		want: []string{"slug"},
+	}, {
+		// MessageFeedbackHandler.Delete — DELETE /api/v1/feedback.
+		name: "trimmed, and either one missing is fatal",
+		body: "{\n" +
+			"\tmessageID := strings.TrimSpace(r.URL.Query().Get(\"message_id\"))\n" +
+			"\tsignal := strings.TrimSpace(r.URL.Query().Get(\"signal\"))\n" +
+			"\tif messageID == \"\" || signal == \"\" {\n" +
+			"\t\treplyError(w, http.StatusBadRequest, \"message_id and signal required\")\n" +
+			"\t\treturn\n" +
+			"\t}\n" +
+			"}",
+		want: []string{"message_id", "signal"},
+	}, {
+		// MessageFeedbackHandler.List — GET /api/v1/feedback, the same two
+		// reads one function below the case above, joined by && instead. Either
+		// parameter alone satisfies the handler, so neither is required. The
+		// pair is the sharpest available check that widening the read pattern
+		// did not widen the guard rule with it.
+		name: "trimmed, but only fatal in combination",
+		body: "{\n" +
+			"\tmessageID := strings.TrimSpace(r.URL.Query().Get(\"message_id\"))\n" +
+			"\ttraceID := strings.TrimSpace(r.URL.Query().Get(\"trace_id\"))\n" +
+			"\tif messageID == \"\" && traceID == \"\" {\n" +
+			"\t\treplyError(w, http.StatusBadRequest, \"message_id or trace_id required\")\n" +
+			"\t\treturn\n" +
+			"\t}\n" +
+			"}",
+		want: nil,
+	}, {
+		// CliPairHandler.Poll — GET /api/v1/auth/pair/poll. ?code really is
+		// required, but only because normalizePairingCode("") returns "", which
+		// is a fact about another function's body. f("") == "" does not follow
+		// from the shape: a wrapper that returned a fallback would make the
+		// guard unreachable and the parameter optional, and the generator would
+		// have marked it required on a request that succeeds. Delegated
+		// validation is what the `!` annotation exists for.
+		name: "an unknown wrapper is not known to preserve emptiness",
+		body: "{\n" +
+			"\tcode := normalizePairingCode(r.URL.Query().Get(\"code\"))\n" +
+			"\tif code == \"\" {\n" +
+			"\t\treplyError(w, http.StatusBadRequest, \"code is required\")\n" +
+			"\t\treturn\n" +
+			"\t}\n" +
+			"}",
+		want: nil,
+	}, {
+		// AdminKeeperJudgeHandler — the trimmed read feeds a fallback, so the
+		// 4xx below it says nothing about the query parameter.
+		name: "trimmed, then defaulted from configuration",
+		body: "{\n" +
+			"\tendpointArg := strings.TrimSpace(r.URL.Query().Get(\"endpoint\"))\n" +
+			"\tif endpointArg == \"\" && h.store != nil {\n" +
+			"\t\tendpointArg = h.store.Effective().EndpointURL.Value\n" +
+			"\t}\n" +
+			"\tif endpointArg == \"\" {\n" +
+			"\t\treplyError(w, http.StatusBadRequest, \"endpoint is required\")\n" +
+			"\t\treturn\n" +
+			"\t}\n" +
+			"}",
+		want: nil,
+	}, {
 		name: "the guard supplies a default",
 		body: "{\n" +
 			"\twindow := r.URL.Query().Get(\"range\")\n" +
@@ -273,6 +358,44 @@ func TestRequiredQueryParamsRecognisesOnlyRejectOnEmpty(t *testing.T) {
 				t.Fatalf("requiredQueryParams = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// The `!` marker is the escape hatch #1824 asks for: requiredness a human read
+// off a handler whose validation is delegated, where the inference correctly
+// refuses to guess. It has to be opt-in per parameter and it must not leak into
+// the neighbouring fields of the same annotation.
+func TestApplyAnnotationMarksRequiredOnlyWhereTheBangIsWritten(t *testing.T) {
+	info := handlerInfo{query: map[string]queryParam{}, statuses: map[string]bool{}}
+	applyAnnotation(&info, "query metric:string! window:string bucket group_by:string; responses 200,400")
+
+	want := map[string]queryParam{
+		"metric":   {typ: "string", required: true},
+		"window":   {typ: "string"},
+		"bucket":   {typ: "string"},
+		"group_by": {typ: "string"},
+	}
+	if len(info.query) != len(want) {
+		t.Fatalf("query = %+v, want %d parameters", info.query, len(want))
+	}
+	for name, expect := range want {
+		if got := info.query[name]; got != expect {
+			t.Errorf("%s = %+v, want %+v", name, got, expect)
+		}
+	}
+}
+
+// An annotation declares the type and may declare the obligation, but it must
+// never take one away: a parameter the handler was seen to reject on is
+// required whether or not whoever wrote the annotation remembered the `!`.
+func TestApplyAnnotationNeverClearsInferredRequiredness(t *testing.T) {
+	info := handlerInfo{
+		query:    map[string]queryParam{"path": {typ: "string", required: true}},
+		statuses: map[string]bool{},
+	}
+	applyAnnotation(&info, "query path:string limit:integer")
+	if !info.query["path"].required {
+		t.Errorf("path = %+v; the annotation cleared requiredness the handler proved", info.query["path"])
 	}
 }
 
