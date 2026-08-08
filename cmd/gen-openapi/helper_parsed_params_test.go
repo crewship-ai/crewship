@@ -26,6 +26,15 @@ import (
 //
 // Each entry below was read against the helper that parses it. The helper is
 // named so the next reader can re-derive the claim rather than trust this list.
+//
+// params is the EXACT set the operation documents, not a subset. That
+// direction matters more than the one this issue is about: every defect in
+// this generator's recent history was a spurious addition, not an omission —
+// #1819 published `?Authorization=` because a header read like a query
+// parameter, #1830 bled one route's annotation onto its neighbours, #1832 had
+// five operations advertising 95 parameters they never read. A containment
+// check catches a parameter going missing and waves all three of those
+// through, so these are compared as sets.
 var helperParsedQueryParameters = []struct {
 	method, path string
 	helper       string
@@ -39,8 +48,9 @@ var helperParsedQueryParameters = []struct {
 	// TopSpenders calls parseWindow too, but discards the `until` half
 	// (`since, _ := parseWindow(r)`). ?until= is parsed and then thrown away, so
 	// it is accepted without having any effect — documenting it would advertise
-	// a filter that does not filter. `limit` is read inline and already inferred.
-	{"GET", "/api/v1/paymaster/top-spenders", "parseWindow", []string{"range", "since"}},
+	// a filter that does not filter. `limit` is read inline, so it is inferred
+	// rather than annotated, and belongs in the exact set all the same.
+	{"GET", "/api/v1/paymaster/top-spenders", "parseWindow", []string{"limit", "range", "since"}},
 
 	// parseJournalQuery (journal_handler.go) is the whole filter grammar of the
 	// journal. GET /api/v1/journal documented none of it.
@@ -56,12 +66,15 @@ var helperParsedQueryParameters = []struct {
 	}},
 	// Count parses the same grammar, but off a clone with ?limit and ?cursor
 	// deleted first — a count has no use for either, and parseJournalQuery
-	// would 400 on a malformed one. They stay documented because the handler
-	// body does read them (rawQ.Has) to strip them; they are accepted and
-	// ignored, which is what the operation does.
+	// would 400 on a malformed one. The annotation therefore declares neither,
+	// yet both appear in the exact set below: the handler body reads them
+	// (rawQ.Has) in order to strip them, so they are inferred rather than
+	// declared, and the operation does accept them — it just ignores them.
+	// That is also why this operation is the canary for r.Clone provenance,
+	// pinned separately in TestGeneratedSpecKeepsJournalCountPagination.
 	{"GET", "/api/v1/journal/count", "parseJournalQuery", []string{
-		"actor_type", "agent_id", "agent_ids", "crew_id", "crew_ids",
-		"entry_type", "exclude_entry_type", "mission_id", "priority",
+		"actor_type", "agent_id", "agent_ids", "crew_id", "crew_ids", "cursor",
+		"entry_type", "exclude_entry_type", "limit", "mission_id", "priority",
 		"q", "severity", "since", "trace_id", "until",
 	}},
 
@@ -84,15 +97,43 @@ func TestGeneratedSpecDocumentsParametersParsedByHelpers(t *testing.T) {
 	ops := loadSpecOperations(t)
 	for _, want := range helperParsedQueryParameters {
 		got := specQueryParams(t, ops, want.method, want.path)
-		have := map[string]bool{}
-		for _, name := range got {
-			have[name] = true
-		}
+
+		expected := map[string]bool{}
 		for _, name := range want.params {
-			if !have[name] {
-				t.Errorf("%s %s does not document %q, which %s reads off the query string (has %v)",
-					want.method, want.path, name, want.helper, got)
+			expected[name] = true
+		}
+		documented := map[string]bool{}
+		for _, name := range got {
+			documented[name] = true
+		}
+
+		var missing, spurious []string
+		for _, name := range want.params {
+			if !documented[name] {
+				missing = append(missing, name)
 			}
+		}
+		for _, name := range got {
+			if !expected[name] {
+				spurious = append(spurious, name)
+			}
+		}
+		sort.Strings(missing)
+		sort.Strings(spurious)
+
+		if len(missing) > 0 {
+			t.Errorf("%s %s does not document %v, which %s reads off the query string (has %v)",
+				want.method, want.path, missing, want.helper, got)
+		}
+		// The direction that matters. A name here is one no caller can use:
+		// either the handler never reads it, or an annotation put it on the
+		// wrong route. Check it against the handler before widening the table —
+		// "the test went red so I updated the list" is how #1832's 95 phantom
+		// parameters would have survived review.
+		if len(spurious) > 0 {
+			t.Errorf("%s %s documents %v, which neither %s nor the handler body reads — "+
+				"a parameter no caller can send (has %v)",
+				want.method, want.path, spurious, want.helper, got)
 		}
 	}
 }
