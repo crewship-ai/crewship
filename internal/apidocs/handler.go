@@ -28,6 +28,12 @@ var tmpl = template.Must(template.New("pages").Funcs(template.FuncMap{
 // bug, and it is reported as a 500 with the reason rather than a 200 that
 // renders an empty shell — a docs page that answers 200 with nothing in it is
 // the same lie GET /openapi.json told when the SPA catch-all owned that path.
+//
+// The document is parsed and indexed once, here, rather than lazily on first
+// view: measured on the current 3 MB / 536-operation spec that is ~20 ms of
+// server startup and ~5 MB retained, which is not worth a sync.Once and the
+// concurrency surface that comes with it. Rendering a page afterwards touches
+// only the index. Revisit if either number grows an order of magnitude.
 func NewHandler(spec []byte) http.Handler {
 	h := &handler{}
 	ix, err := newIndex(spec)
