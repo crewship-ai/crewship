@@ -20,6 +20,7 @@ Auth: every subcommand requires an authenticated session (`crewship login`). All
 | Command | Purpose |
 | --- | --- |
 | `chat <chat-id>` | Print the full message history of one chat as a rendered transcript. |
+| `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
 | `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes an `UNREAD` column (replies you haven't seen). |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
 | `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/` in the container). |
@@ -115,6 +116,34 @@ duplicates output. Full frame reference: [Watching agent runs](/guides/watching-
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--role <member\|owner>` | `member` | Role to grant the participant. Any value other than `owner` is stored as `member`. |
+
+## `crewship chat create <agent-slug-or-id>`
+
+Create a chat session on an agent without sending it a message. Calls
+`POST /api/v1/agents/{agentId}/chats` with `origin: CLI`; the session starts
+empty and `ACTIVE`.
+
+Every other way to get a session — `ask`, `run`, `routine iterate` — creates it
+on the way to a model call, so none of them can produce one on an instance with
+no provider credential. `chat create` needs none, which makes it the way to set
+up scripted fixtures and to exercise `chat stream`'s idle contract
+(`stream.open` → `stream.end` / `no_active_run`) on a workspace where nothing
+has ever run.
+
+The chat id goes to **stdout** in every format, so it can be captured directly:
+
+```bash
+CHAT=$(crewship chat create atlas)
+crewship chat stream "$CHAT" --idle 10
+crewship chat delete "$CHAT" --yes
+```
+
+| Format | Output |
+| --- | --- |
+| (default) | The chat id on stdout, plus `Chat <chat-id> created.` on stderr. |
+| `--format json` | `{"id":"<chat-id>","agent_id":"<agent-id>"}` |
+| `--format yaml` / `ndjson` | The same object as YAML / one JSON line. |
+| `--format quiet` | The bare chat id, nothing else. |
 
 ## `crewship chat delete <chat-id>`
 

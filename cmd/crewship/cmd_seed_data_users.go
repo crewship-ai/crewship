@@ -72,6 +72,19 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	fmt.Fprintln(os.Stderr, "Seeding RBAC fixture (4 users × 4 roles)...")
 	fmt.Fprintln(os.Stderr, "  (requires CREWSHIP_ALLOW_SIGNUP=true on server)")
 
+	// Preflight: the server publishes whether signup is open, so the one
+	// configuration this fixture cannot work under is knowable before we
+	// spend four signups discovering it four times. Advisory by design — a
+	// server that does not answer setup-status must not block the fixture,
+	// and the zero-placed verdict at the bottom still catches it.
+	if open, known := serverAllowsSignup(client); known && !open {
+		return fmt.Errorf(
+			"signup is disabled on this server (allow_signup=false), so all %d RBAC signups "+
+				"would be refused with 403 and the fixture would place nobody. Start the server "+
+				"with CREWSHIP_ALLOW_SIGNUP=true (or auth.allow_signup: true) and re-run",
+			len(demoUsers))
+	}
+
 	var minted []demoUser
 
 	for _, u := range demoUsers {
@@ -148,9 +161,19 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 		minted = append(minted, u)
 	}
 
+	// A fixture that placed nobody is a failed fixture. This used to print a
+	// note to stderr and return nil, so `seed --with-users` exited 0 having
+	// created no second identity — and every caller downstream (the nightly
+	// harness matrix above all) proceeded as if it had one, then skipped with
+	// a reason about the wrong thing (#1829). Per-user failures stay
+	// non-fatal, so a partial fixture is still a success; only "none at all"
+	// is a verdict.
 	if len(minted) == 0 {
-		fmt.Fprintln(os.Stderr, "  (no users seeded; --with-users requires CREWSHIP_ALLOW_SIGNUP=true)")
-		return nil
+		return fmt.Errorf(
+			"no RBAC fixture users were placed (0 of %d): see the per-user lines above. "+
+				"The usual cause is signup disabled on the server — start it with "+
+				"CREWSHIP_ALLOW_SIGNUP=true and re-run",
+			len(demoUsers))
 	}
 
 	// Print the credential table to stderr so the operator can copy
@@ -169,6 +192,31 @@ func seedRBACUsers(ctx context.Context, client *cli.Client) error {
 	fmt.Fprintln(os.Stderr, "    crewship login  # interactive prompt for email + password above")
 	fmt.Fprintln(os.Stderr, "")
 	return nil
+}
+
+// serverAllowsSignup reads the public first-run gate (GET
+// /api/v1/system/setup-status, no auth) and reports whether the server has
+// registration open, plus whether that answer is knowable at all.
+//
+// known=false for anything that is not a clean read — an older build without
+// the route, a proxy in the way, a transport error. Callers must treat an
+// unknown answer as "carry on": this exists to name a cause early, not to add
+// a dependency the fixture did not have.
+func serverAllowsSignup(client *cli.Client) (allow, known bool) {
+	resp, err := client.Get("/api/v1/system/setup-status")
+	if err != nil {
+		return false, false
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return false, false
+	}
+	var status struct {
+		AllowSignup *bool `json:"allow_signup"`
+	}
+	if err := cli.ReadJSON(resp, &status); err != nil || status.AllowSignup == nil {
+		return false, false
+	}
+	return *status.AllowSignup, true
 }
 
 // findWorkspaceMemberByEmail resolves an email to (userID, currentRole)

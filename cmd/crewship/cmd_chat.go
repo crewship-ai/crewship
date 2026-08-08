@@ -566,6 +566,84 @@ Examples:
 	},
 }
 
+// chatCreateCmd opens an empty chat session on an agent — CLI parity for
+// POST /api/v1/agents/{agentId}/chats, the only route in the chat tree that
+// had no command of its own (rule #3 in CLAUDE.md).
+//
+// Every existing caller of that route creates a session as a side effect of
+// sending something: `ask`, `run`, `routine iterate`. All of them need a
+// provider credential, so on an instance without one there is no way to end up
+// with a chat at all — `crewship seed` creates none unless --smoke-test runs a
+// real agent. That made the control-plane half of
+// scripts/test-harness/test-run-stream.sh unrunnable on a fresh CI instance:
+// its tenancy and frame-contract sections both need a chat that genuinely
+// EXISTS, and both silently skipped for want of one (#1829).
+//
+// The session starts empty and ACTIVE. Streaming it answers
+// stream.open → stream.end/no_active_run, which is exactly the idle contract.
+var chatCreateCmd = &cobra.Command{
+	Use:   "create <agent-slug-or-id>",
+	Short: "Open an empty chat session on an agent",
+	Long: `Create a chat session without sending anything to it.
+
+Useful for scripted setups and test fixtures that need a session id up
+front, and for opening a conversation on an instance with no provider
+credential — 'ask' and 'run' both create their session on the way to a
+model call, so neither can produce one there.
+
+Examples:
+  crewship chat create atlas
+  crewship chat create atlas --format json`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		resp, err := client.Post("/api/v1/agents/"+url.PathEscape(agentID)+"/chats",
+			map[string]string{"origin": "CLI"})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var created struct {
+			ID string `json:"id"`
+		}
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			return err
+		}
+		if created.ID == "" {
+			return fmt.Errorf("server accepted the chat but returned no id")
+		}
+
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(map[string]string{"id": created.ID, "agent_id": agentID})
+		case "yaml":
+			return f.YAML(map[string]string{"id": created.ID, "agent_id": agentID})
+		case "ndjson":
+			return f.NDJSON(map[string]string{"id": created.ID, "agent_id": agentID})
+		case "quiet":
+			fmt.Println(created.ID)
+			return nil
+		}
+		// The id goes to STDOUT even in table mode: `$(crewship chat create x)`
+		// is the whole point of the command, and PrintSuccess writes to stderr.
+		fmt.Println(created.ID)
+		cli.PrintSuccess(fmt.Sprintf("Chat %s created.", created.ID))
+		return nil
+	},
+}
+
 // lookupChatAgentID finds which agent owns a chat by walking the agents
 // list and querying each agent's chat list until the chat ID is found.
 // Worst case scales with #agents — fine for the typical workspace size
@@ -742,6 +820,7 @@ func init() {
 	chatCmd.AddCommand(chatReactCmd)
 	chatCmd.AddCommand(chatParticipantsCmd)
 	chatCmd.AddCommand(chatAttachCmd)
+	chatCmd.AddCommand(chatCreateCmd)
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatReadCmd)
 	chatCmd.AddCommand(chatDeleteCmd)
