@@ -751,10 +751,16 @@ func problemSchema() map[string]any {
 
 // An annotation is intentionally small and local to a route. Example:
 //
-//	// openapi: query page:integer limit:integer; responses 200,400,401,403,500
+//	// openapi: query page:integer limit:integer metric:string!; responses 200,400
 //
 // It is an escape hatch for handlers whose query parsing is delegated to a
 // helper, or whose status is produced outside the handler body.
+//
+// Grammar: `query <field>...` where a field is `name`, `name:type`, or either
+// with a trailing `!` marking the parameter required. Type defaults to string
+// and must be one of integer, number, boolean, string — an unrecognised type
+// drops the field rather than guessing. `responses <codes>` is a comma list.
+// Both clauses are optional and separated by `;`.
 func applyAnnotation(info *handlerInfo, annotation string) {
 	if annotation == "" {
 		return

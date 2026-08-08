@@ -18,14 +18,18 @@ This is a **route catalog**, not a hand-authored contract: paths, HTTP methods, 
 
 ## Query parameters
 
-Query parameters are **inferred from the handler body** — the generator resolves each registration to the concrete handler it runs and lists the names that handler reads off the request. A parameter it cannot attribute to a handler is left out rather than guessed in, so the list is a subset of what an operation accepts, never a superset. Where a handler delegates its parsing to a shared helper, the route carries an explicit `// openapi:` annotation instead.
+Query parameters are **inferred from the handler body** — the generator resolves each registration to the concrete handler it runs and lists the names that handler reads off the request. A parameter it cannot attribute to a handler is left out rather than guessed in, so the list is a subset of what an operation accepts, never a superset.
+
+That subset has one blind spot worth knowing about: a handler that parses nothing itself and calls a shared helper to do it. `GET /api/v1/paymaster/spend/by-crew` reads its window through `parseWindow`, `GET /api/v1/journal` its whole filter grammar through `parseJournalQuery`. The scan reads one function body and stops, so those routes carry an explicit `// openapi:` annotation naming what the helper accepts. If an operation lists no query parameters at all, it may genuinely take none — or its annotation may still be missing.
 
 `required` is inferred the same way, and asymmetrically:
 
 - **`required: true`** means the handler was seen to answer `4xx` when the parameter is absent — for example `DELETE /api/v1/crews/{crewId}/files/delete?path=`, which answers `400 path parameter required`. Send it.
-- **`required: false`** means *not proven required*, not *proven optional*. Most parameters are genuinely optional; a few are required in ways the inference does not recognise (validation delegated to a helper, or an obligation that depends on another parameter).
+- **`required: false`** means *not proven required*, not *proven optional*. Most parameters are genuinely optional; a few are required in ways the inference does not recognise (an obligation that depends on another parameter, or a value validated by a helper the generator will not follow into).
 
 Over-claiming would tell a client a request will fail when it will succeed, so the generator under-claims by design. Treat `required: true` as binding and `required: false` as unknown.
+
+A parameter can also be declared required by hand, with a `!` in the route's annotation (`// openapi: query metric:string!`). That is reserved for handlers whose check is delegated — `GET /api/v1/metrics/timeseries` rejects an absent `?metric` inside `parseTimeseriesParams`, `GET /api/v1/auth/pair/poll` an absent `?code` inside `normalizePairingCode`. Declared and inferred entries are held to the same standard: each is pinned by name in `cmd/gen-openapi`'s tests and each has a test showing the `4xx` when the parameter is omitted, so `required: true` means the same thing however it got there.
 
 ## Methods not listed are rejected
 
