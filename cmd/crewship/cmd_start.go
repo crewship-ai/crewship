@@ -21,6 +21,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/admission"
 	api "github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/automation"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/chatnotify"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -427,6 +428,45 @@ var startCmd = &cobra.Command{
 			}
 		}
 
+		// Automations: the third journal commit observer. It matches committed
+		// entries against the workspace's automation rules in memory and parks
+		// a debounced run in pending_runs — completing the trigger path
+		// journal → observer → pending_runs, whose only missing hop was this
+		// one. AddCommitObserver for the same reason the two above use it.
+		if deps.DB != nil {
+			if jw := srv.JournalWriter(); jw != nil {
+				autoReg := automation.NewRegistry(
+					automation.NewStore(deps.DB),
+					pipeline.NewPendingRunStore(deps.DB),
+					automation.Options{Journal: jw, Logger: logger},
+				)
+				if err := autoReg.Refresh(ctx); err != nil {
+					logger.Error("automation: initial registry load failed", "err", err)
+				}
+				// Without this the registry prices every hop at depth 1 and a
+				// composed cycle re-enters the process with a fresh budget —
+				// which is exactly how a two-rule loop ran 59 hops past a cap
+				// of 8.
+				autoReg.SetChainSource(pipeline.NewRunChainReader(deps.DB))
+				autoReg.Start(ctx)
+				defer autoReg.Stop()
+				jw.AddCommitObserver(autoReg.Observer)
+				// A rule saved through the API must fire on the NEXT event,
+				// not up to a minute later — otherwise the first thing an
+				// author sees after saving is nothing happening.
+				if apiRouter := srv.APIRouter(); apiRouter != nil {
+					if ah := apiRouter.Automations(); ah != nil {
+						ah.SetRefresh(func(c context.Context) {
+							if err := autoReg.Refresh(c); err != nil {
+								logger.Error("automation: registry refresh after write failed", "err", err)
+							}
+						})
+					}
+				}
+				logger.Info("automation registry wired (journal commit → pending_runs)")
+			}
+		}
+
 		// V-01: Wire up channel authorizer for WebSocket subscription access control
 		if deps.DB != nil {
 			srv.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(deps.DB))
@@ -800,6 +840,11 @@ var startCmd = &cobra.Command{
 						ScriptRunner: ph.ScriptRunner(),
 						Signals:      signalRegistry,
 						RunVerdict:   srv.APIRouter().RunVerdict,
+						// Dispatch gates on the in-process call_pipeline path,
+						// and `crewship` step dispatch — both shared with the
+						// HTTP path so an unattended run behaves identically.
+						Preflight: ph.RunPreflight(),
+						Crewship:  ph.CrewshipActions(),
 						// Share the pipeline handler's verdict WaitGroup so
 						// this boot executor's async verdicts drain at shutdown.
 						VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),
@@ -870,6 +915,11 @@ var startCmd = &cobra.Command{
 						ScriptRunner: ph.ScriptRunner(),
 						Signals:      signalRegistry,
 						RunVerdict:   srv.APIRouter().RunVerdict,
+						// Dispatch gates on the in-process call_pipeline path,
+						// and `crewship` step dispatch — both shared with the
+						// HTTP path so an unattended run behaves identically.
+						Preflight: ph.RunPreflight(),
+						Crewship:  ph.CrewshipActions(),
 						// Share the pipeline handler's verdict WaitGroup so
 						// this resume executor's async verdicts drain at shutdown.
 						VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),
@@ -959,6 +1009,11 @@ var startCmd = &cobra.Command{
 					ScriptRunner: ph.ScriptRunner(),
 					Signals:      signalRegistry,
 					RunVerdict:   srv.APIRouter().RunVerdict,
+					// Dispatch gates on the in-process call_pipeline path,
+					// and `crewship` step dispatch — both shared with the
+					// HTTP path so an unattended run behaves identically.
+					Preflight: ph.RunPreflight(),
+					Crewship:  ph.CrewshipActions(),
 					// Share the pipeline handler's verdict WaitGroup so this
 					// scheduler executor's async verdicts drain at shutdown.
 					VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),

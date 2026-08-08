@@ -40,6 +40,46 @@ type runRecordRow struct {
 	TriggeredVia     string  `json:"triggered_via"`
 	TriggeredByID    string  `json:"triggered_by_id,omitempty"`
 	IdempotencyKey   string  `json:"idempotency_key,omitempty"`
+	// ChainDepth / ChainOrigin place a run in a COMPOSED chain: 0 is a run
+	// somebody started, 1 a routine that run called, 2 an automation fired by
+	// an event that run emitted. Capped at 8 by the server.
+	ChainDepth  int    `json:"chain_depth"`
+	ChainOrigin string `json:"chain_origin,omitempty"`
+	// AutomationID / AutomationName / TriggerEventType name the RULE behind a
+	// rule-fired run. They are not redundant with TriggeredVia: the server
+	// fires every deferred run with triggered_via="schedule", so the enum
+	// alone cannot tell a cron from an automation.
+	AutomationID     string `json:"automation_id,omitempty"`
+	AutomationName   string `json:"automation_name,omitempty"`
+	TriggerEventType string `json:"trigger_event_type,omitempty"`
+}
+
+// triggerLabel is what the TRIGGER column prints.
+//
+// A rule-fired run arrives as triggered_via="schedule" because the pending-run
+// dispatcher is shared with cron. Printing the enum verbatim would tell an
+// operator a schedule did it. When the row names an automation, the automation
+// is the answer, and the rule's name goes in the column beside it.
+func triggerLabel(r runRecordRow) string {
+	if r.AutomationName != "" {
+		return "automation"
+	}
+	if r.TriggeredVia == "" {
+		return "manual"
+	}
+	return r.TriggeredVia
+}
+
+// triggerSource is the second half of the answer: which rule, which schedule
+// id, which issue. Empty when the trigger label already says everything.
+func triggerSource(r runRecordRow) string {
+	if r.AutomationName != "" {
+		return r.AutomationName
+	}
+	if r.TriggeredByID != "" {
+		return r.TriggeredByID
+	}
+	return "—"
 }
 
 var routineRecordsCmd = &cobra.Command{
@@ -125,8 +165,23 @@ Examples:
 			}
 			return nil
 		}
+		// The CHAIN column is conditional. Composition is rare — most
+		// workspaces have none — and a column of em-dashes on every row is a
+		// permanent tax for a fact that applies to almost nothing. It appears
+		// exactly when some run in this page was composed.
+		composed := false
+		for _, r := range rows {
+			if r.ChainDepth > 0 {
+				composed = true
+				break
+			}
+		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "RUN ID\tSTATUS\tMODE\tTRIGGER\tDURATION\tCOST\tSTARTED")
+		if composed {
+			fmt.Fprintln(w, "RUN ID\tSTATUS\tMODE\tTRIGGER\tSOURCE\tCHAIN\tDURATION\tCOST\tSTARTED")
+		} else {
+			fmt.Fprintln(w, "RUN ID\tSTATUS\tMODE\tTRIGGER\tSOURCE\tDURATION\tCOST\tSTARTED")
+		}
 		for _, r := range rows {
 			dur := "—"
 			if r.DurationMs > 0 {
@@ -136,8 +191,19 @@ Examples:
 			if r.CostUSD > 0 {
 				cost = fmt.Sprintf("$%.4f", r.CostUSD)
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				truncIDForCLI(r.ID, 16), r.Status, r.Mode, r.TriggeredVia, dur, cost, formatTimestamp(r.StartedAt))
+			if composed {
+				chain := "—"
+				if r.ChainDepth > 0 {
+					chain = fmt.Sprintf("%d", r.ChainDepth)
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					truncIDForCLI(r.ID, 16), r.Status, r.Mode, triggerLabel(r), triggerSource(r),
+					chain, dur, cost, formatTimestamp(r.StartedAt))
+				continue
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				truncIDForCLI(r.ID, 16), r.Status, r.Mode, triggerLabel(r), triggerSource(r),
+				dur, cost, formatTimestamp(r.StartedAt))
 		}
 		return w.Flush()
 	},

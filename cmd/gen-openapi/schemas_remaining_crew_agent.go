@@ -180,6 +180,19 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		add(method, path, "Remaining"+name+"V1", action)
 	}
 
+	// Topic-scoped signal delivery is deliberately NOT folded into the
+	// action envelope above: the answer to "deliver this event" is which
+	// runs it reached, and a generic {success, status, message} would drop
+	// exactly the part a caller acts on. delivered=0 is a success, so the
+	// count is the only way to tell "nobody was listening" from "two runs
+	// resumed".
+	add("POST", "/api/v1/workspaces/{workspaceId}/signals", "RemainingWorkspaceTopicSignalV1",
+		object(map[string]any{
+			"ok": boolean(), "delivered": integer(), "run_ids": array(str()), "truncated": boolean(),
+		}))
+	addRequest("POST", "/api/v1/workspaces/{workspaceId}/signals", "RemainingWorkspaceTopicSignalRequestV1",
+		object(map[string]any{"event_type": str(), "payload": str()}))
+
 	return routes, components
 }
 

@@ -36,6 +36,12 @@ type fakeExecutor struct {
 	inFlight  int32
 	maxInWork int32
 	completed int32
+
+	// seenMu/seen record what the dispatcher actually asked the executor
+	// for. Concurrency tests ignore it; the attribution test is about the
+	// CONTENT of the request rather than its timing.
+	seenMu sync.Mutex
+	seen   []RunInput
 }
 
 // barrierAbandonAfter releases a rendezvous that will never assemble, so
@@ -48,6 +54,9 @@ type fakeExecutor struct {
 const barrierAbandonAfter = 10 * time.Second
 
 func (f *fakeExecutor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
+	f.seenMu.Lock()
+	f.seen = append(f.seen, in)
+	f.seenMu.Unlock()
 	cur := atomic.AddInt32(&f.inFlight, 1)
 	for {
 		hi := atomic.LoadInt32(&f.maxInWork)
@@ -301,5 +310,68 @@ func TestDispatcher_ThreadsInvokingUser(t *testing.T) {
 	d.Stop()
 	if exec.last.InvokingUserID != "usr_trigger" {
 		t.Errorf("dispatcher RunInput.InvokingUserID = %q, want usr_trigger", exec.last.InvokingUserID)
+	}
+}
+
+// The dispatcher must ASK for what the row says, not just be able to.
+//
+// effectivePendingTrigger and the store round-trip are each pinned on their
+// own, but "the dispatcher actually consults them" is a third fact: mutating
+// the dispatcher back to a hard-coded schedule left both of those suites
+// green, which is exactly how the original bug survived.
+func TestPendingDispatcher_HonoursTheRowsAttribution(t *testing.T) {
+	s := NewPendingRunStore(newPendingDB(t))
+	ctx := context.Background()
+	past := time.Now().Add(-time.Minute)
+
+	if _, _, err := s.Enqueue(ctx, PendingRun{
+		ID: "p_auto", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s", FireAt: past,
+		TriggeredVia: TriggeredViaAutomation, TriggeredByID: "aut_abc",
+	}); err != nil {
+		t.Fatalf("enqueue attributed: %v", err)
+	}
+	if _, _, err := s.Enqueue(ctx, PendingRun{
+		ID: "p_plain", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s", FireAt: past,
+	}); err != nil {
+		t.Fatalf("enqueue plain: %v", err)
+	}
+
+	exec := &fakeExecutor{}
+	d := NewPendingRunDispatcher(s, exec, nil)
+	d.Start(ctx)
+	defer d.Stop()
+
+	if !waitFor(t, barrierAbandonAfter, func() bool {
+		exec.seenMu.Lock()
+		defer exec.seenMu.Unlock()
+		return len(exec.seen) >= 2
+	}) {
+		t.Fatal("dispatcher never fired both rows")
+	}
+
+	exec.seenMu.Lock()
+	defer exec.seenMu.Unlock()
+	var sawAutomation, sawSchedule bool
+	for _, in := range exec.seen {
+		switch in.TriggeredVia {
+		case TriggeredViaAutomation:
+			sawAutomation = true
+			if in.TriggeredByID != "aut_abc" {
+				t.Errorf("automation run points at %q, want the automation id", in.TriggeredByID)
+			}
+		case TriggeredViaSchedule:
+			sawSchedule = true
+			if in.TriggeredByID != "p_plain" {
+				t.Errorf("unattributed run points at %q, want its own pending id", in.TriggeredByID)
+			}
+		default:
+			t.Errorf("unexpected trigger %q", in.TriggeredVia)
+		}
+	}
+	if !sawAutomation {
+		t.Error("no run reported the automation — a rule fired and the dispatcher called it a cron")
+	}
+	if !sawSchedule {
+		t.Error("the unattributed row stopped defaulting to schedule")
 	}
 }

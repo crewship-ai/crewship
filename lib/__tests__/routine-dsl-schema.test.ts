@@ -24,6 +24,7 @@ describe("stepKinds", () => {
         "script",
         "transform",
         "wait",
+        "crewship",
       ].sort(),
     )
   })

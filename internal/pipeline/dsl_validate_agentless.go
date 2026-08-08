@@ -28,6 +28,14 @@ func validateAgentless(dsl *DSL) error {
 			return fmt.Errorf("pipeline: step %q is agent_run — not allowed in an agentless routine (token-zero guarantee)", st.ID)
 		case StepCallPipeline:
 			return fmt.Errorf("pipeline: step %q is call_pipeline — not allowed in an agentless routine (nested target resolves at runtime, guarantee can't be enforced)", st.ID)
+		case StepCrewship:
+			// Same reasoning as call_pipeline, one hop further out: the verb
+			// reaches a handler that MAY start an agent — an @mention in an
+			// issue body wakes the mentioned agent (#1768), an assignment
+			// dispatches one by definition — and whether it does depends on
+			// rendered content, not on anything provable at save time. A
+			// token-zero guarantee that holds "usually" is not one.
+			return fmt.Errorf("pipeline: step %q is crewship — not allowed in an agentless routine (an issue mention or an assignment can wake an agent, so token-zero can't be enforced)", st.ID)
 		case StepForeach:
 			// A foreach is agentless only if its whole body is — an
 			// agent_run inside the fan-out is token spend all the same.

@@ -203,12 +203,23 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// (audit-like, retry counters, telemetry) is excluded explicitly.
 	"agent_config_history": IntentInclude,
 	"approvals_queue":      IntentInclude,
-	"assignments":          IntentInclude,
-	"budget_limits":        IntentInclude,
-	"captain_chats":        IntentInclude,
-	"checkpoints":          IntentInclude,
-	"cost_ledger":          IntentInclude,
-	"credential_crews":     IntentInclude,
+	// automations are user-authored rules: "when this happens, run that".
+	// Same class as pipelines — configuration a person wrote and would have to
+	// write again, not derived state. A restore that silently comes back with
+	// no automations is the worst version of this failure, because everything
+	// still works and simply stops happening by itself.
+	//
+	// Soft-deleted rows ride along (deleted_at is a column, not a filter here).
+	// That is deliberate: internal/chain reads deleted rules to explain runs
+	// they caused, so dropping them on restore would make restored history
+	// unexplainable.
+	"automations":      IntentInclude,
+	"assignments":      IntentInclude,
+	"budget_limits":    IntentInclude,
+	"captain_chats":    IntentInclude,
+	"checkpoints":      IntentInclude,
+	"cost_ledger":      IntentInclude,
+	"credential_crews": IntentInclude,
 	// Both new with the credentials-V2 work. They hold durable user content
 	// and losing them on restore is silent: a multi-part credential comes
 	// back with its primary value and no access key id or region, and every

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Register inserts a new hook row. The caller passes allowedShell=true only
@@ -60,8 +62,8 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 		boolToInt(h.Blocking),
 		boolToInt(h.Enabled),
 		nullableStr(h.CreatedBy),
-		h.CreatedAt.UTC().Format(time.RFC3339Nano),
-		h.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		tsformat.Format(h.CreatedAt),
+		tsformat.Format(h.UpdatedAt),
 	)
 	if err != nil {
 		return "", fmt.Errorf("hooks: insert: %w", err)
@@ -87,14 +89,24 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 	return h.ID, nil
 }
 
-// validateForInsert is the shared guard used by Register. Split out so tests
-// can exercise the branches without a DB.
+// validateForInsert is the shared guard used by Register and Update. Split
+// out so tests can exercise the branches without a DB.
+//
+// The event check is the reason this is a chokepoint rather than a
+// convenience: hooks_config CHECKs handler_kind but not event, so an
+// unrecognised event name inserts cleanly and then never matches
+// ListByEvent's predicate. The hook lists and toggles like any other and
+// silently never fires. Rejecting it at the only write path turns a
+// permanently-dead registration into an error the caller can act on.
 func validateForInsert(h Hook, allowedShell bool) error {
 	if h.WorkspaceID == "" {
 		return errors.New("hooks: workspace_id required")
 	}
 	if h.Event == "" {
 		return errors.New("hooks: event required")
+	}
+	if err := ValidateEvent(h.Event); err != nil {
+		return err
 	}
 	switch h.HandlerKind {
 	case HandlerKindShell:
@@ -112,6 +124,99 @@ func validateForInsert(h Hook, allowedShell bool) error {
 		// Agent selection is handler-specific; don't enforce shape here.
 	default:
 		return ErrUnknownHandlerKind
+	}
+	return nil
+}
+
+// Update rewrites the mutable columns of an existing hook. The caller
+// supplies the FULL desired state (an already-merged Hook, not a patch) —
+// merging partial input against the current row is the HTTP layer's job,
+// so this function stays a single UPDATE with no read-modify-write race
+// of its own.
+//
+// Three things are deliberately NOT taken from h:
+//
+//   - id / workspace_id come from the arguments and pin the WHERE clause,
+//     so a body that names another workspace cannot move a row across
+//     tenants;
+//   - created_at / created_by are never rewritten — provenance of who
+//     first registered a hook survives every later edit.
+//
+// allowedShell carries the same meaning as in Register and is checked by
+// the same guard: converting an http hook into a shell hook is exactly
+// the escalation the OWNER gate exists to stop, so Update must not be a
+// way around it.
+//
+// Returns sql.ErrNoRows when no row in workspaceID has that id, matching
+// SetEnabled / Delete so a cross-tenant id is indistinguishable from a
+// missing one.
+func Update(ctx context.Context, db *sql.DB, workspaceID string, h Hook, allowedShell bool) error {
+	if h.ID == "" {
+		return errors.New("hooks: update: id required")
+	}
+	if workspaceID == "" {
+		return errors.New("hooks: update: workspace_id required")
+	}
+	// Validate against the workspace we are actually writing to, not the
+	// one the caller put in the struct.
+	h.WorkspaceID = workspaceID
+	if err := validateForInsert(h, allowedShell); err != nil {
+		return err
+	}
+
+	matcherJSON, err := json.Marshal(h.Matcher)
+	if err != nil {
+		return fmt.Errorf("hooks: marshal matcher: %w", err)
+	}
+	handlerCfg := h.HandlerConfig
+	if handlerCfg == nil {
+		handlerCfg = map[string]any{}
+	}
+	handlerJSON, err := json.Marshal(handlerCfg)
+	if err != nil {
+		return fmt.Errorf("hooks: marshal handler_config: %w", err)
+	}
+
+	res, err := db.ExecContext(ctx, `UPDATE hooks_config SET
+		crew_id = ?, event = ?, matcher = ?, handler_kind = ?, handler_config = ?,
+		blocking = ?, enabled = ?, updated_at = ?
+		WHERE id = ? AND workspace_id = ?`,
+		nullableStr(h.CrewID),
+		string(h.Event),
+		string(matcherJSON),
+		string(h.HandlerKind),
+		string(handlerJSON),
+		boolToInt(h.Blocking),
+		boolToInt(h.Enabled),
+		tsformat.Format(time.Now()),
+		h.ID,
+		workspaceID,
+	)
+	if err != nil {
+		return fmt.Errorf("hooks: update: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("hooks: rows affected: %w", err)
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+
+	// Same lint breadcrumb Register leaves — an edit that introduces the
+	// unquoted-$CREWSHIP_PAYLOAD gotcha deserves the same warning as a
+	// fresh registration, otherwise operators can launder a bad command
+	// through PATCH.
+	if h.HandlerKind == HandlerKindShell {
+		if cmd, ok := h.HandlerConfig["command"].(string); ok {
+			for _, w := range LintShellCommand(cmd) {
+				slog.Default().Warn("hooks: shell command lint",
+					"hook_id", h.ID,
+					"workspace_id", workspaceID,
+					"warning", w,
+				)
+			}
+		}
 	}
 	return nil
 }
@@ -145,7 +250,7 @@ func Delete(ctx context.Context, db *sql.DB, workspaceID, id string) error {
 func SetEnabled(ctx context.Context, db *sql.DB, workspaceID, id string, enabled bool) error {
 	res, err := db.ExecContext(ctx,
 		`UPDATE hooks_config SET enabled = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
-		boolToInt(enabled), time.Now().UTC().Format(time.RFC3339Nano), id, workspaceID)
+		boolToInt(enabled), tsformat.Format(time.Now()), id, workspaceID)
 	if err != nil {
 		return fmt.Errorf("hooks: set enabled: %w", err)
 	}
@@ -297,7 +402,9 @@ func scanHook(r rowScanner) (Hook, error) {
 	return h, nil
 }
 
-// parseTS accepts both the RFC3339Nano form we write and the shorter
+// parseTS accepts both the fixed-width tsformat.Layout we now write, the
+// RFC3339Nano form written before that (time.RFC3339Nano parses both), and the
+// shorter
 // datetime('now') SQLite produces, matching the pattern journal.parseTS
 // uses.
 func parseTS(s string) (time.Time, error) {

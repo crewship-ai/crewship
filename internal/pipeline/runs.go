@@ -58,6 +58,13 @@ const (
 	// crons produce many of these, so run lists can filter them out
 	// by this marker.
 	TriggeredViaWakeCheck TriggeredVia = "wake_check"
+
+	// TriggeredViaAutomation marks a run an automation rule started, so a
+	// reader can tell a rule from a cron. Both arrive through pending_runs;
+	// before this existed the dispatcher labelled every deferred run
+	// "schedule" and the rule was only recoverable out of metadata_json.
+	// TriggeredByID carries the automations.id.
+	TriggeredViaAutomation TriggeredVia = "automation"
 	// TriggeredViaIssue marks runs fired from an issue's "Run routine"
 	// button. TriggeredByID carries the issue identifier (e.g. ENG-15)
 	// so the runs list can JOIN back to missions for the source pill.
@@ -114,10 +121,21 @@ type RunRecord struct {
 	// run; ReplayOf is that prior run's id. Injected into the render
 	// context as {{ run.is_replay }} so steps can short-circuit side
 	// effects on replay.
-	IsReplay  bool
-	ReplayOf  string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	IsReplay bool
+	ReplayOf string
+	// ChainDepth is how many COMPOSED hops separate this run from whatever a
+	// human did (v20260807160100). A run a person started is 0; a routine that
+	// run called is 1; an automation fired by an event that run emitted is 2.
+	// Distinct from the executor's in-process `depth` argument, which resets
+	// per top-level run and is not persisted — a chain can leave the process
+	// through the journal and come back, and this is what survives that hop.
+	// Bounded by MaxChainDepth; see GuardChainDepth.
+	ChainDepth int
+	// ChainOrigin is the id of the run or journal entry that started the
+	// chain. Empty on a chain root (where the run's own id is the origin).
+	ChainOrigin string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 	// WarningsJSON is a JSON array of RunWarning entries — non-fatal
 	// issues attached to the run (currently: failed after_all /
 	// on_failure lifecycle hooks) that don't flip the terminal status
@@ -245,15 +263,17 @@ INSERT INTO pipeline_runs (
     error_message, failed_at_step, error_fingerprint,
     invoking_crew_id, invoking_agent_id, invoking_user_id,
     triggered_via, triggered_by_id, idempotency_key,
-    inputs_json, concurrency_key, metadata_json, is_replay, replay_of, warnings_json, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    inputs_json, concurrency_key, metadata_json, is_replay, replay_of, warnings_json,
+    chain_depth, chain_origin, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WorkspaceID, r.PipelineID, r.PipelineSlug, nullableIntPtr(r.PipelineVersion), nullableStr(r.DefinitionHash),
 		string(r.Status), string(r.Mode), formatRFC3339(r.StartedAt), nullableTime(r.EndedAt), nullableStr(r.CurrentStepID),
 		r.StepOutputsJSON, nullableStr(r.Output), r.CostUSD, r.DurationMs,
 		nullableStr(r.ErrorMessage), nullableStr(r.FailedAtStep), nullableStr(r.ErrorFingerprint),
 		nullableStr(r.InvokingCrewID), nullableStr(r.InvokingAgentID), nullableStr(r.InvokingUserID),
 		string(r.TriggeredVia), nullableStr(r.TriggeredByID), nullableStr(r.IdempotencyKey),
-		r.InputsJSON, nullableStr(r.ConcurrencyKey), r.MetadataJSON, boolToInt(r.IsReplay), nullableStr(r.ReplayOf), r.WarningsJSON, formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt))
+		r.InputsJSON, nullableStr(r.ConcurrencyKey), r.MetadataJSON, boolToInt(r.IsReplay), nullableStr(r.ReplayOf), r.WarningsJSON,
+		r.ChainDepth, nullableStr(r.ChainOrigin), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: insert: %w", err)
 	}
@@ -674,6 +694,7 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
        inputs_json, COALESCE(concurrency_key,''),
        COALESCE(metadata_json,'{}'), COALESCE(is_replay,0), COALESCE(replay_of,''),
        COALESCE(warnings_json,'[]'),
+       COALESCE(chain_depth,0), COALESCE(chain_origin,''),
        created_at, updated_at
 FROM pipeline_runs`
 
@@ -704,6 +725,7 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		&r.InputsJSON, &r.ConcurrencyKey,
 		&r.MetadataJSON, &isReplay, &r.ReplayOf,
 		&r.WarningsJSON,
+		&r.ChainDepth, &r.ChainOrigin,
 		&createdAt, &updatedAt,
 	); err != nil {
 		return nil, err

@@ -38,6 +38,7 @@ Problem Details shape (`error` is the human-readable message).
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes` | member | Git changes for the run |
 | PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata` | update | Replace run metadata |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal` | update | Deliver a signal to a waiting step |
+| POST | `/api/v1/workspaces/{workspaceId}/signals` | update | Deliver a signal by topic to every run waiting on it |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions` | member | Version list |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}` | member | One immutable version |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff?from=N&to=M` | member | Unified definition diff |
@@ -172,6 +173,28 @@ run reaches a terminal status. Persisted run records additionally use
 `queued`, `running`, `completed`, `failed`, `cancelled`, `interrupted`,
 `dry_run`, and `waiting` (lowercase); `interrupted` marks boot recovery.
 
+## Run provenance
+
+Rows from `GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records`
+carry the composition fields below, so "why did this run" is answerable without
+a second request.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `chain_depth` | integer | Composed hops from whatever a human did. `0` = a run somebody started; `1` = a routine that run called; `2` = an automation fired by an event that run emitted. Capped at 8 — a chain past the ceiling is refused and emits `automation.depth_exceeded`. Always present. |
+| `chain_origin` | string | The run or journal entry that started the chain. Omitted on a chain root, where the run's own id is the origin. |
+| `automation_id` | string | The [automation](/api-reference/automations) that fired this run. Omitted when no rule did. |
+| `automation_name` | string | That rule's name, as stored. Omitted when no rule did. |
+| `trigger_event_type` | string | The journal entry type that matched the rule. Omitted when no rule fired the run. |
+
+<Warning>
+`triggered_via` **cannot** distinguish an automation from a cron schedule. Every
+deferred run is fired by the same pending-run dispatcher and stored with
+`triggered_via: "schedule"`, automations included. Test `automation_name` for
+presence to identify a rule-fired run; treat a `"schedule"` row without it as a
+cron.
+</Warning>
+
 ## Save and validation
 
 ```json
@@ -287,6 +310,32 @@ run.
 
 **Response:** `200 OK` — `{ "ok": true, "delivered": true }`. A durable
 delivery write failure is `500`.
+
+#### `POST /api/v1/workspaces/{workspaceId}/signals`
+
+Topic-scoped delivery: the same act as the per-run signal above, addressed by
+event instead of by run. Use it when the sender knows *what happened* but not
+*who is waiting* — every run in the workspace parked on that `event_type`
+wakes, each receiving the payload as its wait step's output.
+
+**Auth:** `member` plus `update` (MANAGER+) — identical to the per-run signal,
+because delivering one still resumes somebody's parked run. The body is
+`{ "event_type": "mission.status_change", "payload": "..." }`; `event_type` is
+required and is a free-form string (no registry, no enum). Invalid JSON or a
+missing `event_type` is `400`. An unwired signal-wait store is `503` — unlike
+the per-run form there is no in-memory fallback, since the in-process registry
+is keyed by run id and cannot answer "who is waiting on this event".
+
+Each pending wait is claimed exactly once, so two callers delivering the same
+topic simultaneously wake disjoint sets of runs and no run is resumed twice.
+The workspace in the path is the fence: a run in another workspace never wakes.
+
+**Response:** `200 OK` — `{ "ok": true, "delivered": 2, "run_ids": ["run_…", "run_…"] }`.
+Delivering a topic nobody waits on is **`200` with `delivered: 0`**, not `404`:
+an event source emits whether or not a routine happens to be listening. A
+delivery write failure is `500`. In the pathological case of more waits than
+one call can drain, the response adds `"truncated": true` — the listed runs
+were delivered and resumed, and calling again claims the rest.
 
 #### `GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree`
 

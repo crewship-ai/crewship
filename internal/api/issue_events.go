@@ -129,6 +129,33 @@ type issueEvent struct {
 	ActorID   string
 	Action    issueAction
 	Details   string
+	// From/To carry a status transition as data. Details keeps the prose
+	// ("BACKLOG → TODO") because that is what a human reads in the timeline;
+	// these are what an automation matcher can predicate on. Both emit sites
+	// already held them and joined them into the sentence, so the structure
+	// was being thrown away — which is why "fire when an issue moves to DONE"
+	// was not expressible at all.
+	From string
+	To   string
+}
+
+// issueEventPayload is the journal payload for one issue event.
+//
+// Extracted so the shape has a name and a test: the automation matcher
+// predicates on these keys, and until they were pinned the docs described a
+// key (`to`) the emitter never produced.
+func issueEventPayload(ev issueEvent) map[string]any {
+	p := map[string]any{"action": string(ev.Action), "details": ev.Details}
+	// Only on a transition. A key that is always present and always empty is
+	// a predicate that always fails, which is the failure mode this whole
+	// change exists to remove.
+	if ev.From != "" {
+		p["from"] = ev.From
+	}
+	if ev.To != "" {
+		p["to"] = ev.To
+	}
+	return p
 }
 
 // issueEvents fans an issue event out to the audit row, the journal and the
@@ -190,7 +217,7 @@ func (e issueEvents) log(ctx context.Context, ev issueEvent) {
 		ActorType:   actor,
 		ActorID:     ev.ActorID,
 		Summary:     string(ev.Action) + ": " + truncate(ev.Details, 120),
-		Payload:     map[string]any{"action": string(ev.Action), "details": ev.Details},
+		Payload:     issueEventPayload(ev),
 		Refs:        map[string]any{"mission_id": ev.MissionID, "activity_id": actID},
 	})
 }
