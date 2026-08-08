@@ -57,15 +57,23 @@ func (s *Server) registerIPCRoutes() {
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	body := map[string]interface{}{
 		"status":  "ok",
 		"service": "crewshipd",
 		"uptime":  time.Since(s.startedAt).String(),
-		// Episodic recall mode: "vector" (embedder configured, indexer
-		// sweeping) or "sparse-only" (degraded — no embedder, recall is
-		// keyword/FTS only). `crewship doctor` reads this field.
+		// Episodic recall mode, from OBSERVED behaviour, not config:
+		// "vector" (embedder working, indexer sweeping), "vector-degraded"
+		// (embedder configured but its calls are failing — the index is
+		// not growing and recall is silently BM25-only), or "sparse-only"
+		// (no embedder). `crewship doctor` reads this field.
 		"episodic": s.episodicMode(),
-	})
+	}
+	// Only present when something is wrong, so a healthy body is unchanged
+	// and "degraded" never arrives without a reason to act on.
+	if detail := s.episodicDetail(); detail != "" {
+		body["episodic_error"] = detail
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {

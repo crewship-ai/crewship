@@ -222,6 +222,20 @@ CLASSIFY_JQ="$WAIT_JQ"'
          else [] end)
       + (if $state == "absent" and $walk != null
          then ["a walkthrough was posted, a review never followed"] else [] end)
+      # THE CHECK THAT IS NOT THERE. `gh pr checks` can only render rows
+      # that exist: a workflow which never produced a run for this head
+      # contributes no row at all, so the list reads green with the main
+      # test suite simply missing. Observed on #1833 on 2026-08-08 — two
+      # pushes, no CI run either time, while the labeler
+      # (pull_request_target) and the CodeQL default setup ran and
+      # reported green. Cause not established: a conflicting PR was the
+      # first guess and #1837 disproves it (conflicting, and its head does
+      # have a CI run). So this asserts the OBSERVABLE — no CI run exists
+      # for the head SHA — rather than a theory about why.
+      + (if ($in.ciRunForHead == false)
+         then ["no CI workflow run exists for head " + ($in.headSha | short)
+               + " — `gh pr checks` cannot show a row that was never created, so its green means CI is ABSENT, not passing. Re-run it: gh workflow run ci.yml --ref <branch>"]
+         else [] end)
       # Reading the thread, "✅ Action performed — Review finished." looks like
       # the answer. It is not: it acknowledges the command, and CodeRabbit
       # will not re-review a commit it has already seen, so a re-trigger fired
@@ -299,6 +313,16 @@ fetch_pr() { # <number> -> classifier input on stdout, rc 1 if anything failed
   reviews="$(printf '%s' "$reviews" | jq -s 'add // []' 2>/dev/null)" || return 1
   status="$(gh api "repos/$REPO/commits/$sha/status" 2>/dev/null)" || status=""
   [ -n "$status" ] || status='{"statuses":[]}'
+  # Did the CI workflow produce a run for THIS commit at all? A workflow
+  # that never ran contributes no check row, so its absence is invisible in
+  # `gh pr checks`. Any event counts, including a manual workflow_dispatch:
+  # the question is whether CI was exercised, not how it was triggered.
+  local ciruns ciRun=false
+  ciruns="$(gh api "repos/$REPO/actions/runs?head_sha=$sha&per_page=100" 2>/dev/null)" || ciruns=""
+  if [ -n "$ciruns" ] &&
+     printf '%s' "$ciruns" | jq -e '[.workflow_runs[]? | select(.name == "CI")] | length > 0' >/dev/null 2>&1; then
+    ciRun=true
+  fi
 
   jq -n \
     --argjson pr "$pr" \
@@ -308,11 +332,14 @@ fetch_pr() { # <number> -> classifier input on stdout, rc 1 if anything failed
     --argjson status "$status" \
     --arg bot "$BOT" \
     --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --argjson window "$WINDOW_MIN" '
+    --argjson window "$WINDOW_MIN" \
+    --argjson ciRun "$ciRun" '
     ( [ $status.statuses[]? | select((.context // "") | test("coderabbit"; "i")) ] | last ) as $s
     | { number: $pr.number, title: ($pr.title // ""), branch: ($pr.head.ref // ""),
         headSha: ($pr.head.sha // ""), createdAt: ($pr.created_at // ""),
         now: $now, windowMin: $window,
+        # Whether ANY run of the CI workflow exists for the head commit.
+        ciRunForHead: $ciRun,
         statusState: (($s.state) // ""), statusDesc: (($s.description) // ""),
         comments: [ $comments[] | select(.user.login == $bot)
                     | {createdAt: .created_at, body: (.body // "")} ],
