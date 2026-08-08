@@ -43,7 +43,10 @@ import (
 //  5. Build orchestrator.AgentRunRequest, call RunAgent with a
 //     buffering EventHandler that captures "text" + "result"
 //     events.
-//  6. On completion, return the assembled assistant text.
+//  6. Persist the assistant's turn into that chat — success or
+//     failure — and reconcile the chat's message count, so the
+//     transcript a watcher saw live survives a reload (#1835).
+//  7. Return the assembled assistant text.
 //
 // The runner is stateless across calls — every step gets a fresh
 // chat session. This keeps each step deterministic with respect
@@ -257,13 +260,24 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 
 	// 5. Persist the rendered prompt as the user message so the
 	//    chat's conversation history shows what the pipeline asked.
+	//
+	// AgentID is stamped because conversation.Store.Search filters on it as its
+	// isolation boundary — a turn written without one is in the chat but
+	// invisible to the agent's own recall.
+	promptPersisted := false
 	if r.convStore != nil {
-		_ = r.convStore.Append(ctx, chatID, conversation.Message{
+		if err := r.convStore.Append(ctx, chatID, conversation.Message{
 			ID:        generateRunID(),
+			AgentID:   agentID,
 			Role:      conversation.RoleUser,
 			Content:   req.Prompt,
 			Timestamp: time.Now().UTC(),
-		})
+		}); err != nil {
+			r.logger.Warn("pipeline orchestrator runner: persist step prompt failed",
+				"error", err, "chat_id", chatID, "step_id", req.StepID)
+		} else {
+			promptPersisted = true
+		}
 	}
 
 	// 6. Build AgentRunRequest.
@@ -345,6 +359,21 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		CaptureResultMeta: true,
 	})
 
+	// partAcc assembles the ordered structured segments of the agent's turn
+	// (text / thinking / tool calls / tool results) from the same normalized
+	// event stream the chat bridge feeds its own accumulator. Reload has to
+	// render what the live watcher saw: #1831 put this run's tool activity on
+	// screen, and a turn flattened to Content alone comes back as one
+	// undifferentiated blob with the tools missing. Accumulating
+	// unconditionally keeps one handler chain rather than a second conditional
+	// wrapper; the cost is one slice append per event, next to the log-buffer
+	// write already on that path.
+	partAcc := conversation.NewPartAccumulator()
+	finalHandler := func(ev orchestrator.AgentEvent) {
+		partAcc.Add(ev.Type, ev.Content, ev.Metadata)
+		handler(ev)
+	}
+
 	// Sub-span capture — the leaf of the drillable run-trace tree. When this
 	// is a real routine step (run_id + step_id present), wrap the buffering
 	// handler with a recorder that pairs the agent's tool_use→tool_result
@@ -354,7 +383,6 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	// tool). A step with no tool calls produces zero spans and leaves the hot
 	// path byte-identical to before. ctx already carries StartRoutineStepSpan
 	// from the executor, so the OTEL children nest correctly.
-	finalHandler := handler
 	var recorder *orchestrator.AgentSpanRecorder
 	if req.PipelineRunID != "" && req.StepID != "" {
 		runID, stepID := req.PipelineRunID, req.StepID
@@ -364,9 +392,10 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 			telemetry.RecordRunAgentToolSpan(ctx, span.Kind, span.Name, span.Seq,
 				span.StartedAt, span.DurationMs, span.Status, span.Attributes)
 		})
+		inner := finalHandler
 		finalHandler = func(ev orchestrator.AgentEvent) {
 			recorder.Observe(ev)
-			handler(ev)
+			inner(ev)
 		}
 	}
 
@@ -385,6 +414,12 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		// partial cost instead of $0 (the cost cap + paymaster otherwise
 		// undercount every interrupted run).
 		costUSD, tokIn, tokOut := orchestrator.ParseResultUsage(acc.ResultMeta())
+		// A failed step keeps whatever the agent managed to say. An in-band
+		// failure — the CLI exits 0 and its own terminal event reports the turn
+		// failed — is the failure shape that usually DID produce text, and the
+		// chat is exactly where someone goes to find out why the step went red.
+		// This mirrors the WebSocket path's persistInBandFailureTurn.
+		r.recordChatTurn(ctx, chatID, agentID, acc.Text(), partAcc.Parts(), promptPersisted)
 		return AgentStepResult{
 			Output:     acc.Text(),
 			DurationMs: time.Since(startedAt).Milliseconds(),
@@ -393,6 +428,12 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 			TokensOut:  tokOut,
 		}, fmt.Errorf("orchestrator: %w", runErr)
 	}
+
+	// The step succeeded — persist the reply so the chat still holds it after
+	// the browser reloads (#1835). Before this, a routine step wrote the prompt
+	// and dropped the answer, which was invisible until #1823/#1831 made these
+	// runs watchable and the text started disappearing in front of people.
+	r.recordChatTurn(ctx, chatID, agentID, acc.Text(), partAcc.Parts(), promptPersisted)
 
 	// 8. Extract token + cost from result metadata if the adapter
 	//    surfaced any. CLI adapters that wrap CLI tools may not —
@@ -427,6 +468,123 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		TokensIn:   tokIn,
 		TokensOut:  tokOut,
 	}, nil
+}
+
+// persistTurnDeadline bounds the detached write recordChatTurn falls back to
+// when the step's own context is already done. Same 5 seconds the chat bridge
+// gives its cancelled-run persist (chatbridge.HandleChatMessage's cleanCtx).
+const persistTurnDeadline = 5 * time.Second
+
+// persistContext returns a context safe to write the turn under.
+//
+// A cancelled or timed-out step leaves ctx already done, and both
+// conversation.Store.Append and the message-count IPC refuse a done context —
+// so persisting under it would drop exactly the text the live watcher just
+// saw, on the one path where losing it is most visible. Detaching from the
+// cancellation while KEEPING the values (trace context, deadlines carried as
+// values) is what context.WithoutCancel is for; the bridge does the same thing
+// with a bare Background because it predates that API.
+//
+// The healthy case allocates nothing and returns the caller's own context, so
+// a normal step's persist is still bounded by the step's deadline.
+func persistContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), persistTurnDeadline)
+}
+
+// persistAssistantTurn writes the agent's reply into the step's chat and
+// reports whether anything landed. A run that produced neither text nor parts
+// (a refusal the adapter swallowed, an exec that died before first token)
+// writes nothing rather than an empty bubble.
+//
+// Best-effort by design: a storage failure is logged, never returned. The
+// pipeline runs on the step's RESULT, and reddening a green step because its
+// transcript could not be written would trade a cosmetic loss for a real one.
+func (r *OrchestratorRunner) persistAssistantTurn(ctx context.Context, chatID, agentID, text string, parts []conversation.Part) bool {
+	if r.convStore == nil || (text == "" && len(parts) == 0) {
+		return false
+	}
+	ctx, cancel := persistContext(ctx)
+	defer cancel()
+	if err := r.convStore.Append(ctx, chatID, conversation.Message{
+		ID:        generateRunID(),
+		AgentID:   agentID,
+		Role:      conversation.RoleAssistant,
+		Content:   text,
+		Parts:     parts,
+		Timestamp: time.Now().UTC(),
+	}); err != nil {
+		r.logger.Warn("pipeline orchestrator runner: persist step reply failed",
+			"error", err, "chat_id", chatID)
+		return false
+	}
+	return true
+}
+
+// recordChatTurn closes out the step's chat: it persists the agent's reply and
+// then reconciles the chat's derived message_count with what the chat actually
+// holds.
+//
+// The count is incremented per message that landed, not as the bridge's and
+// scheduler's coupled "+2 for the pair". Those two can couple it because in a
+// chat turn the prompt and the reply always land together; a routine step can
+// persist a prompt and then fail before the agent says anything, and a chat
+// reporting "2 messages" while holding one is the same class of lie #1835 is
+// about. Zero messages written means no call at all — IncrementMessageCount
+// also stamps last_activity_at, and a step that stored nothing did not make the
+// chat active.
+//
+// # This turn is persisted and deliberately NOT notified
+//
+// The bridge follows its own Append with notifyReply, projecting "your agent
+// replied" into the unified inbox (internal/chatnotify). This path does not,
+// and that is a decision rather than an omission:
+//
+//   - Nobody asked. The inbox item's premise is that a human sent a message,
+//     walked away, and would otherwise miss the answer. A routine step is the
+//     machine talking to itself on a schedule — there is no waiting human whose
+//     question went unanswered, so "an agent replied" is not news.
+//   - The dedupe that makes chat replies survivable would not engage. chatnotify
+//     collapses repeat replies onto ONE unread item per (user, chat), keyed
+//     "chat_reply_<chat>_<user>". A routine step mints a FRESH chat per step per
+//     attempt (step 4 in RunStep), so each run would produce a new key and the
+//     items would stack rather than collapse: a fifteen-minute routine with
+//     three agent steps is 288 inbox items a day, per recipient.
+//   - Routines already have a notification surface built for them (the
+//     routine.* categories in internal/notify, #843), which knows about runs,
+//     outcomes and failures. A second, blinder channel that fires once per step
+//     regardless of outcome would bury that signal, not add to it.
+//   - The scheduler — the other unattended dispatch path — has persisted its
+//     replies without notifying since it was written. Keeping the two
+//     unattended paths saying the same thing is worth more than either of them
+//     being individually clever.
+//
+// This is written down because today it is ALSO true by accident, twice, and
+// both accidents are the kind that quietly stop holding: notifyReply is a
+// *Bridge* method and this path does not use the Bridge, and a step's chat is
+// created with no user at all (created_by NULL, no participants) so chatnotify
+// would find no recipients even if it were called. The second one is pinned by
+// chatnotify's TestNotify_SystemInitiatedChatRaisesNothing, because it is the
+// one that changes the day someone gives routine chats an owner.
+func (r *OrchestratorRunner) recordChatTurn(ctx context.Context, chatID, agentID, text string, parts []conversation.Part, promptPersisted bool) {
+	written := 0
+	if promptPersisted {
+		written++
+	}
+	if r.persistAssistantTurn(ctx, chatID, agentID, text, parts) {
+		written++
+	}
+	if written == 0 {
+		return
+	}
+	countCtx, cancel := persistContext(ctx)
+	defer cancel()
+	if err := r.resolver.IncrementMessageCount(countCtx, chatID, written); err != nil {
+		r.logger.Warn("pipeline orchestrator runner: message count update failed",
+			"error", err, "chat_id", chatID, "delta", written)
+	}
 }
 
 // resolveAgentID looks up the agent row in the author crew with the

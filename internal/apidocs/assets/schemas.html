@@ -1,0 +1,19 @@
+{{define "schemas"}}{{template "head" .}}
+<h1>Schemas</h1>
+<p class="lede">{{len .Schemas}} component schemas. {{if .UnreachableSchemas}}{{.UnreachableSchemas}} of them are <strong>unreferenced</strong> — no operation reaches them, directly or through another schema, so nothing on this API is described by them.{{else}}Every one is reachable from at least one operation.{{end}}</p>
+
+<div class="filter">
+  <label for="op-filter">Filter</label>
+  <input id="op-filter" type="search" placeholder="schema name" autocomplete="off" spellcheck="false">
+  <span id="op-count" class="dim">{{len .Schemas}} schemas</span>
+</div>
+
+<ul class="schemalist">
+  {{range .Schemas}}
+  <li data-search="{{lower .Name}}">
+    <a href="/openapi/schema/{{.Name}}"><code>{{.Name}}</code></a>
+    {{if .UsedBy}}<span class="dim">named by {{len .UsedBy}} operation(s)</span>{{else if .Reachable}}<span class="dim">reached through another schema</span>{{else}}<span class="badge warnb">unreferenced</span>{{end}}
+  </li>
+  {{end}}
+</ul>
+{{template "foot" .}}{{end}}

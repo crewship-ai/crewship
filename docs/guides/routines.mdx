@@ -1821,6 +1821,12 @@ Every routine run emits a sequence of journal entries:
 
 Plus WebSocket broadcast on the workspace channel for live UI updates (PipelineRunNode in the orchestration graph + Runs sub-tab waterfall both subscribe).
 
+### The step's chat is a durable transcript
+
+Every `agent_run` step gets its own chat (titled `Pipeline <id> · step <id>`, one per attempt), and that chat keeps **both** halves of the turn: the rendered prompt the step sent, and the agent's answer with its reasoning and tool activity in the order they streamed. Read it with `crewship chat <chat-id>`, or open the chat in the dashboard — the transcript is the same one [`crewship chat stream`](/guides/watching-agent-runs) shows live, so a browser left open on a running step still has the text after a reload. A step that failed **after** the agent said something keeps what it said, which is usually the most useful thing on the screen.
+
+These chats raise **no** "agent replied" inbox item, by design: nobody asked the step a question, and a routine on a fifteen-minute cron would otherwise bell you ninety-six times a day per step. Use a [`notify` step](#notify) when a run genuinely needs to reach someone.
+
 ### Live visibility — what is a routine doing right now?
 
 While at least one routine run is in flight, the dashboard surfaces it from anywhere in the app:

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/apidocs"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
 )
 
@@ -30,6 +31,15 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /ws", s.handleWebSocket)
 	s.mux.HandleFunc("GET /ws/terminal", s.handleTerminalWebSocket)
 	s.mux.HandleFunc("GET /openapi.json", api.ServeOpenAPISpec)
+
+	// Browsable rendering of that same document (#1846). Both patterns are
+	// registered: without the exact one, ServeMux would 301 /openapi to
+	// /openapi/, and without the subtree one every page under it would fall
+	// through to the SPA catch-all — which answers 200 text/html for any
+	// path and would make a missing docs page look like a working one.
+	docs := apidocs.NewHandler(api.OpenAPISpecJSON())
+	s.mux.Handle("GET /openapi", docs)
+	s.mux.Handle("GET /openapi/", docs)
 }
 
 func (s *Server) registerIPCRoutes() {

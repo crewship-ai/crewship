@@ -263,6 +263,46 @@ func mustTime(t *testing.T, iso string) time.Time {
 	return ts.UTC()
 }
 
+// A system-initiated chat — routine dispatch, scheduler, webhook — is created
+// with no user at all: created_by is NULL and nobody joins it as a participant
+// (internal/api.InternalHandler.CreateChat, which documents the NULL for
+// exactly this class of chat). The recipient set is therefore empty and the
+// projection raises nothing, no matter who calls it.
+//
+// This is pinned rather than assumed because #1835 made routine steps persist
+// their assistant reply, and the decision NOT to bell those replies has to be a
+// property of the projection rather than of where the call happens to sit —
+// internal/pipeline's runner does not use the Bridge today, but "the call is
+// somewhere else" is not an invariant. The invariant is: a conversation nobody
+// is in has nobody to notify. It stops holding the day system chats get an
+// owner, and this test is what says so.
+func TestNotify_SystemInitiatedChatRaisesNothing(t *testing.T) {
+	db := newNotifyTestDB(t)
+	if _, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, created_by, title, status)
+		VALUES ('cron1', 'ag1', 'ws1', NULL, 'Pipeline pln_1 · step notify', 'ACTIVE')`); err != nil {
+		t.Fatalf("seed system chat: %v", err)
+	}
+	hub := &fakeHub{subscribed: map[string]bool{}}
+	n := New(db, hub, quietLogger())
+
+	rn := baseNotification()
+	rn.ChatID = "cron1"
+	rn.AuthorUserID = "" // no human triggered this turn
+	rn.ReplyText = "Nightly sweep finished — 3 services green."
+	n.NotifyAssistantReply(context.Background(), rn)
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items`).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("inbox rows = %d, want 0 (a chat nobody is in has nobody to notify)", count)
+	}
+	if len(hub.broadcasts) != 0 {
+		t.Errorf("broadcasts = %v, want none", hub.broadcasts)
+	}
+}
+
 func TestNotify_EmptyReplyOrMissingChatIsNoop(t *testing.T) {
 	db := newNotifyTestDB(t)
 	hub := &fakeHub{subscribed: map[string]bool{}}

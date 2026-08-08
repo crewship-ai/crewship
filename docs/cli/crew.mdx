@@ -39,6 +39,8 @@ crewship crew <subcommand> [flags]
 | `provision` | Trigger devcontainer provisioning |
 | `provision status` | Check provisioning status |
 | `restart-agents` | Drop the runtime container so the next exec rebuilds from the cached image |
+| `image-status` | Report whether the running container is behind its image tag |
+| `refresh-image` | Pull the current image and recycle the container so agents pick it up |
 | `rebuild` | Invalidate the cache and re-provision the container |
 | `apply-avatar-style` | Apply (or reset) an avatar style across every agent in the crew |
 | `cache list` | List cached devcontainer images (`crewship-cache:*`) |
@@ -309,6 +311,67 @@ A **stopped** crew needs no action and gets no notice: a container whose limits
 no longer match its crew is rebuilt, not restarted, the next time the crew
 wakes. `crewship crew container-status` shows the configured and effective
 figures side by side — see [`Limits:`](#limits-is-this-container-running-today-s-crew-configuration).
+</Note>
+
+---
+
+## `crewship crew image-status`
+
+Report whether a crew's **running** container is behind the image tag it was
+built from. A pure read — it never pulls and never restarts anything.
+
+```bash
+crewship crew image-status <slug-or-id>
+crewship crew image-status backend-team --format json
+```
+
+```
+Crew:             backend-team
+Image:            ghcr.io/crewship-ai/agent-runtime:latest
+Status:           BEHIND
+Running digest:   sha256:1111…
+Tag resolves to:  sha256:2222…
+Container:        3f1a9c02b7de (running)
+
+Run 'crewship crew refresh-image backend-team' to pull the current image and recycle the container.
+```
+
+<Warning>
+  `Status: current` and `Status: unknown (…)` are different answers. When the
+  registry is unreachable, the crew has no container, or it runs a locally built
+  `crewship-cache:*` image, nothing could be compared — the command says so
+  rather than reporting the crew as up to date.
+</Warning>
+
+Full background, including the daily check and the notification it raises:
+[Keeping crew images current](/guides/crew-image-freshness).
+
+---
+
+## `crewship crew refresh-image`
+
+Pull the crew's configured image, then drop its runtime container so the next
+agent exec recreates it from the fresh copy.
+
+```bash
+crewship crew refresh-image <slug-or-id>
+crewship crew refresh-image backend-team --format json
+```
+
+The pull happens **first**: a failed pull leaves the crew exactly as it was
+rather than without a container *and* without a current image.
+
+Requires the `update` role action (OWNER, ADMIN, MANAGER).
+
+<Warning>
+  Agents executing in the container when it is removed are interrupted.
+</Warning>
+
+<Note>
+  **Not the same as `restart-agents`.** `restart-agents` drops the container
+  *without* pulling — that picks up a devcontainer image you have already
+  rebuilt locally. `refresh-image` pulls first, which is what picks up a base
+  image that has moved on in the registry.
 </Note>
 
 ---

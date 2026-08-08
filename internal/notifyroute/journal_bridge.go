@@ -82,6 +82,29 @@ var journalCategories = map[journal.EntryType]string{
 	journal.EntryBudgetWarning:           notify.CategoryAgentsBudget,
 
 	// System + security.
+	//
+	// image.stale is system.health rather than a fifteenth category, and rather
+	// than joining sidecar.stale on agents.error. Both halves are decisions
+	// (#1845):
+	//
+	// Not a new category, because the taxonomy is closed on purpose — see the
+	// agent.mentioned note above, and note additionally that the CHECK on
+	// user_notification_prefs.category is generated from notify.AllCategories
+	// at migration v169, so a fifteenth row is unstorable on every instance
+	// that has already migrated until a widening migration lands. That cost is
+	// worth paying for a producer with no home; this one has one.
+	//
+	// Not agents.error, because the two staleness signals answer different
+	// questions. A stale SIDECAR means the binary executing inside the
+	// container is older than this server — memory recall and egress policy are
+	// degraded right now, and it is one agent's container misbehaving.
+	// A stale IMAGE means the container is a faithful snapshot of an older
+	// release: nothing is malfunctioning, the fleet is simply behind. Someone
+	// who mutes agents.error to stop run-failure noise must not thereby lose
+	// "every crew on this instance is three releases old", which is an
+	// instance-health fact — exactly what system.health names, and its first
+	// journal producer.
+	journal.EntryImageStale:      notify.CategorySystemHealth,
 	journal.EntrySystemMigration: notify.CategorySystemMigration,
 	journal.EntryGuardrailInput:  notify.CategorySecurity,
 	journal.EntryGuardrailOutput: notify.CategorySecurity,

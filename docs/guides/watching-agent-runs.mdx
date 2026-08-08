@@ -134,6 +134,7 @@ A chat you may not watch answers `404`, the same as a chat that does not exist. 
 - **A chat with no active run ends immediately.** That is the honest answer — nothing is generating, and a finished run's transcript comes from `crewship chat <chat-id>`, not from here. To *wait* for a run instead of watching one already in flight, use `--follow` (bounded by `--idle` so it still terminates).
 - **`error` is followed by `done`.** The CLI records the error, waits for the terminal frame, then exits non-zero. Do not treat the first `error` frame as the end of the stream.
 - **Streaming does not suppress your inbox item.** Unlike a browser tab on the chat, an open HTTP stream does **not** count as "watching live", so the "agent replied" inbox item is still created. That is deliberate: the inbox row is the durable record of the reply, and a stream that is redirected to a file — or wedged on a reader that stopped consuming — is no evidence anyone saw it. A redundant bell beats a lost record.
+- **An unattended run's reply is kept, but never belled.** A routine step, a scheduled agent or a webhook writes its turn to the chat like any other run, so `crewship chat <chat-id>` shows the prompt and the answer after the stream is over. It raises **no** "agent replied" inbox item, because nobody asked it a question — the bell exists for a human who sent a message and walked away. Routine outcomes have their own notifications; see the [`notify` step](/guides/routines#notify) and [Notification categories](/guides/notifications).
 
 ## Related
 

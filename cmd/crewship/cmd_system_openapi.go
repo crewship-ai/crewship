@@ -31,8 +31,12 @@ stdout unchanged.
 
 The spec is generated from the server's actual route registrations, so it
 always matches the instance you are pointed at — paths, methods and path
-parameters are exact. Request/response bodies use a generic placeholder
-schema; the spec is a route contract, not a hand-authored data model.
+parameters are exact. Bodies are derived from the handlers, not authored:
+most operations carry a named schema, and where the generator could not
+derive one it emits an unconstrained object.
+
+The same document is browsable in a browser at <server>/openapi — the
+instance renders it itself, so it needs no network access.
 
 Examples:
   crewship system openapi > openapi.json

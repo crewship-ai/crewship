@@ -9,6 +9,8 @@ import (
 // CSP is path-aware:
 //   - SPA UI: looser policy with 'unsafe-inline' / 'unsafe-eval' for the Next.js
 //     runtime; connect-src 'self' covers same-origin WebSocket.
+//   - /openapi (the browsable spec rendering): default-src 'none' with 'self'
+//     for its one stylesheet and one script, and nothing else — see #1846.
 //   - API / health endpoints: strict default-src 'none'. Same baseline is
 //     reapplied by api.SecurityHeaders inside the API router so the policy
 //     survives if any future surface is reached without going through this
@@ -78,6 +80,24 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		switch {
 		case isExposed:
 			// Upstream owns its own policy; do not stamp.
+		case isOpenAPIDocsPath(path):
+			// The browsable OpenAPI rendering (#1846) is HTML served by the
+			// mux, so it needs its own stylesheet and its filter script —
+			// but nothing else, and nothing from anywhere else. Keeping
+			// 'self' as the only source is what makes the page's offline
+			// guarantee enforceable by the browser rather than by review:
+			// a CDN bundle or a remote font added here later does not load.
+			// No 'unsafe-inline' either, which is why the renderer emits no
+			// inline <script> and no style="" attribute.
+			w.Header().Set("Content-Security-Policy",
+				"default-src 'none'; "+
+					"script-src 'self'; "+
+					"style-src 'self'; "+
+					"img-src 'self' data:; "+
+					"font-src 'self'; "+
+					"form-action 'none'; "+
+					"frame-ancestors 'none'; "+
+					"base-uri 'none'")
 		case isUI:
 			// connect-src is just 'self' — earlier 'ws: wss:' was a
 			// scheme-only source that allows WebSocket to ANY host;

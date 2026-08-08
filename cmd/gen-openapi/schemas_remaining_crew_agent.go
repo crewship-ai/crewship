@@ -73,6 +73,19 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	addAction("POST", "/api/v1/crews/{crewId}/provision", "RemainingCrewProvisionTriggeredV1")
 	addAction("POST", "/api/v1/crews/{crewId}/rebuild", "RemainingCrewRebuildTriggeredV1")
 	addAction("POST", "/api/v1/crews/{crewId}/restart-agents", "RemainingCrewAgentsRestartedV1")
+	// #1845 crew image freshness. Given real shapes rather than the shared
+	// `action` envelope, because both answers are the whole point of the
+	// endpoints: a client that cannot read `behind` and `reason` off the
+	// status, or `previous_digest`/`new_digest` off the refresh, has been told
+	// only that something happened.
+	add("GET", "/api/v1/crews/{crewId}/image-status", "RemainingCrewImageStatusV1", object(map[string]any{
+		"crew_id": str(), "image": str(), "container_id": str(), "running": boolean(),
+		"running_digest": str(), "resolved_digest": str(), "behind": boolean(), "reason": str(),
+	}))
+	add("POST", "/api/v1/crews/{crewId}/refresh-image", "RemainingCrewImageRefreshedV1", object(map[string]any{
+		"crew_id": str(), "image": str(), "previous_digest": str(), "new_digest": str(),
+		"container_removed": boolean(),
+	}))
 
 	// Agent lifecycle and subresource mutations.
 	add("POST", "/api/v1/agents", "RemainingAgentCreatedV1", ref("Agent"))
