@@ -34,7 +34,14 @@ const automationColumns = `id, workspace_id, name, enabled, event_type, matcher_
 	COALESCE(created_by, ''), created_at, updated_at, deleted_at`
 
 // Create inserts a validated automation and returns the stored row.
+//
+// Defaults are applied here so a row this store writes never depends on the
+// column default. A zero on THIS path means "not supplied": the struct carries
+// no way to say otherwise, which is why Update takes a Patch of pointers and
+// this does not. A create that genuinely wants debounce_seconds 0 must PATCH
+// it afterwards — narrow, and stated rather than discovered.
 func (s *Store) Create(ctx context.Context, a Automation) (Automation, error) {
+	a.ApplyDefaults()
 	if err := a.Validate(); err != nil {
 		return Automation{}, err
 	}

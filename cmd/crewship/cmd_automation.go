@@ -37,17 +37,28 @@ Inputs may reference the triggering entry with {{ event.mission_id }},
 {{ event.agent_id }}, {{ event.crew_id }}, {{ event.run_id }} and
 {{ event.payload.<key> }} — the same renderer routine steps use.
 
-A mission.status_change entry carries exactly two payload keys:
+A mission.status_change entry carries:
 
   action   what happened, from a closed set: status_changed,
            priority_changed, review_approved, task_failed, … — this is
            the key to write predicates against
-  details  human-readable prose, e.g. "BACKLOG → TODO"
+  details  human-readable prose, e.g. "BACKLOG → TODO". For display,
+           NOT for matching: it is a sentence and breaks the day
+           somebody rewords it
+  from     the status before the change — only on action=status_changed
+  to       the status after it — only on action=status_changed
 
-Note what that means: "fire when an issue moves to DONE" is NOT
-expressible as a predicate. The target status only appears inside
-details, which is prose and not stable to match on. Match on the action
-and let the routine read {{ event.payload.details }} to decide.`,
+So "fire when an issue moves to DONE" is one predicate:
+
+  crewship automation create --name "on close" \
+      --event mission.status_change --payload-equals to=DONE \
+      --routine post-close
+
+A key the emitter never writes is accepted and matches nothing, which
+is silent. Check a rule against real history before trusting it:
+
+  crewship automation preview --event mission.status_change \
+      --payload-equals to=DONE`,
 }
 
 // automationRow mirrors the API's automation JSON. --format json must pass

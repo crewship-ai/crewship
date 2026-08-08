@@ -147,18 +147,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// dashboard can trust the value without sanitizing again. Anything
 	// outside the enum falls back to "manual" — same forgive-and-carry-on
 	// semantics as TierOverride above.
-	triggeredVia := pipeline.TriggeredVia(body.TriggeredVia)
-	switch triggeredVia {
-	case pipeline.TriggeredViaManual,
-		pipeline.TriggeredViaSchedule,
-		pipeline.TriggeredViaWebhook,
-		pipeline.TriggeredViaCallPipeline,
-		pipeline.TriggeredViaIssue,
-		pipeline.TriggeredViaAutomation:
-		// accepted
-	default:
-		triggeredVia = pipeline.TriggeredViaManual
-	}
+	triggeredVia := acceptedTriggerSource(body.TriggeredVia)
 
 	// Integration gate (run-time enforcement of integrations_required).
 	// Block the run before any dispatch when the routine declares
@@ -1013,4 +1002,35 @@ LIMIT 200`, workspaceID)
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// acceptedTriggerSource decides what a caller-supplied `triggered_via` is
+// allowed to claim on the user-facing run endpoint.
+//
+// A named function rather than an inline switch because it answers a security
+// question, and an inline switch cannot be tested without standing up an HTTP
+// request: "automation" is refused here, and only that refusal keeps the
+// causal graph honest.
+//
+// triggered_by_id is body-supplied on this route, so accepting the pair would
+// let any member stamp a hand-started run as rule-fired and name an existing
+// rule as its cause. internal/chain reads exactly that pair to draw "this rule
+// caused this run" — a topology whose whole job is explaining what caused what
+// must not take the answer from the caller. Only PendingRunDispatcher sets it,
+// from the pending row Registry.Flush wrote.
+//
+// Anything unrecognised — including "automation" — downgrades to manual rather
+// than erroring, matching the forgive-and-carry-on handling of TierOverride
+// above: the run is legitimate, only its claimed provenance is not.
+func acceptedTriggerSource(raw string) pipeline.TriggeredVia {
+	switch v := pipeline.TriggeredVia(raw); v {
+	case pipeline.TriggeredViaManual,
+		pipeline.TriggeredViaSchedule,
+		pipeline.TriggeredViaWebhook,
+		pipeline.TriggeredViaCallPipeline,
+		pipeline.TriggeredViaIssue:
+		return v
+	default:
+		return pipeline.TriggeredViaManual
+	}
 }
