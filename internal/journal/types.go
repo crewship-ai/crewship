@@ -316,6 +316,25 @@ const (
 	// `crewship crew restart-agents`.
 	EntrySidecarStale EntryType = "sidecar.stale"
 
+	// EntryImageStale (#1845): a crew's RUNNING container was created from a
+	// manifest that its image tag no longer resolves to. Deliberately a
+	// different type from EntrySidecarStale rather than a second flavour of it,
+	// because the two say different things and want different reactions:
+	//
+	//   sidecar.stale — the code executing INSIDE the container right now is
+	//     not the code this server shipped. Memory recall and egress policy are
+	//     degraded as you read it. Severity error; fix is rebuild + recopy the
+	//     sidecar binary, then recycle.
+	//   image.stale   — the container is a faithful snapshot of an older
+	//     release. Nothing is misbehaving; it is simply not current. Severity
+	//     warn; fix is `crewship crew refresh-image`.
+	//
+	// Emitted once per (crew, running digest, resolved digest) by the daily
+	// image-freshness sweep, never per run: the condition persists until an
+	// operator acts, and a per-run emitter would write the same row hundreds of
+	// times a day. See internal/server/image_freshness.go.
+	EntryImageStale EntryType = "image.stale"
+
 	// Credentials
 	// EntryCredentialAutoAssignFailed: a single autoAssignCredentials step failed
 	// (list/scan/insert). Operators see this when a template/Captain/internal

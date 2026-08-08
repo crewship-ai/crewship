@@ -1364,4 +1364,26 @@ func (s *Server) RegisterKeeperRoutines(sched *scheduler.Scheduler) {
 		"skill_review", skillReg, "memory_health_check", memReg)
 }
 
+// RegisterImageFreshnessRoutine wires #1845's daily crew-image freshness
+// sweep onto the same cron engine, from the same call site as the Keeper
+// sweeps.
+//
+// Kept as its own method rather than folded into RegisterKeeperRoutines
+// because it shares nothing with them: no evaluator, no LLM budget, no
+// paymaster scope — only the scheduler. Registration is independent and
+// non-fatal in every branch (see registerImageFreshnessRoutine): a provider
+// that cannot report image freshness, or a boot with no journal, skips the
+// sweep with an info log rather than deferring the rest of startup.
+func (s *Server) RegisterImageFreshnessRoutine(sched *scheduler.Scheduler) {
+	var emitter journal.Emitter
+	// A typed-nil *journal.Writer stored in the interface would be non-nil to
+	// the callee's `emitter == nil` check and panic on first fire, so the
+	// conversion happens only when there is really a writer.
+	if s.journalWriter != nil {
+		emitter = s.journalWriter
+	}
+	registered := registerImageFreshnessRoutine(sched, s.db, s.container, emitter, s.logger)
+	s.logger.Info("image freshness: sweep registration", "registered", registered)
+}
+
 // Start launches the HTTP server, IPC listener, WebSocket hub, scheduler,

@@ -66,6 +66,7 @@
               "guides/watching-agent-runs",
               "guides/manifests",
               "guides/devcontainers",
+              "guides/crew-image-freshness",
               "guides/credentials",
               "guides/auto-managed-credentials",
               "guides/model-discovery",

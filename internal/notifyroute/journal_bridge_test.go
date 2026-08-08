@@ -76,11 +76,15 @@ func TestObservationalCategoriesHaveAProducer(t *testing.T) {
 	// Categories with no producer yet, each needing a documented reason.
 	// Anything listed here is a promise the settings matrix is making that
 	// the product cannot currently keep, so the list should only shrink.
-	knownUnwired := map[string]string{
-		notify.CategorySystemHealth: "no instance-health monitor exists yet — nothing measures or " +
-			"emits instance health, so wiring this needs a health emitter first (thresholds, " +
-			"debounce, what counts as unhealthy), not just a map entry",
-	}
+	//
+	// system.health used to be listed here ("no instance-health monitor exists
+	// yet"). #1845's image-freshness sweep is that monitor: it has thresholds
+	// (a digest mismatch, and only when both sides are known), debounce (once
+	// per crew per observed digest pair, checked against the journal so a
+	// restart does not re-alert), and a definition of unhealthy that is not a
+	// judgement call. The map is now empty, which is the point of the test —
+	// the list only ever shrinks.
+	knownUnwired := map[string]string{}
 
 	for _, cat := range notify.AllCategories {
 		if produced[cat] {

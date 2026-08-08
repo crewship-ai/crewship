@@ -24,6 +24,8 @@ Implementation lives in `internal/api/crew_provisioning_jobs.go` and `internal/a
 | POST | [`/api/v1/crews/{crewId}/provision`](#trigger-provision) | Trigger a provision |
 | POST | [`/api/v1/crews/{crewId}/rebuild`](#rebuild) | Clear the cache marker and rebuild |
 | POST | [`/api/v1/crews/{crewId}/restart-agents`](#restart-agents) | Recreate the runtime container without rebuilding |
+| GET | [`/api/v1/crews/{crewId}/image-status`](#image-status) | Report whether the running container is behind its image tag |
+| POST | [`/api/v1/crews/{crewId}/refresh-image`](#refresh-image) | Pull the current image and recycle the container |
 | GET | [`/api/v1/cache/images`](#list-cached-images) | List cached images |
 | DELETE | [`/api/v1/cache/images/{tag}`](#delete-cached-image) | Delete a cached image |
 
@@ -234,6 +236,81 @@ Requires the `update` role action (OWNER, ADMIN, MANAGER).
 | 404 | Crew not in workspace. |
 | 500 | DB error or Docker `ContainerRemove` failure. |
 | 503 | Docker client not configured. |
+
+---
+
+## Image freshness
+
+A crew container is created once and reused until something recreates it. On a
+long-lived crew that can be weeks, during which the image tag it was built from
+keeps moving — so the container quietly becomes a snapshot of an older release.
+These two endpoints report that and fix it. See
+[Keeping crew images current](/guides/crew-image-freshness) for the full story,
+including the daily check and the notification it raises.
+
+### Image status
+
+```
+GET /api/v1/crews/{crewId}/image-status
+```
+
+**Auth:** Authenticated workspace request; any workspace role, including `VIEWER` — noticing that a crew is behind is a read. **Request:** `crewId` path parameter; no body. **Response:** JSON object with `crew_id`, `image`, `container_id`, `running`, `running_digest`, `resolved_digest`, `behind` and `reason`. **Statuses:** `200 OK`; `400` on an empty crew ID, `404` when the crew is not in the workspace, `500` on a daemon failure, `503` when no container provider can report image digests.
+
+Compares the registry manifest digest the crew's **running** container was created from against what its tag resolves to on the registry right now. It never pulls and never restarts anything.
+
+```json
+{
+  "crew_id": "c8f2…",
+  "image": "ghcr.io/crewship-ai/agent-runtime:latest",
+  "container_id": "3f1a9c02b7de",
+  "running": true,
+  "running_digest": "sha256:1111…",
+  "resolved_digest": "sha256:2222…",
+  "behind": true,
+  "reason": ""
+}
+```
+
+<Warning>
+  `behind: false` is not the same as "current". Read `reason` alongside it —
+  `registry unreachable`, `no container`, `image has no registry digest` and
+  `locally built image` all report `behind: false` because nothing could be
+  compared. Only an empty `reason` with `behind: false` means the two digests
+  were compared and agreed.
+</Warning>
+
+| Status | Condition |
+|---|---|
+| 400 | Empty crew ID. |
+| 404 | Crew not in workspace. |
+| 500 | Container runtime could not be queried. |
+| 503 | No container provider, or a provider that cannot report image digests. |
+
+### Refresh image
+
+```
+POST /api/v1/crews/{crewId}/refresh-image
+```
+
+**Auth:** Authenticated caller with the `update` role action (OWNER, ADMIN, MANAGER). **Request:** `crewId` path parameter; no body. **Response:** JSON object with `crew_id`, `image`, `previous_digest`, `new_digest` and `container_removed`. **Statuses:** `200 OK`; `400`, `403`, `404`, `500`, or `503` for the conditions listed below.
+
+Pulls the crew's configured image, then force-removes its runtime container so the next agent exec recreates it from the fresh copy. The pull happens **first**: if it fails, the crew is left exactly as it was rather than without a container *and* without an image.
+
+Idempotent — a crew that is already current transfers nothing, and one with no container has nothing to drop (`container_removed: false`).
+
+<Warning>
+  Agents executing in the container when it is removed are interrupted.
+</Warning>
+
+**Not the same as [Restart agents](#restart-agents).** `restart-agents` drops the container *without* pulling, which picks up a devcontainer image you have already rebuilt locally. `refresh-image` pulls first, which is what picks up a **base image that has moved on in the registry**.
+
+| Status | Condition |
+|---|---|
+| 400 | Empty crew ID. |
+| 403 | Caller lacks `update` permission. |
+| 404 | Crew not in workspace. |
+| 500 | The pull failed (a throttling registry is the common cause), or the container could not be removed. |
+| 503 | No container provider, or a provider that cannot report image digests. |
 
 ---
 
