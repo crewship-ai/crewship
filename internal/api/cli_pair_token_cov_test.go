@@ -147,6 +147,25 @@ func TestCovCLIPairPoll_MissingCode400(t *testing.T) {
 	}
 }
 
+// TestCovCLIPairPoll_AbsentCode400 is the evidence behind the `// openapi:
+// query code:string!` annotation on this route (#1824). MissingCode400 above
+// sends a code that is present but too short, which proves normalizePairingCode
+// rejects malformed input — not that omitting the parameter is fatal. The spec
+// now tells clients ?code is required, and this is the case that says so.
+func TestCovCLIPairPoll_AbsentCode400(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	h := NewCliPairHandler(db, newTestLogger())
+
+	req := httptest.NewRequest("GET", "/api/v1/cli/pair/poll", nil) // no ?code at all
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	rr := httptest.NewRecorder()
+	h.Poll(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 when ?code is omitted", rr.Code)
+	}
+}
+
 // TestCovCLIPairPoll_PendingHappy: owner polls their own pending code
 // and sees status='pending' plus the echoed adapter_hint.
 func TestCovCLIPairPoll_PendingHappy(t *testing.T) {

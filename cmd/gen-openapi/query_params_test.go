@@ -195,6 +195,14 @@ func TestQueryParamNamesKeepsRequestsDerivedFromTheInboundOne(t *testing.T) {
 // real spec rather than a fixture: GET /api/v1/journal/count reads `limit` and
 // `cursor` only through the r.Clone-derived request, so it is the operation
 // that disappears first if the inference is narrowed to the literal `r`.
+//
+// It asserted the exact set until #1844, when the operation gained the journal
+// filter grammar by annotation — those parameters are parsed in
+// parseJournalQuery, which no body scan can see. The property this test exists
+// for is provenance across r.Clone, and that is what it still checks: exactness
+// for this operation now lives in helperParsedQueryParameters, and the guard
+// against the inference marking things required lives in
+// requiredQueryParametersInSpec.
 func TestGeneratedSpecKeepsJournalCountPagination(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "api", "openapi.gen.json"))
 	if err != nil {
@@ -222,7 +230,15 @@ func TestGeneratedSpecKeepsJournalCountPagination(t *testing.T) {
 		}
 	}
 	sort.Strings(query)
-	if strings.Join(query, ",") != "cursor,limit" {
-		t.Fatalf("GET /api/v1/journal/count query params = %v, want [cursor limit]", query)
+	documented := map[string]bool{}
+	for _, name := range query {
+		documented[name] = true
+	}
+	for _, name := range []string{"cursor", "limit"} {
+		if !documented[name] {
+			t.Fatalf("GET /api/v1/journal/count lost %q — the only place it is read is the "+
+				"r.Clone-derived request, so provenance across the clone has stopped working (has %v)",
+				name, query)
+		}
 	}
 }

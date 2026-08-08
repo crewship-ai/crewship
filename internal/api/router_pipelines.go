@@ -129,6 +129,11 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// breaker. Workspace list also stays out of /pipelines/{slug}/
 	// because it spans every pipeline.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
+	// #1844. The #863 sub-span I/O gate is read in resolveIOStep
+	// (pipeline_runs.go), not in GetRun's body, so neither name reached the
+	// spec. ?include_io=1 inlines every span's input/output, ?io_step=<stepId>
+	// only that step's.
+	// openapi: query include_io:string io_step:string
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree", authed(wsCtx(http.HandlerFunc(pipes.GetRunTree))))
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata", roleCreate, pipes.UpdateRunMetadata)
