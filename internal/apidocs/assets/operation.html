@@ -1,0 +1,64 @@
+{{define "operation"}}{{template "head" .}}
+<p class="crumbs"><a href="{{.Base}}">Operations</a> ›
+  {{range $i, $t := .Op.Tags}}{{if $i}}, {{end}}<a href="{{$.Base}}#tag-{{$t}}">{{$t}}</a>{{end}}
+</p>
+
+<h1 class="opheading">{{template "method" .Op.Method}}<code class="p">{{.Op.Path}}</code></h1>
+<p class="dim">operationId <code>{{.Op.ID}}</code></p>
+{{if .Op.Deprecated}}<p class="warn">This operation is marked deprecated.</p>{{end}}
+{{with .Op.Summary}}<p class="lede">{{.}}</p>{{end}}
+{{with .Op.Description}}<p>{{.}}</p>{{end}}
+
+<h2>Authentication</h2>
+{{if .Op.Public}}
+<p class="warn"><span class="badge pub">public</span> No authentication. The spec declares <code>security: []</code> for this operation, so it answers without credentials.</p>
+{{else}}
+<p>Send any <em>one</em> of:</p>
+<ul class="sec">
+  {{range .Security}}<li>{{range $i, $s := .Schemes}}{{if $i}} <em>and</em> {{end}}<code>{{$s.Name}}</code> — {{$s.How}}{{end}}</li>{{end}}
+</ul>
+{{end}}
+
+{{if .Params}}
+<h2>Parameters</h2>
+{{range .Params}}
+<h3 class="in">{{.In}}</h3>
+<table class="params">
+  <thead><tr><th>Name</th><th>Type</th><th>Binding</th><th>Notes</th></tr></thead>
+  <tbody>
+  {{range .Params}}
+  <tr>
+    <td><code>{{.Name}}</code></td>
+    <td>{{.Type}}</td>
+    <td>{{if .Required}}<span class="badge req">required</span>{{else}}<span class="dim" title="required: false means not proven required, not proven optional">not proven required</span>{{end}}</td>
+    <td>{{with .Description}}{{.}}{{end}}{{if .Deprecated}} <span class="badge dep">deprecated</span>{{end}}{{with .Enum}}<span class="enum">one of: {{range $i, $e := .}}{{if $i}}, {{end}}<code>{{$e}}</code>{{end}}</span>{{end}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+{{else}}
+<h2>Parameters</h2>
+<p class="dim">None derived. The generator lists only parameters it could attribute to the handler, so this is a lower bound, not proof the operation reads nothing.</p>
+{{end}}
+
+{{if .HasBody}}
+<h2>Request body{{if .BodyRequired}} <span class="badge req">required</span>{{end}}</h2>
+{{with .BodyDesc}}<p>{{.}}</p>{{end}}
+{{range .Body}}
+<h3 class="mt"><code>{{.MediaType}}</code></h3>
+<ul class="tree root">{{template "node" .Tree}}</ul>
+{{end}}
+{{end}}
+
+<h2>Responses</h2>
+{{range .Responses}}
+<details class="resp {{.Class}}">
+  <summary><span class="code">{{.Status}}</span> {{.Description}}{{if .Empty}} <span class="dim">no body</span>{{end}}</summary>
+  {{range .Contents}}
+  <h3 class="mt"><code>{{.MediaType}}</code></h3>
+  <ul class="tree root">{{template "node" .Tree}}</ul>
+  {{end}}
+</details>
+{{end}}
+{{template "foot" .}}{{end}}

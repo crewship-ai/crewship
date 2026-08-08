@@ -1,0 +1,42 @@
+{{define "index"}}{{template "head" .}}
+<h1>{{.SpecTitle}}</h1>
+<p class="lede">Every route this instance registers, rendered from the document it serves at <a href="/openapi.json">/openapi.json</a>. This is what an agent driving the API sees.</p>
+
+<dl class="stats">
+  <div><dt>Paths</dt><dd>{{.PathCount}}</dd></div>
+  <div><dt>Operations</dt><dd>{{.OpCount}}</dd></div>
+  <div><dt>Tags</dt><dd>{{.TagCount}}</dd></div>
+  <div><dt>Schemas</dt><dd><a href="{{.Base}}/schemas">{{.SchemaCount}}</a></dd></div>
+  <div><dt>Unauthenticated</dt><dd>{{.PublicCount}}</dd></div>
+</dl>
+
+<section class="howto">
+  <h2>How to read this</h2>
+  <ul>
+    <li><strong>Paths, methods and path parameters are exact.</strong> They are generated from the route registrations, so they match this build of this instance. A method not listed for a path is refused with <code>405</code>.</li>
+    <li><strong><code>required</code> is asymmetric.</strong> A parameter marked <em>required</em> was seen to make the handler answer <code>4xx</code> when absent — treat it as binding. A parameter <em>not</em> marked required means <em>not proven required</em>, not proven optional.</li>
+    <li><strong>Bodies are derived, not authored.</strong> Where the generator could not derive a shape from the handler it emits an unconstrained object, and this page says so on the field rather than presenting an empty object as a contract.</li>
+    <li><strong>Unauthenticated operations are marked <span class="badge pub">public</span>.</strong> Everything else needs one of the credentials named on its page.</li>
+  </ul>
+  {{with .Description}}<p class="dim">{{.}}</p>{{end}}
+</section>
+
+<div class="filter">
+  <label for="op-filter">Filter</label>
+  <input id="op-filter" type="search" placeholder="path, method, tag or operation id" autocomplete="off" spellcheck="false">
+  <span id="op-count" class="dim">{{.OpCount}} operations</span>
+</div>
+
+<nav class="taglist" aria-label="Tags">
+  {{range .Groups}}<a href="#tag-{{.Name}}">{{.Name}} <span class="dim">{{len .Ops}}</span></a>{{end}}
+</nav>
+
+{{range .Groups}}
+<details class="tag" id="tag-{{.Name}}" open>
+  <summary><span class="tagname">{{.Name}}</span> <span class="dim">{{len .Ops}}</span></summary>
+  <ul class="ops">
+    {{range .Ops}}{{template "oprow" .}}{{end}}
+  </ul>
+</details>
+{{end}}
+{{template "foot" .}}{{end}}

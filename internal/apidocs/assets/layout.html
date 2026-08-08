@@ -1,0 +1,55 @@
+{{define "head"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{.Title}} · {{.SpecTitle}}</title>
+<link rel="stylesheet" href="{{.Base}}/ui.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="{{.Base}}">{{.SpecTitle}}</a>
+    <span class="ver">OpenAPI {{.OpenAPIVersion}} · spec {{.SpecVersion}}</span>
+    <nav>
+      <a href="{{.Base}}">Operations</a>
+      <a href="{{.Base}}/schemas">Schemas</a>
+      <a href="/openapi.json">openapi.json</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap">{{end}}
+
+{{define "foot"}}</main>
+<footer class="wrap">
+  <p>Rendered by this instance from the document it serves at <a href="/openapi.json">/openapi.json</a>. Generated from the route registrations in <code>internal/api/router_*.go</code>, not hand-authored: it is exact about paths, methods and path parameters, and describes bodies only as far as the generator could derive them from the handler.</p>
+</footer>
+<script src="{{.Base}}/ui.js" defer></script>
+</body>
+</html>{{end}}
+
+{{define "method"}}<span class="m m-{{lower .}}">{{.}}</span>{{end}}
+
+{{define "oprow"}}<li class="op" data-search="{{.Search}}">
+  <a href="/openapi/op/{{.ID}}">{{template "method" .Method}}<code class="p">{{.Path}}</code></a>
+  {{if .Public}}<span class="badge pub" title="security: [] — this operation answers without credentials">public</span>{{end}}
+  {{if .Deprecated}}<span class="badge dep">deprecated</span>{{end}}
+</li>{{end}}
+
+{{define "node"}}<li class="node">
+  <span class="nm">{{if .Name}}{{.Name}}{{else}}(body){{end}}</span>
+  <span class="ty">{{if .Ref}}<a href="/openapi/schema/{{.Ref}}">{{.Ref}}</a>{{if and .Type (ne .Type .Ref)}} <span class="dim">{{.Type}}</span>{{end}}{{else}}{{.Type}}{{end}}</span>
+  {{if .Required}}<span class="badge req">required</span>{{end}}
+  {{if .Nullable}}<span class="badge nul">nullable</span>{{end}}
+  {{with .Description}}<p class="desc">{{.}}</p>{{end}}
+  {{with .Enum}}<p class="enum">one of: {{range $i, $e := .}}{{if $i}}, {{end}}<code>{{$e}}</code>{{end}}</p>{{end}}
+  {{with .Note}}<p class="note">{{.}}</p>{{end}}
+  {{with .Children}}<ul class="tree">{{range .}}{{template "node" .}}{{end}}</ul>{{end}}
+</li>{{end}}
+
+{{define "notfound"}}{{template "head" .}}
+<h1>Not found</h1>
+<p class="lede">{{.Message}}</p>
+<p><a href="{{.Base}}">Back to the operation list</a></p>
+{{template "foot" .}}{{end}}
