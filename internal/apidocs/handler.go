@@ -222,7 +222,11 @@ type opPage struct {
 func (h *handler) renderOperation(w http.ResponseWriter, id string) {
 	e, ok := h.ix.opByID[id]
 	if !ok || id == "" {
-		h.notFound(w, "No operation with id "+id+".")
+		// The requested id is deliberately not echoed back. It would be
+		// escaped by the template, but a page that reflects any path segment
+		// is a page a scanner has to reason about; there is nothing to gain
+		// here by repeating what the reader just typed.
+		h.notFound(w, "No operation with that id. It may have been renamed, or removed from this build.")
 		return
 	}
 	op := e.Op
@@ -356,7 +360,7 @@ type schemaPage struct {
 func (h *handler) renderSchema(w http.ResponseWriter, name string) {
 	e, ok := h.ix.schemaBy[name]
 	if !ok || name == "" {
-		h.notFound(w, "No schema named "+name+".")
+		h.notFound(w, "No schema with that name in components.schemas.")
 		return
 	}
 	h.render(w, http.StatusOK, "schema", schemaPage{

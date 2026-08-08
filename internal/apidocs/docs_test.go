@@ -141,8 +141,15 @@ func TestOperationPageUnknownIDIs404(t *testing.T) {
 		"/openapi/nonsense",
 		"/openapi/op/",
 	} {
-		if code := get(t, h, p).Code; code != http.StatusNotFound {
-			t.Errorf("GET %s = %d, want 404", p, code)
+		rec := get(t, h, p)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d, want 404", p, rec.Code)
+		}
+		// The 404 does not echo the path back. It would be escaped, but a
+		// page that reflects an arbitrary segment is a page a scanner has to
+		// reason about for no reader benefit.
+		if seg := strings.TrimPrefix(p, "/openapi/"); seg != "" && strings.Contains(rec.Body.String(), seg) {
+			t.Errorf("GET %s reflects the requested path back into the page", p)
 		}
 	}
 }
