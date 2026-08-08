@@ -24,13 +24,17 @@ Paymaster exposes read-only cost rollups across crew, agent, and mission scopes,
 
 ## Time window parameters
 
-Every endpoint accepts the same window parameters:
+Most endpoints accept the same window parameters:
 
 | Param | Type | Description |
 |---|---|---|
 | `range` | string | One of `1h`, `24h`, `7d`, `30d`. Default `7d`. |
 | `since` | string | Explicit RFC3339 lower bound. Overrides `range` when set. |
 | `until` | string | Explicit RFC3339 upper bound. Defaults to now. |
+
+Two exceptions, both visible in the responses below: **top spenders** applies
+the lower bound only and ignores `until`, and **spend by mission** takes no
+window at all — it reports one mission's lifetime total.
 
 ---
 
@@ -168,7 +172,14 @@ GET /api/v1/paymaster/top-spenders?limit=10&range=7d
 | Param | Type | Default | Description |
 |---|---|---|---|
 | `limit` | integer | 10 | 1-100. |
-| `range` / `since` / `until` | | 7d | Window. |
+| `range` / `since` | | 7d | Window **start**. |
+
+<Note>
+Unlike the `spend/*` endpoints, this one applies only the lower bound: it ranks
+everything from `since` (or the start implied by `range`) up to now. `?until=`
+is parsed and discarded, and the response echoes `since` without `until` for
+that reason. Send it and nothing changes.
+</Note>
 
 **Response:** `200 OK`
 
