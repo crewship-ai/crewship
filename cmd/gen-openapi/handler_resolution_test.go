@@ -198,17 +198,38 @@ func TestGeneratedSpecDoesNotBleedAnnotationsOntoNeighbouringRoutes(t *testing.T
 // inference cannot quietly start marking parameters required. If this test
 // fails after a handler change, check the new entry against its handler before
 // updating the list.
+// Six entries joined the list in #1844's PR. Four came from widening the read
+// pattern to look through an emptiness-preserving wrapper
+// (emptinessPreservingWrappers), two from the `!` annotation, which is the
+// escape hatch for a handler whose emptiness check lives somewhere the scan
+// cannot follow. Each names the test that already pins its 4xx:
+//
+//	DELETE /api/v1/feedback ?message_id, ?signal   TestFeedbackDelete_Guards/missing_params_400
+//	GET /api/v1/integrations/composio/tools ?toolkit  TestComposio_ListTools_RequiresToolkit
+//	GET /api/v1/models ?provider                   TestModelsList_BadRequest/missing_provider
+//	GET /api/v1/metrics/timeseries ?metric   (`!`) TestMetricsTimeseries_ParamValidation/missing_metric
+//	GET /api/v1/auth/pair/poll ?code         (`!`) TestCovCLIPairPoll_AbsentCode400
+//
+// GET /api/v1/feedback is the control and is deliberately NOT here: it reads
+// the same two trimmed parameters as the DELETE fifty lines above it, joined by
+// && instead of ||, so either alone satisfies it and neither is required.
 var requiredQueryParametersInSpec = []string{
 	"DELETE /api/v1/admin/backups ?path",
 	"DELETE /api/v1/crews/{crewId}/files/delete ?path",
+	"DELETE /api/v1/feedback ?message_id",
+	"DELETE /api/v1/feedback ?signal",
 	"DELETE /api/v1/notification-templates ?category",
 	"GET /api/v1/admin/backups/download ?path",
 	"GET /api/v1/admin/backups/inspect ?path",
 	"GET /api/v1/admin/backups/verify ?path",
 	"GET /api/v1/agents/{agentId}/files/download ?path",
+	"GET /api/v1/auth/pair/poll ?code",
 	"GET /api/v1/crews/{crewId}/files/download ?path",
+	"GET /api/v1/integrations/composio/tools ?toolkit",
 	"GET /api/v1/memory/versions ?path",
 	"GET /api/v1/memory/versions/{sha} ?path",
+	"GET /api/v1/metrics/timeseries ?metric",
+	"GET /api/v1/models ?provider",
 	"GET /api/v1/oauth/callback ?code",
 	"GET /api/v1/oauth/callback ?state",
 	"GET /api/v1/skills/proposed ?crew_id",
