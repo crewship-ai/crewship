@@ -372,7 +372,10 @@ func (h *handler) renderSchema(w http.ResponseWriter, name string) {
 	h.render(w, http.StatusOK, "schema", schemaPage{
 		chrome: h.chrome("Schema " + name),
 		Entry:  e,
-		Tree:   h.ix.tree(e.Schema, "", false),
+		// Named root: on this page the tree IS the schema, so the root row
+		// carries its name. The "(body)" fallback in the template is for the
+		// request/response roots on an operation page, which have none.
+		Tree: h.ix.tree(e.Schema, e.Name, false),
 	})
 }
 
