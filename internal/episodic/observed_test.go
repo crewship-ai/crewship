@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 // The bug these pin: /healthz reported episodic recall as "vector"
@@ -95,6 +96,82 @@ func TestObservedEmbedder_RecordsFailureAndRecovery(t *testing.T) {
 	}
 	if got := obs.LastError(); got != nil {
 		t.Fatalf("LastError() = %v, want nil after recovery", got)
+	}
+}
+
+func TestObservedEmbedder_CallerCancellationIsNotDegradation(t *testing.T) {
+	// The wrapper is also handed to hybrid search, which embeds queries on
+	// REQUEST goroutines — so a client that disconnects mid-search cancels
+	// the context and the embedder returns context.Canceled through no
+	// fault of its own. Recording that would flip /healthz to
+	// vector-degraded and make `crewship doctor` exit non-zero on a
+	// perfectly healthy embedder: the same "health reports something that
+	// isn't true" bug this type exists to remove, pointing the other way.
+	stub := &observedStub{dim: 768, name: "nomic-embed-text"}
+	obs := NewObservedEmbedder(stub)
+
+	for _, tc := range []struct {
+		name    string
+		ctxErr  error
+		mkCtx   func() (context.Context, context.CancelFunc)
+		wantErr error
+	}{
+		{
+			name: "cancelled by the caller",
+			mkCtx: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx, func() {}
+			},
+			wantErr: context.Canceled,
+		},
+		{
+			name: "caller deadline exceeded",
+			mkCtx: func() (context.Context, context.CancelFunc) {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				return ctx, cancel
+			},
+			wantErr: context.DeadlineExceeded,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := tc.mkCtx()
+			defer cancel()
+			stub.setErr(tc.wantErr)
+
+			if _, err := obs.Embed(ctx, "hello"); !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Embed() error = %v, want the delegate's %v surfaced unchanged", err, tc.wantErr)
+			}
+			if obs.Degraded() {
+				t.Error("a caller-cancelled context must not mark the EMBEDDER degraded")
+			}
+			if got := obs.LastError(); got != nil {
+				t.Errorf("LastError() = %v, want nil — the embedder did not fail", got)
+			}
+		})
+	}
+
+	// And the guard must not swallow a real failure that happens to occur
+	// while a live context is in play.
+	stub.setErr(errors.New(`ollama http 404: model "nomic-embed-text" not found`))
+	if _, err := obs.Embed(context.Background(), "hello"); err == nil {
+		t.Fatal("Embed() error = nil, want the delegate's error")
+	}
+	if !obs.Degraded() {
+		t.Error("a genuine embedder failure must still mark degraded")
+	}
+}
+
+func TestObservedEmbedder_NilReceiverIsNotDegraded(t *testing.T) {
+	// server.go only wraps a non-nil embedder, but the accessors guard
+	// o == nil and nothing pinned it — a refactor could drop the guard and
+	// stay green while introducing a nil-deref on the health path.
+	var obs *ObservedEmbedder
+	if obs.Degraded() {
+		t.Error("a nil wrapper must not report degraded")
+	}
+	if err := obs.LastError(); err != nil {
+		t.Errorf("LastError() = %v, want nil on a nil wrapper", err)
 	}
 }
 

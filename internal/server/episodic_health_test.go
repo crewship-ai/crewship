@@ -138,3 +138,56 @@ func TestEpisodicHealthDetail(t *testing.T) {
 		t.Errorf("episodicDetail() = %q with no embedder, want empty", d)
 	}
 }
+
+// /healthz is registered on s.mux with no auth middleware, so whatever
+// episodicDetail() returns is world-readable. Go's http.Client returns a
+// *url.Error, which stringifies the FULL request URL — so an unreachable
+// Ollama would publish the internal host:port, and any credentials in
+// KEEPER_OLLAMA_URL, to anyone who can reach the port.
+func TestEpisodicDetailDoesNotLeakTheEmbedderURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantAbsent  []string
+		wantPresent string
+	}{
+		{
+			name: "transport error carrying host, port and credentials",
+			err: errors.New(`episodic: ollama unreachable: Post "http://admin:hunter2@10.0.5.12:11434/api/embeddings": ` +
+				`dial tcp 10.0.5.12:11434: connect: connection refused`),
+			wantAbsent: []string{"hunter2", "admin", "10.0.5.12", "11434"},
+			// The actionable half must survive — "connection refused" is
+			// what tells the operator this is reachability, not a model.
+			wantPresent: "connection refused",
+		},
+		{
+			name:        "https url is redacted too",
+			err:         errors.New(`episodic: ollama unreachable: Post "https://ollama.internal.corp:8443/api/embeddings": EOF`),
+			wantAbsent:  []string{"ollama.internal.corp", "8443"},
+			wantPresent: "EOF",
+		},
+		{
+			name: "a model-missing error has no url and must survive intact",
+			err:  errors.New(`episodic: ollama http 404: {"error":"model \"nomic-embed-text\" not found, try pulling it first"}`),
+			// This is the whole reason the field exists — do not scrub it.
+			wantPresent: "nomic-embed-text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := episodic.NewObservedEmbedder(failingEmbedder{err: tt.err})
+			_, _ = e.Embed(context.Background(), "x")
+			got := (&Server{episodicEmbedder: e}).episodicDetail()
+
+			for _, leak := range tt.wantAbsent {
+				if strings.Contains(got, leak) {
+					t.Errorf("episodicDetail() = %q, must not contain %q — /healthz is unauthenticated", got, leak)
+				}
+			}
+			if tt.wantPresent != "" && !strings.Contains(got, tt.wantPresent) {
+				t.Errorf("episodicDetail() = %q, want it to keep %q so the error stays actionable", got, tt.wantPresent)
+			}
+		})
+	}
+}

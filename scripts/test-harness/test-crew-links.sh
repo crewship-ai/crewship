@@ -70,9 +70,30 @@ TAG="$(nonce XLINK)"
 # Any NEW feed entry addressed to morgan counts: an assignment row is the
 # expected shape, but a peer.conversation is also work crossing the link,
 # and this suite is about the link, not about which mechanism carried it.
+# CORRELATED TO THIS DELEGATION, not merely addressed to morgan.
+#
+# "any new row with to_slug == morgan" was the first cut and it is unsound:
+# the harness runs suites in sequence against a shared slot, and anything
+# else that assigns to morgan inside the window would mark this suite green
+# without a single request having crossed the link. On a promotion gate a
+# false green is the expensive direction, so the nonce that already
+# identifies this delegation does the correlating.
+#
+# TAG rides in the task text alex passes to /assign, which the journal entry
+# carries as payload.task and echoes into summary (assignments_run.go builds
+# it as "assigned <slug> → <name>: <task preview>"). Entry types are pinned
+# to the documented cross-crew set so an unrelated type cannot satisfy it.
+#
+# The trade, stated rather than hidden: if the model delegates but drops the
+# tag from the task, this reads as no evidence. That is the correct bias —
+# it fails loudly instead of passing on somebody else's assignment.
 xlink_to_morgan_ids() {
   cs activity --since 30m --lines 200 --export ndjson 2>/dev/null |
-    jq -r 'select(.to_slug == "morgan") | .id' 2>/dev/null | sort -u
+    jq -r --arg tag "$TAG" '
+      select(.to_slug == "morgan")
+      | select(.entry_type | test("^(assignment\\.|peer\\.conversation)"))
+      | select(((.summary // "") + " " + (.payload.task // "")) | contains($tag))
+      | .id' 2>/dev/null | sort -u
 }
 
 XLINK_HAVE_JQ=0

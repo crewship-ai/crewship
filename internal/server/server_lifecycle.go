@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
@@ -444,9 +445,40 @@ func (s *Server) episodicDetail() string {
 		return ""
 	}
 	if err := obs.LastError(); err != nil {
-		return err.Error()
+		return scrubURLs(err.Error())
 	}
 	return ""
+}
+
+// embedderURLPattern matches a scheme://... token up to the first quote,
+// whitespace or comma. Go's http.Client returns a *url.Error whose text
+// embeds the FULL request URL, so an unreachable Ollama stringifies as
+// `Post "http://user:pass@10.0.5.12:11434/api/embeddings": dial tcp …`.
+var embedderURLPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^"\s,]+`)
+
+// embedderHostPortPattern catches the address a SECOND time. A dial
+// failure repeats it outside the URL — `Post "http://10.0.5.12:11434/…":
+// dial tcp 10.0.5.12:11434: connect: connection refused` — so scrubbing
+// only the URL still publishes the host. Requires 2-5 digits after the
+// colon, which is why `http 404: {…}` and `"error":"model …"` survive.
+var embedderHostPortPattern = regexp.MustCompile(`\b[a-zA-Z0-9][a-zA-Z0-9.-]*:\d{2,5}\b`)
+
+// scrubURLs removes URLs from text bound for /healthz.
+//
+// /healthz is registered on s.mux with NO auth middleware (routes.go), so
+// anything episodicDetail() returns is readable by anyone who can reach
+// the port. Publishing the raw error would hand out the internal host and
+// port from KEEPER_OLLAMA_URL — and its userinfo, if it carries any.
+//
+// telemetry.RedactURL is the wrong tool here: it strips credentials but
+// keeps host:port, which is exactly what an unauthenticated endpoint must
+// not advertise. Everything around the URL is kept, because that is the
+// half an operator acts on: "connection refused" says reachability,
+// `model "nomic-embed-text" not found` says pull the model, and neither
+// needs an address to be useful.
+func scrubURLs(s string) string {
+	s = embedderURLPattern.ReplaceAllString(s, "<redacted-url>")
+	return embedderHostPortPattern.ReplaceAllString(s, "<redacted-addr>")
 }
 
 // Shutdown gracefully stops all server subsystems, draining connections and

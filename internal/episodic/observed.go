@@ -2,6 +2,7 @@ package episodic
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
 
@@ -43,8 +44,22 @@ func NewObservedEmbedder(e Embedder) *ObservedEmbedder {
 
 // Embed delegates and records the outcome. The delegate's error is
 // returned unchanged; callers keep whatever handling they already had.
+//
+// A failure the CALLER caused is not evidence about the embedder. This
+// wrapper is also handed to hybrid search (server.go, WithHybridSearchEmbedder),
+// which embeds queries on REQUEST goroutines — so a client that disconnects
+// mid-search cancels the context and Embed returns context.Canceled through
+// no fault of Ollama's. Recording that would flip /healthz to
+// vector-degraded and make `crewship doctor` exit non-zero on a perfectly
+// healthy embedder: the same "health surface says something untrue" bug
+// this type exists to remove, just pointing the other way.
 func (o *ObservedEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	vec, err := o.Embedder.Embed(ctx, text)
+	if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		// Leave the previous verdict alone rather than overwriting it —
+		// we learned nothing about the embedder on this call.
+		return vec, err
+	}
 	o.mu.Lock()
 	o.lastErr = err
 	o.mu.Unlock()
