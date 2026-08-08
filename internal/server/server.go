@@ -14,6 +14,7 @@ import (
 	"time"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/apidocs"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -1222,7 +1223,18 @@ func isMuxRoutedPath(path string) bool {
 		strings.HasPrefix(path, "/exposed/") ||
 		path == "/healthz" || path == "/readyz" ||
 		path == "/metrics" || path == "/ws" ||
-		path == "/ws/terminal" || path == "/openapi.json"
+		path == "/ws/terminal" || path == "/openapi.json" ||
+		isOpenAPIDocsPath(path)
+}
+
+// isOpenAPIDocsPath reports whether path belongs to the browsable OpenAPI
+// rendering (#1846). It is HTML, but it is NOT the SPA: it is served by the
+// mux from Go templates, and it runs under the strict CSP below rather than
+// the Next.js runtime's 'unsafe-inline'/'unsafe-eval' policy. Missing it here
+// would hand every one of its pages to the SPA catch-all, which answers 200
+// text/html for any path — the exact failure /openapi.json had before #1325.
+func isOpenAPIDocsPath(path string) bool {
+	return path == apidocs.BasePath || strings.HasPrefix(path, apidocs.BasePath+"/")
 }
 
 // sensitiveStaticPathPrefixes lists URL path prefixes that should never be
