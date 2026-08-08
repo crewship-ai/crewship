@@ -110,3 +110,40 @@ func TestParse_Agentless_RoundTrip(t *testing.T) {
 		t.Fatal("agentless flag should survive Parse")
 	}
 }
+
+// The hole the recursion closes. Before foreach was saveable at all
+// (validateStepEgress had no case for it), the body scan checking agent_run
+// alone was unreachable. Making foreach saveable turned it into a bypass: an
+// agentless routine could nest a crewship verb — which can @mention an agent —
+// inside a fan-out and still carry the token-zero guarantee.
+func TestValidateAgentless_RejectsForbiddenKindsInsideAForeachBody(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind StepType
+	}{
+		{"crewship", StepCrewship},
+		{"call_pipeline", StepCallPipeline},
+		{"agent_run", StepAgentRun},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &DSL{
+				DSLVersion: "1.0", Name: "nested", Agentless: true,
+				Steps: []Step{{
+					ID: "fan", Type: StepForeach,
+					Foreach: &ForeachStep{Steps: []Step{{ID: "inner", Type: tc.kind}}},
+				}},
+			}
+			err := validateAgentless(d)
+			if err == nil {
+				t.Fatalf("a %s nested in a foreach body was accepted in an agentless routine — "+
+					"the routine bills LLM spend while reporting token-zero", tc.kind)
+			}
+			if !strings.Contains(err.Error(), "inner") {
+				t.Errorf("the error must name the offending inner step, got %q", err)
+			}
+			if !strings.Contains(err.Error(), "fan") {
+				t.Errorf("the error must name the enclosing foreach so a reader knows where to look, got %q", err)
+			}
+		})
+	}
+}

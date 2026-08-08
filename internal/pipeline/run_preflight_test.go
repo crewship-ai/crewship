@@ -143,3 +143,78 @@ func TestExecutor_CallPipeline_DryRunSkipsPreflight(t *testing.T) {
 		t.Errorf("preflight consulted on a dry run (%d times) — it must be exempt, as on the HTTP path", len(gate.seen))
 	}
 }
+
+// The THIRD door. RunPreflight's own doc says the operation "had two doors and
+// only one was guarded"; the composition substrate added another. An
+// automation-fired run enters through PendingRunDispatcher and goes straight
+// to Executor.Run, which never consulted the gates — so a routine whose
+// integrations, resources or credentials a user cannot satisfy by hand could
+// start itself the moment a rule matched.
+//
+// Guarded at Run rather than in the dispatcher on purpose: fixing the
+// dispatcher would guard door three and leave door four to whoever adds it.
+// Run already documents itself as the top-level chokepoint and carries the
+// governance status gate for exactly this reason.
+func TestExecutor_Run_RefusedByPreflight(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+
+	in := validSaveInput("gated-top")
+	in.DefinitionJSON = `{"dsl_version":"1.0","name":"gated-top","steps":[` +
+		`{"id":"s1","type":"agent_run","agent_slug":"agent_lead","prompt":"1"}]}`
+	p, serr := store.Save(context.Background(), in)
+	if serr != nil {
+		t.Fatalf("save: %v", serr)
+	}
+
+	gate := &stubPreflight{err: fmt.Errorf("%w: routine requires an integration the crew has not connected", ErrRunPreflightBlocked)}
+	exec := NewExecutor(store, resolver, newMockRunner(), nil).WithRunPreflight(gate)
+
+	_, err := exec.Run(context.Background(), RunInput{
+		WorkspaceID: "ws_test", PipelineID: p.ID, Mode: ModeRun,
+	})
+	if !errors.Is(err, ErrRunPreflightBlocked) {
+		t.Fatalf("err = %v, want it to wrap ErrRunPreflightBlocked — a top-level dispatch that "+
+			"skips the gates lets an automation start a routine nobody can start by hand", err)
+	}
+	if len(gate.seen) != 1 {
+		t.Fatalf("preflight consulted %d times, want 1", len(gate.seen))
+	}
+	// The AUTHOR crew is the subject, not the invoker: a routine runs in its
+	// author's crew, so its author's connections decide whether it can work.
+	if got := gate.seen[0].AuthorCrewID; got != "crew_a" {
+		t.Errorf("AuthorCrewID = %q, want crew_a", got)
+	}
+	if gate.seen[0].DSL == nil {
+		t.Error("the gates need the parsed definition to see what the routine declares")
+	}
+}
+
+// dry_run previews and touches no vault. Gating it would refuse a preview of
+// the very routine an operator is trying to diagnose, and the HTTP path is
+// exempt for the same reason — two doors that disagree about the edges are two
+// doors again.
+func TestExecutor_Run_DryRunIsNotGated(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+
+	in := validSaveInput("gated-dry")
+	in.DefinitionJSON = `{"dsl_version":"1.0","name":"gated-dry","steps":[` +
+		`{"id":"s1","type":"agent_run","agent_slug":"agent_lead","prompt":"1"}]}`
+	p, serr := store.Save(context.Background(), in)
+	if serr != nil {
+		t.Fatalf("save: %v", serr)
+	}
+
+	gate := &stubPreflight{err: fmt.Errorf("%w: blocked", ErrRunPreflightBlocked)}
+	exec := NewExecutor(store, resolver, newMockRunner(), nil).WithRunPreflight(gate)
+
+	if _, err := exec.Run(context.Background(), RunInput{
+		WorkspaceID: "ws_test", PipelineID: p.ID, Mode: ModeDryRun,
+	}); errors.Is(err, ErrRunPreflightBlocked) {
+		t.Error("dry_run was refused by the dispatch gates; it previews and asserts nothing")
+	}
+	if len(gate.seen) != 0 {
+		t.Errorf("preflight consulted %d times on a dry run, want 0", len(gate.seen))
+	}
+}

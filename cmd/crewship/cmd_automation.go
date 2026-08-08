@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -37,17 +38,28 @@ Inputs may reference the triggering entry with {{ event.mission_id }},
 {{ event.agent_id }}, {{ event.crew_id }}, {{ event.run_id }} and
 {{ event.payload.<key> }} — the same renderer routine steps use.
 
-A mission.status_change entry carries exactly two payload keys:
+A mission.status_change entry carries:
 
   action   what happened, from a closed set: status_changed,
            priority_changed, review_approved, task_failed, … — this is
            the key to write predicates against
-  details  human-readable prose, e.g. "BACKLOG → TODO"
+  details  human-readable prose, e.g. "BACKLOG → TODO". For display,
+           NOT for matching: it is a sentence and breaks the day
+           somebody rewords it
+  from     the status before the change — only on action=status_changed
+  to       the status after it — only on action=status_changed
 
-Note what that means: "fire when an issue moves to DONE" is NOT
-expressible as a predicate. The target status only appears inside
-details, which is prose and not stable to match on. Match on the action
-and let the routine read {{ event.payload.details }} to decide.`,
+So "fire when an issue moves to DONE" is one predicate:
+
+  crewship automation create --name "on close" \
+      --event mission.status_change --payload-equals to=DONE \
+      --routine post-close
+
+A key the emitter never writes is accepted and matches nothing, which
+is silent. Check a rule against real history before trusting it:
+
+  crewship automation preview --event mission.status_change \
+      --payload-equals to=DONE`,
 }
 
 // automationRow mirrors the API's automation JSON. --format json must pass
@@ -177,7 +189,13 @@ var automationUpdateCmd = &cobra.Command{
 	Long: `Update an automation.
 
 The write is sparse: only the flags you pass are sent, so changing the cap
-cannot clobber a matcher somebody edited a moment ago.`,
+cannot clobber a matcher somebody edited a moment ago.
+
+The MATCHER is the exception, because the API writes it as a whole object.
+Passing any predicate flag replaces every predicate, so a rule matched on a
+crew and a payload key, updated with --payload-equals alone, would silently
+stop being crew-scoped. That is refused: re-supply the predicates you want to
+keep, or pass --replace-matcher to say you meant to drop them.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -192,6 +210,12 @@ cannot clobber a matcher somebody edited a moment ago.`,
 		}
 		if len(body) == 0 {
 			return fmt.Errorf("nothing to update — pass at least one field flag")
+		}
+		if m, ok := body["matcher"].(map[string]any); ok {
+			replace, _ := cmd.Flags().GetBool("replace-matcher")
+			if err := refuseSilentMatcherLoss(args[0], m, replace); err != nil {
+				return err
+			}
 		}
 		return patchAutomation(args[0], body, "updated")
 	},
@@ -364,6 +388,8 @@ func init() {
 	// candidate before it is saved, which needs the same vocabulary the save
 	// takes. It skips --routine and the burst controls: they do not change
 	// what a rule MATCHES.
+	automationUpdateCmd.Flags().Bool("replace-matcher", false,
+		"Replace the whole matcher, dropping any predicate not re-supplied")
 	for _, c := range []*cobra.Command{automationCreateCmd, automationUpdateCmd, automationPreviewCmd} {
 		c.Flags().String("name", "", "Human-readable name")
 		c.Flags().String("event", "", "Journal entry type to watch, e.g. mission.status_change")
@@ -510,4 +536,103 @@ func matcherFromFlags(cmd *cobra.Command) (map[string]any, error) {
 		matcher["payload_equals"] = pairs
 	}
 	return matcher, nil
+}
+
+// refuseSilentMatcherLoss stops an update from dropping predicates the caller
+// did not mention.
+//
+// The API writes `matcher` as a whole object, so a PATCH carrying
+// --payload-equals alone replaces every predicate the rule had. A rule scoped
+// to one crew silently widens to the entire workspace and starts firing on
+// events it was never meant to see — and the CLI reported success.
+//
+// Same doctrine the action object already follows a few lines up: refuse
+// rather than silently detach. --replace-matcher is the way to say you meant
+// it.
+//
+// A failed read is NOT a reason to block the write: the check is a guard
+// against a silent mistake, not an authorisation, and turning a transient GET
+// failure into "you cannot edit your rule" trades one bad outcome for a worse
+// one. It falls through and lets the PATCH proceed.
+func refuseSilentMatcherLoss(id string, next map[string]any, replace bool) error {
+	if replace {
+		return nil
+	}
+	// Read through LIST, not GET /automations/{id} — that route does not exist
+	// (the API registers list, patch and delete only), and the repo's route
+	// contract test catches the call. Worth stating because the failure would
+	// have been silent: the helper falls through on a read error, so a 404 here
+	// would leave a guard that is present, reports nothing, and protects
+	// nothing.
+	resp, err := newAPIClient().Get("/api/v1/automations")
+	if err != nil {
+		return nil
+	}
+	var listed struct {
+		Automations []struct {
+			ID      string         `json:"id"`
+			Matcher map[string]any `json:"matcher"`
+		} `json:"automations"`
+	}
+	if err := cli.ReadJSON(resp, &listed); err != nil {
+		return nil
+	}
+	var stored map[string]any
+	for _, a := range listed.Automations {
+		if a.ID == id {
+			stored = a.Matcher
+			break
+		}
+	}
+	if stored == nil {
+		// Unknown id: let the PATCH answer 404 rather than inventing one here.
+		return nil
+	}
+	lost := droppedPredicates(stored, next)
+	if len(lost) == 0 {
+		return nil
+	}
+	return matcherLossError(lost)
+}
+
+// droppedPredicates lists the predicates a stored matcher has that the
+// replacement does not. Split from the network call so the decision — the part
+// that can be wrong — is testable without a server.
+func droppedPredicates(cur, next map[string]any) []string {
+	var lost []string
+	for k, v := range cur {
+		if isEmptyPredicate(v) {
+			continue
+		}
+		if _, kept := next[k]; !kept {
+			lost = append(lost, k)
+		}
+	}
+	sort.Strings(lost)
+	return lost
+}
+
+func matcherLossError(lost []string) error {
+	return fmt.Errorf("this update would delete %d predicate(s) the rule has and you did not "+
+		"re-supply: %s\n"+
+		"The matcher is written as a whole object, so passing any predicate flag replaces all of "+
+		"them. Re-supply the ones you want to keep, or pass --replace-matcher if dropping them is "+
+		"what you meant.", len(lost), strings.Join(lost, ", "))
+}
+
+// isEmptyPredicate treats a present-but-empty value as absent: the server
+// stores {} / [] for a predicate never set, and reporting those as "lost"
+// would refuse an update that removes nothing.
+func isEmptyPredicate(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case []any:
+		return len(t) == 0
+	case map[string]any:
+		return len(t) == 0
+	case string:
+		return t == ""
+	}
+	return false
 }

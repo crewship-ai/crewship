@@ -206,7 +206,18 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 		_, err = tx.ExecContext(ctx, `
 UPDATE pipelines SET
     name = ?, description = ?, dsl_version = ?, definition_json = ?, definition_hash = ?,
-    author_crew_id = ?, author_agent_id = ?, author_user_id = ?, author_chat_id = ?, author_run_id = ?,
+    author_crew_id = ?,
+    -- Empty means "the save did not mention it", not "clear it". The field
+    -- became load-bearing with the crewship step kind (it is the agent every
+    -- verb acts as), while several save clients predate that and never send
+    -- it: the dashboard's rename and duplicate payloads, the manifest's
+    -- buildSaveBody. Writing it unconditionally made a rename silently unset
+    -- the acting agent, after which the routine kept working in a quieter,
+    -- wronger way — audit rows filed under "system", and no actor for the
+    -- delegation cap to measure from. Clearing it deliberately gets an
+    -- explicit door if anything ever needs one.
+    author_agent_id = COALESCE(NULLIF(?, ''), author_agent_id),
+    author_user_id = ?, author_chat_id = ?, author_run_id = ?,
     authored_via = ?, imported_from_url = ?,
     last_test_run_at = ?, last_test_run_passed = 1,
     execution_tier_json = ?,

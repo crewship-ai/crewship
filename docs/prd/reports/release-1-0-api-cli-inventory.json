@@ -15,7 +15,7 @@
     "api_with_concrete_json_requests": 226,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 724,
+    "cli_with_test_signals": 729,
     "cli_with_flags": 351,
     "cli_with_all_flags_documented": 351,
     "cli_missing_flag_docs": 0,
@@ -25266,6 +25266,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_automation_matcher_loss_test.go",
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_routine_records_provenance_test.go"
       ]
@@ -25285,12 +25286,12 @@
       "test_signals": [
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_audit_test.go",
+        "cmd/crewship/cmd_automation_matcher_loss_test.go",
         "cmd/crewship/cmd_chat_create_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_mutate_cov2_test.go",
         "cmd/crewship/cmd_hooks_write_test.go",
-        "cmd/crewship/cmd_integration_crew_cov_test.go",
         "…"
       ],
       "flags": [
@@ -25331,7 +25332,10 @@
       "root_docs": [
         "docs/cli/automation.mdx"
       ],
-      "status": "documented_exact"
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_automation_matcher_loss_test.go"
+      ]
     },
     {
       "path": "automation disable",
@@ -25344,7 +25348,10 @@
       "root_docs": [
         "docs/cli/automation.mdx"
       ],
-      "status": "documented_exact"
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_automation_matcher_loss_test.go"
+      ]
     },
     {
       "path": "automation enable",
@@ -25357,7 +25364,10 @@
       "root_docs": [
         "docs/cli/automation.mdx"
       ],
-      "status": "documented_exact"
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_automation_matcher_loss_test.go"
+      ]
     },
     {
       "path": "automation list",
@@ -25376,11 +25386,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_automation_matcher_loss_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -25396,6 +25406,9 @@
         "docs/cli/automation.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_automation_matcher_loss_test.go"
+      ],
       "flags": [
         "agent",
         "crew",
@@ -25435,6 +25448,9 @@
         "docs/cli/automation.mdx"
       ],
       "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_automation_matcher_loss_test.go"
+      ],
       "flags": [
         "agent",
         "crew",
@@ -25445,6 +25461,7 @@
         "mission",
         "name",
         "payload-equals",
+        "replace-matcher",
         "routine",
         "severity"
       ],
@@ -25458,6 +25475,7 @@
         "mission",
         "name",
         "payload-equals",
+        "replace-matcher",
         "routine",
         "severity"
       ]

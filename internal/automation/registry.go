@@ -181,6 +181,40 @@ func (r *Registry) SetChainSource(c ChainSource) { r.chains = c }
 // emitDepthExceeded records a refused hop. Loud on purpose: a cap that
 // refuses silently is a cap nobody can debug, and this entry is how an
 // operator finds out a loop exists at all.
+// emitChainUnreadable records a hop refused because the parent run's chain
+// position could not be read.
+//
+// It reuses automation.depth_exceeded rather than introducing a type, because
+// what the operator needs to know is the same thing in both cases — this rule
+// did not fire, and the composition budget is why. The payload says which:
+// `reason` is "unreadable" here and absent on a real depth refusal, and
+// chain_depth is omitted because there is no depth to report. Inventing a
+// number would be worse than saying nothing.
+func (r *Registry) emitChainUnreadable(ctx context.Context, it *intent, cause error) {
+	r.logger.Error("automation: chain position unreadable, refusing the hop",
+		"err", cause, "automation_id", it.automationID, "origin_run_id", it.originRunID)
+	if r.journal == nil {
+		return
+	}
+	_, _ = r.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: it.workspaceID,
+		Type:        journal.EntryAutomationDepthExceeded,
+		Severity:    journal.SeverityError,
+		ActorType:   journal.ActorSystem,
+		ActorID:     "automation",
+		Summary: fmt.Sprintf("automation %q refused: could not read the chain position of run %s",
+			it.automationName, it.originRunID),
+		Payload: map[string]any{
+			"automation_id":   it.automationID,
+			"automation_name": it.automationName,
+			"routine_slug":    it.pipelineSlug,
+			"origin_run_id":   it.originRunID,
+			"reason":          "unreadable",
+			"error":           cause.Error(),
+		},
+	})
+}
+
 func (r *Registry) emitDepthExceeded(ctx context.Context, it *intent, depth int) {
 	r.logger.Warn("automation: composed chain refused at the depth cap",
 		"automation_id", it.automationID, "routine", it.pipelineSlug,
@@ -548,8 +582,14 @@ func (r *Registry) Flush(ctx context.Context) int {
 				// Fail CLOSED on an unreadable position. An unknown depth that
 				// defaults to "shallow" is how a cycle buys itself a fresh
 				// budget every lap.
-				r.logger.Error("automation: chain position unreadable, refusing the hop",
-					"err", err, "automation_id", it.automationID, "origin_run_id", it.originRunID)
+				//
+				// Recorded in the JOURNAL as well as the log. Refusing the hop
+				// discards a run the operator was expecting, and a server log
+				// line is not somewhere they will look — from the outside a
+				// dropped run is indistinguishable from a rule that quietly
+				// stopped matching. The depth refusal writes an entry for
+				// exactly this reason; so does this.
+				r.emitChainUnreadable(ctx, it, err)
 				continue
 			} else if ok {
 				depth = pos.Depth + 1

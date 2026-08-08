@@ -232,19 +232,39 @@ func (a *Automation) Validate() error {
 	if a.Action.RoutineSlug == "" {
 		return errors.New("automation: action.routine_slug required")
 	}
-	if a.DebounceSeconds == 0 {
-		a.DebounceSeconds = DefaultDebounceSeconds
-	}
+	// Range checks only — Validate does not rewrite. It used to coerce a zero
+	// to the default first, which collapsed a distinction the API layer takes
+	// care to keep: automationBody uses *int, so "not mentioned" and "set to
+	// zero" arrive as different values. Collapsing them made
+	// debounce_seconds: 0 unreachable — a legal value inside the documented
+	// range, meaning "fire on the first match, do not hold the run open" —
+	// while the API answered 200 and stored 10.
+	//
+	// "Unset" becomes a number in ApplyDefaults, called by the create path,
+	// which is the only caller that knows a field was absent.
 	if a.DebounceSeconds < 0 || a.DebounceSeconds > maxDebounceSeconds {
 		return fmt.Errorf("automation: debounce_seconds must be between 0 and %d", maxDebounceSeconds)
-	}
-	if a.MaxPerHour == 0 {
-		a.MaxPerHour = DefaultMaxPerHour
 	}
 	if a.MaxPerHour < 1 || a.MaxPerHour > maxPerHourCeiling {
 		return fmt.Errorf("automation: max_per_hour must be between 1 and %d", maxPerHourCeiling)
 	}
 	return nil
+}
+
+// ApplyDefaults fills the burst controls a caller left unset.
+//
+// Separate from Validate on purpose. Only a caller that knows a field was
+// ABSENT may substitute a number for it; Validate is handed a struct and
+// cannot tell absence from a chosen zero, so it must not guess. The API's
+// create path calls this before validating (its body uses *int, so it knows);
+// the update path does not, which is what makes an explicit zero expressible.
+func (a *Automation) ApplyDefaults() {
+	if a.DebounceSeconds == 0 {
+		a.DebounceSeconds = DefaultDebounceSeconds
+	}
+	if a.MaxPerHour == 0 {
+		a.MaxPerHour = DefaultMaxPerHour
+	}
 }
 
 // Resolved pairs a stored rule with the routine it targets. The Registry

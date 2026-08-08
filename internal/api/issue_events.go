@@ -137,6 +137,16 @@ type issueEvent struct {
 	// was not expressible at all.
 	From string
 	To   string
+	// RunID is the routine run that caused this change, when one did. It
+	// becomes the journal entry's TraceID, and that pointer is what the
+	// composition depth cap is built on: Registry.Flush resolves it, reads
+	// that run's chain_depth, and spends depth+1, so a chain leaving the
+	// process through the journal and coming back keeps ONE budget.
+	//
+	// Empty for a human moving a card, and it must stay empty there — an
+	// entry naming a run that never ran gives the causal walk a parent to
+	// follow into nothing and makes a person's action read as a composed hop.
+	RunID string
 }
 
 // issueEventPayload is the journal payload for one issue event.
@@ -217,8 +227,12 @@ func (e issueEvents) log(ctx context.Context, ev issueEvent) {
 		ActorType:   actor,
 		ActorID:     ev.ActorID,
 		Summary:     string(ev.Action) + ": " + truncate(ev.Details, 120),
-		Payload:     issueEventPayload(ev),
-		Refs:        map[string]any{"mission_id": ev.MissionID, "activity_id": actID},
+		// The run that caused it, when one did. journal.prepareEntry treats
+		// trace_id as the originating run id, which is the pointer
+		// automation.Registry.Flush resolves to price a composed hop.
+		TraceID: ev.RunID,
+		Payload: issueEventPayload(ev),
+		Refs:    map[string]any{"mission_id": ev.MissionID, "activity_id": actID},
 	})
 }
 

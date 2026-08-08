@@ -159,17 +159,33 @@ WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
 	// are wrong and only one of them is quiet: a user's inputs firing under a
 	// rule's name is a forged audit trail, and a rule's run reading as a cron
 	// is the exact confusion the columns were added to end.
+	// The chain position does NOT follow the payload — it follows the DEEPEST
+	// claimant. Attribution moves because a forged byline is the harm there;
+	// the budget must not, because under-charging is the harm here. A row that
+	// took the later trigger's depth would hand a composed cycle its allowance
+	// back every time a hop met a shallower pending row: an automation at
+	// depth 6 coalescing into a user's depth-0 defer would fire at 0 and buy
+	// eight more hops. Charged too much is survivable; charged too little is
+	// the unbounded loop this cap exists to stop.
+	//
+	// chain_origin travels with the depth that won, so a chain that keeps its
+	// budget also keeps its root. Found by the runtime harness, which produced
+	// ten status changes against a cap of nine and two distinct origins.
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE pending_runs
 SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
     priority = ?, fire_at = ?, expires_at = ?, invoking_user_id = ?,
     triggered_via = ?, triggered_by_id = ?,
+    chain_origin = CASE WHEN ? > COALESCE(chain_depth,0) THEN ? ELSE chain_origin END,
+    chain_depth  = MAX(COALESCE(chain_depth,0), ?),
     updated_at = datetime('now','subsec')
 WHERE id = ?`,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, fireAt.UTC().Format(time.RFC3339Nano),
 		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID),
-		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), existingID); err != nil {
+		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID),
+		pr.ChainDepth, nullableStr(pr.ChainOrigin), pr.ChainDepth,
+		existingID); err != nil {
 		return "", false, fmt.Errorf("pending_runs: coalesce: %w", err)
 	}
 	return existingID, true, nil

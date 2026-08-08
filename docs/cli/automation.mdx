@@ -163,6 +163,17 @@ matcher somebody edited a moment ago. Accepts the same flags as `create`.
 | `--payload-equals` | `stringSlice` | Replace the payload predicate, as `key=value`. Repeatable. |
 | `--debounce-seconds` | `int` | Debounce window in seconds. |
 | `--max-per-hour` | `int` | Runs per hour burst brake. Per server process; a restart clears it. |
+| `--replace-matcher` | `bool` | Confirm that predicates you did not re-supply should be dropped. |
+
+<Warning>
+The write is sparse — except for the **matcher**, which the API stores as one
+object. Passing any predicate flag replaces *every* predicate, so a rule scoped
+to a crew and updated with `--payload-equals` alone would silently stop being
+crew-scoped and start firing workspace-wide.
+
+The CLI refuses that and names what would be lost. Re-supply the predicates you
+want to keep, or pass `--replace-matcher` if dropping them is what you meant.
+</Warning>
 
 ---
 

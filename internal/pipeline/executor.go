@@ -758,6 +758,37 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	in.pipeline = p
 	in.dsl = dsl
 
+	// Dispatch gates — same chokepoint, same reason as the status gate above.
+	//
+	// RunPreflight's own doc says the operation "had two doors and only one
+	// was guarded". It grew a third: an automation-fired run enters through
+	// PendingRunDispatcher, straight to Run, and skipped the integration,
+	// resource and credential checks entirely — so a routine a user could not
+	// start by hand could start itself the moment a rule matched, and the
+	// {{ secrets.* }} refs then failed deep inside a runner with an opaque
+	// auth error rather than refusing here with an actionable one.
+	//
+	// Placed here rather than in the dispatcher because that would guard door
+	// three and leave door four to whoever adds it. The HTTP handlers gate
+	// before calling in; checking again is idempotent and fails open, so the
+	// cost of the overlap is a resolver read and the benefit is that no future
+	// caller can forget.
+	//
+	// ModeRun only, matching runCallPipelineStep and gateMissingCredentials:
+	// dry_run touches no vault and asserts no status. Two doors that disagree
+	// about the edges are two doors again.
+	if e.preflight != nil && in.Mode == ModeRun {
+		if perr := e.preflight.Check(ctx, PreflightRequest{
+			WorkspaceID:  in.WorkspaceID,
+			PipelineID:   p.ID,
+			PipelineSlug: p.Slug,
+			AuthorCrewID: p.AuthorCrewID,
+			DSL:          dsl,
+		}); perr != nil {
+			return nil, perr
+		}
+	}
+
 	// Boot-time resume re-validation (TOCTOU guard): buildResumePlan
 	// vetted the persisted state against the definition AS OF the boot
 	// scan, but runResumedRun's concurrency-slot retry loop can wait
