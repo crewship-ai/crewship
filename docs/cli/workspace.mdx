@@ -30,9 +30,9 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 | `workspace update` | Patch mutable fields on the current workspace. |
 | `workspace delete [slug-or-id]` | Delete a workspace (OWNER only, irreversible). Requires `--confirm <slug>`. |
 | `workspace member list` | List members of the active workspace. |
-| `workspace member add <user-id>` | Add an existing user to the workspace. |
-| `workspace member role <member-id> <ROLE>` | Change a member's role (`MANAGER+`, ladder-guarded). |
-| `workspace member remove <user-id>` | Remove a member (prompts unless `-y`). |
+| `workspace member add <user-id>` | Add an existing user to the workspace. Takes a **user** id. |
+| `workspace member role <member-id-or-user-id> <ROLE>` | Change a member's role (`MANAGER+`, ladder-guarded). |
+| `workspace member remove <member-id-or-user-id>` | Remove a member (prompts unless `-y`). |
 | `workspace member invite <email>` | Add someone by email, creating an account if needed, and print a one-time setup link. |
 | `workspace member capabilities ...` | Manage per-member capability grants (aliases: `caps`, `capability`). See [below](#workspace-member-capabilities). |
 | `workspace invite [email]` | Record an invitation row by email (shortcut for `invite create`; no email is sent). |
@@ -91,19 +91,55 @@ crews and agents; `OWNER` only, and refused if it is your only workspace.
 | --- | --- | --- |
 | `--role <ROLE>` | `MEMBER` | One of `MEMBER` or `ADMIN`. Owners are seeded at workspace-create time. |
 
+### Which id do the member commands take?
+
+`workspace member list` prints two ids per row and they are not
+interchangeable at the API:
+
+| Column | What it is | Consumed by |
+| --- | --- | --- |
+| `MEMBER ID` | The `workspace_members` row | `PATCH` / `DELETE /api/v1/workspaces/{id}/members/{memberId}` |
+| `USER ID` | The person | `POST /api/v1/workspaces/{id}/members` |
+
+So `member add` takes a **user** id while the endpoints behind `member role`
+and `member remove` match only a **membership** row. Passing the user id used
+to answer a bare `Member not found` — which reads as "that person is not in
+this workspace" rather than "wrong id", and cost a test suite its most
+important assertion (#1829).
+
+Both commands now accept **either** column and resolve it for you. An argument
+that is in neither is refused by name before any request goes out:
+
+```
+no workspace member matches "nobody": it is neither a MEMBER ID nor a USER ID
+in 'crewship workspace member list'
+```
+
+Resolution is a convenience, not a new dependency: if the member roster cannot
+be read (permissions, an unreachable server), the argument is sent through
+untouched and the server answers as it always did.
+
+`workspace member list --format json` carries the address in a flat `email`
+field **and** in the nested `user.email` the server sends. The flat field used
+to be present and always empty — a shape that silently broke every
+`jq 'select(.email == …)'` written against it.
+
 ### `workspace member role`
 
 ```bash
-crewship workspace member role <member-id> <ROLE>
+crewship workspace member role <member-id-or-user-id> <ROLE>
 ```
 
-`<member-id>` is the membership row id from `workspace member list`;
 `<ROLE>` is one of `OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`
 (case-insensitive). `MANAGER+` only, and subject to the server ladder:
 you can only grant a role below your own, cannot modify a member ranked
 above you, and cannot demote the last `OWNER`.
 
 ### `workspace member remove`
+
+```bash
+crewship workspace member remove <member-id-or-user-id> --yes
+```
 
 | Flag | Default | Effect |
 | --- | --- | --- |
@@ -190,7 +226,7 @@ not the `OWNER`.
 ```bash
 crewship workspace member list
 crewship workspace member add usr_abc123 --role ADMIN
-crewship workspace member remove usr_abc123 --yes
+crewship workspace member remove usr_abc123 --yes   # user id or MEMBER ID both work
 crewship workspace member invite alice@acme.com --role MEMBER
 ```
 

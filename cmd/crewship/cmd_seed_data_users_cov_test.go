@@ -148,16 +148,17 @@ func TestSeedRBACUsers_PreExistingAccountIsReported(t *testing.T) {
 	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
 	stub.OnGet(adminUsers, clitest.JSONResponse(200, []map[string]any{}))
 
+	var err error
 	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), newSeedClient(stub)); err != nil {
-			t.Errorf("seedRBACUsers: %v", err)
-		}
+		err = seedRBACUsers(context.Background(), newSeedClient(stub))
 	})
 	if !strings.Contains(out, "account predates this seed") {
 		t.Errorf("expected pre-existing-account line:\n%s", out)
 	}
-	if !strings.Contains(out, "no users seeded") {
-		t.Errorf("expected empty-mint summary:\n%s", out)
+	// Nobody landed, so the fixture failed — see seedRBACUsers. This used to
+	// be a stderr notice next to a zero exit code (#1829).
+	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
+		t.Errorf("expected the zero-placed verdict, got %v", err)
 	}
 }
 
@@ -167,16 +168,21 @@ func TestSeedRBACUsers_SignupFailuresAreNonFatal(t *testing.T) {
 	stub.OnPost(invitationsPath, clitest.JSONResponse(201, map[string]string{"id": "inv1"}))
 	stub.OnPost(signupPath, clitest.ErrorResponse(500, "signup broken"))
 
+	var err error
 	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), newSeedClient(stub)); err != nil {
-			t.Errorf("hard failure must not abort the seed: %v", err)
-		}
+		err = seedRBACUsers(context.Background(), newSeedClient(stub))
 	})
+	// "Non-fatal" describes the LOOP: every user is attempted and reported
+	// individually rather than the first failure aborting the rest. The
+	// verdict at the end is separate, and zero placed is a failure.
 	if !strings.Contains(out, "signup HTTP 500") {
 		t.Errorf("expected per-user failure lines:\n%s", out)
 	}
-	if !strings.Contains(out, "no users seeded") {
-		t.Errorf("expected empty-mint summary:\n%s", out)
+	if n := len(stub.CallsFor("POST", signupPath)); n != len(demoUsers) {
+		t.Errorf("signups attempted = %d, want %d — the loop must not abort early", n, len(demoUsers))
+	}
+	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
+		t.Errorf("expected the zero-placed verdict, got %v", err)
 	}
 }
 
@@ -185,10 +191,9 @@ func TestSeedRBACUsers_InviteErrorSkipsUser(t *testing.T) {
 	defer stub.Close()
 	stub.OnPost(invitationsPath, clitest.ErrorResponse(403, "not allowed"))
 
+	var err error
 	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), newSeedClient(stub)); err != nil {
-			t.Errorf("seedRBACUsers: %v", err)
-		}
+		err = seedRBACUsers(context.Background(), newSeedClient(stub))
 	})
 	if !strings.Contains(out, "not allowed") {
 		t.Errorf("expected invite failure lines:\n%s", out)
@@ -198,8 +203,8 @@ func TestSeedRBACUsers_InviteErrorSkipsUser(t *testing.T) {
 	if n := len(stub.CallsFor("POST", signupPath)); n != 0 {
 		t.Errorf("signups = %d after invite failure, want 0", n)
 	}
-	if !strings.Contains(out, "no users seeded") {
-		t.Errorf("nobody minted → summary expected:\n%s", out)
+	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
+		t.Errorf("nobody placed → verdict expected, got %v", err)
 	}
 }
 
@@ -210,29 +215,36 @@ func TestSeedRBACUsers_RosterLookupFailureIsNonFatal(t *testing.T) {
 	stub.OnPost(signupPath, clitest.JSONResponse(202, map[string]any{"ok": true}))
 	stub.OnGet(adminUsers, clitest.ErrorResponse(500, "roster broken"))
 
+	var err error
 	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), newSeedClient(stub)); err != nil {
-			t.Errorf("lookup failures must not abort: %v", err)
-		}
+		err = seedRBACUsers(context.Background(), newSeedClient(stub))
 	})
 	if !strings.Contains(out, "roster lookup failed") {
 		t.Errorf("expected lookup failure lines:\n%s", out)
+	}
+	if n := len(stub.CallsFor("GET", adminUsers)); n != len(demoUsers) {
+		t.Errorf("roster lookups = %d, want %d — a failed lookup must not abort the loop", n, len(demoUsers))
+	}
+	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
+		t.Errorf("nobody confirmed placed → verdict expected, got %v", err)
 	}
 }
 
 func TestSeedRBACUsers_TransportErrorsAreNonFatal(t *testing.T) {
 	// Dead server: every invitation POST fails at the transport layer.
 	client := cli.NewClient("http://127.0.0.1:1", "tok", covWS)
+	var err error
 	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), client); err != nil {
-			t.Errorf("transport failures must not abort: %v", err)
-		}
+		err = seedRBACUsers(context.Background(), client)
 	})
 	if !strings.Contains(out, "invite request failed") {
 		t.Errorf("expected per-user transport failure lines:\n%s", out)
 	}
-	if !strings.Contains(out, "no users seeded") {
-		t.Errorf("expected empty summary:\n%s", out)
+	if strings.Count(out, "invite request failed") != len(demoUsers) {
+		t.Errorf("every user must be attempted, not just the first:\n%s", out)
+	}
+	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
+		t.Errorf("expected the zero-placed verdict, got %v", err)
 	}
 }
 
@@ -247,16 +259,18 @@ func TestSeedRBACUsers_SignupTransportErrorSkipsUser(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
+	var err error
 	out := captureStdoutCovCli2(t, func() {
-		if err := seedRBACUsers(context.Background(), cli.NewClient(srv.URL, "tok", covWS)); err != nil {
-			t.Errorf("signup transport failures must not abort: %v", err)
-		}
+		err = seedRBACUsers(context.Background(), cli.NewClient(srv.URL, "tok", covWS))
 	})
 	if !strings.Contains(out, "signup request failed") {
 		t.Errorf("expected signup failure lines:\n%s", out)
 	}
-	if !strings.Contains(out, "no users seeded") {
-		t.Errorf("expected empty summary:\n%s", out)
+	if strings.Count(out, "signup request failed") != len(demoUsers) {
+		t.Errorf("every user must be attempted, not just the first:\n%s", out)
+	}
+	if err == nil || !strings.Contains(err.Error(), "no RBAC fixture users") {
+		t.Errorf("expected the zero-placed verdict, got %v", err)
 	}
 }
 

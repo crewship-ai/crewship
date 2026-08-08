@@ -44,7 +44,7 @@ green night closes the bot's own issue).
 | `test-keeper-toctou.sh` | 15 assertions, 0 fail |
 | `test-orphan-token-reap.sh` | 1 assertion + 1 self-SKIP (no docker provider) — and see the coverage note below for what it does and does not prove on a PR runner |
 | `test-attack-surface.sh` | 4 assertions (Tier A), Tier B SKIPs by design |
-| `test-run-stream.sh` | Tier A (CLI parity, 404-not-403, idle-chat frame contract); Tiers B and C SKIP without a provider |
+| `test-run-stream.sh` | Tier A (CLI parity, 404-not-403, idle-chat frame contract); Tiers B and C SKIP without a usable provider — B on any credential that is not **ACTIVE**, C when the routine's step never reaches a chat |
 
 All five were driven end-to-end against a clean-DB bootstrap of exactly that
 sequence before the workflow was written. `test-run-stream.sh` (#1818) joined
@@ -60,6 +60,45 @@ dispatch path — scheduler, webhook, routine step, agent-start IPC — because 
 of them publish through the same chokepoint (`orchestrator.RunAgent`). It could
 not pass before #1823: every attach answered `no_active_run` for a run that was
 executing.
+
+> **Tier B skips on *any* unusable provider, not just a missing one.** The
+> earlier wording said "without a provider" and only one door led there: no
+> chat row ever appeared. An **EXPIRED** credential is a different shape — the
+> run still creates its chat, then the agent exits 1 with no output — and the
+> suite used to hard-FAIL `live stream exits 0` and `live stream delivered the
+> agent's text`, reporting an unusable environment as a product regression
+> (#1829, dev2). Both tiers now read `PROVIDER_STATE` — one probe of the
+> workspace's credentials, taken before either starts anything — and Tier B
+> skips with the status it found (`ANTHROPIC_API_KEY is EXPIRED`). A credential
+> that is ACTIVE and still cannot answer stays a **failure**: that is a lying
+> credential or a broken runner, not an environment gap.
+>
+> The skip is scoped, and the scoping is load-bearing. Tier B asserts the
+> agent's *words* arrive; Tier C asserts the session channel is *published at
+> all*, and it already treats a failed run as signal (`run_begin` + `error` +
+> `done` are real frames). So Tier B `return`s rather than ending the suite —
+> a dead credential must not take #1823's regression signal down with it.
+>
+> Tier C reads the same `PROVIDER_STATE` for one narrow purpose: when the
+> workspace has **no usable provider at all**, the agent step dies on the spot
+> (`agent exited with code 1` after ~5s on dev2) and an attach that lands after
+> that sees an idle chat. An empty transcript there says nothing about the
+> chokepoint, so it SKIPs with the credential status instead of reporting
+> "this is #1823's failure mode". **The assertion is not weakened**: with an
+> ACTIVE credential an empty transcript is still a hard FAIL, which is the red
+> the tier exists to produce. Verified — pristine `main` fails that assertion
+> against dev2 today for exactly this reason.
+>
+> **Its Tier A tenancy case needs a second identity, and CI must seed one.**
+> The assertion that streaming cannot be used as an existence oracle needs a
+> user who *is* a member, gets removed, and must then be answered 404 rather
+> than 403 for a chat that demonstrably exists. That identity comes from
+> `crewship seed --with-users`, which needs the server started with
+> `CREWSHIP_ALLOW_SIGNUP=true`; the control-plane matrix passes both for this
+> square. Point `RUN_STREAM_T2_EMAIL` / `RUN_STREAM_T2_PASSWORD` at any
+> non-owner account to use a different one. If no such member exists the case
+> SKIPs — and the reason now says *that*, rather than the false "is not a
+> member of this workspace" it printed while reading the wrong JSON field.
 
 **PR subset:** `test-keeper.sh`, `test-keeper-config.sh`,
 `test-keeper-aux.sh`, `test-inbox.sh`, and `test-orphan-token-reap.sh`.
