@@ -28,7 +28,7 @@ On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself.
 | `--wait-provision` | `false` | Block until all crews finish provisioning. Default is fire-and-forget — seed returns while provisioning runs in the background. |
 | `--test-backup` | `false` | After seeding, run a backup/restore round-trip self-test on one crew. Implies `--wait-provision`. |
 | `--with-memory` | `false` | Pre-seed agent memory tiers (`AGENT.md` / `CREW.md` / `PERSONA.md` / `pins.md` / `daily/{date}.md` / `learned.md`) for the demo workspace; useful for memory-recall demos and live GDPR/RBAC tests. |
-| `--with-users` | `false` | Add four extra users (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`) to the workspace for RBAC matrix testing; requires `CREWSHIP_ALLOW_SIGNUP=true` on the server. |
+| `--with-users` | `false` | Add four extra users (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`) to the workspace for RBAC matrix testing. Requires the server to have been started with `CREWSHIP_ALLOW_SIGNUP=true` — seed checks before it starts and **fails** rather than placing nobody. |
 
 ## Examples
 
@@ -114,7 +114,7 @@ Implies `--wait-provision`. Picks the first provisioned crew (preferring `resear
 | --- | --- | --- |
 | 1. Bootstrap / auth | Hits `/api/v1/bootstrap` on a fresh DB; falls back to existing CLI token | Fatal |
 | 0. Nuke (if `--nuke`) | Wipes workspace contents | Fatal |
-| 1b. RBAC users (if `--with-users`) | Adds four extra members (`ADMIN`/`MANAGER`/`MEMBER`/`VIEWER`) before crews land | Non-fatal (logs and continues) |
+| 1b. RBAC users (if `--with-users`) | Adds four extra members (`ADMIN`/`MANAGER`/`MEMBER`/`VIEWER`) before crews land | **Fatal if none land**; individual failures are logged and the rest of the fixture continues |
 | 2. Crews + members | Creates four crews and links the admin user | Fatal |
 | 2a. Crew connections | All-pairs bidirectional `crew_connections` so missions can hand off | Non-fatal (logs and continues) |
 | 2b. Provision crews | Triggers devcontainer image builds in parallel | Errors deferred to end |

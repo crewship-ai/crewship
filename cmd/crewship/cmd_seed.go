@@ -197,8 +197,14 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// Fatal, unlike the other optional phases. --with-users is an
+		// explicit request for a second identity, and a caller that asked for
+		// one and did not get it must not be told the seed succeeded: that is
+		// how the nightly harness matrix ran for the whole life of the flag
+		// against workspaces with exactly one user (#1829). Partial fixtures
+		// still return nil — see seedRBACUsers.
 		if err := seedRBACUsers(ctx, client); err != nil {
-			fmt.Fprintf(os.Stderr, "RBAC user seeding hit an error (continuing): %v\n", err)
+			return fmt.Errorf("--with-users: %w", err)
 		}
 	}
 
