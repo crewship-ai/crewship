@@ -27,3 +27,11 @@ func ServeOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(openAPISpec)
 }
+
+// OpenAPISpecJSON returns the embedded spec so another package can render it —
+// internal/apidocs turns it into the browsable pages served at /openapi
+// (#1846). The slice backs the embedded data and is shared with every caller,
+// including ServeOpenAPISpec: read it, never write to it.
+func OpenAPISpecJSON() []byte {
+	return openAPISpec
+}

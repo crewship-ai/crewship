@@ -1,0 +1,20 @@
+{{define "schema"}}{{template "head" .}}
+<p class="crumbs"><a href="{{.Base}}">Operations</a> › <a href="{{.Base}}/schemas">Schemas</a></p>
+<h1><code>{{.Entry.Name}}</code></h1>
+{{if not .Entry.Reachable}}
+<p class="warn"><span class="badge warnb">unreferenced</span> No operation reaches this schema, directly or through another schema. It is carried in the document but describes nothing this API accepts or returns.</p>
+{{end}}
+
+<ul class="tree root">{{template "node" .Tree}}</ul>
+
+<h2>Named by</h2>
+{{if .Entry.UsedBy}}
+<ul class="ops">
+  {{range .Entry.UsedBy}}{{template "oprow" .}}{{end}}
+</ul>
+{{else if .Entry.Reachable}}
+<p class="dim">No operation names it directly — it is reached through another schema.</p>
+{{else}}
+<p class="dim">Nothing.</p>
+{{end}}
+{{template "foot" .}}{{end}}

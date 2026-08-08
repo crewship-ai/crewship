@@ -14,6 +14,7 @@ import (
 	"time"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/apidocs"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -1222,7 +1223,18 @@ func isMuxRoutedPath(path string) bool {
 		strings.HasPrefix(path, "/exposed/") ||
 		path == "/healthz" || path == "/readyz" ||
 		path == "/metrics" || path == "/ws" ||
-		path == "/ws/terminal" || path == "/openapi.json"
+		path == "/ws/terminal" || path == "/openapi.json" ||
+		isOpenAPIDocsPath(path)
+}
+
+// isOpenAPIDocsPath reports whether path belongs to the browsable OpenAPI
+// rendering (#1846). It is HTML, but it is NOT the SPA: it is served by the
+// mux from Go templates, and it runs under the strict CSP below rather than
+// the Next.js runtime's 'unsafe-inline'/'unsafe-eval' policy. Missing it here
+// would hand every one of its pages to the SPA catch-all, which answers 200
+// text/html for any path — the exact failure /openapi.json had before #1325.
+func isOpenAPIDocsPath(path string) bool {
+	return path == apidocs.BasePath || strings.HasPrefix(path, apidocs.BasePath+"/")
 }
 
 // sensitiveStaticPathPrefixes lists URL path prefixes that should never be
@@ -1362,6 +1374,28 @@ func (s *Server) RegisterKeeperRoutines(sched *scheduler.Scheduler) {
 	)
 	s.logger.Info("keeper: phase 2 routines registered",
 		"skill_review", skillReg, "memory_health_check", memReg)
+}
+
+// RegisterImageFreshnessRoutine wires #1845's daily crew-image freshness
+// sweep onto the same cron engine, from the same call site as the Keeper
+// sweeps.
+//
+// Kept as its own method rather than folded into RegisterKeeperRoutines
+// because it shares nothing with them: no evaluator, no LLM budget, no
+// paymaster scope — only the scheduler. Registration is independent and
+// non-fatal in every branch (see registerImageFreshnessRoutine): a provider
+// that cannot report image freshness, or a boot with no journal, skips the
+// sweep with an info log rather than deferring the rest of startup.
+func (s *Server) RegisterImageFreshnessRoutine(sched *scheduler.Scheduler) {
+	var emitter journal.Emitter
+	// A typed-nil *journal.Writer stored in the interface would be non-nil to
+	// the callee's `emitter == nil` check and panic on first fire, so the
+	// conversion happens only when there is really a writer.
+	if s.journalWriter != nil {
+		emitter = s.journalWriter
+	}
+	registered := registerImageFreshnessRoutine(sched, s.db, s.container, emitter, s.logger)
+	s.logger.Info("image freshness: sweep registration", "registered", registered)
 }
 
 // Start launches the HTTP server, IPC listener, WebSocket hub, scheduler,

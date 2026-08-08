@@ -513,6 +513,20 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/crews/{crewId}/rebuild", roleCreate, provisioning.ProvisionRebuild)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/restart-agents", roleCreate, provisioning.RestartCrewAgents)
 
+	// Crew image freshness (#1845). Separate handler from `provisioning`
+	// because it asks the CONTAINER PROVIDER, not the Docker client: the
+	// digest comparison has to reuse the same image-resolution chain
+	// EnsureCrewRuntime uses, and re-deriving it here would be free to
+	// disagree with what actually starts.
+	//
+	// image-status is a plain read (any workspace member, VIEWER included —
+	// noticing that a crew is behind is exactly what a dashboard watcher is
+	// for). refresh-image is roleCreate, matching provision / rebuild /
+	// restart-agents: it pulls and then force-removes a running container.
+	crewImages := NewCrewImageHandler(r.db, r.logger, r.activeContainer())
+	r.mux.Handle("GET /api/v1/crews/{crewId}/image-status", authed(wsCtx(http.HandlerFunc(crewImages.Status))))
+	r.authedMut("POST", "/api/v1/crews/{crewId}/refresh-image", roleCreate, crewImages.Refresh)
+
 	// Devcontainer image cache management (GC)
 	r.mux.Handle("GET /api/v1/cache/images", authed(wsCtx(http.HandlerFunc(provisioning.CacheList))))
 	r.authedMut("DELETE", "/api/v1/cache/images/{tag}", roleManage, provisioning.CacheDelete)

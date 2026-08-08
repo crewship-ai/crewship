@@ -12,9 +12,33 @@ Returns a generated [OpenAPI 3.0](https://spec.openapis.org/oas/v3.0.3) document
 GET /openapi.json
 ```
 
-This is a **route catalog**, not a hand-authored contract: paths, HTTP methods, and path parameters (`{id}`-style) are exact, generated straight from the route registrations in `internal/api/router_*.go` by `cmd/gen-openapi`. Request and response bodies are a generic `object` placeholder rather than per-endpoint schemas — enough for API discovery and black-box fuzzing tools (e.g. schemathesis) to enumerate every operation, not enough to code-generate a typed client from. For the real request/response shapes, use the per-resource pages in this section.
+This is a **route catalog**, not a hand-authored contract: paths, HTTP methods, and path parameters (`{id}`-style) are exact, generated straight from the route registrations in `internal/api/router_*.go` by `cmd/gen-openapi`. Bodies are *derived* from the handlers, not authored: most operations now carry a named schema, and where the generator could not derive a shape it emits an unconstrained `object` rather than guessing. For prose, examples and the reasoning behind a field, use the per-resource pages in this section.
 
 `/api/v1/internal/*` routes are deliberately excluded — that surface is sidecar-only, `X-Internal-Token` authenticated (see [Internal IPC](/api-reference/internal)), and this endpoint itself carries no auth. Publishing a route map of the one part of the API kept non-public would be counterproductive.
+
+## Browse it from your instance
+
+The same document is rendered as browsable HTML by the instance itself:
+
+```
+GET /openapi        →  https://your-instance/openapi
+```
+
+The point is narrower than "nicer docs". The spec is the discovery surface an agent drives the API from, so a rendering is how a human checks what the agent is seeing — against **their** instance and **their** build, not against whatever this docs site last published.
+
+Three pages:
+
+- **`/openapi`** — every operation, grouped by tag, with a filter box. Operations that answer without credentials are marked `public`.
+- **`/openapi/op/{operationId}`** — one operation: which credentials it accepts, its parameters split by location (path, query, header) with `required` shown as *binding* or *not proven required*, and its request and response schemas with `$ref`s resolved and linked.
+- **`/openapi/schemas`** and **`/openapi/schema/{name}`** — the component schemas, each with the operations that name it. Schemas no operation reaches are flagged `unreferenced`.
+
+It is **self-contained**: no CDN, no remote font, no third-party JavaScript. The binary embeds the whole rendering, so it works on an offline or air-gapped install, and the server serves it under a `default-src 'none'; script-src 'self'; style-src 'self'` Content-Security-Policy — a remote asset added there by accident would not load.
+
+<Note>
+  Like `/openapi.json`, this surface is **unauthenticated**: it renders the same public route catalog and carries no data. If you would not want the route map of your instance readable, that was already true of the JSON.
+</Note>
+
+It does not replace these reference pages. The generated document carries no prose — no summaries, no descriptions, no examples — so the rendering shows shape and status, and this section stays the place where behaviour is explained. There is no "try it out": nothing on that page issues a request.
 
 ## Query parameters
 
@@ -43,7 +67,7 @@ Content-Type: application/json
 This used not to hold. Go's router matches method and path together, so an unlisted method on a literal path could fall through to a sibling parameterised route — `DELETE /api/v1/notifications/count` reached the delete-notification handler with `id="count"` and answered `401`/`404` instead of `405`. Twenty-nine paths behaved that way. (That particular pair of routes has since been removed — see [#1751](https://github.com/crewship-ai/crewship/issues/1751) — but the failure mode it illustrates is why the guards exist.) <!-- docs-inventory: ignore --> A client can now trust the spec's method list: what it does not list, the server refuses.
 
 <Note>
-  Response bodies are still the generic `object` placeholder, and each operation still documents only `200`. Error statuses (`400`, `401`, `403`, `404`, `405`, `409`, `429`, `500`) are real and are listed under [Common Status Codes](/api-reference/overview#common-status-codes) — they are simply not yet enumerated per operation in the generated document. Treat the spec as authoritative for **paths, methods and path parameters**, and this reference section as authoritative for bodies and statuses.
+  This used to say that bodies were a generic placeholder and that every operation documented only `200`. Neither is true any more: the document enumerates the error statuses each operation can answer (`400`, `401`, `403`, `404`, `409`, `429`, `500`, …) alongside its success status, and 513 of 536 operations return a named schema — 9 still fall back to an unconstrained `object`, and 14 have no success body at all. Request bodies are named for 184 operations and generic for 40. The spec is authoritative for **paths, methods and path parameters**; treat a derived body as a strong hint and this reference section as authoritative for meaning.
 </Note>
 
 <Note>
