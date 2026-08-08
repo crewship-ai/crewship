@@ -459,9 +459,16 @@ var embedderURLPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^"\s,]+`
 // embedderHostPortPattern catches the address a SECOND time. A dial
 // failure repeats it outside the URL — `Post "http://10.0.5.12:11434/…":
 // dial tcp 10.0.5.12:11434: connect: connection refused` — so scrubbing
-// only the URL still publishes the host. Requires 2-5 digits after the
-// colon, which is why `http 404: {…}` and `"error":"model …"` survive.
-var embedderHostPortPattern = regexp.MustCompile(`\b[a-zA-Z0-9][a-zA-Z0-9.-]*:\d{2,5}\b`)
+// only the URL still publishes the host.
+//
+// Two forms, both of which a first cut at this missed: a bracketed IPv6
+// literal (`[fd00::1]:11434`) does not look like a hostname at all, and a
+// one-digit port (`10.0.5.12:9`) is a perfectly valid endpoint that a
+// 2-5 digit bound waved through. Ports are 1-5 digits and must follow the
+// colon immediately, which is what keeps `http 404: {…}` intact — there
+// the colon is followed by a space.
+var embedderHostPortPattern = regexp.MustCompile(
+	`(\[[0-9a-fA-F:]+\]|\b[a-zA-Z0-9][a-zA-Z0-9.-]*):\d{1,5}\b`)
 
 // scrubURLs removes URLs from text bound for /healthz.
 //

@@ -167,6 +167,23 @@ func TestEpisodicDetailDoesNotLeakTheEmbedderURL(t *testing.T) {
 			wantPresent: "EOF",
 		},
 		{
+			// A one-digit port is a valid endpoint and was slipping through
+			// a 2-5 digit bound.
+			name: "single-digit port is still an address",
+			err: errors.New(`episodic: ollama unreachable: Post "http://10.0.5.12:9/api/embeddings": ` +
+				`dial tcp 10.0.5.12:9: connect: connection refused`),
+			wantAbsent:  []string{"10.0.5.12:9", "10.0.5.12"},
+			wantPresent: "connection refused",
+		},
+		{
+			// Bracketed IPv6 does not match a hostname-shaped pattern at all.
+			name: "bracketed IPv6 host",
+			err: errors.New(`episodic: ollama unreachable: Post "http://[fd00::1]:11434/api/embeddings": ` +
+				`dial tcp [fd00::1]:11434: connect: network is unreachable`),
+			wantAbsent:  []string{"fd00::1", "11434"},
+			wantPresent: "network is unreachable",
+		},
+		{
 			name: "a model-missing error has no url and must survive intact",
 			err:  errors.New(`episodic: ollama http 404: {"error":"model \"nomic-embed-text\" not found, try pulling it first"}`),
 			// This is the whole reason the field exists — do not scrub it.
