@@ -218,6 +218,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "provisioning.failed",
       "provisioning.build_failed",
       "sidecar.stale",
+      "image.stale",
     ],
   },
 ]
