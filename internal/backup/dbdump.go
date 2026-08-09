@@ -175,6 +175,7 @@ var BackupTables = []string{
 	"pending_runs",              // deferred/debounced triggers — durable queued work
 	"pipeline_tags",             // routine-definition discovery tags (v125)
 	"pipeline_waitpoints",       // suspended workflow state — durable
+	"waitpoint_trust_grants",    // standing "stop asking" grants; FK pipeline_id → pipelines
 	"gdpr_actions",              // Art. 15/17 compliance audit trail
 	// Credential audit/rotations: depend on credentials being in already
 	"credential_audit",

@@ -71,6 +71,7 @@ DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags/{tag} roleCreate
+DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust/{grantId} roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId} roleManage
 GET /api/v1/admin/keeper/judge/models roleManage
 GET /api/v1/memory/export roleManage
@@ -260,6 +261,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
 POST /api/v1/workspaces/{workspaceId}/skills/import roleCreate

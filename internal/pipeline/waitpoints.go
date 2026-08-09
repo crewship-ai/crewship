@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/policy"
 )
 
 // SQLWaitpointStore is the production WaitpointStore backed by the
@@ -54,6 +56,11 @@ type SQLWaitpointStore struct {
 	// Executor.ResumeAfterApproval so the parked run fails/continues per
 	// its on_fail immediately.
 	resumer func(runID string)
+
+	// trust reads standing approval grants. It shares this store's DB
+	// handle and has no dependencies of its own, so the feature needs no
+	// bootstrap wiring — every construction of a waitpoint store gets it.
+	trust *TrustGrantStore
 }
 
 // SetTimeoutResumer wires the callback the sweeper (and boot recovery)
@@ -97,6 +104,7 @@ func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
 		db:        db,
 		listeners: make(map[string]chan waitDecision),
 		stopCh:    make(chan struct{}),
+		trust:     NewTrustGrantStore(db),
 	}
 	s.sweeperWg.Add(1)
 	go s.sweeper()
@@ -199,7 +207,45 @@ func (s *SQLWaitpointStore) CreateApproval(ctx context.Context, req WaitpointApp
 		timeoutSec = 24 * 3600
 	}
 	token := generateWaitpointToken()
-	timeoutAt := time.Now().Add(time.Duration(timeoutSec) * time.Second).UTC().Format(time.RFC3339Nano)
+	timeoutAt := time.Now().Add(time.Duration(timeoutSec) * time.Second).UTC().Format(time.RFC3339Nano) // tsformat:allow: timeout_at is string-compared by the sweep query in sweepOnce; the whole column is RFC3339Nano and tsformat would order differently against existing rows
+
+	// Standing trust: an operator who has waved this exact gate through
+	// on this exact routine body can have said "stop asking me". Consult
+	// that BEFORE writing a pending row, so a trusted gate never parks
+	// the run and never mints an inbox card that nobody needs to answer.
+	//
+	// Every failure here falls through to the normal blocking path: a
+	// gate whose trust cannot be established is a gate that asks. The
+	// lookup is deliberately incapable of failing open.
+	trustCtx := s.routineTrust(ctx, req)
+	if use, ok := s.consumeTrust(ctx, req, trustCtx); ok {
+		payload, _ := json.Marshal(map[string]any{
+			"auto_approved":      true,
+			"grant_id":           use.GrantID,
+			"granted_by_user_id": use.GrantedByUserID,
+			"grant_uses":         use.Uses,
+			"definition_hash":    trustCtx.definitionHash,
+		})
+		decidedAt := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: decided_at parity with CompleteApproval, which writes the same format for a human decision — an auto-approval must be indistinguishable in shape from the manual one it stands in for
+		if _, err := s.db.ExecContext(ctx, `
+INSERT INTO pipeline_waitpoints (
+    token, workspace_id, pipeline_run_id, step_id, kind, prompt,
+    invoking_crew_id, status, timeout_at, decided_at, decided_by_user_id, decision_payload
+) VALUES (?, ?, ?, ?, 'approval', ?, ?, 'approved', ?, ?, ?, ?)`,
+			token, req.WorkspaceID, req.PipelineRunID, req.StepID,
+			nullableStr(req.Prompt), nullableStr(req.InvokingCrewID), timeoutAt,
+			decidedAt, nullableStr(use.GrantedByUserID), string(payload),
+		); err != nil {
+			return "", fmt.Errorf("waitpoints: insert auto-approved: %w", err)
+		}
+		// The row is written approved, so WaitFor resolves from
+		// checkDecided. The listener is still pre-created to keep the
+		// one shape every token has in the map.
+		s.mu.Lock()
+		s.listeners[token] = make(chan waitDecision, 1)
+		s.mu.Unlock()
+		return token, nil
+	}
 
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO pipeline_waitpoints (
@@ -254,6 +300,11 @@ INSERT INTO pipeline_waitpoints (
 			"step_id":          req.StepID,
 			"invoking_crew_id": req.InvokingCrewID,
 			"timeout_at":       timeoutAt,
+			// Carries the "you have approved this N times — always
+			// allow?" offer, with every coordinate the grant call needs
+			// so the surface asking the question never has to re-derive
+			// which routine body was on screen.
+			"trust_offer": s.trustOffer(ctx, req, trustCtx),
 		},
 	})
 	// Pre-create the listener channel so a fast CompleteApproval
@@ -263,6 +314,105 @@ INSERT INTO pipeline_waitpoints (
 	s.listeners[token] = make(chan waitDecision, 1)
 	s.mu.Unlock()
 	return token, nil
+}
+
+// TrustOfferThreshold is how many times an operator must have approved
+// the same gate, on the same routine body, before they are offered a
+// standing grant.
+//
+// Three, not one: the first approval is how you learn what the gate
+// does, the second is how you learn it is repetitive, and the third is
+// where "am I adding any judgement here?" is answerable honestly. Set it
+// lower and the product is nagging people to disarm gates they have not
+// understood yet.
+const TrustOfferThreshold = 3
+
+// routineTrustCtx is the routine identity behind a waitpoint: which
+// definition body the run is executing, and how much autonomy its crew
+// was given. Every field is best-effort; a zero value means "we could
+// not establish trust", which the callers treat as "so ask a human".
+type routineTrustCtx struct {
+	pipelineID     string
+	definitionHash string
+	autonomy       string // crews.autonomy_level; "" when the run has no crew
+}
+
+// routineTrust resolves the run's routine identity. Errors are swallowed
+// into a zero value on purpose: this lookup can only ever REMOVE a
+// human from the loop, so every uncertain answer must be the one that
+// keeps them in it.
+func (s *SQLWaitpointStore) routineTrust(ctx context.Context, req WaitpointApprovalRequest) routineTrustCtx {
+	var out routineTrustCtx
+	var crewID string
+	err := s.db.QueryRowContext(ctx, `
+SELECT pipeline_id, COALESCE(definition_hash, ''), COALESCE(invoking_crew_id, '')
+  FROM pipeline_runs WHERE id = ?`, req.PipelineRunID).Scan(&out.pipelineID, &out.definitionHash, &crewID)
+	if err != nil {
+		// A run row we cannot read (test rigs that never insert one,
+		// a call_pipeline child, a deleted run) simply gets the
+		// blocking path it would have got before this feature existed.
+		return routineTrustCtx{}
+	}
+	if req.InvokingCrewID != "" {
+		crewID = req.InvokingCrewID
+	}
+	if crewID == "" {
+		// No crew, so no crew-level posture to respect. The grant, if
+		// any, was still an explicit per-gate decision by a human.
+		return out
+	}
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(autonomy_level, '') FROM crews WHERE id = ?`, crewID).Scan(&out.autonomy); err != nil {
+		// Cannot read the dial → assume the strictest posture.
+		out.autonomy = string(policy.AutonomyStrict)
+	}
+	return out
+}
+
+// consumeTrust fires a standing grant if one covers this gate.
+func (s *SQLWaitpointStore) consumeTrust(ctx context.Context, req WaitpointApprovalRequest, tc routineTrustCtx) (TrustGrantUse, bool) {
+	if tc.pipelineID == "" || tc.definitionHash == "" {
+		return TrustGrantUse{}, false
+	}
+	// A strict crew has opted out of every shortcut around the operator.
+	// v106 made the identical call for self-learning: a strict crew
+	// cannot self-promote "regardless of this flag".
+	if tc.autonomy == string(policy.AutonomyStrict) {
+		return TrustGrantUse{}, false
+	}
+	use, ok, err := s.trust.Consume(ctx, req.WorkspaceID, tc.pipelineID, req.StepID, tc.definitionHash)
+	if err != nil {
+		slog.Default().Warn("waitpoints: trust grant lookup failed, falling back to blocking approval",
+			"error", err, "run_id", req.PipelineRunID, "step_id", req.StepID)
+		return TrustGrantUse{}, false
+	}
+	return use, ok
+}
+
+// trustOffer builds the "stop asking me?" offer attached to a blocking
+// inbox card. Ineligible offers are still emitted (eligible=false) so the
+// payload shape is stable for consumers.
+func (s *SQLWaitpointStore) trustOffer(ctx context.Context, req WaitpointApprovalRequest, tc routineTrustCtx) map[string]any {
+	offer := map[string]any{"eligible": false}
+	if tc.pipelineID == "" || tc.definitionHash == "" || tc.autonomy == string(policy.AutonomyStrict) {
+		return offer
+	}
+	prior, err := s.trust.PriorApprovals(ctx, req.WorkspaceID, tc.pipelineID, req.StepID, tc.definitionHash)
+	if err != nil {
+		slog.Default().Warn("waitpoints: prior-approval count failed, offering nothing",
+			"error", err, "run_id", req.PipelineRunID, "step_id", req.StepID)
+		return offer
+	}
+	offer["prior_approvals"] = prior
+	if prior < TrustOfferThreshold {
+		return offer
+	}
+	offer["eligible"] = true
+	offer["threshold"] = TrustOfferThreshold
+	offer["pipeline_id"] = tc.pipelineID
+	offer["step_id"] = req.StepID
+	offer["definition_hash"] = tc.definitionHash
+	return offer
 }
 
 // WaitFor blocks until the waitpoint resolves or ctx is cancelled.
