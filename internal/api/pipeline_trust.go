@@ -43,19 +43,20 @@ type trustGrantView struct {
 	Live bool `json:"live"`
 }
 
-// trustGrants returns the grant store, building it on first use from the
-// handler's own DB handle.
+// trustGrants returns the grant store.
 //
-// It is a lazy accessor rather than a constructor-assigned field because
-// PipelineHandler is built both ways: NewPipelineHandler in production,
-// and a bare struct literal in a good number of tests. A field set only
-// by the constructor would nil-panic on the second path, and adding it
-// to every literal is churn for no safety.
+// The field is assigned once, in NewPipelineHandler, before the handler
+// is reachable by any request — so the common path is a plain read. The
+// fallback covers the OTHER way this struct is built: a bare literal, as
+// a good number of tests do it. That path constructs per call and does
+// NOT memoise, deliberately. Caching here would be a write to a field
+// concurrent requests also read, which is a data race for the sake of
+// saving one struct allocation on a path production never takes.
 func (h *PipelineHandler) trustGrants() *pipeline.TrustGrantStore {
-	if h.trustGrantStore == nil {
-		h.trustGrantStore = pipeline.NewTrustGrantStore(h.db)
+	if h.trustGrantStore != nil {
+		return h.trustGrantStore
 	}
-	return h.trustGrantStore
+	return pipeline.NewTrustGrantStore(h.db)
 }
 
 // GrantTrust records a standing approval for one gate of one routine.

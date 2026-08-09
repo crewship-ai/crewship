@@ -324,12 +324,12 @@ func TestTrustGrant_PriorApprovals_IgnoresItsOwnAutoApprovals(t *testing.T) {
 
 	seed := func(runID, payload string) {
 		t.Helper()
-		if _, err := db.Exec(`
+		if _, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, definition_hash, status, started_at)
 VALUES (?, 'ws_test', 'pl1', 'triage', 'hashA', 'completed', datetime('now'))`, runID); err != nil {
 			t.Fatalf("seed run: %v", err)
 		}
-		if _, err := db.Exec(`
+		if _, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, status, timeout_at, decision_payload)
 VALUES (?, 'ws_test', ?, 'publish', 'approval', 'approved', datetime('now','+1 day'), ?)`,
 			"tok_"+runID, runID, nullableStr(payload)); err != nil {

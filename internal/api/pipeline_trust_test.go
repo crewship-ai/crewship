@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -251,4 +252,37 @@ func TestTrustGrantAPI_RevokeIsScopedToTheRoutineInTheURL(t *testing.T) {
 	if len(listed.Grants) != 1 || !listed.Grants[0].Live {
 		t.Errorf("grant did not survive the mis-scoped revoke: %+v", listed.Grants)
 	}
+}
+
+// TestTrustGrantAccessor_IsRaceFree guards the accessor that serves the
+// grant store. An earlier version memoised it lazily on the shared
+// handler — a write to a field concurrent requests also read, i.e. a data
+// race introduced, ironically, while making the handlers share one store.
+//
+// This hammers trustGrants() DIRECTLY rather than driving HTTP handlers.
+// Going through a handler does not work: database/sql takes internal
+// mutexes on the way to the DB, and the happens-before edges those create
+// between the goroutines hide the unsynchronised field write from the
+// race detector. A concurrency test that cannot fail is worse than none,
+// because it reads as coverage.
+func TestTrustGrantAccessor_IsRaceFree(t *testing.T) {
+	h, _, _ := newPipelineHandlerForCRUDTest(t)
+	// Clear the constructor's assignment so the fallback path — the one a
+	// bare struct literal takes — is what the goroutines exercise.
+	h.trustGrantStore = nil
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start // release them together, no staggering
+			if got := h.trustGrants(); got == nil {
+				t.Error("trustGrants() returned nil")
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
 }
