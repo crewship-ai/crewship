@@ -165,3 +165,24 @@ func TestRoutineTrustGrantRunE_RejectsNegativeMaxUses(t *testing.T) {
 		t.Errorf("sent %d requests despite failing validation", len(calls))
 	}
 }
+
+// A grant whose expiry has already passed can never fire, so reporting
+// "will now auto-approve" for one is a lie in the exact register this
+// feature exists to remove. Reject it where the operator can still fix
+// the typo.
+func TestRoutineTrustGrantRunE_RejectsExpiryInThePast(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	setupStubCLICov(t, stub)
+	setFlagCov(t, routineTrustGrantCmd, "step", "review")
+	setFlagCov(t, routineTrustGrantCmd, "max-uses", "0")
+	setFlagCov(t, routineTrustGrantCmd, "expires", "2020-01-01T00:00:00Z")
+
+	err := routineTrustGrantCmd.RunE(routineTrustGrantCmd, []string{"triage"})
+	if err == nil {
+		t.Fatal("accepted an expiry in the past; the CLI would report a gate as auto-approving when it never will")
+	}
+	if calls := stub.CallsFor("POST", trustPathCov("triage")); len(calls) != 0 {
+		t.Errorf("sent %d requests for a dead-on-arrival grant", len(calls))
+	}
+}

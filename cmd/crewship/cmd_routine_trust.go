@@ -162,8 +162,15 @@ var routineTrustGrantCmd = &cobra.Command{
 			return fmt.Errorf("--step is required: trust is granted per gate, not per routine")
 		}
 		if trustGrantExpires != "" {
-			if _, err := time.Parse(time.RFC3339, trustGrantExpires); err != nil {
+			exp, err := time.Parse(time.RFC3339, trustGrantExpires)
+			if err != nil {
 				return fmt.Errorf("--expires must be RFC3339 (e.g. 2026-12-31T00:00:00Z): %w", err)
+			}
+			// A grant that has already expired can never fire, so
+			// printing "will now auto-approve" for one would be a lie in
+			// the exact register this feature exists to remove.
+			if !exp.After(time.Now()) {
+				return fmt.Errorf("--expires %s is already in the past — that grant could never fire", trustGrantExpires)
 			}
 		}
 

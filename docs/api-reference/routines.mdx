@@ -58,7 +58,10 @@ Request notes for `POST`:
   saved now.
 - A second grant for the same gate and definition is `409`, not a silent reset
   of the existing grant's use counter.
-- `max_uses` and `expires_at` are both optional; absent means unbounded.
+- `max_uses` and `expires_at` are both optional; absent means unbounded. An
+  `expires_at` already in the past is `400`: such a grant could never fire, and
+  a row that reads as trust granted while changing nothing is worse than a
+  refusal.
 
 The response to `GET` reports `definition_hash` at the top level — the value a
 client must echo back to grant new trust — alongside each grant's own pinned

@@ -143,9 +143,72 @@ INSERT INTO waitpoint_trust_grants (
 		// The partial UNIQUE index on live rows is the only constraint
 		// that can collide here.
 		if isUniqueViolation(err) {
-			return "", ErrGrantExists
+			return s.renewOrConflict(ctx, in, id)
 		}
 		return "", fmt.Errorf("trust grants: insert: %w", err)
+	}
+	return id, nil
+}
+
+// renewOrConflict resolves a collision with the partial UNIQUE index.
+//
+// The index excludes revoked rows only — it cannot express "expired" or
+// "out of uses", because neither is a deterministic function of the row
+// alone. So a grant that has run out still occupies the slot, and a
+// naive ErrGrantExists would tell the operator "this gate is already
+// trusted" at the exact moment the gate is asking them for approval
+// again. That is both false and the opposite of actionable.
+//
+// A blocker that can no longer fire is therefore retired as superseded —
+// kept, not deleted, so the trail still shows the grant that ran out —
+// and the insert is retried once. A blocker that is genuinely live is a
+// real conflict: replacing it would reset its use counter and lose the
+// record of how often trust has fired, which is exactly what the
+// double-click guard exists to prevent.
+func (s *TrustGrantStore) renewOrConflict(ctx context.Context, in GrantInput, id string) (string, error) {
+	existing, err := s.List(ctx, in.WorkspaceID, in.PipelineID)
+	if err != nil {
+		return "", ErrGrantExists
+	}
+	now := s.now()
+	var blocker *TrustGrant
+	for i := range existing {
+		g := existing[i]
+		if g.StepID == in.StepID && g.DefinitionHash == in.DefinitionHash && g.RevokedAt == nil {
+			blocker = &existing[i]
+			break
+		}
+	}
+	if blocker == nil || blocker.Live(now) {
+		return "", ErrGrantExists
+	}
+	if _, rerr := s.Revoke(ctx, in.WorkspaceID, in.PipelineID, blocker.ID, in.GrantedByUserID,
+		"superseded by a new grant after this one ran out"); rerr != nil {
+		return "", ErrGrantExists
+	}
+
+	var expires any
+	if in.ExpiresAt != nil {
+		expires = tsformat.Format(*in.ExpiresAt)
+	}
+	var maxUses any
+	if in.MaxUses != nil {
+		maxUses = *in.MaxUses
+	}
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO waitpoint_trust_grants (
+    id, workspace_id, pipeline_id, step_id, definition_hash,
+    granted_by_user_id, reason, prior_approvals, max_uses, expires_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, in.WorkspaceID, in.PipelineID, in.StepID, in.DefinitionHash,
+		in.GrantedByUserID, nullableStr(in.Reason), in.PriorApprovals, maxUses, expires,
+	); err != nil {
+		if isUniqueViolation(err) {
+			// Another caller renewed it between our revoke and this
+			// insert. Theirs stands.
+			return "", ErrGrantExists
+		}
+		return "", fmt.Errorf("trust grants: renew: %w", err)
 	}
 	return id, nil
 }

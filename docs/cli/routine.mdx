@@ -1418,7 +1418,7 @@ crewship routine trust grant triage-inbound-issue --step review --expires 2026-1
 | `--step` | Step id of the `wait:approval` gate (**required** — trust is per gate, not per routine) |
 | `--reason` | Why this gate no longer needs a human. Kept in the audit trail |
 | `--max-uses` | Auto-approve at most N times, then ask again (default: unlimited) |
-| `--expires` | RFC3339 instant after which the grant stops firing |
+| `--expires` | RFC3339 instant after which the grant stops firing. An instant already in the past is rejected — that grant could never fire |
 | `--prior-approvals` | How many manual approvals earned this grant (audit) |
 
 A second grant for the same gate and definition returns `409` rather than resetting the existing grant's use counter.

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -386,6 +387,81 @@ func TestTrustGrant_RevokeIsScopedAndAttributed(t *testing.T) {
 
 		if _, err := s.Revoke(ctx, "ws_test", "pl1", id, "", "no actor"); err == nil {
 			t.Error("accepted a revocation with no actor — Grant refuses an anonymous granter for the same reason")
+		}
+	})
+}
+
+// TestTrustGrant_RenewAfterTheGrantDies covers the flow the docs
+// describe: bound a grant with max_uses or expires_at, let it run out,
+// watch the gate start asking again — and then trust it again.
+//
+// The partial UNIQUE index only excludes REVOKED rows, so a spent or
+// expired grant still occupies the slot. Without handling that, renewing
+// fails with "this gate is already trusted for the current definition",
+// which is false at the exact moment it is shown: the gate is asking.
+func TestTrustGrant_RenewAfterTheGrantDies(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a spent grant can be renewed", func(t *testing.T) {
+		db := openTrustGrantTestDB(t)
+		s := NewTrustGrantStore(db)
+		one := 1
+		in := baseGrant()
+		in.MaxUses = &one
+		first := mustGrant(t, s, in)
+
+		if _, ok, _ := s.Consume(ctx, "ws_test", "pl1", "publish", "hashA"); !ok {
+			t.Fatal("bounded grant did not fire once")
+		}
+		if _, ok, _ := s.Consume(ctx, "ws_test", "pl1", "publish", "hashA"); ok {
+			t.Fatal("bounded grant fired past its ceiling")
+		}
+
+		second, err := s.Grant(ctx, baseGrant())
+		if err != nil {
+			t.Fatalf("renewing a spent grant: %v", err)
+		}
+		if second == first {
+			t.Error("renewal returned the old grant id")
+		}
+		if _, ok, _ := s.Consume(ctx, "ws_test", "pl1", "publish", "hashA"); !ok {
+			t.Error("renewed grant does not fire")
+		}
+		// The superseded row is retired rather than deleted, so the trail
+		// still shows the grant that ran out.
+		var revokedReason string
+		if err := db.QueryRow(`SELECT COALESCE(revoke_reason,'') FROM waitpoint_trust_grants WHERE id = ?`, first).Scan(&revokedReason); err != nil {
+			t.Fatalf("read superseded grant: %v", err)
+		}
+		if revokedReason == "" {
+			t.Error("the spent grant was replaced without saying so in its own row")
+		}
+	})
+
+	t.Run("an expired grant can be renewed", func(t *testing.T) {
+		s := NewTrustGrantStore(openTrustGrantTestDB(t))
+		past := time.Now().Add(-time.Hour)
+		in := baseGrant()
+		in.ExpiresAt = &past
+		mustGrant(t, s, in)
+
+		if _, err := s.Grant(ctx, baseGrant()); err != nil {
+			t.Fatalf("renewing an expired grant: %v", err)
+		}
+		if _, ok, _ := s.Consume(ctx, "ws_test", "pl1", "publish", "hashA"); !ok {
+			t.Error("renewed grant does not fire")
+		}
+	})
+
+	// The double-click guard must survive: a grant that is genuinely
+	// still live is not silently replaced, because that would reset its
+	// use counter and lose the audit of how often it fired.
+	t.Run("a live grant is still a conflict", func(t *testing.T) {
+		s := NewTrustGrantStore(openTrustGrantTestDB(t))
+		mustGrant(t, s, baseGrant())
+
+		if _, err := s.Grant(ctx, baseGrant()); !errors.Is(err, ErrGrantExists) {
+			t.Errorf("second grant on a live one: err=%v, want ErrGrantExists", err)
 		}
 	})
 }

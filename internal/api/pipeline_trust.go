@@ -126,6 +126,13 @@ func (h *PipelineHandler) GrantTrust(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusBadRequest, "expires_at must be RFC3339")
 			return
 		}
+		// A grant that is already expired can never fire. Storing one
+		// would put a row in the audit trail that reads as trust granted
+		// while changing nothing, which is worse than refusing it.
+		if !exp.After(time.Now()) {
+			replyError(w, http.StatusBadRequest, "expires_at is already in the past — that grant could never fire")
+			return
+		}
 		in.ExpiresAt = &exp
 	}
 

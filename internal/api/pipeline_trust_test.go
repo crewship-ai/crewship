@@ -286,3 +286,18 @@ func TestTrustGrantAccessor_IsRaceFree(t *testing.T) {
 	close(start)
 	wg.Wait()
 }
+
+// The server refuses a dead-on-arrival grant too, not just the CLI: the
+// API is the contract every other client codes against, and a row that
+// can never fire is not a grant, it is litter in the audit trail.
+func TestTrustGrantAPI_RejectsExpiryInThePast(t *testing.T) {
+	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
+	_ = seedTrustableRoutine(t, h, wsID, "tg-past")
+
+	rr := httptest.NewRecorder()
+	h.GrantTrust(rr, grantTrustReq(t, userID, wsID, "tg-past", "MANAGER",
+		`{"step_id":"review","expires_at":"2020-01-01T00:00:00Z"}`))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status=%d want 400 for an expiry that has already passed; body=%s", rr.Code, rr.Body.String())
+	}
+}
