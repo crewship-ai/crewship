@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // TrustGrantStore backs standing approval grants — the "you have waved
@@ -118,7 +120,11 @@ func (s *TrustGrantStore) Grant(ctx context.Context, in GrantInput) (string, err
 	id := "wtg_" + generateWaitpointToken()
 	var expires any
 	if in.ExpiresAt != nil {
-		expires = in.ExpiresAt.UTC().Format(time.RFC3339Nano)
+		// tsformat, because Consume string-compares this column: the
+		// stdlib nano layout truncates trailing fractional zeros, so a
+		// whole-second expiry sorts after a sub-second instant within
+		// that same second and the grant outlives its own expiry.
+		expires = tsformat.Format(*in.ExpiresAt)
 	}
 	var maxUses any
 	if in.MaxUses != nil {
@@ -171,7 +177,7 @@ func (s *TrustGrantStore) Consume(ctx context.Context, workspaceID, pipelineID, 
 		// prove which body it is executing, so it never auto-approves.
 		return TrustGrantUse{}, false, nil
 	}
-	now := s.now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(s.now()) // fixed width; compared against expires_at below
 
 	var use TrustGrantUse
 	err := s.db.QueryRowContext(ctx, `
@@ -204,7 +210,7 @@ func (s *TrustGrantStore) Revoke(ctx context.Context, workspaceID, grantID, byUs
 UPDATE waitpoint_trust_grants
    SET revoked_at = ?, revoked_by_user_id = ?, revoke_reason = ?
  WHERE id = ? AND workspace_id = ? AND revoked_at IS NULL`,
-		s.now().UTC().Format(time.RFC3339Nano), nullableStr(byUserID), nullableStr(reason), grantID, workspaceID)
+		tsformat.Format(s.now()), nullableStr(byUserID), nullableStr(reason), grantID, workspaceID)
 	if err != nil {
 		return false, fmt.Errorf("trust grants: revoke: %w", err)
 	}
@@ -224,7 +230,7 @@ func (s *TrustGrantStore) RevokeForPipeline(ctx context.Context, workspaceID, pi
 UPDATE waitpoint_trust_grants
    SET revoked_at = ?, revoked_by_user_id = ?, revoke_reason = ?
  WHERE workspace_id = ? AND pipeline_id = ? AND revoked_at IS NULL`,
-		s.now().UTC().Format(time.RFC3339Nano), nullableStr(byUserID), nullableStr(reason), workspaceID, pipelineID)
+		tsformat.Format(s.now()), nullableStr(byUserID), nullableStr(reason), workspaceID, pipelineID)
 	if err != nil {
 		return 0, fmt.Errorf("trust grants: revoke for pipeline: %w", err)
 	}
@@ -308,10 +314,11 @@ SELECT COUNT(*)
 	return n, nil
 }
 
-// parseNullableTime tolerates both RFC3339Nano (what this package
-// writes) and SQLite's datetime() shape (what a DEFAULT or a hand-run
-// UPDATE writes), returning nil when the column is NULL or unparseable —
-// an unreadable timestamp must not read as "not revoked".
+// parseNullableTime tolerates both the RFC 3339 family (tsformat's
+// fixed-width output parses as RFC3339Nano unchanged) and SQLite's
+// datetime() shape, which is what the granted_at DEFAULT writes.
+// Returns nil when the column is NULL or unparseable — an unreadable
+// timestamp must not read as "not revoked".
 func parseNullableTime(s sql.NullString) *time.Time {
 	if !s.Valid || s.String == "" {
 		return nil

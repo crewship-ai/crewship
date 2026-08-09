@@ -188,6 +188,29 @@ func TestTrustGrant_Consume(t *testing.T) {
 		}
 	})
 
+	// expires_at is written by Grant and string-compared by Consume, so
+	// the two must render at the same width. time.RFC3339Nano truncates
+	// trailing zeros, which makes a whole-second expiry sort AFTER a
+	// sub-second instant inside that same second ('Z' 0x5A > '.' 0x2E) —
+	// and the grant keeps firing past its own expiry. Failing open is
+	// the one direction this feature must never fail.
+	t.Run("expiry holds against a sub-second now inside the same second", func(t *testing.T) {
+		s := NewTrustGrantStore(openTrustGrantTestDB(t))
+		expiry := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC) // whole second, zero nanos
+		in := baseGrant()
+		in.ExpiresAt = &expiry
+		mustGrant(t, s, in)
+
+		// Half a second past the expiry: expired by any honest reading.
+		s.now = func() time.Time { return expiry.Add(500 * time.Millisecond) }
+
+		if _, ok, err := s.Consume(ctx, "ws_test", "pl1", "publish", "hashA"); err != nil {
+			t.Fatalf("Consume: %v", err)
+		} else if ok {
+			t.Error("grant fired after its expiry — the stored and compared timestamps are not the same width")
+		}
+	})
+
 	t.Run("max_uses is a hard ceiling", func(t *testing.T) {
 		s := NewTrustGrantStore(openTrustGrantTestDB(t))
 		max := 2
