@@ -115,19 +115,26 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		// blocking behaviour (they have no row to resume and nobody to return
 		// WAITING to).
 		if depth == 0 && in.Mode == ModeRun && e.runStore != nil && in.pipeline != nil {
-			// Park on a fresh run; on a resume, RE-PARK only while the waitpoint
-			// is still pending (#1428, 2.9). A boot/approval-resumed run re-
-			// acquires a concurrency slot, and blocking on WaitFor below would
-			// hold that slot for up to the 24h approval timeout. Re-parking
-			// returns the suspend sentinel so runDSL releases the slot again. A
-			// DECIDED waitpoint (approved/denied/timed_out) falls through to
-			// WaitFor to resolve immediately from the recorded decision.
-			park := !in.resume
-			if in.resume {
-				if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
-					if st, serr := reader.WaitpointStatus(ctx, token); serr == nil && st == "pending" {
-						park = true
-					}
+			// Park only while the waitpoint is actually PENDING (#1428, 2.9).
+			// A boot/approval-resumed run re-acquires a concurrency slot, and
+			// blocking on WaitFor below would hold that slot for up to the 24h
+			// approval timeout. Re-parking returns the suspend sentinel so
+			// runDSL releases the slot again. A DECIDED waitpoint
+			// (approved/denied/timed_out) falls through to WaitFor to resolve
+			// immediately from the recorded decision.
+			//
+			// The status check covers a FRESH run too, not just a resume. It
+			// used to be resume-only, on the assumption that a run which just
+			// minted its own waitpoint could only ever find it pending — true
+			// until standing approval grants, which resolve the waitpoint
+			// inside CreateApproval. Parking on one of those strands the run:
+			// there is no pending row for anyone to approve, and the timeout
+			// sweeper only visits pending rows, so nothing ever wakes it. A
+			// trusted gate that parks is strictly worse than one that asks.
+			park := true
+			if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
+				if st, serr := reader.WaitpointStatus(ctx, token); serr == nil && st != "pending" {
+					park = false
 				}
 			}
 			if park {
