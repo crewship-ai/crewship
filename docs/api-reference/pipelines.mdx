@@ -26,6 +26,9 @@ Problem Details shape (`error` is the human-readable message).
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject` | create | Reject (soft-delete) a proposed definition |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable` | manage | Disable a pipeline and stop new runs |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable` | manage | Re-enable a disabled pipeline |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust` | member | Standing approval grants on this routine's gates |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust` | create | Stop one `wait:approval` gate from asking |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust/{grantId}` | create | Withdraw a standing grant |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs` | member | Journal-backed run entries |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records` | member | Typed run-record projection |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/runs/active` | member | In-flight runs on this replica |

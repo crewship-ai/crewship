@@ -76,7 +76,7 @@ var routineTrustListCmd = &cobra.Command{
 		}
 		client := newAPIClient()
 		resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/trust",
-			client.GetWorkspaceID(), args[0]))
+			client.GetWorkspaceID(), url.PathEscape(args[0])))
 		if err != nil {
 			return err
 		}
@@ -167,6 +167,10 @@ var routineTrustGrantCmd = &cobra.Command{
 			}
 		}
 
+		if trustGrantMaxUses < 0 {
+			return fmt.Errorf("--max-uses must be a positive count (omit the flag for unlimited)")
+		}
+
 		body := map[string]any{"step_id": trustGrantStep}
 		if trustGrantReason != "" {
 			body["reason"] = trustGrantReason
@@ -183,7 +187,7 @@ var routineTrustGrantCmd = &cobra.Command{
 
 		client := newAPIClient()
 		resp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/trust",
-			client.GetWorkspaceID(), args[0]), body)
+			client.GetWorkspaceID(), url.PathEscape(args[0])), body)
 		if err != nil {
 			return err
 		}
@@ -230,7 +234,7 @@ var routineTrustRevokeCmd = &cobra.Command{
 		}
 		client := newAPIClient()
 		path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/trust/%s",
-			client.GetWorkspaceID(), args[0], args[1])
+			client.GetWorkspaceID(), url.PathEscape(args[0]), url.PathEscape(args[1]))
 		if trustRevokeReason != "" {
 			path += "?reason=" + url.QueryEscape(trustRevokeReason)
 		}

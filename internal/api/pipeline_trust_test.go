@@ -202,3 +202,53 @@ func TestTrustGrantAPI_ListAndRevoke(t *testing.T) {
 		t.Errorf("second revoke status=%d want 404", againRR.Code)
 	}
 }
+
+// TestTrustGrantAPI_RevokeIsScopedToTheRoutineInTheURL pins that the
+// slug is part of the predicate. Grant ids are workspace-unique, so a
+// revoke that ignored the slug would let a request naming one routine
+// retire another routine's grant — the URL would be describing something
+// other than what happened.
+func TestTrustGrantAPI_RevokeIsScopedToTheRoutineInTheURL(t *testing.T) {
+	h, userID, wsID := newPipelineHandlerForCRUDTest(t)
+	_ = seedTrustableRoutine(t, h, wsID, "tg-owner")
+	_ = seedTrustableRoutine(t, h, wsID, "tg-bystander")
+
+	create := httptest.NewRecorder()
+	h.GrantTrust(create, grantTrustReq(t, userID, wsID, "tg-owner", "MANAGER", `{"step_id":"review"}`))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("grant status=%d; body=%s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode grant: %v", err)
+	}
+
+	// Same workspace, same role — but the wrong routine in the path.
+	wrong := withWorkspaceUser(httptest.NewRequest("DELETE", "/x", nil), userID, wsID, "MANAGER")
+	wrong.SetPathValue("slug", "tg-bystander")
+	wrong.SetPathValue("grantId", created.ID)
+	wrongRR := httptest.NewRecorder()
+	h.RevokeTrust(wrongRR, wrong)
+	if wrongRR.Code != http.StatusNotFound {
+		t.Errorf("status=%d want 404 — a grant was revoked through an unrelated routine's URL", wrongRR.Code)
+	}
+
+	// The grant is genuinely still live.
+	listReq := withWorkspaceUser(httptest.NewRequest("GET", "/x", nil), userID, wsID, "VIEWER")
+	listReq.SetPathValue("slug", "tg-owner")
+	listRR := httptest.NewRecorder()
+	h.ListTrustGrants(listRR, listReq)
+	var listed struct {
+		Grants []struct {
+			Live bool `json:"live"`
+		} `json:"grants"`
+	}
+	if err := json.Unmarshal(listRR.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listed.Grants) != 1 || !listed.Grants[0].Live {
+		t.Errorf("grant did not survive the mis-scoped revoke: %+v", listed.Grants)
+	}
+}

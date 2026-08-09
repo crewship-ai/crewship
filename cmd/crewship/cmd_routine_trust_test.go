@@ -145,3 +145,23 @@ func TestRoutineTrustListRunE_EmptyIsExplicit(t *testing.T) {
 		t.Errorf("empty list should state the safe status positively; got: %q", out)
 	}
 }
+
+// A bounding flag that fails open defeats its own purpose: a negative
+// --max-uses used to be dropped from the body, producing exactly the
+// unlimited grant the operator was reaching for the flag to avoid.
+func TestRoutineTrustGrantRunE_RejectsNegativeMaxUses(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	setupStubCLICov(t, stub)
+	setFlagCov(t, routineTrustGrantCmd, "step", "review")
+	setFlagCov(t, routineTrustGrantCmd, "expires", "")
+	setFlagCov(t, routineTrustGrantCmd, "max-uses", "-1")
+
+	err := routineTrustGrantCmd.RunE(routineTrustGrantCmd, []string{"triage"})
+	if err == nil {
+		t.Fatal("accepted --max-uses -1; the grant would have been created unlimited")
+	}
+	if calls := stub.CallsFor("POST", trustPathCov("triage")); len(calls) != 0 {
+		t.Errorf("sent %d requests despite failing validation", len(calls))
+	}
+}

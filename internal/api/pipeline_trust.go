@@ -43,6 +43,21 @@ type trustGrantView struct {
 	Live bool `json:"live"`
 }
 
+// trustGrants returns the grant store, building it on first use from the
+// handler's own DB handle.
+//
+// It is a lazy accessor rather than a constructor-assigned field because
+// PipelineHandler is built both ways: NewPipelineHandler in production,
+// and a bare struct literal in a good number of tests. A field set only
+// by the constructor would nil-panic on the second path, and adding it
+// to every literal is churn for no safety.
+func (h *PipelineHandler) trustGrants() *pipeline.TrustGrantStore {
+	if h.trustGrantStore == nil {
+		h.trustGrantStore = pipeline.NewTrustGrantStore(h.db)
+	}
+	return h.trustGrantStore
+}
+
 // GrantTrust records a standing approval for one gate of one routine.
 // MANAGER+ — disarming a gate is the same class of act as approving the
 // routine that contains it.
@@ -113,8 +128,7 @@ func (h *PipelineHandler) GrantTrust(w http.ResponseWriter, r *http.Request) {
 		in.ExpiresAt = &exp
 	}
 
-	grants := pipeline.NewTrustGrantStore(h.db)
-	id, err := grants.Grant(r.Context(), in)
+	id, err := h.trustGrants().Grant(r.Context(), in)
 	if errors.Is(err, pipeline.ErrGrantExists) {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "this gate is already trusted for the current definition",
@@ -154,7 +168,7 @@ func (h *PipelineHandler) ListTrustGrants(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	grants, err := pipeline.NewTrustGrantStore(h.db).List(r.Context(), workspaceID, p.ID)
+	grants, err := h.trustGrants().List(r.Context(), workspaceID, p.ID)
 	if err != nil {
 		h.logger.Error("trust grants: list", "error", err, "slug", slug)
 		replyError(w, http.StatusInternalServerError, "list standing approvals")
@@ -189,20 +203,41 @@ func (h *PipelineHandler) RevokeTrust(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "grant id is required")
 		return
 	}
+	// The routine in the URL is part of the predicate, not decoration.
+	// Grant ids are workspace-unique, so without resolving the slug a
+	// request naming routine A would happily retire a grant belonging to
+	// routine B.
+	slug := r.PathValue("slug")
+	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		replyError(w, http.StatusNotFound, "routine not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("trust grant: load routine", "error", err, "slug", slug)
+		replyError(w, http.StatusInternalServerError, "load routine")
+		return
+	}
 	actorID := ""
 	if user := UserFromContext(r.Context()); user != nil {
 		actorID = user.ID
 	}
+	if actorID == "" {
+		// The store refuses this too; failing here keeps the reason
+		// legible instead of surfacing as a 500.
+		replyError(w, http.StatusForbidden, "an authenticated user is required to revoke standing approval")
+		return
+	}
 	reason := r.URL.Query().Get("reason")
 
-	revoked, err := pipeline.NewTrustGrantStore(h.db).Revoke(r.Context(), workspaceID, grantID, actorID, reason)
+	revoked, err := h.trustGrants().Revoke(r.Context(), workspaceID, p.ID, grantID, actorID, reason)
 	if err != nil {
 		h.logger.Error("trust grant: revoke", "error", err, "grant_id", grantID)
 		replyError(w, http.StatusInternalServerError, "revoke standing approval")
 		return
 	}
 	if !revoked {
-		replyError(w, http.StatusNotFound, "no live standing approval with that id")
+		replyError(w, http.StatusNotFound, "no live standing approval with that id on this routine")
 		return
 	}
 	h.broadcastInboxUpdated(workspaceID, "trust_revoked")

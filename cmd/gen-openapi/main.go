@@ -495,6 +495,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range final21GenericResponseSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range routineTrustSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	coreResourceRequestsV2, _ := coreResourceRequestSchemaCatalogV2()
 	for key, schema := range coreResourceRequestsV2 {
 		result[key] = mergeDomainSchema(result[key], schema)

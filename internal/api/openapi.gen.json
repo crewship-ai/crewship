@@ -110346,6 +110346,73 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "definition_hash": {
+                      "type": "string"
+                    },
+                    "grants": {
+                      "items": {
+                        "properties": {
+                          "definition_hash": {
+                            "type": "string"
+                          },
+                          "expires_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "granted_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "granted_by_user_id": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "live": {
+                            "type": "boolean"
+                          },
+                          "max_uses": {
+                            "type": "integer"
+                          },
+                          "pipeline_id": {
+                            "type": "string"
+                          },
+                          "prior_approvals": {
+                            "type": "integer"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "revoke_reason": {
+                            "type": "string"
+                          },
+                          "revoked_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "revoked_by_user_id": {
+                            "type": "string"
+                          },
+                          "step_id": {
+                            "type": "string"
+                          },
+                          "uses": {
+                            "type": "integer"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "slug": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -110542,26 +110609,54 @@
           "content": {
             "application/json": {
               "schema": {
+                "properties": {
+                  "definition_hash": {
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "max_uses": {
+                    "type": "integer"
+                  },
+                  "prior_approvals": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "step_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "step_id"
+                ],
                 "type": "object"
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "definition_hash": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "step_id": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }
@@ -110807,6 +110902,14 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
                   "type": "object"
                 }
               }

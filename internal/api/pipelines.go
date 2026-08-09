@@ -36,6 +36,10 @@ type PipelineHandler struct {
 	codeRunner   pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
 	scriptRunner pipeline.ScriptRunner    // optional; nil → type:script steps fail closed with a wiring hint
 	signals      *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
+	// trustGrantStore backs the standing-approval endpoints. Filled on
+	// first use by trustGrants() rather than in the constructor, because
+	// tests build this struct as a literal; see pipeline_trust.go.
+	trustGrantStore *pipeline.TrustGrantStore
 	// runVerdict resolves the post-run outcome verdict's provider+model
 	// (#1403) for routine runs, at the moment a run terminates — same
 	// wiring as internal.InternalHandler's for ad-hoc agent runs, and

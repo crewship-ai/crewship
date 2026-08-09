@@ -156,7 +156,7 @@ func TestTrustGrant_Consume(t *testing.T) {
 		s := NewTrustGrantStore(db)
 		id := mustGrant(t, s, baseGrant())
 
-		revoked, err := s.Revoke(ctx, "ws_test", id, "usr2", "changed my mind")
+		revoked, err := s.Revoke(ctx, "ws_test", "pl1", id, "usr2", "changed my mind")
 		if err != nil {
 			t.Fatalf("Revoke: %v", err)
 		}
@@ -304,4 +304,88 @@ VALUES (?, 'ws_test', ?, 'publish', 'approval', ?, datetime('now','+1 day'))`,
 	if got != 2 {
 		t.Errorf("prior approvals = %d, want 2 (denials, timeouts and other definitions must not count)", got)
 	}
+}
+
+// TestTrustGrant_PriorApprovals_IgnoresItsOwnAutoApprovals closes the
+// loop a grant would otherwise create for itself.
+//
+// A firing grant writes `approved` waitpoints — deliberately, so the run
+// history shows a real approval. But those rows are not evidence that a
+// human looked. Counting them means: operator approves 3 times, grants,
+// the grant fires 50 times, operator REVOKES it, and the very next card
+// offers the shortcut again on the strength of 53 "approvals" — 50 of
+// which the grant manufactured. A deliberate revocation would be
+// answered with a stronger nag. That is precisely the
+// promotion-without-oversight the denial/timeout filter exists to stop.
+func TestTrustGrant_PriorApprovals_IgnoresItsOwnAutoApprovals(t *testing.T) {
+	db := openTrustGrantTestDB(t)
+	s := NewTrustGrantStore(db)
+	ctx := context.Background()
+
+	seed := func(runID, payload string) {
+		t.Helper()
+		if _, err := db.Exec(`
+INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, definition_hash, status, started_at)
+VALUES (?, 'ws_test', 'pl1', 'triage', 'hashA', 'completed', datetime('now'))`, runID); err != nil {
+			t.Fatalf("seed run: %v", err)
+		}
+		if _, err := db.Exec(`
+INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, status, timeout_at, decision_payload)
+VALUES (?, 'ws_test', ?, 'publish', 'approval', 'approved', datetime('now','+1 day'), ?)`,
+			"tok_"+runID, runID, nullableStr(payload)); err != nil {
+			t.Fatalf("seed waitpoint: %v", err)
+		}
+	}
+
+	// Two genuine human decisions. The manual path stores the approver's
+	// free-text comment here, NOT JSON — so the exclusion must survive a
+	// payload that is not parseable at all.
+	seed("run_h1", "LGTM, same as always")
+	seed("run_h2", "")
+	// Three the grant wrote for itself.
+	for _, id := range []string{"run_a1", "run_a2", "run_a3"} {
+		seed(id, `{"auto_approved":true,"grant_id":"wtg_x","granted_by_user_id":"usr1"}`)
+	}
+
+	got, err := s.PriorApprovals(ctx, "ws_test", "pl1", "publish", "hashA")
+	if err != nil {
+		t.Fatalf("PriorApprovals: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("prior approvals = %d, want 2 — a grant is counting its own firings as human review", got)
+	}
+}
+
+// TestTrustGrant_RevokeIsScopedAndAttributed pins the two things that
+// make a revocation trustworthy: it touches only the routine it names,
+// and it records who performed it.
+func TestTrustGrant_RevokeIsScopedAndAttributed(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("cannot revoke another routine's grant", func(t *testing.T) {
+		db := openTrustGrantTestDB(t)
+		s := NewTrustGrantStore(db)
+		id := mustGrant(t, s, baseGrant()) // pipeline pl1
+
+		revoked, err := s.Revoke(ctx, "ws_test", "pl_other", id, "usr2", "wrong routine")
+		if err != nil {
+			t.Fatalf("Revoke: %v", err)
+		}
+		if revoked {
+			t.Error("revoked a grant through a different routine's scope")
+		}
+		// And it is genuinely untouched.
+		if _, ok, _ := s.Consume(ctx, "ws_test", "pl1", "publish", "hashA"); !ok {
+			t.Error("the grant stopped firing despite the revoke being rejected")
+		}
+	})
+
+	t.Run("refuses an unattributed revocation", func(t *testing.T) {
+		s := NewTrustGrantStore(openTrustGrantTestDB(t))
+		id := mustGrant(t, s, baseGrant())
+
+		if _, err := s.Revoke(ctx, "ws_test", "pl1", id, "", "no actor"); err == nil {
+			t.Error("accepted a revocation with no actor — Grant refuses an anonymous granter for the same reason")
+		}
+	})
 }

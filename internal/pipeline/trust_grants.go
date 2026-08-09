@@ -204,13 +204,23 @@ RETURNING id, granted_by_user_id, prior_approvals, uses`,
 
 // Revoke retires a grant. Rows are kept, not deleted, so the audit can
 // answer who trusted this gate and who took it back. Returns false when
-// the id matched nothing live in this workspace.
-func (s *TrustGrantStore) Revoke(ctx context.Context, workspaceID, grantID, byUserID, reason string) (bool, error) {
+// the id matched nothing live for this routine in this workspace.
+//
+// pipelineID is part of the predicate rather than trusted from the
+// caller's context: grant ids are workspace-unique, so without it a
+// request naming routine A could retire a grant belonging to routine B.
+// Same reason byUserID is mandatory — a revocation with no actor leaves
+// the audit unable to answer the second half of the question it exists
+// to answer.
+func (s *TrustGrantStore) Revoke(ctx context.Context, workspaceID, pipelineID, grantID, byUserID, reason string) (bool, error) {
+	if byUserID == "" {
+		return false, errors.New("pipeline: revoking a trust grant needs an attributable actor")
+	}
 	res, err := s.db.ExecContext(ctx, `
 UPDATE waitpoint_trust_grants
    SET revoked_at = ?, revoked_by_user_id = ?, revoke_reason = ?
- WHERE id = ? AND workspace_id = ? AND revoked_at IS NULL`,
-		tsformat.Format(s.now()), nullableStr(byUserID), nullableStr(reason), grantID, workspaceID)
+ WHERE id = ? AND workspace_id = ? AND pipeline_id = ? AND revoked_at IS NULL`,
+		tsformat.Format(s.now()), byUserID, nullableStr(reason), grantID, workspaceID, pipelineID)
 	if err != nil {
 		return false, fmt.Errorf("trust grants: revoke: %w", err)
 	}
@@ -226,11 +236,14 @@ UPDATE waitpoint_trust_grants
 // is being asked to look at the routine again, so standing trust in its
 // gates should not outlive that review.
 func (s *TrustGrantStore) RevokeForPipeline(ctx context.Context, workspaceID, pipelineID, byUserID, reason string) (int, error) {
+	if byUserID == "" {
+		return 0, errors.New("pipeline: revoking trust grants needs an attributable actor")
+	}
 	res, err := s.db.ExecContext(ctx, `
 UPDATE waitpoint_trust_grants
    SET revoked_at = ?, revoked_by_user_id = ?, revoke_reason = ?
  WHERE workspace_id = ? AND pipeline_id = ? AND revoked_at IS NULL`,
-		tsformat.Format(s.now()), nullableStr(byUserID), nullableStr(reason), workspaceID, pipelineID)
+		tsformat.Format(s.now()), byUserID, nullableStr(reason), workspaceID, pipelineID)
 	if err != nil {
 		return 0, fmt.Errorf("trust grants: revoke for pipeline: %w", err)
 	}
@@ -296,6 +309,18 @@ SELECT id, workspace_id, pipeline_id, step_id, definition_hash,
 // Only 'approved' counts. A denial is the opposite of a vote of
 // confidence, and a timeout means nobody looked — treating either as
 // evidence of trust would let a gate nobody watches promote itself.
+//
+// By the same rule the count excludes the approvals a GRANT wrote. A
+// firing grant deliberately writes real `approved` rows so the run
+// history stays honest, but they are not evidence that a human looked.
+// Counting them would close a loop: grant fires fifty times, operator
+// revokes it, and the next card re-offers the shortcut on the strength
+// of fifty approvals the grant manufactured — a deliberate revocation
+// answered with a stronger nag.
+//
+// json_valid guards the extraction because the manual path stores the
+// approver's free-text comment in decision_payload, and json_extract
+// errors on input that is not JSON.
 func (s *TrustGrantStore) PriorApprovals(ctx context.Context, workspaceID, pipelineID, stepID, definitionHash string) (int, error) {
 	if definitionHash == "" {
 		return 0, nil
@@ -306,7 +331,9 @@ SELECT COUNT(*)
   FROM pipeline_waitpoints w
   JOIN pipeline_runs r ON r.id = w.pipeline_run_id
  WHERE w.workspace_id = ? AND w.step_id = ? AND w.status = 'approved'
-   AND r.pipeline_id = ? AND r.definition_hash = ?`,
+   AND r.pipeline_id = ? AND r.definition_hash = ?
+   AND NOT (json_valid(COALESCE(w.decision_payload, ''))
+            AND COALESCE(json_extract(w.decision_payload, '$.auto_approved'), 0) = 1)`,
 		workspaceID, stepID, pipelineID, definitionHash).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("trust grants: prior approvals: %w", err)
