@@ -124,6 +124,19 @@ func TestRun_TrustedGate_CompletesInsteadOfParking(t *testing.T) {
 		}
 	}
 
+	// "Nothing parked" is satisfied by a FAILED run too, so assert the
+	// terminal status the feature actually promises: a trusted gate lets
+	// the routine finish, it does not merely stop blocking it.
+	var runStatus string
+	if err := db.QueryRowContext(ctx, `
+SELECT status FROM pipeline_runs WHERE pipeline_id = ? ORDER BY started_at DESC LIMIT 1`, p.ID).Scan(&runStatus); err != nil {
+		t.Fatalf("read run status: %v", err)
+	}
+	if RunStatus(runStatus) != RunStatusCompleted {
+		t.Errorf("run status = %q, want %q — a trusted gate must carry the routine through, not just fail somewhere other than the gate",
+			runStatus, RunStatusCompleted)
+	}
+
 	// The waitpoint still exists and is approved — the audit trail is the
 	// point; it is the PARKING that must not happen, not the record.
 	var status, payload string
