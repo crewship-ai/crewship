@@ -73,7 +73,10 @@ cross-routine write. Both granting and revoking require an authenticated user �
 the audit exists to answer *who* trusted this gate and *who* took it back, and
 neither half may be NULL.
 
-Grants are ignored entirely for crews at `autonomy_level: strict`.
+Grants are ignored entirely when the governing crew is at `autonomy_level: strict`.
+That is the routine's **author** crew — a routine executes in its author's
+context, reusing that crew's persona and credentials — or the invoking crew when
+one invokes across crews.
 
 ## Schedules
 

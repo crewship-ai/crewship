@@ -357,8 +357,28 @@ SELECT pipeline_id, COALESCE(definition_hash, ''), COALESCE(invoking_crew_id, ''
 		crewID = req.InvokingCrewID
 	}
 	if crewID == "" {
-		// No crew, so no crew-level posture to respect. The grant, if
-		// any, was still an explicit per-gate decision by a human.
+		// Fall back to the routine's AUTHOR crew. invoking_crew_id is
+		// empty for the ordinary case — a user triggering a routine from
+		// the CLI or the dashboard — so reading only that would apply the
+		// strict posture to cross-crew invocations and quietly skip it
+		// for the runs operators actually make.
+		//
+		// The author crew is the right one on the merits, not just as a
+		// fallback: a routine executes in its author's context, reusing
+		// that crew's persona and credentials. The posture that governs
+		// the execution is that crew's.
+		if err := s.db.QueryRowContext(ctx,
+			`SELECT COALESCE(author_crew_id, '') FROM pipelines WHERE id = ?`, out.pipelineID).Scan(&crewID); err != nil {
+			// Cannot establish which crew owns this routine → assume the
+			// strictest posture rather than auto-approving blind.
+			out.autonomy = string(policy.AutonomyStrict)
+			return out
+		}
+	}
+	if crewID == "" {
+		// A routine with no author crew at all: no crew-level posture
+		// exists to respect, and the grant was still an explicit
+		// per-gate decision by a named human.
 		return out
 	}
 	if err := s.db.QueryRowContext(ctx,

@@ -22,6 +22,14 @@ const waitOnlyTrustDSL = `{
 
 func addTrustGrantTable(t *testing.T, db *sql.DB) {
 	t.Helper()
+	// The shared test schema declares crews as (id, workspace_id); the
+	// autonomy dial is a v101 column the real schema has. Without it the
+	// trust lookup fails closed — correctly, but for a reason that only
+	// exists in the rig.
+	if _, err := db.ExecContext(context.Background(),
+		`ALTER TABLE crews ADD COLUMN autonomy_level TEXT NOT NULL DEFAULT 'guided'`); err != nil {
+		t.Fatalf("add autonomy_level: %v", err)
+	}
 	if _, err := db.ExecContext(context.Background(), `
 CREATE TABLE IF NOT EXISTS waitpoint_trust_grants (
     id                 TEXT PRIMARY KEY,

@@ -1424,7 +1424,7 @@ crewship routine trust grant triage-inbound-issue --step review --expires 2026-1
 A second grant for the same gate and definition returns `409` rather than resetting the existing grant's use counter.
 
 <Note>
-A crew at `autonomy_level: strict` ignores standing grants entirely — strict means every governable action reaches an operator, regardless of what has been granted.
+When the governing crew is at `autonomy_level: strict`, standing grants are ignored entirely — strict means every governable action reaches an operator, regardless of what has been granted. The governing crew is the routine's **author** crew (a routine runs in its author's context), or the invoking crew on a cross-crew invocation.
 </Note>
 
 ### `trust revoke <slug> <grant-id>`

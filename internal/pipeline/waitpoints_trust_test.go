@@ -274,3 +274,56 @@ VALUES (?, 'ws_test', ?, 'publish', 'approval', 'approved', datetime('now','+1 d
 		}
 	})
 }
+
+// TestCreateApproval_StrictAuthorCrewIgnoresGrant closes the gap between
+// the documented claim and what a real run does.
+//
+// The strict check originally read only the run's invoking_crew_id,
+// which is EMPTY for the ordinary case: a user triggering a routine from
+// the CLI or the dashboard. So "a strict crew ignores standing grants"
+// held for cross-crew invocations and quietly did not hold for the runs
+// operators actually make.
+//
+// The crew whose posture governs is the AUTHOR crew: a routine executes
+// in its author's context, reusing that crew's persona and credentials
+// (see `crewship routine save --help`). If that crew is strict, nothing
+// may shortcut around the operator — including a grant.
+func TestCreateApproval_StrictAuthorCrewIgnoresGrant(t *testing.T) {
+	ctx := context.Background()
+	db := openTrustGateTestDB(t)
+
+	// A strict crew, and a routine authored by it.
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, autonomy_level) VALUES ('cr_strict', 'ws_test', 'strict')`); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, author_crew_id)
+VALUES ('pl1', 'ws_test', 'triage', 'Triage', '{}', 'hashA', 'cr_strict')`); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	grants := NewTrustGrantStore(db)
+	mustGrant(t, grants, baseGrant())
+
+	// A user-triggered run: no invoking crew, which is the ordinary case.
+	if _, err := db.Exec(`
+INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, definition_hash, status, started_at)
+VALUES ('run_user', 'ws_test', 'pl1', 'triage', 'hashA', 'running', datetime('now'))`); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	store := NewSQLWaitpointStore(db)
+	defer store.Close()
+
+	token, err := store.CreateApproval(ctx, WaitpointApprovalRequest{
+		WorkspaceID:   "ws_test",
+		PipelineRunID: "run_user",
+		StepID:        "publish",
+		Prompt:        "Publish?",
+	})
+	if err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+	if status, _, _ := waitpointRow(t, db, token); status != "pending" {
+		t.Errorf("waitpoint status = %q, want pending — a strict author crew must not honour standing grants, and invoking_crew_id is empty for every user-triggered run", status)
+	}
+}
