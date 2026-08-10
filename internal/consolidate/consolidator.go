@@ -633,7 +633,7 @@ func (c *Consolidator) recordCanonicalVersion(ctx context.Context, cfg Config, c
 	if c.DB == nil || cfg.BlobRoot == "" {
 		return
 	}
-	content, err := os.ReadFile(canonicalPath)
+	content, err := memory.ReadFileNoFollow(canonicalPath)
 	if err != nil {
 		c.logger().Warn("version record: read canonical failed",
 			"err", err, "path", canonicalPath)

@@ -74,6 +74,10 @@ context (LEAD) or peer communication (non-LEAD), the memory context, language.
 **Volatile, in the user message** (`session_context.go:22`): conversation history, episodic
 recall, memory nudge, cost awareness.
 
+Canonical memory versioning reads host files without following a final-component
+symlink. A canonical file can live in an agent-writable bind mount, so the version
+recorder must refuse a link rather than snapshot bytes from an unrelated host path.
+
 ---
 
 ## 3. The gaps
