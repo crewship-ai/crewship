@@ -138,6 +138,21 @@ func TestSkillProposed_List_RefusesSymlinkedStagedFile(t *testing.T) {
 	if bytes.Contains(rr.Body.Bytes(), []byte(secretName)) {
 		t.Fatalf("listing followed a staged-file symlink and exposed outside content: %s", rr.Body.String())
 	}
+
+	// Absent content is not the same as an absent entry. A read that fails
+	// makes List skip the file entirely, but a *parse* failure still emits a
+	// summary carrying the file name — so a regression that read the symlink
+	// and reported it as unparseable would leak the entry while keeping the
+	// target's body out of the response, and the check above alone would pass.
+	var got []ProposedSkillSummary
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode listing: %v (body=%s)", err, rr.Body.String())
+	}
+	for _, s := range got {
+		if s.FileName == "skill-planted.md" {
+			t.Fatalf("refused symlink still appears in the listing as %+v", s)
+		}
+	}
 }
 
 func TestSkillProposed_List_EmptyCrew_ReturnsEmptyArray(t *testing.T) {
