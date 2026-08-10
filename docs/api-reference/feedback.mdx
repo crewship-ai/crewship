@@ -2,6 +2,8 @@
 title: "Feedback"
 description: "Per-message feedback signals (thumb-up/down, edit, regenerate) bound to OTel trace_id."
 icon: "thumbs-up"
+stability: experimental
+tag: Experimental
 ---
 
 Endpoints under `/api/v1/feedback` capture structured per-message signal — thumb-up/down, edit, regenerate — for the [continuous-learning loop](/guides/feedback). Rows are keyed to an OTel `trace_id` so the eval pipeline can join signals back onto the run that produced them. See the [Feedback guide](/guides/feedback) for the design contract and UI flow.

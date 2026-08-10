@@ -225,6 +225,42 @@ func TestRepositoryDocsHaveNoBrokenProseLinks(t *testing.T) {
 	}
 }
 
+func TestRepositoryDocsHaveValidStabilityLabels(t *testing.T) {
+	root := filepath.Join("..", "..")
+	issues, pages, err := documentationStability(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pages == 0 {
+		t.Fatal("no MDX pages examined; the walk did not reach the docs tree")
+	}
+	for _, issue := range issues {
+		t.Error(issue)
+	}
+}
+
+func TestDocumentationStabilityRejectsUnknownAndMismatchedLabels(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/good.mdx", "---\ntitle: Good\nstability: early\ntag: Early\n---\n")
+	writeDocsPage(t, root, "docs/unknown.mdx", "---\ntitle: Unknown\nstability: preview\ntag: Preview\n---\n")
+	writeDocsPage(t, root, "docs/mismatch.mdx", "---\ntitle: Mismatch\nstability: stable\ntag: Experimental\n---\n")
+
+	issues, pages, err := documentationStability(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pages != 3 {
+		t.Fatalf("pages = %d, want 3", pages)
+	}
+	want := []string{
+		`docs/mismatch.mdx: rendered tag "Experimental" does not match stability "stable"`,
+		`docs/unknown.mdx: invalid stability label "preview"`,
+	}
+	if !slices.Equal(issues, want) {
+		t.Fatalf("issues = %v\nwant %v", issues, want)
+	}
+}
+
 func TestDeprecatedTerminologyNamesPageSpellingAndReplacement(t *testing.T) {
 	root := t.TempDir()
 	writeDocsPage(t, root, "docs/guides/delegation.mdx", "A coordinator assigns the work.\n")
