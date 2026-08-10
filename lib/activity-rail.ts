@@ -84,14 +84,23 @@ export function scopeNarrowsFetch(scope: RailScope): boolean {
  * Counts are suppressed (null) for every bucket the current query did not
  * load. Printing the raw 0 is how the old rail told a reader "nothing is
  * running" on the evidence of a query that only asked for failures.
+ *
+ * `countsAreComplete` overrides that suppression, and exists because the rail
+ * stopped counting one thing. Its list is CHAINS, and the chain index is
+ * fetched independently of the scope facet — so under scope=failed the caller
+ * genuinely holds all four numbers, and blanking them would print "we cannot
+ * say" over data it is holding. Suppression stays the default because the
+ * journal, which the rest of the page still queries by scope, really cannot
+ * answer for the buckets it did not fetch.
  */
 export function railSegments(
   scope: RailScope,
   scopeCounts: Record<ActivityScope, number>,
   total: number,
+  countsAreComplete = false,
 ): RailSegment[] {
   const keys: RailScope[] = scope === "done" ? [...FIXED, "done"] : FIXED
-  const knowable = !scopeNarrowsFetch(scope)
+  const knowable = countsAreComplete || !scopeNarrowsFetch(scope)
   return keys.map((key) => {
     const meta = ACTIVITY_SCOPES.find((s) => s.key === key)
     const raw = key === "all" ? total : scopeCounts[key as ActivityScope]

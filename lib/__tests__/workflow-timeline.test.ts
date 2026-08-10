@@ -8,6 +8,7 @@ import {
   formatRowDuration,
   rowStatusToken,
   startedByPhrase,
+  workflowRuns,
   type TimelineSource,
 } from "@/lib/workflow-timeline"
 
@@ -508,5 +509,76 @@ describe("rowStatusToken", () => {
     // "IDLE" is what a real agent node carries, and it is not a run status.
     expect(rowStatusToken("IDLE")).toBe("--muted-foreground-soft")
     expect(rowStatusToken(undefined)).toBe("--muted-foreground-soft")
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ *  workflowRuns — the Runs card
+ * ------------------------------------------------------------------ */
+
+describe("workflowRuns", () => {
+  const graph = (nodes: ChainNode[]): TimelineSource => ({ nodes, edges: [] })
+
+  it("keeps only run nodes — a routine and an agent are not runs", () => {
+    const rows = workflowRuns(
+      graph([
+        node({ id: "run_a", kind: "run", occurred_at: "2026-08-10T10:00:00.000000000Z" }),
+        node({ id: "pln_1", kind: "routine" }),
+        node({ id: "agt_1", kind: "agent" }),
+      ]),
+    )
+    expect(rows.map((r) => r.id)).toEqual(["run_a"])
+  })
+
+  it("orders oldest first — this is a sequence, not a recency list", () => {
+    const rows = workflowRuns(
+      graph([
+        node({ id: "run_late", occurred_at: "2026-08-10T10:00:05.000000000Z" }),
+        node({ id: "run_early", occurred_at: "2026-08-10T10:00:01.000000000Z" }),
+      ]),
+    )
+    expect(rows.map((r) => r.id)).toEqual(["run_early", "run_late"])
+  })
+
+  it("sorts an undated run last, not first", () => {
+    // Absent is the least certain row on the card, and the top is where the
+    // reader looks first. A missing stamp sorting to the top is the same class
+    // of bug as a zero timestamp rendering as 1970.
+    const rows = workflowRuns(
+      graph([
+        node({ id: "run_undated" }),
+        node({ id: "run_dated", occurred_at: "2026-08-10T10:00:01.000000000Z" }),
+      ]),
+    )
+    expect(rows.map((r) => r.id)).toEqual(["run_dated", "run_undated"])
+  })
+
+  it("is deterministic when two runs share an instant", () => {
+    const rows = workflowRuns(
+      graph([
+        node({ id: "run_b", occurred_at: "2026-08-10T10:00:01.000000000Z" }),
+        node({ id: "run_a", occurred_at: "2026-08-10T10:00:01.000000000Z" }),
+      ]),
+    )
+    expect(rows.map((r) => r.id)).toEqual(["run_a", "run_b"])
+  })
+
+  it("drops a node with no ref rather than rendering a link to nowhere", () => {
+    expect(workflowRuns(graph([{ kind: "run", ref: "", label: "x", depth: 0 } as ChainNode]))).toEqual([])
+  })
+
+  it("carries the status and the timing the row renders", () => {
+    const [row] = workflowRuns(
+      graph([
+        node({
+          id: "run_a",
+          status: "failed",
+          occurred_at: "2026-08-10T10:00:01.000000000Z",
+          duration_ms: 38,
+        }),
+      ]),
+    )
+    expect(row.status).toBe("failed")
+    expect(formatRowDuration(row.timing)).toBe("38ms")
   })
 })

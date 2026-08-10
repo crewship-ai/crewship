@@ -175,11 +175,22 @@ describe("WorkflowPage", () => {
     renderPage()
     await screen.findByText("file a follow-up when an issue closes")
     expect(screen.queryByText("0ms")).toBeNull()
-    expect(screen.getAllByText("—")).toHaveLength(4)
-    // 13ms twice — the anchor run's own row, and the chain KPI, which on a
-    // one-run chain is the same measurement seen from two heights.
-    expect(screen.getAllByText("13ms")).toHaveLength(2)
-    expect(screen.getByText("38ms")).toBeInTheDocument()
+    // Scoped to the sequence. The page carries other cards with their own
+    // dashes and durations — a page-wide count is an assertion about the whole
+    // layout wearing the clothes of one about this list.
+    const sequence = within(screen.getByRole("region", { name: "What happened, in sequence" }))
+    expect(sequence.getAllByText("—")).toHaveLength(4)
+    // 13ms three times, and each one is a different height on the same
+    // measurement: the Runs card lists the run, the sequence places it among
+    // everything else, and the chain KPI is the whole workflow — which on a
+    // one-run chain is that run. Asserted per card rather than as a total, so
+    // the next card added to this page does not break an assertion about a
+    // number none of its rows changed.
+    expect(sequence.getByText("13ms")).toBeInTheDocument()
+    expect(
+      within(screen.getByRole("region", { name: "Runs" })).getByText("13ms"),
+    ).toBeInTheDocument()
+    expect(sequence.getByText("38ms")).toBeInTheDocument()
   })
 
   it("says out loud which steps the order is not a claim about", async () => {
@@ -203,7 +214,8 @@ describe("WorkflowPage", () => {
     renderPage()
     await screen.findByText("file a follow-up when an issue closes")
     expect(screen.queryByText(/are not dated/)).toBeNull()
-    expect(screen.getAllByText("500ms")).toHaveLength(4)
+    const sequence = within(screen.getByRole("region", { name: "What happened, in sequence" }))
+    expect(sequence.getAllByText("500ms")).toHaveLength(4)
   })
 
   it("offers the issues it touched as things to open", async () => {

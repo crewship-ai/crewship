@@ -106,6 +106,12 @@ type chainSummary struct {
 	MaxChainDepth int    `json:"max_chain_depth"`
 	FailedRuns    int    `json:"failed_runs"`
 	Failed        bool   `json:"failed"`
+	// Non-terminal runs, split by whether anything moves without a person.
+	// Timestamps cannot answer this: last_activity falls back to started_at
+	// while a run is in flight, so a chain parked on an approval since Tuesday
+	// and one that finished on Tuesday carry the same instant.
+	RunningRuns   int    `json:"running_runs"`
+	WaitingRuns   int    `json:"waiting_runs"`
 	FirstActivity string `json:"first_activity"`
 	LastActivity  string `json:"last_activity"`
 	// DurationMS is wall clock first-to-last, and a POINTER for the reason the

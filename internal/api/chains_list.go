@@ -124,6 +124,26 @@ type ChainSummary struct {
 	FailedRuns int  `json:"failed_runs"`
 	Failed     bool `json:"failed"`
 
+	// RunningRuns and WaitingRuns are the chain's NON-TERMINAL runs, split by
+	// whether anything can move without a person.
+	//
+	// They exist because the timestamps cannot answer this. LastActivity falls
+	// back to started_at while a run is in flight, so a chain parked on an
+	// approval since Tuesday and one that finished on Tuesday carry the same
+	// instant — and "what needs me right now" is the question this page is
+	// opened twice a day to answer.
+	//
+	// Split rather than one "active" count, because the two are different asks:
+	// a running chain resolves itself, a waiting one never will. Folding them
+	// together files "awaiting your approval" under the same word as "busy",
+	// which is how a queue goes unread.
+	//
+	// Derived from status, NOT from a NULL ended_at. The cheap derivation would
+	// report every interrupted run — a process that died mid-run and will never
+	// write an end — as running forever.
+	RunningRuns int `json:"running_runs"`
+	WaitingRuns int `json:"waiting_runs"`
+
 	// FirstActivity/LastActivity bound the chain: the earliest start and the
 	// latest end (falling back to start for a run still going). Rows are
 	// ordered by LastActivity descending.
@@ -274,6 +294,16 @@ WITH grouped AS (
            COUNT(*)                                           AS runs,
            MAX(COALESCE(chain_depth, 0))                      AS max_chain_depth,
            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_runs,
+           -- 'queued' rides with 'running': from the reader's side a run that
+           -- has been accepted but not yet picked up is in flight, and a rail
+           -- that showed it as neither running nor finished would be reporting
+           -- a gap in its own bookkeeping rather than a state of the world.
+           SUM(CASE WHEN status IN ('running','queued') THEN 1 ELSE 0 END) AS running_runs,
+           -- 'paused' is not written anywhere in the server today; it is spelled
+           -- because the frontend's isAwaitingApproval has always accepted both,
+           -- and one predicate meaning two things in two places is how the two
+           -- drift apart the day it starts being written.
+           SUM(CASE WHEN status IN ('waiting','paused') THEN 1 ELSE 0 END) AS waiting_runs,
            MIN(started_at)                                    AS first_activity,
            MAX(COALESCE(ended_at, started_at))                AS last_activity
     FROM pipeline_runs
@@ -282,7 +312,8 @@ WITH grouped AS (
       AND chain_origin <> ''
     GROUP BY chain_origin
 )
-SELECT g.origin, g.runs, g.max_chain_depth, g.failed_runs, g.first_activity, g.last_activity,
+SELECT g.origin, g.runs, g.max_chain_depth, g.failed_runs, g.running_runs, g.waiting_runs,
+       g.first_activity, g.last_activity,
        COALESCE(root.triggered_via, ''),
        COALESCE(root.triggered_by_id, ''),
        COALESCE(root.invoking_user_id, ''),
@@ -339,7 +370,8 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 			userName     string
 		)
 		if err := rows.Scan(
-			&c.Origin, &c.Runs, &c.MaxChainDepth, &c.FailedRuns, &c.FirstActivity, &c.LastActivity,
+			&c.Origin, &c.Runs, &c.MaxChainDepth, &c.FailedRuns, &c.RunningRuns, &c.WaitingRuns,
+			&c.FirstActivity, &c.LastActivity,
 			&c.TriggeredVia, &triggeredBy, &userID, &c.RoutineID, &c.RoutineSlug,
 			&ruleName, &ruleEvent, &issueID, &issueTitle, &scheduleName, &userName,
 		); err != nil {

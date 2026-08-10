@@ -70,6 +70,7 @@ import {
   type SidebarRoutine,
 } from "./activity-sidebar"
 import { useChains } from "@/hooks/use-chains"
+import type { LensKey } from "@/lib/activity-lenses"
 import { ActivityOverview, iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
 import { WorkflowPage } from "./workflow-page"
@@ -122,6 +123,11 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const [pinned, setPinned] = React.useState<SpineLink | null>(null)
   const [selected, setSelected] = React.useState<JournalEntry | null>(null)
   const [railCollapsed, setRailCollapsed] = React.useState(false)
+  // Which catalogue the rail lists. Owned HERE rather than inside the rail so
+  // it survives a drill-down: walking into an agent out of a chain graph and
+  // pressing back must land the reader on the list they left, not reset them to
+  // Workflows.
+  const [lens, setLens] = React.useState<LensKey>("workflows")
 
   // Where the reader is — ONE value, whether they picked a workflow out of the
   // rail, focused an issue, or walked down into a node of a chain.
@@ -625,6 +631,10 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               // The rail chooses which walk you are on, so it starts a new
               // path rather than pushing onto the current one.
               onFocus={(f) => setPath(selectStop(f))}
+              lens={lens}
+              onLens={setLens}
+              // Same rule as onFocus: a row in the rail is where a walk BEGINS.
+              onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
               total={focusScoped.length}
               onToggleCollapse={() => setRailCollapsed(true)}
             />
@@ -753,6 +763,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   <WorkflowPage
                     workspaceId={workspaceId}
                     chain={openChain}
+                    routineName={routines.find((r) => r.slug === openChain.routine_slug)?.name}
                     onBack={goBack}
                     onOpenNode={openNode}
                   />

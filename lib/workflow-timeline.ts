@@ -463,3 +463,57 @@ export function viaPhrase(via: string | undefined): string | undefined {
   if (!via) return undefined
   return VIA_PHRASE[via] ?? via
 }
+
+/* ------------------------------------------------------------------ *
+ *  The runs, as a list
+ * ------------------------------------------------------------------ */
+
+/** One run of a routine inside this chain, as the Runs card renders it. */
+export interface WorkflowRun {
+  /** pipeline_runs.id — the anchor a deep link and the walk both accept. */
+  id: string
+  label: string
+  status: string
+  /** Normalised UTC instant, or "" when the walk could not place it. */
+  occurredAt: string
+  timing: RowTiming
+}
+
+/**
+ * The chain's runs, oldest first.
+ *
+ * Derived from the walk this page already fetched rather than from a second
+ * request: a run node IS a row of pipeline_runs, and the graph carries its id,
+ * status and both stamps. A separate GET would be a second answer to a question
+ * already answered, and the two would disagree the moment one of them is cached.
+ *
+ * Oldest first, against the rail's newest-first order and deliberately: this is
+ * a SEQUENCE — what ran, then what that caused — and reading a causal chain
+ * bottom-up is work the reader should not have to do. The rail is a list of
+ * separate things and sorts by recency; this is one thing and sorts by story.
+ *
+ * A run with no readable start sorts last rather than first. Undated rows
+ * cannot be placed, and placing them at the top puts the least certain row
+ * where the reader looks first.
+ */
+export function workflowRuns(graph: TimelineSource): WorkflowRun[] {
+  const runs = graph.nodes
+    .filter((n) => String(n.kind) === "run")
+    .map((n) => ({
+      id: String(n.ref ?? ""),
+      label: String(n.label ?? n.ref ?? ""),
+      status: String(n.status ?? ""),
+      occurredAt: String(n.occurred_at ?? ""),
+      timing: rowTiming(n),
+    }))
+    .filter((r) => r.id !== "")
+  return runs.sort((a, b) => {
+    if (!a.occurredAt && !b.occurredAt) return a.id.localeCompare(b.id)
+    if (!a.occurredAt) return 1
+    if (!b.occurredAt) return -1
+    // The walk emits one fixed-width UTC form for every instant, so a string
+    // compare IS a chronological compare — see internal/chain/timing.go. Parsing
+    // here would add a second reader of a format that has exactly one.
+    return a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id)
+  })
+}

@@ -92,6 +92,10 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"origin": str(), "started_by_kind": str(), "started_by_id": str(), "started_by_key": str(),
 		"started_by": str(), "triggered_via": str(), "routine_id": str(), "routine_slug": str(),
 		"runs": integer(), "max_chain_depth": integer(), "failed_runs": integer(), "failed": boolean(),
+		// Non-terminal runs, split by whether anything moves without a person.
+		// The timestamps cannot answer it: last_activity falls back to
+		// started_at while a run is in flight.
+		"running_runs": integer(), "waiting_runs": integer(),
 		"first_activity": dateTime(), "last_activity": dateTime(),
 		"duration_ms": map[string]any{"type": "integer", "nullable": true},
 		"issues":      array(chainIssueRef), "issue_count": integer(),

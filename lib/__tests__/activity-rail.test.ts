@@ -239,3 +239,24 @@ describe("filterFacets — what the popover holds", () => {
     ])
   })
 })
+
+describe("railSegments — counts that are complete regardless of the fetch", () => {
+  // The rail lists CHAINS, and the chain index is fetched independently of the
+  // scope facet (useChains takes no scope). So under scope=failed the other
+  // three buckets are still fully known — suppressing them would print "we
+  // cannot say" over a number the caller is holding.
+  it("prints every count when the caller says the set is complete", () => {
+    const segs = railSegments("failed", counts({ active: 2, waiting: 1, failed: 3, done: 9 }), 15, true)
+    expect(Object.fromEntries(segs.map((s) => [s.key, s.count]))).toEqual({
+      all: 15,
+      active: 2,
+      waiting: 1,
+      failed: 3,
+    })
+  })
+
+  it("still suppresses them by default, which is the journal's case", () => {
+    const segs = railSegments("failed", counts({ active: 2, waiting: 1, failed: 3 }), 15)
+    expect(segs.find((s) => s.key === "active")?.count).toBeNull()
+  })
+})

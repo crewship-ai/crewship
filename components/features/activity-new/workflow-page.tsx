@@ -8,12 +8,18 @@
 // plainest one there is: what happened, one under the other, in the order it
 // went, and let me click into any of it.
 //
-// So the page answers four questions, in this order, and nothing else:
+// So the page answers five questions, in this order, and nothing else:
 //
 //   1. What was this?          the header — who started it, when, how long
-//   2. How did it happen?      the causal graph (TopologyCard, already built)
-//   3. What happened, then?    the timeline — the part that did not exist
-//   4. What did it touch?      the issues and agents, clickable
+//   2. Which runs?             the Runs card — the list, and a way into each
+//   3. How did it happen?      the causal graph (TopologyCard, already built)
+//   4. What happened, then?    the timeline — the part that did not exist
+//   5. What did it touch?      the issues and agents, clickable
+//
+// Runs sits above the picture because it is the shape a reader arrives already
+// knowing: /routines opens a RUNS dock under every routine and each line there
+// is a link into that run. The picture is what a workflow LOOKS like; the list
+// is what you can do with it.
 //
 // The timeline's shaping — ordering, indentation, durations, and the
 // running-versus-zero rule — lives in lib/workflow-timeline as a pure
@@ -26,6 +32,7 @@ import {
   ArrowLeft,
   BookOpen,
   Bot,
+  ChevronRight,
   CircleDot,
   Clock,
   Inbox,
@@ -46,9 +53,11 @@ import { formatDurationMs } from "@/lib/activity-stream"
 import { statusIcon } from "@/lib/activity/run-status"
 import { relTime } from "@/lib/time"
 import type { ChainSummary } from "@/hooks/use-chains"
+import { workflowName } from "@/lib/activity-lenses"
 import {
   buildWorkflowTimeline,
   chainHeaderDuration,
+  workflowRuns,
   formatRowDuration,
   rowStatusToken,
   startedByPhrase,
@@ -63,6 +72,13 @@ export interface WorkflowPageProps {
   workspaceId: string
   chain: ChainSummary
   onBack: () => void
+  /**
+   * The routine's human name, resolved by the shell from the loaded pipelines
+   * list. Passed rather than looked up here so the rail row and this heading
+   * cannot name one workflow two ways — which is what happened while the rail
+   * read the name and the page read the slug.
+   */
+  routineName?: string
   /** Drill down: "issue" | "run" | "agent" | "assignment" | … plus the ref. */
   onOpenNode: (kind: string, ref: string) => void
 }
@@ -89,7 +105,7 @@ const KIND_ICON: Record<string, LucideIcon> = {
 /** Left inset per level of causal depth, in pixels. */
 const INDENT_STEP = 18
 
-export function WorkflowPage({ workspaceId, chain, onBack, onOpenNode }: WorkflowPageProps) {
+export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNode }: WorkflowPageProps) {
   // The walk, for the sequence below. TopologyCard fetches the same anchor for
   // the picture; it owns its own request and takes no data prop, and reaching
   // into it to share one would be a change to a file another workstream owns.
@@ -132,7 +148,11 @@ export function WorkflowPage({ workspaceId, chain, onBack, onOpenNode }: Workflo
     [graph],
   )
 
-  const headline = chain.routine_slug || chain.started_by || "Workflow"
+  // The runs, out of the same walk. See workflowRuns for why this is not a
+  // second request against the endpoint the sequence already read.
+  const runs = React.useMemo(() => (graph ? workflowRuns(graph) : []), [graph])
+
+  const headline = workflowName(chain, routineName)
   const duration = chainHeaderDuration(chain)
   const issues = chain.issues ?? []
   const agents = chain.agents ?? []
@@ -211,8 +231,85 @@ export function WorkflowPage({ workspaceId, chain, onBack, onOpenNode }: Workflo
         </div>
       </Appear>
 
-      {/* ── 2. How it happened ────────────────────────────────────── */}
+      {/* ── 2. Which runs, and open one ───────────────────────────────
+          The first card under the header, because it is the one a reader
+          arrives already knowing how to use: /routines opens a RUNS dock
+          at the bottom of every routine and each line there is a link
+          straight into that run. This page began with the picture and
+          did not list the runs at all — they were dissolved into the
+          sequence below, between routines and agents, where "which runs
+          were there" cannot be read off at a glance.
+
+          Derived from the walk already fetched for the sequence; see
+          workflowRuns for why this is not a second request. */}
       <Appear order={2}>
+        <DashboardCard
+          // A real landmark, not a test hook: the page is four stacked cards of
+          // near-identical rows, and without a name a screen reader announces
+          // four unlabelled groups. It also lets an assertion say "this many
+          // dashes IN THE SEQUENCE" instead of counting the whole page, which
+          // is what made adding this card break two tests about another one.
+          role="region"
+          aria-label="Runs"
+          title="Runs"
+          icon={BookOpen}
+          hint={
+            runs.length > 0
+              ? `${runs.length} · open one to see its steps`
+              : loading
+                ? "walking…"
+                : undefined
+          }
+        >
+          {runs.length === 0 ? (
+            <div className="flex flex-col items-center gap-1.5 py-8 text-center">
+              <BookOpen className="h-4 w-4 text-muted-foreground-soft" />
+              <p className="max-w-[380px] text-[11px] leading-relaxed text-muted-foreground-soft">
+                {loading
+                  ? "Walking the chain…"
+                  : // Reachable and not an error: a chain rooted at agent work
+                    // holds assignments and no runs at all.
+                    "No routine ran in this workflow. The work it holds is agent work — it is in the sequence below."}
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col">
+              {runs.map((run) => (
+                <button
+                  key={run.id}
+                  type="button"
+                  onClick={() => onOpenNode("run", run.id)}
+                  className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto_auto]"
+                >
+                  <span
+                    aria-hidden
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ background: `var(${rowStatusToken(run.status)})` }}
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono text-[11px] text-foreground/85">{run.id}</span>
+                    <span className="block truncate text-[10px] uppercase tracking-wide text-muted-foreground-soft">
+                      {run.status || "—"}
+                    </span>
+                  </span>
+                  <span className="hidden font-mono text-[10.5px] tabular-nums text-muted-foreground-soft md:block">
+                    {run.occurredAt
+                      ? new Date(run.occurredAt).toLocaleTimeString(undefined, { hour12: false })
+                      : "—"}
+                  </span>
+                  <span className="w-14 text-right font-mono text-[10.5px] tabular-nums text-muted-foreground">
+                    {formatRowDuration(run.timing)}
+                  </span>
+                  <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground-soft transition-colors group-hover:text-foreground md:block" />
+                </button>
+              ))}
+            </div>
+          )}
+        </DashboardCard>
+      </Appear>
+
+      {/* ── 3. How it happened ────────────────────────────────────── */}
+      <Appear order={3}>
         <TopologyCard
           workspaceId={workspaceId}
           anchor={anchor}
@@ -221,9 +318,11 @@ export function WorkflowPage({ workspaceId, chain, onBack, onOpenNode }: Workflo
         />
       </Appear>
 
-      {/* ── 3. What happened, in sequence ─────────────────────────── */}
-      <Appear order={3}>
+      {/* ── 4. What happened, in sequence ─────────────────────────── */}
+      <Appear order={4}>
         <DashboardCard
+          role="region"
+          aria-label="What happened, in sequence"
           title="What happened, in sequence"
           icon={ListTree}
           hint={

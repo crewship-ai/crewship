@@ -343,6 +343,8 @@ type chainsListRow struct {
 	Runs          int    `json:"runs"`
 	MaxChainDepth int    `json:"max_chain_depth"`
 	FailedRuns    int    `json:"failed_runs"`
+	RunningRuns   int    `json:"running_runs"`
+	WaitingRuns   int    `json:"waiting_runs"`
 	Failed        bool   `json:"failed"`
 	FirstActivity string `json:"first_activity"`
 	LastActivity  string `json:"last_activity"`
@@ -985,5 +987,83 @@ func TestChainsList_ForeignWorkspaceWorkNeverAttachesToARow(t *testing.T) {
 	}
 	if row.AgentCount != 1 {
 		t.Errorf("agent_count = %d, want 1", row.AgentCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Live state: what is still going, and what is still asking.
+//
+// A chain's timestamps cannot answer either question. last_activity falls back
+// to started_at while a run is in flight, so a chain that has been parked on an
+// approval since Tuesday and one that finished on Tuesday carry the same
+// instant — and the rail's "Active now" section, which is the reason a person
+// opens this page twice in a day, would have to guess between them.
+// ---------------------------------------------------------------------------
+
+// TestChainsList_RunStillGoingIsCountedAsRunning proves the count comes from
+// the run's STATUS and not from a missing ended_at, which is the cheap
+// derivation that would also report an interrupted run as running forever.
+func TestChainsList_RunStillGoingIsCountedAsRunning(t *testing.T) {
+	r := newChainsListRig(t)
+	live := r.seedRun(t, runSpec{id: "prn_live", via: pipeline.TriggeredViaManual})
+	done := r.seedRun(t, runSpec{id: "prn_done", via: pipeline.TriggeredViaManual})
+	r.finish(t, done, pipeline.RunStatusCompleted)
+
+	b := decodeChainsList(t, r.list(t, ""))
+	for _, c := range b.Chains {
+		switch c.Origin {
+		case live:
+			if c.RunningRuns != 1 || c.WaitingRuns != 0 {
+				t.Errorf("live chain: running=%d waiting=%d, want 1 and 0", c.RunningRuns, c.WaitingRuns)
+			}
+		case done:
+			if c.RunningRuns != 0 || c.WaitingRuns != 0 {
+				t.Errorf("finished chain: running=%d waiting=%d, want 0 and 0", c.RunningRuns, c.WaitingRuns)
+			}
+		default:
+			t.Errorf("unexpected chain %q", c.Origin)
+		}
+	}
+}
+
+// TestChainsList_RunParkedOnAnApprovalIsWaitingNotRunning is the distinction
+// the section header rests on: both are non-terminal, but only one of them will
+// never move without a person. Counting them together would put "awaiting your
+// approval" under the same word as "busy", and the reader would stop looking.
+func TestChainsList_RunParkedOnAnApprovalIsWaitingNotRunning(t *testing.T) {
+	r := newChainsListRig(t)
+	parked := r.seedRun(t, runSpec{id: "prn_parked", via: pipeline.TriggeredViaManual})
+	if err := r.runs.MarkWaiting(context.Background(), parked, "approve"); err != nil {
+		t.Fatalf("mark waiting: %v", err)
+	}
+
+	b := decodeChainsList(t, r.list(t, ""))
+	if len(b.Chains) != 1 {
+		t.Fatalf("chains = %v, want one", b.origins())
+	}
+	if got := b.Chains[0]; got.WaitingRuns != 1 || got.RunningRuns != 0 {
+		t.Errorf("parked chain: waiting=%d running=%d, want 1 and 0", got.WaitingRuns, got.RunningRuns)
+	}
+}
+
+// TestChainsList_LiveCountsAreScopedToTheWorkspace fences the two new columns
+// the way every other predicate in this query is fenced. chain_origin has no
+// foreign key behind it, so an unfenced SUM lets another tenant's in-flight run
+// light up the "Active now" section of a workspace it does not belong to.
+func TestChainsList_LiveCountsAreScopedToTheWorkspace(t *testing.T) {
+	r := newChainsListRig(t)
+	ours := r.seedRun(t, runSpec{id: "prn_ours", via: pipeline.TriggeredViaManual})
+	r.finish(t, ours, pipeline.RunStatusCompleted)
+	// Another tenant stamps OUR origin on a run that is still going.
+	r.seedWorkspace(t, "ws_other", "other")
+	r.seedRoutine(t, "p_other", "ws_other", "deploy")
+	r.seedRun(t, runSpec{id: "prn_theirs", ws: "ws_other", pipelineID: "p_other", via: pipeline.TriggeredViaManual, origin: ours})
+
+	b := decodeChainsList(t, r.list(t, ""))
+	if len(b.Chains) != 1 {
+		t.Fatalf("chains = %v, want only ours", b.origins())
+	}
+	if got := b.Chains[0].RunningRuns; got != 0 {
+		t.Errorf("running_runs = %d, want 0 — a foreign run must not light up our chain", got)
 	}
 }

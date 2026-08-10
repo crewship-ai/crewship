@@ -37153,6 +37153,9 @@
                           "routine_slug": {
                             "type": "string"
                           },
+                          "running_runs": {
+                            "type": "integer"
+                          },
                           "runs": {
                             "type": "integer"
                           },
@@ -37170,6 +37173,9 @@
                           },
                           "triggered_via": {
                             "type": "string"
+                          },
+                          "waiting_runs": {
+                            "type": "integer"
                           }
                         },
                         "type": "object"

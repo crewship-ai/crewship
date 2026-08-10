@@ -214,66 +214,74 @@ export function ActivityOverview({
         </div>
       </Appear>
 
-      {/* ── What is happening right now ───────────────────────────────
-          One line, not a card. "Three agents are working" is a glance;
-          it used to occupy two of four KPI tiles. */}
-      <Appear order={1}>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-border/60 bg-card px-3.5 py-2.5 text-[11.5px]">
-          <span className="inline-flex items-center gap-2">
-            <span
-              aria-hidden
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                live.running > 0 ? "bg-primary animate-pulse" : "bg-muted-foreground-soft",
-              )}
-            />
-            {live.running > 0 ? (
-              <button
-                type="button"
-                onClick={() => onScope("active")}
-                className="font-medium text-foreground hover:underline"
-              >
-                {live.running} running now
-              </button>
-            ) : (
-              <span className="text-muted-foreground-soft">
-                {total === 0 ? "Nothing recorded in this window" : "Nothing in flight right now"}
-              </span>
-            )}
-          </span>
+      {/* ── The four numbers ──────────────────────────────────────────
+          One row of KPI tiles, the same rhythm the Routines overview
+          opens with — four tiles, then two cards, then the wide/narrow
+          pair. The two pages are one object at two subjects, and a
+          different opening shape is the first thing a reader notices.
 
-          {live.agents > 0 && (
-            <span className="text-muted-foreground">
-              {live.agents} {live.agents === 1 ? "agent" : "agents"} at work
-            </span>
-          )}
-          {live.spendUSD > 0 && (
-            <span className="font-mono text-muted-foreground-soft">${live.spendUSD.toFixed(2)}</span>
-          )}
-          {live.slowestMs != null && (
-            <span className="font-mono text-muted-foreground-soft">
-              slowest {formatDurationMs(live.slowestMs)}
-            </span>
-          )}
+          This was a one-line strip, on the argument that "three agents
+          are working" is a glance rather than a quarter of the screen.
+          That argument was about WEIGHT and it was right; it was applied
+          by shrinking the row instead of by choosing what goes in it.
+          The four here are the four questions this page exists for, and
+          each is a place to go rather than a number to read. */}
+      <Appear order={1}>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <KpiCard
+            label="Running now"
+            value={live.running}
+            subtitle={
+              live.running > 0
+                ? `${live.agents} ${live.agents === 1 ? "agent" : "agents"} at work`
+                : total === 0
+                  ? "nothing recorded in this window"
+                  : "nothing in flight"
+            }
+            valueColor={live.running > 0 ? tokenColor("--primary") : undefined}
+            onClick={live.running > 0 ? () => onScope("active") : undefined}
+          />
+          <KpiCard
+            label="Waiting on you"
+            value={waiting.length}
+            subtitle={
+              waitingCopy ? waitingCopy.subtitle : "approvals, escalations & keeper requests still open"
+            }
+            valueColor={waiting.length > 0 ? tokenColor("--warn") : undefined}
+            onClick={waiting.length > 0 ? () => onScope("waiting") : undefined}
+          />
+          <KpiCard
+            label="Failures"
+            value={failedTotal}
+            subtitle={
+              brokenCopy
+                ? brokenCopy.subtitle
+                : `${broken.length} ${broken.length === 1 ? "thing" : "things"} failing`
+            }
+            valueColor={failedTotal > 0 ? tokenColor("--destructive") : undefined}
+            onClick={failedTotal > 0 ? () => onScope("failed") : undefined}
+          />
+          <KpiCard
+            label={`Spend · ${rangeLabel.toLowerCase()}`}
+            // Not a placeholder zero: an em dash says "nothing was billed",
+            // where $0.00 reads as a measurement that came back empty.
+            value={live.spendUSD > 0 ? `$${live.spendUSD.toFixed(2)}` : "—"}
+            subtitle={
+              live.slowestMs != null ? `slowest ${formatDurationMs(live.slowestMs)}` : "no priced work yet"
+            }
+          />
         </div>
       </Appear>
 
       {/* ── The two questions ─────────────────────────────────────────
-          Side by side, each as a number and the evidence for it. */}
+          Side by side, each with its evidence. The numbers moved up into
+          the KPI row; repeating them here would put the same figure on
+          screen twice, which is how two copies of one number start to
+          disagree. */}
       <Appear order={2}>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {/* 1. Is anything waiting on me? */}
           <div className="flex flex-col gap-4">
-            <KpiCard
-              label="Waiting on you"
-              value={waiting.length}
-              subtitle={
-                waitingCopy
-                  ? waitingCopy.subtitle
-                  : "approvals, escalations & keeper requests still open"
-              }
-              valueColor={waiting.length > 0 ? tokenColor("--warn") : undefined}
-            />
             <DashboardCard
               title="Open asks"
               icon={Bell}
@@ -304,16 +312,6 @@ export function ActivityOverview({
 
           {/* 2. What is broken? */}
           <div className="flex flex-col gap-4">
-            <KpiCard
-              label="Failures"
-              value={failedTotal}
-              subtitle={
-                brokenCopy
-                  ? brokenCopy.subtitle
-                  : `${broken.length} ${broken.length === 1 ? "thing" : "things"} failing · ${rangeLabel.toLowerCase()}`
-              }
-              valueColor={failedTotal > 0 ? tokenColor("--destructive") : undefined}
-            />
             <DashboardCard
               title="What is broken"
               icon={AlertTriangle}

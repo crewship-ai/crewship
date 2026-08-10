@@ -27,6 +27,20 @@ export interface ChainSummary {
   max_chain_depth: number
   failed_runs: number
   failed: boolean
+  /**
+   * Runs of this chain still going, and runs still asking a person.
+   *
+   * These are what make "Active now" a state the rail can render rather than a
+   * guess from a timestamp. A chain whose last activity was three days ago but
+   * which still holds an approval is the most urgent row on the page; without
+   * these two counts it is indistinguishable from one that finished then.
+   *
+   * Optional on the type — not on the wire — so a client compiled against a
+   * newer server than it talks to degrades to the `failed` flag rather than
+   * reading `undefined` as 0. See chainStatus in lib/activity-lenses.
+   */
+  running_runs?: number
+  waiting_runs?: number
   first_activity: string
   last_activity: string
   /**

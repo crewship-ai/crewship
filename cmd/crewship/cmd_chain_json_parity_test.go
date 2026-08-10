@@ -1,11 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/api"
 )
 
 // `-f json` must pass the server's answer through, not a subset of it.
@@ -19,52 +20,51 @@ import (
 //
 // A comment is not a mechanism. This is.
 //
-// Deliberately a shape test rather than a golden response: the failure is
-// always "the server grew a field and this struct did not", and the cheapest
-// thing that catches it is comparing the two field sets.
+// The field set is read from api.ChainSummary — the type the handler marshals —
+// and NOT from a captured response, which is how this gate was written first and
+// why it stayed green while running_runs and waiting_runs were added server-side.
+// A fixture is a photograph of the wire on the day somebody pasted it in; the
+// thing it is supposed to catch is precisely the wire changing afterwards. The
+// import is test-only, so nothing enters the shipped CLI binary.
+//
+// Deliberately a shape test rather than a golden response: the failure is always
+// "the server grew a field and this struct did not", and the cheapest thing that
+// catches it is comparing the two field sets.
 func TestChainSummary_CarriesEveryFieldTheServerSends(t *testing.T) {
-	// Captured from GET /api/v1/chains on a live instance. Refresh with:
-	//   crewship chain list -f json
-	const serverRow = `{
-      "origin": "run_x", "started_by_kind": "automation", "started_by_id": "aut_1",
-      "started_by_key": "mission.status_change", "started_by": "file a follow-up",
-      "triggered_via": "automation", "routine_id": "pln_1", "routine_slug": "followup",
-      "runs": 1, "max_chain_depth": 1, "failed_runs": 0, "failed": false,
-      "first_activity": "2026-08-10T06:35:58.384000000Z",
-      "last_activity": "2026-08-10T06:35:58.397000000Z",
-      "duration_ms": 13,
-      "issues": [{"id":"m1","identifier":"ENG-8","title":"Follow-up","created":true}],
-      "issue_count": 1,
-      "agents": [{"id":"a1","slug":"riley","name":"Riley","assignments":2}],
-      "agent_count": 1
-    }`
-
-	var wire map[string]any
-	if err := json.Unmarshal([]byte(serverRow), &wire); err != nil {
-		t.Fatalf("fixture is not valid JSON: %v", err)
+	server := jsonFieldNames(reflect.TypeOf(api.ChainSummary{}))
+	if len(server) == 0 {
+		t.Fatal("api.ChainSummary exposed no json fields — the reflection above is reading the wrong type")
 	}
+	cli := jsonFieldNames(reflect.TypeOf(chainSummary{}))
 
-	have := map[string]bool{}
-	rt := reflect.TypeOf(chainSummary{})
+	var dropped []string
+	for name := range server {
+		if !cli[name] {
+			dropped = append(dropped, name)
+		}
+	}
+	if len(dropped) > 0 {
+		sort.Strings(dropped)
+		t.Errorf("chainSummary drops %d field(s) api.ChainSummary sends: %s\n"+
+			"`-f json` re-marshals this struct, so these reach a consumer as absent while the "+
+			"server returned them. Add the field here when one is added server-side.",
+			len(dropped), strings.Join(dropped, ", "))
+	}
+}
+
+// jsonFieldNames is the set of wire names a struct marshals to. Fields tagged
+// "-" and untagged fields are skipped: the first never reaches the wire, and the
+// second is a Go-side name this comparison has no opinion about.
+func jsonFieldNames(rt reflect.Type) map[string]bool {
+	out := map[string]bool{}
 	for i := 0; i < rt.NumField(); i++ {
 		tag := rt.Field(i).Tag.Get("json")
 		if tag == "" || tag == "-" {
 			continue
 		}
-		have[strings.Split(tag, ",")[0]] = true
-	}
-
-	var dropped []string
-	for k := range wire {
-		if !have[k] {
-			dropped = append(dropped, k)
+		if name := strings.Split(tag, ",")[0]; name != "" {
+			out[name] = true
 		}
 	}
-	if len(dropped) > 0 {
-		sort.Strings(dropped)
-		t.Errorf("chainSummary drops %d field(s) the server sends: %s\n"+
-			"`-f json` re-marshals this struct, so these reach a consumer as absent while the "+
-			"server returned them. Add the field here when one is added server-side.",
-			len(dropped), strings.Join(dropped, ", "))
-	}
+	return out
 }
