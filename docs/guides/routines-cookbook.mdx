@@ -600,7 +600,7 @@ crewship routine schedules create --slug incremental-invoice-sync \
 
 ---
 
-## Recipe 9 — Backtest a candidate version before rollout
+## Recipe 11 — Backtest a candidate version before rollout
 
 **Goal**: you edited `support-triage` (new prompt, tightened gate, whatever) and saved it as v9. Before it becomes the version live traffic gets, prove it behaves at least as well as v8 did — on real recent inputs, not a hand-picked eval suite.
 
@@ -658,12 +658,159 @@ Recipe 6 (eval-driven promotion) validates against an **authored eval suite** �
 
 ---
 
+## Recipe 12 — Human approval on the write
+
+**Goal**: let an agent decide something genuinely ambiguous, but never let it touch the outside world unreviewed.
+
+This is the shape to reach for whenever a routine both *reasons* and *acts*: triaging an inbound issue and labelling it, drafting a customer reply and sending it, classifying an alert and paging someone. The pattern is four beats — **fetch deterministically → reason → gate → act** — and the order is the design.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "triage-inbound-issue",
+  "display_name": "Triage an inbound issue, publish after review",
+  "estimated_cost_usd": 0.004,
+  "max_cost_usd": 0.50,
+  "egress_targets": ["api.github.com"],
+  "credentials_required": [{ "type": "anthropic" }, { "type": "github" }],
+  "inputs": [
+    { "name": "issue_url", "type": "string", "required": true }
+  ],
+  "steps": [
+    {
+      "id": "fetch_issue",
+      "type": "http",
+      "http": {
+        "method": "GET",
+        "url": "{{ inputs.issue_url }}",
+        "max_response_bytes": 200000,
+        "success_codes": [200]
+      },
+      "timeout_seconds": 30
+    },
+    {
+      "id": "issue_facts",
+      "type": "transform",
+      "needs": ["fetch_issue"],
+      "transform": {
+        "input": "{{ steps.fetch_issue.output }}",
+        "expression": ".title"
+      }
+    },
+    {
+      "id": "classify",
+      "type": "agent_run",
+      "agent_slug": "filip",
+      "complexity": "fast",
+      "needs": ["issue_facts"],
+      "on_fail": "escalate_tier",
+      "prompt": "Classify this issue as exactly one of bug|feature|question, then draft a two-sentence reply.\n\nTitle: {{ steps.issue_facts.output }}\n\nReturn JSON: {\"kind\":\"...\",\"priority\":\"P0|P1|P2\",\"reply\":\"...\"}",
+      "validation": {
+        "json_schema": {
+          "type": "object",
+          "required": ["kind", "priority", "reply"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["bug", "feature", "question"] },
+            "priority": { "type": "string", "enum": ["P0", "P1", "P2"] },
+            "reply": { "type": "string", "minLength": 20, "maxLength": 600 }
+          }
+        }
+      }
+    },
+    {
+      "id": "review",
+      "type": "wait",
+      "needs": ["classify"],
+      "wait": {
+        "kind": "approval",
+        "approval_prompt": "Publish this triage?\n\n{{ steps.classify.output }}"
+      },
+      "timeout_seconds": 86400,
+      "on_fail": "abort"
+    },
+    {
+      "id": "publish",
+      "type": "http",
+      "needs": ["review"],
+      "http": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/acme/app/issues/1/comments",
+        "body": "{{ steps.classify.output }}",
+        "success_codes": [201]
+      },
+      "timeout_seconds": 30
+    }
+  ]
+}
+```
+
+### Gates explained
+
+**`fetch_issue` + `issue_facts` come before the agent, not inside it.** If the agent gathers its own facts, it will eventually invent one — a version number, a stack trace, a file path. Deterministic steps mean same issue in, same facts out, every run. The agent gets a clean context instead of a research task, which is also why `complexity: fast` is enough here.
+
+**`classify` is the only step that reasons**, and its `json_schema` is what makes its output safe to interpolate downstream. Without the schema, `publish` would POST whatever prose came back.
+
+**`review` is the whole point.** A `wait` step of `kind: approval` parks the run — the goroutine releases its concurrency slot, the run row goes to `waiting`, and an inbox card appears. Nothing after this step runs until a human decides. The park survives a restart: the waitpoint is a row, not a timer.
+
+**`publish` sits *after* `review` in the DAG.** This is the load-bearing bit. Every step capable of changing something outside Crewship belongs downstream of the gate. Put `publish` in `needs: ["classify"]` instead and the gate becomes decoration — the run would publish and then ask.
+
+### `on_fail: abort` on the gate is not optional
+
+A `wait` step whose `timeout_seconds` elapses falls through to its `on_fail`. With `abort`, an approval nobody answered within 24 hours fails the run and nothing is published. That is the behaviour you want: **an unanswered question is not a yes.**
+
+<Warning>
+Do not give an approval gate an `on_fail` that continues the run. A gate that auto-proceeds on timeout protects you only while someone is watching the inbox — which is exactly when you did not need it.
+</Warning>
+
+### Failure modes & fixes
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Run publishes without asking | `publish` doesn't `need` the gate | Check the DAG, not the step order in the file — `needs` is what sequences a DAG |
+| Gate fires but the card is blank | `approval_prompt` interpolates a step that produced no output | Interpolate the validated step, and keep the schema on it |
+| Run stuck in `waiting` forever | `timeout_seconds: 0` (wait forever) with nobody watching | Set a real timeout plus `on_fail: abort` |
+| Approver can't tell what changed | Prompt shows the verdict but not the input | Put both in `approval_prompt` — the reviewer is checking the *reasoning*, not just the conclusion |
+
+### When the gate stops earning its keep
+
+The honest failure mode of this pattern is not that it is unsafe — it is that it gets ignored. Approve the same routine twenty times with the same verdict and the twenty-first approval carries no judgement; you are rubber-stamping, and a rubber stamp is worse than no gate because it looks like review.
+
+Once you have approved the same gate on the same routine body three times, the inbox card starts offering a **standing grant**: the gate stops asking, and says so in the audit trail rather than quietly.
+
+```bash
+# What is trusted on this routine right now?
+crewship routine trust list triage-inbound-issue
+
+# Stop asking for this one gate.
+crewship routine trust grant triage-inbound-issue \
+  --step review --reason "approved 12x, verdicts identical"
+
+# Bounded variants, when "forever" is too strong.
+crewship routine trust grant triage-inbound-issue --step review --max-uses 20
+crewship routine trust grant triage-inbound-issue --step review --expires 2026-12-31T00:00:00Z
+
+# Take it back.
+crewship routine trust revoke triage-inbound-issue wtg_ab12cd34 --reason "policy review"
+```
+
+What a grant is, precisely:
+
+- **Per gate, not per routine.** Trusting `review` does not trust a `delete_everything` gate in the same routine.
+- **Pinned to the routine's definition hash.** Edit the routine — any step, any prompt — and the hash moves, no grant matches, and the gate asks again. You cannot be talked into trusting a gate and then have the step under it rewritten. `trust list` marks grants whose definition has moved on as `stale`.
+- **Still a real approval.** A grant fires by writing an ordinary approved waitpoint attributed to the operator who granted it, with the grant id in its decision payload. The run history shows an approval that happened and who stands behind it — there is no invisible path through the gate.
+- **Ignored by strict crews.** A crew at `autonomy_level: strict` has opted out of every shortcut around the operator, and standing grants are one. The crew that governs is the routine's **author** crew, since a routine executes in its author's context.
+
+<Note>
+Grants are for gates that have become repetitive, not for gates that have become inconvenient. If a gate is slow because the reviewer disagrees with the agent half the time, the answer is a better prompt or a tighter schema — not a grant.
+</Note>
+
+---
+
 ## What's intentionally NOT in the cookbook
 
 These exist in the routines documentation but aren't recipes here because they don't change the patterns above:
 
 - **Schedules** — see [routine schedules CLI](/cli/routine#crewship-routine-schedules). Add a cron and you have a periodic version of any recipe above.
 - **Webhooks** — see [routine webhooks CLI](/cli/routine#crewship-routine-webhooks). HMAC-signed event triggers for any recipe above.
-- **Wait points** — human approval gates between steps. See [routines guide](/guides/routines).
 
 The recipes here are the LLM-step shapes; the trigger surfaces are orthogonal.

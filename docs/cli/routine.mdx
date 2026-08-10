@@ -1381,6 +1381,62 @@ The decision comment is forwarded to the parked run as the wait step's output, s
 
 ---
 
+## `crewship routine trust`
+
+Manage standing approval grants — the answer to "I have approved this same gate twenty times".
+
+A grant is scoped to **one gate of one routine** and pinned to that routine's current definition hash. Editing the routine moves the hash, so no grant matches and the gate asks again. A grant never becomes a silent path: when it fires it writes an ordinary approved waitpoint attributed to the operator who granted it.
+
+MANAGER+ is required to grant or revoke. Listing is readable by anyone who can see the routine.
+
+### `trust list <slug>`
+
+```bash
+crewship routine trust list triage-inbound-issue
+crewship routine trust list triage-inbound-issue --format json
+```
+
+**Output columns:** GRANT ID, STEP, STATE, USES, GRANTED, DEFINITION, REASON
+
+`STATE` is `live` (still firing), `revoked` (somebody withdrew it), or `spent` (expired or out of uses). A `DEFINITION` marked `(stale)` belongs to a routine body that has since changed — the grant is already inert.
+
+Revoked grants stay in the list on purpose: the audit question is *who trusted this gate and who took it back*, which a live-only list cannot answer.
+
+### `trust grant <slug> --step <step_id>`
+
+```bash
+crewship routine trust grant triage-inbound-issue \
+  --step review --reason "approved 12x, verdicts identical"
+
+# Bounded variants, when "forever" is too strong
+crewship routine trust grant triage-inbound-issue --step review --max-uses 20
+crewship routine trust grant triage-inbound-issue --step review --expires 2026-12-31T00:00:00Z
+```
+
+| Flag | Description |
+|------|-------------|
+| `--step` | Step id of the `wait:approval` gate (**required** — trust is per gate, not per routine) |
+| `--reason` | Why this gate no longer needs a human. Kept in the audit trail |
+| `--max-uses` | Auto-approve at most N times, then ask again (default: unlimited) |
+| `--expires` | RFC3339 instant after which the grant stops firing. An instant already in the past is rejected — that grant could never fire |
+| `--prior-approvals` | How many manual approvals earned this grant (audit) |
+
+A second grant for the same gate and definition returns `409` rather than resetting the existing grant's use counter.
+
+<Note>
+When the governing crew is at `autonomy_level: strict`, standing grants are ignored entirely — strict means every governable action reaches an operator, regardless of what has been granted. The governing crew is the routine's **author** crew (a routine runs in its author's context), or the invoking crew on a cross-crew invocation.
+</Note>
+
+### `trust revoke <slug> <grant-id>`
+
+```bash
+crewship routine trust revoke triage-inbound-issue wtg_ab12cd34 --reason "policy review"
+```
+
+The gate blocks again on the next run. The grant row is kept and marked, not deleted.
+
+---
+
 ## Global flags
 
 All routine subcommands accept these global flags:

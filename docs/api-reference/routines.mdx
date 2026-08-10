@@ -29,6 +29,55 @@ is the updated routine object (`200 OK`). A missing or soft-deleted routine is
 Approval/rejection are valid only for `proposed` routines. Disable cancels
 in-flight runs; only `active` routines can run.
 
+## Standing approval grants
+
+A `wait:approval` gate blocks every run until a human decides. A standing
+grant lets a gate the operator keeps waving through stop asking.
+
+A grant is scoped to **one gate of one routine** and pinned to the routine's
+`definition_hash`. Editing the routine moves that hash, so no grant matches
+and the gate asks again — trust never carries onto a body nobody reviewed. A
+grant is never an invisible path: when it fires, an ordinary `approved`
+waitpoint is still written, attributed to the granting operator, with the
+grant id in its `decision_payload`.
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust` | member | No body | `{ slug, definition_hash, grants[] }` — revoked grants included, each with a computed `live` flag | `200`, `403`, `404`, `500` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust` | `create` (MANAGER+) | `step_id` required; optional `definition_hash`, `reason`, `prior_approvals`, `max_uses`, `expires_at` (RFC3339) | `{ id, slug, step_id, definition_hash }` | `201`, `400`, `403`, `404`, `409`, `500` |
+| DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust/{grantId}` | `create` (MANAGER+) | No body; optional `?reason=` query parameter | `{ id, status: "revoked" }` | `200`, `400`, `403`, `404`, `500` |
+
+Request notes for `POST`:
+
+- **`step_id` is required.** A grant with no step would be trust in the routine
+  as a whole, which this endpoint deliberately cannot express — `400`.
+- **`definition_hash` is the anti-TOCTOU token.** The inbox card that offered
+  the grant carries the hash it was rendered for. If the routine changed in
+  between, the supplied hash no longer matches and the request is `409` rather
+  than being silently retargeted at the new body. Omit it to accept whatever is
+  saved now.
+- A second grant for the same gate and definition is `409`, not a silent reset
+  of the existing grant's use counter.
+- `max_uses` and `expires_at` are both optional; absent means unbounded. An
+  `expires_at` already in the past is `400`: such a grant could never fire, and
+  a row that reads as trust granted while changing nothing is worse than a
+  refusal.
+
+The response to `GET` reports `definition_hash` at the top level — the value a
+client must echo back to grant new trust — alongside each grant's own pinned
+hash. A grant whose hash differs from the current one is already inert.
+
+`DELETE` is scoped to the routine in the path: grant ids are workspace-unique,
+so revoking through an unrelated routine's URL is `404` rather than a silent
+cross-routine write. Both granting and revoking require an authenticated user —
+the audit exists to answer *who* trusted this gate and *who* took it back, and
+neither half may be NULL.
+
+Grants are ignored entirely when the governing crew is at `autonomy_level: strict`.
+That is the routine's **author** crew — a routine executes in its author's
+context, reusing that crew's persona and credentials — or the invoking crew when
+one invokes across crews.
+
 ## Schedules
 
 See the dedicated [Schedules API reference](/api-reference/schedules) for the

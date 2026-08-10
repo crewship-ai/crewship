@@ -36,6 +36,11 @@ type PipelineHandler struct {
 	codeRunner   pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
 	scriptRunner pipeline.ScriptRunner    // optional; nil → type:script steps fail closed with a wiring hint
 	signals      *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
+	// trustGrantStore backs the standing-approval endpoints. Assigned by
+	// NewPipelineHandler before the handler serves anything; nil only in
+	// tests that build this struct as a literal, where trustGrants()
+	// falls back without writing (see pipeline_trust.go).
+	trustGrantStore *pipeline.TrustGrantStore
 	// runVerdict resolves the post-run outcome verdict's provider+model
 	// (#1403) for routine runs, at the moment a run terminates — same
 	// wiring as internal.InternalHandler's for ad-hoc agent runs, and
@@ -84,12 +89,13 @@ func NewPipelineHandler(db *sql.DB, logger *slog.Logger, runner pipeline.AgentRu
 	store := pipeline.NewStore(db)
 	resolver := pipeline.NewResolver(db)
 	return &PipelineHandler{
-		db:       db,
-		logger:   logger,
-		store:    store,
-		resolver: resolver,
-		runner:   runner,
-		emitter:  emitter,
+		db:              db,
+		logger:          logger,
+		store:           store,
+		resolver:        resolver,
+		runner:          runner,
+		emitter:         emitter,
+		trustGrantStore: pipeline.NewTrustGrantStore(db),
 	}
 }
 
