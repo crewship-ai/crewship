@@ -102,7 +102,7 @@ func TestTrustGrant_Consume(t *testing.T) {
 			t.Errorf("use.Uses = %d, want 1 (the count including this fire)", use.Uses)
 		}
 		var uses int
-		if err := db.QueryRow(`SELECT uses FROM waitpoint_trust_grants WHERE id = ?`, id).Scan(&uses); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT uses FROM waitpoint_trust_grants WHERE id = ?`, id).Scan(&uses); err != nil {
 			t.Fatalf("read uses: %v", err)
 		}
 		if uses != 1 {
@@ -279,12 +279,12 @@ func TestTrustGrant_PriorApprovals(t *testing.T) {
 
 	seed := func(runID, hash, status string) {
 		t.Helper()
-		if _, err := db.Exec(`
+		if _, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, definition_hash, status, started_at)
 VALUES (?, 'ws_test', 'pl1', 'triage', ?, 'completed', datetime('now'))`, runID, hash); err != nil {
 			t.Fatalf("seed run: %v", err)
 		}
-		if _, err := db.Exec(`
+		if _, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, status, timeout_at)
 VALUES (?, 'ws_test', ?, 'publish', 'approval', ?, datetime('now','+1 day'))`,
 			"tok_"+runID, runID, status); err != nil {
@@ -430,7 +430,7 @@ func TestTrustGrant_RenewAfterTheGrantDies(t *testing.T) {
 		// The superseded row is retired rather than deleted, so the trail
 		// still shows the grant that ran out.
 		var revokedReason string
-		if err := db.QueryRow(`SELECT COALESCE(revoke_reason,'') FROM waitpoint_trust_grants WHERE id = ?`, first).Scan(&revokedReason); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(revoke_reason,'') FROM waitpoint_trust_grants WHERE id = ?`, first).Scan(&revokedReason); err != nil {
 			t.Fatalf("read superseded grant: %v", err)
 		}
 		if revokedReason == "" {

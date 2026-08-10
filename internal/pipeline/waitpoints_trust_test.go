@@ -57,12 +57,12 @@ func seedTrustRun(t *testing.T, db *sql.DB, runID, hash, autonomy string) {
 	crewID := ""
 	if autonomy != "" {
 		crewID = "cr_" + runID
-		if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, autonomy_level) VALUES (?, 'ws_test', ?)`,
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO crews (id, workspace_id, autonomy_level) VALUES (?, 'ws_test', ?)`,
 			crewID, autonomy); err != nil {
 			t.Fatalf("seed crew: %v", err)
 		}
 	}
-	if _, err := db.Exec(`
+	if _, err := db.ExecContext(t.Context(), `
 INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, definition_hash, status, started_at, invoking_crew_id)
 VALUES (?, 'ws_test', 'pl1', 'triage', ?, 'running', datetime('now'), ?)`,
 		runID, hash, nullableStr(crewID)); err != nil {
@@ -73,7 +73,7 @@ VALUES (?, 'ws_test', 'pl1', 'triage', ?, 'running', datetime('now'), ?)`,
 func waitpointRow(t *testing.T, db *sql.DB, token string) (status, decidedBy, payload string) {
 	t.Helper()
 	var by, pl sql.NullString
-	if err := db.QueryRow(`SELECT status, decided_by_user_id, decision_payload FROM pipeline_waitpoints WHERE token = ?`,
+	if err := db.QueryRowContext(t.Context(), `SELECT status, decided_by_user_id, decision_payload FROM pipeline_waitpoints WHERE token = ?`,
 		token).Scan(&status, &by, &pl); err != nil {
 		t.Fatalf("read waitpoint: %v", err)
 	}
@@ -83,7 +83,7 @@ func waitpointRow(t *testing.T, db *sql.DB, token string) (status, decidedBy, pa
 func inboxCount(t *testing.T, db *sql.DB, token string) int {
 	t.Helper()
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE source_id = ?`, token).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM inbox_items WHERE source_id = ?`, token).Scan(&n); err != nil {
 		t.Fatalf("count inbox: %v", err)
 	}
 	return n
@@ -199,7 +199,7 @@ func TestCreateApproval_TrustGrant(t *testing.T) {
 		db := openTrustGateTestDB(t)
 		for i, runID := range []string{"run_p1", "run_p2", "run_p3"} {
 			seedTrustRun(t, db, runID, "hashA", "guided")
-			if _, err := db.Exec(`
+			if _, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, status, timeout_at)
 VALUES (?, 'ws_test', ?, 'publish', 'approval', 'approved', datetime('now','+1 day'))`,
 				"tok_prior_"+runID, runID); err != nil {
@@ -222,7 +222,7 @@ VALUES (?, 'ws_test', ?, 'publish', 'approval', 'approved', datetime('now','+1 d
 		}
 
 		var payloadJSON string
-		if err := db.QueryRow(`SELECT payload_json FROM inbox_items WHERE source_id = ?`, token).Scan(&payloadJSON); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT payload_json FROM inbox_items WHERE source_id = ?`, token).Scan(&payloadJSON); err != nil {
 			t.Fatalf("read inbox payload: %v", err)
 		}
 		var payload struct {
@@ -266,7 +266,7 @@ VALUES (?, 'ws_test', ?, 'publish', 'approval', 'approved', datetime('now','+1 d
 			t.Fatalf("CreateApproval: %v", err)
 		}
 		var payloadJSON string
-		if err := db.QueryRow(`SELECT payload_json FROM inbox_items WHERE source_id = ?`, token).Scan(&payloadJSON); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT payload_json FROM inbox_items WHERE source_id = ?`, token).Scan(&payloadJSON); err != nil {
 			t.Fatalf("read inbox payload: %v", err)
 		}
 		if strings.Contains(payloadJSON, `"eligible":true`) {
@@ -293,10 +293,10 @@ func TestCreateApproval_StrictAuthorCrewIgnoresGrant(t *testing.T) {
 	db := openTrustGateTestDB(t)
 
 	// A strict crew, and a routine authored by it.
-	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, autonomy_level) VALUES ('cr_strict', 'ws_test', 'strict')`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO crews (id, workspace_id, autonomy_level) VALUES ('cr_strict', 'ws_test', 'strict')`); err != nil {
 		t.Fatalf("seed crew: %v", err)
 	}
-	if _, err := db.Exec(`
+	if _, err := db.ExecContext(ctx, `
 INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash, author_crew_id)
 VALUES ('pl1', 'ws_test', 'triage', 'Triage', '{}', 'hashA', 'cr_strict')`); err != nil {
 		t.Fatalf("seed pipeline: %v", err)
@@ -305,7 +305,7 @@ VALUES ('pl1', 'ws_test', 'triage', 'Triage', '{}', 'hashA', 'cr_strict')`); err
 	mustGrant(t, grants, baseGrant())
 
 	// A user-triggered run: no invoking crew, which is the ordinary case.
-	if _, err := db.Exec(`
+	if _, err := db.ExecContext(ctx, `
 INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, definition_hash, status, started_at)
 VALUES ('run_user', 'ws_test', 'pl1', 'triage', 'hashA', 'running', datetime('now'))`); err != nil {
 		t.Fatalf("seed run: %v", err)
