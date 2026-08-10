@@ -14,6 +14,7 @@ import {
   sourceMix,
   dailyCounts,
   NOISE_ENTRY_TYPES,
+  narrowToFocus,
   runIdOf,
   timeBucket,
 } from "@/lib/activity-stream"
@@ -367,5 +368,73 @@ describe("runIdOf", () => {
 
   it("ignores a non-string run id rather than rendering an object", () => {
     expect(runIdOf(entry({ payload: { run_id: { id: 1 } } }))).toBeNull()
+  })
+})
+
+describe("narrowToFocus — the rail and the cards must count the same set", () => {
+  // The screen showed both answers at once: the FAILED card read "0 — nothing
+  // broke" while the rail beside it read "Failed 9". The cards were built from
+  // the routine-focused set and the rail from the whole loaded window, so one
+  // screen gave two answers to "did anything break", and the reassuring one
+  // was the wrong one.
+  //
+  // The rail's STATUS list is a filter CONTROL: each count answers "how many
+  // would I get if I also clicked this". That is only true when it is counted
+  // over the same focus the cards use — so the focus narrowing is extracted
+  // here, applied once, and shared.
+  const entry = (over: Partial<JournalEntry>): JournalEntry =>
+    ({
+      id: "j1",
+      workspace_id: "ws",
+      entry_type: "pipeline.run.completed",
+      severity: "info",
+      created_at: new Date().toISOString(),
+      ...over,
+    }) as JournalEntry
+
+  const probe = entry({ id: "a", payload: { pipeline_slug: "cost-spike-probe" } })
+  const probeFailed = entry({
+    id: "b",
+    entry_type: "pipeline.run.failed",
+    severity: "error",
+    payload: { pipeline_slug: "cost-spike-probe" },
+  })
+  const otherFailed = entry({
+    id: "c",
+    entry_type: "pipeline.run.failed",
+    severity: "error",
+    payload: { pipeline_slug: "normalize-dates" },
+  })
+
+  it("narrows to the focused routine", () => {
+    const out = narrowToFocus([probe, probeFailed, otherFailed], {
+      kind: "routine",
+      id: "cost-spike-probe",
+    })
+    expect(out.map((e) => e.id)).toEqual(["a", "b"])
+  })
+
+  it("returns everything when nothing is focused", () => {
+    const all = [probe, probeFailed, otherFailed]
+    expect(narrowToFocus(all, null)).toHaveLength(3)
+  })
+
+  it("counts the focused set, not the window — the contradiction, pinned", () => {
+    const focused = narrowToFocus([probe, probeFailed, otherFailed], {
+      kind: "routine",
+      id: "cost-spike-probe",
+    })
+    const failed = focused.filter((e) => scopeOf(e) === "failed").length
+    // One failure belongs to this routine; the other does not. A rail reading
+    // 2 here is the screen contradicting its own cards.
+    expect(failed).toBe(1)
+  })
+
+  it("matches routine_slug as well as pipeline_slug", () => {
+    // Two producers spell it differently and both reach the journal; matching
+    // only one silently drops half the routine's events from the count.
+    const viaRoutineSlug = entry({ id: "d", refs: { routine_slug: "cost-spike-probe" } })
+    const out = narrowToFocus([viaRoutineSlug], { kind: "routine", id: "cost-spike-probe" })
+    expect(out).toHaveLength(1)
   })
 })

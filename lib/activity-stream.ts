@@ -601,3 +601,43 @@ export function runIdOf(entry: JournalEntry): string | null {
   if (typeof fromRefs === "string" && fromRefs !== "") return fromRefs
   return null
 }
+
+/**
+ * The subset of a focus this narrowing needs. Deliberately structural rather
+ * than an import of the sidebar's EntityFocus: this module is pure and must
+ * not depend on a component, and the label is presentation.
+ */
+export interface FocusRef {
+  kind: "issue" | "routine" | "crew"
+  id: string
+}
+
+/**
+ * Narrows a loaded window to the focused entity, for the ROUTINE case only.
+ *
+ * Issue and crew focus are expressible server-side and are already applied by
+ * the query; a routine's slug lives inside the journal payload, which is not
+ * indexed, so it can only be narrowed here — over whatever window was loaded.
+ *
+ * Extracted because two places need the SAME answer and were computing
+ * different ones. The overview cards were built from the focused set while the
+ * rail's status counts were built from the whole window, so a screen focused on
+ * one routine read "FAILED 0 — nothing broke" beside a rail reading "Failed 9".
+ * One screen, two answers to "did anything break", and the reassuring one was
+ * the wrong one.
+ *
+ * The rail's counts are a filter CONTROL — each answers "how many would I get
+ * if I also clicked this" — which is only true when counted over the same focus
+ * the cards use.
+ *
+ * Both spellings are matched. Producers disagree (`pipeline_slug` from the
+ * executor, `routine_slug` from the newer surfaces) and both reach the journal,
+ * so matching one silently drops half a routine's events from its own count.
+ */
+export function narrowToFocus(entries: JournalEntry[], focus: FocusRef | null): JournalEntry[] {
+  if (!focus || focus.kind !== "routine") return entries
+  return entries.filter((e) => {
+    const bag = { ...(e.payload ?? {}), ...(e.refs ?? {}) }
+    return bag["pipeline_slug"] === focus.id || bag["routine_slug"] === focus.id
+  })
+}

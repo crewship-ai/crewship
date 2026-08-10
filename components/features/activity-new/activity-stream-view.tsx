@@ -33,6 +33,7 @@ import {
   ACTIVE_ENTRY_TYPES,
   ACTIVITY_SCOPES,
   NOISE_ENTRY_TYPES,
+  narrowToFocus,
   scopeOf,
   sourceEntryTypes,
   sourceMeta,
@@ -182,7 +183,10 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // Routine / run / step ids live inside the payload, which the API cannot
   // filter on — so a crumb of those kinds narrows here, over the loaded
   // window, and the chip says so rather than implying a full-table match.
-  const visible = React.useMemo(() => {
+  // Narrowed by the pinned crumb and the entity focus, but NOT by the status
+  // facet — this is the set the rail's status counts are taken over, so each
+  // count answers "how many would I get if I also clicked this".
+  const focusScoped = React.useMemo(() => {
     let out = entries
     if (pinned && pinned.kind !== "issue") {
       out = out.filter((e) => {
@@ -197,31 +201,39 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     // A routine focus cannot go to the server: the slug lives inside the
     // payload, which the journal does not index. Narrowed here, over the
     // loaded window, and the chip says so.
-    if (focus?.kind === "routine") {
-      out = out.filter((e) => {
-        const bag = { ...(e.payload ?? {}), ...(e.refs ?? {}) }
-        return bag["pipeline_slug"] === focus.id || bag["routine_slug"] === focus.id
-      })
-    }
+    return narrowToFocus(out, focus)
+  }, [entries, pinned, focus])
+
+  // What the feed shows and the cards count: the focused set with the status
+  // facet applied on top.
+  //
+  // The split matters because the two were computed from different windows
+  // before. The cards were built from the focused set while the rail's counts
+  // came from the whole loaded window, so a screen focused on one routine read
+  // "FAILED 0 — nothing broke" beside a rail reading "Failed 9" — one screen,
+  // two answers to "did anything break", and the reassuring one was wrong.
+  const visible = React.useMemo(() => {
     // `done` has no server-side expression (it is "everything else"), so it
     // is the one scope narrowed client-side.
-    if (facets.scope === "done") out = out.filter((e) => scopeOf(e) === "done")
-    return out
-  }, [entries, pinned, focus, facets.scope])
+    if (facets.scope === "done") return focusScoped.filter((e) => scopeOf(e) === "done")
+    return focusScoped
+  }, [focusScoped, facets.scope])
 
   const scopeCounts = React.useMemo(() => {
     const c: Record<ActivityScope, number> = { active: 0, waiting: 0, failed: 0, done: 0 }
-    // Counts describe the loaded window; when a scope filter is active the
-    // server already narrowed it, so only the active bucket is meaningful.
-    for (const e of entries) c[scopeOf(e)] += 1
+    // Counted over the FOCUSED window, so the rail and the cards answer the
+    // same question. When a scope facet is active the server already narrowed
+    // the fetch, so the other buckets are not knowable from what was loaded —
+    // that is a property of the query, not a zero.
+    for (const e of focusScoped) c[scopeOf(e)] += 1
     return c
-  }, [entries])
+  }, [focusScoped])
 
   const crewCounts = React.useMemo(() => {
     const c: Record<string, number> = {}
-    for (const e of entries) if (e.crew_id) c[e.crew_id] = (c[e.crew_id] ?? 0) + 1
+    for (const e of focusScoped) if (e.crew_id) c[e.crew_id] = (c[e.crew_id] ?? 0) + 1
     return c
-  }, [entries])
+  }, [focusScoped])
 
   const issueCounts = React.useMemo(() => {
     const c: Record<string, number> = {}
@@ -416,7 +428,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               routineCounts={routineCounts}
               focus={focus}
               onFocus={setFocus}
-              total={entries.length}
+              total={focusScoped.length}
               onToggleCollapse={() => setRailCollapsed(true)}
             />
           )}
