@@ -42,6 +42,30 @@ func TestCheckEpisodicRecallMode(t *testing.T) {
 			wantHint:   "KEEPER_OLLAMA_URL",
 		},
 		{
+			// The state that had no case at all. An embedder that is
+			// configured but whose every call fails is worse than
+			// sparse-only: sparse-only is a deliberate choice that still
+			// serves keyword recall, whereas this looks configured, grows
+			// no index, and used to report PASS. Falling through to the
+			// `default` arm would call a dead subsystem an INFO curiosity
+			// ("unknown episodic mode"), which is how it stayed unnoticed.
+			name:       "degraded embedder fails loudly, not as an unknown mode",
+			body:       `{"status":"ok","episodic":"vector-degraded","episodic_error":"ollama http 404: model \"nomic-embed-text\" not found"}`,
+			status:     http.StatusOK,
+			wantStatus: "FAIL",
+			wantDetail: "DEGRADED",
+			wantHint:   "nomic-embed-text",
+		},
+		{
+			// Degraded without the reason still has to be actionable —
+			// an older server may report the mode and not the detail.
+			name:       "degraded without a reason still fails",
+			body:       `{"status":"ok","episodic":"vector-degraded"}`,
+			status:     http.StatusOK,
+			wantStatus: "FAIL",
+			wantDetail: "DEGRADED",
+		},
+		{
 			name:       "older server without the field is informational",
 			body:       `{"status":"ok"}`,
 			status:     http.StatusOK,

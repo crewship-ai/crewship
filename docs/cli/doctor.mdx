@@ -98,6 +98,15 @@ with a vector embedder or degraded to keyword/FTS only.
 - **PASS — `vector + sparse recall`** — an embedder is configured
   (`KEEPER_OLLAMA_URL`); the boot-time indexer sweeper is embedding
   journal entries and recall serves vector + BM25 results.
+- **FAIL — `vector-degraded`** — an embedder *is* configured but its
+  calls are failing, so the index is not growing and recall is silently
+  BM25-only. The server includes the underlying error as
+  `episodic_error` and this check prints it. The usual cause is an
+  Ollama host that is reachable but not serving the model —
+  `ollama pull nomic-embed-text` on that host. This is a FAIL rather
+  than a WARN because it is worse than `sparse-only`: that one is a
+  deliberate choice that still serves keyword recall, whereas this
+  looks configured and delivers nothing.
 - **WARN — `sparse-only`** — no embedder configured. Recall still
   works on keywords, but vector similarity is off. Set
   `KEEPER_OLLAMA_URL` to an Ollama host serving `nomic-embed-text`.
