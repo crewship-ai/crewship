@@ -153,7 +153,7 @@ func (h *SkillProposedHandler) List(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		full := filepath.Join(dir, name)
-		raw, err := os.ReadFile(full)
+		raw, err := memory.ReadFileNoFollow(full)
 		if err != nil {
 			h.logger.Warn("skills proposed: read entry", "file", full, "err", err)
 			continue
