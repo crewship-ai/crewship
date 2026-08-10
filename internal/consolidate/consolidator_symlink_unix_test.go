@@ -20,7 +20,7 @@ func TestSnapshotPinsRefusesSymlinkedTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(victim, filepath.Join(dir, "pins.md")); err != nil {
-		t.Skipf("symlink unsupported: %v", err)
+		t.Fatalf("plant pins symlink: %v", err)
 	}
 
 	_, err := snapshotPins(Config{OutputDir: dir}, []journal.Entry{{
@@ -48,7 +48,7 @@ func TestAppendRulesRefusesSymlinkedTarget(t *testing.T) {
 	}
 	name := "learned-" + now.Format("2006-01-02") + ".md"
 	if err := os.Symlink(victim, filepath.Join(dir, name)); err != nil {
-		t.Skipf("symlink unsupported: %v", err)
+		t.Fatalf("plant learned-file symlink: %v", err)
 	}
 
 	c := &Consolidator{}
