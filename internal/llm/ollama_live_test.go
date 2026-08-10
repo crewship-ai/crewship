@@ -36,6 +36,48 @@ func liveOllamaBase(t *testing.T) string {
 	return base
 }
 
+// liveCallTimeout bounds one completion against the live daemon.
+//
+// It was 120s, and that was not enough on the machine this test is written for.
+// Measured on crewship-dev with qwen2.5:7b: a warm, unloaded call answers in
+// ~7s, but a cold one spends 13.4s in `load_duration` before it starts, and
+// under concurrent load individual calls took 56s and 94s. The result was a
+// test that failed on *whichever* sub-case happened to run while the box was
+// busiest — the failing shape moved between runs, which is the signature of a
+// deadline problem rather than a product one. All four stored shapes reach a
+// live model and return a valid judgement; that was verified before this
+// number was changed.
+//
+// The generous value costs nothing when things are healthy: the whole test
+// finishes in seconds against an idle daemon. It only spends time on the
+// machine where the alternative is a false red.
+const liveCallTimeout = 5 * time.Minute
+
+// warmLiveModel pays the model's load cost once, up front, so it is not
+// charged to whichever sub-case happens to run first. `load_duration` was 13.4s
+// of a 20.6s cold call in the measurement above; without this the first
+// sub-case is systematically slower than its siblings for a reason that has
+// nothing to do with what it asserts.
+//
+// Failures here are not fatal: this is a warm-up, and if it cannot complete the
+// sub-cases will say so with their own assertions rather than being skipped by
+// a setup step.
+func warmLiveModel(t *testing.T, base, model string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), liveCallTimeout)
+	defer cancel()
+	start := time.Now()
+	if _, err := NewOllama(base, model).Complete(ctx, Request{
+		Model:     model,
+		Messages:  []Message{{Role: "user", Content: "ok"}},
+		MaxTokens: 1,
+	}); err != nil {
+		t.Logf("warm-up call failed (%v) — sub-cases will report the real verdict", err)
+		return
+	}
+	t.Logf("warmed %s in %s", model, time.Since(start).Round(time.Millisecond))
+}
+
 // liveModel picks a model the daemon actually has pulled, preferring a small
 // instruct model — the judge is a classifier, so a 3-8B model is the realistic
 // production choice and keeps the test fast.
@@ -70,10 +112,11 @@ func TestLive_OllamaAcceptsEveryStoredShape(t *testing.T) {
 	base := liveOllamaBase(t)
 	model := liveModel(t, base)
 	t.Logf("live Ollama at %s, judging with %s", base, model)
+	warmLiveModel(t, base, model)
 
 	for _, suffix := range []string{"", "/", "/v1", "/api/chat"} {
 		t.Run("stored"+suffix, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), liveCallTimeout)
 			defer cancel()
 
 			p := NewOllama(base+suffix, model)
