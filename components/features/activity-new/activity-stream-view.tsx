@@ -74,6 +74,8 @@ import type { LensKey } from "@/lib/activity-lenses"
 import { ActivityOverview, iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
 import { WorkflowPage } from "./workflow-page"
+import { AgentsOverview, IssuesOverview, RoutinesLensOverview } from "./lens-overviews"
+import { RoutineRunsPage } from "./routine-runs-page"
 import { FeedRow } from "./feed-row"
 
 /** Connection state as a word, not a button. */
@@ -534,13 +536,39 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // global overview under it, unchanged — same "56 events · past 24 hours ·
   // every crew, agent, routine and issue in one place" for every workflow, two
   // screenshots identical below the graph. One selection, one column.
+  // A routine picked out of the Routines lens. Its own surface, because thirty
+  // runs of one routine is a different question from any chain: the workflow
+  // page answers "what did this one run cause", and this answers "which of the
+  // thirty was the one at ten past two".
+  const openRoutineSlug =
+    stop?.kind === "routine" && lens === "routines" ? stop.id : null
+
   const overviewShown =
-    !loading && !error && !emptyByFilters && surface.main === "overview" && facets.scope === "all"
+    !loading &&
+    !error &&
+    !emptyByFilters &&
+    surface.main === "overview" &&
+    facets.scope === "all" &&
+    lens === "workflows"
+
+  // Each lens owns the column. They were four tabs over one Overview: the same
+  // four KPIs and the same "what is broken" whichever was pressed, which is a
+  // control that changes what is SELECTED without changing what is SHOWN — the
+  // same defect as a graph left pointing at the previous chain.
+  const lensOverviewShown =
+    !loading && !error && !emptyByFilters && surface.main === "overview" && lens !== "workflows"
   // The feed as a list: one scope bucket, or one node of a chain. Same shape,
   // different heading — a bucket is "everything that failed", a node is
   // "everything this agent touched" — so it is one branch, not two that can
   // both draw.
-  const listShown = !loading && !error && !emptyByFilters && surface.main !== "workflow" && !overviewShown
+  const listShown =
+    !loading &&
+    !error &&
+    !emptyByFilters &&
+    surface.main !== "workflow" &&
+    !overviewShown &&
+    !lensOverviewShown &&
+    openRoutineSlug == null
   const listTitle = surface.node ? surface.node.label : (scopeMeta?.label ?? "Activity")
   const listCaption = surface.node
     ? `${visible.length.toLocaleString()} ${visible.length === 1 ? "event" : "events"} mentioning this ${
@@ -724,7 +752,22 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
             )}
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {surface.main !== "workflow" && loading && entries.length === 0 && (
+              {/* A routine out of the Routines lens: its runs, by the hour.
+                  Placed before every other branch because it is a whole
+                  surface, not a narrowing of the feed — the same reason the
+                  workflow page is. */}
+              {openRoutineSlug && (
+                <RoutineRunsPage
+                  workspaceId={workspaceId}
+                  slug={openRoutineSlug}
+                  label={stop?.label ?? openRoutineSlug}
+                  routine={routines.find((r) => r.slug === openRoutineSlug)}
+                  onBack={goBack}
+                  onOpenRun={(runID) => openNode("run", runID)}
+                />
+              )}
+
+              {openRoutineSlug == null && surface.main !== "workflow" && loading && entries.length === 0 && (
                 <div className="flex items-center justify-center gap-2 py-20 text-xs text-muted-foreground">
                   <Spinner className="h-3.5 w-3.5" /> Loading activity…
                 </div>
@@ -802,6 +845,35 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                     }
                   />
                 </div>
+              )}
+
+              {lensOverviewShown && lens === "issues" && (
+                <IssuesOverview
+                  chains={chains}
+                  rangeLabel={range.label}
+                  onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
+                  onOpenWorkflow={selectChain}
+                />
+              )}
+
+              {lensOverviewShown && lens === "agents" && (
+                <AgentsOverview
+                  chains={chains}
+                  rangeLabel={range.label}
+                  hiredCount={agents.length}
+                  onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
+                  onOpenWorkflow={selectChain}
+                />
+              )}
+
+              {lensOverviewShown && lens === "routines" && (
+                <RoutinesLensOverview
+                  chains={chains}
+                  routines={routines}
+                  rangeLabel={range.label}
+                  catalogueCount={pipelines.length}
+                  onOpenRoutine={(slug, label) => setPath(selectStop({ kind: "routine", id: slug, label }))}
+                />
               )}
 
               {overviewShown && (
