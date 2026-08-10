@@ -37431,8 +37431,18 @@
                           "anchor": {
                             "type": "boolean"
                           },
+                          "chain_depth": {
+                            "type": "integer"
+                          },
                           "depth": {
                             "type": "integer"
+                          },
+                          "duration_ms": {
+                            "type": "integer"
+                          },
+                          "ended_at": {
+                            "format": "date-time",
+                            "type": "string"
                           },
                           "id": {
                             "type": "string"
@@ -37444,6 +37454,10 @@
                             "type": "string"
                           },
                           "label": {
+                            "type": "string"
+                          },
+                          "occurred_at": {
+                            "format": "date-time",
                             "type": "string"
                           },
                           "partial": {

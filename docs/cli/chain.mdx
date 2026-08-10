@@ -30,9 +30,9 @@ know which one your anchor lives in.
 ```
 issue ENG-7  Deploy is flaky on cold start  (IN_PROGRESS) (partial)
 ├─ [triggers ->] routine deploy  Deploy  (active)
-│  └─ [runs ->] run prn_01hy  deploy  (failed)
-│     ├─ [triggers ->] run prn_01hz  deploy  (failed)
-│     │  └─ [produces ->] inbox/failed_run ibx_01j2  deploy failed  (unread)
+│  └─ [runs ->] run prn_01hy  deploy  (failed)  2h ago · 1m30s
+│     ├─ [triggers ->] run prn_01hz  deploy  (failed)  2h ago · 12.4s
+│     │  └─ [produces ->] inbox/failed_run ibx_01j2  deploy failed  (unread)  2h ago
 │     └─ [<- executes] agent viktor  Viktor  (IDLE)
 └─ [triggers ->] run prn_01hy (shown above)
 
@@ -137,6 +137,15 @@ tree and `--format json` describe the same thing.
   separate it from whatever a human did. It is a property of the run, not of
   your query — unlike the tree's indentation, it does not change with the
   anchor you chose. Runs a person started carry 0 and print nothing.
+- **`2h ago · 1m30s`** is when the node happened and how long it took. It
+  appears on `run`, `assignment` and `inbox` lines and on nothing else, because
+  nothing else can answer honestly: an issue's, a routine's, an agent's or a
+  rule's `created_at` is when it was *filed / written / hired / authored*, not
+  when anything in this chain happened. A blank means "this kind has no time",
+  not "the time is missing".
+- A run still in flight prints its start and **no duration**, because it has
+  not finished. `0ms` means the opposite — it finished inside a millisecond —
+  so the two are never spelled the same way.
 
 ## Edge kinds
 
@@ -159,7 +168,7 @@ Anchor on one to see what it is wired to and what it has actually done:
 ```
 automation/run.failed aut_01hx  Triage on failure  (enabled)
 ├─ [triggers ->] routine triage  Triage  (active)
-└─ [triggers ->] run prn_01j4  triage  (completed) [composed depth 1]
+└─ [triggers ->] run prn_01j4  triage  (completed)  18m ago · 4.2s [composed depth 1]
 
 3 nodes, 2 edges (depth<=4, limit 200)
 ```

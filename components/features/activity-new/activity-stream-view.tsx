@@ -15,7 +15,7 @@
 // panel — see activity-detail.tsx for why.
 
 import * as React from "react"
-import { Activity, FilterX } from "lucide-react"
+import { Activity, ArrowLeft, ChevronRight, FilterX } from "lucide-react"
 
 import { SubBar } from "@/components/layout/sub-bar"
 import { SidebarActiveChip, SidebarActiveChips, SidebarCollapseButton } from "@/components/layout/sidebar-kit"
@@ -35,6 +35,7 @@ import {
   NOISE_ENTRY_TYPES,
   narrowToFocus,
   scopeOf,
+  shortId,
   sourceEntryTypes,
   sourceMeta,
   type ActivityScope,
@@ -43,9 +44,19 @@ import {
   type SpineLink,
 } from "@/lib/activity-stream"
 import {
+  ACTIVITY_HOME,
   activitySurface,
+  activityTrail,
+  backFrom,
+  currentStop,
+  jumpTo,
+  openStop,
+  selectStop,
+  stopMatcher,
+  workflowAnchor,
   workflowLabel,
-  type ActivitySelection,
+  type ActivityPath,
+  type ActivityStop,
 } from "@/lib/activity-selection"
 import type { JournalEntry } from "@/lib/types/journal"
 import { cn } from "@/lib/utils"
@@ -61,7 +72,7 @@ import {
 import { useChains } from "@/hooks/use-chains"
 import { ActivityOverview, iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
-import { TopologyCard } from "./topology-card"
+import { WorkflowPage } from "./workflow-page"
 import { FeedRow } from "./feed-row"
 
 /** Connection state as a word, not a button. */
@@ -112,8 +123,8 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const [selected, setSelected] = React.useState<JournalEntry | null>(null)
   const [railCollapsed, setRailCollapsed] = React.useState(false)
 
-  // What the page is pointed at — ONE value, whether the reader picked a
-  // workflow out of the rail or focused an issue, a routine or a crew.
+  // Where the reader is — ONE value, whether they picked a workflow out of the
+  // rail, focused an issue, or walked down into a node of a chain.
   //
   // It was two independent states: an EntityFocus for the rail and a
   // selectedChain for the graph. Neither cleared the other, so the chips could
@@ -121,11 +132,31 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // on-close-file-followup chain — two answers to "what am I looking at", and
   // the graph was the stale one. Making them notify each other would have kept
   // two sources of truth, which is the shape of that bug; there is one, and
-  // the rail's highlight, the query's narrowing, the graph and its chip are
-  // all derived from it in lib/activity-selection.
-  const [selection, setSelection] = React.useState<ActivitySelection | null>(null)
-  const surface = React.useMemo(() => activitySurface(selection), [selection])
+  // the rail's highlight, the query's narrowing, the main column, the trail
+  // and the chip are all derived from it in lib/activity-selection.
+  //
+  // The path is that same one value grown a memory: its LAST stop is the
+  // selection, the ones before it are only there so back has somewhere to go.
+  const [path, setPath] = React.useState<ActivityPath>(ACTIVITY_HOME)
+  const stop = React.useMemo(() => currentStop(path), [path])
+  const surface = React.useMemo(() => activitySurface(stop), [stop])
   const focus = surface.focus
+  const trail = React.useMemo(() => activityTrail(path), [path])
+
+  const goBack = React.useCallback(() => setPath(backFrom), [])
+
+  // The rail follows the workflow the reader is INSIDE, not the stop they are
+  // standing on, so the highlight does not blink off the moment they open a
+  // node of it.
+  const railChain = React.useMemo(() => workflowAnchor(path), [path])
+
+  // A node has no server-side expression — an agent id is a column but a run
+  // or an assignment id lives inside the payload — so it narrows the loaded
+  // window here, the same way a pinned crumb does.
+  const nodeMatch = React.useMemo(
+    () => (surface.node ? stopMatcher(surface.node) : null),
+    [surface.node],
+  )
 
   // Entities for the rail. The journal lookup already carries crews, agents
   // and missions; routines come from the pipelines list so the rows can show
@@ -207,16 +238,24 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const selectChain = React.useCallback(
     (origin: string | null) => {
       if (!origin) {
-        setSelection(null)
+        setPath(ACTIVITY_HOME)
         return
       }
-      setSelection({
-        kind: "workflow",
-        id: origin,
-        label: workflowLabel(chains.find((c) => c.origin === origin)),
-      })
+      setPath(
+        selectStop({
+          kind: "workflow",
+          id: origin,
+          label: workflowLabel(chains.find((c) => c.origin === origin)),
+        }),
+      )
     },
     [chains],
+  )
+
+  /** The chain the workflow column draws, or undefined once the index has moved on. */
+  const openChain = React.useMemo(
+    () => (surface.chainAnchor ? chains.find((c) => c.origin === surface.chainAnchor) : undefined),
+    [chains, surface.chainAnchor],
   )
 
   const { status: streamStatus } = useJournalStream({
@@ -244,11 +283,14 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
         return bag["step_id"] === pinned.id || bag["step"] === pinned.id
       })
     }
+    // The node the reader walked into, if any. Same reason as the crumb: an
+    // assignment or a run id is payload, not a column.
+    if (nodeMatch) out = out.filter(nodeMatch)
     // A routine focus cannot go to the server: the slug lives inside the
     // payload, which the journal does not index. Narrowed here, over the
     // loaded window, and the chip says so.
     return narrowToFocus(out, focus)
-  }, [entries, pinned, focus])
+  }, [entries, pinned, focus, nodeMatch])
 
   // What the feed shows and the cards count: the focused set with the status
   // facet applied on top.
@@ -344,6 +386,36 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     [lookup.crews],
   )
 
+  // A node clicked in a chain graph arrives as "kind:ref" and nothing else —
+  // the walker's payload is deliberately thin. The name is resolved HERE, at
+  // the click, from what the page already holds, for the same reason the
+  // workflow's label is: a breadcrumb that reads "agent: agt_01H8…" tells the
+  // reader nothing about where they are, and re-reading the name at render
+  // time from a list that has since refreshed is the staleness this whole
+  // change removes.
+  const resolveStop = React.useCallback(
+    (kind: string, ref: string): ActivityStop => {
+      if (kind === "agent") return { kind, id: ref, label: lookup.agents.get(ref)?.name ?? shortId(ref) }
+      if (kind === "crew") return { kind, id: ref, label: lookup.crews.get(ref)?.name ?? shortId(ref) }
+      if (kind === "issue") return { kind, id: ref, label: labels.issues?.[ref] ?? shortId(ref) }
+      if (kind === "routine") {
+        // The graph refs a routine by id on some nodes and by slug on others;
+        // the journal only ever carries the slug, so the stop is keyed on the
+        // slug or it narrows to nothing.
+        const r = routines.find((x) => x.id === ref || x.slug === ref)
+        return { kind, id: r?.slug ?? ref, label: r?.name ?? ref }
+      }
+      return { kind, id: ref, label: shortId(ref) }
+    },
+    [lookup.agents, lookup.crews, labels.issues, routines],
+  )
+
+  /** Walk one level down. Bounded and loop-collapsing — see openStop. */
+  const openNode = React.useCallback(
+    (kind: string, ref: string) => setPath((p) => openStop(p, resolveStop(kind, ref))),
+    [resolveStop],
+  )
+
   // Keyboard: a surface you can only drive with a mouse is one you abandon
   // on the second screenful.
   React.useEffect(() => {
@@ -351,7 +423,11 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
       const el = document.activeElement
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
       if (e.key === "Escape") {
-        setSelected(null)
+        // An opened record first, then one stop back up the walk. Escape is
+        // the key readers press to undo the last thing they opened, and until
+        // now it stopped working the moment they were already at the top.
+        if (selected) setSelected(null)
+        else setPath(backFrom)
         return
       }
       if (e.key !== "j" && e.key !== "k") return
@@ -369,7 +445,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // column, so a chain is not expressible as a filter over journal rows. The
   // distinction is not cosmetic — the empty-result banner counts filters, and
   // a chip that filters nothing must not be counted there.
-  const chips: { label: string; narrows: boolean; onClear: () => void }[] = []
+  const chips: { label: string; narrows: boolean; onClear: () => void; position?: boolean }[] = []
   if (debouncedSearch)
     chips.push({ label: `“${debouncedSearch}”`, narrows: true, onClear: () => setSearch("") })
   if (pinned) {
@@ -380,11 +456,14 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
       onClear: () => setPinned(null),
     })
   }
-  // The selection — workflow, issue, routine or crew — is one chip, because it
-  // is one selection. A graph on screen therefore always has a chip naming it,
-  // and that chip is the way back out.
+  // The selection is one chip, because it is one selection — but it is the
+  // reader's POSITION, and the trail above already names it and is the way
+  // back out of it, so it is not drawn a second time as a removable filter.
+  // It is still counted: an issue focus or a node really does narrow the
+  // window, and the empty-result banner's "none satisfies all N filters"
+  // would be a lie if the filter doing the narrowing went uncounted.
   if (surface.chip) {
-    chips.push({ ...surface.chip, onClear: () => setSelection(null) })
+    chips.push({ ...surface.chip, position: true, onClear: () => setPath(ACTIVITY_HOME) })
   }
   if (facets.range !== "24h") {
     chips.push({ label: range.label, narrows: true, onClear: () => setFacets({ ...facets, range: "24h" }) })
@@ -438,25 +517,59 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const clearAllChips = React.useCallback(() => {
     setSearch("")
     setPinned(null)
-    setSelection(null)
+    setPath(ACTIVITY_HOME)
     setFacets((f) => ({ ...EMPTY_FACETS, scope: f.scope }))
   }, [])
 
   const scopeMeta = ACTIVITY_SCOPES.find((s) => s.key === facets.scope)
+
+  // One boolean, so the overview and a workflow cannot both be true. They were
+  // stacked: picking a workflow re-pointed the graph at the top and left the
+  // global overview under it, unchanged — same "56 events · past 24 hours ·
+  // every crew, agent, routine and issue in one place" for every workflow, two
+  // screenshots identical below the graph. One selection, one column.
+  const overviewShown =
+    !loading && !error && !emptyByFilters && surface.main === "overview" && facets.scope === "all"
+  // The feed as a list: one scope bucket, or one node of a chain. Same shape,
+  // different heading — a bucket is "everything that failed", a node is
+  // "everything this agent touched" — so it is one branch, not two that can
+  // both draw.
+  const listShown = !loading && !error && !emptyByFilters && surface.main !== "workflow" && !overviewShown
+  const listTitle = surface.node ? surface.node.label : (scopeMeta?.label ?? "Activity")
+  const listCaption = surface.node
+    ? `${visible.length.toLocaleString()} ${visible.length === 1 ? "event" : "events"} mentioning this ${
+        surface.node.kind
+      } in ${range.label.toLowerCase()}`
+    : `${visible.length.toLocaleString()} in ${range.label.toLowerCase()}`
+  const filterChips = chips.filter((c) => !c.position)
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
       <SubBar
         icon={Activity}
         title="Activity"
-        section={scopeMeta?.label}
+        // The header names the reader's position, not a fixed page. In a
+        // workflow the event count is not what is on screen — it counted the
+        // whole window while the column showed one chain, which is the same
+        // lie the stacked overview told underneath it.
+        section={stop ? stop.label : scopeMeta?.label}
         ariaLabel="Activity"
         description={
-          <>
-            {visible.length.toLocaleString()} {visible.length === 1 ? "event" : "events"} ·{" "}
-            {range.label.toLowerCase()}
-
-          </>
+          surface.main === "workflow" ? (
+            openChain ? (
+              <>
+                {openChain.runs.toLocaleString()} {openChain.runs === 1 ? "run" : "runs"} · started by{" "}
+                {openChain.started_by}
+              </>
+            ) : (
+              <>workflow</>
+            )
+          ) : (
+            <>
+              {visible.length.toLocaleString()} {visible.length === 1 ? "event" : "events"} ·{" "}
+              {range.label.toLowerCase()}
+            </>
+          )
         }
         actions={
           // No Pause, no Refresh. This surface is always live: the journal
@@ -494,7 +607,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
             <ActivitySidebar
               chains={chains}
               chainsHaveUnrecorded={chainsHaveUnrecorded}
-              selectedChain={surface.chainAnchor}
+              selectedChain={railChain}
               onSelectChain={selectChain}
               search={search}
               onSearchChange={setSearch}
@@ -509,7 +622,9 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               issueCounts={issueCounts}
               routineCounts={routineCounts}
               focus={focus}
-              onFocus={setSelection}
+              // The rail chooses which walk you are on, so it starts a new
+              // path rather than pushing onto the current one.
+              onFocus={(f) => setPath(selectStop(f))}
               total={focusScoped.length}
               onToggleCollapse={() => setRailCollapsed(true)}
             />
@@ -539,9 +654,58 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
             </div>
           ) : (
           <div className="flex min-h-0 min-w-0 flex-col">
-            {chips.length > 0 && (
+            {/* Where you are, and every place you came through to get here.
+                Rendered whenever the reader has left the overview, because a
+                column that can be four levels deep and cannot say which level
+                it is on is a place people stop trusting. */}
+            {path.stops.length > 0 && (
+              <nav
+                aria-label="Activity trail"
+                className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-3 py-1.5 text-xs"
+              >
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 gap-1 px-1.5 text-xs text-muted-foreground"
+                  onClick={goBack}
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  Back
+                </Button>
+                <span aria-hidden className="mx-1 h-3.5 w-px bg-white/10" />
+                {trail.crumbs.map((c, i) => (
+                  <React.Fragment key={c.depth}>
+                    {i > 0 && <ChevronRight aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/50" />}
+                    {/* The walk is longer than the trail: stops fell off the
+                        front at the depth cap, and a breadcrumb that quietly
+                        began in the middle would claim the reader started
+                        there. */}
+                    {i === 1 && trail.truncated && (
+                      <span className="text-muted-foreground/60" title="Earlier stops were dropped">
+                        …
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setPath((p) => jumpTo(p, c.depth))}
+                      aria-current={c.current ? "page" : undefined}
+                      className={cn(
+                        "max-w-[22ch] truncate rounded px-1.5 py-0.5 hover:bg-white/[0.06]",
+                        c.current ? "font-medium text-foreground" : "text-muted-foreground",
+                      )}
+                    >
+                      {c.label}
+                    </button>
+                  </React.Fragment>
+                ))}
+              </nav>
+            )}
+
+            {/* Filters, not position — the trail owns position. Hidden in a
+                workflow, where none of them describes what is on screen. */}
+            {filterChips.length > 0 && surface.main !== "workflow" && (
               <SidebarActiveChips className="shrink-0 border-b border-white/[0.06] px-4 py-1.5">
-                {chips.map((c) => (
+                {filterChips.map((c) => (
                   <SidebarActiveChip key={c.label} onRemove={c.onClear}>
                     {c.label}
                   </SidebarActiveChip>
@@ -550,13 +714,13 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
             )}
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {loading && entries.length === 0 && (
+              {surface.main !== "workflow" && loading && entries.length === 0 && (
                 <div className="flex items-center justify-center gap-2 py-20 text-xs text-muted-foreground">
                   <Spinner className="h-3.5 w-3.5" /> Loading activity…
                 </div>
               )}
 
-              {error && !loading && (
+              {surface.main !== "workflow" && error && !loading && (
                 <div className="px-6 py-14">
                   <EmptyState
                     icon={Activity}
@@ -578,24 +742,39 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   zeros: "nothing broke", "all clear", "Nothing has failed.
                   Nice." Every one of those is false; the truth is that nothing
                   was ASKED. The window has events, this question has none. */}
-              {/* A picked workflow opens as its own tree, above everything
-                  else. This is the payoff of the whole trace layer: one
-                  picture that crosses from the rule that started it, through
-                  the routine runs, into the agent work those dispatched —
-                  which until now stopped dead at the moment real work began. */}
-              {/* Shown only while the SELECTION is that workflow, so the graph
-                  cannot outlive the chip that names it. */}
-              {surface.chainAnchor && (
-                <div className="mx-auto w-full max-w-[1800px] p-4 md:p-6 md:pb-0">
-                  <TopologyCard
+              {/* A picked workflow IS the column — the payoff of the whole
+                  trace layer: one picture that crosses from the rule that
+                  started it, through the routine runs, into the agent work
+                  those dispatched. It used to be glued above the global
+                  overview, which then answered a question nobody asked; the
+                  overview is gone here, not pushed down. */}
+              {surface.main === "workflow" &&
+                (openChain ? (
+                  <WorkflowPage
                     workspaceId={workspaceId}
-                    anchor={surface.chainAnchor}
-                    anchorLabel={surface.chainLabel ?? undefined}
+                    chain={openChain}
+                    onBack={goBack}
+                    onOpenNode={openNode}
                   />
-                </div>
-              )}
+                ) : (
+                  // Reachable: the chains index is fetched once and not
+                  // streamed, so a row can be picked and then swept from the
+                  // list. Saying so beats a graph-shaped hole.
+                  <div className="px-6 py-14">
+                    <EmptyState
+                      icon={Activity}
+                      title="This workflow is no longer in the index"
+                      description={`“${surface.chainLabel ?? "It"}” was picked from a list that has since moved on. The runs it holds are still in the activity feed.`}
+                      action={
+                        <Button size="sm" variant="outline" onClick={goBack}>
+                          Back
+                        </Button>
+                      }
+                    />
+                  </div>
+                ))}
 
-              {!loading && !error && emptyByFilters && (
+              {surface.main !== "workflow" && !loading && !error && emptyByFilters && (
                 <div className="px-6 py-14">
                   <EmptyState
                     icon={FilterX}
@@ -614,7 +793,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                 </div>
               )}
 
-              {!loading && !error && !emptyByFilters && facets.scope === "all" && (
+              {overviewShown && (
                 <ActivityOverview
                   entries={visible}
                   rangeLabel={range.label}
@@ -637,28 +816,36 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                 />
               )}
 
-              {!loading && !error && !emptyByFilters && facets.scope !== "all" && (
+              {listShown && (
                 <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
                   <Appear order={0}>
                     <div>
-                      <h1 className="text-lg font-semibold tracking-tight">{scopeMeta?.label}</h1>
-                      <p className="text-xs text-muted-foreground">
-                        {visible.length.toLocaleString()} in {range.label.toLowerCase()}
-                      </p>
+                      <h1 className="text-lg font-semibold tracking-tight">{listTitle}</h1>
+                      <p className="text-xs text-muted-foreground">{listCaption}</p>
                     </div>
                   </Appear>
                   <Appear order={1}>
-                    <DashboardCard title={scopeMeta?.label ?? "Activity"} icon={Activity} hint={`${visible.length}`}>
+                    <DashboardCard title={listTitle} icon={Activity} hint={`${visible.length}`}>
                       {visible.length === 0 ? (
                         <div className="py-8">
                           <EmptyState
                             icon={Activity}
                             title="Nothing here"
-                            description="No event in this window matches. Widen the range or clear a filter."
+                            description={
+                              surface.node
+                                ? `Nothing in the loaded window mentions this ${surface.node.kind}. Widen the range, or go back.`
+                                : "No event in this window matches. Widen the range or clear a filter."
+                            }
                             action={
-                              <Button size="sm" variant="outline" onClick={() => setFacets(EMPTY_FACETS)}>
-                                Reset
-                              </Button>
+                              surface.node ? (
+                                <Button size="sm" variant="outline" onClick={goBack}>
+                                  Back
+                                </Button>
+                              ) : (
+                                <Button size="sm" variant="outline" onClick={() => setFacets(EMPTY_FACETS)}>
+                                  Reset
+                                </Button>
+                              )
                             }
                           />
                         </div>

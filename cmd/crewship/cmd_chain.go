@@ -48,7 +48,19 @@ type chainNode struct {
 	// ChainDepth is the run's own composition depth, not its distance from the
 	// anchor (that is Depth). Rendered only when non-zero, so an ordinary run
 	// reads exactly as it did before.
-	ChainDepth    int    `json:"chain_depth"`
+	ChainDepth int `json:"chain_depth"`
+	// OccurredAt / EndedAt / DurationMS are when the node happened and how long
+	// it took. Only run, assignment and inbox carry them; issue, routine, agent
+	// and automation are nouns and send nothing rather than their row's
+	// created_at, which is a different fact. See internal/chain.Node.
+	//
+	// DurationMS is a POINTER for the reason the server made it one: 0 is a run
+	// that finished inside a millisecond, and absent is a span that could not be
+	// derived. A plain int64 would decode both as 0 and this command would print
+	// "0ms" over work that is still running.
+	OccurredAt    string `json:"occurred_at"`
+	EndedAt       string `json:"ended_at"`
+	DurationMS    *int64 `json:"duration_ms"`
 	Anchor        bool   `json:"anchor"`
 	Partial       bool   `json:"partial"`
 	PartialReason string `json:"partial_reason"`
@@ -96,6 +108,39 @@ type chainSummary struct {
 	Failed        bool   `json:"failed"`
 	FirstActivity string `json:"first_activity"`
 	LastActivity  string `json:"last_activity"`
+	// DurationMS is wall clock first-to-last, and a POINTER for the reason the
+	// server made it one: null is a chain with nothing to measure between (a
+	// single run still going), and 0 would assert the work was instant.
+	DurationMS *int64 `json:"duration_ms"`
+	// What the chain reached. These are what tell two runs of ONE routine
+	// apart — the routine name is identical on both, the nouns are not.
+	//
+	// The lists are capped server-side; the counts are not. Rendering only the
+	// returned refs would make a chain that touched forty issues read as one
+	// that touched five, so both travel together and the count is the truth.
+	Issues     []chainIssueRef `json:"issues"`
+	IssueCount int             `json:"issue_count"`
+	Agents     []chainAgentRef `json:"agents"`
+	AgentCount int             `json:"agent_count"`
+}
+
+// chainIssueRef / chainAgentRef mirror internal/api. They exist here for one
+// reason: `-f json` re-marshals this struct, so a field this file does not
+// declare is silently absent from the output — the server answers and the
+// consumer sees null. TestChainSummary_CarriesEveryFieldTheServerSends pins
+// that, because the comment above them saying so was not enough.
+type chainIssueRef struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Created    bool   `json:"created,omitempty"`
+}
+
+type chainAgentRef struct {
+	ID          string `json:"id"`
+	Slug        string `json:"slug,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Assignments int    `json:"assignments"`
 }
 
 type chainList struct {
@@ -541,6 +586,9 @@ func chainNodeLine(n chainNode, edgeLabel string) string {
 	if n.Status != "" {
 		fmt.Fprintf(&b, "  %s(%s)%s", cli.Dim, sanitizeTerminal(n.Status), cli.Reset)
 	}
+	if when := chainWhen(n); when != "" {
+		fmt.Fprintf(&b, "  %s%s%s", cli.Dim, when, cli.Reset)
+	}
 	// A composed run says so. Printed only above zero: every hand-started run
 	// carries 0, and a "composed 0" on each of them would bury the handful that
 	// are actually composed.
@@ -551,6 +599,31 @@ func chainNodeLine(n chainNode, edgeLabel string) string {
 		fmt.Fprintf(&b, " %s(partial)%s", cli.Yellow, cli.Reset)
 	}
 	return b.String()
+}
+
+// chainWhen is the "…and when" half of a node line: a relative start, then the
+// span if there is one, e.g. "3h ago · 1m30s".
+//
+// Printed only from what the server sent, and the server sends nothing for a
+// kind that cannot answer — issue, routine, agent and automation are nouns, and
+// their row's created_at is a different fact from when anything in this chain
+// happened. So a blank here means "this kind has no time", not "the time is
+// missing", and inventing one would put a routine written last March on the
+// same line as the run it produced this morning.
+//
+// The duration is printed only when the server sent one. It is a POINTER on the
+// wire precisely so this can tell 0 (a run that finished inside a millisecond)
+// from absent (a run that has not finished): decoded into an int64 both would
+// arrive as 0, and "0ms" over an in-flight run reads as "instant".
+func chainWhen(n chainNode) string {
+	if n.OccurredAt == "" {
+		return ""
+	}
+	when := issueRelativeTime(n.OccurredAt)
+	if n.DurationMS == nil {
+		return when
+	}
+	return when + " · " + formatDurMs(*n.DurationMS)
 }
 
 // chainShortRef is the handle a reader uses to identify a node — and, more

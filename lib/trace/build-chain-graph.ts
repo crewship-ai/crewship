@@ -55,6 +55,33 @@ export interface ChainNode {
   anchor?: boolean
   partial?: boolean
   partial_reason?: string
+
+  /**
+   * When this node happened, and how long it took. All three are OPTIONAL and
+   * their absence is load-bearing: the server withholds them from any kind
+   * that cannot answer honestly, rather than sending a zero.
+   *
+   * Only `run`, `assignment` and `inbox` are events and carry them:
+   * `pipeline_runs.started_at`/`ended_at`, `assignments.started_at`/
+   * `finished_at`, and `inbox_items.created_at` (an instant with no span —
+   * `resolved_at` measures how long a human took, not how long the work took).
+   *
+   * `issue`, `routine`, `agent` and `automation` are NOUNS and carry nothing.
+   * Their tables all have a created_at, but "when the issue was filed" / "when
+   * the routine was written" / "when the agent was hired" / "when the rule was
+   * authored" is a different fact from when anything in this chain happened.
+   * When a rule fired is the `occurred_at` of the run it caused.
+   *
+   * Never substitute 0 or "" for an absent value on the way to a chart:
+   * `new Date(0)` is 1 January 1970 and sorts above everything real.
+   * `occurred_at`/`ended_at` are normalised UTC RFC3339 (fixed-width, always
+   * `Z`), so `new Date(s)` is safe. `duration_ms` is milliseconds and may
+   * legitimately be 0 — a run that finished inside a millisecond — which is a
+   * different answer from absent, so test for `undefined`, not falsiness.
+   */
+  occurred_at?: string
+  ended_at?: string
+  duration_ms?: number
 }
 
 export interface ChainEdge {
@@ -115,13 +142,33 @@ const EDGE_TOKEN: Record<string, string> = {
 const DASHED_EDGE_KINDS = new Set(["triggers", "produces", "relates"])
 
 /**
+ * The timing fields, carried through under the names the cards already use.
+ *
+ * Spread onto every kind rather than only the two that can fill it, so a kind
+ * that gains a time server-side does not need a second edit here — and so the
+ * absent case is uniform: `startedAt` falls back to `""` because that is what
+ * the run card has always been handed and what it already renders as "no time",
+ * while `durationMs` stays UNDEFINED. Defaulting the duration to 0 would be the
+ * bug the server went out of its way to avoid: 0 reads as "instant", and a run
+ * that is still going is not instant.
+ */
+function timingFor(n: ChainNode): Record<string, unknown> {
+  return {
+    startedAt: n.occurred_at ?? "",
+    endedAt: n.ended_at ?? "",
+    durationMs: n.duration_ms,
+  }
+}
+
+/**
  * Node data per kind.
  *
- * The chain response is deliberately thin — id, kind, label, status — so the
- * walker does not have to know what a card wants to draw. That means some
- * fields the components accept simply are not available here, and this fills
- * what it can rather than inventing the rest: an invented invocation count
- * looks like knowledge.
+ * The chain response is deliberately thin — id, kind, label, status, and now
+ * when the node happened — so the walker does not have to know what a card
+ * wants to draw. That means some fields the components accept simply are not
+ * available here, and this fills what it can rather than inventing the rest:
+ * an invented invocation count looks like knowledge, and so does an invented
+ * timestamp.
  */
 function dataFor(n: ChainNode): Record<string, unknown> {
   const common = {
@@ -129,6 +176,7 @@ function dataFor(n: ChainNode): Record<string, unknown> {
     partial: n.partial === true,
     partialReason: n.partial_reason ?? "",
     depth: n.depth,
+    ...timingFor(n),
   }
   switch (n.kind) {
     case "issue":
@@ -140,14 +188,13 @@ function dataFor(n: ChainNode): Record<string, unknown> {
         ...common,
         runId: n.ref,
         status: n.status ?? "",
-        startedAt: "",
         pipelineSlug: n.key ?? "",
       }
     case "assignment":
       // An assignment IS a run of agent work — the mission engine's half of
       // the substrate. It borrows the run card until it earns its own; the
       // label says which it is, so the reader is not misled.
-      return { ...common, runId: n.ref, status: n.status ?? "", startedAt: "", pipelineSlug: n.label }
+      return { ...common, runId: n.ref, status: n.status ?? "", pipelineSlug: n.label }
     case "agent":
       return { ...common, agentId: n.ref, slug: n.key ?? n.ref, name: n.label, avatarSeed: n.ref }
     case "inbox":
@@ -169,7 +216,7 @@ function dataFor(n: ChainNode): Record<string, unknown> {
         routineSlug: "",
       }
     default:
-      return { ...common, runId: n.ref, status: n.status ?? "", startedAt: "", pipelineSlug: n.label }
+      return { ...common, runId: n.ref, status: n.status ?? "", pipelineSlug: n.label }
   }
 }
 

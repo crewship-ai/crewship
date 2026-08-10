@@ -329,7 +329,10 @@ reports the consequence.
       "key": "deploy",
       "label": "deploy",
       "status": "failed",
-      "depth": 1
+      "depth": 1,
+      "occurred_at": "2026-08-07T09:41:02.000000000Z",
+      "ended_at": "2026-08-07T09:42:32.000000000Z",
+      "duration_ms": 90000
     }
   ],
   "edges": [
@@ -360,6 +363,9 @@ reports the consequence.
 | `nodes[].status` | string | Row status, verbatim from its table. |
 | `nodes[].depth` | integer | Shortest distance from the anchor, in hops. A property of **this query**: the same row reports a different value depending on where you started. |
 | `nodes[].chain_depth` | integer | `run` nodes only. `pipeline_runs.chain_depth` — how many **composed** hops separate this run from whatever a human did. A property of **the run**, identical whoever asks. Omitted when zero, so an absent field means "not composed" rather than "unknown". |
+| `nodes[].occurred_at` | string | When this node **happened**, RFC3339 UTC. Only `run`, `assignment` and `inbox` carry it — see [When a node happened](#when-a-node-happened). **Absent, never zero**, on every other kind. |
+| `nodes[].ended_at` | string | When it stopped, RFC3339 UTC. `run` and `assignment` only, and only once they have stopped. Absent while the work is still in flight, and absent whenever `occurred_at` is. |
+| `nodes[].duration_ms` | integer | Wall clock between the two, in milliseconds. `0` is a real answer (it finished inside a millisecond); **absent** means there is no span to measure. Test for presence, not for truthiness. |
 | `nodes[].anchor` | boolean | True on exactly one node. |
 | `nodes[].partial` | boolean | The node's outward expansion is known to be incomplete. |
 | `nodes[].partial_reason` | string | Why. Present whenever `partial` is true. |
@@ -442,6 +448,47 @@ Two consequences worth knowing:
   show a node you cannot click through to. The run keeps
   `triggered_via='automation'`, so the fact that *a* rule started it survives
   in the run record even when the rule itself is no longer readable.
+
+### When a node happened
+
+A chain answers "what caused what". `occurred_at` / `ended_at` / `duration_ms`
+answer "and when", which is what a timeline needs — but only three of the seven
+kinds can answer it honestly, and the other four send **nothing** rather than a
+plausible number.
+
+| Kind | Carries time? | Where it comes from |
+|---|---|---|
+| `run` | yes, with a span | `pipeline_runs.started_at` (never NULL) and `ended_at`. `ended_at` and the duration are absent while the run is in flight. |
+| `assignment` | yes, with a span | `assignments.started_at` and `finished_at`. |
+| `inbox` | an instant only | `inbox_items.created_at`. The row is written at the moment of the thing it reports, so its creation *is* the event. |
+| `issue` | **no** | `missions.created_at` is when the issue was **filed**. The issue spans the whole chain; what happened inside it are the runs and assignments, which carry their own times. |
+| `routine` | **no** | `pipelines.created_at` is when somebody **wrote** the routine — possibly months before this chain. |
+| `agent` | **no** | `agents.created_at` is when the agent was **hired**. |
+| `automation` | **no** | `automations.created_at` is when the rule was **authored**. When it *fired* is the `occurred_at` of the run it caused, already on that run's node. |
+
+Absence is the answer, not a gap. A zero timestamp renders as 1 January 1970
+and sorts above everything real, and a zero duration reads as "it was instant";
+both are confident lies about work whose time simply is not recorded. Do not
+substitute `0` or `""` on the way to a chart.
+
+Two details the wire format pins down:
+
+- **`duration_ms` is nullable, and `0` is meaningful.** `0` means the work
+  finished inside a millisecond. Absent means the span could not be derived —
+  it has not finished, or a stamp was unreadable. A client that treats `0` and
+  absent alike will draw an in-flight run as instantaneous.
+- **`ended_at` is never sent without `occurred_at`.** An assignment cancelled
+  before it ever started holds `finished_at` with `started_at` still NULL. A
+  node with an end and no beginning is not a shorter bar on a timeline, it is
+  an unplaceable one, so both are withheld.
+
+The two instants are normalised: always UTC, always RFC3339 with a `Z`,
+whatever syntax the underlying column held. The columns behind them are written
+by several producers in three different shapes — including SQLite's
+`2026-08-07 09:41:02.317`, which `new Date()` reads as *local* time in V8 and
+rejects outright elsewhere — so the endpoint parses and re-emits rather than
+passing the stored string through. A stamp it cannot parse is reported as
+absent rather than forwarded raw.
 
 ### Links that do not exist
 

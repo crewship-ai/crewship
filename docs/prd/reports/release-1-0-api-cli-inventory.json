@@ -6030,6 +6030,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_chain_test.go",
         "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/chain_handler_test.go",
@@ -6051,6 +6052,7 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
+            "cmd/crewship/cmd_chain_json_parity_test.go",
             "cmd/crewship/cmd_chain_test.go",
             "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/chain_handler_test.go",
@@ -25426,6 +25428,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_automation_matcher_loss_test.go",
+        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_routine_records_provenance_test.go"
       ]
@@ -26010,6 +26013,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_pipeline_cov_test.go"
       ],
@@ -26043,11 +26047,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
-        "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
       ],
       "flags": [
@@ -29616,13 +29620,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
+        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_eval_baseline_cov2_test.go",
         "cmd/crewship/cmd_eval_baseline_cov_test.go",
         "cmd/crewship/cmd_eval_baseline_test.go",
         "cmd/crewship/cmd_eval_compare_cov_test.go",
         "cmd/crewship/cmd_eval_cov_test.go",
-        "cmd/crewship/cmd_eval_get_cov_test.go",
         "…"
       ],
       "flags": [
@@ -36458,10 +36462,10 @@
         "cmd/crewship/cmd_admin_gdpr_test.go",
         "cmd/crewship/cmd_admin_stats_test.go",
         "cmd/crewship/cmd_ask_cov_test.go",
+        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_manage_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
-        "cmd/crewship/cmd_journal_cov_test.go",
         "…"
       ]
     },

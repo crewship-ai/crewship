@@ -82,6 +82,64 @@ type Node struct {
 	// "started by a human".
 	ChainDepth int `json:"chain_depth,omitempty"`
 
+	// OccurredAt is WHEN THIS NODE HAPPENED, and EndedAt/DurationMS are how
+	// long it took. All three are absent — never zero — on a kind that cannot
+	// answer, and absent is a load-bearing answer: a zero timestamp renders as
+	// 1970 and sorts to the top of every timeline, while a zero duration reads
+	// as "it was instant". Both are confident lies about work whose time is
+	// simply not recorded.
+	//
+	// Only three kinds carry time, because only three are EVENTS:
+	//
+	//   run        pipeline_runs.started_at (NOT NULL) and .ended_at. A run
+	//              began and stopped; the wall clock between the two is the
+	//              span. ended_at is NULL while the run is in flight, and then
+	//              the duration is absent too — see spanMS for why the
+	//              duration_ms COLUMN is not the number to report.
+	//
+	//   assignment assignments.started_at and .finished_at. Of the four
+	//              timestamps on that table this is the only pair that names
+	//              when the work happened on every row that did work.
+	//              queued_at is stamped only when the crew budget was full, so
+	//              NULL means "never waited" rather than "unknown", and on a
+	//              row that did wait it names the moment work was BLOCKED.
+	//              running_at is stamped only by the crew-slot CAS
+	//              (internal/api/assignments_queue.go) and is NULL on every row
+	//              the direct dispatch path started. created_at is when the
+	//              work was REQUESTED — the gap to started_at is queue dwell,
+	//              which belongs to the queue, not to the work. started_at is
+	//              written by BOTH dispatch paths, so it is the one stamp every
+	//              row that ran actually has.
+	//
+	//   inbox      inbox_items.created_at, which the writer stamps at the
+	//              instant of the thing the item reports, so the row's creation
+	//              IS the event. No span: resolved_at exists, but "how long a
+	//              human took to answer" is a different measurement from "how
+	//              long the work took", and one field name for both puts two
+	//              incomparable bars on one axis.
+	//
+	// issue, routine, agent and automation carry NOTHING, although every one of
+	// their tables has a created_at that would fill this field without
+	// complaint. They are nouns, not events, and their creation time is a
+	// different fact from "when this happened in this chain":
+	// missions.created_at is when the issue was filed (the issue spans the
+	// chain; the things that happened inside it are the runs and assignments,
+	// which carry their own times), pipelines.created_at is when somebody wrote
+	// the routine — possibly months before this chain — agents.created_at is
+	// when the agent was hired, and automations.created_at is when the rule was
+	// written, whereas when it FIRED is the started_at of the run it caused,
+	// already on that run's node.
+	//
+	// Both instants are emitted in one normalised UTC form whatever syntax the
+	// column held; see timing.go, which is where the three stored syntaxes are
+	// enumerated.
+	OccurredAt string `json:"occurred_at,omitempty"`
+	EndedAt    string `json:"ended_at,omitempty"`
+	// DurationMS is a pointer because 0 and absent are different answers: 0 is
+	// a run that finished inside a millisecond, absent is a span that cannot be
+	// derived. A plain int64 with omitempty would collapse them.
+	DurationMS *int64 `json:"duration_ms,omitempty"`
+
 	// Partial marks a node whose outward expansion is known to be incomplete,
 	// with PartialReason naming why. Two causes, deliberately not separated:
 	// a link the schema does not carry, and a boundary this walk declines to

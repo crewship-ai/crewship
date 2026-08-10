@@ -50,9 +50,17 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	// than a nested tree, because the underlying data is a graph: a run
 	// reached from both its routine and its issue has two parents, and any
 	// tree encoding would have to drop one of those edges.
+	// occurred_at/ended_at/duration_ms are OMITTED, never zeroed, on a kind that
+	// cannot answer: only run, assignment and inbox are events. issue, routine,
+	// agent and automation are nouns whose created_at is a different fact from
+	// "when this happened in this chain", so they send nothing — a zero
+	// timestamp is 1970 and sorts to the top of every timeline. duration_ms is
+	// nullable for the same reason chains[].duration_ms is: 0 means "finished
+	// inside a millisecond", absent means "no span to measure".
 	chainNode := object(map[string]any{
 		"id": str(), "kind": str(), "ref": str(), "key": str(), "label": str(),
-		"status": str(), "depth": integer(), "anchor": boolean(),
+		"status": str(), "depth": integer(), "chain_depth": integer(), "anchor": boolean(),
+		"occurred_at": dateTime(), "ended_at": dateTime(), "duration_ms": integer(),
 		"partial": boolean(), "partial_reason": str(),
 	})
 	chainEdge := object(map[string]any{"from": str(), "to": str(), "kind": str()})

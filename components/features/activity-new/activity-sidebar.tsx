@@ -2,18 +2,21 @@
 
 // Left rail for /activity-new.
 //
-// Same shape as the Routines rail on purpose: a search box and a Filter
-// trigger in the toolbar, then bucket rows you click, then the entity list.
-// Secondary facets (time range, source, severity, agent) live INSIDE the
-// filter popover rather than sitting permanently expanded — the first draft
-// of this page unfolded all five at once and turned the rail into a wall.
+// The rail is NAVIGATION and nothing else: one line of status segments, then
+// the workflow list. That is the whole column.
+//
+// It used to stack four unrelated things in it — a status bucket list, a crew
+// list, 17 issues, 39 routines — and then the workflows underneath, so a place
+// you go and a way to narrow what you see looked like the same kind of row.
+// "Failed" existed twice (a bucket here, `severity: error` in the popover) and
+// a filter that matched nothing left 56 rows all reading 0. Every narrowing now
+// lives in the filter popover, where a narrowing belongs; the decisions behind
+// that split are pure functions in lib/activity-rail.ts.
 //
 // SidebarFilterPopover owns the panel, so a pick never closes it and never
 // clears a sibling facet (#1776).
 
 import * as React from "react"
-import { Activity, CheckCircle2, PauseCircle, ScrollText, XCircle } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
 
 import {
   SidebarCollapseButton,
@@ -26,7 +29,6 @@ import {
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
 import { StatusIcon } from "@/components/features/issues/status-icon"
-import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
@@ -34,14 +36,31 @@ import type { ChainSummary } from "@/hooks/use-chains"
 import { chainTouched } from "@/lib/chain-touched"
 import { relTime } from "@/lib/time"
 import {
-  ACTIVITY_SCOPES,
   ACTIVITY_SOURCES,
   formatDurationMs,
   railInventory,
   type ActivityScope,
   type ActivitySource,
 } from "@/lib/activity-stream"
+import {
+  DEFAULT_RANGE,
+  RAIL_SEVERITIES,
+  TIME_RANGES,
+  activeFilterCount,
+  clearedFilters,
+  filterFacets,
+  railSegments,
+  railSources,
+  type RailSegment,
+  type TimeRangeKey,
+} from "@/lib/activity-rail"
 import { cn } from "@/lib/utils"
+
+// Re-exported so the shell keeps importing the range table from the rail it
+// belongs to; the values themselves moved to lib/activity-rail.ts, where the
+// "24h is the default, not a filter" rule can be tested.
+export { TIME_RANGES }
+export type { TimeRangeKey }
 
 /**
  * What the rail is currently pointed at.
@@ -50,7 +69,8 @@ import { cn } from "@/lib/utils"
  * issue and the whole surface — cards, chart, counts — narrows to that
  * issue's activity. That is the difference the user asked for between this
  * rail and the ones on /issues and /routines, which navigate to the entity
- * itself.
+ * itself. It is why the issue and routine lists sit in the filter popover
+ * now: they were always narrowings wearing navigation's clothes.
  */
 export interface EntityFocus {
   kind: "issue" | "routine" | "crew"
@@ -85,35 +105,6 @@ export interface SidebarCrew {
   color?: string | null
 }
 
-// Scope icons + tones are lifted verbatim from the Routines rail's STATUS
-// bucket list (routines-explorer.tsx:67). Two rails showing "Failed" with a
-// different glyph is the kind of near-miss that makes an app feel assembled
-// rather than designed.
-const SCOPE_ICON: Record<string, { icon: LucideIcon; tone: string }> = {
-  all: { icon: ScrollText, tone: "text-foreground/70" },
-  waiting: { icon: PauseCircle, tone: "text-warn" },
-  active: { icon: Activity, tone: "text-primary" },
-  completed: { icon: CheckCircle2, tone: "text-success" },
-  done: { icon: CheckCircle2, tone: "text-success" },
-  failed: { icon: XCircle, tone: "text-destructive" },
-}
-
-export const TIME_RANGES = [
-  { key: "1h", label: "Past hour", ms: 60 * 60_000 },
-  { key: "24h", label: "Past 24 hours", ms: 24 * 60 * 60_000 },
-  { key: "7d", label: "Past 7 days", ms: 7 * 24 * 60 * 60_000 },
-  { key: "30d", label: "Past 30 days", ms: 30 * 24 * 60 * 60_000 },
-] as const
-
-export type TimeRangeKey = (typeof TIME_RANGES)[number]["key"]
-
-const SEVERITIES = [
-  { key: "error", label: "Error", token: "--destructive" },
-  { key: "warn", label: "Warning", token: "--warn" },
-  { key: "notice", label: "Notice", token: "--notice" },
-  { key: "info", label: "Info", token: "--muted-foreground" },
-] as const
-
 export interface FacetState {
   scope: ActivityScope | "all"
   sources: ActivitySource[]
@@ -131,7 +122,7 @@ export const EMPTY_FACETS: FacetState = {
   severities: [],
   crewIDs: [],
   agentIDs: [],
-  range: "24h",
+  range: DEFAULT_RANGE,
   showTelemetry: false,
 }
 
@@ -139,11 +130,11 @@ function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
 }
 
-function Dot({ token, pulse }: { token: string; pulse?: boolean }) {
+function Dot({ token }: { token: string }) {
   return (
     <span
       aria-hidden
-      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", pulse && "animate-pulse")}
+      className="h-1.5 w-1.5 shrink-0 rounded-full"
       style={{ background: `var(${token})` }}
     />
   )
@@ -159,6 +150,68 @@ function Count({ n, dim }: { n: number; dim?: boolean }) {
     >
       {n}
     </span>
+  )
+}
+
+/**
+ * The status line: All · Running · Waiting · Failed, one line, one choice.
+ *
+ * This replaces the STATUS section — five full-width rows for what is a single
+ * mutually-exclusive pick. The tones are the ones the overview cards already
+ * read for the same four buckets (--info / --warn / --destructive / --success),
+ * so a failure is one colour across the page; the bucket-list glyphs went with
+ * the bucket list.
+ *
+ * A segment with no number is one this query cannot count, not one holding
+ * nothing — see railSegments.
+ */
+function ScopeSegments({
+  segments,
+  scope,
+  onScope,
+}: {
+  segments: RailSegment[]
+  scope: FacetState["scope"]
+  onScope: (s: FacetState["scope"]) => void
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Activity status"
+      className="mx-2 mb-1.5 flex shrink-0 items-center gap-0.5 rounded-md border border-white/[0.08] bg-white/[0.04] p-0.5"
+    >
+      {segments.map((s) => {
+        const selected = scope === s.key
+        const empty = s.count === 0
+        return (
+          <button
+            key={s.key}
+            type="button"
+            aria-pressed={selected}
+            title={s.hint}
+            onClick={() => onScope(s.key)}
+            className={cn(
+              "flex min-w-0 flex-1 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] transition-colors",
+              selected
+                ? "bg-primary/15 text-primary"
+                : empty
+                  ? "text-foreground/40 hover:bg-white/[0.04] hover:text-foreground"
+                  : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
+            )}
+          >
+            <span className="truncate">{s.label}</span>
+            {s.count != null && s.count > 0 && (
+              <span
+                className="shrink-0 font-mono text-[10px] tabular-nums"
+                style={selected ? undefined : { color: `var(${s.token})` }}
+              >
+                {s.count}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
@@ -183,9 +236,9 @@ export interface ActivitySidebarProps {
    * work that shares one cause — the rule or person that started it, the
    * routine runs it caused, the agent work those dispatched.
    *
-   * Listed FIRST because it is the question the rail exists to answer. The
-   * sections under it slice the same activity by type, which is only useful
-   * once you already know which run you are looking at.
+   * The only list left in the rail, because it is the question the rail exists
+   * to answer. Everything that used to sit beside it sliced the same activity
+   * by type, which is a filter, and filters live behind the Filter button.
    */
   chains: ChainSummary[]
   chainsHaveUnrecorded: boolean
@@ -216,21 +269,9 @@ export function ActivitySidebar({
   onSelectChain,
   onToggleCollapse,
 }: ActivitySidebarProps) {
-  const [openSection, setOpenSection] = React.useState<Record<string, boolean>>({
-    // Open by default: it is the question the rail exists to answer, and a
-    // collapsed section is a feature nobody finds.
-    chains: true,
-    scope: true,
-    crews: true,
-    issues: false,
-    routines: false,
-  })
-  const toggleSection = (k: string) =>
-    setOpenSection((s) => ({ ...s, [k]: !s[k] }))
-
-  // See railInventory. Unfocused the rail answers "where is the activity";
-  // focused it has to answer "where else can I go", or clicking one issue
-  // deletes every other row and there is no way back out except the crumb.
+  // See railInventory. Unfocused the popover answers "where is the activity";
+  // focused it has to answer "where else can I go", or picking one issue
+  // deletes every other option and there is no way back out except the crumb.
   const activeIssues = React.useMemo(
     () => railInventory(issues, issueCounts, (i) => i.id, focus != null),
     [issues, issueCounts, focus],
@@ -247,12 +288,19 @@ export function ActivitySidebar({
     [agents, facets.crewIDs],
   )
 
-  const filterCount =
-    facets.sources.length +
-    facets.severities.length +
-    facets.agentIDs.length +
-    (facets.range === "24h" ? 0 : 1) +
-    (facets.showTelemetry ? 1 : 0)
+  const segments = React.useMemo(
+    () => railSegments(facets.scope, scopeCounts, total),
+    [facets.scope, scopeCounts, total],
+  )
+
+  const facetKeys = filterFacets({
+    crews: crews.length,
+    agents: visibleAgents.length,
+    issues: activeIssues.length,
+    routines: activeRoutines.length,
+  })
+  const has = (k: (typeof facetKeys)[number]) => facetKeys.includes(k)
+  const first = (k: (typeof facetKeys)[number]) => facetKeys[0] === k
 
   return (
     <div className="flex h-full flex-col">
@@ -265,19 +313,173 @@ export function ActivitySidebar({
         />
         <SidebarFilterPopover
           label="Filter activity"
-          activeCount={filterCount}
-          onClear={() =>
-            onChange({ ...facets, sources: [], severities: [], agentIDs: [], range: "24h" })
-          }
+          activeCount={activeFilterCount(facets, focus != null)}
+          // The panel is anchored to the trigger's right edge inside a 280px
+          // rail that clips its overflow, so anything wider than the trigger's
+          // distance from the rail's left edge loses its first characters —
+          // "FILTERS" rendering as "TERS" is what 264px looked like.
+          panelClassName="w-[228px]"
+          onClear={() => {
+            onChange(clearedFilters(facets))
+            onFocus(null)
+          }}
         >
+          {has("crew") && (
+            <SidebarFacet
+              first={first("crew")}
+              label="Crew"
+              resetLabel="All crews"
+              resetActive={facets.crewIDs.length === 0}
+              onReset={() => onChange({ ...facets, crewIDs: [], agentIDs: [] })}
+            >
+              {crews.map((c) => {
+                const n = crewCounts[c.id] ?? 0
+                return (
+                  <SidebarFacetOption
+                    key={c.id}
+                    active={facets.crewIDs.includes(c.id)}
+                    onToggle={() => {
+                      const crewIDs = toggle(facets.crewIDs, c.id)
+                      // Dropping a crew drops its agents too — otherwise the
+                      // filter keeps narrowing on someone no longer listed.
+                      const stillVisible = new Set(
+                        agents
+                          .filter((a) => a.crew_id && crewIDs.includes(a.crew_id))
+                          .map((a) => a.id),
+                      )
+                      onChange({
+                        ...facets,
+                        crewIDs,
+                        agentIDs:
+                          crewIDs.length === 0
+                            ? facets.agentIDs
+                            : facets.agentIDs.filter((id) => stillVisible.has(id)),
+                      })
+                    }}
+                  >
+                    {/* The crew's own icon + colour, the same derivation the
+                        crew pages use — two surfaces drawing one crew
+                        differently is worse than drawing none. */}
+                    <CrewIcon
+                      icon={c.icon ?? "users"}
+                      color={c.color}
+                      size="sm"
+                      className={cn("!h-4 !w-4 !rounded shrink-0", n === 0 && "opacity-40")}
+                    />
+                    <span className="truncate">{c.name}</span>
+                    <Count n={n} dim={n === 0} />
+                  </SidebarFacetOption>
+                )
+              })}
+            </SidebarFacet>
+          )}
+
+          {has("agent") && (
+            <SidebarFacet
+              first={first("agent")}
+              label="Agent"
+              resetLabel="All agents"
+              resetActive={facets.agentIDs.length === 0}
+              onReset={() => onChange({ ...facets, agentIDs: [] })}
+            >
+              {visibleAgents.map((a) => (
+                <SidebarFacetOption
+                  key={a.id}
+                  active={facets.agentIDs.includes(a.id)}
+                  onToggle={() => onChange({ ...facets, agentIDs: toggle(facets.agentIDs, a.id) })}
+                >
+                  <AgentAvatar seed={a.id} alt="" className="h-4 w-4 shrink-0 rounded-full" />
+                  <span className="truncate">{a.name}</span>
+                </SidebarFacetOption>
+              ))}
+            </SidebarFacet>
+          )}
+
+          {has("issue") && (
+            <SidebarFacet
+              first={first("issue")}
+              label="Issue"
+              resetLabel="Any issue"
+              resetActive={focus?.kind !== "issue"}
+              onReset={() => focus?.kind === "issue" && onFocus(null)}
+            >
+              {activeIssues.map((issue) => (
+                <SidebarFacetOption
+                  key={issue.id}
+                  active={focus?.kind === "issue" && focus.id === issue.id}
+                  onToggle={() =>
+                    onFocus(
+                      focus?.kind === "issue" && focus.id === issue.id
+                        ? null
+                        : {
+                            kind: "issue",
+                            id: issue.id,
+                            label: issue.identifier || issue.title,
+                          },
+                    )
+                  }
+                >
+                  <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+                  {/* The identifier only when there is one. A fixed column
+                      spent 42px of a 228px panel printing "--" for every
+                      issue in a workspace that does not use identifiers. */}
+                  {issue.identifier && (
+                    <span className="shrink-0 font-mono text-[10px] text-foreground/50">
+                      {issue.identifier}
+                    </span>
+                  )}
+                  <span className="truncate" title={issue.title}>
+                    {issue.title}
+                  </span>
+                  <Count n={issueCounts[issue.id] ?? 0} />
+                </SidebarFacetOption>
+              ))}
+            </SidebarFacet>
+          )}
+
+          {has("routine") && (
+            <SidebarFacet
+              first={first("routine")}
+              label="Routine"
+              resetLabel="Any routine"
+              resetActive={focus?.kind !== "routine"}
+              onReset={() => focus?.kind === "routine" && onFocus(null)}
+            >
+              {activeRoutines.map((r) => (
+                <SidebarFacetOption
+                  key={r.id}
+                  active={focus?.kind === "routine" && focus.id === r.slug}
+                  onToggle={() =>
+                    onFocus(
+                      focus?.kind === "routine" && focus.id === r.slug
+                        ? null
+                        : { kind: "routine", id: r.slug, label: r.name },
+                    )
+                  }
+                >
+                  {/* Same icon + colour derivation as the routines rail and
+                      the routine detail header. */}
+                  <CrewIcon
+                    icon={resolveRoutineIcon(r as never)}
+                    color={resolveRoutineColor(r as never)}
+                    size="sm"
+                    className="!h-4 !w-4 !rounded shrink-0"
+                  />
+                  <span className="truncate">{r.name}</span>
+                  <Count n={routineCounts[r.slug] ?? 0} />
+                </SidebarFacetOption>
+              ))}
+            </SidebarFacet>
+          )}
+
           <SidebarFacet
-            first
+            first={first("range")}
             label="Time range"
             resetLabel="Past 24 hours"
-            resetActive={facets.range === "24h"}
-            onReset={() => onChange({ ...facets, range: "24h" })}
+            resetActive={facets.range === DEFAULT_RANGE}
+            onReset={() => onChange({ ...facets, range: DEFAULT_RANGE })}
           >
-            {TIME_RANGES.filter((r) => r.key !== "24h").map((r) => (
+            {TIME_RANGES.filter((r) => r.key !== DEFAULT_RANGE).map((r) => (
               <SidebarFacetOption
                 key={r.key}
                 active={facets.range === r.key}
@@ -294,7 +496,7 @@ export function ActivitySidebar({
             resetActive={facets.sources.length === 0}
             onReset={() => onChange({ ...facets, sources: [] })}
           >
-            {ACTIVITY_SOURCES.map((s) => (
+            {railSources(ACTIVITY_SOURCES).map((s) => (
               <SidebarFacetOption
                 key={s.key}
                 active={facets.sources.includes(s.key)}
@@ -308,17 +510,21 @@ export function ActivitySidebar({
             ))}
           </SidebarFacet>
 
+          {/* No "Error" here: that is the Failed segment above, and the same
+              query. See RAIL_SEVERITIES. */}
           <SidebarFacet
             label="Severity"
             resetLabel="Any severity"
             resetActive={facets.severities.length === 0}
             onReset={() => onChange({ ...facets, severities: [] })}
           >
-            {SEVERITIES.map((s) => (
+            {RAIL_SEVERITIES.map((s) => (
               <SidebarFacetOption
                 key={s.key}
                 active={facets.severities.includes(s.key)}
-                onToggle={() => onChange({ ...facets, severities: toggle(facets.severities, s.key) })}
+                onToggle={() =>
+                  onChange({ ...facets, severities: toggle(facets.severities, s.key) })
+                }
               >
                 <Dot token={s.token} />
                 {s.label}
@@ -336,43 +542,28 @@ export function ActivitySidebar({
               active={facets.showTelemetry}
               onToggle={() => onChange({ ...facets, showTelemetry: !facets.showTelemetry })}
             >
-              <span className="truncate" title="container.metrics, snapshots, exec output, status pings">
+              <span
+                className="truncate"
+                title="container.metrics, snapshots, exec output, status pings"
+              >
                 Show system telemetry
               </span>
             </SidebarFacetOption>
           </SidebarFacet>
-
-          {visibleAgents.length > 0 && (
-            <SidebarFacet
-              label="Agent"
-              resetLabel="All agents"
-              resetActive={facets.agentIDs.length === 0}
-              onReset={() => onChange({ ...facets, agentIDs: [] })}
-            >
-              {visibleAgents.map((a) => (
-                <SidebarFacetOption
-                  key={a.id}
-                  active={facets.agentIDs.includes(a.id)}
-                  onToggle={() => onChange({ ...facets, agentIDs: toggle(facets.agentIDs, a.id) })}
-                >
-                  <span className="truncate">{a.name}</span>
-                </SidebarFacetOption>
-              ))}
-            </SidebarFacet>
-          )}
         </SidebarFilterPopover>
         <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
       </SidebarToolbar>
 
+      <ScopeSegments
+        segments={segments}
+        scope={facets.scope}
+        onScope={(s) => onChange({ ...facets, scope: s })}
+      />
+
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-        <SidebarSection
-          label="Workflows"
-          count={chains.length}
-          collapsible
-          collapsed={!openSection.chains}
-          onToggle={() => toggleSection("chains")}
-          className="border-b border-white/[0.06]"
-        >
+        {/* Not collapsible: it is the only list in the rail now, and a chevron
+            whose one job is to empty the column is a trap, not a control. */}
+        <SidebarSection label="Workflows" count={chains.length}>
           {chains.length === 0 ? (
             <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground-soft">
               {chainsHaveUnrecorded
@@ -427,209 +618,6 @@ export function ActivitySidebar({
             </p>
           )}
         </SidebarSection>
-
-        <SidebarSection
-          label="Status"
-          count={ACTIVITY_SCOPES.length + 1}
-          collapsible
-          collapsed={!openSection.scope}
-          onToggle={() => toggleSection("scope")}
-          className="border-b border-white/[0.06]"
-        >
-          {[{ key: "all" as const, label: "All activity" }, ...ACTIVITY_SCOPES].map((s) => {
-            const conf = SCOPE_ICON[s.key] ?? SCOPE_ICON.all
-            const IconComp = conf.icon
-            const isSelected = facets.scope === s.key
-            const count = s.key === "all" ? total : scopeCounts[s.key as ActivityScope]
-            return (
-              <SidebarRow
-                key={s.key}
-                selected={isSelected}
-                onSelect={() => onChange({ ...facets, scope: s.key })}
-              >
-                {/* A bucket holding nothing dims to match — five rows of
-                    equal weight, three of them zero, is what makes a column
-                    read as a wall. Same rule as the Routines rail. */}
-                <IconComp
-                  className={cn(
-                    "h-3.5 w-3.5 shrink-0",
-                    conf.tone,
-                    count === 0 && !isSelected && "opacity-40",
-                    s.key === "active" && count > 0 && "animate-pulse",
-                  )}
-                />
-                <span
-                  className={cn(
-                    "flex-1 truncate",
-                    count === 0 && !isSelected ? "text-foreground/40" : "text-foreground/80",
-                  )}
-                >
-                  {s.label}
-                </span>
-                <span
-                  className={cn(
-                    "rounded-full px-1.5 py-px text-[10px] tabular-nums",
-                    count === 0
-                      ? "text-muted-foreground-soft/50"
-                      : isSelected
-                        ? "bg-primary/15 text-primary"
-                        : "bg-white/[0.05] text-muted-foreground",
-                  )}
-                >
-                  {count}
-                </span>
-              </SidebarRow>
-            )
-          })}
-        </SidebarSection>
-
-        {crews.length > 0 && (
-          <SidebarSection
-            label="Crews"
-            count={crews.length}
-            collapsible
-            collapsed={!openSection.crews}
-            onToggle={() => toggleSection("crews")}
-          >
-            {crews.map((c) => {
-              const n = crewCounts[c.id] ?? 0
-              return (
-                <SidebarRow
-                  key={c.id}
-                  selected={facets.crewIDs.includes(c.id)}
-                  onSelect={() => {
-                    const crewIDs = toggle(facets.crewIDs, c.id)
-                    // Dropping a crew drops its agents too — otherwise the
-                    // filter keeps narrowing on someone no longer listed.
-                    const stillVisible = new Set(
-                      agents.filter((a) => a.crew_id && crewIDs.includes(a.crew_id)).map((a) => a.id),
-                    )
-                    onChange({
-                      ...facets,
-                      crewIDs,
-                      agentIDs:
-                        crewIDs.length === 0
-                          ? facets.agentIDs
-                          : facets.agentIDs.filter((id) => stillVisible.has(id)),
-                    })
-                  }}
-                >
-                  {/* The crew's own icon + colour, the same derivation the
-                      crew pages use — two surfaces drawing one crew
-                      differently is worse than drawing none. */}
-                  <CrewIcon
-                    icon={c.icon ?? "users"}
-                    color={c.color}
-                    size="sm"
-                    className={cn("!h-4 !w-4 !rounded shrink-0", n === 0 && "opacity-40")}
-                  />
-                  <span className={cn("truncate flex-1", n === 0 && "text-foreground/40")}>{c.name}</span>
-                  <Count n={n} dim={n === 0} />
-                </SidebarRow>
-              )
-            })}
-          </SidebarSection>
-        )}
-
-        {activeIssues.length > 0 && (
-          <SidebarSection
-            label="Issues"
-            count={activeIssues.length}
-            collapsible
-            collapsed={!openSection.issues}
-            onToggle={() => toggleSection("issues")}
-          >
-            {activeIssues.map((issue) => (
-              <SidebarRow
-                key={issue.id}
-                selected={focus?.kind === "issue" && focus.id === issue.id}
-                onSelect={() =>
-                  onFocus(
-                    focus?.kind === "issue" && focus.id === issue.id
-                      ? null
-                      : {
-                          kind: "issue",
-                          id: issue.id,
-                          label: issue.identifier || issue.title,
-                        },
-                  )
-                }
-              >
-                <span className="relative shrink-0">
-                  <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                  {issue.status === "IN_PROGRESS" && (
-                    <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-success agent-active-dot" />
-                  )}
-                </span>
-                <span className="w-[44px] shrink-0 truncate font-mono text-[10px] text-foreground/50">
-                  {issue.identifier || "--"}
-                </span>
-                <span className="flex-1 truncate text-foreground/80">{issue.title}</span>
-                {issue.assignee_id && (
-                  <AgentAvatar
-                    seed={issue.assignee_id}
-                    alt={issue.assignee_name || ""}
-                    className="h-4 w-4 shrink-0 rounded-full"
-                  />
-                )}
-                <PriorityIcon priority={(issue.priority || "none") as never} className="h-3 w-3 shrink-0" />
-                <Count n={issueCounts[issue.id] ?? 0} />
-              </SidebarRow>
-            ))}
-          </SidebarSection>
-        )}
-
-        {activeRoutines.length > 0 && (
-          <SidebarSection
-            label="Routines"
-            count={activeRoutines.length}
-            collapsible
-            collapsed={!openSection.routines}
-            onToggle={() => toggleSection("routines")}
-          >
-            {activeRoutines.map((r) => {
-              const last = r.last_invocation_status?.toLowerCase()
-              const dot =
-                last === "completed"
-                  ? "bg-success"
-                  : last === "failed"
-                    ? "bg-destructive"
-                    : last === "running"
-                      ? "bg-primary animate-pulse"
-                      : "bg-muted-foreground/30"
-              return (
-                <SidebarRow
-                  key={r.id}
-                  selected={focus?.kind === "routine" && focus.id === r.slug}
-                  onSelect={() =>
-                    onFocus(
-                      focus?.kind === "routine" && focus.id === r.slug
-                        ? null
-                        : { kind: "routine", id: r.slug, label: r.name },
-                    )
-                  }
-                >
-                  {/* Same icon + colour derivation as the routines rail and
-                      the routine detail header. */}
-                  <span className="relative shrink-0">
-                    <CrewIcon
-                      icon={resolveRoutineIcon(r as never)}
-                      color={resolveRoutineColor(r as never)}
-                      size="sm"
-                      className="!h-4 !w-4 !rounded shrink-0"
-                    />
-                    <span
-                      aria-hidden
-                      className={cn("absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full ring-2 ring-card", dot)}
-                    />
-                  </span>
-                  <span className="flex-1 truncate text-foreground/80">{r.name}</span>
-                  <Count n={routineCounts[r.slug] ?? 0} />
-                </SidebarRow>
-              )
-            })}
-          </SidebarSection>
-        )}
       </div>
     </div>
   )

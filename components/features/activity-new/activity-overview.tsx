@@ -1,34 +1,51 @@
 "use client"
 
-// The Activity overview — a card dashboard, not a log.
+// The Activity overview — two questions, and the evidence for each.
 //
-// This page and /journal read the SAME table, and the first draft of this
-// file forgot that and rebuilt the journal: a seven-column grid of ts /
-// type / severity rows. The journal already does that, better. What was
-// missing is the question you ask BEFORE you go reading rows — what is
-// running, what is stuck on me, what broke, and is today normal — which is
-// a dashboard question and gets dashboard answers.
+// A person opens this page for one of exactly two reasons: something might
+// be waiting on them, or something might be broken. The first draft answered
+// neither. It opened with four equal KPI tiles and an ACTIVITY MIX donut
+// counting events by type — "how many messages versus runs" — which is a
+// number with no question behind it, and it pushed the two things that ARE
+// asked below the fold at a quarter of the weight.
 //
-// Every card is built from the same KpiCard / DashboardCard / StatusDonut
-// vocabulary as the Routines overview, so the two pages are the same object
-// at different subjects rather than two houses in one street.
+// So the page is now shaped like the questions:
+//
+//   a one-line NOW strip     — what is in flight, small, because "3 agents
+//                              are working" is a glance, not a quarter of
+//                              the screen
+//   WAITING ON YOU / FAILURES— side by side, each with its number big and
+//                              its evidence underneath
+//   LATEST ACTIVITY          — kept: at scope "all" this component IS the
+//                              whole content area, so dropping it would
+//                              leave no way to see a recent event at all
+//   FAILURES · N DAYS        — kept, but re-aimed from "how much happened"
+//                              at "is this breakage new", which is part of
+//                              the second question rather than a third one.
+//                              N is what the window can speak for, and the
+//                              card hides itself below two days.
+//
+// The judgements — which zero is which, what still counts as waiting on a
+// person, what one broken thing is — are in lib/activity-overview.ts, where
+// they can be tested without a DOM.
+//
+// Every card is built from the same KpiCard / DashboardCard vocabulary as
+// the Routines overview, so the two pages stay one object at two subjects.
 
 import * as React from "react"
 import {
   Activity as ActivityIcon,
   AlertTriangle,
-  Ban,
   Bell,
   Bot,
   Brain,
-  CircleDot,
   Coins,
   FileText,
+  Inbox,
   MessageSquare,
-  PieChart,
-  Play,
   ShieldCheck,
   Terminal,
+  TrendingDown,
   Workflow,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
@@ -43,21 +60,24 @@ import {
 import { Appear } from "@/components/ui/detail"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { StatusDonut } from "@/components/features/dashboard/status-donut"
+import { cn } from "@/lib/utils"
 import {
-  ACTIVITY_SCOPES,
   activitySource,
   dailyCounts,
   formatDurationMs,
-  entryCostUSD,
-  entryDurationMs,
-  scopeOf,
-  sourceMix,
   type ActivityScope,
   type ActivitySource,
   type SpineLabels,
   type SpineLink,
 } from "@/lib/activity-stream"
+import {
+  failureClusters,
+  liveSignal,
+  openAsks,
+  windowSpanDays,
+  zeroCopy,
+  zeroKind,
+} from "@/lib/activity-overview"
 import type { JournalEntry } from "@/lib/types/journal"
 
 import { FeedRow } from "./feed-row"
@@ -84,12 +104,12 @@ function Empty({ icon: Icon, children }: { icon: LucideIcon; children: React.Rea
   return (
     <div className="flex flex-col items-center justify-center gap-1.5 py-7 text-center">
       <Icon className="h-4 w-4 text-muted-foreground-soft" />
-      <p className="max-w-[280px] text-[11px] text-muted-foreground-soft">{children}</p>
+      <p className="max-w-[300px] text-[11px] leading-relaxed text-muted-foreground-soft">{children}</p>
     </div>
   )
 }
 
-/** Reads a token to a real colour — recharts and the donut need a value. */
+/** Reads a token to a real colour — recharts needs a value, not a var(). */
 function tokenColor(token: string): string {
   if (typeof window === "undefined") return "currentColor"
   return getComputedStyle(document.documentElement).getPropertyValue(token).trim() || "currentColor"
@@ -106,6 +126,11 @@ export interface ActivityOverviewProps {
   onSelect: (e: JournalEntry) => void
   onSpineClick: (l: SpineLink) => void
   onScope: (s: ActivityScope | "all") => void
+  /**
+   * Kept so the caller keeps compiling. Nothing consumes it since the
+   * ACTIVITY MIX donut — the only control that filtered by source — was
+   * removed; the rail owns source filtering.
+   */
   onSource: (s: ActivitySource) => void
 }
 
@@ -120,58 +145,46 @@ export function ActivityOverview({
   onSelect,
   onSpineClick,
   onScope,
-  onSource,
 }: ActivityOverviewProps) {
-  const scoped = React.useMemo(() => {
-    const counts: Record<ActivityScope, number> = { active: 0, waiting: 0, failed: 0, done: 0 }
-    for (const e of entries) counts[scopeOf(e)] += 1
-    return counts
-  }, [entries])
+  const total = entries.length
 
-  const spend = React.useMemo(
-    () => entries.reduce((n, e) => n + (entryCostUSD(e) ?? 0), 0),
-    [entries],
+  // Question 1. Not "rows of type approval.requested" — those stay in the
+  // log after they are answered, so counting them reports a queue that was
+  // already cleared. See lib/activity-overview.ts.
+  const waiting = React.useMemo(() => openAsks(entries), [entries])
+
+  // Question 2. Grouped by the thing that is broken, so one routine failing
+  // nine times is one row and not the whole panel.
+  const broken = React.useMemo(() => failureClusters(entries), [entries])
+  const failedTotal = React.useMemo(() => broken.reduce((n, c) => n + c.count, 0), [broken])
+
+  const live = React.useMemo(() => liveSignal(entries), [entries])
+  const latest = React.useMemo(() => entries.slice(0, 8), [entries])
+
+  // Only as many columns as the window can actually speak for. A fixed 7
+  // drawn from a 24-hour window is six empty bars that read as six quiet
+  // days — the "nothing broke" lie, told with an axis. Below two days there
+  // is no trend at all and the card does not render.
+  const spanDays = React.useMemo(() => windowSpanDays(entries), [entries])
+  const showTrend = spanDays >= 2
+  const days = React.useMemo(
+    () => (showTrend ? dailyCounts(entries, spanDays) : []),
+    [entries, spanDays, showTrend],
   )
+  const trendErrors = React.useMemo(() => days.reduce((n, d) => n + d.errors, 0), [days])
+  const trendTotal = React.useMemo(() => days.reduce((n, d) => n + d.total, 0), [days])
 
-  const slowest = React.useMemo(() => {
-    let best: { entry: JournalEntry; ms: number } | null = null
-    for (const e of entries) {
-      const ms = entryDurationMs(e)
-      if (ms != null && (best == null || ms > best.ms)) best = { entry: e, ms }
-    }
-    return best
-  }, [entries])
-
-  // Distinct agents that produced anything in the window.
-  const workingAgents = React.useMemo(() => {
-    const seen = new Set<string>()
-    for (const e of entries) if (e.agent_id) seen.add(e.agent_id)
-    return seen.size
-  }, [entries])
-
-  const mix = React.useMemo(() => sourceMix(entries), [entries])
-  const days = React.useMemo(() => dailyCounts(entries, 7), [entries])
-
-  const waiting = React.useMemo(
-    () => entries.filter((e) => scopeOf(e) === "waiting").slice(0, 5),
-    [entries],
-  )
-  const failed = React.useMemo(
-    () => entries.filter((e) => scopeOf(e) === "failed").slice(0, 5),
-    [entries],
-  )
-  const live = React.useMemo(() => entries.slice(0, 8), [entries])
-
-  const donut = React.useMemo(
-    () => mix.map((m) => ({ key: m.key, label: m.label, count: m.count, color: tokenColor(m.token) })),
-    [mix],
-  )
+  // A zero says which zero it is. "nothing broke" is a claim about the
+  // world; this window only ever knew about itself.
+  const waitingZero = zeroKind(total, waiting.length)
+  const brokenZero = zeroKind(total, failedTotal)
+  const waitingCopy = waitingZero
+    ? zeroCopy(waitingZero, total, "an approval, escalation or keeper request still open")
+    : null
+  const brokenCopy = brokenZero ? zeroCopy(brokenZero, total, "a failure") : null
 
   const chartConfig = React.useMemo<ChartConfig>(
-    () => ({
-      total: { label: "Events", color: tokenColor("--info") },
-      errors: { label: "Errors", color: tokenColor("--destructive") },
-    }),
+    () => ({ errors: { label: "Failed", color: tokenColor("--destructive") } }),
     [],
   )
 
@@ -195,170 +208,218 @@ export function ActivityOverview({
         <div>
           <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
           <p className="text-xs text-muted-foreground">
-            {entries.length.toLocaleString()} {entries.length === 1 ? "event" : "events"} ·{" "}
-            {rangeLabel.toLowerCase()} · every crew, agent, routine and issue in one place
+            What needs you, and what broke · {total.toLocaleString()}{" "}
+            {total === 1 ? "event" : "events"} in {rangeLabel.toLowerCase()}
           </p>
         </div>
       </Appear>
 
-      {/* ── What is live, what is stuck, what it cost ─────────────── */}
+      {/* ── What is happening right now ───────────────────────────────
+          One line, not a card. "Three agents are working" is a glance;
+          it used to occupy two of four KPI tiles. */}
       <Appear order={1}>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <KpiCard
-            label="Running now"
-            value={scoped.active}
-            subtitle={scoped.active === 0 ? "nothing in flight" : "agents mid-run"}
-            valueColor={scoped.active > 0 ? tokenColor("--info") : undefined}
-          />
-          <KpiCard
-            label="Waiting on you"
-            value={scoped.waiting}
-            subtitle={scoped.waiting === 0 ? "all clear" : "approvals & escalations"}
-            valueColor={scoped.waiting > 0 ? tokenColor("--warn") : undefined}
-          />
-          <KpiCard
-            label="Failed"
-            value={scoped.failed}
-            subtitle={scoped.failed === 0 ? "nothing broke" : rangeLabel.toLowerCase()}
-            valueColor={scoped.failed > 0 ? tokenColor("--destructive") : undefined}
-          />
-          {/* Not spend. Spend is a number you review once a week; "who is
-              working right now" is the one you look at when you open this
-              page. The cost still shows, as this tile's second line. */}
-          <KpiCard
-            label="Agents at work"
-            value={workingAgents}
-            subtitle={
-              spend > 0
-                ? `$${spend.toFixed(2)} · slowest ${formatDurationMs(slowest?.ms)}`
-                : rangeLabel.toLowerCase()
-            }
-            valueColor={workingAgents > 0 ? tokenColor("--success") : undefined}
-          />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-border/60 bg-card px-3.5 py-2.5 text-[11.5px]">
+          <span className="inline-flex items-center gap-2">
+            <span
+              aria-hidden
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                live.running > 0 ? "bg-primary animate-pulse" : "bg-muted-foreground-soft",
+              )}
+            />
+            {live.running > 0 ? (
+              <button
+                type="button"
+                onClick={() => onScope("active")}
+                className="font-medium text-foreground hover:underline"
+              >
+                {live.running} running now
+              </button>
+            ) : (
+              <span className="text-muted-foreground-soft">
+                {total === 0 ? "Nothing recorded in this window" : "Nothing in flight right now"}
+              </span>
+            )}
+          </span>
+
+          {live.agents > 0 && (
+            <span className="text-muted-foreground">
+              {live.agents} {live.agents === 1 ? "agent" : "agents"} at work
+            </span>
+          )}
+          {live.spendUSD > 0 && (
+            <span className="font-mono text-muted-foreground-soft">${live.spendUSD.toFixed(2)}</span>
+          )}
+          {live.slowestMs != null && (
+            <span className="font-mono text-muted-foreground-soft">
+              slowest {formatDurationMs(live.slowestMs)}
+            </span>
+          )}
         </div>
       </Appear>
 
-      {/* ── The shape of the activity, and what blocks a person ───── */}
+      {/* ── The two questions ─────────────────────────────────────────
+          Side by side, each as a number and the evidence for it. */}
       <Appear order={2}>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <DashboardCard title="Activity mix" icon={PieChart} hint={`${entries.length} events`}>
-            {donut.length === 0 ? (
-              <Empty icon={PieChart}>Nothing was recorded in this window.</Empty>
-            ) : (
-              // The arcs sum to the number in the header, and a click on a
-              // slice filters the page — a donut you cannot act on is a
-              // picture of your data, not a way into it.
-              <StatusDonut
-                data={donut}
-                centerLabel="events"
-                onSelect={(key) => onSource(key as ActivitySource)}
-              />
-            )}
-          </DashboardCard>
+          {/* 1. Is anything waiting on me? */}
+          <div className="flex flex-col gap-4">
+            <KpiCard
+              label="Waiting on you"
+              value={waiting.length}
+              subtitle={
+                waitingCopy
+                  ? waitingCopy.subtitle
+                  : "approvals, escalations & keeper requests still open"
+              }
+              valueColor={waiting.length > 0 ? tokenColor("--warn") : undefined}
+            />
+            <DashboardCard
+              title="Open asks"
+              icon={Bell}
+              hint={waiting.length > 0 ? `${waiting.length} open` : undefined}
+              action={
+                waiting.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => onScope("waiting")}
+                    className="text-primary hover:underline"
+                  >
+                    Show all →
+                  </button>
+                ) : undefined
+              }
+            >
+              {waiting.length === 0 ? (
+                <Empty icon={Inbox}>{waitingCopy?.panel}</Empty>
+              ) : (
+                <div className="flex flex-col">
+                  {waiting.slice(0, 6).map((e) => (
+                    <FeedRow key={e.id} {...rowProps(e)} />
+                  ))}
+                </div>
+              )}
+            </DashboardCard>
+          </div>
 
-          <DashboardCard
-            title="Waiting on you"
-            icon={Bell}
-            hint={waiting.length > 0 ? `${scoped.waiting} pending` : "all clear"}
-            action={
-              scoped.waiting > 0 ? (
-                <button type="button" onClick={() => onScope("waiting")} className="text-primary hover:underline">
-                  Show all →
-                </button>
-              ) : undefined
-            }
-          >
-            {waiting.length === 0 ? (
-              <Empty icon={ShieldCheck}>
-                No approval, escalation or keeper request is blocked on a person.
-              </Empty>
-            ) : (
-              <div className="flex flex-col">
-                {waiting.map((e) => (
-                  <FeedRow key={e.id} {...rowProps(e)} />
-                ))}
-              </div>
-            )}
-          </DashboardCard>
+          {/* 2. What is broken? */}
+          <div className="flex flex-col gap-4">
+            <KpiCard
+              label="Failures"
+              value={failedTotal}
+              subtitle={
+                brokenCopy
+                  ? brokenCopy.subtitle
+                  : `${broken.length} ${broken.length === 1 ? "thing" : "things"} failing · ${rangeLabel.toLowerCase()}`
+              }
+              valueColor={failedTotal > 0 ? tokenColor("--destructive") : undefined}
+            />
+            <DashboardCard
+              title="What is broken"
+              icon={AlertTriangle}
+              hint={failedTotal > 0 ? `${failedTotal} events` : undefined}
+              action={
+                failedTotal > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => onScope("failed")}
+                    className="text-primary hover:underline"
+                  >
+                    Show all →
+                  </button>
+                ) : undefined
+              }
+            >
+              {broken.length === 0 ? (
+                <Empty icon={ShieldCheck}>{brokenCopy?.panel}</Empty>
+              ) : (
+                <div className="flex flex-col">
+                  {/* One row per broken THING, with how many times it went
+                      wrong — nine rows from one routine is one thing to fix
+                      and used to eat the whole panel. */}
+                  {broken.slice(0, 6).map((c) => (
+                    <div key={c.key} className="flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        <FeedRow {...rowProps(c.latest)} />
+                      </div>
+                      {c.count > 1 && (
+                        <span className="shrink-0 rounded bg-destructive/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-destructive">
+                          ×{c.count}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </DashboardCard>
+          </div>
         </div>
       </Appear>
 
-      {/* ── The feed itself, and what broke ──────────────────────── */}
+      {/* ── Everything else, at the weight of everything else ───────── */}
       <Appear order={3}>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className={cn("grid grid-cols-1 gap-4", showTrend && "lg:grid-cols-3")}>
           <DashboardCard
+            className={cn(showTrend && "lg:col-span-2")}
             title="Latest activity"
             icon={ActivityIcon}
-            hint={live.length > 0 ? `last ${live.length}` : "nothing yet"}
+            hint={latest.length > 0 ? `last ${latest.length}` : undefined}
             action={
               <a href="/journal" className="text-primary hover:underline">
                 Full journal →
               </a>
             }
           >
-            {live.length === 0 ? (
-              <Empty icon={Play}>Nothing has happened in this window yet.</Empty>
+            {latest.length === 0 ? (
+              <Empty icon={ActivityIcon}>
+                No events were recorded in this window. Widen the range or clear a filter.
+              </Empty>
             ) : (
               <div className="flex flex-col">
-                {live.map((e) => (
+                {latest.map((e) => (
                   <FeedRow key={e.id} {...rowProps(e)} />
                 ))}
               </div>
             )}
           </DashboardCard>
 
-          <DashboardCard
-            title="Recently failed"
-            icon={AlertTriangle}
-            hint={failed.length > 0 ? `${scoped.failed} in window` : "all clean"}
-            action={
-              scoped.failed > 0 ? (
-                <button type="button" onClick={() => onScope("failed")} className="text-primary hover:underline">
-                  Show all →
-                </button>
-              ) : undefined
-            }
-          >
-            {failed.length === 0 ? (
-              <Empty icon={Ban}>Nothing has failed. Nice.</Empty>
-            ) : (
-              <div className="flex flex-col">
-                {failed.map((e) => (
-                  <FeedRow key={e.id} {...rowProps(e)} />
-                ))}
-              </div>
-            )}
-          </DashboardCard>
+          {/* Not "how much happened" — that was the mix donut's question in
+              another shape. This one asks whether the breakage is new, which
+              is the second half of "what is broken".
+
+              Rendered only when the loaded window spans more than one day.
+              A fixed seven columns over a 24-hour range is six bars that are
+              empty because nobody asked, drawn as if they were quiet. */}
+          {showTrend && (
+            <DashboardCard
+              title={`Failures · ${spanDays} days`}
+              icon={TrendingDown}
+              hint={trendTotal > 0 ? `${trendErrors} of ${trendTotal}` : undefined}
+            >
+              <ChartContainer config={chartConfig} className="aspect-auto h-[196px] w-full">
+                <BarChart data={days} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
+                  <CartesianGrid vertical={false} strokeOpacity={0.08} />
+                  <XAxis
+                    dataKey="label"
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={6}
+                    className="text-[10px]"
+                  />
+                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} className="text-[10px]" />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  {/* Failures only. This was a volume column with a red cap
+                      stacked on it, and on a real instance the volume (260)
+                      squashed the failures (3) into an unreadable sliver —
+                      a chart titled "Failures" whose failures could not be
+                      compared between days. The rate that band carried is
+                      in the header instead ("11 of 300"). */}
+                  <Bar dataKey="errors" fill="var(--color-errors)" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ChartContainer>
+            </DashboardCard>
+          )}
         </div>
-      </Appear>
-
-      {/* ── Is today normal? ─────────────────────────────────────── */}
-      <Appear order={4}>
-        <DashboardCard
-          title="Activity · 7 days"
-          icon={CircleDot}
-          hint={`${days.reduce((n, d) => n + d.total, 0)} events`}
-        >
-          <ChartContainer config={chartConfig} className="aspect-auto h-[170px] w-full">
-            <BarChart data={days} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
-              <CartesianGrid vertical={false} strokeOpacity={0.08} />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} className="text-[10px]" />
-              <YAxis allowDecimals={false} tickLine={false} axisLine={false} className="text-[10px]" />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              {/* Errors stack on top of the rest rather than beside it, so
-                  the column height stays "how much happened" and the red
-                  band reads as a share of it. */}
-              <Bar dataKey="total" stackId="a" fill="var(--color-total)" radius={[0, 0, 2, 2]} />
-              <Bar dataKey="errors" stackId="a" fill="var(--color-errors)" radius={[2, 2, 0, 0]} />
-            </BarChart>
-          </ChartContainer>
-        </DashboardCard>
-      </Appear>
-
-      <Appear order={5}>
-        <p className="text-center font-mono text-[10px] uppercase tracking-widest text-muted-foreground-soft">
-          {ACTIVITY_SCOPES.map((s) => `${s.label} ${scoped[s.key]}`).join("  ·  ")}
-        </p>
       </Appear>
     </div>
   )

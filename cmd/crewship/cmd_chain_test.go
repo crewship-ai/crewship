@@ -491,3 +491,93 @@ func TestChainCmd_DepthAndLimitReachTheRequest(t *testing.T) {
 		t.Errorf("request query = %q, want depth=7 and limit=42", q)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// When each node happened.
+// ---------------------------------------------------------------------------
+
+func ptrI64(v int64) *int64 { return &v }
+
+// A chain read in a terminal is read to answer "why did this happen", and the
+// second question is always "when". The tree had the causality and no clock.
+func TestRenderChainTree_ARunSaysWhenItRanAndHowLongItTook(t *testing.T) {
+	g := chainFixture()
+	for i := range g.Nodes {
+		if g.Nodes[i].ID == "run:run-1" {
+			g.Nodes[i].OccurredAt = "2026-08-07T09:41:02.000000000Z"
+			g.Nodes[i].EndedAt = "2026-08-07T09:42:32.000000000Z"
+			g.Nodes[i].DurationMS = ptrI64(90_000)
+		}
+	}
+
+	line := chainLineFor(t, renderChainTree(g, false), "run-1")
+	if !strings.Contains(line, "1m30s") {
+		t.Errorf("run line = %q, want the duration 1m30s", line)
+	}
+	if !strings.Contains(line, "ago") {
+		t.Errorf("run line = %q, want a relative time", line)
+	}
+}
+
+// A run still going has a start and no span. Printing "0ms" would say it
+// finished instantly, which is the opposite of what is happening.
+func TestRenderChainTree_AnInFlightRunPrintsNoDuration(t *testing.T) {
+	g := chainFixture()
+	for i := range g.Nodes {
+		if g.Nodes[i].ID == "run:run-1" {
+			g.Nodes[i].Status = "running"
+			g.Nodes[i].OccurredAt = "2026-08-07T09:41:02.000000000Z"
+		}
+	}
+
+	line := chainLineFor(t, renderChainTree(g, false), "run-1")
+	if strings.Contains(line, "0ms") {
+		t.Errorf("run line = %q claims an in-flight run took 0ms", line)
+	}
+	if !strings.Contains(line, "ago") {
+		t.Errorf("run line = %q, want the start it does know", line)
+	}
+}
+
+// A run that finished inside a millisecond really did take 0ms, and that is a
+// different answer from "we cannot say". Only the pointer keeps them apart.
+func TestRenderChainTree_AZeroDurationIsPrintedNotSwallowed(t *testing.T) {
+	g := chainFixture()
+	for i := range g.Nodes {
+		if g.Nodes[i].ID == "run:run-1" {
+			g.Nodes[i].OccurredAt = "2026-08-07T09:41:02.000000000Z"
+			g.Nodes[i].EndedAt = "2026-08-07T09:41:02.000100000Z"
+			g.Nodes[i].DurationMS = ptrI64(0)
+		}
+	}
+
+	line := chainLineFor(t, renderChainTree(g, false), "run-1")
+	if !strings.Contains(line, "0ms") {
+		t.Errorf("run line = %q, want 0ms — the run finished, very fast", line)
+	}
+}
+
+// A noun sends no time, and the tree must not manufacture one. A "1970" or a
+// "56y ago" on a routine is worse than a blank: it looks like an answer.
+func TestRenderChainTree_ANodeWithNoTimePrintsNoTime(t *testing.T) {
+	lines := renderChainTree(chainFixture(), false)
+	for _, want := range []string{"deploy", "ENG-7"} {
+		line := chainLineFor(t, lines, want)
+		if strings.Contains(line, "ago") || strings.Contains(line, "1970") {
+			t.Errorf("line %q invented a time for a node that sent none", line)
+		}
+	}
+}
+
+// chainLineFor returns the first rendered line mentioning ref, so the
+// assertions above read against one node rather than the whole page.
+func chainLineFor(t *testing.T, lines []string, ref string) string {
+	t.Helper()
+	for _, l := range lines {
+		if strings.Contains(l, ref) {
+			return l
+		}
+	}
+	t.Fatalf("no line mentions %q; lines = %v", ref, lines)
+	return ""
+}

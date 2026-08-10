@@ -362,3 +362,96 @@ describe("the contract with the walker", () => {
     expect(g.nodes[0].data.enabled).toBe(true)
   })
 })
+
+describe("buildChainGraph — when a node happened", () => {
+  // The run card has always accepted a startedAt and this adapter has always
+  // passed "". The walk carries the answer now (occurred_at), and a card that
+  // keeps hard-coding the empty string is a timeline with no time on it.
+  it("passes a run's occurred_at through to the card", () => {
+    const g = buildChainGraph(
+      chain({
+        nodes: [
+          {
+            id: "run:r1",
+            kind: "run",
+            ref: "r1",
+            key: "deploy",
+            label: "deploy",
+            status: "completed",
+            depth: 0,
+            occurred_at: "2026-08-07T09:41:02.000000000Z",
+            ended_at: "2026-08-07T09:42:32.000000000Z",
+            duration_ms: 90000,
+          },
+        ],
+      }),
+    )
+    expect(g.nodes[0].data.startedAt).toBe("2026-08-07T09:41:02.000000000Z")
+    expect(g.nodes[0].data.endedAt).toBe("2026-08-07T09:42:32.000000000Z")
+    expect(g.nodes[0].data.durationMs).toBe(90000)
+  })
+
+  it("passes an assignment's occurred_at through the card it borrows", () => {
+    const g = buildChainGraph(
+      chain({
+        nodes: [
+          {
+            id: "assignment:a1",
+            kind: "assignment",
+            ref: "a1",
+            label: "summarise the thread",
+            status: "COMPLETED",
+            depth: 1,
+            occurred_at: "2026-08-07T10:00:00.000000000Z",
+            ended_at: "2026-08-07T10:00:45.000000000Z",
+            duration_ms: 45000,
+          },
+        ],
+      }),
+    )
+    expect(g.nodes[0].data.startedAt).toBe("2026-08-07T10:00:00.000000000Z")
+    expect(g.nodes[0].data.durationMs).toBe(45000)
+  })
+
+  // The negative, which is the whole point of the server returning nothing for
+  // a kind that cannot answer. If absent became 0 or "" -> Date(0) anywhere on
+  // the way to a card, every noun in the graph stacks up on 1 January 1970.
+  it("leaves a kind that carries no time undated rather than dating it at zero", () => {
+    const g = buildChainGraph(
+      chain({
+        nodes: [
+          { id: "issue:m1", kind: "issue", ref: "m1", key: "ENG-1", label: "an issue", depth: 0 },
+          { id: "routine:p1", kind: "routine", ref: "p1", key: "triage", label: "triage", depth: 1 },
+          { id: "agent:ag1", kind: "agent", ref: "ag1", key: "ada", label: "Ada", depth: 1 },
+          {
+            id: "automation:a1",
+            kind: "automation",
+            ref: "a1",
+            key: "run.failed",
+            label: "rule",
+            status: "enabled",
+            depth: 1,
+          },
+          // A run that has not finished: it has a beginning and no end.
+          {
+            id: "run:r1",
+            kind: "run",
+            ref: "r1",
+            key: "deploy",
+            label: "deploy",
+            status: "running",
+            depth: 1,
+            occurred_at: "2026-08-07T09:41:02.000000000Z",
+          },
+        ],
+      }),
+    )
+    for (const n of g.nodes) {
+      expect(n.data.durationMs, `${n.id} duration`).toBeUndefined()
+      if (n.id !== "run:r1") {
+        expect(n.data.startedAt ?? "", `${n.id} startedAt`).toBe("")
+      }
+      expect(n.data.endedAt ?? "", `${n.id} endedAt`).toBe("")
+    }
+  })
+})
