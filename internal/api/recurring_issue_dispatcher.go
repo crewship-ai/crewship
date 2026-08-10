@@ -23,8 +23,8 @@ import (
 // occurrence gets a distinct key while retries of the same occurrence
 // collide.
 //
-// TODO(#820): consolidate with pipeline.ScheduledFireIdempotencyKey once
-// that sibling PR lands on main (it exports the identical scheme).
+// TODO(#1883): consolidate with pipeline.ScheduledFireIdempotencyKey; the
+// sibling now exports the identical scheme.
 func scheduledFireIdempotencyKey(kind, id, bucket string) string {
 	sum := sha256.Sum256([]byte(kind + "\x00" + id + "\x00" + bucket))
 	return hex.EncodeToString(sum[:])

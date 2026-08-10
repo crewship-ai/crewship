@@ -49,6 +49,36 @@ var proseLink = regexp.MustCompile(`\]\((/[^)\s]*)\)|href=["'](/[^"']*)["']`)
 // not. Mintlify accepts both fence characters.
 var codeFence = regexp.MustCompile("^\\s*(?:```|~~~)")
 
+type deprecatedTerm struct {
+	spelling    string
+	replacement string
+	pattern     *regexp.Regexp
+}
+
+var deprecatedTerms = []deprecatedTerm{
+	{spelling: "COORDINATOR", replacement: "LEAD", pattern: regexp.MustCompile(`(?i)\bcoordinator\b`)},
+}
+
+var allowedDeprecatedOccurrences = map[string][]string{
+	"docs/concepts.mdx": {
+		"| **`COORDINATOR`** | **`LEAD`** |",
+		"Published prose must not introduce `COORDINATOR` outside this replacement record",
+	},
+	"docs/manifest/agent.md": {
+		"LEAD | AGENT | COORDINATOR (server default: AGENT)",
+		"One of `LEAD` \\| `AGENT` \\| `COORDINATOR`.",
+		"**`COORDINATOR` is effectively unsupported — prefer `AGENT`/`LEAD`**",
+		"**`COORDINATOR` is asymmetric — and effectively unsupported.**",
+		"still admits `COORDINATOR`, but:",
+		"`COORDINATOR` survives in the",
+	},
+	"docs/manifest/workspace.md": {
+		"`COORDINATOR` is rejected in the nested form",
+		"**`COORDINATOR` is not valid in nested bundles.**",
+		"accepts `COORDINATOR` in its own front-end validator",
+	},
+}
+
 func main() {
 	root := flag.String("root", ".", "repository root")
 	// Empty by default: the repository-side assertions are hermetic and safe
@@ -107,6 +137,19 @@ func main() {
 		fail(fmt.Errorf("dead internal links in prose (no such page in the docs tree):\n  %s", strings.Join(offenders, "\n  ")))
 	}
 	fmt.Printf("docs-surface-check: internal prose links %d checked, 0 dead\n", checkedLinks)
+
+	deprecated, err := deprecatedTerminologyInDocs(*root)
+	if err != nil {
+		fail(err)
+	}
+	if len(deprecated) > 0 {
+		offenders := make([]string, 0, len(deprecated))
+		for _, use := range deprecated {
+			offenders = append(offenders, fmt.Sprintf("%s uses %s; use %s", use.page, use.spelling, use.replacement))
+		}
+		fail(fmt.Errorf("deprecated terminology in published docs:\n  %s", strings.Join(offenders, "\n  ")))
+	}
+	fmt.Printf("docs-surface-check: deprecated terminology 0 uses across %d denied spelling(s)\n", len(deprecatedTerms))
 
 	served, err := checkServed(*baseURL, len(declared))
 	if err != nil {
@@ -283,6 +326,59 @@ func documentationStability(root string) ([]string, int, error) {
 type deadLink struct {
 	page   string
 	target string
+}
+
+type deprecatedTermUse struct {
+	page        string
+	spelling    string
+	replacement string
+}
+
+func deprecatedTerminologyInDocs(root string) ([]deprecatedTermUse, error) {
+	docsRoot := filepath.Join(root, "docs")
+	offenders := []deprecatedTermUse{}
+	err := filepath.Walk(docsRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if path == filepath.Join(docsRoot, "prd") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".mdx") && !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		page := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		text := string(body)
+		for _, allowed := range allowedDeprecatedOccurrences[page] {
+			// Remove only the exact reviewed compatibility wording. Any extra
+			// deprecated term on the same page — even on the same line — stays
+			// in text and is reported below.
+			text = strings.Replace(text, allowed, "", 1)
+		}
+		for _, term := range deprecatedTerms {
+			if term.pattern.MatchString(text) {
+				offenders = append(offenders, deprecatedTermUse{page: page, spelling: term.spelling, replacement: term.replacement})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(offenders, func(i, j int) bool {
+		if offenders[i].page != offenders[j].page {
+			return offenders[i].page < offenders[j].page
+		}
+		return offenders[i].spelling < offenders[j].spelling
+	})
+	return offenders, nil
 }
 
 // brokenProseLinks resolves every internal link written inside a page body

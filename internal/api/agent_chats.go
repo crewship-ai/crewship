@@ -513,7 +513,7 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 // can never produce a "../" segment that escapes storagePath and unlinks
 // an unrelated tree.
 //
-// TODO(#1148): this unlinks via os.RemoveAll on the local storagePath,
+// TODO(#1768): this unlinks via os.RemoveAll on the local storagePath,
 // which only cleans up the default localfs backend. provider.StorageProvider
 // already defines a Delete(ctx, path) site, so once a non-local backend
 // (e.g. an S3 StorageProvider) is wired, these blobs would leak — route the
