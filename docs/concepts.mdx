@@ -6,22 +6,44 @@ icon: "book-open"
 
 # Crewship concepts and glossary
 
-Crewship separates the place where work lives from the people and automations that perform it. This glossary is the shortest route from a noun in the dashboard or CLI to the reference page that defines it.
+Crewship separates the place where work lives from the people and automations that perform it. This is the canonical map from names used by the product to their meaning, product surfaces, and nearest look-alikes. A dash means that the object has no dedicated surface; manifest availability includes management through `crewship apply`.
 
-## Work objects
+## Canonical terminology
 
-| Term | What it is | What it is not | Reference |
+| Term | Definition | Surfaces (UI / CLI / API / manifest) | Commonly confused with |
 |---|---|---|---|
-| **Workspace** | The top-level tenant boundary containing members, crews, skills, credentials, and automation. | Not a crew container or a single project. | [Workspace API](/api-reference/workspaces) |
-| **Crew** | A team boundary whose agents share a container, network policy, and crew memory. | Not an individual agent or merely a chat group. | [Crew guide](/guides/first-crew) |
-| **Agent** | A configured coding worker that runs tasks inside its crew. | Not a Docker container: several agents can use the crew runtime. | [Agent API](/api-reference/agents) |
-| **Lead** | An agent role allowed to coordinate peers and delegate work. | Not a human owner or a separate execution engine. | [Delegation guide](/guides/orchestration) |
-| **Mission** | A tracked unit of multi-step or multi-agent execution with observable progress. | Not an infinite loop; runs end, wait, or fail durably. | [Mission API](/api-reference/missions) |
-| **Issue** | A durable work item with status, priority, labels, and optional assignment. | Not a prompt: an issue can trigger work, but a prompt is the task input. | [Issue API](/api-reference/issues) |
-| **Routine** | A saved workflow that can be invoked by a user, cron schedule, or webhook. | Not a permanently running agent. | [Routines guide](/guides/routines) |
-| **Skill** | A reusable `SKILL.md` instruction bundle available to selected agents. | Not a model or a credential. | [Skills guide](/guides/skills) |
-| **Shared memory** | The crew-visible memory tier that peers in one crew can recall. | Not workspace memory or a general-purpose filesystem. | [Agent memory guide](/guides/agent-memory) |
-| **Project** | A grouping of related issues with delivery status and rollups. | Not a repository checkout or a crew. | [Project API](/api-reference/projects) |
+| **Workspace** | The top-level tenant and authorization boundary that owns members, crews, resources, and automation. | Yes / Yes / Yes / `Workspace` | **Crew** is the shared runtime boundary; **project** groups delivery work without granting access. |
+| **Crew** | A team and runtime boundary whose agents share a container, network policy, and crew memory. | Yes / Yes / Yes / `Crew` | **Agent** is one worker in the crew; **crew template** is a reusable deployment source, not a running crew. |
+| **Agent** | A configured worker that executes assigned prompts and tools inside a crew runtime. | Yes / Yes / Yes / `Agent` | **Crew** owns the shared runtime; an agent is not a container, and **LEAD** is an agent role rather than another object. |
+| **Mission** | A durable, observable unit of multi-step work that owns tasks and may pause or finish. | Yes / Yes / Yes / — | **Routine** stores repeatable invocation; **pipeline** connects typed stages; a mission is the execution being tracked. |
+| **Routine** | A saved executable workflow invoked manually or by a cron or webhook trigger. | Yes / Yes / Yes / `Routine` | **Mission** is a tracked execution; **pipeline** is a stage graph with durable transitions, not the saved triggerable routine. |
+| **Pipeline** | A definition and runner for ordered stages, schedules, webhooks, and durable human waitpoints. | Yes / Yes / Yes / — | **Routine** invokes saved agent work; **mission** records work in progress; a pipeline controls stage-to-stage orchestration. |
+| **Pipeline alias** | A stable alternate name that resolves to a pipeline without copying its definition. | — / Yes / Yes / — | A **pipeline** contains the stages; an alias is only an indirection to one pipeline. |
+| **Memory tier** | One of the agent, crew-shared, or workspace scopes that controls who can recall stored memory. | Yes / Yes / Yes / — | A **workspace** or **crew** is an ownership boundary; the memory tier is the visibility scope of a memory item. |
+| **Project** | A grouping of related issues with delivery status, milestones, and rollups. | Yes / Yes / Yes / `Project` | A repository checkout is code on disk; a **workspace** is a tenant and a **crew** executes work. |
+| **Skill** | A reusable `SKILL.md` instruction bundle importable and assignable to agents. | Yes / Yes / Yes / `Skill` | A **recipe** is structured reusable procedure data; a **routine** can execute, while a skill only supplies instructions. |
+| **Recipe** | A reusable structured procedure that can be discovered and attached to agent work. | Yes / Yes / Yes / `Recipe` | A **skill** is a `SKILL.md` bundle; a **routine** is an executable saved workflow. |
+| **Connector** | A named external-service connection definition referenced by crew or agent integration bindings. | Yes / Yes / Yes / `Connector` | A credential holds secret material; an integration binds an endpoint and connector configuration to runtime use. |
+| **Keeper** | The credential-governance gate that evaluates sensitive access and may require escalation. | Yes / Yes / Yes / — | **Harbormaster** holds a human decision; Keeper evaluates policy and is not the credential store or proxy. |
+| **Harbormaster** | The human-in-the-loop approval queue for dangerous or policy-gated actions. | Yes / Yes / Yes / — | **Keeper** evaluates whether escalation is required; Harbormaster persists and resolves the human approval. |
+| **Paymaster** | The usage ledger and budget service for model and run spending. | Yes / Yes / Yes / — | Provider billing is external; Paymaster records and enforces Crewship budgets but is not the provider invoice. |
+| **Journal** | The append-oriented event spine that records run and system activity for audit and views. | Yes / Yes / Yes / — | Agent **memory** is recalled context; the journal is an event record and not a checkpoint or chat transcript. |
+| **Waitpoint** | A durable paused pipeline state that waits for a human decision or external continuation. | Yes / Yes / Yes / — | A process sleep requires a live process; a waitpoint persists while no agent loop is running. |
+| **Crew template** | A server-side reusable crew blueprint that deploys a crew under a chosen name. | Yes / Yes / Yes / `CrewTemplate` | `Crew` declaratively owns a crew row; `CrewTemplate` deploys a blueprint and does not round-trip the resulting crew. |
+| **Workflow template** | A reusable issue workflow definition containing states and transitions. | Yes / Yes / Yes / `WorkflowTemplate` | A **pipeline** orchestrates executable stages; a workflow template defines issue lifecycle states. |
+| **Triage rule** | A workspace rule that matches incoming issues and applies routing actions such as labels or assignment. | Yes / Yes / Yes / `TriageRule` | A **saved view** filters issues for display; a triage rule mutates routing metadata when it matches. |
+| **Saved view** | A stored private or shared issue filter and presentation configuration. | Yes / Yes / Yes / `SavedView` | A **triage rule** acts on incoming issues; a saved view only selects and presents existing issues. |
+| **Hook** | A named outbound webhook configuration for delivering matching Crewship events. | — / Yes / Yes / `Hook` | A pipeline webhook can trigger execution; a hook delivers events outward and does not define pipeline stages. |
+
+The manifest also exposes supporting kinds such as `Issue`, `Label`, `Milestone`, `RecurringIssue`, `FeatureFlag`, `InstanceSetting`, and `Integration`. Their authoritative schemas live in the [manifest reference](/manifest/workspace); they do not introduce alternate meanings for the terms above.
+
+## Deprecated terminology
+
+| Deprecated spelling | Replacement | Since | Why |
+|---|---|---|---|
+| **`COORDINATOR`** | **`LEAD`** | Deprecated 2026-04-16; retired in v0.1 | The former workspace-wide agent role no longer exists in the public role model. A legacy standalone `Agent` manifest may still accept the literal for compatibility, but new UI, CLI prose, API schemas, and manifests use `LEAD`. |
+
+Published prose must not introduce `COORDINATOR` outside this replacement record and the manifest pages that document the exact legacy compatibility boundary. `scripts/docs-surface-check` enforces that deny-list.
 
 ## Named roles and services
 

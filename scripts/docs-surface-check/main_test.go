@@ -225,6 +225,55 @@ func TestRepositoryDocsHaveNoBrokenProseLinks(t *testing.T) {
 	}
 }
 
+func TestDeprecatedTerminologyNamesPageSpellingAndReplacement(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/guides/delegation.mdx", "A coordinator assigns the work.\n")
+
+	offenders, err := deprecatedTerminologyInDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []deprecatedTermUse{{
+		page:        "docs/guides/delegation.mdx",
+		spelling:    "COORDINATOR",
+		replacement: "LEAD",
+	}}
+	if !slices.Equal(offenders, want) {
+		t.Fatalf("deprecatedTerminologyInDocs() = %+v\nwant %+v", offenders, want)
+	}
+}
+
+func TestDeprecatedTerminologyRejectsUnrelatedUseOnCompatibilityPage(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/concepts.mdx", ""+
+		"| **`COORDINATOR`** | **`LEAD`** | Deprecated 2026-04-16 |\n"+
+		"A coordinator assigns the work.\n")
+
+	offenders, err := deprecatedTerminologyInDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []deprecatedTermUse{{
+		page:        "docs/concepts.mdx",
+		spelling:    "COORDINATOR",
+		replacement: "LEAD",
+	}}
+	if !slices.Equal(offenders, want) {
+		t.Fatalf("deprecatedTerminologyInDocs() = %+v\nwant %+v", offenders, want)
+	}
+}
+
+func TestRepositoryDocsHaveNoDeprecatedTerminology(t *testing.T) {
+	root := filepath.Join("..", "..")
+	offenders, err := deprecatedTerminologyInDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, use := range offenders {
+		t.Errorf("%s uses deprecated %s; use %s", use.page, use.spelling, use.replacement)
+	}
+}
+
 // Two spellings of a live page that a naive path join turns into a false
 // positive: the site root, which Mintlify serves from `index`, and a trailing
 // slash. Both are legal to write, and a gate that reddens on a working link is
