@@ -184,7 +184,7 @@ func (p hostPlacer) Place(_ context.Context, stagingDir string, rels []string) e
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(dst, body, 0o664); err != nil {
+		if err := memory.WriteFileNoFollow(dst, body, 0o664); err != nil {
 			return err
 		}
 	}
