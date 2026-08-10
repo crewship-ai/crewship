@@ -536,9 +536,12 @@ func (s *Server) mountAPIRouter(
 	// "crewshipd" for backwards compatibility with existing dashboards;
 	// new deployments should set the env explicitly to differentiate
 	// main API, sidecar, and EE per-tenant traces).
-	otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	// Resolved, not configured: this is the full URL spans are POSTed to,
+	// signal path included. Logging the configured value instead is how a
+	// misrouted exporter reads as healthy (#1868, #1870).
+	otelEndpoint, otelConfigured := telemetry.ResolveTracesEndpoint("")
 	serviceName := telemetry.ServiceNameFromEnv("crewshipd")
-	if otelShutdown, err := telemetry.Init(context.Background(), otelEndpoint, serviceName); err != nil {
+	if otelShutdown, err := telemetry.Init(context.Background(), "", serviceName); err != nil {
 		logger.Warn("telemetry init failed, falling back to noop tracer", "err", err)
 	} else {
 		s.telemetryShutdown = otelShutdown
@@ -546,8 +549,8 @@ func (s *Server) mountAPIRouter(
 		// entry emit. No-op when the tracer is noop, so entries just
 		// get empty trace IDs (backwards compatible).
 		telemetry.RegisterJournalResolver()
-		if otelEndpoint != "" {
-			logger.Info("OTel GenAI telemetry enabled", "endpoint", otelEndpoint)
+		if otelConfigured {
+			logger.Info("OTel GenAI telemetry enabled", "traces_url", otelEndpoint)
 		}
 	}
 

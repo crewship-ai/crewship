@@ -93,9 +93,13 @@ func TestWithTracesPath(t *testing.T) {
 		{"base url gets the signal path", "http://localhost:4318", "http://localhost:4318/v1/traces"},
 		{"trailing slash is still a base url", "http://localhost:4318/", "http://localhost:4318/v1/traces"},
 		{"https base url", "https://collector.example.com", "https://collector.example.com/v1/traces"},
-		{"explicit traces path is left alone", "http://localhost:4318/v1/traces", "http://localhost:4318/v1/traces"},
-		{"project-scoped prefix is left alone", "https://cloud.example.com/api/public/otel", "https://cloud.example.com/api/public/otel"},
+		{"explicit traces path is not doubled", "http://localhost:4318/v1/traces", "http://localhost:4318/v1/traces"},
+		{"trailing slash on the traces path is not doubled", "http://localhost:4318/v1/traces/", "http://localhost:4318/v1/traces"},
+		// The case #1870 is about: a project-scoped base URL is still a base
+		// URL, so the signal path belongs on the end of it.
+		{"project-scoped prefix gets the signal path", "https://cloud.example.com/api/public/otel", "https://cloud.example.com/api/public/otel/v1/traces"},
 		{"query string survives", "http://localhost:4318?tenant=a", "http://localhost:4318/v1/traces?tenant=a"},
+		{"bare host:port is not a URL and is untouched", "127.0.0.1:4318", "127.0.0.1:4318"},
 		{"unparseable input is passed through", "http://[::1", "http://[::1"},
 	}
 	for _, tt := range tests {
@@ -107,10 +111,76 @@ func TestWithTracesPath(t *testing.T) {
 	}
 }
 
-// A collector reached through a project-scoped prefix must keep receiving
-// exports at that prefix — we only fill in a path when there is none.
-func TestInit_PrefixedURLEndpointKeepsItsPath(t *testing.T) {
-	restoreGlobalProvider(t)
+func TestResolveTracesEndpoint(t *testing.T) {
+	const (
+		generic = "OTEL_EXPORTER_OTLP_ENDPOINT"
+		signal  = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+	)
+	tests := []struct {
+		name           string
+		explicit       string
+		env            map[string]string
+		want           string
+		wantConfigured bool
+	}{
+		{
+			name: "nothing configured", want: "", wantConfigured: false,
+		},
+		{
+			name: "generic base url gets the signal path",
+			env:  map[string]string{generic: "http://localhost:4318"},
+			want: "http://localhost:4318/v1/traces", wantConfigured: true,
+		},
+		{
+			name: "generic prefix gets the signal path too",
+			env:  map[string]string{generic: "https://cloud.example.com/api/public/otel"},
+			want: "https://cloud.example.com/api/public/otel/v1/traces", wantConfigured: true,
+		},
+		{
+			// The signal-specific variable is a full URL by definition, so a
+			// prefix here means the operator meant exactly that.
+			name: "signal-specific url is verbatim",
+			env:  map[string]string{signal: "https://cloud.example.com/api/public/otel"},
+			want: "https://cloud.example.com/api/public/otel", wantConfigured: true,
+		},
+		{
+			name: "signal-specific wins over generic",
+			env:  map[string]string{generic: "http://localhost:4318", signal: "http://elsewhere:4318/custom"},
+			want: "http://elsewhere:4318/custom", wantConfigured: true,
+		},
+		{
+			name:     "explicit argument wins over both",
+			explicit: "http://argument:4318",
+			env:      map[string]string{generic: "http://localhost:4318", signal: "http://elsewhere:4318/custom"},
+			want:     "http://argument:4318/v1/traces", wantConfigured: true,
+		},
+		{
+			name: "whitespace-only env is not configuration",
+			env:  map[string]string{generic: "   "},
+			want: "", wantConfigured: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(generic, "")
+			t.Setenv(signal, "")
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			got, ok := ResolveTracesEndpoint(tt.explicit)
+			if got != tt.want || ok != tt.wantConfigured {
+				t.Errorf("ResolveTracesEndpoint(%q) = (%q, %v), want (%q, %v)",
+					tt.explicit, got, ok, tt.want, tt.wantConfigured)
+			}
+		})
+	}
+}
+
+// pathRecorder is a collector that records the path of every request it is
+// sent, so a test can assert where spans actually landed rather than that
+// something was sent somewhere.
+func pathRecorder(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
 	var mu sync.Mutex
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -120,24 +190,64 @@ func TestInit_PrefixedURLEndpointKeepsItsPath(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
-
-	ctx := context.Background()
-	shutdown, err := Init(ctx, srv.URL+"/api/public/otel", "cov-test")
-	if err != nil {
-		t.Fatalf("Init: %v", err)
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), paths...)
 	}
-	_, span := otel.Tracer(tracerName).Start(ctx, "cov-span")
+}
+
+// emitOneSpan runs a full Init → span → shutdown cycle so the batcher flushes
+// before the caller inspects what the collector received.
+func emitOneSpan(t *testing.T, endpoint string) {
+	t.Helper()
+	shutdown, err := Init(context.Background(), endpoint, "cov-test")
+	if err != nil {
+		t.Fatalf("Init(%q): %v", endpoint, err)
+	}
+	_, span := otel.Tracer(tracerName).Start(context.Background(), "cov-span")
 	span.End()
 	shutdown()
+}
 
-	mu.Lock()
-	defer mu.Unlock()
+// A project-scoped base URL is still a base URL: the signal path belongs on
+// the end of it, which is what makes backends like Langfuse reachable. Before
+// #1870 we posted to the bare prefix, where a collector answers 200 and drops
+// the payload.
+func TestInit_PrefixedURLEndpointGetsTracesPath(t *testing.T) {
+	restoreGlobalProvider(t)
+	srv, seen := pathRecorder(t)
+
+	emitOneSpan(t, srv.URL+"/api/public/otel")
+
+	paths := seen()
 	if len(paths) == 0 {
 		t.Fatal("no OTLP trace export reached the collector after shutdown flush")
 	}
 	for _, p := range paths {
-		if p != "/api/public/otel" {
-			t.Errorf("export posted to %q, want the configured prefix verbatim", p)
+		if p != "/api/public/otel/v1/traces" {
+			t.Errorf("export posted to %q, want /api/public/otel/v1/traces", p)
+		}
+	}
+}
+
+// The signal-specific variable is a full URL by definition, so whatever it
+// says is where spans go — no path is appended to it.
+func TestInit_SignalSpecificEnvIsUsedVerbatim(t *testing.T) {
+	restoreGlobalProvider(t)
+	srv, seen := pathRecorder(t)
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://unused.invalid:4318")
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", srv.URL+"/custom/trace/sink")
+
+	emitOneSpan(t, "")
+
+	paths := seen()
+	if len(paths) == 0 {
+		t.Fatal("signal-specific endpoint received nothing — generic endpoint won")
+	}
+	for _, p := range paths {
+		if p != "/custom/trace/sink" {
+			t.Errorf("export posted to %q, want /custom/trace/sink verbatim", p)
 		}
 	}
 }
