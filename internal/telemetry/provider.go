@@ -34,6 +34,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -132,7 +133,7 @@ func Init(ctx context.Context, endpoint string, serviceName string) (func(), err
 	// the scheme (http vs https), which matters for self-signed collectors.
 	opts := []otlptracehttp.Option{}
 	if isURL(endpoint) {
-		opts = append(opts, otlptracehttp.WithEndpointURL(endpoint))
+		opts = append(opts, otlptracehttp.WithEndpointURL(withTracesPath(endpoint)))
 	} else {
 		opts = append(opts, otlptracehttp.WithEndpoint(endpoint))
 		// Bare host:port defaults to plaintext because TLS usually needs a
@@ -170,6 +171,34 @@ func Init(ctx context.Context, endpoint string, serviceName string) (func(), err
 		}
 	}
 	return shutdown, nil
+}
+
+// withTracesPath points a bare collector URL at the OTLP traces path.
+//
+// The endpoint we are handed is a *base* URL — that is what the standard
+// OTEL_EXPORTER_OTLP_ENDPOINT variable means and what our setup guide tells
+// operators to configure (`http://localhost:4318`). otlptracehttp's
+// WithEndpointURL, however, wants the full signal URL. Up to v1.44 the two
+// happened to agree, because a URL with no path of its own fell through to
+// the exporter's default `/v1/traces`. v1.45 made an empty path explicit
+// (it now POSTs to `/`), so a documented base endpoint would keep exporting
+// happily to a collector route that discards it — spans silently vanish
+// with no error anywhere.
+//
+// Appending the path ourselves makes us independent of that default. A URL
+// that already carries a path is left alone: the exporter has always used
+// such a path verbatim, and backends with a project-scoped prefix rely on
+// it.
+func withTracesPath(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		// Malformed input is the exporter's to reject, with its own message.
+		return raw
+	}
+	if u.Path == "" || u.Path == "/" {
+		u.Path = "/v1/traces"
+	}
+	return u.String()
 }
 
 // isURL is a cheap heuristic — we only need to distinguish host:port from

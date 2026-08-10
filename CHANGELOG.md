@@ -50,6 +50,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **The OTLP endpoint keeps its own `/v1/traces` default.** opentelemetry-go
+  1.45 changed `WithEndpointURL`: a URL with no path of its own used to fall
+  through to the exporter's default signal path, and now resolves to `/`. Since
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is a base URL — that is the standard, and what
+  our setup guide tells you to configure — every collector would have started
+  receiving spans on its root route, where a 200 and a discarded payload look
+  exactly like success. `telemetry.Init` appends the signal path itself now, so
+  the upgrade is invisible to operators and the SDK's default stops mattering
+  to us. An endpoint that already carries a path keeps it verbatim, as before.
+
+  The setup guide also claimed the SDK appends `/v1/traces` to a project-scoped
+  prefix such as `/api/public/otel`. It never did, in any version — if you
+  configured a bare prefix, set the full URL your backend documents.
+
 - **One attachments table, and `chat_attachments` is gone (#1768).** The schema
   carried two attachment tables that no product code had ever read or written —
   `chat_attachments` and `workspace_files` (both migration v57) — while the chat
