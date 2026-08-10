@@ -39,6 +39,22 @@ var proseLink = regexp.MustCompile(`\]\((/[^)\s]*)\)|href=["'](/[^"']*)["']`)
 // not. Mintlify accepts both fence characters.
 var codeFence = regexp.MustCompile("^\\s*(?:```|~~~)")
 
+type deprecatedTerm struct {
+	spelling    string
+	replacement string
+	pattern     *regexp.Regexp
+}
+
+var deprecatedTerms = []deprecatedTerm{
+	{spelling: "COORDINATOR", replacement: "LEAD", pattern: regexp.MustCompile(`(?i)\bcoordinator\b`)},
+}
+
+var deprecatedTermAllowlist = map[string]bool{
+	"docs/concepts.mdx":          true, // canonical replacement record
+	"docs/manifest/agent.md":     true, // accepted legacy manifest literal
+	"docs/manifest/workspace.md": true, // rejection/compatibility boundary
+}
+
 func main() {
 	root := flag.String("root", ".", "repository root")
 	// Empty by default: the repository-side assertions are hermetic and safe
@@ -89,6 +105,19 @@ func main() {
 		fail(fmt.Errorf("dead internal links in prose (no such page in the docs tree):\n  %s", strings.Join(offenders, "\n  ")))
 	}
 	fmt.Printf("docs-surface-check: internal prose links %d checked, 0 dead\n", checkedLinks)
+
+	deprecated, err := deprecatedTerminologyInDocs(*root)
+	if err != nil {
+		fail(err)
+	}
+	if len(deprecated) > 0 {
+		offenders := make([]string, 0, len(deprecated))
+		for _, use := range deprecated {
+			offenders = append(offenders, fmt.Sprintf("%s uses %s; use %s", use.page, use.spelling, use.replacement))
+		}
+		fail(fmt.Errorf("deprecated terminology in published docs:\n  %s", strings.Join(offenders, "\n  ")))
+	}
+	fmt.Printf("docs-surface-check: deprecated terminology 0 uses across %d denied spelling(s)\n", len(deprecatedTerms))
 
 	served, err := checkServed(*baseURL, len(declared))
 	if err != nil {
@@ -213,6 +242,55 @@ func fetch(url string) (string, error) {
 type deadLink struct {
 	page   string
 	target string
+}
+
+type deprecatedTermUse struct {
+	page        string
+	spelling    string
+	replacement string
+}
+
+func deprecatedTerminologyInDocs(root string) ([]deprecatedTermUse, error) {
+	docsRoot := filepath.Join(root, "docs")
+	offenders := []deprecatedTermUse{}
+	err := filepath.Walk(docsRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if path == filepath.Join(docsRoot, "prd") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".mdx") && !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		page := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+		if deprecatedTermAllowlist[page] {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, term := range deprecatedTerms {
+			if term.pattern.Match(body) {
+				offenders = append(offenders, deprecatedTermUse{page: page, spelling: term.spelling, replacement: term.replacement})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(offenders, func(i, j int) bool {
+		if offenders[i].page != offenders[j].page {
+			return offenders[i].page < offenders[j].page
+		}
+		return offenders[i].spelling < offenders[j].spelling
+	})
+	return offenders, nil
 }
 
 // brokenProseLinks resolves every internal link written inside a page body
