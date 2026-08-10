@@ -30,7 +30,13 @@ import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
-import { ACTIVITY_SCOPES, ACTIVITY_SOURCES, type ActivityScope, type ActivitySource } from "@/lib/activity-stream"
+import {
+  ACTIVITY_SCOPES,
+  ACTIVITY_SOURCES,
+  railInventory,
+  type ActivityScope,
+  type ActivitySource,
+} from "@/lib/activity-stream"
 import { cn } from "@/lib/utils"
 
 /**
@@ -198,23 +204,16 @@ export function ActivitySidebar({
   const toggleSection = (k: string) =>
     setOpenSection((s) => ({ ...s, [k]: !s[k] }))
 
-  // Only entities that actually appear in the loaded window are listed, and
-  // busiest first. A rail listing 38 routines of which 3 have activity is a
-  // rail you scroll past — the point here is "where is the activity", not
-  // "what exists".
+  // See railInventory. Unfocused the rail answers "where is the activity";
+  // focused it has to answer "where else can I go", or clicking one issue
+  // deletes every other row and there is no way back out except the crumb.
   const activeIssues = React.useMemo(
-    () =>
-      issues
-        .filter((i) => (issueCounts[i.id] ?? 0) > 0)
-        .sort((a, b) => (issueCounts[b.id] ?? 0) - (issueCounts[a.id] ?? 0)),
-    [issues, issueCounts],
+    () => railInventory(issues, issueCounts, (i) => i.id, focus != null),
+    [issues, issueCounts, focus],
   )
   const activeRoutines = React.useMemo(
-    () =>
-      routines
-        .filter((r) => (routineCounts[r.slug] ?? 0) > 0)
-        .sort((a, b) => (routineCounts[b.slug] ?? 0) - (routineCounts[a.slug] ?? 0)),
-    [routines, routineCounts],
+    () => railInventory(routines, routineCounts, (r) => r.slug, focus != null),
+    [routines, routineCounts, focus],
   )
   const visibleAgents = React.useMemo(
     () =>

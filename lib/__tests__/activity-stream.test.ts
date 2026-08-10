@@ -16,6 +16,7 @@ import {
   dailyCounts,
   NOISE_ENTRY_TYPES,
   narrowToFocus,
+  railInventory,
   runIdOf,
   timeBucket,
 } from "@/lib/activity-stream"
@@ -492,5 +493,45 @@ describe("chainElapsedMs — how long the chain actually took", () => {
       at("2026-08-10T08:34:02.000Z", { payload: { duration_ms: 0 } }),
     ]
     expect(chainElapsedMs(chain)).toBe(2000)
+  })
+})
+
+describe("railInventory — the rail must stay navigable while focused", () => {
+  // Unfocused, the rail answers "where is the activity": only entities with
+  // events, busiest first. A rail listing 38 routines of which 3 are live is a
+  // rail you scroll past.
+  //
+  // Focused, that same rule removes every OTHER entity — because an issue
+  // focus narrows the fetch server-side, so the window holds only that issue's
+  // events and every other issue and routine counts zero. The rail then has
+  // exactly one row and there is no way to click to a different issue: the
+  // list stopped being navigation and became a label for the current filter.
+  const items = [
+    { id: "a", label: "A" },
+    { id: "b", label: "B" },
+    { id: "c", label: "C" },
+  ]
+  const key = (i: { id: string }) => i.id
+
+  it("unfocused: only entities with activity, busiest first", () => {
+    const out = railInventory(items, { a: 2, c: 9 }, key, false)
+    expect(out.map((i) => i.id)).toEqual(["c", "a"])
+  })
+
+  it("focused: the whole inventory, so you can navigate away", () => {
+    const out = railInventory(items, { a: 2 }, key, true)
+    expect(out.map((i) => i.id).sort()).toEqual(["a", "b", "c"])
+  })
+
+  it("focused: the ones with activity still lead", () => {
+    // Order still carries information — the quiet ones simply stop vanishing.
+    const out = railInventory(items, { c: 9, a: 2 }, key, true)
+    expect(out.slice(0, 2).map((i) => i.id)).toEqual(["c", "a"])
+  })
+
+  it("unfocused with no activity at all yields an empty rail, not the inventory", () => {
+    // "Nothing happened" is a real answer and must not be dressed up as a
+    // catalogue of everything that exists.
+    expect(railInventory(items, {}, key, false)).toEqual([])
   })
 })

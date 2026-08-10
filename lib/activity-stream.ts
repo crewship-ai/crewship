@@ -667,3 +667,33 @@ export function chainElapsedMs(chain: JournalEntry[]): number | null {
   if (times.length < 2) return null
   return Math.max(...times) - Math.min(...times)
 }
+
+/**
+ * Which entities the rail lists, and in what order.
+ *
+ * Two different questions, decided by whether a focus is active:
+ *
+ *   unfocused — "where is the activity". Only entities with events, busiest
+ *     first. A rail listing 38 routines of which 3 are live is a rail you
+ *     scroll past.
+ *
+ *   focused — "where else can I go". The WHOLE inventory, because an issue
+ *     focus narrows the fetch server-side: the window then holds only that
+ *     issue's events, every other issue and routine counts zero, and the
+ *     busiest-first filter removes them all. The rail collapses to a single
+ *     row and there is no way to click to a different issue — the list stops
+ *     being navigation and becomes a label for the current filter.
+ *
+ * Order is the same rule in both cases, so the quiet ones simply stop
+ * vanishing rather than being reshuffled into an unfamiliar order.
+ */
+export function railInventory<T>(
+  items: T[],
+  counts: Record<string, number>,
+  key: (item: T) => string,
+  focused: boolean,
+): T[] {
+  const byActivity = (a: T, b: T) => (counts[key(b)] ?? 0) - (counts[key(a)] ?? 0)
+  if (focused) return [...items].sort(byActivity)
+  return items.filter((i) => (counts[key(i)] ?? 0) > 0).sort(byActivity)
+}
