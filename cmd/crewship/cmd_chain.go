@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -75,6 +76,38 @@ type chainGraph struct {
 	Truncated   bool        `json:"truncated"`
 	TruncatedBy string      `json:"truncated_by"`
 	Gaps        []chainGap  `json:"gaps"`
+}
+
+// chainSummary / chainList mirror the wire types of GET /api/v1/chains
+// (internal/api/chains_list.go). Same rule as above: --format json prints the
+// decoded struct, so a field added server-side needs a field here too.
+type chainSummary struct {
+	Origin        string `json:"origin"`
+	StartedByKind string `json:"started_by_kind"`
+	StartedByID   string `json:"started_by_id"`
+	StartedByKey  string `json:"started_by_key"`
+	StartedBy     string `json:"started_by"`
+	TriggeredVia  string `json:"triggered_via"`
+	RoutineID     string `json:"routine_id"`
+	RoutineSlug   string `json:"routine_slug"`
+	Runs          int    `json:"runs"`
+	MaxChainDepth int    `json:"max_chain_depth"`
+	FailedRuns    int    `json:"failed_runs"`
+	Failed        bool   `json:"failed"`
+	FirstActivity string `json:"first_activity"`
+	LastActivity  string `json:"last_activity"`
+}
+
+type chainList struct {
+	Chains  []chainSummary `json:"chains"`
+	Count   int            `json:"count"`
+	Limit   int            `json:"limit"`
+	Offset  int            `json:"offset"`
+	HasMore bool           `json:"has_more"`
+	// HasUnrecordedRuns says this workspace holds runs from before the
+	// chain_origin column existed. They are not in the index and cannot be —
+	// see the note the renderer prints.
+	HasUnrecordedRuns bool `json:"has_unrecorded_runs"`
 }
 
 var chainCmd = &cobra.Command{
@@ -171,6 +204,176 @@ Examples:
 			}
 		})
 	},
+}
+
+// chainListCmd is the index: every chain that ran here, newest first.
+//
+// A subcommand rather than a flag on `chain`, because it answers a different
+// question and takes different arguments — but that does mean it shadows an
+// anchor literally spelled "list" (a routine could be slugged that). The
+// escape is the standard one: `crewship chain -- list` stops cobra looking for
+// a subcommand and passes the word through as the anchor.
+var chainListCmd = &cobra.Command{
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List the chains that have run in this workspace, newest first",
+	Long: `List chain runs — one row per chain, newest first.
+
+A chain is a workflow run: whatever started it, plus every run it went on to
+cause. This is the index that "crewship chain <anchor>" cannot be — it answers
+"what ran here" without you already knowing an anchor. Every row's origin is a
+valid anchor, so the pair is: list to find it, chain to open it.
+
+Each row carries what set the chain off (a rule name, an issue, a person, a
+schedule), how many runs it grew to, the deepest composed hop it reached, the
+window it covers, and whether any run in it failed.
+
+The page is capped server-side (default 50, ceiling 200): the index is a
+grouped scan of this workspace's runs, so it is paged rather than dumped.
+
+Runs recorded before the chain_origin column landed are NOT indexed. The link
+was never written and cannot be reconstructed, so listing them would mean
+claiming each one was its own chain root. Their existence is reported in the
+footer instead.
+
+Examples:
+  crewship chain list
+  crewship chain list --limit 100
+  crewship chain list --limit 50 --offset 50
+  crewship chain list --format json`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+
+		q := url.Values{}
+		if limit > 0 {
+			q.Set("limit", strconv.Itoa(limit))
+		}
+		if offset > 0 {
+			q.Set("offset", strconv.Itoa(offset))
+		}
+		qs := ""
+		if len(q) > 0 {
+			qs = "?" + q.Encode()
+		}
+		// Inlined Sprintf for the reason spelled out on chainCmd: a path
+		// assembled into a local first is dropped from the CLI↔route contract
+		// gate silently.
+		resp, err := client.Get(fmt.Sprintf("/api/v1/chains%s", qs))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var l chainList
+		if err := cli.ReadJSON(resp, &l); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		return f.AutoHuman(l, func() {
+			for _, line := range renderChainList(l) {
+				fmt.Println(line)
+			}
+		})
+	},
+}
+
+// renderChainList lays the index out as a table. Pure function of the decoded
+// payload, same as renderChainTree, so the layout is testable without HTTP.
+func renderChainList(l chainList) []string {
+	if len(l.Chains) == 0 {
+		out := []string{"No chains recorded in this workspace yet."}
+		return append(out, chainListNotes(l)...)
+	}
+
+	header := []string{"WHEN", "STARTED BY", "ROUTINE", "RUNS", "DEPTH", "STATUS", "ORIGIN"}
+	rows := [][]string{header}
+	for _, c := range l.Chains {
+		status := "ok"
+		if c.Failed {
+			status = "FAILED"
+		}
+		rows = append(rows, []string{
+			issueRelativeTime(c.LastActivity),
+			chainCauseCell(c),
+			orDash(sanitizeTerminal(c.RoutineSlug)),
+			strconv.Itoa(c.Runs),
+			strconv.Itoa(c.MaxChainDepth),
+			status,
+			truncateID(sanitizeTerminal(c.Origin), 24),
+		})
+	}
+
+	// Widths are measured on the plain cells, in RUNES, and the colour is
+	// applied after padding — so neither an ANSI sequence nor a non-ASCII
+	// label (an em dash, an accented name) can push a column out of line.
+	width := make([]int, len(header))
+	for _, row := range rows {
+		for i, cell := range row {
+			if n := utf8.RuneCountInString(cell); n > width[i] {
+				width[i] = n
+			}
+		}
+	}
+
+	var out []string
+	for r, row := range rows {
+		var b strings.Builder
+		for i, cell := range row {
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			padded := cell + strings.Repeat(" ", width[i]-utf8.RuneCountInString(cell))
+			switch {
+			case r == 0:
+				fmt.Fprintf(&b, "%s%s%s", cli.Dim, padded, cli.Reset)
+			case i == 5 && cell == "FAILED":
+				fmt.Fprintf(&b, "%s%s%s", cli.Yellow, padded, cli.Reset)
+			default:
+				b.WriteString(padded)
+			}
+		}
+		out = append(out, strings.TrimRight(b.String(), " "))
+	}
+
+	out = append(out, "")
+	out = append(out, fmt.Sprintf("%d chains (limit %d, offset %d)", len(l.Chains), l.Limit, l.Offset))
+	if l.HasMore {
+		out = append(out, fmt.Sprintf("%sMore chains beyond this page. Continue with --offset %d.%s",
+			cli.Dim, l.Offset+l.Limit, cli.Reset))
+	}
+	return append(out, chainListNotes(l)...)
+}
+
+// chainListNotes carries the absences the index cannot show, in both the empty
+// and the populated case — an empty list that says nothing reads as "nothing
+// ever ran here", which for a pre-migration database is false.
+func chainListNotes(l chainList) []string {
+	if !l.HasUnrecordedRuns {
+		return nil
+	}
+	return []string{fmt.Sprintf("%sSome runs in this workspace predate chain recording (the chain_origin column) "+
+		"and are not indexed here: the link that would group them was never written.%s", cli.Dim, cli.Reset)}
+}
+
+// chainCauseCell is the "what set this off" column: the kind first so the rows
+// scan, then the human label. Labels are rule names and issue titles — user-
+// and agent-written — so they are stripped before they reach a terminal.
+func chainCauseCell(c chainSummary) string {
+	kind := sanitizeTerminal(c.StartedByKind)
+	label := sanitizeTerminal(strings.ReplaceAll(c.StartedBy, "\n", " "))
+	if label == "" || label == kind {
+		return orDash(kind)
+	}
+	return truncateStr(kind+" "+label, 44)
 }
 
 // renderChainTree returns the human view as lines. A pure function of the
@@ -412,5 +615,8 @@ func init() {
 	chainCmd.Flags().Int("depth", 0, "How many hops from the anchor to walk (server default 4, max 10)")
 	chainCmd.Flags().Int("limit", 0, "Maximum nodes to return (server default 200, max 1000)")
 	chainCmd.Flags().Bool("gaps", false, "Print the full text of the links the data model cannot carry")
+	chainListCmd.Flags().Int("limit", 0, "Chains per page (server default 50, ceiling 200)")
+	chainListCmd.Flags().Int("offset", 0, "Skip this many chains (for paging)")
+	chainCmd.AddCommand(chainListCmd)
 	rootCmd.AddCommand(chainCmd)
 }

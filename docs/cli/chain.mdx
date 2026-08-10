@@ -9,12 +9,17 @@ icon: "share-nodes"
 Reconstruct the causal chain around one anchor and print it as a tree.
 
 ```bash
+crewship chain list
 crewship chain ENG-7
 crewship chain prn_01hy
 crewship chain nightly-deploy --depth 6 --limit 400
 crewship chain aut_01hx
 crewship chain ENG-7 --format json
 ```
+
+Two commands, one feature: `crewship chain list` finds a chain,
+`crewship chain <anchor>` opens it. Every origin the list prints is a valid
+anchor.
 
 The anchor is whatever you have to hand — an issue identifier, an issue id, a
 run id, a routine id or slug, an assignment id, an inbox item id, or an
@@ -37,6 +42,71 @@ Not walkable (the schema carries no link here):
   ENG-7: inbox items raised while this issue was worked cannot be linked to it: inbox_items carries no mission/issue column.
   viktor: agents are chain leaves: this agent's other assignments are not part of this chain.
 ```
+
+## `crewship chain list` — what ran here
+
+The index. One row per chain, newest first, so you can find a chain without
+already knowing an anchor.
+
+```bash
+crewship chain list
+crewship chain list --limit 100
+crewship chain list --limit 50 --offset 50
+crewship chain list --format json
+```
+
+```
+WHEN    STARTED BY                    ROUTINE  RUNS  DEPTH  STATUS  ORIGIN
+2h ago  automation Triage on failure  triage   3     2      FAILED  prn_01j4
+5h ago  issue Deploy is flaky         deploy   2     1      ok      prn_01hy
+1d ago  user Pavel                    deploy   1     0      ok      prn_01hb
+
+3 chains (limit 50, offset 0)
+```
+
+- **STARTED BY** is the root run's trigger resolved into something you
+  recognise: a rule name, an issue title, the person who pressed the button,
+  a schedule. When the pointer resolves to nothing — a rule deleted since — the
+  cell falls back to the bare trigger word rather than inventing a name.
+- **DEPTH** is the deepest `chain_depth` the chain reached. `0` is a run
+  somebody started by hand; anything higher is a chain that built itself.
+- **STATUS** is `FAILED` when **any** run in the chain failed, not only the
+  root. `interrupted` runs are not counted as failures — a process that died is
+  an operational event, not the chain's verdict.
+- **ORIGIN** is the anchor. Feed it straight back: `crewship chain prn_01j4`.
+
+### Paging
+
+The page is capped server-side — default 50, ceiling 200 — because the index
+groups over every run in the workspace. When more exists the footer says so and
+names the offset that continues:
+
+```
+2 chains (limit 2, offset 0)
+More chains beyond this page. Continue with --offset 2.
+```
+
+### Runs that predate chain recording
+
+Runs recorded before the `chain_origin` column landed are **not** in the index,
+and the footer says so:
+
+```
+No chains recorded in this workspace yet.
+Some runs in this workspace predate chain recording (the chain_origin column)
+and are not indexed here: the link that would group them was never written.
+```
+
+They cannot be backfilled — nothing in those rows says whether a run was a
+chain root or the third hop of a chain since swept — so they are excluded
+rather than shown as single-run chains they may never have been. The note is
+there so an empty list never reads as "nothing has ever run here".
+
+<Note>
+  `list` is a subcommand, so it shadows an anchor literally spelled `list` (a
+  routine could be slugged that). The escape is the standard one:
+  `crewship chain -- list` passes the word through as the anchor.
+</Note>
 
 ## Reading the tree
 
@@ -130,11 +200,20 @@ A short tree is never silently presented as a complete chain.
 
 ## Flags
 
+`crewship chain <anchor>`:
+
 | Flag | Default | Description |
 |---|---|---|
 | `--depth` | server default `4`, ceiling `10` | How many hops from the anchor to walk. |
 | `--limit` | server default `200`, ceiling `1000` | Maximum nodes to return. |
 | `--gaps` | off | Print the full text of the links the data model cannot carry. |
+
+`crewship chain list`:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--limit` | server default `50`, ceiling `200` | Chains per page. |
+| `--offset` | `0` | Chains to skip. |
 
 Global flags apply as usual — `--format json|yaml|ndjson` emits the raw graph
 (nodes, edges, `truncated`, `gaps`) for a script to consume.

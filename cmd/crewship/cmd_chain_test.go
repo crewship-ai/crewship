@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
+	"github.com/spf13/cobra"
 )
 
 // ---------------------------------------------------------------------------
@@ -282,6 +283,186 @@ func TestChainCmd_FormatJSONIsMachineReadable(t *testing.T) {
 	// much as a human does.
 	if len(decoded.Gaps) != 2 {
 		t.Errorf("gaps = %+v, want both known gaps", decoded.Gaps)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// `crewship chain list` — the index.
+// ---------------------------------------------------------------------------
+
+func chainListFixture() chainList {
+	return chainList{
+		Chains: []chainSummary{
+			{
+				Origin: "prn_01j4", StartedByKind: "automation", StartedByID: "aut_01hx",
+				StartedByKey: "run.failed", StartedBy: "Triage on failure", TriggeredVia: "automation",
+				RoutineID: "p1", RoutineSlug: "triage", Runs: 3, MaxChainDepth: 2,
+				FailedRuns: 1, Failed: true,
+				FirstActivity: "2026-08-07T12:00:00.000000000Z", LastActivity: "2026-08-07T12:09:00.000000000Z",
+			},
+			{
+				Origin: "prn_01hy", StartedByKind: "user", StartedByID: "usr_1",
+				StartedBy: "Pavel", TriggeredVia: "manual",
+				RoutineID: "p2", RoutineSlug: "deploy", Runs: 1,
+				FirstActivity: "2026-08-07T11:00:00.000000000Z", LastActivity: "2026-08-07T11:02:00.000000000Z",
+			},
+		},
+		Count: 2, Limit: 50, Offset: 0,
+	}
+}
+
+// The row has to answer "what ran, why, how big, did it break" without the
+// reader opening anything. A list that only prints ids is a list of ids.
+func TestRenderChainList_RowNamesTheCauseTheSizeAndTheOutcome(t *testing.T) {
+	out := strings.Join(renderChainList(chainListFixture()), "\n")
+
+	for _, want := range []string{"Triage on failure", "triage", "prn_01j4", "Pavel", "deploy"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "FAILED") {
+		t.Errorf("a chain with a failed run is not marked:\n%s", out)
+	}
+	// The composed chain must announce its depth; the single hand-started run
+	// must not, or "depth" stops distinguishing anything.
+	if !strings.Contains(out, "2") || strings.Count(out, "FAILED") != 1 {
+		t.Errorf("depth/outcome columns do not separate the two rows:\n%s", out)
+	}
+}
+
+// An empty index is not "the system is fine": it means either nothing has run
+// or everything predates chain recording, and the two must not read alike.
+func TestRenderChainList_EmptyIndexSaysWhichKindOfEmpty(t *testing.T) {
+	empty := strings.Join(renderChainList(chainList{Limit: 50}), "\n")
+	if !strings.Contains(empty, "No chains") {
+		t.Errorf("an empty index printed nothing a reader can act on:\n%s", empty)
+	}
+	if strings.Contains(empty, "predate") {
+		t.Errorf("an empty index blamed pre-migration rows that do not exist:\n%s", empty)
+	}
+
+	old := chainList{Limit: 50, HasUnrecordedRuns: true}
+	withOld := strings.Join(renderChainList(old), "\n")
+	if !strings.Contains(withOld, "predate") {
+		t.Errorf("runs recorded before chain_origin existed are not declared:\n%s", withOld)
+	}
+}
+
+// A capped page must say so and name how to get the next one.
+func TestRenderChainList_TruncatedPageIsStatedAndActionable(t *testing.T) {
+	l := chainListFixture()
+	l.Limit = 2
+	l.HasMore = true
+
+	out := strings.Join(renderChainList(l), "\n")
+
+	if !strings.Contains(out, "--offset 2") {
+		t.Errorf("a capped page does not name the offset that continues it:\n%s", out)
+	}
+}
+
+// Labels come from user- and agent-written rows (rule names, issue titles) and
+// are printed straight to a terminal.
+func TestRenderChainList_StripsControlBytesFromLabels(t *testing.T) {
+	l := chainListFixture()
+	l.Chains[0].StartedBy = "pwn\x1b[2Jed"
+
+	out := strings.Join(renderChainList(l), "\n")
+
+	if strings.Contains(out, "\x1b[2J") {
+		t.Errorf("an escape sequence from a rule name reached the terminal:\n%q", out)
+	}
+}
+
+func TestChainListCmd_CallsTheRouteAndRendersIt(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnGet("/api/v1/chains", clitest.JSONResponse(200, chainListFixture()))
+	covSetupCli10(t, s.URL())
+	chainListCmd.SetContext(context.Background())
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return chainListCmd.RunE(chainListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v (out: %s)", err, out)
+	}
+	if !strings.Contains(out, "prn_01j4") || !strings.Contains(out, "Triage on failure") {
+		t.Errorf("human output does not render the index:\n%s", out)
+	}
+}
+
+func TestChainListCmd_FormatJSONIsMachineReadable(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnGet("/api/v1/chains", clitest.JSONResponse(200, chainListFixture()))
+	covSetupCli10(t, s.URL())
+	chainListCmd.SetContext(context.Background())
+	flagFormat = "json"
+
+	out, err := captureStdoutCovCli10(t, func() error {
+		return chainListCmd.RunE(chainListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v (out: %s)", err, out)
+	}
+	var decoded chainList
+	if jerr := json.Unmarshal([]byte(out), &decoded); jerr != nil {
+		t.Fatalf("--format json output does not parse: %v\n%s", jerr, out)
+	}
+	if len(decoded.Chains) != 2 || decoded.Chains[0].Origin != "prn_01j4" {
+		t.Errorf("decoded payload lost data: %+v", decoded)
+	}
+}
+
+// The page bounds must reach the wire, or the flags are decoration.
+func TestChainListCmd_LimitAndOffsetReachTheRequest(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnGet("/api/v1/chains", clitest.JSONResponse(200, chainListFixture()))
+	covSetupCli10(t, s.URL())
+	chainListCmd.SetContext(context.Background())
+	setFlagCovCli10(t, chainListCmd, "limit", "25")
+	setFlagCovCli10(t, chainListCmd, "offset", "50")
+
+	if _, err := captureStdoutCovCli10(t, func() error {
+		return chainListCmd.RunE(chainListCmd, nil)
+	}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+
+	calls := s.Calls()
+	if len(calls) == 0 {
+		t.Fatal("no request reached the server")
+	}
+	q := calls[len(calls)-1].Query
+	if !strings.Contains(q, "limit=25") || !strings.Contains(q, "offset=50") {
+		t.Errorf("request query = %q, want limit=25 and offset=50", q)
+	}
+}
+
+// `chain list` is a subcommand, so it shadows an anchor literally named
+// "list". Dispatch must send each form to the command that can answer it, and
+// the `--` escape has to keep the shadowed anchor reachable.
+func TestChainCmd_ListSubcommandDoesNotStealOtherAnchors(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want *cobra.Command
+	}{
+		{[]string{"chain", "list"}, chainListCmd},
+		{[]string{"chain", "ENG-7"}, chainCmd},
+		{[]string{"chain", "--", "list"}, chainCmd},
+		{[]string{"why", "list"}, chainListCmd},
+	} {
+		got, _, err := rootCmd.Find(tc.args)
+		if err != nil {
+			t.Errorf("Find(%v): %v", tc.args, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("Find(%v) resolved to %q, want %q", tc.args, got.Name(), tc.want.Name())
+		}
 	}
 }
 

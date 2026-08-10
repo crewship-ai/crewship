@@ -132,7 +132,21 @@ type RunRecord struct {
 	// Bounded by MaxChainDepth; see GuardChainDepth.
 	ChainDepth int
 	// ChainOrigin is the id of the run or journal entry that started the
-	// chain. Empty on a chain root (where the run's own id is the origin).
+	// chain.
+	//
+	// It is ALWAYS set on a row this package writes: chainOriginForRun stamps
+	// the run's own id when the run is itself the root, so a root row names
+	// itself rather than saying nothing. The comment here used to claim the
+	// opposite ("empty on a chain root"), which cost a reader a defensive
+	// `chain_origin != ''` they did not need and sent them looking for a
+	// convention the table does not use.
+	//
+	// Empty therefore means one of two things, and neither is "this is a
+	// root": the row predates the column, or something other than
+	// persistRunStart wrote it. RunChainReader.ChainOf treats empty as "no
+	// answer" and lets the caller name the run — which reaches the same
+	// result, so the two readings never disagreed about behaviour, only about
+	// what the data means.
 	ChainOrigin string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time

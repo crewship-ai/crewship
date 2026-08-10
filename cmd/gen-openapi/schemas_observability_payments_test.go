@@ -15,6 +15,9 @@ func TestObservabilityPaymentsCatalogUsesConcreteContracts(t *testing.T) {
 		// client cannot tell a short chain from a capped one, or "nothing is
 		// attached" from "the schema cannot see what is attached".
 		"GET /api/v1/chains/{anchor}": {"nodes", "edges", "truncated", "truncated_by", "gaps", "anchor_node", "max_depth", "max_nodes"},
+		// has_unrecorded_runs is the index's equivalent: without it a client
+		// cannot tell "no chains" from "the chains here predate recording".
+		"GET /api/v1/chains": {"chains", "count", "limit", "offset", "has_more", "has_unrecorded_runs"},
 	}
 	for route, properties := range checks {
 		schema, ok := catalog[route]

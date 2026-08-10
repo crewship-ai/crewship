@@ -29,7 +29,139 @@ id.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
+| GET | [`/api/v1/chains`](#list-chains) | The index: one row per chain that ran, newest first |
 | GET | [`/api/v1/chains/{anchor}`](#get-a-chain) | The causal graph around one anchor |
+
+The two are a pair. The index answers "what ran here", the walk answers "what
+caused what" — and every row's `origin` is a valid anchor, so a client lists to
+find a chain and walks to open it.
+
+---
+
+## List chains
+
+```
+GET /api/v1/chains?limit=50&offset=0
+```
+
+**Auth:** bearer token, workspace-scoped (`RequireAuth` + `RequireWorkspace`).
+The workspace comes from the authenticated session, never from a parameter.
+
+One row per **chain**, not per run. A chain is identified by
+`pipeline_runs.chain_origin` — the run that started it — which the executor
+stamps on every run it persists: its own id when the run is the root, the
+inherited one when a rule or a nested call carried it. The index is therefore a
+`GROUP BY` over that column rather than a traversal.
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `limit` | integer | Rows per page. Default `50`, ceiling `200`. Values above the ceiling are clamped down, not reset. |
+| `offset` | integer | Rows to skip. Default `0`. |
+
+The page is capped because the query groups over this workspace's runs, which
+is the busiest table in the schema. There is no "return everything" mode.
+
+**Response:** `200 OK`
+
+```json
+{
+  "chains": [
+    {
+      "origin": "prn_01j4",
+      "started_by_kind": "automation",
+      "started_by_id": "aut_01hx",
+      "started_by_key": "run.failed",
+      "started_by": "Triage on failure",
+      "triggered_via": "automation",
+      "routine_id": "pl_01hx",
+      "routine_slug": "triage",
+      "runs": 3,
+      "max_chain_depth": 2,
+      "failed_runs": 1,
+      "failed": true,
+      "first_activity": "2026-08-07T12:00:00.000000000Z",
+      "last_activity": "2026-08-07T12:09:00.000000000Z"
+    }
+  ],
+  "count": 1,
+  "limit": 50,
+  "offset": 0,
+  "has_more": false,
+  "has_unrecorded_runs": true
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `chains[].origin` | string | `pipeline_runs.chain_origin`: the id of the run that started the chain. Also a valid anchor for [the walk](#get-a-chain). |
+| `chains[].started_by_kind` | string | What set the chain off, resolved from the root run's `triggered_via`: `automation`, `issue`, `run`, `user`, `schedule`, `webhook`, or `unknown`. Open set — treat an unknown kind as opaque. |
+| `chains[].started_by_id` | string | The row it points at: a rule id, a mission id, a schedule id, a user id. Omitted when nothing resolved. |
+| `chains[].started_by_key` | string | The handle a human recognises: the event that arms a rule, the issue identifier. Omitted where the kind has none. |
+| `chains[].started_by` | string | Human label — a rule name, an issue title, a person's name. Falls back to the raw trigger word when the pointer resolves to nothing. User- and agent-written; escape before rendering. |
+| `chains[].triggered_via` | string | The root run's raw `triggered_via`, unresolved, so `manual` and `wake_check` stay distinguishable even where both render the same. |
+| `chains[].routine_id` / `routine_slug` | string | The root run's routine. Absent when the root run itself is no longer in the table. |
+| `chains[].runs` | integer | Runs still recorded for this chain, including the root. |
+| `chains[].max_chain_depth` | integer | The deepest `chain_depth` any run in the chain reached. `0` with one run is a run somebody started by hand; `3` is a chain that built itself. |
+| `chains[].failed_runs` | integer | Runs with status `failed`. `interrupted` is **not** counted — a process that died mid-run is an operational event, and folding it in would make the flag mean two things. |
+| `chains[].failed` | boolean | `failed_runs > 0`. True when **any** run in the chain failed, not only the root. |
+| `chains[].first_activity` | string | Earliest `started_at` in the chain. |
+| `chains[].last_activity` | string | Latest `ended_at`, falling back to `started_at` for a run still going. Rows are ordered by this, descending, with `origin` descending as the tiebreak. |
+| `count` | integer | Rows in this page. |
+| `limit` / `offset` | integer | The bounds actually applied, after clamping. |
+| `has_more` | boolean | Another page exists. Computed by reading one row past the page, so it is a fact rather than an inference from a full page. |
+| `has_unrecorded_runs` | boolean | This workspace holds runs from before chain recording. See below. **Always present**, including when false. |
+
+### What the index does not cover
+
+Runs recorded before migration `20260807160100` — the one that added
+`chain_origin` — carry `NULL` and are **excluded**.
+
+They cannot be backfilled: the link was never written, so nothing in the row
+says whether it was a chain root or the third hop of a composed chain that has
+since been swept. Synthesising an origin from the run's own id would assert the
+former for every one of them, which is exactly the claim the data cannot
+support — and it would show a composed chain from that era as three unrelated
+single-run chains, silently.
+
+So the index covers **chains recorded since the column landed**, and says so
+through `has_unrecorded_runs` rather than leaving the absence to be inferred
+from a short list.
+
+Two related cases that are *not* excluded:
+
+- A chain whose **root run has been swept** by retention is still listed: its
+  surviving runs still carry the origin id. `started_by_kind` is `unknown`,
+  and `routine_id`/`routine_slug` are absent, because the row that held the
+  provenance is gone.
+- A chain started by a rule that was **soft-deleted since** keeps
+  `started_by_kind: "automation"` with the rule's id. The label falls back to
+  `"automation"` rather than inventing a name — the run records that a rule
+  started it, and that fact outlives the rule.
+
+### Tenancy
+
+Every predicate carries the workspace, including the five label lookups. That
+is not defence in depth layered over a scoped entry point: `chain_origin` and
+`triggered_by_id` are untyped string columns with no foreign key behind them,
+and issue identifiers are only unique **per workspace**, so an unfenced label
+lookup would happily hand another tenant's issue title or rule name to a run of
+yours. The labels are correlated subqueries rather than joins for the same
+reason a duplicate must not matter: a subquery cannot multiply the row count,
+so one chain can never split into two index rows.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | No authenticated session, or no workspace resolvable. |
+| 403 | Caller is not a member of the workspace. |
+| 500 | Query failed. |
+
+An empty `chains[]` is `200`, not `404`: a workspace where nothing has run yet
+is a valid answer, and one where everything predates chain recording is a
+different answer that `has_unrecorded_runs` distinguishes.
 
 ---
 
@@ -244,9 +376,11 @@ a dangling reference from a rendering bug of its own.
 
 ## CLI
 
-The same data, rendered as a tree:
+The same data — the index as a table, the walk as a tree:
 
 ```
+crewship chain list
+crewship chain list --limit 100 --offset 100
 crewship chain ENG-7
 crewship chain ENG-7 --depth 6 --limit 400 --gaps
 crewship chain prn_01hy --format json

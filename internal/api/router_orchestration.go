@@ -383,6 +383,20 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	chainH := NewChainHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/chains/{anchor}", authed(wsCtx(http.HandlerFunc(chainH.Get))))
 
+	chainsListH := NewChainsListHandler(r.db, r.logger)
+	// The index the walk above cannot be: one row per chain run, newest
+	// first, so a client can ask "what workflows ran here" without already
+	// knowing an anchor. A GROUP BY over pipeline_runs.chain_origin rather
+	// than a traversal — every row's origin is a valid anchor for the walk,
+	// which is how the list and the graph stay one feature.
+	//
+	// The paging goes through parsePagination (helpers.go), which the spec
+	// generator cannot see into, so ?limit/?offset are declared here — same
+	// reason as the mcp-registry routes below. The annotation has to sit in
+	// the comment run IMMEDIATELY above the registration or it is ignored.
+	// openapi: query limit:integer offset:integer
+	r.mux.Handle("GET /api/v1/chains", authed(wsCtx(http.HandlerFunc(chainsListH.List))))
+
 	// Harbor Master: HITL approvals inbox. Enqueue side runs inside
 	// the orchestrator's gate; this handler is list + decide for humans.
 	ah := NewApprovalsHandler(r.db, r.logger, r.Journal())

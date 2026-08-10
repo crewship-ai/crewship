@@ -64,6 +64,24 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"nodes": array(chainNode), "edges": array(chainEdge),
 		"truncated": boolean(), "truncated_by": str(), "gaps": array(chainGap),
 	})
+	// Chain index (GET /api/v1/chains). One row per chain run — a GROUP BY
+	// over pipeline_runs.chain_origin — so a client can find a chain without
+	// already holding an anchor. started_by_* is the root run's
+	// triggered_via/triggered_by_id pair resolved into something human.
+	chainSummary := object(map[string]any{
+		"origin": str(), "started_by_kind": str(), "started_by_id": str(), "started_by_key": str(),
+		"started_by": str(), "triggered_via": str(), "routine_id": str(), "routine_slug": str(),
+		"runs": integer(), "max_chain_depth": integer(), "failed_runs": integer(), "failed": boolean(),
+		"first_activity": dateTime(), "last_activity": dateTime(),
+	})
+	// has_unrecorded_runs is load-bearing the way truncated is on the walk:
+	// runs from before the chain_origin column are absent from the index and
+	// cannot be backfilled, and a client needs to tell that absence apart from
+	// "nothing ever ran here".
+	chainIndex := object(map[string]any{
+		"chains": array(chainSummary), "count": integer(), "limit": integer(), "offset": integer(),
+		"has_more": boolean(), "has_unrecorded_runs": boolean(),
+	})
 	flag := object(map[string]any{
 		"id": str(), "key": str(), "description": nullableString(), "enabled": boolean(), "percentage": integer(),
 		"created_at": dateTime(), "updated_at": dateTime(), "override_enabled": map[string]any{"type": "boolean", "nullable": true},
@@ -127,6 +145,7 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"GET /api/v1/paymaster/top-spenders":                 {Response: object(map[string]any{"rows": array(topPaymaster), "limit": integer(), "since": dateTime()})},
 		"GET /api/v1/paymaster/subscriptions":                {Response: object(map[string]any{"rows": array(subscription), "since": dateTime(), "until": dateTime()})},
 		"GET /api/v1/chains/{anchor}":                        {Response: chainGraph},
+		"GET /api/v1/chains":                                 {Response: chainIndex},
 		"GET /api/v1/metrics/timeseries":                     {Response: timeseries},
 		"GET /api/v1/mission-metrics":                        {Response: missionMetrics},
 		"GET /api/v1/feature-flags":                          {Response: array(flag)},

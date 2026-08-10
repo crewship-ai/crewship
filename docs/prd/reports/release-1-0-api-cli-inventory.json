@@ -1,23 +1,23 @@
 {
   "summary": {
-    "api_operations": 548,
-    "api_exact_docs": 548,
+    "api_operations": 549,
+    "api_exact_docs": 549,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 746,
-    "cli_exact_docs": 746,
-    "cli_root_docs_present": 746,
+    "cli_operations": 747,
+    "cli_exact_docs": 747,
+    "cli_root_docs_present": 747,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 415,
-    "api_with_concrete_response_schemas": 534,
+    "api_with_test_signals": 416,
+    "api_with_concrete_response_schemas": 535,
     "api_generic_response_schemas": 0,
     "api_with_request_bodies": 231,
     "api_with_concrete_json_requests": 227,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 731,
-    "cli_with_flags": 351,
-    "cli_with_all_flags_documented": 351,
+    "cli_with_test_signals": 732,
+    "cli_with_flags": 352,
+    "cli_with_all_flags_documented": 352,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 100,
@@ -6013,6 +6013,49 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "source_file": "internal/api/router_crews.go"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/chains",
+      "operation_id": "get_api_v1_chains",
+      "tag": "chains",
+      "exact_docs": [
+        "docs/api-reference/automations.mdx",
+        "docs/api-reference/chains.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/chains.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_chain_test.go",
+        "cmd/gen-openapi/schemas_observability_payments_test.go",
+        "internal/api/chain_handler_test.go",
+        "internal/api/chains_list_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "test_signals": [
+            "cmd/crewship/cmd_chain_test.go",
+            "cmd/gen-openapi/schemas_observability_payments_test.go",
+            "internal/api/chain_handler_test.go",
+            "internal/api/chains_list_test.go"
+          ]
         }
       }
     },
@@ -25150,10 +25193,10 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
-        "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
       ],
       "flags": [
@@ -25503,10 +25546,10 @@
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
         "cmd/crewship/cmd_automation_matcher_loss_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
-        "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
       ]
     },
@@ -25745,8 +25788,8 @@
         "cmd/crewship/cmd_backup_admin_cov_test.go",
         "cmd/crewship/cmd_backup_cov_test.go",
         "cmd/crewship/cmd_backup_lifecycle_cov_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
-        "cmd/crewship/cmd_checkpoint_cov_test.go",
         "…"
       ]
     },
@@ -25979,6 +26022,41 @@
         "depth",
         "gaps",
         "limit"
+      ]
+    },
+    {
+      "path": "chain list",
+      "use": "list",
+      "short": "List the chains that have run in this workspace, newest first",
+      "aliases": [
+        "ls"
+      ],
+      "root": "chain",
+      "exact_docs": [
+        "docs/cli/chain.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/chain.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_agent_mcp_cov_test.go",
+        "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
+        "cmd/crewship/cmd_chat_cov2_test.go",
+        "cmd/crewship/cmd_checkpoint_cov_test.go",
+        "cmd/crewship/cmd_checkpoint_test.go",
+        "cmd/crewship/cmd_credential_cov2_test.go",
+        "…"
+      ],
+      "flags": [
+        "limit",
+        "offset"
+      ],
+      "documented_flags": [
+        "limit",
+        "offset"
       ]
     },
     {
@@ -26520,11 +26598,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -26769,11 +26847,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -27411,11 +27489,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_assignment_cov_test.go",
-        "cmd/crewship/cmd_credential_binding_test.go",
         "…"
       ],
       "flags": [
@@ -27908,11 +27986,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_avatar_test.go",
         "…"
       ]
     },
@@ -28431,11 +28509,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_avatar_test.go",
         "…"
       ],
       "flags": [
@@ -29149,11 +29227,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -29340,11 +29418,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -29762,11 +29840,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -29911,11 +29989,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -29989,11 +30067,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -30106,11 +30184,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -30385,11 +30463,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -30623,11 +30701,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -30867,11 +30945,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -31945,11 +32023,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -32661,11 +32739,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -33395,11 +33473,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -34542,11 +34620,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -34704,11 +34782,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -34933,11 +35011,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -34982,11 +35060,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -35746,11 +35824,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -35929,11 +36007,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -36189,11 +36267,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -36503,11 +36581,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -37203,11 +37281,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -37317,11 +37395,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -37475,11 +37553,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -37639,11 +37717,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -37773,11 +37851,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -38046,11 +38124,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -38248,11 +38326,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -38367,10 +38445,10 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
-        "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
       ],
       "flags": [
@@ -39326,11 +39404,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -39482,11 +39560,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -39991,11 +40069,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -40660,11 +40738,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -40884,11 +40962,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -41062,11 +41140,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -41125,11 +41203,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -41233,10 +41311,10 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
-        "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
       ],
       "flags": [
@@ -41449,11 +41527,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -41530,11 +41608,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -41915,11 +41993,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42010,11 +42088,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -42141,11 +42219,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -42746,11 +42824,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -42839,11 +42917,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ],
       "flags": [
@@ -43046,10 +43124,10 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
-        "cmd/crewship/cmd_credential_cov2_test.go",
         "…"
       ],
       "flags": [
@@ -43384,11 +43462,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -43617,11 +43695,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -43641,11 +43719,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -43868,11 +43946,11 @@
         "cmd/crewship/cmd_admin_extras_test.go",
         "cmd/crewship/cmd_agent_mcp_cov_test.go",
         "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_chat_cov2_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
         "cmd/crewship/cmd_credential_cov2_test.go",
-        "cmd/crewship/cmd_crew_cache_cov_test.go",
         "…"
       ]
     },
@@ -45497,11 +45575,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4032,
-    "api_path_references": 2032,
+    "command_references": 4046,
+    "api_path_references": 2034,
     "environment_references": 401,
     "manifest_kind_references": 209,
-    "flag_references": 1872,
+    "flag_references": 1878,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,
