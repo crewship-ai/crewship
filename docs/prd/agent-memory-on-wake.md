@@ -74,6 +74,10 @@ context (LEAD) or peer communication (non-LEAD), the memory context, language.
 **Volatile, in the user message** (`session_context.go:22`): conversation history, episodic
 recall, memory nudge, cost awareness.
 
+The consolidator's `.proposed` staging directory is created one component at a time and
+refuses symlinks. Both consolidation proposals and memory-derived skill candidates share
+this boundary, preventing the agent-writable tree from redirecting host-side staging.
+
 The host consolidator treats `pins.md` and daily `learned-*.md` files as
 agent-writable trust boundaries. Reads and appends are anchored to the resolved topics
 directory and explicitly refuse a final-component symlink, so a link planted in the
