@@ -12,6 +12,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -81,6 +82,64 @@ func TestInit_WithURLEndpoint_ExportsSpans(t *testing.T) {
 	// Second shutdown call is a no-op (initState already nil) — must not
 	// panic.
 	shutdown()
+}
+
+func TestWithTracesPath(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"base url gets the signal path", "http://localhost:4318", "http://localhost:4318/v1/traces"},
+		{"trailing slash is still a base url", "http://localhost:4318/", "http://localhost:4318/v1/traces"},
+		{"https base url", "https://collector.example.com", "https://collector.example.com/v1/traces"},
+		{"explicit traces path is left alone", "http://localhost:4318/v1/traces", "http://localhost:4318/v1/traces"},
+		{"project-scoped prefix is left alone", "https://cloud.example.com/api/public/otel", "https://cloud.example.com/api/public/otel"},
+		{"query string survives", "http://localhost:4318?tenant=a", "http://localhost:4318/v1/traces?tenant=a"},
+		{"unparseable input is passed through", "http://[::1", "http://[::1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := withTracesPath(tt.in); got != tt.want {
+				t.Errorf("withTracesPath(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// A collector reached through a project-scoped prefix must keep receiving
+// exports at that prefix — we only fill in a path when there is none.
+func TestInit_PrefixedURLEndpointKeepsItsPath(t *testing.T) {
+	restoreGlobalProvider(t)
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	shutdown, err := Init(ctx, srv.URL+"/api/public/otel", "cov-test")
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	_, span := otel.Tracer(tracerName).Start(ctx, "cov-span")
+	span.End()
+	shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) == 0 {
+		t.Fatal("no OTLP trace export reached the collector after shutdown flush")
+	}
+	for _, p := range paths {
+		if p != "/api/public/otel" {
+			t.Errorf("export posted to %q, want the configured prefix verbatim", p)
+		}
+	}
 }
 
 func TestInit_BareHostPortUsesInsecureExporter(t *testing.T) {

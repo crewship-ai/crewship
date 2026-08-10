@@ -20,7 +20,7 @@ Set the env vars on the Crewship process (`.env.local` for `dev.sh`,
 systemd unit `Environment=` for prod, container `-e` for Docker):
 
 ```sh
-# Base OTLP HTTP endpoint — SDK appends /v1/traces automatically.
+# Base OTLP HTTP endpoint — /v1/traces is appended automatically.
 # Same-host backends should be reached over loopback so traces don't
 # round-trip through the reverse proxy (TLS overhead + extra hops
 # for high-volume telemetry).
@@ -35,9 +35,14 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>
 # OTEL_EXPORTER_OTLP_HEADERS=X-API-Key=<value>
 ```
 
-If your backend documents a project-scoped path (e.g.
-`/api/public/otel`), append it to `OTEL_EXPORTER_OTLP_ENDPOINT` —
-the OTel SDK still appends `/v1/traces` to whatever you set here.
+`/v1/traces` is only filled in when the endpoint has no path of its own.
+If your backend documents a project-scoped path (e.g. `/api/public/otel`),
+that path is used verbatim — set the **full** URL your backend expects,
+including the signal segment:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.example.com/api/public/otel/v1/traces
+```
 
 Compute a Basic-auth header once if needed:
 
