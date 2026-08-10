@@ -5,6 +5,12 @@
 **Created:** 2026-08-04  
 **Scope:** release-1.0 readiness
 
+> **Progress against this PRD is measured in
+> [`RELEASE-1-0-READINESS-2026-08-10.md`](RELEASE-1-0-READINESS-2026-08-10.md)**
+> — every claim there re-measured at `69a8ceb9`, including the ones that turned
+> out to be stale. The remaining routine work is broken into executable
+> packages in [`CODEX-WORK-ORDER-RELEASE-1-0.md`](CODEX-WORK-ORDER-RELEASE-1-0.md).
+
 ## Purpose
 
 Prepare Crewship for a credible 1.0 release by establishing a trustworthy
