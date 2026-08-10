@@ -131,8 +131,11 @@ env:
   #   crew-privilege-controls     0 /  6
   #   crew-provisioning           0 /  1
   #   crews-real-workflow         0 / 12
+  #   command-palette             5 /  7
+  #   crew-image-freshness        0 /  1
+  #   pr-contract                 0 /  1
   #                              ──────────
-  #                              24 / 52   of the 78 the main config runs
+  #                              29 / 61   of the 90 tests selected here
   #
   # plus crews-unification / edge-cases / full-integration /
   # manual-crews-walkthrough / mobile-crews / smoke, which the main config
@@ -147,7 +150,9 @@ env:
   # issue this job files is where that gets an owner.
   DRIFT_SPECS: >-
     e2e/a11y.spec.ts
+    e2e/command-palette.spec.ts
     e2e/connectors.spec.ts
+    e2e/crew-image-freshness.spec.ts
     e2e/crew-journal.spec.ts
     e2e/crew-privilege-controls.spec.ts
     e2e/crew-provisioning.spec.ts
@@ -160,6 +165,7 @@ env:
     e2e/full-integration.spec.ts
     e2e/manual-crews-walkthrough.spec.ts
     e2e/mobile-crews.spec.ts
+    e2e/pr-contract.spec.ts
     e2e/smoke.spec.ts
   # EXCLUDED: deliberately run by nobody here — see the header for each.
   EXCLUDED_SPECS: >-
