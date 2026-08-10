@@ -243,6 +243,26 @@ func TestDeprecatedTerminologyNamesPageSpellingAndReplacement(t *testing.T) {
 	}
 }
 
+func TestDeprecatedTerminologyRejectsUnrelatedUseOnCompatibilityPage(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/concepts.mdx", ""+
+		"| **`COORDINATOR`** | **`LEAD`** | Deprecated 2026-04-16 |\n"+
+		"A coordinator assigns the work.\n")
+
+	offenders, err := deprecatedTerminologyInDocs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []deprecatedTermUse{{
+		page:        "docs/concepts.mdx",
+		spelling:    "COORDINATOR",
+		replacement: "LEAD",
+	}}
+	if !slices.Equal(offenders, want) {
+		t.Fatalf("deprecatedTerminologyInDocs() = %+v\nwant %+v", offenders, want)
+	}
+}
+
 func TestRepositoryDocsHaveNoDeprecatedTerminology(t *testing.T) {
 	root := filepath.Join("..", "..")
 	offenders, err := deprecatedTerminologyInDocs(root)

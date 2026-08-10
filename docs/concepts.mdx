@@ -41,7 +41,7 @@ The manifest also exposes supporting kinds such as `Issue`, `Label`, `Milestone`
 
 | Deprecated spelling | Replacement | Since | Why |
 |---|---|---|---|
-| **`COORDINATOR`** | **`LEAD`** | Retired in v0.1 | The former workspace-wide agent role no longer exists in the public role model. A legacy standalone `Agent` manifest may still accept the literal for compatibility, but new UI, CLI prose, API schemas, and manifests use `LEAD`. |
+| **`COORDINATOR`** | **`LEAD`** | Deprecated 2026-04-16; retired in v0.1 | The former workspace-wide agent role no longer exists in the public role model. A legacy standalone `Agent` manifest may still accept the literal for compatibility, but new UI, CLI prose, API schemas, and manifests use `LEAD`. |
 
 Published prose must not introduce `COORDINATOR` outside this replacement record and the manifest pages that document the exact legacy compatibility boundary. `scripts/docs-surface-check` enforces that deny-list.
 

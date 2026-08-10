@@ -49,10 +49,24 @@ var deprecatedTerms = []deprecatedTerm{
 	{spelling: "COORDINATOR", replacement: "LEAD", pattern: regexp.MustCompile(`(?i)\bcoordinator\b`)},
 }
 
-var deprecatedTermAllowlist = map[string]bool{
-	"docs/concepts.mdx":          true, // canonical replacement record
-	"docs/manifest/agent.md":     true, // accepted legacy manifest literal
-	"docs/manifest/workspace.md": true, // rejection/compatibility boundary
+var allowedDeprecatedOccurrences = map[string][]string{
+	"docs/concepts.mdx": {
+		"| **`COORDINATOR`** | **`LEAD`** |",
+		"Published prose must not introduce `COORDINATOR` outside this replacement record",
+	},
+	"docs/manifest/agent.md": {
+		"LEAD | AGENT | COORDINATOR (server default: AGENT)",
+		"One of `LEAD` \\| `AGENT` \\| `COORDINATOR`.",
+		"**`COORDINATOR` is effectively unsupported — prefer `AGENT`/`LEAD`**",
+		"**`COORDINATOR` is asymmetric — and effectively unsupported.**",
+		"still admits `COORDINATOR`, but:",
+		"`COORDINATOR` survives in the",
+	},
+	"docs/manifest/workspace.md": {
+		"`COORDINATOR` is rejected in the nested form",
+		"**`COORDINATOR` is not valid in nested bundles.**",
+		"accepts `COORDINATOR` in its own front-end validator",
+	},
 }
 
 func main() {
@@ -267,15 +281,19 @@ func deprecatedTerminologyInDocs(root string) ([]deprecatedTermUse, error) {
 			return nil
 		}
 		page := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
-		if deprecatedTermAllowlist[page] {
-			return nil
-		}
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
+		text := string(body)
+		for _, allowed := range allowedDeprecatedOccurrences[page] {
+			// Remove only the exact reviewed compatibility wording. Any extra
+			// deprecated term on the same page — even on the same line — stays
+			// in text and is reported below.
+			text = strings.Replace(text, allowed, "", 1)
+		}
 		for _, term := range deprecatedTerms {
-			if term.pattern.Match(body) {
+			if term.pattern.MatchString(text) {
 				offenders = append(offenders, deprecatedTermUse{page: page, spelling: term.spelling, replacement: term.replacement})
 			}
 		}
