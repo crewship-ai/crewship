@@ -54,8 +54,10 @@ import {
   type SidebarIssue,
   type SidebarRoutine,
 } from "./activity-sidebar"
+import { useChains } from "@/hooks/use-chains"
 import { ActivityOverview, iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
+import { TopologyCard } from "./topology-card"
 import { FeedRow } from "./feed-row"
 
 /** Connection state as a word, not a button. */
@@ -106,6 +108,10 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const [selected, setSelected] = React.useState<JournalEntry | null>(null)
   const [railCollapsed, setRailCollapsed] = React.useState(false)
   const [focus, setFocus] = React.useState<EntityFocus | null>(null)
+  // The workflow the reader picked out of the rail. Held here rather than in
+  // the sidebar because the TREE is what it opens, and the tree lives in the
+  // main column — the rail's job is to name the chain, not to draw it.
+  const [selectedChain, setSelectedChain] = React.useState<string | null>(null)
 
   // Entities for the rail. The journal lookup already carries crews, agents
   // and missions; routines come from the pipelines list so the rows can show
@@ -172,6 +178,12 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
 
   const { entries, loading, loadingMore, error, nextCursor, refresh, loadMore, prependLive } =
     useJournalList({ workspaceId, params, limit: PAGE_SIZE, maxEntries: MAX_BUFFERED })
+
+  // The workflow index. Independent of the journal query on purpose: the rail
+  // must answer "where can I go" even when the current filters answer nothing,
+  // and tying it to the same window is what made the rail collapse to a single
+  // row the moment an issue was focused.
+  const { chains, hasUnrecordedRuns: chainsHaveUnrecorded } = useChains(workspaceId)
 
   const { status: streamStatus } = useJournalStream({
     workspaceId,
@@ -426,6 +438,10 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
             </div>
           ) : (
             <ActivitySidebar
+              chains={chains}
+              chainsHaveUnrecorded={chainsHaveUnrecorded}
+              selectedChain={selectedChain}
+              onSelectChain={setSelectedChain}
               search={search}
               onSearchChange={setSearch}
               facets={facets}
@@ -508,6 +524,25 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   zeros: "nothing broke", "all clear", "Nothing has failed.
                   Nice." Every one of those is false; the truth is that nothing
                   was ASKED. The window has events, this question has none. */}
+              {/* A picked workflow opens as its own tree, above everything
+                  else. This is the payoff of the whole trace layer: one
+                  picture that crosses from the rule that started it, through
+                  the routine runs, into the agent work those dispatched —
+                  which until now stopped dead at the moment real work began. */}
+              {selectedChain && (
+                <div className="mx-auto w-full max-w-[1800px] p-4 md:p-6 md:pb-0">
+                  <TopologyCard
+                    workspaceId={workspaceId}
+                    anchor={selectedChain}
+                    anchorLabel={
+                      chains.find((c) => c.origin === selectedChain)?.routine_slug ||
+                      chains.find((c) => c.origin === selectedChain)?.started_by ||
+                      "this workflow"
+                    }
+                  />
+                </div>
+              )}
+
               {!loading && !error && emptyByFilters && (
                 <div className="px-6 py-14">
                   <EmptyState

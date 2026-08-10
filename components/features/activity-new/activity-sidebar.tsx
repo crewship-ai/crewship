@@ -30,6 +30,7 @@ import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
+import type { ChainSummary } from "@/hooks/use-chains"
 import {
   ACTIVITY_SCOPES,
   ACTIVITY_SOURCES,
@@ -174,6 +175,19 @@ export interface ActivitySidebarProps {
   focus: EntityFocus | null
   onFocus: (f: EntityFocus | null) => void
   total: number
+  /**
+   * The workflow runs in this workspace, newest first. Each is every piece of
+   * work that shares one cause — the rule or person that started it, the
+   * routine runs it caused, the agent work those dispatched.
+   *
+   * Listed FIRST because it is the question the rail exists to answer. The
+   * sections under it slice the same activity by type, which is only useful
+   * once you already know which run you are looking at.
+   */
+  chains: ChainSummary[]
+  chainsHaveUnrecorded: boolean
+  selectedChain: string | null
+  onSelectChain: (origin: string | null) => void
   onToggleCollapse: () => void
 }
 
@@ -193,9 +207,16 @@ export function ActivitySidebar({
   focus,
   onFocus,
   total,
+  chains,
+  chainsHaveUnrecorded,
+  selectedChain,
+  onSelectChain,
   onToggleCollapse,
 }: ActivitySidebarProps) {
   const [openSection, setOpenSection] = React.useState<Record<string, boolean>>({
+    // Open by default: it is the question the rail exists to answer, and a
+    // collapsed section is a feature nobody finds.
+    chains: true,
     scope: true,
     crews: true,
     issues: false,
@@ -341,6 +362,50 @@ export function ActivitySidebar({
       </SidebarToolbar>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+        <SidebarSection
+          label="Workflows"
+          count={chains.length}
+          collapsible
+          collapsed={!openSection.chains}
+          onToggle={() => toggleSection("chains")}
+          className="border-b border-white/[0.06]"
+        >
+          {chains.length === 0 ? (
+            <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground-soft">
+              {chainsHaveUnrecorded
+                ? "No workflows recorded yet. Runs from before chain recording cannot be grouped — the link was never written."
+                : "No workflows yet. One appears the first time something causes something else."}
+            </p>
+          ) : (
+            chains.map((c) => (
+              <SidebarRow
+                key={c.origin}
+                selected={selectedChain === c.origin}
+                onSelect={() => onSelectChain(selectedChain === c.origin ? null : c.origin)}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "h-1.5 w-1.5 shrink-0 rounded-full",
+                    c.failed ? "bg-destructive" : "bg-success",
+                  )}
+                />
+                <span className="flex-1 truncate text-foreground/80" title={c.started_by}>
+                  {c.routine_slug || c.started_by}
+                </span>
+                {/* Steps, not events: what a reader compares between rows is
+                    how much happened, and the depth is in the tree already. */}
+                <Count n={c.runs} />
+              </SidebarRow>
+            ))
+          )}
+          {chains.length > 0 && chainsHaveUnrecorded && (
+            <p className="px-3 pb-1 pt-1.5 text-[10.5px] leading-snug text-muted-foreground-soft">
+              Older runs are not indexed here — the link that would group them was never written.
+            </p>
+          )}
+        </SidebarSection>
+
         <SidebarSection
           label="Status"
           count={ACTIVITY_SCOPES.length + 1}
