@@ -110,6 +110,36 @@ func TestSkillProposed_List_HappyPath(t *testing.T) {
 	}
 }
 
+func TestSkillProposed_List_RefusesSymlinkedStagedFile(t *testing.T) {
+	h, _, userID, wsID, crewID, slug := newSkillProposedHandlerTest(t, "symlink-list-crew")
+	root := t.TempDir()
+	dir := hostProposedDir(t, root, crewID, slug)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir staged: %v", err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	const secretName = "must-not-leak-through-symlink"
+	if err := os.WriteFile(outside, []byte("---\nname: "+secretName+"\ndescription: Use when testing refusal\n---\n"), 0o644); err != nil {
+		t.Fatalf("write outside: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "skill-planted.md")); err != nil {
+		t.Fatalf("plant symlink: %v", err)
+	}
+	h.SetStorageBasePath(root)
+
+	req := httptest.NewRequest("GET", "/api/v1/skills/proposed?crew_id="+crewID, nil)
+	req = withWorkspaceUser(req, userID, wsID, "MANAGER")
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if bytes.Contains(rr.Body.Bytes(), []byte(secretName)) {
+		t.Fatalf("listing followed a staged-file symlink and exposed outside content: %s", rr.Body.String())
+	}
+}
+
 func TestSkillProposed_List_EmptyCrew_ReturnsEmptyArray(t *testing.T) {
 	h, _, userID, wsID, crewID, _ := newSkillProposedHandlerTest(t, "no-skills-crew")
 	h.SetStorageBasePath(t.TempDir()) // root exists but crew dir doesn't
