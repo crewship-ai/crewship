@@ -66,11 +66,12 @@ import {
   chainScopeCounts,
   chainStatus,
   chainsInScope,
+  isComposed,
   issueLens,
   matchesQuery,
   routineLens,
   workflowHandle,
-  workflowName,
+  workflowSentence,
   type ChainStatus,
   type LensKey,
 } from "@/lib/activity-lenses"
@@ -325,7 +326,7 @@ function WorkflowRow({
 }) {
   const status = chainStatus(chain)
   const live = status === "running" || status === "waiting"
-  const name = workflowName(chain, routine?.name)
+  const sentence = workflowSentence(chain, routine?.name)
   const touched = chainTouched(chain)
   const handle = workflowHandle(chain.origin)
   const startedBy = chain.started_by?.trim() || chain.triggered_via || "unknown trigger"
@@ -381,8 +382,10 @@ function WorkflowRow({
       </span>
 
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-foreground/85" title={name}>
-          {name}
+        {/* The SHAPE, not the routine's name. Two runs of one routine render
+            the same word; what they did differs, and that is the line. */}
+        <span className="truncate text-foreground/85" title={sentence}>
+          {sentence}
         </span>
         <span className="flex items-center gap-1.5 truncate text-[10.5px] text-muted-foreground-soft">
           <span>{relTime(chain.last_activity)}</span>
@@ -410,7 +413,7 @@ function WorkflowRow({
           tells two rows apart, and hovering is where it comes back. */}
       <TooltipContent side="right" sideOffset={8}>
         <div className="space-y-0.5">
-          <div className="font-medium">{name}</div>
+          <div className="font-medium">{sentence}</div>
           <div className="font-mono text-[10px] opacity-70">{handle}</div>
           <div className="text-[10px] opacity-70">
             {startedBy} · {status}
@@ -534,17 +537,25 @@ export function ActivitySidebar({
     [searched, facets.scope],
   )
 
+  // Only composed chains are workflows. A bare run — one routine, invoked,
+  // nothing bound to anything — is a run of that routine and belongs in the
+  // Routines lens, which is where it already appears. Twelve of twenty-one rows
+  // here were that, which is what made this lens read as a worse-named copy of
+  // Routines. See isComposed.
+  const workflowChains = React.useMemo(() => scopedChains.filter(isComposed), [scopedChains])
+  const bareRuns = scopedChains.length - workflowChains.length
+
   const lensIssues = React.useMemo(() => issueLens(scopedChains), [scopedChains])
   const lensAgents = React.useMemo(() => agentLens(scopedChains), [scopedChains])
   const lensRoutines = React.useMemo(() => routineLens(scopedChains), [scopedChains])
   const lensCounts = React.useMemo<Record<LensKey, number>>(
     () => ({
-      workflows: scopedChains.length,
+      workflows: workflowChains.length,
       issues: lensIssues.length,
       agents: lensAgents.length,
       routines: lensRoutines.length,
     }),
-    [scopedChains.length, lensIssues.length, lensAgents.length, lensRoutines.length],
+    [workflowChains.length, lensIssues.length, lensAgents.length, lensRoutines.length],
   )
 
   // Sections, not a flat list. A chain that has been parked on an approval since
@@ -554,7 +565,7 @@ export function ActivitySidebar({
   // `now` is read once per list build rather than per row: two rows computed
   // either side of local midnight would land in different buckets from the same
   // render, which is a boundary nobody can see and everybody would report.
-  const buckets = React.useMemo(() => bucketChains(scopedChains, Date.now()), [scopedChains])
+  const buckets = React.useMemo(() => bucketChains(workflowChains, Date.now()), [workflowChains])
 
   // The segments count CHAINS, which is what the list under them holds. They
   // counted journal entries before, so "Failed 9" sat above three failed
@@ -837,9 +848,16 @@ export function ActivitySidebar({
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-        {scopedChains.length === 0 ? (
+        {(lens === "workflows" ? workflowChains.length : scopedChains.length) === 0 ? (
           <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground-soft">
-            {chains.length > 0
+            {lens === "workflows" && bareRuns > 0
+              ? // The third emptiness, and the one a reader would otherwise
+                // read as a broken page: things DID run, none of them composed
+                // anything. Naming where they are is the whole point.
+                `Nothing composed a process in this window. ${bareRuns} ${
+                  bareRuns === 1 ? "run" : "runs"
+                } happened on their own — they are under Routines.`
+              : chains.length > 0
               ? // Told apart from an empty workspace, because the two need
                 // opposite actions: one is "widen the question", the other is
                 // "nothing has run here yet".
@@ -944,6 +962,13 @@ export function ActivitySidebar({
               )
             })}
           </SidebarSection>
+        )}
+
+        {lens === "workflows" && workflowChains.length > 0 && bareRuns > 0 && (
+          <p className="px-3 pb-1 pt-1.5 text-[10.5px] leading-snug text-muted-foreground-soft">
+            {bareRuns} {bareRuns === 1 ? "run" : "runs"} composed nothing and {bareRuns === 1 ? "is" : "are"}{" "}
+            listed under Routines.
+          </p>
         )}
 
         {scopedChains.length > 0 && chainsHaveUnrecorded && (

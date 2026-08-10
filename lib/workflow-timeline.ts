@@ -44,6 +44,14 @@ import { formatDurationMs } from "@/lib/activity-stream"
 export interface TimelineSource {
   nodes: ChainNode[]
   edges: ChainEdge[]
+  /**
+   * The graph-wide id of the node the walk started from ("run:run_abc").
+   *
+   * Optional because this type is a structural subset a caller may hand over
+   * without it; when it is absent workflowRuns keeps every run rather than
+   * guessing which are members. See there for why that is the safe direction.
+   */
+  anchor_node?: string
 }
 
 /* ------------------------------------------------------------------ *
@@ -480,6 +488,41 @@ export interface WorkflowRun {
 }
 
 /**
+ * Which run nodes are MEMBERS of this chain rather than siblings of its
+ * routine, or null when the graph does not say.
+ *
+ * The walk expands a run to its routine and a routine to every run of it, so a
+ * chain holding ONE run comes back carrying every run that routine has ever
+ * had. The Runs card built from the raw node list therefore listed eight rows
+ * beside a header reading "1 run" — two numbers on one page describing
+ * different things, which is the defect this card exists to avoid.
+ *
+ * The discriminator is the EDGE, not the depth. `routine --runs--> run` is the
+ * sibling edge and nothing else produces it; a run this chain actually caused
+ * arrives over `triggers`. Depth would not work: a genuinely composed chain has
+ * members two and three hops out, at the same depth as the siblings.
+ *
+ * The anchor is kept by identity, because the walk reaches it by that same
+ * sibling edge — it is how a run's own routine is drawn.
+ *
+ * null when the graph names no anchor. Dropping rows on a guess would hide real
+ * runs; showing them all is what this card did before, and is the safe
+ * direction to be wrong in.
+ */
+function chainRunIDs(graph: TimelineSource): Set<string> | null {
+  const anchor = graph.anchor_node
+  if (!anchor) return null
+  const keep = new Set<string>()
+  if (anchor.startsWith("run:")) keep.add(anchor.slice("run:".length))
+  for (const e of graph.edges) {
+    if (String(e.kind) === "runs") continue
+    const to = String(e.to ?? "")
+    if (to.startsWith("run:")) keep.add(to.slice("run:".length))
+  }
+  return keep
+}
+
+/**
  * The chain's runs, oldest first.
  *
  * Derived from the walk this page already fetched rather than from a second
@@ -497,8 +540,9 @@ export interface WorkflowRun {
  * where the reader looks first.
  */
 export function workflowRuns(graph: TimelineSource): WorkflowRun[] {
+  const member = chainRunIDs(graph)
   const runs = graph.nodes
-    .filter((n) => String(n.kind) === "run")
+    .filter((n) => String(n.kind) === "run" && (member == null || member.has(String(n.ref ?? ""))))
     .map((n) => ({
       id: String(n.ref ?? ""),
       label: String(n.label ?? n.ref ?? ""),

@@ -582,3 +582,83 @@ describe("workflowRuns", () => {
     expect(formatRowDuration(row.timing)).toBe("38ms")
   })
 })
+
+describe("workflowRuns — the chain's runs, not the routine's", () => {
+  const graph = (nodes: ChainNode[], edges: { from: string; to: string; kind: string }[], anchor?: string) =>
+    ({ nodes, edges, anchor_node: anchor }) as unknown as TimelineSource
+
+  it("drops the routine's OTHER runs, which the walk reaches through it", () => {
+    // The walk goes run → its routine → every run of that routine. So a chain
+    // with ONE run comes back carrying eight, and a card built from the node
+    // list said "8" beside a header saying "1 run". Two numbers on one page
+    // describing different things.
+    const rows = workflowRuns(
+      graph(
+        [
+          node({ id: "run_mine", occurred_at: "2026-08-10T10:00:00.000000000Z" }),
+          node({ id: "run_sibling_a", occurred_at: "2026-08-10T09:00:00.000000000Z" }),
+          node({ id: "run_sibling_b", occurred_at: "2026-08-10T08:00:00.000000000Z" }),
+          node({ id: "pln_1", kind: "routine" }),
+        ],
+        [
+          { from: "routine:pln_1", to: "run:run_mine", kind: "runs" },
+          { from: "routine:pln_1", to: "run:run_sibling_a", kind: "runs" },
+          { from: "routine:pln_1", to: "run:run_sibling_b", kind: "runs" },
+        ],
+        "run:run_mine",
+      ),
+    )
+    expect(rows.map((r) => r.id)).toEqual(["run_mine"])
+  })
+
+  it("keeps a run this chain actually caused", () => {
+    // A composed chain: the anchor triggered a second run. That edge is not a
+    // `runs` edge, so the run is a member rather than a sibling.
+    const rows = workflowRuns(
+      graph(
+        [
+          node({ id: "run_root", occurred_at: "2026-08-10T10:00:00.000000000Z" }),
+          node({ id: "run_child", occurred_at: "2026-08-10T10:00:01.000000000Z" }),
+          node({ id: "run_sibling", occurred_at: "2026-08-10T09:00:00.000000000Z" }),
+          node({ id: "pln_1", kind: "routine" }),
+        ],
+        [
+          { from: "routine:pln_1", to: "run:run_root", kind: "runs" },
+          { from: "routine:pln_1", to: "run:run_sibling", kind: "runs" },
+          { from: "run:run_root", to: "run:run_child", kind: "triggers" },
+        ],
+        "run:run_root",
+      ),
+    )
+    expect(rows.map((r) => r.id)).toEqual(["run_root", "run_child"])
+  })
+
+  it("keeps every run when the walk names no anchor", () => {
+    // Older server, or a caller handing over a graph-shaped object without the
+    // field. Dropping rows on a guess would hide real runs; showing them all is
+    // what this card did before and is the safe direction to be wrong in.
+    const rows = workflowRuns(
+      graph(
+        [node({ id: "run_a" }), node({ id: "run_b" })],
+        [
+          { from: "routine:pln_1", to: "run:run_a", kind: "runs" },
+          { from: "routine:pln_1", to: "run:run_b", kind: "runs" },
+        ],
+      ),
+    )
+    expect(rows).toHaveLength(2)
+  })
+
+  it("keeps the anchor even when it is only reachable as a sibling", () => {
+    // The anchor is reached by the same `runs` edge as its siblings — that is
+    // how the walk renders it — so it must be kept by identity, not by edge.
+    const rows = workflowRuns(
+      graph(
+        [node({ id: "run_mine" })],
+        [{ from: "routine:pln_1", to: "run:run_mine", kind: "runs" }],
+        "run:run_mine",
+      ),
+    )
+    expect(rows.map((r) => r.id)).toEqual(["run_mine"])
+  })
+})

@@ -431,3 +431,101 @@ export function chainsInScope(chains: ChainSummary[], scope: string): ChainSumma
   const want = scope === "active" ? "running" : scope
   return chains.filter((c) => chainStatus(c) === want)
 }
+
+// ---------------------------------------------------------------------------
+// What earns the word "workflow".
+// ---------------------------------------------------------------------------
+
+/** How many nouns a workflow's sentence names before it starts eliding. */
+const MAX_REACH_NOUNS = 3
+
+/**
+ * Whether a chain COMPOSED anything, or is just one run wearing the word.
+ *
+ * On the live instance twelve of twenty-one rows in the Workflows lens were
+ * `crewship routine run X` — one run, depth 0, no issue touched, no agent
+ * dispatched. Nothing was bound to anything. Listing those as workflows makes
+ * the word mean "a run", and once it means that the Workflows lens is the
+ * Routines lens with worse naming: open "Classify support ticket" in either and
+ * you see the same eight runs.
+ *
+ * A workflow is a process that BINDS two or more Crewship things together. So
+ * the test is whether anything was bound:
+ *
+ *   runs > 1              a routine called another
+ *   max_chain_depth > 0   something fired something
+ *   agent_count > 0       a routine put an agent to work
+ *   issue_count > 0       it reached into the tracker
+ *
+ * Plus one exception that is not about composition at all: a chain that FAILED,
+ * is still running, or is waiting on a person. A single run that broke is the
+ * reason somebody opened this page, and filing it under its routine would hide
+ * exactly what the rail exists to surface. The rule is "compose, or need me".
+ *
+ * Nothing is deleted by this — a bare run is still a run of its routine, and the
+ * Routines lens is where runs live. This only decides which of the two lists it
+ * belongs in.
+ */
+export function isComposed(c: ChainSummary): boolean {
+  if (c.runs > 1) return true
+  if (c.max_chain_depth > 0) return true
+  if ((c.agent_count ?? 0) > 0) return true
+  if ((c.issue_count ?? 0) > 0) return true
+  return chainStatus(c) !== "done"
+}
+
+/**
+ * The one line that says what a workflow IS, as opposed to what routine it began
+ * with.
+ *
+ * "Classify support ticket" is the routine's name. Two runs of it produce two
+ * rows reading the same, and a reader comparing the Workflows lens to the
+ * Routines lens finds the same words in both — which is what made the whole
+ * lens feel redundant.
+ *
+ * A composed chain has something the routine does not: a shape. It was set off
+ * by something, it ran something, it reached something. Written as one arrow
+ * chain, that is unique to the run and readable at a glance:
+ *
+ *   file a follow-up when an issue closes → Follow up on close → riley → ENG-7
+ *
+ * The cause is dropped when it is a PERSON or when it is the routine itself:
+ * "Demo User → Sweep" tells a reader nothing they were looking for in a list of
+ * processes, and a chain whose cause resolves to its own routine would print the
+ * same word twice.
+ *
+ * The reach is capped and says so. A chain that touched nine issues renders
+ * three and "+6" — a cut list that declares the cut, the same rule chainTouched
+ * follows one file over.
+ */
+export function workflowSentence(c: ChainSummary, routineName?: string): string {
+  const parts: string[] = []
+
+  const cause = c.started_by?.trim()
+  const routine = workflowName(c, routineName)
+  const causeIsWorthNaming =
+    cause != null &&
+    cause !== "" &&
+    cause !== routine &&
+    cause !== c.routine_slug &&
+    c.started_by_kind !== "user" &&
+    c.started_by_kind !== "unknown"
+  if (causeIsWorthNaming) parts.push(cause)
+
+  parts.push(routine)
+
+  const agents = (c.agents ?? []).map((a) => a.name || a.slug || a.id)
+  if (agents.length > 0) parts.push(reach(agents, c.agent_count))
+
+  const issues = (c.issues ?? []).map((i) => i.identifier || i.id)
+  if (issues.length > 0) parts.push(reach(issues, c.issue_count))
+
+  return parts.join(" → ")
+}
+
+/** Up to MAX_REACH_NOUNS names, with the remainder declared rather than dropped. */
+function reach(names: string[], total: number): string {
+  const shown = names.slice(0, MAX_REACH_NOUNS)
+  const more = Math.max(total, names.length) - shown.length
+  return more > 0 ? `${shown.join(", ")} +${more}` : shown.join(", ")
+}

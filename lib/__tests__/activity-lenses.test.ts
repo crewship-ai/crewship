@@ -7,11 +7,13 @@ import {
   chainScopeCounts,
   chainStatus,
   chainsInScope,
+  isComposed,
   issueLens,
   matchesQuery,
   routineLens,
   workflowHandle,
   workflowName,
+  workflowSentence,
 } from "@/lib/activity-lenses"
 import type { ChainSummary } from "@/hooks/use-chains"
 
@@ -305,5 +307,83 @@ describe("chainScopeCounts / chainsInScope", () => {
     for (const scope of ["active", "waiting", "failed", "done"] as const) {
       expect(chainsInScope(chains, scope)).toHaveLength(counts[scope])
     }
+  })
+})
+
+describe("isComposed — what earns the word workflow", () => {
+  it("is false for one manual run that touched nothing", () => {
+    // 12 of 21 rows on the live instance were this: `crewship routine run X`,
+    // one run, depth 0, no issue, no agent. Nothing was composed, so calling it
+    // a workflow makes the word mean "a run" — and then the Workflows lens is
+    // the Routines lens with worse naming.
+    expect(isComposed(chain({ runs: 1, max_chain_depth: 0 }))).toBe(false)
+  })
+
+  it("is true when something caused something else", () => {
+    expect(isComposed(chain({ max_chain_depth: 1 }))).toBe(true)
+    expect(isComposed(chain({ runs: 2 }))).toBe(true)
+  })
+
+  it("is true when it put an agent to work", () => {
+    expect(isComposed(chain({ agent_count: 1 }))).toBe(true)
+  })
+
+  it("is true when it reached an issue", () => {
+    expect(isComposed(chain({ issue_count: 1 }))).toBe(true)
+  })
+
+  it("is true for a failed single run — a failure crosses into what a person does", () => {
+    // The one exception to "one run is not a workflow". A run that broke is the
+    // reason somebody opened this page, and filing it away under its routine
+    // would hide the thing the rail exists to surface.
+    expect(isComposed(chain({ runs: 1, failed: true, failed_runs: 1 }))).toBe(true)
+  })
+
+  it("is true for a run still going or still asking", () => {
+    expect(isComposed(chain({ runs: 1, running_runs: 1 }))).toBe(true)
+    expect(isComposed(chain({ runs: 1, waiting_runs: 1 }))).toBe(true)
+  })
+})
+
+describe("workflowName — the sentence that is not the routine's name", () => {
+  it("names what set it off and what it reached", () => {
+    const c = chain({
+      routine_slug: "on-close-file-followup",
+      started_by: "file a follow-up when an issue closes",
+      started_by_kind: "automation",
+      issues: [{ id: "m1", identifier: "ENG-7" }],
+      issue_count: 1,
+      agents: [{ id: "a1", name: "riley", assignments: 1 }],
+      agent_count: 1,
+    })
+    expect(workflowSentence(c, "Follow up on close")).toBe(
+      "file a follow-up when an issue closes → Follow up on close → riley → ENG-7",
+    )
+  })
+
+  it("falls back to the routine alone when nothing else is known", () => {
+    expect(workflowSentence(chain({ routine_slug: "sweep", started_by: "" }), "Sweep")).toBe("Sweep")
+  })
+
+  it("does not repeat the cause when it IS the routine", () => {
+    // A manual run's cause is a person, not a rule; naming "Demo User → Sweep"
+    // adds nothing a reader is looking for in a list of processes.
+    const c = chain({ routine_slug: "sweep", started_by: "Demo User", started_by_kind: "user" })
+    expect(workflowSentence(c, "Sweep")).toBe("Sweep")
+  })
+
+  it("elides a long reach rather than printing every noun", () => {
+    const c = chain({
+      routine_slug: "sweep",
+      started_by_kind: "schedule",
+      started_by: "nightly",
+      issues: [
+        { id: "1", identifier: "ENG-1" },
+        { id: "2", identifier: "ENG-2" },
+        { id: "3", identifier: "ENG-3" },
+      ],
+      issue_count: 9,
+    })
+    expect(workflowSentence(c, "Sweep")).toContain("+6")
   })
 })

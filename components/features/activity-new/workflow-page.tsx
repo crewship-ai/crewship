@@ -52,7 +52,7 @@ import { formatDurationMs } from "@/lib/activity-stream"
 import { statusIcon } from "@/lib/activity/run-status"
 import { relTime } from "@/lib/time"
 import type { ChainSummary } from "@/hooks/use-chains"
-import { workflowName } from "@/lib/activity-lenses"
+import { workflowSentence } from "@/lib/activity-lenses"
 import {
   buildWorkflowTimeline,
   chainHeaderDuration,
@@ -151,7 +151,10 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
   // second request against the endpoint the sequence already read.
   const runs = React.useMemo(() => (graph ? workflowRuns(graph) : []), [graph])
 
-  const headline = workflowName(chain, routineName)
+  // The shape, matching the rail row that led here. Naming this page after the
+  // routine put the same words on it as the routine's own page, which is what
+  // made the two feel like one thing seen twice.
+  const headline = workflowSentence(chain, routineName)
   const duration = chainHeaderDuration(chain)
   const issues = chain.issues ?? []
   const agents = chain.agents ?? []
