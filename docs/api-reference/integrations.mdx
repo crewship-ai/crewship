@@ -2,6 +2,8 @@
 title: "Integrations"
 description: "MCP server integrations at workspace, crew, and agent levels, plus OAuth flow."
 icon: "plug"
+stability: experimental
+tag: Experimental
 ---
 
 Integrations connect agents to external tools through MCP (Model Context Protocol) servers. Crewship uses a three-tier model: workspace-level MCP servers cascade down to crews, which cascade down to agent bindings, and each level can override or extend the configuration. Servers can be defined directly, discovered from the MCP registry, and authenticated with stored credentials or a full OAuth 2.0 flow.

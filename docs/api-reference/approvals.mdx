@@ -2,6 +2,8 @@
 title: "Approvals"
 description: "Harbormaster human-in-the-loop approval queue."
 icon: "anchor"
+stability: stable
+tag: Stable
 ---
 
 The Harbormaster approval queue is the human-in-the-loop gate for agent actions that match a policy rule. Enqueue is internal-only -- it fires from `harbormaster.Gate` when an agent hits a rule-matching action -- so the public surface is the read + decide flow operators use to triage, approve, or deny pending requests. See the [Harbormaster guide](/guides/harbormaster).

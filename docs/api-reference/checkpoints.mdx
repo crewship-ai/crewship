@@ -2,6 +2,8 @@
 title: "Checkpoints"
 description: "Cartographer mission checkpoints: list, create, restore (advisory), fork, delete."
 icon: "map"
+stability: experimental
+tag: Experimental
 ---
 
 Cartographer checkpoints capture a mission's journal cursor and agent state so a run can be inspected, advisory-restored, or forked into a new mission. Restore is non-destructive — it reports divergence without mutating mission state — while Fork branches a fresh mission anchored at the checkpoint. See the [Cartographer guide](/guides/cartographer).

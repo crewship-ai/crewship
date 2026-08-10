@@ -225,6 +225,42 @@ func TestRepositoryDocsHaveNoBrokenProseLinks(t *testing.T) {
 	}
 }
 
+func TestRepositoryDocsHaveValidStabilityLabels(t *testing.T) {
+	root := filepath.Join("..", "..")
+	issues, pages, err := documentationStability(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pages == 0 {
+		t.Fatal("no MDX pages examined; the walk did not reach the docs tree")
+	}
+	for _, issue := range issues {
+		t.Error(issue)
+	}
+}
+
+func TestDocumentationStabilityRejectsUnknownAndMismatchedLabels(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/good.mdx", "---\ntitle: Good\nstability: early\ntag: Early\n---\n")
+	writeDocsPage(t, root, "docs/unknown.mdx", "---\ntitle: Unknown\nstability: preview\ntag: Preview\n---\n")
+	writeDocsPage(t, root, "docs/mismatch.mdx", "---\ntitle: Mismatch\nstability: stable\ntag: Experimental\n---\n")
+
+	issues, pages, err := documentationStability(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pages != 3 {
+		t.Fatalf("pages = %d, want 3", pages)
+	}
+	want := []string{
+		`docs/mismatch.mdx: rendered tag "Experimental" does not match stability "stable"`,
+		`docs/unknown.mdx: invalid stability label "preview"`,
+	}
+	if !slices.Equal(issues, want) {
+		t.Fatalf("issues = %v\nwant %v", issues, want)
+	}
+}
+
 // Two spellings of a live page that a naive path join turns into a false
 // positive: the site root, which Mintlify serves from `index`, and a trailing
 // slash. Both are legal to write, and a gate that reddens on a working link is

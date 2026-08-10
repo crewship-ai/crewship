@@ -2,6 +2,8 @@
 title: "Eval"
 description: "Mission replay and regression detection via Quartermaster."
 icon: "clipboard-check"
+stability: experimental
+tag: Experimental
 ---
 
 Quartermaster replays a mission deterministically or diffs two missions to detect regressions in tool success, cost, and step signature. Both mutating endpoints return `202 Accepted` immediately and run the work in a background goroutine; poll [List runs](#list-runs) for results. See the [Quartermaster guide](/guides/quartermaster).
