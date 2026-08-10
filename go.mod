@@ -15,7 +15,7 @@ require (
 	github.com/getsentry/sentry-go v0.48.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/google/cel-go v0.30.0
-	github.com/google/go-containerregistry v0.21.8
+	github.com/google/go-containerregistry v0.21.9
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/grafana/pyroscope-go v1.4.1
