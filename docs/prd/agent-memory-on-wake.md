@@ -74,6 +74,11 @@ context (LEAD) or peer communication (non-LEAD), the memory context, language.
 **Volatile, in the user message** (`session_context.go:22`): conversation history, episodic
 recall, memory nudge, cost awareness.
 
+The host consolidator treats `pins.md` and daily `learned-*.md` files as
+agent-writable trust boundaries. Reads and appends are anchored to the resolved topics
+directory and explicitly refuse a final-component symlink, so a link planted in the
+shared bind mount cannot redirect a privileged host write outside that directory.
+
 Canonical memory versioning reads host files without following a final-component
 symlink. A canonical file can live in an agent-writable bind mount, so the version
 recorder must refuse a link rather than snapshot bytes from an unrelated host path.

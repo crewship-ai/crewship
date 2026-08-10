@@ -460,7 +460,13 @@ func snapshotPins(cfg Config, entries []journal.Entry) (wrote bool, err error) {
 	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
 		return false, fmt.Errorf("pins mkdir: %w", err)
 	}
-	path := filepath.Join(cfg.OutputDir, "pins.md")
+	root, err := os.OpenRoot(cfg.OutputDir)
+	if err != nil {
+		return false, fmt.Errorf("pins root: %w", err)
+	}
+	defer root.Close()
+	const name = "pins.md"
+	path := filepath.Join(cfg.OutputDir, name)
 
 	// Lock for the full read-then-append window so two consolidator
 	// runs cannot both see the same `existing` set and double-append
@@ -478,7 +484,7 @@ func snapshotPins(cfg Config, entries []journal.Entry) (wrote bool, err error) {
 	// the entire file would surprise operators who annotated entries
 	// by hand.
 	existing := map[string]bool{}
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := root.ReadFile(name); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			if i := strings.Index(line, "pin-id:"); i >= 0 {
 				// Strip the HTML-comment close marker that we wrote when
@@ -498,7 +504,7 @@ func snapshotPins(cfg Config, entries []journal.Entry) (wrote bool, err error) {
 	}
 
 	var block strings.Builder
-	if _, err := os.Stat(path); err != nil {
+	if _, err := root.Stat(name); err != nil {
 		block.WriteString("# Pinned entries\n\n")
 		block.WriteString("Entries explicitly pinned by operators (`priority=pin`). The consolidator\n")
 		block.WriteString("appends them here so they stay visible outside the rule stream.\n\n")
@@ -520,7 +526,10 @@ func snapshotPins(cfg Config, entries []journal.Entry) (wrote bool, err error) {
 		return false, nil
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if info, err := root.Lstat(name); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("pins open: refusing symlinked target %s", name)
+	}
+	f, err := root.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return false, fmt.Errorf("pins open: %w", err)
 	}
@@ -555,6 +564,11 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 		return "", nil, fmt.Errorf("mkdir %s: %w", outputDir, err)
 	}
 	fname := fmt.Sprintf("learned-%s.md", now.Format("2006-01-02"))
+	root, err := os.OpenRoot(outputDir)
+	if err != nil {
+		return "", nil, fmt.Errorf("open consolidation root: %w", err)
+	}
+	defer root.Close()
 	path := filepath.Join(outputDir, fname)
 
 	// Serialise concurrent appends. Two consolidator goroutines (one
@@ -568,7 +582,10 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 	defer func() { _ = lk.Unlock() }()
 
 	var block strings.Builder
-	_, statErr := os.Stat(path)
+	info, statErr := root.Lstat(fname)
+	if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", nil, fmt.Errorf("open %s: refusing symlinked target", path)
+	}
 	exists := statErr == nil
 	if !exists {
 		block.WriteString("# Learned rules — ")
@@ -596,7 +613,7 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 	}
 	block.WriteByte('\n')
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := root.OpenFile(fname, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return "", nil, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -613,7 +630,7 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 		// silent half-write; the lockfile + defer-unlock still run.
 		return "", nil, fmt.Errorf("sync %s: %w", path, err)
 	}
-	content, err := os.ReadFile(path)
+	content, err := root.ReadFile(fname)
 	if err != nil {
 		return "", nil, fmt.Errorf("read back %s: %w", path, err)
 	}
