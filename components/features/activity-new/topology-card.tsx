@@ -19,7 +19,7 @@ import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { apiFetch } from "@/lib/api-fetch"
-import { buildChainGraph, type ChainGraph } from "@/lib/trace/build-chain-graph"
+import { buildChainGraph, CHAIN_FIT_PADDING, type ChainGraph } from "@/lib/trace/build-chain-graph"
 
 // React Flow (~200 KB+) only loads when a graph actually renders — the same
 // call /activity makes, for the same reason.
@@ -31,6 +31,29 @@ const ChainCanvas = dynamic(() => import("./chain-canvas").then((m) => m.ChainCa
     </div>
   ),
 })
+
+/**
+ * The frame the graph is drawn in, from the size the graph actually is.
+ *
+ * Every chain used to get the same 380px box: a two-node chain then sat in a
+ * third of it under a band of dot background, and a branching one was still
+ * clipped. fitView insets by `CHAIN_FIT_PADDING` per side, so the frame has
+ * to be that much bigger than the graph for the graph to come out at its own
+ * scale.
+ *
+ * Clamped at both ends — a single rank should not collapse to a sliver, and
+ * a deep chain should not push the rest of the page below the fold; past the
+ * ceiling it zooms out, which is the honest response to "this is bigger than
+ * the space".
+ */
+const MIN_CANVAS_HEIGHT = 180
+const MAX_CANVAS_HEIGHT = 420
+
+export function canvasHeightFor(graphHeight: number): number {
+  if (!Number.isFinite(graphHeight) || graphHeight <= 0) return MIN_CANVAS_HEIGHT
+  const framed = Math.round(graphHeight / (1 - 2 * CHAIN_FIT_PADDING))
+  return Math.min(MAX_CANVAS_HEIGHT, Math.max(MIN_CANVAS_HEIGHT, framed))
+}
 
 export interface TopologyCardProps {
   workspaceId: string
@@ -116,7 +139,10 @@ export function TopologyCard({ workspaceId, anchor, anchorLabel, onOpenNode }: T
 
       {graph && chain && chain.nodes.length > 1 && (
         <div className="flex flex-col gap-2">
-          <div className="h-[380px] w-full overflow-hidden rounded-md border border-white/[0.06]">
+          <div
+            className="w-full overflow-hidden rounded-md border border-white/[0.06]"
+            style={{ height: canvasHeightFor(graph.bounds.height) }}
+          >
             <ChainCanvas nodes={graph.nodes} edges={graph.edges} onOpenNode={onOpenNode} />
           </div>
 

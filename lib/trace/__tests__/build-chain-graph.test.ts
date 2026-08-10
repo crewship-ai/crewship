@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { buildChainGraph, type ChainGraph } from "@/lib/trace/build-chain-graph"
-import { OVERVIEW_NODE_TYPES, OVERVIEW_NODE_WIDTH } from "@/lib/trace/build-overview-graph"
+import { buildChainGraph, CHAIN_FIT_PADDING, type ChainGraph } from "@/lib/trace/build-chain-graph"
+import {
+  OVERVIEW_NODE_HEIGHT,
+  OVERVIEW_NODE_TYPES,
+  OVERVIEW_NODE_WIDTH,
+} from "@/lib/trace/build-overview-graph"
 
 function chain(over: Partial<ChainGraph> = {}): ChainGraph {
   return {
@@ -167,6 +171,64 @@ describe("buildChainGraph", () => {
     const serialised = JSON.stringify(g.edges)
     expect(serialised).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
     expect(serialised).not.toMatch(/rgba?\(/)
+  })
+})
+
+describe("the laid-out extent", () => {
+  // The card used to be a fixed 380px box whatever it held, so a two-node
+  // chain sat in a third of the height it was given and the rest was dot
+  // background. The builder is the only thing that knows how tall the
+  // picture actually is; reporting it is what lets the card be that tall.
+  function ranked(runs: number): ChainGraph {
+    return chain({
+      nodes: [
+        { id: "routine:r", kind: "routine", ref: "r", label: "triage", depth: 0 },
+        ...Array.from({ length: runs }, (_, i) => ({
+          id: `run:${i}`,
+          kind: "run",
+          ref: String(i),
+          label: `run ${i}`,
+          depth: 1,
+        })),
+      ],
+      edges: Array.from({ length: runs }, (_, i) => ({
+        from: "routine:r",
+        to: `run:${i}`,
+        kind: "runs",
+      })),
+    })
+  }
+
+  it("measures the box the nodes actually occupy", () => {
+    const g = buildChainGraph(ranked(2))
+    const widthOf = (t: unknown) => OVERVIEW_NODE_WIDTH[t as keyof typeof OVERVIEW_NODE_WIDTH]
+    const left = Math.min(...g.nodes.map((n) => n.position.x))
+    const right = Math.max(...g.nodes.map((n) => n.position.x + widthOf(n.type)))
+    const top = Math.min(...g.nodes.map((n) => n.position.y))
+    const bottom = Math.max(...g.nodes.map((n) => n.position.y + OVERVIEW_NODE_HEIGHT))
+    expect(g.bounds.width).toBe(right - left)
+    expect(g.bounds.height).toBe(bottom - top)
+  })
+
+  it("grows when the chain branches — two runs are taller than one", () => {
+    // A height that ignores the shape is the fixed 380 by another name.
+    expect(buildChainGraph(ranked(2)).bounds.height).toBeGreaterThan(
+      buildChainGraph(ranked(1)).bounds.height,
+    )
+  })
+
+  it("is zero for an empty chain, not NaN or -Infinity", () => {
+    // Math.min of nothing is Infinity, and a card sized from that renders
+    // nothing at all. The empty case has to be spelled, not derived.
+    expect(buildChainGraph(chain()).bounds).toEqual({ width: 0, height: 0 })
+  })
+
+  it("publishes the fit padding as a number a caller can size against", () => {
+    // The card sizes its frame from the graph, and fitView then insets by
+    // this fraction on each side. Two copies of it drift, and the drift
+    // shows as either a clipped node or the dead space it replaced.
+    expect(CHAIN_FIT_PADDING).toBeGreaterThan(0)
+    expect(CHAIN_FIT_PADDING).toBeLessThan(0.5)
   })
 })
 

@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/chain"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // ChainsListHandler serves GET /api/v1/chains — the index of chain RUNS, one
@@ -42,6 +46,22 @@ const (
 	DefaultChainsListLimit = 50
 	MaxChainsListLimit     = 200
 )
+
+// MaxChainSummaryRefs bounds how many issues and how many agents a single row
+// carries.
+//
+// This is a LIST. Everything a row says about what a chain touched costs a join
+// over tables that grow with every dispatch, and doing it per row without a
+// bound is the slow query behind an authenticated route — the same argument
+// that caps the page itself. 5 is what a rail line renders before it starts
+// eliding anyway, and the exact totals ride alongside (ChainSummary.IssueCount
+// / AgentCount) so a truncated list is visible as truncation rather than
+// mistaken for the whole story.
+//
+// The bound is per row, not per page: the queries that fill these are batched
+// across the whole page and keep the top MaxChainSummaryRefs PER origin, so the
+// worst case for one request is limit × 5 issues and limit × 5 agents.
+const MaxChainSummaryRefs = 5
 
 // Trigger kinds that internal/chain has no node kind for, because they are not
 // rows the walk can stand on: a workspace member, a cron schedule, an inbound
@@ -109,6 +129,56 @@ type ChainSummary struct {
 	// ordered by LastActivity descending.
 	FirstActivity string `json:"first_activity"`
 	LastActivity  string `json:"last_activity"`
+
+	// DurationMS is the WALL CLOCK from FirstActivity to LastActivity, and is
+	// null when there is no span to measure between. See chainElapsedMS.
+	DurationMS *int64 `json:"duration_ms"`
+
+	// Issues and Agents are the concrete nouns — what this run actually
+	// touched, which is the only thing that tells two runs of one routine
+	// apart. Capped at MaxChainSummaryRefs each; IssueCount and AgentCount are
+	// the full totals, so a cut list reads as cut.
+	//
+	// Empty is a fact, not a gap: a routine that touched no issue and
+	// dispatched nobody has nothing to show, and the row says so by omitting
+	// the arrays rather than by carrying two empty ones.
+	Issues     []ChainIssueRef `json:"issues,omitempty"`
+	IssueCount int             `json:"issue_count"`
+	Agents     []ChainAgentRef `json:"agents,omitempty"`
+	AgentCount int             `json:"agent_count"`
+}
+
+// ChainIssueRef is one issue this chain created or changed.
+//
+// Identifier ("ENG-7") rather than the id is what a human recognises, and it is
+// also a valid anchor for GET /api/v1/chains/{anchor}, so a row's nouns are
+// clickable without a second lookup.
+type ChainIssueRef struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier,omitempty"`
+	Title      string `json:"title,omitempty"`
+
+	// Created separates the two ways a chain can touch an issue, because they
+	// are not the same claim: an issue that exists BECAUSE of this run is the
+	// strongest thing a row can say about it, while one the run merely moved
+	// was somebody else's before and after.
+	//
+	// It is read from missions.author_run_id — the column insertIssueTx writes
+	// from the crewship verb's author_run_id — and NOT from a journal entry,
+	// because nothing emits mission.created: journalTypeForIssueAction maps it,
+	// and issueAction "created" has no producer. Deriving the flag from that
+	// type would be a field that is false forever.
+	Created bool `json:"created,omitempty"`
+}
+
+// ChainAgentRef is one agent this chain put to work, and how many pieces of
+// work it took. The count is what distinguishes "asked Ada once" from "handed
+// Ada the whole thing in six parts" on rows that otherwise look identical.
+type ChainAgentRef struct {
+	ID          string `json:"id"`
+	Slug        string `json:"slug,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Assignments int    `json:"assignments"`
 }
 
 // ChainsListResponse is the page.
@@ -152,6 +222,15 @@ func (h *ChainsListHandler) List(w http.ResponseWriter, r *http.Request) {
 	hasMore := len(rows) > limit
 	if hasMore {
 		rows = rows[:limit]
+	}
+
+	// After the trim, never before: the extra row exists only to answer
+	// has_more and is not on the page, so fanning out over it would buy two
+	// joins nobody reads.
+	if err := h.attachTouched(r.Context(), workspaceID, rows); err != nil {
+		h.logger.Error("chains index: touched work", "error", err, "workspace_id", workspaceID)
+		replyError(w, http.StatusInternalServerError, "load chains")
+		return
 	}
 
 	unrecorded, err := h.hasUnrecordedRuns(r, workspaceID)
@@ -267,6 +346,7 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 			return nil, err
 		}
 		c.Failed = c.FailedRuns > 0
+		c.DurationMS = chainElapsedMS(c.FirstActivity, c.LastActivity)
 		c.StartedByKind, c.StartedByID, c.StartedByKey, c.StartedBy = resolveChainStart(chainStart{
 			via:          c.TriggeredVia,
 			triggeredBy:  triggeredBy,
@@ -371,4 +451,268 @@ func orRaw(resolved, raw string) string {
 		return resolved
 	}
 	return raw
+}
+
+// ---------------------------------------------------------------------------
+// How long the chain took.
+// ---------------------------------------------------------------------------
+
+// chainElapsedMS is the wall clock between the chain's first and last activity.
+//
+// Deliberately NOT the sum of the runs' own pipeline_runs.duration_ms, which is
+// the obvious implementation and the wrong one. lib/activity-stream's
+// chainElapsedMs settled this client-side for two reasons that hold identically
+// here:
+//
+//   - the sum reads 0 for work no agent billed time for — a routine of
+//     agentless steps records duration_ms 0 on every run, so a chain that took
+//     three minutes would report "instant";
+//   - it double-counts a nested run's time inside the run that contains it.
+//
+// It also cannot see the gaps BETWEEN runs, and on a composed chain those gaps
+// are most of the elapsed time: the wait while a rule debounces is part of how
+// long the workflow took, from the only perspective that asked.
+//
+// Null, not zero, when the two timestamps are equal or out of order. One
+// datable moment has no span, and 0ms would assert "it was instant" where the
+// truth is "it has not finished" — the single-run-still-going case, where
+// last_activity falls back to started_at. Unparseable timestamps yield null for
+// the same reason rather than a number derived from a zero time.
+func chainElapsedMS(first, last string) *int64 {
+	f, ferr := time.Parse(time.RFC3339Nano, first)
+	l, lerr := time.Parse(time.RFC3339Nano, last)
+	if ferr != nil || lerr != nil {
+		return nil
+	}
+	ms := l.Sub(f).Milliseconds()
+	if ms <= 0 {
+		return nil
+	}
+	return &ms
+}
+
+// ---------------------------------------------------------------------------
+// What the chain touched.
+// ---------------------------------------------------------------------------
+
+// chainIssueEntryTypes are the journal entry types that record a run CHANGING
+// an issue. They are the types issueEvents.log writes with a TraceID, which is
+// the pointer back to the causing run.
+//
+// journal.EntryMissionCreated is deliberately absent. journalTypeForIssueAction
+// maps it, but the issueAction that would produce it has no call site anywhere
+// in the server, so matching on it would be a predicate that can never fire —
+// and would make ChainIssueRef.Created a field that is false forever. Creation
+// is read from missions.author_run_id instead, which is a column production
+// actually writes.
+var chainIssueEntryTypes = []string{
+	string(journal.EntryMissionStatus),
+	string(journal.EntryMissionAssigned),
+	string(journal.EntryMissionComment),
+}
+
+// chainAgentsQuery lists the agents each chain put to work, capped per chain.
+//
+// One query for the WHOLE page rather than one per row: assignments.chain_origin
+// carries the same value on every hop of a chain (idx_assignment_chain_origin),
+// so the page's rows are one indexed range scan together, and the cap is applied
+// with a window function instead of by issuing `limit` separate LIMIT queries.
+//
+// The fence is a.workspace_id plus ag.workspace_id = a.workspace_id on the join.
+// chain_origin has no foreign key behind it and assigned_to_id is only unique
+// globally by luck, so a workspace on the outer predicate alone would let a row
+// another tenant stamped with OUR origin lend us its agent's name.
+//
+// COUNT(*) OVER is exact rather than capped: the reader needs to know the list
+// was cut, and "5+" is not that. It is bounded by the delegation fan-out cap,
+// which is what stops a chain from having unboundedly many assignments at all.
+const chainAgentsQuery = `
+WITH work AS (
+    SELECT a.chain_origin        AS origin,
+           ag.id                 AS agent_id,
+           COALESCE(ag.name, '') AS agent_name,
+           COALESCE(ag.slug, '') AS agent_slug,
+           COUNT(*)              AS assignments
+    FROM assignments a
+    JOIN agents ag
+      ON ag.id = a.assigned_to_id
+     AND ag.workspace_id = a.workspace_id
+    WHERE a.workspace_id = ?
+      AND a.chain_origin IN (%s)
+    GROUP BY a.chain_origin, ag.id
+),
+ranked AS (
+    SELECT origin, agent_id, agent_name, agent_slug, assignments,
+           ROW_NUMBER() OVER (PARTITION BY origin ORDER BY assignments DESC, agent_id ASC) AS rn,
+           COUNT(*)     OVER (PARTITION BY origin)                                         AS distinct_agents
+    FROM work
+)
+SELECT origin, agent_id, agent_name, agent_slug, assignments, distinct_agents
+FROM ranked
+WHERE rn <= ?
+ORDER BY origin ASC, rn ASC`
+
+// chainIssuesQuery lists the issues each chain created or changed, capped per
+// chain.
+//
+// Two arms, because there are two records and they say different things:
+//
+//   - missions.author_run_id (idx_mission_run) — this run AUTHORED the issue.
+//     The crewship issue.create verb passes author_run_id and insertIssueTx
+//     stores it, so the link is exact.
+//   - journal_entries.trace_id (idx_journal_ws_trace_run) — this run CHANGED
+//     the issue. issueEvents.log stamps the causing run as the entry's trace,
+//     which is the same pointer internal/chain's expandRun follows to find who
+//     executed a run.
+//
+// It matches trace_id ONLY, where the walk matches (trace_id OR run_id). That
+// is not a divergence in scoping but the absence of a second arm to scope: run_id
+// is a generated column over payload.$.run_id, and issueEventPayload writes
+// action/details/from/to and nothing else, so the run_id arm cannot match a
+// mission entry. An OR that can never be true is a guard that never runs.
+//
+// Every join carries the workspace. mission_id, trace_id and author_run_id are
+// untyped string columns whose foreign keys (where they exist at all) constrain
+// the row but not the tenant, and a chain's origin is a bare id — so an unfenced
+// arm reads another tenant's issue titles into our rows, the same hole the
+// started_by lookups were fenced for. Three of the four are individually
+// load-bearing and TestChainsList_ForeignWorkspaceWorkNeverAttachesToARow kills
+// each one on its own.
+//
+// The fourth — m.workspace_id on the FINAL label join — is a backstop and is
+// stated as one rather than passed off as a fence: once the three upstream arms
+// hold, `agg` can only contain in-workspace issue ids, so nothing reaches it to
+// exclude. It stays because that join is where the text on the wire comes from,
+// and a title lookup with no workspace on it is the shape of the bug even when
+// this particular query cannot reach it.
+//
+// KNOWN GAP, stated rather than papered over: issue writes an AGENT makes from
+// inside its assignment do not appear. Those journal entries carry the
+// assignment's own journal run id as their trace, and that id is not recorded on
+// the assignments row, so there is no column joining them back to the chain. The
+// issues a chain's ROUTINE runs touched are complete; the ones its agents
+// touched are not reachable from here.
+const chainIssuesQuery = `
+WITH chain_runs AS (
+    SELECT id, chain_origin
+    FROM pipeline_runs
+    WHERE workspace_id = ?
+      AND chain_origin IN (%s)
+),
+touched AS (
+    SELECT cr.chain_origin AS origin, m.id AS issue_id, 1 AS created
+    FROM chain_runs cr
+    JOIN missions m
+      ON m.author_run_id = cr.id
+     AND m.workspace_id = ?
+    UNION ALL
+    SELECT cr.chain_origin, m.id, 0
+    FROM chain_runs cr
+    JOIN journal_entries j
+      ON j.trace_id = cr.id
+     AND j.workspace_id = ?
+     AND j.entry_type IN (%s)
+    JOIN missions m
+      ON m.id = j.mission_id
+     AND m.workspace_id = j.workspace_id
+),
+agg AS (
+    SELECT origin, issue_id, MAX(created) AS created, COUNT(*) AS touches
+    FROM touched
+    GROUP BY origin, issue_id
+),
+ranked AS (
+    SELECT origin, issue_id, created, touches,
+           ROW_NUMBER() OVER (PARTITION BY origin ORDER BY created DESC, touches DESC, issue_id ASC) AS rn,
+           COUNT(*)     OVER (PARTITION BY origin)                                                   AS distinct_issues
+    FROM agg
+)
+SELECT rk.origin, rk.issue_id, COALESCE(m.identifier, ''), COALESCE(m.title, ''),
+       rk.created, rk.distinct_issues
+FROM ranked rk
+JOIN missions m
+  ON m.id = rk.issue_id
+ AND m.workspace_id = ?
+WHERE rk.rn <= ?
+ORDER BY rk.origin ASC, rk.rn ASC`
+
+// attachTouched fills Issues/Agents and their totals for one page of rows.
+//
+// Two queries for the page, not two per row. A row with nothing to show keeps
+// its nil slices and zero counts, which is the honest answer for a routine that
+// touched no issue and dispatched nobody.
+func (h *ChainsListHandler) attachTouched(ctx context.Context, workspaceID string, rows []ChainSummary) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	origins := make([]any, 0, len(rows))
+	at := make(map[string]*ChainSummary, len(rows))
+	for i := range rows {
+		origins = append(origins, rows[i].Origin)
+		at[rows[i].Origin] = &rows[i]
+	}
+	if err := h.attachAgents(ctx, workspaceID, origins, at); err != nil {
+		return err
+	}
+	return h.attachIssues(ctx, workspaceID, origins, at)
+}
+
+func (h *ChainsListHandler) attachAgents(ctx context.Context, workspaceID string, origins []any, at map[string]*ChainSummary) error {
+	args := append([]any{workspaceID}, origins...)
+	args = append(args, MaxChainSummaryRefs)
+	rows, err := h.db.QueryContext(ctx, fmt.Sprintf(chainAgentsQuery, sqlPlaceholders(len(origins))), args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			origin string
+			ref    ChainAgentRef
+			total  int
+		)
+		if err := rows.Scan(&origin, &ref.ID, &ref.Name, &ref.Slug, &ref.Assignments, &total); err != nil {
+			return err
+		}
+		// A row the page does not hold cannot arrive — the IN list is built
+		// from the page — but the map lookup is what makes that structural
+		// rather than assumed.
+		if c, ok := at[origin]; ok {
+			c.Agents = append(c.Agents, ref)
+			c.AgentCount = total
+		}
+	}
+	return rows.Err()
+}
+
+func (h *ChainsListHandler) attachIssues(ctx context.Context, workspaceID string, origins []any, at map[string]*ChainSummary) error {
+	args := append([]any{workspaceID}, origins...)
+	args = append(args, workspaceID, workspaceID)
+	for _, t := range chainIssueEntryTypes {
+		args = append(args, t)
+	}
+	args = append(args, workspaceID, MaxChainSummaryRefs)
+	query := fmt.Sprintf(chainIssuesQuery, sqlPlaceholders(len(origins)), sqlPlaceholders(len(chainIssueEntryTypes)))
+	rows, err := h.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			origin  string
+			ref     ChainIssueRef
+			created int
+			total   int
+		)
+		if err := rows.Scan(&origin, &ref.ID, &ref.Identifier, &ref.Title, &created, &total); err != nil {
+			return err
+		}
+		ref.Created = created == 1
+		if c, ok := at[origin]; ok {
+			c.Issues = append(c.Issues, ref)
+			c.IssueCount = total
+		}
+	}
+	return rows.Err()
 }

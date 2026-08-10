@@ -42,6 +42,11 @@ import {
   type SpineLabels,
   type SpineLink,
 } from "@/lib/activity-stream"
+import {
+  activitySurface,
+  workflowLabel,
+  type ActivitySelection,
+} from "@/lib/activity-selection"
 import type { JournalEntry } from "@/lib/types/journal"
 import { cn } from "@/lib/utils"
 
@@ -49,7 +54,6 @@ import {
   ActivitySidebar,
   EMPTY_FACETS,
   TIME_RANGES,
-  type EntityFocus,
   type FacetState,
   type SidebarIssue,
   type SidebarRoutine,
@@ -107,11 +111,21 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const [pinned, setPinned] = React.useState<SpineLink | null>(null)
   const [selected, setSelected] = React.useState<JournalEntry | null>(null)
   const [railCollapsed, setRailCollapsed] = React.useState(false)
-  const [focus, setFocus] = React.useState<EntityFocus | null>(null)
-  // The workflow the reader picked out of the rail. Held here rather than in
-  // the sidebar because the TREE is what it opens, and the tree lives in the
-  // main column — the rail's job is to name the chain, not to draw it.
-  const [selectedChain, setSelectedChain] = React.useState<string | null>(null)
+
+  // What the page is pointed at — ONE value, whether the reader picked a
+  // workflow out of the rail or focused an issue, a routine or a crew.
+  //
+  // It was two independent states: an EntityFocus for the rail and a
+  // selectedChain for the graph. Neither cleared the other, so the chips could
+  // read "routine: Normalize dates to ISO 8601" over a card still drawing the
+  // on-close-file-followup chain — two answers to "what am I looking at", and
+  // the graph was the stale one. Making them notify each other would have kept
+  // two sources of truth, which is the shape of that bug; there is one, and
+  // the rail's highlight, the query's narrowing, the graph and its chip are
+  // all derived from it in lib/activity-selection.
+  const [selection, setSelection] = React.useState<ActivitySelection | null>(null)
+  const surface = React.useMemo(() => activitySurface(selection), [selection])
+  const focus = surface.focus
 
   // Entities for the rail. The journal lookup already carries crews, agents
   // and missions; routines come from the pipelines list so the rows can show
@@ -184,6 +198,26 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // and tying it to the same window is what made the rail collapse to a single
   // row the moment an issue was focused.
   const { chains, hasUnrecordedRuns: chainsHaveUnrecorded } = useChains(workspaceId)
+
+  // Picking a workflow is a selection like any other, so it goes through the
+  // same setter — which is what makes it impossible for the graph to outlive
+  // the thing that opened it. The label is resolved here, at the click, rather
+  // than looked up again at render: a heading read from a list that has since
+  // refreshed is the same class of staleness this whole change removes.
+  const selectChain = React.useCallback(
+    (origin: string | null) => {
+      if (!origin) {
+        setSelection(null)
+        return
+      }
+      setSelection({
+        kind: "workflow",
+        id: origin,
+        label: workflowLabel(chains.find((c) => c.origin === origin)),
+      })
+    },
+    [chains],
+  )
 
   const { status: streamStatus } = useJournalStream({
     workspaceId,
@@ -330,63 +364,83 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     return () => window.removeEventListener("keydown", onKey)
   }, [visible, selected])
 
-  const chips: { label: string; onClear: () => void }[] = []
-  if (debouncedSearch) chips.push({ label: `“${debouncedSearch}”`, onClear: () => setSearch("") })
+  // Every chip carries whether it NARROWS the feed. All of them do except a
+  // workflow, which re-points the graph: the journal has no chain_origin
+  // column, so a chain is not expressible as a filter over journal rows. The
+  // distinction is not cosmetic — the empty-result banner counts filters, and
+  // a chip that filters nothing must not be counted there.
+  const chips: { label: string; narrows: boolean; onClear: () => void }[] = []
+  if (debouncedSearch)
+    chips.push({ label: `“${debouncedSearch}”`, narrows: true, onClear: () => setSearch("") })
   if (pinned) {
     chips.push({
       label:
         pinned.kind === "issue" ? `issue: ${pinned.label}` : `${pinned.kind}: ${pinned.label} (loaded window)`,
+      narrows: true,
       onClear: () => setPinned(null),
     })
   }
-  if (focus) {
-    chips.push({
-      label:
-        focus.kind === "routine"
-          ? `routine: ${focus.label} (loaded window)`
-          : `${focus.kind}: ${focus.label}`,
-      onClear: () => setFocus(null),
-    })
+  // The selection — workflow, issue, routine or crew — is one chip, because it
+  // is one selection. A graph on screen therefore always has a chip naming it,
+  // and that chip is the way back out.
+  if (surface.chip) {
+    chips.push({ ...surface.chip, onClear: () => setSelection(null) })
   }
   if (facets.range !== "24h") {
-    chips.push({ label: range.label, onClear: () => setFacets({ ...facets, range: "24h" }) })
+    chips.push({ label: range.label, narrows: true, onClear: () => setFacets({ ...facets, range: "24h" }) })
   }
   for (const s of facets.sources) {
     chips.push({
       label: sourceMeta(s).label,
+      narrows: true,
       onClear: () => setFacets({ ...facets, sources: facets.sources.filter((x) => x !== s) }),
     })
   }
   for (const s of facets.severities) {
     chips.push({
       label: s,
+      narrows: true,
       onClear: () => setFacets({ ...facets, severities: facets.severities.filter((x) => x !== s) }),
     })
   }
   for (const id of facets.crewIDs) {
     chips.push({
       label: lookup.crews.get(id)?.name ?? id,
+      narrows: true,
       onClear: () => setFacets({ ...facets, crewIDs: facets.crewIDs.filter((x) => x !== id) }),
     })
   }
   for (const id of facets.agentIDs) {
     chips.push({
       label: lookup.agents.get(id)?.name ?? id,
+      narrows: true,
       onClear: () => setFacets({ ...facets, agentIDs: facets.agentIDs.filter((x) => x !== id) }),
     })
   }
+
+  const narrowingChips = chips.filter((c) => c.narrows).length
 
   // The window holds events and this question returns none of them. Told
   // apart from a genuinely quiet system, because the overview's copy for zero
   // is reassurance — "nothing broke", "all clear", "Nothing has failed. Nice."
   // — and every word of it is false when the answer is simply unasked.
-  const emptyByFilters = chips.length > 0 && visible.length === 0 && entries.length > 0
+  const emptyByFilters = narrowingChips > 0 && visible.length === 0 && entries.length > 0
 
   // One click out. Clearing them one crumb at a time is the state a reader is
   // already lost in.
+  //
+  // NOT a loop over each chip's onClear. Every facet chip's closure captures
+  // the SAME `facets` from this render and spreads it, so calling them in
+  // sequence makes each one compute from the original state and the last write
+  // wins — "clear all filters" left every earlier facet in place, which is the
+  // exact opposite of what the button promises and is invisible unless two
+  // facets are on at once. One write, from the known-empty state.
   const clearAllChips = React.useCallback(() => {
-    for (const c of chips) c.onClear()
-  }, [chips])
+    setSearch("")
+    setPinned(null)
+    setSelection(null)
+    setFacets((f) => ({ ...EMPTY_FACETS, scope: f.scope }))
+  }, [])
 
   const scopeMeta = ACTIVITY_SCOPES.find((s) => s.key === facets.scope)
 
@@ -440,8 +494,8 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
             <ActivitySidebar
               chains={chains}
               chainsHaveUnrecorded={chainsHaveUnrecorded}
-              selectedChain={selectedChain}
-              onSelectChain={setSelectedChain}
+              selectedChain={surface.chainAnchor}
+              onSelectChain={selectChain}
               search={search}
               onSearchChange={setSearch}
               facets={facets}
@@ -455,7 +509,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               issueCounts={issueCounts}
               routineCounts={routineCounts}
               focus={focus}
-              onFocus={setFocus}
+              onFocus={setSelection}
               total={focusScoped.length}
               onToggleCollapse={() => setRailCollapsed(true)}
             />
@@ -529,16 +583,14 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   picture that crosses from the rule that started it, through
                   the routine runs, into the agent work those dispatched —
                   which until now stopped dead at the moment real work began. */}
-              {selectedChain && (
+              {/* Shown only while the SELECTION is that workflow, so the graph
+                  cannot outlive the chip that names it. */}
+              {surface.chainAnchor && (
                 <div className="mx-auto w-full max-w-[1800px] p-4 md:p-6 md:pb-0">
                   <TopologyCard
                     workspaceId={workspaceId}
-                    anchor={selectedChain}
-                    anchorLabel={
-                      chains.find((c) => c.origin === selectedChain)?.routine_slug ||
-                      chains.find((c) => c.origin === selectedChain)?.started_by ||
-                      "this workflow"
-                    }
+                    anchor={surface.chainAnchor}
+                    anchorLabel={surface.chainLabel ?? undefined}
                   />
                 </div>
               )}
@@ -550,12 +602,12 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                     title="No activity matches these filters"
                     description={`The loaded window holds ${entries.length.toLocaleString()} ${
                       entries.length === 1 ? "event" : "events"
-                    }, and none of them satisfies all ${chips.length} filter${
-                      chips.length === 1 ? "" : "s"
+                    }, and none of them satisfies all ${narrowingChips} filter${
+                      narrowingChips === 1 ? "" : "s"
                     } at once. This is an empty question, not a quiet system.`}
                     action={
                       <Button size="sm" variant="outline" onClick={clearAllChips}>
-                        Clear {chips.length === 1 ? "the filter" : "all filters"}
+                        Clear {narrowingChips === 1 ? "the filter" : "all filters"}
                       </Button>
                     }
                   />

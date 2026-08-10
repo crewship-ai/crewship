@@ -1,14 +1,18 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -37,11 +41,27 @@ type chainsListRig struct {
 	ws    string
 	crew  string
 	agent string
+	// lead is the agent the crewship dispatcher acts as, and chat is the
+	// session its dispatches are filed under — both required by the real
+	// assignment.create door.
+	lead string
+	chat string
+	// assign and issues are the PRODUCTION doors a routine step reaches
+	// through the crewship verbs. Fixtures go through them rather than
+	// INSERTing rows, for the reason stated at the top of this file.
+	assign *AssignmentHandler
+	issues *InternalIssueHandler
+	jw     *journal.Writer
 	// clock hands out strictly increasing started_at values, so "newest
 	// first" is an assertion about ordering rather than about how fast the
 	// test machine inserts rows.
 	clock time.Time
 }
+
+// chainsListWorkers are the dispatch targets, by slug. Six of them because the
+// per-row fan-out cap is MaxChainSummaryRefs and a cap is only tested by
+// exceeding it; all six fit inside the default delegation fan-out of 8.
+var chainsListWorkers = []string{"ada", "bob", "cy", "di", "ed", "fi"}
 
 func newChainsListRig(t *testing.T) *chainsListRig {
 	t.Helper()
@@ -61,7 +81,112 @@ func newChainsListRig(t *testing.T) *chainsListRig {
 		clock: time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC),
 	}
 	r.seedRoutine(t, "p1", wsID, "deploy")
+
+	// An issue prefix and a LEAD are what the internal issue.create door
+	// requires; without them it answers 400 rather than writing a row.
+	r.exec(t, `UPDATE crews SET issue_prefix = 'ENG' WHERE id = ?`, crewID)
+	r.lead = seedAgentRow(t, db, "chains-lead", wsID, crewID, "Lead", "lead", "LEAD")
+	for _, slug := range chainsListWorkers[1:] { // [0] is the agent seeded above
+		seedAgentRow(t, db, "chains-worker-"+slug, wsID, crewID, "Worker "+slug, slug, "AGENT")
+	}
+	r.chat = "chains-chat"
+	r.exec(t, `INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`,
+		r.chat, r.lead, wsID)
+
+	r.assign = NewAssignmentHandler(db, nil, nil, "chains-internal-token", newTestLogger())
+	jw := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = jw.Close() })
+	r.issues = NewInternalIssueHandler(db, nil, newTestLogger())
+	r.issues.SetJournal(jw)
+	r.jw = jw
 	return r
+}
+
+// ---------------------------------------------------------------------------
+// The two production doors a routine step reaches through the crewship verbs.
+//
+// Both go through crewshipBody — the dispatcher's own body builder — so the
+// provenance fields are stamped exactly as the step dispatcher stamps them,
+// including author_run_id, the pointer every chain link on this page hangs off.
+// A hand-written body here would be this test agreeing with itself about a key
+// the dispatcher may not even send.
+// ---------------------------------------------------------------------------
+
+func (r *chainsListRig) crewshipCall(t *testing.T, verb, runID string, args map[string]any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(crewshipBody(pipeline.CrewshipRequest{
+		Verb:        verb,
+		Args:        args,
+		WorkspaceID: r.ws,
+		CrewID:      r.crew,
+		AgentID:     r.lead,
+		RunID:       runID,
+	}))
+	if err != nil {
+		t.Fatalf("marshal %s body: %v", verb, err)
+	}
+	return raw
+}
+
+// dispatchAgent runs the assignment.create verb: the routine hop that gives an
+// assignment its chain_origin and parent_run_id. Returns the assignment id.
+func (r *chainsListRig) dispatchAgent(t *testing.T, runID, targetSlug string) string {
+	t.Helper()
+	raw := r.crewshipCall(t, "assignment.create", runID, map[string]any{
+		"target_slug": targetSlug,
+		"task":        "work for " + targetSlug,
+		"chat_id":     r.chat,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/assignments", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.assign.Create(w, req)
+	t.Cleanup(r.assign.WaitDispatches)
+	return createdAssignmentID(t, w)
+}
+
+// issueFromRun runs the issue.create verb. insertIssueTx stores author_run_id
+// on the missions row, which is the only exact record that a run CREATED an
+// issue. Returns the identifier.
+func (r *chainsListRig) issueFromRun(t *testing.T, runID, title string) string {
+	t.Helper()
+	raw := r.crewshipCall(t, "issue.create", runID, map[string]any{"title": title})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/issues", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.issues.Create(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("issue.create: status = %d, body %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode issue.create response %q: %v", w.Body.String(), err)
+	}
+	if resp["identifier"] == "" {
+		t.Fatalf("issue.create returned no identifier: %s", w.Body.String())
+	}
+	return resp["identifier"]
+}
+
+// moveIssueFromRun runs the issue.update verb, which is what puts a
+// mission.status_change journal entry on the run's trace — the record that a
+// run CHANGED an issue it did not create.
+func (r *chainsListRig) moveIssueFromRun(t *testing.T, runID, identifier, status string) {
+	t.Helper()
+	raw := r.crewshipCall(t, "issue.update", runID, map[string]any{"status": status})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/internal/issues/"+identifier, bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("identifier", identifier)
+	w := httptest.NewRecorder()
+	r.issues.UpdateStatus(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("issue.update %s: status = %d, body %s", identifier, w.Code, w.Body.String())
+	}
+	// The writer batches; the index reads the table, so drain it here rather
+	// than making every assertion racy against a flush interval.
+	if err := r.jw.Flush(context.Background()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 }
 
 func (r *chainsListRig) exec(t *testing.T, q string, args ...any) {
@@ -202,28 +327,79 @@ func (r *chainsListRig) list(t *testing.T, query string) *httptest.ResponseRecor
 	return rr
 }
 
+// chainsListRow decodes one row off the wire. Deliberately a hand-written
+// mirror of ChainSummary rather than the type itself: a test that unmarshals
+// into the production struct cannot catch a renamed json tag, because both
+// sides move together.
+type chainsListRow struct {
+	Origin        string `json:"origin"`
+	StartedByKind string `json:"started_by_kind"`
+	StartedByID   string `json:"started_by_id"`
+	StartedByKey  string `json:"started_by_key"`
+	StartedBy     string `json:"started_by"`
+	TriggeredVia  string `json:"triggered_via"`
+	RoutineID     string `json:"routine_id"`
+	RoutineSlug   string `json:"routine_slug"`
+	Runs          int    `json:"runs"`
+	MaxChainDepth int    `json:"max_chain_depth"`
+	FailedRuns    int    `json:"failed_runs"`
+	Failed        bool   `json:"failed"`
+	FirstActivity string `json:"first_activity"`
+	LastActivity  string `json:"last_activity"`
+	DurationMS    *int64 `json:"duration_ms"`
+	Issues        []struct {
+		ID         string `json:"id"`
+		Identifier string `json:"identifier"`
+		Title      string `json:"title"`
+		Created    bool   `json:"created"`
+	} `json:"issues"`
+	IssueCount int `json:"issue_count"`
+	Agents     []struct {
+		ID          string `json:"id"`
+		Slug        string `json:"slug"`
+		Name        string `json:"name"`
+		Assignments int    `json:"assignments"`
+	} `json:"agents"`
+	AgentCount int `json:"agent_count"`
+}
+
+func (c chainsListRow) issueIdentifiers() []string {
+	out := make([]string, 0, len(c.Issues))
+	for _, i := range c.Issues {
+		out = append(out, i.Identifier)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (c chainsListRow) agentSlugs() []string {
+	out := make([]string, 0, len(c.Agents))
+	for _, a := range c.Agents {
+		out = append(out, a.Slug)
+	}
+	sort.Strings(out)
+	return out
+}
+
 type chainsListBody struct {
-	Chains []struct {
-		Origin        string `json:"origin"`
-		StartedByKind string `json:"started_by_kind"`
-		StartedByID   string `json:"started_by_id"`
-		StartedByKey  string `json:"started_by_key"`
-		StartedBy     string `json:"started_by"`
-		TriggeredVia  string `json:"triggered_via"`
-		RoutineID     string `json:"routine_id"`
-		RoutineSlug   string `json:"routine_slug"`
-		Runs          int    `json:"runs"`
-		MaxChainDepth int    `json:"max_chain_depth"`
-		FailedRuns    int    `json:"failed_runs"`
-		Failed        bool   `json:"failed"`
-		FirstActivity string `json:"first_activity"`
-		LastActivity  string `json:"last_activity"`
-	} `json:"chains"`
-	Count             int  `json:"count"`
-	Limit             int  `json:"limit"`
-	Offset            int  `json:"offset"`
-	HasMore           bool `json:"has_more"`
-	HasUnrecordedRuns bool `json:"has_unrecorded_runs"`
+	Chains            []chainsListRow `json:"chains"`
+	Count             int             `json:"count"`
+	Limit             int             `json:"limit"`
+	Offset            int             `json:"offset"`
+	HasMore           bool            `json:"has_more"`
+	HasUnrecordedRuns bool            `json:"has_unrecorded_runs"`
+}
+
+// byOrigin indexes the page so a test can name the row it means.
+func (b chainsListBody) byOrigin(t *testing.T, origin string) chainsListRow {
+	t.Helper()
+	for _, c := range b.Chains {
+		if c.Origin == origin {
+			return c
+		}
+	}
+	t.Fatalf("chain %q missing from the index; got %v", origin, b.origins())
+	return chainsListRow{}
 }
 
 func decodeChainsList(t *testing.T, rr *httptest.ResponseRecorder) chainsListBody {
@@ -519,5 +695,295 @@ func TestChainsList_LimitDefaultsCapsAndPaginates(t *testing.T) {
 	}
 	if second.Chains[0].Origin == first.Chains[0].Origin || second.Chains[0].Origin == first.Chains[1].Origin {
 		t.Errorf("page 2 repeats a row from page 1: %v then %v", first.origins(), second.origins())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A row identifies a RUN, not a routine.
+// ---------------------------------------------------------------------------
+
+// The complaint this exists to answer: two runs of one routine rendered as two
+// identical lines — the routine slug and the number 1, twice, with nothing to
+// tell them apart. A workflow row has to name what THAT run did.
+//
+// Same routine, same trigger kind, same user. The only things that differ are
+// what the runs touched, and that has to be enough.
+func TestChainsList_TwoRunsOfOneRoutineAreTellableApart(t *testing.T) {
+	r := newChainsListRig(t)
+
+	first := r.seedRun(t, runSpec{id: "prn_first", via: pipeline.TriggeredViaManual, userID: r.user})
+	firstIssue := r.issueFromRun(t, first, "Cold start is slow")
+	r.dispatchAgent(t, first, "ada")
+	r.finish(t, first, pipeline.RunStatusCompleted)
+
+	second := r.seedRun(t, runSpec{id: "prn_second", via: pipeline.TriggeredViaManual, userID: r.user})
+	secondIssue := r.issueFromRun(t, second, "Sidecar leaks a socket")
+	r.dispatchAgent(t, second, "bob")
+	r.dispatchAgent(t, second, "cy")
+	r.finish(t, second, pipeline.RunStatusCompleted)
+
+	b := decodeChainsList(t, r.list(t, ""))
+	a := b.byOrigin(t, first)
+	z := b.byOrigin(t, second)
+
+	// The premise: on the fields the row already had, these two are the same
+	// line. If this ever stops holding the rest of the test proves nothing.
+	if a.RoutineSlug != z.RoutineSlug || a.Runs != z.Runs || a.StartedByKind != z.StartedByKind {
+		t.Fatalf("the two chains already differ on the old fields (%s/%d/%s vs %s/%d/%s); "+
+			"this test only means something while they do not",
+			a.RoutineSlug, a.Runs, a.StartedByKind, z.RoutineSlug, z.Runs, z.StartedByKind)
+	}
+
+	if got := a.issueIdentifiers(); len(got) != 1 || got[0] != firstIssue {
+		t.Errorf("chain %s issues = %v, want the issue it created, %q", first, got, firstIssue)
+	}
+	if got := z.issueIdentifiers(); len(got) != 1 || got[0] != secondIssue {
+		t.Errorf("chain %s issues = %v, want the issue it created, %q", second, got, secondIssue)
+	}
+	if a.IssueCount != 1 || z.IssueCount != 1 {
+		t.Errorf("issue_count = %d and %d, want 1 each", a.IssueCount, z.IssueCount)
+	}
+	if got := a.agentSlugs(); len(got) != 1 || got[0] != "ada" {
+		t.Errorf("chain %s agents = %v, want [ada]", first, got)
+	}
+	if got := z.agentSlugs(); len(got) != 2 || got[0] != "bob" || got[1] != "cy" {
+		t.Errorf("chain %s agents = %v, want [bob cy]", second, got)
+	}
+	if a.AgentCount != 1 || z.AgentCount != 2 {
+		t.Errorf("agent_count = %d and %d, want 1 and 2", a.AgentCount, z.AgentCount)
+	}
+	for _, ag := range z.Agents {
+		if ag.Assignments != 1 {
+			t.Errorf("chain %s agent %s: assignments = %d, want 1", second, ag.Slug, ag.Assignments)
+		}
+	}
+	// And an issue this run CREATED is marked as such — the strongest noun a
+	// row can carry, because it exists only because of this run.
+	for _, iss := range a.Issues {
+		if !iss.Created {
+			t.Errorf("issue %s: created = false, but %s is the run that authored it", iss.Identifier, first)
+		}
+	}
+}
+
+// An issue the chain only MOVED is on the row too, and is not claimed as one it
+// created. The two are different facts about the same run and the distinction is
+// the whole reason the flag exists rather than a bare list.
+func TestChainsList_IssueChangedByTheChainIsListedWithoutClaimingItWasCreated(t *testing.T) {
+	r := newChainsListRig(t)
+
+	// An issue that already existed, authored by a run in an unrelated chain.
+	earlier := r.seedRun(t, runSpec{id: "prn_earlier", via: pipeline.TriggeredViaManual, userID: r.user})
+	existing := r.issueFromRun(t, earlier, "Deploy is flaky")
+	r.finish(t, earlier, pipeline.RunStatusCompleted)
+
+	mover := r.seedRun(t, runSpec{id: "prn_mover", via: pipeline.TriggeredViaManual, userID: r.user})
+	r.moveIssueFromRun(t, mover, existing, "TODO")
+	r.finish(t, mover, pipeline.RunStatusCompleted)
+
+	b := decodeChainsList(t, r.list(t, ""))
+	row := b.byOrigin(t, mover)
+
+	if got := row.issueIdentifiers(); len(got) != 1 || got[0] != existing {
+		t.Fatalf("chain %s issues = %v, want the issue it moved, %q", mover, got, existing)
+	}
+	if row.Issues[0].Created {
+		t.Errorf("issue %s reads created=true on chain %s, which only moved it — "+
+			"the run that authored it was %s", existing, mover, earlier)
+	}
+	if row.Issues[0].Title != "Deploy is flaky" {
+		t.Errorf("issue title = %q, want the title a human recognises", row.Issues[0].Title)
+	}
+	// The chain that DID create it still says so.
+	if created := b.byOrigin(t, earlier); len(created.Issues) != 1 || !created.Issues[0].Created {
+		t.Errorf("chain %s = %+v, want the issue it authored marked created", earlier, created.Issues)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// How long it took.
+// ---------------------------------------------------------------------------
+
+// Wall clock between the first and the last activity, NOT the sum of the runs'
+// own duration_ms.
+//
+// Same decision lib/activity-stream.chainElapsedMs made client-side, for the
+// same two reasons: the sum reads 0 for work no agent billed time for, and it
+// counts a nested run's time twice inside the run that contains it. The fixture
+// pins the first half — every run here finishes with duration_ms 0, exactly as
+// a run of agentless steps does — so a summing implementation reports "instant"
+// on a chain that took three minutes.
+func TestChainsList_ElapsedIsWallClockNotTheSumOfRunDurations(t *testing.T) {
+	r := newChainsListRig(t)
+
+	root := r.seedRun(t, runSpec{id: "prn_root", via: pipeline.TriggeredViaManual})
+	r.finish(t, root, pipeline.RunStatusCompleted)
+	child := r.seedRun(t, runSpec{id: "prn_child", via: pipeline.TriggeredViaAutomation, byID: "aut_x", depth: 1, origin: root})
+	r.finish(t, child, pipeline.RunStatusCompleted)
+
+	// Non-vacuous: assert the column a summing implementation would read really
+	// does hold zero, so "not the sum" is a claim about this data.
+	var summed int64
+	if err := r.db.QueryRow(
+		`SELECT COALESCE(SUM(duration_ms),0) FROM pipeline_runs WHERE chain_origin = ?`, root).Scan(&summed); err != nil {
+		t.Fatalf("sum duration_ms: %v", err)
+	}
+	if summed != 0 {
+		t.Fatalf("per-run duration_ms sums to %d; this test needs the agentless shape (0)", summed)
+	}
+
+	row := decodeChainsList(t, r.list(t, "")).byOrigin(t, root)
+
+	// clock ticks a minute per event: start root, end root, start child, end
+	// child — three minutes from the first activity to the last.
+	const wantMS = int64(3 * 60 * 1000)
+	if row.DurationMS == nil {
+		t.Fatalf("duration_ms is null on a chain spanning %v..%v", row.FirstActivity, row.LastActivity)
+	}
+	if *row.DurationMS != wantMS {
+		t.Errorf("duration_ms = %d, want %d — the wall clock between first_activity and "+
+			"last_activity, not the %d the per-run durations sum to",
+			*row.DurationMS, wantMS, summed)
+	}
+}
+
+// One run, still going: there is no span to measure between, and 0 would assert
+// "it was instant". Null is the honest answer — the same rule chainElapsedMs
+// applies to a chain of fewer than two datable entries.
+func TestChainsList_ElapsedIsNullWhenThereIsNothingToMeasureBetween(t *testing.T) {
+	r := newChainsListRig(t)
+	only := r.seedRun(t, runSpec{id: "prn_only", via: pipeline.TriggeredViaManual})
+
+	row := decodeChainsList(t, r.list(t, "")).byOrigin(t, only)
+
+	if row.FirstActivity != row.LastActivity {
+		t.Fatalf("first/last = %q/%q; this test needs the single-open-run shape",
+			row.FirstActivity, row.LastActivity)
+	}
+	if row.DurationMS != nil {
+		t.Errorf("duration_ms = %d on a run that has not ended; want null, because 0 reads "+
+			"as 'it was instant' where the truth is 'it has not finished'", *row.DurationMS)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fan-out.
+// ---------------------------------------------------------------------------
+
+// This is a LIST. The nouns are capped per row so one authenticated request
+// cannot fan out over every chain in the workspace — and the count is exact, so
+// the reader is told what the cap hid rather than shown a short list that looks
+// complete.
+func TestChainsList_TouchedNounsAreCappedPerRowAndCountedInFull(t *testing.T) {
+	r := newChainsListRig(t)
+	run := r.seedRun(t, runSpec{id: "prn_busy", via: pipeline.TriggeredViaManual})
+
+	const issues = MaxChainSummaryRefs + 2
+	for i := 0; i < issues; i++ {
+		r.issueFromRun(t, run, fmt.Sprintf("Issue number %d", i))
+	}
+	for _, slug := range chainsListWorkers {
+		r.dispatchAgent(t, run, slug)
+	}
+	r.finish(t, run, pipeline.RunStatusCompleted)
+
+	row := decodeChainsList(t, r.list(t, "")).byOrigin(t, run)
+
+	if len(row.Issues) != MaxChainSummaryRefs {
+		t.Errorf("issues = %d entries, want the cap %d — an uncapped per-row subquery over "+
+			"every chain is the slow query this endpoint must not become",
+			len(row.Issues), MaxChainSummaryRefs)
+	}
+	if row.IssueCount != issues {
+		t.Errorf("issue_count = %d, want %d — the count is what tells the reader the list was cut",
+			row.IssueCount, issues)
+	}
+	if len(row.Agents) != MaxChainSummaryRefs {
+		t.Errorf("agents = %d entries, want the cap %d", len(row.Agents), MaxChainSummaryRefs)
+	}
+	if row.AgentCount != len(chainsListWorkers) {
+		t.Errorf("agent_count = %d, want %d", row.AgentCount, len(chainsListWorkers))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The fence, for the joins this page adds.
+// ---------------------------------------------------------------------------
+
+// chain_origin on assignments, author_run_id on missions and trace_id on
+// journal_entries are all untyped string columns with no foreign key behind
+// them, exactly like chain_origin on runs. A join missing the workspace hands
+// another tenant's issue titles and agent names to a row of ours.
+//
+// The three foreign rows are written with raw SQL for the same reason
+// seedPreMigrationRun is: the production path cannot produce a cross-tenant
+// pointer, and reproducing one is the entire point of the test.
+func TestChainsList_ForeignWorkspaceWorkNeverAttachesToARow(t *testing.T) {
+	r := newChainsListRig(t)
+	mine := r.seedRun(t, runSpec{id: "prn_mine", via: pipeline.TriggeredViaManual})
+
+	// One issue and one agent that ARE ours, so the row has a real answer to
+	// compare against. Without them every fence in these two queries is
+	// redundant with every other — an empty row is an empty row however it got
+	// that way — and the test would pass with three of the four removed.
+	ourIssue := r.issueFromRun(t, mine, "Ours")
+	r.dispatchAgent(t, mine, "ada")
+
+	r.seedWorkspace(t, "ws-other", "other")
+	r.exec(t, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('other-crew', 'ws-other', 'C', 'c')`)
+	r.exec(t, `INSERT INTO agents (id, workspace_id, crew_id, name, slug) VALUES ('other-agent', 'ws-other', 'other-crew', 'Their Secret Agent', 'ghost')`)
+	r.exec(t, `INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('other-chat', 'other-agent', 'ws-other', 'CHAT', 'ACTIVE')`)
+	r.seedIssue(t, "mis_foreign", "ws-other", "other-crew", "other-agent", "THEIRS-1", "Their secret issue")
+
+	// Their agent work, pointed at OUR chain — what the outer workspace
+	// predicate on assignments has to exclude.
+	r.exec(t, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, chain_origin, created_at)
+		VALUES ('asn_foreign', 'ws-other', 'other-chat', 'other-agent', 'other-agent', 'theirs', 'PENDING', 1, ?, datetime('now'))`,
+		mine)
+	// OUR assignment, addressed to THEIR agent — what the join predicate has to
+	// exclude. assignments.assigned_to_id has a foreign key to agents but none
+	// to a workspace, so the row is legal and the agent name behind it is not
+	// ours to render. A separate case from the one above: a fence on the outer
+	// predicate alone lets this one through.
+	r.exec(t, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, chain_origin, created_at)
+		VALUES ('asn_crossed', ?, ?, ?, 'other-agent', 'crossed', 'PENDING', 1, ?, datetime('now'))`,
+		r.ws, r.chat, r.lead, mine)
+	// Their issue, claiming OUR run authored it.
+	r.exec(t, `UPDATE missions SET author_run_id = ? WHERE id = 'mis_foreign'`, mine)
+	// Their journal entry, on OUR run's trace.
+	r.exec(t, `
+		INSERT INTO journal_entries (id, workspace_id, mission_id, entry_type, severity, actor_type, summary, trace_id, ts)
+		VALUES ('jrn_foreign', 'ws-other', 'mis_foreign', 'mission.status_change', 'info', 'system', 'moved', ?, ?)`,
+		mine, time.Now().UTC().Format(time.RFC3339Nano))
+	// OUR journal entry, on our run's trace, naming THEIR issue.
+	// journal_entries.mission_id has a foreign key to missions and none to a
+	// workspace, so the entry-side fence alone does not stop this one — it is
+	// the missions join that has to carry j.workspace_id.
+	r.exec(t, `
+		INSERT INTO journal_entries (id, workspace_id, mission_id, entry_type, severity, actor_type, summary, trace_id, ts)
+		VALUES ('jrn_crossed', ?, 'mis_foreign', 'mission.status_change', 'info', 'system', 'moved', ?, ?)`,
+		r.ws, mine, time.Now().UTC().Format(time.RFC3339Nano))
+
+	row := decodeChainsList(t, r.list(t, "")).byOrigin(t, mine)
+
+	if got := row.issueIdentifiers(); len(got) != 1 || got[0] != ourIssue {
+		t.Errorf("chain %s issues = %+v, want only our own %q", mine, row.Issues, ourIssue)
+	}
+	// The count is asserted separately from the list because they are computed
+	// at different points: the total is a window function over the grouped set,
+	// the list is what survives the final label join. A fence missing from an
+	// EARLIER arm lets a foreign issue into the count while the last join still
+	// keeps it off the wire — a row that says "2 issues" and shows one.
+	if row.IssueCount != 1 {
+		t.Errorf("issue_count = %d, want 1 — a foreign issue reached the total even though "+
+			"the label join kept it out of the list", row.IssueCount)
+	}
+	if got := row.agentSlugs(); len(got) != 1 || got[0] != "ada" {
+		t.Errorf("chain %s agents = %+v, want only our own [ada]", mine, row.Agents)
+	}
+	if row.AgentCount != 1 {
+		t.Errorf("agent_count = %d, want 1", row.AgentCount)
 	}
 }

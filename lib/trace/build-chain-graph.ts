@@ -19,6 +19,18 @@ import {
   type OverviewNodeType,
 } from "./build-overview-graph"
 
+/**
+ * The inset fitView leaves around the graph, as a fraction of the frame per
+ * side.
+ *
+ * It lives here rather than next to the `<ReactFlow>` that consumes it
+ * because the CARD sizes its frame from `bounds` and has to know the
+ * fraction that will then be taken out of it — and the card must not import
+ * the canvas module, which pulls React Flow (~200 KB) out of the lazy chunk
+ * it was split into. One number, in the module both sides already import.
+ */
+export const CHAIN_FIT_PADDING = 0.18
+
 /* ------------------------------------------------------------------ *
  *  The wire shape — mirrors internal/chain.Graph
  * ------------------------------------------------------------------ */
@@ -161,9 +173,24 @@ function dataFor(n: ChainNode): Record<string, unknown> {
   }
 }
 
+/** The box the laid-out nodes occupy, in unscaled layout pixels. */
+export interface ChainBounds {
+  width: number
+  height: number
+}
+
 export interface ChainGraphData {
   nodes: Node[]
   edges: Edge[]
+  /**
+   * How big the picture actually is.
+   *
+   * The card used to give every chain the same 380px box, so a two-node
+   * chain sat in a third of it and the rest was dot background — while a
+   * branching one was still clipped. Only the layout pass knows the answer,
+   * so it says.
+   */
+  bounds: ChainBounds
 }
 
 /**
@@ -201,7 +228,9 @@ export function buildChainGraph(chain: ChainGraph): ChainGraphData {
       },
     }))
 
-  if (nodes.length === 0) return { nodes, edges }
+  // Spelled, not derived: Math.min over nothing is Infinity, and a frame
+  // sized from that renders nothing at all.
+  if (nodes.length === 0) return { nodes, edges, bounds: { width: 0, height: 0 } }
 
   const g = new DagreGraph({ multigraph: false, compound: false })
   g.setGraph({ rankdir: "LR", nodesep: 30, ranksep: 90, marginx: 20, marginy: 20 })
@@ -215,12 +244,27 @@ export function buildChainGraph(chain: ChainGraph): ChainGraphData {
   for (const e of edges) g.setEdge(e.source, e.target)
   dagreLayout(g)
 
+  let left = Infinity
+  let right = -Infinity
+  let top = Infinity
+  let bottom = -Infinity
+
   for (const n of nodes) {
     const pos = g.node(n.id)
     if (!pos) continue
     const w = OVERVIEW_NODE_WIDTH[n.type as OverviewNodeType]
     n.position = { x: pos.x - w / 2, y: pos.y - OVERVIEW_NODE_HEIGHT / 2 }
+    left = Math.min(left, n.position.x)
+    right = Math.max(right, n.position.x + w)
+    top = Math.min(top, n.position.y)
+    bottom = Math.max(bottom, n.position.y + OVERVIEW_NODE_HEIGHT)
   }
 
-  return { nodes, edges }
+  // Every node above came from `nodes`, but a node dagre never saw is
+  // skipped, and all of them being skipped would leave the sentinels in
+  // place. An unmeasurable graph reports no size rather than -Infinity.
+  const bounds: ChainBounds =
+    left === Infinity ? { width: 0, height: 0 } : { width: right - left, height: bottom - top }
+
+  return { nodes, edges, bounds }
 }

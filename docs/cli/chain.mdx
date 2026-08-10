@@ -75,6 +75,15 @@ WHEN    STARTED BY                    ROUTINE  RUNS  DEPTH  STATUS  ORIGIN
   an operational event, not the chain's verdict.
 - **ORIGIN** is the anchor. Feed it straight back: `crewship chain prn_01j4`.
 
+<Note>
+  The table is a summary of a wider row. `--format json` also carries what the
+  chain **touched** — `issues[]` (with `created` marking the ones it authored),
+  `agents[]` with a per-agent work count, the uncapped `issue_count` /
+  `agent_count`, and `duration_ms` — which is what tells two runs of the same
+  routine apart. Both lists are capped at 5 per row server-side; the counts are
+  not. See [the API reference](/api-reference/chains#fan-out-and-its-cap).
+</Note>
+
 ### Paging
 
 The page is capped server-side — default 50, ceiling 200 — because the index

@@ -37077,6 +37077,33 @@
                     "chains": {
                       "items": {
                         "properties": {
+                          "agent_count": {
+                            "type": "integer"
+                          },
+                          "agents": {
+                            "items": {
+                              "properties": {
+                                "assignments": {
+                                  "type": "integer"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "slug": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "duration_ms": {
+                            "nullable": true,
+                            "type": "integer"
+                          },
                           "failed": {
                             "type": "boolean"
                           },
@@ -37086,6 +37113,29 @@
                           "first_activity": {
                             "format": "date-time",
                             "type": "string"
+                          },
+                          "issue_count": {
+                            "type": "integer"
+                          },
+                          "issues": {
+                            "items": {
+                              "properties": {
+                                "created": {
+                                  "type": "boolean"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "identifier": {
+                                  "type": "string"
+                                },
+                                "title": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
                           },
                           "last_activity": {
                             "format": "date-time",

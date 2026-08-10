@@ -68,11 +68,26 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	// over pipeline_runs.chain_origin — so a client can find a chain without
 	// already holding an anchor. started_by_* is the root run's
 	// triggered_via/triggered_by_id pair resolved into something human.
+	//
+	// issues/agents are the nouns that tell two runs of one routine apart, and
+	// are capped per row (5); issue_count/agent_count are the uncapped totals,
+	// so a client can render "+N more" rather than mistaking a cut list for the
+	// whole story. duration_ms is nullable on purpose — null means "no span to
+	// measure between", which 0 would misreport as "instant".
+	chainIssueRef := object(map[string]any{
+		"id": str(), "identifier": str(), "title": str(), "created": boolean(),
+	})
+	chainAgentRef := object(map[string]any{
+		"id": str(), "slug": str(), "name": str(), "assignments": integer(),
+	})
 	chainSummary := object(map[string]any{
 		"origin": str(), "started_by_kind": str(), "started_by_id": str(), "started_by_key": str(),
 		"started_by": str(), "triggered_via": str(), "routine_id": str(), "routine_slug": str(),
 		"runs": integer(), "max_chain_depth": integer(), "failed_runs": integer(), "failed": boolean(),
 		"first_activity": dateTime(), "last_activity": dateTime(),
+		"duration_ms": map[string]any{"type": "integer", "nullable": true},
+		"issues":      array(chainIssueRef), "issue_count": integer(),
+		"agents": array(chainAgentRef), "agent_count": integer(),
 	})
 	// has_unrecorded_runs is load-bearing the way truncated is on the walk:
 	// runs from before the chain_origin column are absent from the index and

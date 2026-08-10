@@ -45259,6 +45259,7 @@
       "name": "Issue",
       "docs": [
         "docs/api-reference/agents.mdx",
+        "docs/api-reference/chains.mdx",
         "docs/api-reference/conversations.mdx",
         "docs/api-reference/crews.mdx",
         "docs/api-reference/issues.mdx",

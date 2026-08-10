@@ -82,7 +82,23 @@ is the busiest table in the schema. There is no "return everything" mode.
       "failed_runs": 1,
       "failed": true,
       "first_activity": "2026-08-07T12:00:00.000000000Z",
-      "last_activity": "2026-08-07T12:09:00.000000000Z"
+      "last_activity": "2026-08-07T12:09:00.000000000Z",
+      "duration_ms": 540000,
+      "issues": [
+        {
+          "id": "mis_01hx",
+          "identifier": "ENG-7",
+          "title": "Deploy is flaky on cold start",
+          "created": true
+        },
+        { "id": "mis_01hy", "identifier": "ENG-4", "title": "Sidecar leaks a socket" }
+      ],
+      "issue_count": 2,
+      "agents": [
+        { "id": "agt_01hx", "slug": "ada", "name": "Ada", "assignments": 3 },
+        { "id": "agt_01hy", "slug": "bo", "name": "Bo", "assignments": 1 }
+      ],
+      "agent_count": 2
     }
   ],
   "count": 1,
@@ -108,10 +124,94 @@ is the busiest table in the schema. There is no "return everything" mode.
 | `chains[].failed` | boolean | `failed_runs > 0`. True when **any** run in the chain failed, not only the root. |
 | `chains[].first_activity` | string | Earliest `started_at` in the chain. |
 | `chains[].last_activity` | string | Latest `ended_at`, falling back to `started_at` for a run still going. Rows are ordered by this, descending, with `origin` descending as the tiebreak. |
+| `chains[].duration_ms` | integer \| null | Wall clock from `first_activity` to `last_activity`. **Always present**, and `null` when there is no span to measure between. See [How long it took](#how-long-it-took). |
+| `chains[].issues[]` | array | Issues this chain created or changed, **capped at 5**. Absent when it touched none. |
+| `chains[].issues[].id` / `identifier` | string | The mission id and its human handle (`ENG-7`). The identifier is also a valid anchor for [the walk](#get-a-chain). |
+| `chains[].issues[].title` | string | User- and agent-written; escape before rendering. |
+| `chains[].issues[].created` | boolean | The chain **authored** this issue rather than moving one that already existed. Absent means changed, which is a weaker claim. |
+| `chains[].issue_count` | integer | Total issues touched, **uncapped**. `issue_count > issues.length` is the "+N more" case. |
+| `chains[].agents[]` | array | Agents this chain dispatched, **capped at 5**, most work first. Absent when it dispatched none. |
+| `chains[].agents[].id` / `slug` / `name` | string | The agent. `name` is user-written; escape before rendering. |
+| `chains[].agents[].assignments` | integer | Pieces of work that agent took **in this chain** — what separates "asked Ada once" from "handed Ada the whole thing in six parts". |
+| `chains[].agent_count` | integer | Total distinct agents, **uncapped**. Same "+N more" rule as `issue_count`. |
 | `count` | integer | Rows in this page. |
 | `limit` / `offset` | integer | The bounds actually applied, after clamping. |
 | `has_more` | boolean | Another page exists. Computed by reading one row past the page, so it is a fact rather than an inference from a full page. |
 | `has_unrecorded_runs` | boolean | This workspace holds runs from before chain recording. See below. **Always present**, including when false. |
+
+### Why a row carries nouns
+
+Two runs of one routine are the same sentence twice — the slug, the trigger
+kind, and the number `1` — and a list of those is not navigable. What makes a
+row identify a **run** is what that run actually touched: the issues it named
+and the agents it put to work. Those are the fields you render beside the
+routine slug; the routine slug alone is the thing the reader already knew.
+
+`duration_ms` and `issues[].created` carry the two distinctions that survive
+scanning: how long it took, and whether an issue exists *because of* this run.
+
+### How long it took
+
+`duration_ms` is the **wall clock** between `first_activity` and
+`last_activity`. It is deliberately not the sum of the runs' own
+`pipeline_runs.duration_ms`, for three reasons:
+
+- a routine of agentless steps records `duration_ms` `0` on every run, so the
+  sum reports "instant" for a chain that took three minutes;
+- a nested run's time is counted twice, once in itself and once inside the run
+  that contains it;
+- the sum cannot see the gaps *between* runs, and on a composed chain — one
+  waiting on a rule's debounce — those gaps are most of the elapsed time.
+
+This is the same decision the dashboard's `chainElapsedMs` made client-side; the
+server now answers it so every client answers it the same way.
+
+`null` means there is nothing to measure between: one datable moment, which on
+this endpoint is a single run that has not ended yet (`last_activity` falls back
+to `started_at`). Render it as "running". **Do not substitute `0`** — `0`
+asserts the work was instantaneous, which is a different and wrong claim.
+
+### Fan-out and its cap
+
+`issues[]` and `agents[]` are capped at **5 per row**. This is a list: every
+noun costs a join over tables that grow with every dispatch, and doing that per
+row without a bound is the slow query behind an authenticated route — the same
+argument that caps the page itself.
+
+The cap is per row, so one request costs at most `limit × 5` issues and
+`limit × 5` agents. Both queries are issued **once per page**, not once per row,
+and keep the top *N* per chain with a window function.
+
+`issue_count` and `agent_count` are **not** capped. A short list next to a
+larger count is how a client knows it was cut; a capped count would leave a
+truncated row indistinguishable from a complete one.
+
+Ordering inside a capped list is stable and meaningful rather than arbitrary:
+issues the chain created come first, then the ones it touched most; agents come
+by how much work they took.
+
+#### The columns behind the nouns
+
+| Noun | Column |
+|---|---|
+| chain → agent | `assignments.chain_origin` (every hop of a chain carries the same value), joined to `agents.assigned_to_id` |
+| chain → issue (created) | `missions.author_run_id` = a run in the chain — written by the `issue.create` crewship verb through `insertIssueTx` |
+| chain → issue (changed) | `journal_entries.trace_id` = a run in the chain, on entry types `mission.status_change`, `mission.assigned`, `mission.comment` — the run pointer `issueEvents` stamps |
+
+<Note>
+  **A gap worth knowing.** Issue writes an *agent* makes from inside its own
+  assignment do not appear on the row. Those journal entries carry the
+  assignment's own run id as their trace, and that id is not recorded on the
+  `assignments` row, so no column joins them back to the chain. The issues a
+  chain's **routine runs** touched are complete; the ones its **agents** touched
+  are not reachable from here. The agents themselves are — they come from
+  `assignments.chain_origin`, which is exact.
+
+  `mission.created` is not in the entry-type list above because nothing emits
+  it: the journal type exists but the issue action behind it has no producer, so
+  matching on it would be a predicate that can never fire. Creation is read from
+  `missions.author_run_id` instead, which is a column production actually writes.
+</Note>
 
 ### What the index does not cover
 
@@ -141,6 +241,14 @@ Two related cases that are *not* excluded:
   started it, and that fact outlives the rule.
 
 ### Tenancy
+
+The joins that fill `issues[]` and `agents[]` carry the workspace on every arm,
+for the same reason the label lookups do: `assignments.chain_origin`,
+`journal_entries.trace_id`, `journal_entries.mission_id` and
+`missions.author_run_id` are untyped string columns whose foreign keys (where
+they exist at all) constrain the row but not the tenant. Two distinct holes are
+closed, not one — a row *another tenant* stamped with your chain's origin, and a
+row of *yours* pointing at another tenant's agent or issue.
 
 Every predicate carries the workspace, including the five label lookups. That
 is not defence in depth layered over a scoped entry point: `chain_origin` and

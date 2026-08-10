@@ -31,9 +31,12 @@ import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import type { ChainSummary } from "@/hooks/use-chains"
+import { chainTouched } from "@/lib/chain-touched"
+import { relTime } from "@/lib/time"
 import {
   ACTIVITY_SCOPES,
   ACTIVITY_SOURCES,
+  formatDurationMs,
   railInventory,
   type ActivityScope,
   type ActivitySource,
@@ -382,20 +385,39 @@ export function ActivitySidebar({
                 key={c.origin}
                 selected={selectedChain === c.origin}
                 onSelect={() => onSelectChain(selectedChain === c.origin ? null : c.origin)}
+                className="!items-start !py-1.5"
               >
                 <span
                   aria-hidden
                   className={cn(
-                    "h-1.5 w-1.5 shrink-0 rounded-full",
+                    "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
                     c.failed ? "bg-destructive" : "bg-success",
                   )}
                 />
-                <span className="flex-1 truncate text-foreground/80" title={c.started_by}>
-                  {c.routine_slug || c.started_by}
+                {/* Two lines, because one line cannot tell two runs of the same
+                    routine apart — which is what this list looked like before
+                    the summary carried nouns. Line one is what ran, line two is
+                    which run: when, how long, and what it actually touched. */}
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate text-foreground/85" title={c.started_by}>
+                    {c.routine_slug || c.started_by}
+                  </span>
+                  <span className="flex items-center gap-1.5 truncate text-[10.5px] text-muted-foreground-soft">
+                    <span>{relTime(c.last_activity)}</span>
+                    {c.duration_ms != null && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span>{formatDurationMs(c.duration_ms)}</span>
+                      </>
+                    )}
+                    {chainTouched(c) && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span className="truncate">{chainTouched(c)}</span>
+                      </>
+                    )}
+                  </span>
                 </span>
-                {/* Steps, not events: what a reader compares between rows is
-                    how much happened, and the depth is in the tree already. */}
-                <Count n={c.runs} />
               </SidebarRow>
             ))
           )}

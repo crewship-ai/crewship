@@ -29,6 +29,55 @@ export interface ChainSummary {
   failed: boolean
   first_activity: string
   last_activity: string
+  /**
+   * Wall clock from `first_activity` to `last_activity`, in milliseconds.
+   *
+   * `null` when there is nothing to measure between — one datable moment, which
+   * on this endpoint means a single run that has not ended yet. Render that as
+   * "running", never as 0: 0 asserts the work was instant.
+   *
+   * The server computes it exactly the way `chainElapsedMs` does in
+   * lib/activity-stream — wall clock, NOT the sum of the runs' own durations,
+   * which reads 0 for agentless work and double-counts nested spans.
+   */
+  duration_ms: number | null
+  /**
+   * The issues this chain created or changed, and how many there are in total.
+   *
+   * `issues` is capped server-side (5 per row); `issue_count` is the full
+   * number, so `issue_count > issues.length` is the "+N more" case. Both absent
+   * arrays and a zero count mean the chain touched no issue.
+   */
+  issues?: ChainIssueRef[]
+  issue_count: number
+  /** The agents this chain put to work. Same cap and same total rule as `issues`. */
+  agents?: ChainAgentRef[]
+  agent_count: number
+}
+
+/** One issue a chain touched. Mirrors internal/api.ChainIssueRef. */
+export interface ChainIssueRef {
+  id: string
+  /** "ENG-7" — what a human recognises, and a valid anchor for the walk. */
+  identifier?: string
+  /** User- and agent-written. Escape before rendering. */
+  title?: string
+  /**
+   * The chain AUTHORED this issue, rather than merely moving one that already
+   * existed. Read from `missions.author_run_id`; absent means "changed", which
+   * is a weaker and different claim.
+   */
+  created?: boolean
+}
+
+/** One agent a chain dispatched. Mirrors internal/api.ChainAgentRef. */
+export interface ChainAgentRef {
+  id: string
+  slug?: string
+  /** User-written. Escape before rendering. */
+  name?: string
+  /** Pieces of work this agent took in THIS chain — "ada ×3" on the row. */
+  assignments: number
 }
 
 interface UseChainsResult {
