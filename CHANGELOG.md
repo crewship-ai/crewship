@@ -50,6 +50,29 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **`OTEL_EXPORTER_OTLP_ENDPOINT` is treated as the base URL it is, and
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is honoured (#1870).** The standard
+  says the generic variable is a base URL for every signal and the signal
+  path is appended to it — including when it already carries a path. We
+  appended only when there was no path, and ignored the signal-specific
+  variable entirely.
+
+  Two consequences. A backend documenting a project-scoped prefix, such as
+  Langfuse's `/api/public/otel`, expects spans at
+  `/api/public/otel/v1/traces`; we posted to the bare prefix, where a
+  collector answers 200 and drops the payload — indistinguishable from
+  working. And an operator who set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, the
+  correct way to pin an exact URL, was not listened to at all.
+
+  **If you configured a bare prefix, traces move** — to where the backend
+  wanted them. A path that already ends in `/v1/traces` is not doubled, so a
+  fully-written-out endpoint is unaffected. To pin any exact URL, use
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`.
+
+  The startup line now prints `traces_url` — the resolved destination, signal
+  path included — instead of the configured endpoint. Logging what was
+  configured is what let a misrouted exporter read as healthy for a release.
+
 - **The OTLP endpoint keeps its own `/v1/traces` default.** opentelemetry-go
   1.45 changed `WithEndpointURL`: a URL with no path of its own used to fall
   through to the exporter's default signal path, and now resolves to `/`. Since

@@ -28,14 +28,18 @@ defer shutdown()
 
 | Env var | Purpose |
 |---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector URL. Accepts `host:port` (plaintext) or `http(s)://host:port[/path]`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector **base** URL, shared by every signal — `/v1/traces` is appended. Accepts `host:port` (plaintext) or `http(s)://host:port[/prefix]`. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | The **full** trace URL, used verbatim. Takes precedence over the base variable. |
 | `CREWSHIP_VERSION` | Stamped as `service.version` on the resource. Empty = `"dev"`. |
 
-Endpoint resolution order:
+Endpoint resolution order (`telemetry.ResolveTracesEndpoint`):
 
-1. The explicit `endpoint` argument to `Init` (most specific wins).
-2. `OTEL_EXPORTER_OTLP_ENDPOINT`.
-3. Empty string -> no-op tracer, nothing exported.
+1. The explicit `endpoint` argument to `Init` — treated as a base URL.
+2. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, verbatim.
+3. `OTEL_EXPORTER_OTLP_ENDPOINT`, with `/v1/traces` appended (not doubled if the path already ends in it).
+4. Nothing set -> no-op tracer, nothing exported.
+
+`ResolveTracesEndpoint` is exported so a caller can log where spans actually go. `server.go` logs it as `traces_url`; logging the configured value instead is what let a misrouted exporter read as healthy.
 
 The propagator is set to the W3C composite (TraceContext + Baggage) unconditionally so `Inject`/`Extract` work even in no-op mode. Without this, cross-process links are silently dropped when the exporter is disabled.
 

@@ -35,13 +35,24 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>
 # OTEL_EXPORTER_OTLP_HEADERS=X-API-Key=<value>
 ```
 
-`/v1/traces` is only filled in when the endpoint has no path of its own.
-If your backend documents a project-scoped path (e.g. `/api/public/otel`),
-that path is used verbatim — set the **full** URL your backend expects,
-including the signal segment:
+`OTEL_EXPORTER_OTLP_ENDPOINT` is a **base** URL, so `/v1/traces` is appended
+to whatever you set — including a project-scoped path. A backend documenting
+`/api/public/otel` wants spans at `/api/public/otel/v1/traces`, and setting
+the prefix is enough:
 
 ```sh
-OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.example.com/api/public/otel/v1/traces
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.example.com/api/public/otel
+```
+
+If a path already ends in `/v1/traces` it is not doubled, so an endpoint
+written out in full keeps working.
+
+To send traces somewhere the base-URL rule would not reach — a collector
+serving them off a non-standard path — set the signal-specific variable
+instead. It is used exactly as written, and takes precedence:
+
+```sh
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://collector.example.com/ingest/spans
 ```
 
 Compute a Basic-auth header once if needed:
@@ -52,23 +63,23 @@ echo -n "user:pass" | base64 -w0
 
 Restart `crewship`. The init logs one of:
 
-- `OTel GenAI telemetry enabled  endpoint=http://...` → working
+- `OTel GenAI telemetry enabled  traces_url=http://.../v1/traces` → working.
+  This is the **resolved** URL, signal path included — if it is not where you
+  expected spans to go, the configuration is wrong and this line says so
+  before any span is dropped.
 - `telemetry init failed, falling back to noop tracer` → check
   endpoint reachability and that header values parse (no quotes, no
   newline in base64).
 
 ## Smoke test
 
-Verify endpoint + auth without waiting for an LLM call. `curl` has to be
-given the exact URL Crewship resolves — it does not do the `/v1/traces`
-fill-in for you, so set it once and reuse it:
+Verify endpoint + auth without waiting for an LLM call. `curl` needs the
+resolved URL — the one the startup line prints as `traces_url`:
 
 ```sh
-# Base endpoint (no path of its own) — Crewship appends the signal segment:
 TRACE_URL="$OTEL_EXPORTER_OTLP_ENDPOINT/v1/traces"
-
-# Project-scoped endpoint (already a full trace URL) — use it verbatim:
-# TRACE_URL="$OTEL_EXPORTER_OTLP_ENDPOINT"
+# …or, if you set the signal-specific variable, that value as-is:
+# TRACE_URL="$OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 ```
 
 ```sh
