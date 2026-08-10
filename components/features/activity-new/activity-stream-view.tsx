@@ -28,6 +28,7 @@ import { useJournalLookup } from "@/hooks/use-journal-lookup"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { usePipelines } from "@/hooks/use-pipelines"
+import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { apiFetch } from "@/lib/api-fetch"
 import {
   ACTIVE_ENTRY_TYPES,
@@ -168,6 +169,10 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // and missions; routines come from the pipelines list so the rows can show
   // the same icon + colour the Routines rail does.
   const { pipelines } = usePipelines(workspaceId)
+  // Only the Routines lens reads these; the hook is cheap and shared, and
+  // gating the fetch on the lens would make the card empty on first paint
+  // every time the reader switches to it.
+  const { schedules } = usePipelineSchedules(workspaceId)
   const [issues, setIssues] = React.useState<SidebarIssue[]>([])
   React.useEffect(() => {
     let cancelled = false
@@ -884,6 +889,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   routines={routines}
                   rangeLabel={range.label}
                   catalogueCount={pipelines.length}
+                  schedules={schedules}
                   onOpenRoutine={(slug, label) => setPath(selectStop({ kind: "routine", id: slug, label }))}
                 />
               )}

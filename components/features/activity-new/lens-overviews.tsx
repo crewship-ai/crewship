@@ -25,7 +25,7 @@
 // lib/activity-lenses; this file is layout.
 
 import * as React from "react"
-import { Bot, CircleDot, ScrollText, type LucideIcon } from "lucide-react"
+import { Bot, CircleDot, Clock, ScrollText, type LucideIcon } from "lucide-react"
 
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
@@ -45,6 +45,7 @@ import {
   issueLens,
   routineLens,
 } from "@/lib/activity-lenses"
+import { firingNext, type FiringSchedule } from "@/lib/firing-next"
 import type { ChainSummary } from "@/hooks/use-chains"
 import type { SidebarRoutine } from "./activity-sidebar"
 import { cn } from "@/lib/utils"
@@ -438,6 +439,8 @@ export interface RoutinesLensOverviewProps {
   rangeLabel: string
   /** Catalogue size, for "7 of 40" — the number that stops 7 reading as all. */
   catalogueCount: number
+  /** Cron schedules in the workspace, for what is about to run. */
+  schedules: FiringSchedule[]
   onOpenRoutine: (slug: string, label: string) => void
 }
 
@@ -453,10 +456,16 @@ export function RoutinesLensOverview({
   routines,
   rangeLabel,
   catalogueCount,
+  schedules,
   onOpenRoutine,
 }: RoutinesLensOverviewProps) {
   const rows = React.useMemo(() => routineLens(chains), [chains])
   const byslug = React.useMemo(() => new Map(routines.map((r) => [r.slug, r])), [routines])
+
+  // `now` read once per render, not per row: two countdowns computed a
+  // millisecond apart can round to different minutes, and a list where one row
+  // says 45m and the next says 44m for the same instant reads as a bug.
+  const upcoming = React.useMemo(() => firingNext(schedules, Date.now()), [schedules])
 
   const totalRuns = rows.reduce((n, r) => n + r.runs, 0)
   const failedChains = chains.filter((c) => chainStatus(c) === "failed").length
@@ -538,6 +547,49 @@ export function RoutinesLensOverview({
                   </Line>
                 )
               })}
+            </div>
+          )}
+        </DashboardCard>
+      </Appear>
+
+      {/* The other half of a schedule-driven workspace. "What ran" is above;
+          this is what is about to, which on a routine firing every minute is
+          the difference between reading a page and watching one.
+
+          Four rows and a countdown, nothing else: cron expression, timezone,
+          catch-up policy and wake gate all belong on the routine's Triggers
+          card where they can be CHANGED. Here it is a glance. */}
+      <Appear order={3}>
+        <DashboardCard
+          title="Firing next"
+          icon={Clock}
+          hint={upcoming.length > 0 ? `${upcoming.length} scheduled` : undefined}
+        >
+          {upcoming.length === 0 ? (
+            <Empty icon={Clock}>
+              {schedules.length > 0
+                ? "Every schedule in this workspace is disabled or has no next fire computed."
+                : "No schedule is due. Open a routine and add one under Triggers."}
+            </Empty>
+          ) : (
+            <div className="flex flex-col">
+              {upcoming.map((s) => (
+                <Line
+                  key={s.id}
+                  onClick={s.slug ? () => onOpenRoutine(s.slug!, byslug.get(s.slug!)?.name || s.slug!) : undefined}
+                >
+                  <Dot token="--muted-foreground" />
+                  {/* The routine first: the reader is looking for what is about
+                      to run, not for what somebody called the cron. */}
+                  <span className="min-w-0 flex-1 truncate">
+                    {s.slug ? byslug.get(s.slug)?.name || s.slug : s.name}
+                  </span>
+                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground-soft">{s.cron}</span>
+                  <span className="w-14 shrink-0 text-right font-mono text-[10.5px] tabular-nums text-muted-foreground">
+                    {s.dueIn}
+                  </span>
+                </Line>
+              ))}
             </div>
           )}
         </DashboardCard>
