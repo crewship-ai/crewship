@@ -15,7 +15,7 @@
 // panel — see activity-detail.tsx for why.
 
 import * as React from "react"
-import { Activity } from "lucide-react"
+import { Activity, FilterX } from "lucide-react"
 
 import { SubBar } from "@/components/layout/sub-bar"
 import { SidebarActiveChip, SidebarActiveChips, SidebarCollapseButton } from "@/components/layout/sidebar-kit"
@@ -364,6 +364,18 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     })
   }
 
+  // The window holds events and this question returns none of them. Told
+  // apart from a genuinely quiet system, because the overview's copy for zero
+  // is reassurance — "nothing broke", "all clear", "Nothing has failed. Nice."
+  // — and every word of it is false when the answer is simply unasked.
+  const emptyByFilters = chips.length > 0 && visible.length === 0 && entries.length > 0
+
+  // One click out. Clearing them one crumb at a time is the state a reader is
+  // already lost in.
+  const clearAllChips = React.useCallback(() => {
+    for (const c of chips) c.onClear()
+  }, [chips])
+
   const scopeMeta = ACTIVITY_SCOPES.find((s) => s.key === facets.scope)
 
   return (
@@ -489,7 +501,33 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                 </div>
               )}
 
-              {!loading && !error && facets.scope === "all" && (
+              {/* A filter combination that matches nothing must SAY so.
+                  Two crumbs can intersect to the empty set — a run pinned from
+                  the spine plus an issue focused in the rail is one click
+                  away — and the overview then renders a wall of reassuring
+                  zeros: "nothing broke", "all clear", "Nothing has failed.
+                  Nice." Every one of those is false; the truth is that nothing
+                  was ASKED. The window has events, this question has none. */}
+              {!loading && !error && emptyByFilters && (
+                <div className="px-6 py-14">
+                  <EmptyState
+                    icon={FilterX}
+                    title="No activity matches these filters"
+                    description={`The loaded window holds ${entries.length.toLocaleString()} ${
+                      entries.length === 1 ? "event" : "events"
+                    }, and none of them satisfies all ${chips.length} filter${
+                      chips.length === 1 ? "" : "s"
+                    } at once. This is an empty question, not a quiet system.`}
+                    action={
+                      <Button size="sm" variant="outline" onClick={clearAllChips}>
+                        Clear {chips.length === 1 ? "the filter" : "all filters"}
+                      </Button>
+                    }
+                  />
+                </div>
+              )}
+
+              {!loading && !error && !emptyByFilters && facets.scope === "all" && (
                 <ActivityOverview
                   entries={visible}
                   rangeLabel={range.label}
@@ -512,7 +550,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                 />
               )}
 
-              {!loading && !error && facets.scope !== "all" && (
+              {!loading && !error && !emptyByFilters && facets.scope !== "all" && (
                 <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
                   <Appear order={0}>
                     <div>

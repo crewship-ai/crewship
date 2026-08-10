@@ -31,6 +31,7 @@ import {
   buildSpine,
   entryCostUSD,
   entryDurationMs,
+  chainElapsedMs,
   formatDurationMs,
   runIdOf,
   scopeOf,
@@ -155,6 +156,10 @@ export function ActivityDetail({
     return { ms, usd, errors }
   }, [chain])
 
+  // First entry to last. See chainElapsedMs: null when there is nothing to
+  // measure between, which the card says rather than showing a confident zero.
+  const chainElapsed = React.useMemo(() => chainElapsedMs(chain), [chain])
+
   const rowProps = (e: JournalEntry) => ({
     entry: e,
     icon: iconFor(e),
@@ -243,8 +248,16 @@ export function ActivityDetail({
           />
           <KpiCard
             label="Chain duration"
-            value={chainTotals.ms > 0 ? formatDurationMs(chainTotals.ms) : "—"}
-            subtitle={`${chain.length} ${chain.length === 1 ? "event" : "events"}`}
+            // Wall clock across the chain, not the sum of per-entry durations.
+            // The sum read 0 for an agentless routine whose steps report no
+            // duration — a dash beside "4 events", which says nothing — and it
+            // double-counted a step nested in the run containing it.
+            value={chainElapsed != null ? formatDurationMs(chainElapsed) : "—"}
+            subtitle={
+              chainElapsed != null
+                ? `${chain.length} ${chain.length === 1 ? "event" : "events"}`
+                : "single event — no span"
+            }
           />
           <KpiCard
             label="Chain cost"

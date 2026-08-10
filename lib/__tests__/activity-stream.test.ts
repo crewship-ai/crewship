@@ -6,6 +6,7 @@ import {
   ACTIVITY_SOURCES,
   activitySource,
   buildSpine,
+  chainElapsedMs,
   formatDurationMs,
   groupIntoBuckets,
   severityTone,
@@ -388,7 +389,7 @@ describe("narrowToFocus — the rail and the cards must count the same set", () 
       workspace_id: "ws",
       entry_type: "pipeline.run.completed",
       severity: "info",
-      created_at: new Date().toISOString(),
+      ts: new Date().toISOString(),
       ...over,
     }) as JournalEntry
 
@@ -436,5 +437,60 @@ describe("narrowToFocus — the rail and the cards must count the same set", () 
     const viaRoutineSlug = entry({ id: "d", refs: { routine_slug: "cost-spike-probe" } })
     const out = narrowToFocus([viaRoutineSlug], { kind: "routine", id: "cost-spike-probe" })
     expect(out).toHaveLength(1)
+  })
+})
+
+describe("chainElapsedMs — how long the chain actually took", () => {
+  // "Chain duration —" beside "4 events" tells a reader nothing. It was the
+  // SUM of per-entry durations, which is 0 for an agentless routine whose
+  // steps report 0ms, and which double-counts a step nested inside the run
+  // that contains it. Neither is what "duration" says.
+  //
+  // Wall clock between the first and last entry is what a person means, and it
+  // is the one number the journal can always answer.
+  const at = (iso: string, over: Partial<JournalEntry> = {}): JournalEntry =>
+    ({
+      id: iso,
+      workspace_id: "ws",
+      entry_type: "pipeline.step.completed",
+      severity: "info",
+      ts: iso,
+      ...over,
+    }) as JournalEntry
+
+  it("measures first to last, not the sum of the parts", () => {
+    const chain = [
+      at("2026-08-10T08:34:00.000Z"),
+      at("2026-08-10T08:34:03.500Z"),
+      at("2026-08-10T08:34:08.000Z"),
+    ]
+    expect(chainElapsedMs(chain)).toBe(8000)
+  })
+
+  it("is order-independent — the journal returns newest first", () => {
+    const chain = [at("2026-08-10T08:34:08.000Z"), at("2026-08-10T08:34:00.000Z")]
+    expect(chainElapsedMs(chain)).toBe(8000)
+  })
+
+  it("returns null for a single entry rather than a confident zero", () => {
+    // One event has no span. Reporting 0ms would say "it was instant"; the
+    // truth is "there is nothing to measure between".
+    expect(chainElapsedMs([at("2026-08-10T08:34:00.000Z")])).toBeNull()
+    expect(chainElapsedMs([])).toBeNull()
+  })
+
+  it("survives an unparseable timestamp instead of returning NaN", () => {
+    const chain = [at("not-a-date"), at("2026-08-10T08:34:00.000Z"), at("2026-08-10T08:34:05.000Z")]
+    expect(chainElapsedMs(chain)).toBe(5000)
+  })
+
+  it("reports a real span even when every step reported 0ms", () => {
+    // The agentless case that produced the dash: token-zero steps carry no
+    // duration, but the chain still occupied wall-clock time.
+    const chain = [
+      at("2026-08-10T08:34:00.000Z", { payload: { duration_ms: 0 } }),
+      at("2026-08-10T08:34:02.000Z", { payload: { duration_ms: 0 } }),
+    ]
+    expect(chainElapsedMs(chain)).toBe(2000)
   })
 })

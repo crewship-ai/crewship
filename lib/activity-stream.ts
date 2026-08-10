@@ -641,3 +641,29 @@ export function narrowToFocus(entries: JournalEntry[], focus: FocusRef | null): 
     return bag["pipeline_slug"] === focus.id || bag["routine_slug"] === focus.id
   })
 }
+
+/**
+ * Wall-clock span of a chain: first entry to last, in milliseconds.
+ *
+ * Not the sum of per-entry durations, which is what "Chain duration" used to
+ * show. That sum reads 0 for an agentless routine whose steps report no
+ * duration — rendering as a dash beside "4 events", which tells a reader
+ * nothing — and it double-counts a step's time inside the run that contains
+ * it. Neither is what the word duration promises.
+ *
+ * Null, not zero, for fewer than two datable entries. One event has no span,
+ * and 0ms would assert "it was instant" where the truth is "there is nothing
+ * to measure between".
+ *
+ * Unparseable timestamps are skipped rather than poisoning the result with
+ * NaN: a chain with one bad row should still report the span of the good ones.
+ */
+export function chainElapsedMs(chain: JournalEntry[]): number | null {
+  const times: number[] = []
+  for (const e of chain) {
+    const t = Date.parse(e.ts ?? "")
+    if (Number.isFinite(t)) times.push(t)
+  }
+  if (times.length < 2) return null
+  return Math.max(...times) - Math.min(...times)
+}
