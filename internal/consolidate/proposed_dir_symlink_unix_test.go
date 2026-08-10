@@ -45,6 +45,22 @@ func TestWriteProposalRefusesSymlinkedProposedDir(t *testing.T) {
 	assertDirEmpty(t, outsideDir)
 }
 
+func TestWriteProposalCreatesMissingOutputDir(t *testing.T) {
+	outputDir := filepath.Join(t.TempDir(), "topics")
+	c := &Consolidator{Journal: &noopEmitter{}, Logger: quietLogger()}
+	result, err := c.writeProposal(context.Background(), Config{
+		WorkspaceID: "ws_test", CrewID: "crew_test", OutputDir: outputDir,
+	}, time.Date(2026, 8, 10, 16, 0, 0, 0, time.UTC), []LearnedRule{{
+		Pattern: "pattern", Action: "action",
+	}}, 1)
+	if err != nil {
+		t.Fatalf("writeProposal with missing output directory: %v", err)
+	}
+	if _, err := os.Stat(result.OutputPath); err != nil {
+		t.Fatalf("proposal was not created: %v", err)
+	}
+}
+
 func TestPromoteRuleToSkillRefusesSymlinkedProposedDir(t *testing.T) {
 	outputDir, outsideDir := symlinkedProposedDir(t)
 	_, err := PromoteRuleToSkill(LearnedRule{
