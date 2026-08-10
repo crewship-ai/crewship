@@ -17,6 +17,9 @@
 // clears a sibling facet (#1776).
 
 import * as React from "react"
+import { motion } from "motion/react"
+
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 import {
   SidebarCollapseButton,
@@ -310,11 +313,14 @@ function WorkflowRow({
   chain,
   routine,
   selected,
+  index,
   onSelect,
 }: {
   chain: ChainSummary
   routine?: SidebarRoutine
   selected: boolean
+  /** Position in the list, for the entry stagger. */
+  index: number
   onSelect: () => void
 }) {
   const status = chainStatus(chain)
@@ -322,8 +328,20 @@ function WorkflowRow({
   const name = workflowName(chain, routine?.name)
   const touched = chainTouched(chain)
   const handle = workflowHandle(chain.origin)
+  const startedBy = chain.started_by?.trim() || chain.triggered_via || "unknown trigger"
 
   return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* Rows arrive in sequence, so a filter reads as the list narrowing
+            rather than as the list being replaced. Capped: past a dozen rows a
+            per-row stagger stops being a cascade and starts being a wait. The
+            Routines rail makes exactly this call. */}
+        <motion.div
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], delay: Math.min(index, 12) * 0.018 }}
+        >
     <SidebarRow selected={selected} onSelect={onSelect} className="!items-start !py-1.5">
       <span className="relative mt-0.5 shrink-0">
         {/* A halo, not a moved icon — the same call the Routines rail makes.
@@ -383,13 +401,26 @@ function WorkflowRow({
         </span>
       </span>
 
-      <span
-        className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground-soft"
-        title={`Workflow ${handle} — ${chain.origin}`}
-      >
-        {handle}
-      </span>
+      <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground-soft">{handle}</span>
     </SidebarRow>
+        </motion.div>
+      </TooltipTrigger>
+      {/* What the two truncated lines drop. The Routines rail carries the same
+          card for the same reason: a 280px column elides exactly the part that
+          tells two rows apart, and hovering is where it comes back. */}
+      <TooltipContent side="right" sideOffset={8}>
+        <div className="space-y-0.5">
+          <div className="font-medium">{name}</div>
+          <div className="font-mono text-[10px] opacity-70">{handle}</div>
+          <div className="text-[10px] opacity-70">
+            {startedBy} · {status}
+            {chain.runs > 1 && ` · ${chain.runs} runs`}
+            {chain.max_chain_depth > 0 && ` · depth ${chain.max_chain_depth}`}
+          </div>
+          {touched && <div className="max-w-[280px] text-[10px] opacity-70">{touched}</div>}
+        </div>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -402,13 +433,11 @@ export interface ActivitySidebarProps {
   agents: { id: string; name: string; crew_id: string | null }[]
   issues: SidebarIssue[]
   routines: SidebarRoutine[]
-  scopeCounts: Record<ActivityScope, number>
   crewCounts: Record<string, number>
   issueCounts: Record<string, number>
   routineCounts: Record<string, number>
   focus: EntityFocus | null
   onFocus: (f: EntityFocus | null) => void
-  total: number
   /**
    * The workflow runs in this workspace, newest first. Each is every piece of
    * work that shares one cause — the rule or person that started it, the
@@ -447,13 +476,11 @@ export function ActivitySidebar({
   agents,
   issues,
   routines,
-  scopeCounts,
   crewCounts,
   issueCounts,
   routineCounts,
   focus,
   onFocus,
-  total,
   chains,
   chainsHaveUnrecorded,
   selectedChain,
@@ -539,11 +566,6 @@ export function ActivitySidebar({
     () => railSegments(facets.scope, chainCounts, searched.length, true),
     [facets.scope, chainCounts, searched.length],
   )
-  // The journal-side counts the shell computes are still what the FEED holds,
-  // and the main column's own header renders them. Kept in the signature so the
-  // shell keeps compiling and so the two are not silently confused again.
-  void scopeCounts
-  void total
 
   const facetKeys = filterFacets({
     crews: crews.length,
@@ -827,7 +849,11 @@ export function ActivitySidebar({
                 : "No workflows yet. One appears the first time something causes something else."}
           </p>
         ) : lens === "workflows" ? (
-          buckets.map((b) => (
+          // Radix needs a provider in scope or every TooltipTrigger renders a
+          // plain child and the hover card silently never appears. Same delay as
+          // the Routines rail so a pointer crossing the two feels like one app.
+          <TooltipProvider delayDuration={400}>
+          {buckets.map((b) => (
             // Not collapsible. A chevron whose one job is to hide what is
             // running is a trap, not a control.
             <SidebarSection
@@ -836,17 +862,19 @@ export function ActivitySidebar({
               count={b.chains.length}
               headerClassName={b.key === "active" ? "text-primary" : undefined}
             >
-              {b.chains.map((c) => (
+              {b.chains.map((c, i) => (
                 <WorkflowRow
                   key={c.origin}
                   chain={c}
+                  index={i}
                   routine={routineBySlug.get(c.routine_slug ?? "")}
                   selected={selectedChain === c.origin}
                   onSelect={() => onSelectChain(selectedChain === c.origin ? null : c.origin)}
                 />
               ))}
             </SidebarSection>
-          ))
+          ))}
+          </TooltipProvider>
         ) : lens === "issues" ? (
           <SidebarSection label="Issues touched" count={lensIssues.length}>
             {lensIssues.map((i) => (

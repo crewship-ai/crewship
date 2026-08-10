@@ -27,6 +27,11 @@
 import * as React from "react"
 import { Bot, CircleDot, ScrollText, type LucideIcon } from "lucide-react"
 
+import { StatusIcon } from "@/components/features/issues/status-icon"
+import { PriorityIcon } from "@/components/features/issues/priority-icon"
+import { ALL_PRIORITIES } from "@/components/features/issues/issue-constants"
+import type { IssuePriority } from "@/lib/types/mission"
+
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { Appear } from "@/components/ui/detail"
@@ -109,6 +114,11 @@ function Line({
   )
 }
 
+/** A priority the icon can draw, or undefined for anything else. */
+function priorityOf(raw: string | null | undefined): IssuePriority | undefined {
+  return raw != null && (ALL_PRIORITIES as string[]).includes(raw) ? (raw as IssuePriority) : undefined
+}
+
 function Dot({ token }: { token: string }) {
   return <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: `var(${token})` }} />
 }
@@ -125,6 +135,23 @@ export interface LensOverviewProps {
   onOpenWorkflow: (origin: string) => void
 }
 
+export interface IssuesOverviewProps extends LensOverviewProps {
+  /**
+   * The workspace's issues, by id, for status and priority.
+   *
+   * ChainIssueRef carries id, identifier, title and `created` and nothing else —
+   * enough to name an issue, not enough to DRAW one. Without this the rows wore
+   * a generic dot while the Issues page gave the same issue a status glyph and a
+   * priority mark, which is the same complaint as a workflow not wearing its
+   * routine's face, one object over.
+   *
+   * A miss is normal, not an error: the issue list is capped at 200 and a chain
+   * can touch one outside it. The row then falls back to the dot rather than
+   * inventing a status.
+   */
+  issueMeta: Map<string, { status: string; priority?: string | null }>
+}
+
 /**
  * What happened to issues in this window.
  *
@@ -133,10 +160,23 @@ export interface LensOverviewProps {
  * always a person and there is nothing to put in either slot. Here it is the
  * whole reason the issue is in this product rather than linked from it.
  */
-export function IssuesOverview({ chains, rangeLabel, onOpenEntity, onOpenWorkflow }: LensOverviewProps) {
+export function IssuesOverview({
+  chains,
+  rangeLabel,
+  issueMeta,
+  onOpenEntity,
+  onOpenWorkflow,
+}: IssuesOverviewProps) {
   const rows = React.useMemo(() => issueLens(chains), [chains])
   const created = rows.filter((r) => r.created).length
   const moved = rows.length - created
+  const agentsInvolved = React.useMemo(
+    () =>
+      new Set(
+        chains.filter((c) => (c.issue_count ?? 0) > 0).flatMap((c) => (c.agents ?? []).map((a) => a.id)),
+      ).size,
+    [chains],
+  )
 
   // Which chain touched each issue, so the row can name the routine and the
   // agent. Built once over the page rather than searched per row.
@@ -176,14 +216,15 @@ export function IssuesOverview({ chains, rangeLabel, onOpenEntity, onOpenWorkflo
             value={moved}
             subtitle={moved === 0 ? "none moved" : "existed before, moved here"}
           />
+          {/* This slot held a hardcoded 0 labelled "Waiting on you", with a
+              subtitle explaining that approvals cannot be linked to an issue.
+              The explanation was true and the number was still a measurement
+              nobody took — a KPI reads as measured whatever sits under it. The
+              slot now carries something the data can actually answer. */}
           <KpiCard
-            label="Waiting on you"
-            value={0}
-            // Stated, not guessed. An approval cannot be attached to an issue —
-            // inbox_items carries no mission column — so the honest number here
-            // is "we cannot tell", and a 0 that looks measured is worse than a
-            // sentence saying why. See chain.KnownGaps.
-            subtitle="approvals cannot be linked to an issue yet"
+            label="Agents involved"
+            value={agentsInvolved}
+            subtitle={agentsInvolved === 0 ? "no agent worked an issue here" : "worked on these issues"}
           />
         </div>
       </Appear>
@@ -199,10 +240,28 @@ export function IssuesOverview({ chains, rangeLabel, onOpenEntity, onOpenWorkflo
               {rows.map((r) => {
                 const via = touchedBy.get(r.id) ?? []
                 const agents = [...new Set(via.flatMap((c) => (c.agents ?? []).map((a) => a.name || a.slug || a.id)))]
+                const meta = issueMeta.get(r.id)
                 return (
                   <div key={r.id} className="flex flex-col">
                     <Line onClick={() => onOpenEntity("issue", r.id, r.identifier || r.title || r.id)}>
-                      <Dot token={r.created ? "--success" : "--muted-foreground"} />
+                      {/* The issue's own face, from the same two components the
+                          Issues page draws it with. Falls back to a dot only
+                          when the issue is outside the loaded list. */}
+                      {meta ? (
+                        <>
+                          <StatusIcon status={meta.status} className="h-3.5 w-3.5 shrink-0" />
+                          {/* The wire type is a bare string; PriorityIcon takes
+                              the enum. Narrowed against the real list rather
+                              than cast, so a value the server grows later
+                              renders as absent instead of as whatever the
+                              icon's default branch happens to be. */}
+                          {priorityOf(meta.priority) && (
+                            <PriorityIcon priority={priorityOf(meta.priority)!} className="h-3 w-3 shrink-0" />
+                          )}
+                        </>
+                      ) : (
+                        <Dot token={r.created ? "--success" : "--muted-foreground"} />
+                      )}
                       {r.identifier && (
                         <span className="shrink-0 font-mono text-[10.5px] text-foreground/60">{r.identifier}</span>
                       )}

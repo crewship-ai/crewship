@@ -126,12 +126,6 @@ export interface ActivityOverviewProps {
   onSelect: (e: JournalEntry) => void
   onSpineClick: (l: SpineLink) => void
   onScope: (s: ActivityScope | "all") => void
-  /**
-   * Kept so the caller keeps compiling. Nothing consumes it since the
-   * ACTIVITY MIX donut — the only control that filtered by source — was
-   * removed; the rail owns source filtering.
-   */
-  onSource: (s: ActivitySource) => void
 }
 
 export function ActivityOverview({

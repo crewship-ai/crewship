@@ -29,7 +29,6 @@
 import * as React from "react"
 import {
   AlertTriangle,
-  ArrowLeft,
   BookOpen,
   Bot,
   ChevronRight,
@@ -162,15 +161,14 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
     <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
       {/* ── 1. What was this? ─────────────────────────────────────── */}
       <Appear order={0}>
+        {/* No Back button here. The shell renders the activity trail directly
+            above this page — with its own Back and the whole path the reader
+            came through — so a second one two rows down is two controls for one
+            action, and the one that only goes up a single level is the weaker
+            of the two. /routines carries a back-bar because it has no trail;
+            this has one. `onBack` is still taken, for the empty state below
+            where the trail is not the answer. */}
         <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to activity
-          </button>
-
           <div className="flex flex-wrap items-center gap-2">
             <span
               className="rounded border border-white/[0.08] px-1.5 py-px font-mono text-[10px] uppercase tracking-wider"

@@ -38,8 +38,6 @@ import {
   shortId,
   sourceEntryTypes,
   sourceMeta,
-  type ActivityScope,
-  type ActivitySource,
   type SpineLabels,
   type SpineLink,
 } from "@/lib/activity-stream"
@@ -315,16 +313,6 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     return focusScoped
   }, [focusScoped, facets.scope])
 
-  const scopeCounts = React.useMemo(() => {
-    const c: Record<ActivityScope, number> = { active: 0, waiting: 0, failed: 0, done: 0 }
-    // Counted over the FOCUSED window, so the rail and the cards answer the
-    // same question. When a scope facet is active the server already narrowed
-    // the fetch, so the other buckets are not knowable from what was loaded —
-    // that is a property of the query, not a zero.
-    for (const e of focusScoped) c[scopeOf(e)] += 1
-    return c
-  }, [focusScoped])
-
   const crewCounts = React.useMemo(() => {
     const c: Record<string, number> = {}
     for (const e of focusScoped) if (e.crew_id) c[e.crew_id] = (c[e.crew_id] ?? 0) + 1
@@ -346,6 +334,15 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     }
     return c
   }, [entries])
+
+  // Status and priority for the issues the Issues lens draws. The chain index
+  // carries neither — ChainIssueRef is id, identifier, title and `created` — so
+  // without this an issue in Activity wears a generic dot while the same issue
+  // one page away wears its status glyph.
+  const issueMeta = React.useMemo(
+    () => new Map(issues.map((i) => [i.id, { status: i.status, priority: i.priority }])),
+    [issues],
+  )
 
   const routines = React.useMemo<SidebarRoutine[]>(
     () =>
@@ -555,8 +552,25 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // four KPIs and the same "what is broken" whichever was pressed, which is a
   // control that changes what is SELECTED without changing what is SHOWN — the
   // same defect as a graph left pointing at the previous chain.
+  //
+  // `stop == null` is load-bearing and was missing. An issue is an ENTITY kind,
+  // so activitySurface answers "overview" for it exactly as it does for no
+  // selection at all — which meant clicking an issue row in the Issues lens
+  // re-rendered the same Issues dashboard, unchanged, over a breadcrumb that
+  // said the reader had gone somewhere. A row that leads back to the page it is
+  // on is a dead end wearing a link's clothes.
+  //
+  // An agent row never had the bug because "agent" is not an entity kind and
+  // fell through to the narrowed feed. Requiring no selection here puts issues
+  // and routines on that same path, so every lens row leads somewhere for the
+  // same reason.
   const lensOverviewShown =
-    !loading && !error && !emptyByFilters && surface.main === "overview" && lens !== "workflows"
+    !loading &&
+    !error &&
+    !emptyByFilters &&
+    surface.main === "overview" &&
+    stop == null &&
+    lens !== "workflows"
   // The feed as a list: one scope bucket, or one node of a chain. Same shape,
   // different heading — a bucket is "everything that failed", a node is
   // "everything this agent touched" — so it is one branch, not two that can
@@ -651,7 +665,6 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               agents={agents}
               issues={issues}
               routines={routines}
-              scopeCounts={scopeCounts}
               crewCounts={crewCounts}
               issueCounts={issueCounts}
               routineCounts={routineCounts}
@@ -663,7 +676,6 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               onLens={setLens}
               // Same rule as onFocus: a row in the rail is where a walk BEGINS.
               onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
-              total={focusScoped.length}
               onToggleCollapse={() => setRailCollapsed(true)}
             />
           )}
@@ -762,7 +774,6 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   slug={openRoutineSlug}
                   label={stop?.label ?? openRoutineSlug}
                   routine={routines.find((r) => r.slug === openRoutineSlug)}
-                  onBack={goBack}
                   onOpenRun={(runID) => openNode("run", runID)}
                 />
               )}
@@ -851,6 +862,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                 <IssuesOverview
                   chains={chains}
                   rangeLabel={range.label}
+                  issueMeta={issueMeta}
                   onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
                   onOpenWorkflow={selectChain}
                 />
@@ -888,14 +900,6 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   onSelect={setSelected}
                   onSpineClick={setPinned}
                   onScope={(s) => setFacets({ ...facets, scope: s })}
-                  onSource={(s: ActivitySource) =>
-                    setFacets({
-                      ...facets,
-                      sources: facets.sources.includes(s)
-                        ? facets.sources.filter((x) => x !== s)
-                        : [...facets.sources, s],
-                    })
-                  }
                 />
               )}
 

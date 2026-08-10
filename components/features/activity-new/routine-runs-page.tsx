@@ -24,7 +24,7 @@
 // wrong.
 
 import * as React from "react"
-import { ArrowLeft, ChevronRight, ListTree, ScrollText } from "lucide-react"
+import { ChevronRight, ListTree, ScrollText } from "lucide-react"
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
@@ -53,7 +53,6 @@ export interface RoutineRunsPageProps {
   /** Human name, resolved by the shell. The slug is the fallback, never blank. */
   label: string
   routine?: SidebarRoutine
-  onBack: () => void
   /** Open one run — the same drill-down the workflow page uses. */
   onOpenRun: (runID: string) => void
 }
@@ -63,7 +62,6 @@ export function RoutineRunsPage({
   slug,
   label,
   routine,
-  onBack,
   onOpenRun,
 }: RoutineRunsPageProps) {
   const { records, loading, error, legacy, refresh } = usePipelineRunRecords(workspaceId, slug)
@@ -97,14 +95,9 @@ export function RoutineRunsPage({
   return (
     <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
       <Appear order={0}>
+        {/* No Back button — see workflow-page: the shell's activity trail sits
+            directly above and already owns going back. */}
         <div className="flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to routines
-          </button>
           <div className="flex flex-wrap items-center gap-2">
             <CrewIcon
               icon={resolveRoutineIcon(routine ?? { slug })}
