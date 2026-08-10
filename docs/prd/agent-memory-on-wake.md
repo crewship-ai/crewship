@@ -74,6 +74,10 @@ context (LEAD) or peer communication (non-LEAD), the memory context, language.
 **Volatile, in the user message** (`session_context.go:22`): conversation history, episodic
 recall, memory nudge, cost awareness.
 
+The consolidator's dedup scan accepts only regular `learned-*.md` files opened without
+following a final-component symlink. This prevents an agent-writable topics directory
+from redirecting the privileged host scan to unrelated files.
+
 ---
 
 ## 3. The gaps
