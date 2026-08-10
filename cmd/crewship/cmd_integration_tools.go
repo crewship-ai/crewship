@@ -137,7 +137,7 @@ the discovered tool array from the MCP probe.`,
 		if err != nil {
 			return err
 		}
-		// TODO: scaffolding only — real callers (MCP probe / frontend)
+		// TODO(#1884): real callers (MCP probe / frontend)
 		// should supply the discovered tool array. Empty list is
 		// intentional today; server treats it as a no-op confirming
 		// the route works. See Long for context.
