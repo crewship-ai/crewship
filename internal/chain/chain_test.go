@@ -1149,3 +1149,124 @@ func TestWalk_RunTriggeredByAutomationNamesTheRule(t *testing.T) {
 		"is rendered as a chain root, so the one surface that answers \"what caused this\" "+
 		"cannot see the composition edge", got)
 }
+
+// ── The routine → agent edge ────────────────────────────────────────────────
+
+// seedDispatchedAssignment writes an assignment the way a ROUTINE's
+// assignment.create verb writes one: no parent assignment, a parent_run_id
+// naming the run that dispatched it. Raw SQL for the same reason
+// seedAutomation is — the walk reads the schema, so the fixture asserts
+// against the schema.
+func (r *rig) seedDispatchedAssignment(t *testing.T, id, wsID, task, runID string) string {
+	t.Helper()
+	r.exec(t, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, parent_run_id)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
+		id, wsID, r.chat, r.agent, r.agent, task, nullable(runID))
+	return id
+}
+
+// The hop the whole trace was missing. A routine dispatches an agent, and
+// until parent_run_id existed nothing recorded which run did it — so the walk
+// could group the work into the trace and never draw the line, which is the
+// one sentence the picture exists to say.
+func TestWalk_AssignmentWalksBackToTheRunThatDispatchedIt(t *testing.T) {
+	r := newRig(t, "ws-dispatch-up")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "manual", "")
+	r.seedDispatchedAssignment(t, "asg-1", r.ws, "summarise the thread", "run-1")
+
+	g := walk(t, r, "asg-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if !hasNode(g, "run:run-1") {
+		t.Fatalf("the run that dispatched this agent is not in the graph; nodes = %v", nodeIDs(g))
+	}
+	if !hasEdge(g, "run:run-1", "assignment:asg-1", EdgeTriggers) {
+		t.Errorf("missing run -> assignment edge; edges: %#v", g.Edges)
+	}
+}
+
+// And downward: from a run, the agents it put to work. Without this half a
+// reader who starts at the routine — the common case — sees the run and never
+// the work it caused.
+func TestWalk_RunReachesTheAgentsItDispatched(t *testing.T) {
+	r := newRig(t, "ws-dispatch-down")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "manual", "")
+	r.seedDispatchedAssignment(t, "asg-1", r.ws, "first", "run-1")
+	r.seedDispatchedAssignment(t, "asg-2", r.ws, "second", "run-1")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	for _, id := range []string{"assignment:asg-1", "assignment:asg-2"} {
+		if !hasNode(g, id) {
+			t.Errorf("%s missing; nodes = %v", id, nodeIDs(g))
+		}
+		if !hasEdge(g, "run:run-1", id, EdgeTriggers) {
+			t.Errorf("missing run -> %s edge", id)
+		}
+	}
+}
+
+// An assignment nobody dispatched must not gain an edge. An invented one reads
+// exactly like a real one and points at nothing — worse than the gap, which
+// the walk at least declares.
+func TestWalk_AnUndispatchedAssignmentGainsNoRunEdge(t *testing.T) {
+	r := newRig(t, "ws-dispatch-none")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "manual", "")
+	r.seedAssignment(t, "asg-1", r.ws, "nobody sent me", "")
+
+	g := walk(t, r, "asg-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasNode(g, "run:run-1") {
+		t.Errorf("an unrelated run was drawn as the dispatcher; nodes = %v", nodeIDs(g))
+	}
+}
+
+// The tenant fence, on the new edge too. Every other lookup in this walk is
+// workspace-scoped and this one carries the same risk: a dispatching run named
+// across the boundary would put another tenant's run id into this graph.
+func TestWalk_ADispatchingRunInAnotherWorkspaceStaysInvisible(t *testing.T) {
+	r := newRig(t, "ws-dispatch-fence")
+	r.seedWorkspace(t, "ws-somebody-else", "somebody-else")
+	r.seedRoutine(t, "p1", "ws-somebody-else", "triage")
+	r.seedRun(t, "run-foreign", "ws-somebody-else", "p1", "triage", "manual", "")
+	r.seedDispatchedAssignment(t, "asg-1", r.ws, "mine", "run-foreign")
+
+	g := walk(t, r, "asg-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasNode(g, "run:run-foreign") {
+		t.Errorf("a run from another workspace leaked in; nodes = %v", nodeIDs(g))
+	}
+}
+
+// The fence on the DOWNWARD half too. Asserting it upward is not enough: this
+// direction is the more dangerous one, because a run enumerates rows rather
+// than dereferencing a single id, so a missing fence lists another tenant's
+// agent work inside this workspace's graph.
+//
+// Added after a mutation that removed this exact WHERE clause left every test
+// green — the upward fence test could not see it.
+func TestWalk_ARunNeverListsAnotherWorkspacesAssignments(t *testing.T) {
+	r := newRig(t, "ws-dispatch-fence-down")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "manual", "")
+
+	// Same dispatching run id, an assignment belonging to somebody else.
+	r.seedWorkspace(t, "ws-other-tenant", "other-tenant")
+	r.exec(t, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, parent_run_id)
+		VALUES ('asg-theirs', 'ws-other-tenant', ?, ?, ?, 'their work', 'PENDING', 'run-1')`,
+		r.chat, r.agent, r.agent)
+	r.seedDispatchedAssignment(t, "asg-mine", r.ws, "my work", "run-1")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasNode(g, "assignment:asg-theirs") {
+		t.Errorf("another tenant's assignment was listed under this run; nodes = %v", nodeIDs(g))
+	}
+	if !hasNode(g, "assignment:asg-mine") {
+		t.Errorf("the workspace's own assignment went missing; nodes = %v", nodeIDs(g))
+	}
+}

@@ -581,6 +581,31 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 		return nil, err
 	}
 
+	// Agents this run put to work, through the crewship assignment.create verb.
+	//
+	// The other half of the edge expandAssignment follows upward. Both halves
+	// exist because a reader arrives from either end: from the routine (the
+	// common case — "what did this do?") and from the agent's work ("why am I
+	// doing this?"). One direction only leaves half the readers at a dead end,
+	// which is what the trace looked like before parent_run_id existed.
+	if err := w.collect(ctx, &out, `
+		SELECT id, COALESCE(task,''), COALESCE(status,'')
+		FROM assignments
+		WHERE workspace_id = ? AND parent_run_id = ?
+		ORDER BY created_at ASC, id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		func(rows *sql.Rows) (neighbour, error) {
+			var id, task, status string
+			if err := rows.Scan(&id, &task, &status); err != nil {
+				return neighbour{}, err
+			}
+			to := assignmentNode(id, task, status)
+			return neighbour{node: to, edge: Edge{From: n.ID, To: to.ID, Kind: EdgeTriggers}}, nil
+		}); err != nil {
+		return nil, err
+	}
+
 	// Which agents actually did the work in this run.
 	//
 	// There is no agent column on pipeline_runs that survives the DAG —
@@ -777,13 +802,14 @@ func (w *walker) expandAutomation(ctx context.Context, n Node) ([]neighbour, err
 func (w *walker) expandAssignment(ctx context.Context, n Node) ([]neighbour, error) {
 	var out []neighbour
 
-	var assignedTo, parentID string
+	var assignedTo, parentID, parentRunID string
 	err := w.db.QueryRowContext(ctx, `
-		SELECT COALESCE(assigned_to_id,''), COALESCE(parent_assignment_id,'')
+		SELECT COALESCE(assigned_to_id,''), COALESCE(parent_assignment_id,''),
+		       COALESCE(parent_run_id,'')
 		FROM assignments
 		WHERE id = ? AND workspace_id = ?`,
 		n.Ref, w.workspaceID,
-	).Scan(&assignedTo, &parentID)
+	).Scan(&assignedTo, &parentID, &parentRunID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -814,6 +840,22 @@ func (w *walker) expandAssignment(ctx context.Context, n Node) ([]neighbour, err
 			return nil, err
 		} else if ok {
 			out = append(out, neighbour{node: pn, edge: Edge{From: pn.ID, To: n.ID, Kind: EdgeTriggers}})
+		}
+	}
+
+	// The routine hop. A routine's assignment.create names the run that made
+	// the call, and until that column existed the trace could group this work
+	// and never say what dispatched it — the graph had the node and not the
+	// edge. lookupRunByID is workspace-scoped, so a run named across the tenant
+	// boundary resolves to nothing rather than into this graph.
+	//
+	// Exactly one of the two parents is ever set (the insert enforces it), so
+	// this cannot double an assignment that already has a delegation parent.
+	if parentRunID != "" {
+		if rn, ok, err := w.lookupRunByID(ctx, parentRunID); err != nil {
+			return nil, err
+		} else if ok {
+			out = append(out, neighbour{node: rn, edge: Edge{From: rn.ID, To: n.ID, Kind: EdgeTriggers}})
 		}
 	}
 
