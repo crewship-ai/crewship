@@ -385,6 +385,29 @@ for method in POST PUT PATCH DELETE; do
   expect_argv "mutating method $method is still excluded" "$method"
 done
 
+# Security-parameter negatives are not ours to grade, and left on they were
+# 151 of the gate's 267 findings — 57% of the backlog behind #1815, all of it
+# invented.
+#
+# Why they fire: 525 of 538 operations declare
+#   security: [{bearerAuth}, {sessionCookie}, {secureSessionCookie}]
+# — three ALTERNATIVE requirement objects, i.e. OR, which is a correct
+# description of an API that takes either a bearer token or a session cookie.
+# But schemathesis.toml supplies our credential as a raw `Authorization`
+# header, so Schemathesis cannot connect it to `bearerAuth`. Its coverage
+# phase then drops `__Secure-authjs.session-token`, expects a rejection, and
+# gets 200 — because the bearer token it does not know about is still on the
+# request. Measured: disabling this removes the whole "API accepted
+# schema-violating request" class and leaves "Response violates schema" and
+# "Undocumented Content-Type" unchanged to the finding.
+#
+# Nothing is lost by turning it off. Unauthenticated and invalid-token
+# behaviour is the `auth` phase's job, and that phase never reaches
+# Schemathesis at all — it exits after its own curl checks (see run.sh).
+expect_argv "the phase does not invent security-parameter negatives" \
+  "--generation-with-security-parameters"
+expect_argv "...and passes false, not true" "false"
+
 # The deadline: run.sh must stop Schemathesis itself and leave a named,
 # machine-readable verdict — the thing a job-level reap destroys.
 DEADLINE_ARGV="$TMP_ROOT/argv-deadline"
