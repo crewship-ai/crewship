@@ -148,17 +148,19 @@ describe("WorkflowPage", () => {
     expect(apiFetch.mock.calls[0][0]).toContain(
       `/api/v1/chains/${encodeURIComponent(CHAIN.origin)}`,
     )
-    // The graph is opt-in — on a four-node chain the canvas is empty grid over
-    // a list that already places the same four things — so the assertion opens
-    // it. What is being pinned is the ANCHOR, not where the card sits.
-    fireEvent.click(await screen.findByRole("button", { name: /show it as a graph/i }))
     expect(await screen.findByTestId("topology")).toHaveTextContent(CHAIN.origin)
   })
 
-  it("does not draw the graph until it is asked for", async () => {
+  it("draws the shape beside the sequence, not instead of it", async () => {
+    // Both, always. They are one answer read two ways — the graph is what the
+    // eye lands on, the sequence is the same steps with their times — and a
+    // page that shows one without the other makes the reader ask for the
+    // other.
     renderPage()
-    await screen.findByText("file a follow-up when an issue closes")
-    expect(screen.queryByTestId("topology")).toBeNull()
+    expect(await screen.findByTestId("topology")).toBeInTheDocument()
+    expect(
+      screen.getByRole("region", { name: "What happened, in sequence" }),
+    ).toBeInTheDocument()
   })
 
   it("puts what happened on the screen in the order the shaper decided", async () => {
