@@ -506,3 +506,64 @@ func TestCrewshipActions_ForgedIdentityDiesEvenWithNoActingAgent(t *testing.T) {
 		}
 	}
 }
+
+// A redirect is where a master credential leaves the machine.
+//
+// The dispatcher sends X-Internal-Token — the MASTER internal token, the one
+// that buys unscoped access to every internal route — on a loopback call. Go's
+// default client follows up to ten redirects, and it only strips headers it
+// knows are credentials (Authorization, Cookie, WWW-Authenticate). X-Internal-
+// Token is not on that list, so a 3xx pointing anywhere would carry the token
+// there, to any host, with no error and no log line.
+//
+// The far server here is a stand-in for that "anywhere": it records the token it
+// received, so a passing test is the claim that nothing arrived — not that the
+// response happened to be discarded.
+func TestCrewshipActions_RedirectIsNotFollowedAndTheMasterTokenStaysHome(t *testing.T) {
+	var stolen []string
+	offHost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stolen = append(stolen, r.Header.Get("X-Internal-Token"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"identifier":"ENG-42"}`))
+	}))
+	t.Cleanup(offHost.Close)
+
+	// The daemon's own address, answering the internal route with a 302. No
+	// handler writes one today (see the CheckRedirect comment in
+	// crewship_actions.go); one http.Redirect, or a proxy in front of the
+	// loopback address, is the whole distance between here and there.
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, offHost.URL+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(redirector.Close)
+
+	db := crewshipPolicyDB(t, "crew_ok", "full")
+	actions := newCrewshipActions(redirector.URL, "master-token", policy.NewResolver(db), db, slog.Default())
+	if actions == nil {
+		t.Fatal("dispatcher not constructed")
+	}
+
+	out, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
+		Verb:        "issue.create",
+		Args:        map[string]any{"title": "real title"},
+		WorkspaceID: "ws_real",
+		CrewID:      "crew_ok",
+		AgentID:     "agent_real",
+		RunID:       "run_real",
+	})
+
+	if len(stolen) != 0 {
+		t.Errorf("the redirect was followed and the master internal token was sent off-host: %q — "+
+			"Go copies every header it does not recognise as a credential across hosts, and "+
+			"X-Internal-Token is not one it recognises", stolen)
+	}
+	// The 3xx itself has to surface as the failure. Swallowing it would leave a
+	// routine step silently doing nothing, which is the other half of why the
+	// redirect must not be followed: the step's job was to reach OUR route.
+	if err == nil {
+		t.Fatalf("Do returned no error for a 302; got output %q", out)
+	}
+	if !strings.Contains(err.Error(), "302") {
+		t.Errorf("error = %v, want it to name the 302 the daemon answered with", err)
+	}
+}

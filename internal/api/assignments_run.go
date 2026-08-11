@@ -186,24 +186,47 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// where the only ancestor is the run that made the call. A caller with
 	// neither leaves the column NULL and starts its own trace — the row says
 	// "did not say" rather than asserting a parentage nothing recorded.
-	if scope.ChainOrigin == "" && body.AuthorRunID != "" {
+	//
+	// causingRun is the author_run_id ONCE IT HAS BEEN PROVEN to name a run of
+	// this workspace, and it stays empty otherwise. Both columns written from
+	// that field — the chain and the edge — hang off this one resolution, which
+	// is the point: the same id cannot be refused as a chain and accepted as a
+	// dispatcher, which is what the row said before. body.AuthorRunID is a
+	// caller-supplied string on a master-token route the sidecar can reach, so
+	// "the caller said so" is not a source for either.
+	//
+	// One query, not two: chainOriginForCausingRun already asks ChainOf whether
+	// the run resolves here, and answers "" for every way of not resolving — no
+	// such run, another tenant's run, a read error. So a non-empty answer IS the
+	// proof, and a second existence check would be the same question asked twice
+	// with two chances to disagree.
+	causingRun := ""
+	if body.AuthorRunID != "" {
 		origin, originErr := chainOriginForCausingRun(r.Context(), h.db, body.WorkspaceID, body.AuthorRunID)
 		if originErr != nil {
 			// Provenance, not a cap: the dispatch proceeds untraced rather than
 			// being refused over a field nobody's safety depends on. Logged at
 			// warn because a chain silently losing a hop is exactly the failure
 			// that made the causal walk unreliable in the first place.
-			h.logger.Warn("could not resolve the causing run's chain; assignment will root its own",
+			h.logger.Warn("could not resolve the causing run; assignment will root its own chain and record no dispatcher",
 				"error", originErr, "author_run_id", body.AuthorRunID, "workspace_id", body.WorkspaceID)
 		}
+		if origin != "" {
+			causingRun = body.AuthorRunID
+		}
+		// rootedAt is a FILL, so this is safe to call whether or not the caller
+		// is mid-assignment: a scope that already has an origin keeps it, and the
+		// delegation tree stays the authority on which chain this belongs to.
 		scope = scope.rootedAt(origin)
 	}
-	// Outside the branch above on purpose. That branch already excludes the
-	// delegation case (a caller mid-assignment has an origin), so calling this
-	// inside it would make dispatchedBy's own guard unreachable — a guard that
-	// cannot run is indistinguishable from one that works, which is the failure
-	// this whole change is chasing. Here it is the single live decision.
-	scope = scope.dispatchedBy(body.AuthorRunID)
+	// Outside the branch above on purpose: dispatchedBy's own guard is what
+	// keeps a delegated row to ONE parent, and it can only do that if it is
+	// reached in the delegation case. A caller that is mid-assignment and also
+	// names a valid causing run arrives here with a non-empty causingRun, and
+	// the guard drops it. That case is now testable rather than merely believed,
+	// because the value reaching this line is one the server resolved:
+	// TestAssignmentParentRun_DelegatedCallerNamingAValidRunStillKeepsOneParent.
+	scope = scope.dispatchedBy(causingRun)
 	if assignerCrewID != body.CrewID {
 		connected, connErr := AreCrewsConnected(r.Context(), h.db, assignerCrewID, body.CrewID)
 		if connErr != nil {

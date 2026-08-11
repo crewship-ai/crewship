@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -614,6 +615,62 @@ func TestChainsList_ForeignRuleAndIssueNeverSupplyTheLabel(t *testing.T) {
 	}
 }
 
+// The sixth label lookup. The five beside it each carry the workspace; this one
+// resolved a person's name from users.id alone, which is the only predicate in
+// the whole query that could read a row this workspace has no claim on.
+//
+// It is not a live leak — every writer of invoking_user_id derives it from
+// UserFromContext, so production cannot put a stranger's id in that column —
+// and the foreign row here is written with a raw INSERT for exactly that
+// reason, the same way seedPreMigrationRun writes a shape production can no
+// longer produce. What makes it worth fencing anyway is that the column is a
+// bare id with no workspace beside it: the invariant lives entirely in the
+// writers, and this query is where a future writer's mistake becomes another
+// tenant's name on the page.
+//
+// The membership fence has a product consequence, and the second half of this
+// test pins the answer to it: a name the fence declines to render must not take
+// the user's IDENTITY down with it. The row still says a PERSON started this
+// chain and still carries which one — the same rule this file already applies to
+// a deleted automation, which keeps its kind and its id and falls back to the
+// raw trigger for its label.
+func TestChainsList_UserOutsideTheWorkspaceNeverSuppliesTheStartedByLabel(t *testing.T) {
+	r := newChainsListRig(t)
+
+	// A real person, in another tenant. Their name is the thing that must not
+	// cross, and they are a member of somewhere — just not here.
+	r.seedWorkspace(t, "ws-other", "other")
+	r.exec(t, `INSERT INTO users (id, email, full_name) VALUES ('usr_ghost', 'ghost@other.example', 'Ghost Of Another Tenant')`)
+	r.exec(t, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm_ghost', 'ws-other', 'usr_ghost', 'OWNER')`)
+
+	foreign := r.seedRun(t, runSpec{id: "prn_foreign_user", via: pipeline.TriggeredViaManual, userID: "usr_ghost"})
+	ours := r.seedRun(t, runSpec{id: "prn_our_user", via: pipeline.TriggeredViaManual, userID: r.user})
+
+	b := decodeChainsList(t, r.list(t, ""))
+
+	row := b.byOrigin(t, foreign)
+	if strings.Contains(row.StartedBy, "Ghost") || strings.Contains(row.StartedBy, "ghost@other.example") {
+		t.Errorf("started_by = %q — a user with no membership in this workspace supplied the label; "+
+			"users.id is globally unique, so the only thing keeping a stranger's name off this page "+
+			"is a workspace predicate this lookup did not have", row.StartedBy)
+	}
+	// Refusing the NAME must not erase the fact that a person started it. The id
+	// is what an audit trail is for; blanking the row too would answer "nobody
+	// did this" to a question the data can answer.
+	if row.StartedByKind != chainStartKindUser || row.StartedByID != "usr_ghost" {
+		t.Errorf("started_by_kind/id = %q/%q, want %q/%q — the fence hides an unreadable NAME, "+
+			"not the identity the run recorded",
+			row.StartedByKind, row.StartedByID, chainStartKindUser, "usr_ghost")
+	}
+
+	// And the ordinary case is untouched: a member's name still reaches the row,
+	// which is what makes the assertion above a fence rather than a deletion.
+	if got := b.byOrigin(t, ours); got.StartedBy != "Test User" || got.StartedByKind != chainStartKindUser {
+		t.Errorf("our own run: started_by = %q (%s), want %q — fencing through membership must not "+
+			"blank the name of somebody who is a member", got.StartedBy, got.StartedByKind, "Test User")
+	}
+}
+
 // Runs recorded before the chain_origin column landed carry NULL, and the link
 // they would have had was never written. They are excluded rather than shown as
 // orphan single-run chains — but their existence is declared, so a client can
@@ -988,6 +1045,151 @@ func TestChainsList_ForeignWorkspaceWorkNeverAttachesToARow(t *testing.T) {
 	if row.AgentCount != 1 {
 		t.Errorf("agent_count = %d, want 1", row.AgentCount)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The access path.
+//
+// pipeline_runs is one of the two busiest tables in the schema, and this page
+// reads it three times per visit: the grouped index, the pre-migration probe,
+// and the chain_runs arm of the touched-issues query. All three select on
+// chain_origin. An assertion about the SQL alone cannot see whether that column
+// is reachable by an index — only the planner can, so these tests ask it.
+// ---------------------------------------------------------------------------
+
+// explainPlan returns SQLite's plan for a statement, one line per step.
+//
+// It runs the PRODUCTION query strings (the consts above, not copies), with
+// placeholder values that only have to satisfy the parameter count: the plan is
+// chosen from the schema and the shape of the predicates, not from the values.
+func explainPlan(t *testing.T, db *sql.DB, query string, args ...any) []string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("explain query plan: %v\nquery: %s", err, query)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatalf("scan plan row: %v", err)
+		}
+		plan = append(plan, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	return plan
+}
+
+// runsAccess returns the plan steps that read pipeline_runs by workspace, and
+// reports whether ANY of them narrows the read with chain_origin.
+//
+// The interesting failure is not a bare table scan — it never was. SQLite has
+// several indexes on pipeline_runs that LEAD with workspace_id
+// (idx_pipeline_runs_workspace_status among them), so a query filtering
+// `workspace_id = ? AND chain_origin ...` already reads through one of those and
+// then re-checks chain_origin against the fetched row. The plan says
+// "SEARCH ... (workspace_id=?)" and looks healthy while touching every run the
+// workspace ever recorded.
+//
+// So the assertion is about what the plan says the index DOES, not what it is
+// called. Two readings count as reaching chain_origin through the index, and
+// the index NAME counts as neither — a name containing "chain_origin" is not
+// evidence that the column was resolved inside the index, and matching on it
+// would pass on an index that merely happened to be named after the column:
+//
+//   - the constraint list (the parenthetical) names chain_origin, i.e. SQLite
+//     seeks on it instead of re-checking it per row;
+//   - the read is a COVERING INDEX one, i.e. chain_origin is read out of the
+//     index and the table row is never fetched.
+func runsAccess(plan []string) (steps []string, reachesOrigin bool) {
+	for _, step := range plan {
+		if !strings.Contains(step, " pipeline_runs ") && !strings.HasSuffix(step, " pipeline_runs") {
+			continue
+		}
+		steps = append(steps, step)
+		// The autoindex on the primary key is the by-id root-run join: a single
+		// row, nothing to do with the workspace sweep this is measuring.
+		if strings.Contains(step, "sqlite_autoindex_pipeline_runs_1") {
+			continue
+		}
+		if strings.Contains(step, "COVERING INDEX") {
+			reachesOrigin = true
+			continue
+		}
+		open := strings.Index(step, "(")
+		if open >= 0 && strings.Contains(step[open:], "chain_origin") {
+			reachesOrigin = true
+		}
+	}
+	return steps, reachesOrigin
+}
+
+// TestChainsList_HotQueriesReachRunsByChainOrigin is the reason the
+// (workspace_id, chain_origin) index exists.
+//
+// The index that shipped WITH the chain_origin column covers
+// (workspace_id, chain_depth) WHERE chain_depth > 0, justified as serving "show
+// me the chains". That query was never written: every query that ships selects
+// on chain_origin, and chain_origin was on no index at all. One visit to the
+// Workflows page therefore read every run row in the workspace three times —
+// once per query — and sorted them into a temp B-tree to group them.
+//
+// Two different assertions, because the three queries want two different things
+// from the index:
+//
+//   - the two that name origins (the chain_runs arm) or probe for their absence
+//     want SEEKS: chain_origin has to be resolvable inside the index, or the
+//     read is the whole workspace however good the plan looks;
+//   - the grouped index cannot seek — it wants every chain — so what it gets is
+//     ORDER: rows arriving already sorted by the grouping key, which is what
+//     removes the temporary B-tree.
+func TestChainsList_HotQueriesReachRunsByChainOrigin(t *testing.T) {
+	r := newChainsListRig(t)
+
+	t.Run("grouped index", func(t *testing.T) {
+		plan := explainPlan(t, r.db, chainsIndexQuery,
+			r.ws, r.ws, r.ws, r.ws, r.ws, r.ws, r.ws, r.ws, 50, 0)
+		t.Logf("chainsIndexQuery plan:\n  %s", strings.Join(plan, "\n  "))
+		for _, step := range plan {
+			if strings.Contains(step, "USE TEMP B-TREE FOR GROUP BY") {
+				t.Errorf("the grouping sorts every run in the workspace into a temp B-tree; "+
+					"an index leading (workspace_id, chain_origin) delivers them in grouping order:\n  %s",
+					strings.Join(plan, "\n  "))
+			}
+		}
+	})
+
+	t.Run("pre-migration probe", func(t *testing.T) {
+		plan := explainPlan(t, r.db, chainsUnrecordedQuery, r.ws)
+		t.Logf("chainsUnrecordedQuery plan:\n  %s", strings.Join(plan, "\n  "))
+		steps, ok := runsAccess(plan)
+		if !ok {
+			t.Errorf("the has_unrecorded_runs probe reaches pipeline_runs without resolving "+
+				"chain_origin in the index, so it re-checks the column on every run row in the "+
+				"workspace:\n  %s", strings.Join(steps, "\n  "))
+		}
+	})
+
+	t.Run("touched issues", func(t *testing.T) {
+		args := []any{r.ws, "prn_origin", r.ws, r.ws}
+		for _, ty := range chainIssueEntryTypes {
+			args = append(args, ty)
+		}
+		args = append(args, r.ws, MaxChainSummaryRefs)
+		query := fmt.Sprintf(chainIssuesQuery, sqlPlaceholders(1), sqlPlaceholders(len(chainIssueEntryTypes)))
+		plan := explainPlan(t, r.db, query, args...)
+		t.Logf("chainIssuesQuery plan:\n  %s", strings.Join(plan, "\n  "))
+		steps, ok := runsAccess(plan)
+		if !ok {
+			t.Errorf("the chain_runs arm asks for a HANDFUL of named origins but reaches "+
+				"pipeline_runs without chain_origin in the index, so it reads the workspace's "+
+				"whole run history to find them:\n  %s", strings.Join(steps, "\n  "))
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

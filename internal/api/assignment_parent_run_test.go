@@ -91,6 +91,90 @@ func TestAssignmentParentRun_DelegationKeepsItsAssignmentEdge(t *testing.T) {
 	}
 }
 
+// parent_run_id has to be EARNED, exactly as chain_origin already is.
+//
+// The two columns come from the same field — the author_run_id on the body —
+// and until now they treated it differently: chain_origin only accepted a run
+// that resolved in the workspace (chainOriginForCausingRun), while parent_run_id
+// was written straight through, unchecked, outside that branch. So one field
+// produced a row that says "no chain I can name, but definitely dispatched by
+// run X" — a claim nothing verified.
+//
+// It matters because of who can write it. /api/v1/internal/assignments is a
+// master-token route, and the sidecar is one of its callers: an agent that names
+// a run id gets that id recorded as the run that dispatched its work. The walk
+// then draws an edge from that run to work it never dispatched, and the /chains
+// UI presents the result as evidence of what caused what.
+//
+// This does NOT stop an agent naming a real run of its own workspace — the walk
+// joins on workspace_id, and inside one tenant this is a provenance problem
+// rather than an isolation one. What it stops is the half that is checkable: an
+// id that names nothing here, which is either invented or somebody else's.
+func TestAssignmentParentRun_AnUnprovenCausingRunIsNotRecordedAsTheDispatcher(t *testing.T) {
+	t.Run("a run id that names nothing", func(t *testing.T) {
+		f := setupDelegationFixture(t)
+
+		id := createdAssignmentID(t, f.routineDispatch(t, f.lead, "run_i_made_up", "w1"))
+
+		if parent := parentRunOf(t, f, id); parent.Valid && parent.String != "" {
+			t.Errorf("parent_run_id = %q, want NULL — nothing in this workspace answers to that id, "+
+				"so the edge points at a node the walk cannot reach and reads as evidence anyway",
+				parent.String)
+		}
+	})
+
+	t.Run("a real run, in another tenant", func(t *testing.T) {
+		f := setupDelegationFixture(t)
+		if _, err := f.db.Exec(
+			`INSERT INTO workspaces (id, name, slug) VALUES ('ws-other-parent', 'Other', 'other-parent')`); err != nil {
+			t.Fatalf("seed other workspace: %v", err)
+		}
+		seedChainRun(t, f.db, "ws-other-parent", "run_of_another_tenant", "run_their_root")
+
+		id := createdAssignmentID(t, f.routineDispatch(t, f.lead, "run_of_another_tenant", "w1"))
+
+		// chain_origin already refuses this run (its own test one file over). The
+		// row must not disagree with itself by refusing the chain and then
+		// recording the same run as the dispatcher.
+		if origin := chainOriginOf(t, f, id); origin.Valid {
+			t.Fatalf("precondition: chain_origin = %q, want NULL", origin.String)
+		}
+		if parent := parentRunOf(t, f, id); parent.Valid && parent.String != "" {
+			t.Errorf("parent_run_id = %q — the same run was refused as the chain and accepted as "+
+				"the dispatcher, so one row makes two contradictory claims about one id",
+				parent.String)
+		}
+	})
+}
+
+// The other half of the same resolution: a run that DOES prove out still does
+// not win against the delegation tree. This is the case that used to be
+// unreachable — the caller could only get here with an unvalidated id or none —
+// so dispatchedBy's "one parent only" guard had nothing to refuse and could not
+// be told from a guard that does nothing.
+func TestAssignmentParentRun_DelegatedCallerNamingAValidRunStillKeepsOneParent(t *testing.T) {
+	f := setupDelegationFixture(t)
+	seedChainRun(t, f.db, f.wsID, "run_hop_two", "run_the_root")
+	seedChainRun(t, f.db, f.wsID, "run_unrelated", "run_some_other_root")
+
+	parentID := createdAssignmentID(t, f.routineDispatch(t, f.lead, "run_hop_two", "w1"))
+	holdInFlight(t, f, parentID)
+
+	// w1 is now executing an assignment of its own AND names a run that really
+	// does resolve in this workspace.
+	childID := createdAssignmentID(t, f.routineDispatch(t, f.work1, "run_unrelated", "w2"))
+
+	if got := parentAssignmentOf(t, f, childID); !got.Valid || got.String != parentID {
+		t.Fatalf("precondition: parent_assignment_id = %v, want %q — without the delegation edge "+
+			"this test is not exercising the two-parents case at all", got, parentID)
+	}
+	if got := parentRunOf(t, f, childID); got.Valid && got.String != "" {
+		t.Errorf("parent_run_id = %q alongside parent_assignment_id %q — a row with two parents "+
+			"can be reached by two paths and drawn twice; validating the run does not make it "+
+			"the parent", got.String, parentID)
+	}
+}
+
 func parentRunOf(t *testing.T, f *delegationFixture, assignmentID string) sql.NullString {
 	t.Helper()
 	var parent sql.NullString

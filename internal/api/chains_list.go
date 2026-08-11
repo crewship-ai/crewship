@@ -273,12 +273,29 @@ func (h *ChainsListHandler) List(w http.ResponseWriter, r *http.Request) {
 // chainsIndexQuery groups the workspace's runs by chain and resolves what
 // started each one.
 //
-// Every predicate carries the workspace, including the five label lookups.
+// Every predicate carries the workspace, including all SIX label lookups.
 // That is not defence in depth: chain_origin and triggered_by_id are untyped
 // string columns, and issue identifiers are only unique PER workspace, so an
 // unfenced label join hands another tenant's issue title or rule name to a run
 // of ours. The join to `root` is fenced for the same reason — chain_origin is
 // a bare id with no foreign key behind it.
+//
+// The count is six and it used to read five, which is how the sixth stayed
+// unfenced: the person lookup was the one the sentence did not count, and a
+// comment asserting a number is only a guard while the number is right. It is
+// still stated as a number rather than dropped, because a number is checkable —
+// count the COALESCE subqueries below — where "every lookup is fenced" is a
+// claim a reader has no way to test.
+//
+// The person lookup is fenced differently from the other five, because a user
+// is not OWNED by a workspace the way a rule or a schedule is — users.id is
+// globally unique and a person can belong to several tenants. So it goes
+// through workspace_members, which is the same shape admin_keeper_findings.go
+// uses to decide who may be named. That has a consequence worth stating: a
+// person who has LEFT the workspace stops supplying their name here, and the
+// row falls back to naming the raw trigger. See resolveChainStart's manual arm
+// for what the row keeps instead — the kind and the id, so the audit trail
+// still records that a person started this and which one.
 //
 // The labels are correlated scalar subqueries rather than LEFT JOINs on
 // purpose: a subquery cannot multiply the row count, so a duplicate identifier
@@ -335,6 +352,8 @@ SELECT g.origin, g.runs, g.max_chain_depth, g.failed_runs, g.running_runs, g.wai
                   WHERE root.triggered_via = 'schedule'
                     AND s.id = root.triggered_by_id AND s.workspace_id = ?), ''),
        COALESCE((SELECT COALESCE(NULLIF(u.full_name, ''), u.email) FROM users u
+                  JOIN workspace_members wm
+                    ON wm.user_id = u.id AND wm.workspace_id = ?
                   WHERE u.id = root.invoking_user_id), '')
 FROM grouped g
 LEFT JOIN pipeline_runs root ON root.id = g.origin AND root.workspace_id = ?
@@ -349,6 +368,7 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 		workspaceID, // missions.id
 		workspaceID, // missions.title
 		workspaceID, // pipeline_schedules.name
+		workspaceID, // users, through workspace_members
 		workspaceID, // root run
 		limit, offset)
 	if err != nil {
@@ -395,17 +415,24 @@ func (h *ChainsListHandler) query(r *http.Request, workspaceID string, limit, of
 	return out, rows.Err()
 }
 
+// chainsUnrecordedQuery asks whether this workspace still holds runs from
+// before chain_origin existed. It is a const rather than an inline string so
+// the query-plan test measures the statement the handler actually issues: a
+// copy of the SQL in the test would drift the day this one is tuned, and a plan
+// assertion against a stale copy proves nothing about the shipping path.
+const chainsUnrecordedQuery = `
+SELECT EXISTS(
+    SELECT 1 FROM pipeline_runs
+    WHERE workspace_id = ? AND (chain_origin IS NULL OR chain_origin = '')
+)`
+
 // hasUnrecordedRuns is an EXISTS rather than a COUNT: the client needs to know
 // whether the era before chain_origin is represented in this workspace, not how
 // many rows it holds, and EXISTS stops at the first match instead of scanning
 // the table to produce a number nothing renders.
 func (h *ChainsListHandler) hasUnrecordedRuns(r *http.Request, workspaceID string) (bool, error) {
 	var found int
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT EXISTS(
-		    SELECT 1 FROM pipeline_runs
-		    WHERE workspace_id = ? AND (chain_origin IS NULL OR chain_origin = '')
-		)`, workspaceID).Scan(&found)
+	err := h.db.QueryRowContext(r.Context(), chainsUnrecordedQuery, workspaceID).Scan(&found)
 	if err != nil {
 		return false, err
 	}
@@ -460,10 +487,22 @@ func resolveChainStart(s chainStart) (kind, id, key, label string) {
 		// is all there is.
 		return string(chain.KindRun), s.triggeredBy, "", s.via
 	case "manual":
-		if s.userName != "" {
-			return chainStartKindUser, s.userID, "", s.userName
+		if s.userID == "" {
+			// Nothing recorded who did it. "unknown" is the honest answer, and
+			// it is a different fact from "we know who but cannot name them".
+			return chainStartKindUnknown, "", "", s.via
 		}
-		return chainStartKindUnknown, "", "", s.via
+		// A person started this, and the run says which one. The NAME may still
+		// be missing — the lookup is fenced through workspace_members, so
+		// somebody who has since left the workspace no longer supplies it — and
+		// when it is, the row falls back to the raw trigger exactly as the
+		// automation arm does for a deleted rule.
+		//
+		// Keeping the kind and the id in that case is the point. Dropping them
+		// would turn "Ada started this, and she has left" into "nobody started
+		// this", which is a worse answer than the one the columns support: an
+		// unrenderable name is a rendering problem, not a gap in the record.
+		return chainStartKindUser, s.userID, "", orRaw(s.userName, s.via)
 	case "":
 		// No root row: retention swept it, or the chain was rooted at a
 		// journal entry rather than a run. The chain is still real — its

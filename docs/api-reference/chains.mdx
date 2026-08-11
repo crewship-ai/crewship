@@ -243,6 +243,12 @@ Two related cases that are *not* excluded:
   `started_by_kind: "automation"` with the rule's id. The label falls back to
   `"automation"` rather than inventing a name — the run records that a rule
   started it, and that fact outlives the rule.
+- A chain started by a person who has **since left the workspace** keeps
+  `started_by_kind: "user"` and `started_by_id`; only the name goes, and
+  `started_by` falls back to `"manual"`. The name is resolved through workspace
+  membership, so a former member no longer supplies it — the same rule as the
+  deleted rule above: the fact that a person started this outlives their
+  membership, and the identifier is what carries it.
 
 ### Tenancy
 

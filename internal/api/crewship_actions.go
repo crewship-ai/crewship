@@ -63,7 +63,34 @@ func newCrewshipActions(baseURL, internalToken string, pol *policy.Resolver, db 
 		logger:        logger,
 		// A routine step must not be able to wedge a run against our own
 		// daemon. The internal routes are local writes; 30s is generous.
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+			// Never follow a redirect. This request carries the MASTER internal
+			// token — the credential that buys unscoped access to every internal
+			// route — and Go's default client follows up to ten hops, copying
+			// every header it does not recognise as a credential to whatever host
+			// it lands on. Its list is Authorization, Cookie, WWW-Authenticate;
+			// X-Internal-Token is not on it, so one 3xx is the whole distance
+			// between a loopback call and handing the master token to a stranger.
+			//
+			// A redirect from THIS call is never legitimate, which is what makes
+			// refusing it free rather than a trade. baseURL is the daemon's own
+			// loopback address and the path is built from a verb table in this
+			// file: the six routes on the other side answer JSON, and a route
+			// that wanted to send this caller somewhere else would be telling the
+			// daemon to ask itself a different question — which it could simply
+			// have answered. So a 3xx here means something has been inserted into
+			// a call that was supposed to stay on this machine, and the only safe
+			// reading of it is failure.
+			//
+			// ErrUseLastResponse rather than an error: the 3xx becomes the
+			// response, so the status check below reports "returned 302" with the
+			// body, and the step fails naming what happened instead of an opaque
+			// transport error.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
