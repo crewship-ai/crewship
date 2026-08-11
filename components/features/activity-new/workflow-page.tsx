@@ -43,8 +43,7 @@ import {
 } from "lucide-react"
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { KpiCard } from "@/components/features/dashboard/kpi-card"
-import { Appear } from "@/components/ui/detail"
+import { Appear, StatStrip } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { apiFetch } from "@/lib/api-fetch"
@@ -203,33 +202,26 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
       </Appear>
 
       <Appear order={1}>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {/* Wall clock, first activity to last — the same measure
-              chainElapsedMs settled and the server repeats. Never 0: an
-              unmeasurable span says so in words. */}
-          <KpiCard label="Duration" value={duration.text} subtitle={duration.note} />
-          <KpiCard
-            label="Runs"
-            value={chain.runs}
-            subtitle={
-              chain.failed_runs > 0
-                ? `${chain.failed_runs} failed`
-                : chain.max_chain_depth > 0
-                  ? `composed, depth ${chain.max_chain_depth}`
-                  : "none failed"
-            }
-          />
-          <KpiCard
-            label="Issues touched"
-            value={chain.issue_count}
-            subtitle={chain.issue_count === 0 ? "none" : "created or changed"}
-          />
-          <KpiCard
-            label="Agents"
-            value={chain.agent_count}
-            subtitle={chain.agent_count === 0 ? "agentless" : "dispatched"}
-          />
-        </div>
+        <StatStrip
+          items={[
+            // Wall clock, first activity to last — the same measure
+            // chainElapsedMs settled and the server repeats. Never 0: an
+            // unmeasurable span says so in words.
+            { label: "Duration", value: duration.text, mono: true },
+            { label: "Runs", value: String(chain.runs) },
+            {
+              label: "Failed",
+              value: String(chain.failed_runs),
+              tone: chain.failed_runs > 0 ? "destructive" : "default",
+            },
+            {
+              label: "Depth",
+              value: chain.max_chain_depth > 0 ? String(chain.max_chain_depth) : "root",
+            },
+            { label: "Issues", value: String(chain.issue_count) },
+            { label: "Agents", value: String(chain.agent_count) },
+          ]}
+        />
       </Appear>
 
       {/* ── 2. Which runs, and open one ───────────────────────────────

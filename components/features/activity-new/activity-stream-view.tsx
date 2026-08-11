@@ -75,6 +75,7 @@ import { ActivityDetail } from "./activity-detail"
 import { WorkflowPage } from "./workflow-page"
 import { AgentsOverview, IssuesOverview, RoutinesLensOverview } from "./lens-overviews"
 import { RoutineRunsPage } from "./routine-runs-page"
+import { AgentDrillDown, IssueDrillDown, RunDrillDown } from "./drill-downs"
 import { FeedRow } from "./feed-row"
 
 /** Connection state as a word, not a button. */
@@ -545,6 +546,15 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const openRoutineSlug =
     stop?.kind === "routine" && lens === "routines" ? stop.id : null
 
+  // A row in a lens leads to that THING, not to the feed narrowed by its id.
+  // Every kind landed on the feed before, which for an issue meant a card
+  // headed "Activity · 0 in past 24 hours" over the words "Nothing here" — a
+  // mission's own events do not carry the entry types that query asks for, so
+  // the one kind with the most to show showed nothing.
+  const openIssue = stop?.kind === "issue" ? stop : null
+  const openAgent = stop?.kind === "agent" ? stop : null
+  const openRun = stop?.kind === "run" ? stop : null
+
   const overviewShown =
     !loading &&
     !error &&
@@ -587,7 +597,10 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
     surface.main !== "workflow" &&
     !overviewShown &&
     !lensOverviewShown &&
-    openRoutineSlug == null
+    openRoutineSlug == null &&
+    openIssue == null &&
+    openAgent == null &&
+    openRun == null
   const listTitle = surface.node ? surface.node.label : (scopeMeta?.label ?? "Activity")
   const listCaption = surface.node
     ? `${visible.length.toLocaleString()} ${visible.length === 1 ? "event" : "events"} mentioning this ${
@@ -773,6 +786,38 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   Placed before every other branch because it is a whole
                   surface, not a narrowing of the feed — the same reason the
                   workflow page is. */}
+              {openIssue && (
+                <IssueDrillDown
+                  workspaceId={workspaceId}
+                  identifier={openIssue.label}
+                  chains={chains}
+                />
+              )}
+
+              {openAgent && (
+                <AgentDrillDown
+                  workspaceId={workspaceId}
+                  agentID={openAgent.id}
+                  name={openAgent.label}
+                  chains={chains}
+                  onOpenWorkflow={selectChain}
+                />
+              )}
+
+              {openRun && (
+                <RunDrillDown
+                  workspaceId={workspaceId}
+                  runID={openRun.id}
+                  // The routine is whichever one the reader walked through to
+                  // get here — a run is opened from its routine's list or from
+                  // a workflow, and both leave that stop on the path.
+                  routineSlug={
+                    path.stops.find((s) => s.kind === "routine")?.id ??
+                    chains.find((c) => c.origin === workflowAnchor(path))?.routine_slug
+                  }
+                />
+              )}
+
               {openRoutineSlug && (
                 <RoutineRunsPage
                   workspaceId={workspaceId}
@@ -783,7 +828,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                 />
               )}
 
-              {openRoutineSlug == null && surface.main !== "workflow" && loading && entries.length === 0 && (
+              {openRoutineSlug == null && openIssue == null && openAgent == null && openRun == null && surface.main !== "workflow" && loading && entries.length === 0 && (
                 <div className="flex items-center justify-center gap-2 py-20 text-xs text-muted-foreground">
                   <Spinner className="h-3.5 w-3.5" /> Loading activity…
                 </div>

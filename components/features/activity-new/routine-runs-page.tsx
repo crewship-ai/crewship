@@ -27,8 +27,7 @@ import * as React from "react"
 import { ChevronRight, ListTree, ScrollText } from "lucide-react"
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { KpiCard } from "@/components/features/dashboard/kpi-card"
-import { Appear } from "@/components/ui/detail"
+import { Appear, StatStrip } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { CrewIcon } from "@/components/ui/crew-icon"
@@ -123,31 +122,40 @@ export function RoutineRunsPage({
         </div>
       </Appear>
 
+      {/* The same divided strip /routines opens a routine with — one row, one
+          rule per column. It was a 2×4 grid of bordered cards here, which is a
+          second way to say the same six numbers and the thing that made the two
+          pages read as different products. */}
       <Appear order={1}>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <KpiCard label="Runs" value={runs.length} subtitle="in the loaded page" />
-          <KpiCard
-            label="Success"
-            value={runs.length > 0 ? `${Math.round((ok / runs.length) * 100)}%` : "—"}
-            subtitle={runs.length > 0 ? `${ok} of ${runs.length}` : "nothing recorded"}
-            valueColor={
-              runs.length === 0 ? undefined : failed > 0 ? "var(--warn)" : "var(--success)"
-            }
-          />
-          <KpiCard
-            label="Typical duration"
-            // The MEDIAN, not the mean: one 40-second outlier among thirty
-            // 200ms runs moves a mean past every run that actually happened.
-            value={median != null ? formatDurationMs(median) : "—"}
-            subtitle={median != null ? "median of the finished runs" : "nothing finished yet"}
-          />
-          <KpiCard
-            label="Slowest"
-            value={slowest > 0 ? formatDurationMs(slowest) : "—"}
-            subtitle={slowest > 0 && median != null && slowest > median * 2 ? "well above typical" : "of this page"}
-            valueColor={slowest > 0 && median != null && slowest > median * 2 ? "var(--warn)" : undefined}
-          />
-        </div>
+        <StatStrip
+          items={[
+            { label: "Runs", value: String(runs.length) },
+            {
+              label: "Pass rate",
+              value: runs.length > 0 ? `${Math.round((ok / runs.length) * 100)}%` : "—",
+              tone: runs.length === 0 ? "default" : failed > 0 ? "warn" : "success",
+            },
+            {
+              // The MEDIAN, not the mean: one 40-second outlier among thirty
+              // 200ms runs moves a mean past every run that actually happened.
+              label: "Typical duration",
+              value: median != null ? formatDurationMs(median) : "—",
+              mono: true,
+            },
+            {
+              label: "Slowest",
+              value: slowest > 0 ? formatDurationMs(slowest) : "—",
+              mono: true,
+              tone: slowest > 0 && median != null && slowest > median * 2 ? "warn" : "default",
+            },
+            {
+              label: "Newest",
+              value: newest ? new Date(newest.started_at).toLocaleTimeString(undefined, { hour12: false }) : "—",
+              mono: true,
+            },
+            { label: "Failed", value: String(failed), tone: failed > 0 ? "destructive" : "default" },
+          ]}
+        />
       </Appear>
 
       <Appear order={2}>
