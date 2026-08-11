@@ -261,6 +261,18 @@ var workspaceUpdateCmd = &cobra.Command{
 			v, _ := flags.GetBool("allow-privileged-credentials")
 			body["allow_privileged_credentials"] = v
 		}
+		// Audit retention windows (#1887). Gated on flags.Changed so an
+		// unset flag never sends a 0 — which the server reads as an explicit
+		// "keep forever" and would silently switch pruning off for anyone who
+		// ran `workspace update --name x`.
+		if flags.Changed("credential-audit-retention-days") {
+			v, _ := flags.GetInt("credential-audit-retention-days")
+			body["credential_audit_retention_days"] = v
+		}
+		if flags.Changed("audit-log-retention-days") {
+			v, _ := flags.GetInt("audit-log-retention-days")
+			body["audit_log_retention_days"] = v
+		}
 
 		if len(body) == 0 {
 			return fmt.Errorf("no fields to update")
@@ -739,6 +751,10 @@ func init() {
 	workspaceUpdateCmd.Flags().String("language", "", "Preferred language (e.g. cs, en)")
 	workspaceUpdateCmd.Flags().Bool("allow-privileged-credentials", false,
 		"Load credentials into a --privileged crew's sidecar despite the collapsed UID 1001/1002 isolation boundary (#1032, default false — fails closed)")
+	workspaceUpdateCmd.Flags().Int("credential-audit-retention-days", 0,
+		"Days of credential_audit history to keep; 0 means keep forever. Unset uses the 90-day default (#1887)")
+	workspaceUpdateCmd.Flags().Int("audit-log-retention-days", 0,
+		"Days of audit_logs history to keep; 0 means keep forever, which is the default — audit_logs is the compliance trail (#1887)")
 
 	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
 	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")

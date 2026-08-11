@@ -113,6 +113,14 @@ type workspaceResponse struct {
 	// pipeline_runs retention sweep window in days. nil means "use
 	// pipeline.DefaultRunRetentionDays (90)".
 	RunRetentionDays *int `json:"run_retention_days"`
+	// CredentialAuditRetentionDays / AuditLogRetentionDays (#1887) are the
+	// per-workspace overrides for the two audit sweeps. nil means "use the
+	// product default" — 90 days for credential_audit, unlimited for
+	// audit_logs. An explicit 0 means "keep forever", which is why these are
+	// pointers: nil and 0 are different answers here. See
+	// internal/api/audit_retention.go.
+	CredentialAuditRetentionDays *int `json:"credential_audit_retention_days"`
+	AuditLogRetentionDays        *int `json:"audit_log_retention_days"`
 	// Nested `_count` is the canonical shape the frontend consumes
 	// (#866.1). The flat `_count_*` keys are retained one release for
 	// back-compat with any older client and should be removed after.

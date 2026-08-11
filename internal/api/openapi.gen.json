@@ -2499,6 +2499,14 @@
             "nullable": true,
             "type": "boolean"
           },
+          "audit_log_retention_days": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "credential_audit_retention_days": {
+            "nullable": true,
+            "type": "integer"
+          },
           "name": {
             "nullable": true,
             "type": "string"
@@ -11409,8 +11417,18 @@
           "allow_privileged_credentials": {
             "type": "boolean"
           },
+          "audit_log_retention_days": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
           "created_at": {
             "type": "string"
+          },
+          "credential_audit_retention_days": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
           },
           "currentUserCapabilities": {
             "items": {
@@ -11942,6 +11960,16 @@
           "allow_privileged_credentials": {
             "nullable": true,
             "type": "boolean"
+          },
+          "audit_log_retention_days": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
+          },
+          "credential_audit_retention_days": {
+            "format": "int32",
+            "nullable": true,
+            "type": "integer"
           },
           "name": {
             "nullable": true,
