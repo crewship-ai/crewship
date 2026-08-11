@@ -647,7 +647,8 @@ const socketProbeTimeout = 250 * time.Millisecond
 // "connection refused", the file vanishing under us, or a zero-length file —
 // licenses it. "I could not check" — EACCES on a socket owned by another user,
 // a hung connect, an unreadable parent directory, a regular file whose contents
-// we cannot identify — is reported as a refusal, never silently downgraded to
+// we cannot identify, a directory or device node standing where the socket
+// should be — is reported as a refusal, never silently downgraded to
 // "stale", because treating an unverifiable path as disposable is precisely the
 // bug.
 func ensureSocketPathFree(path string) error {
@@ -685,13 +686,9 @@ func ensureSocketPathFree(path string) error {
 	//     being wrong is asymmetric: a needless refusal costs one `rm` by an
 	//     operator who can see the file, a needless delete costs the file.
 	//
-	// Everything that is NOT a plain file is still probed, including symlinks
-	// (followed by the dial, so a link aimed at the live daemon's socket is
-	// correctly refused) and anything Lstat reports oddly on platforms where
-	// AF_UNIX files are not stat'able as sockets. Note the regular-file check
-	// must come *before* the dial: Linux answers connect() on a non-socket
-	// inode with ECONNREFUSED, which the staleness test below would otherwise
-	// read as proof of a dead daemon.
+	// The regular-file check must come *before* the dial: Linux answers
+	// connect() on a non-socket inode with ECONNREFUSED, which the staleness
+	// test below would otherwise read as proof of a dead daemon.
 	if info.Mode().IsRegular() {
 		if info.Size() == 0 {
 			return nil
@@ -699,6 +696,55 @@ func ensureSocketPathFree(path string) error {
 		return fmt.Errorf("IPC socket path %s is a regular file with %d bytes of content, not a socket: "+
 			"refusing to delete it (check ipc.socket_path / CREWSHIP_SOCKET_PATH; "+
 			"if the file really is disposable, remove it manually)", path, info.Size())
+	}
+
+	// A regular file is not the only non-socket inode, and the ECONNREFUSED
+	// reasoning above applies to every one of them. A *directory* at the socket
+	// path is the case that got missed: it is not IsRegular(), so it fell
+	// through to the dial, connect() refused, the path was declared stale, and
+	// startIPC's removeSocketFile rmdir'd it — silently, if it happened to be
+	// empty, leaving a healthy daemon listening where the operator's directory
+	// used to be. A non-empty one survived only by accident, failing at
+	// os.Remove with "remove socket file: directory not empty", which names
+	// neither the mistake nor the knob that caused it.
+	//
+	// So every answer Lstat can give gets a deliberate disposition:
+	//
+	//   - regular file        handled above: empty is reclaimable, non-empty is
+	//                         refused (we cannot tell a scratch file from a
+	//                         database).
+	//   - directory           refused. Cannot carry a listener, and the plausible
+	//                         accidents (ipc.socket_path aimed at the data dir,
+	//                         or one component short of the socket) are exactly
+	//                         the directories that hold everything.
+	//   - named pipe (FIFO)   refused. Cannot carry a listener; if one exists at
+	//                         this path something else made it deliberately, and
+	//                         a writer may be blocked on it.
+	//   - device (char/block) refused. Cannot carry a listener, and the accident
+	//                         here is a path like /dev/null, where the unlink
+	//                         removes a device node the rest of the system needs.
+	//   - symlink             dialed, NOT resolved here: a link aimed at the live
+	//                         daemon's socket must still be refused, and connect()
+	//                         is what proves that. Following it to classify the
+	//                         target instead would also open a TOCTOU window.
+	//   - socket              dialed. The case this whole function is about.
+	//   - irregular           dialed. This is Lstat saying "I cannot name this",
+	//                         which on windows is an unrecognised reparse point —
+	//                         and a live AF_UNIX socket can land there. Refusing
+	//                         unclassifiable inodes outright would wedge stale-
+	//                         socket recovery permanently on such a platform,
+	//                         which is strictly worse than the transient wedge
+	//                         this guard replaced. The dial still answers safely:
+	//                         a listener refuses the unlink, its absence licenses
+	//                         it.
+	//
+	// Note the zero-length escape hatch is deliberately NOT extended past
+	// regular files: directories, FIFOs and device nodes all report a size that
+	// says nothing about what removing them costs.
+	if kind := nonListenerInodeKind(info.Mode()); kind != "" {
+		return fmt.Errorf("IPC socket path %s is %s, not a socket: "+
+			"refusing to delete it (check ipc.socket_path / CREWSHIP_SOCKET_PATH; "+
+			"if it really is disposable, remove it manually)", path, kind)
 	}
 
 	conn, err := net.DialTimeout("unix", path, socketProbeTimeout)
@@ -718,6 +764,30 @@ func ensureSocketPathFree(path string) error {
 	}
 	return fmt.Errorf("cannot determine whether IPC socket %s is in use: %w (refusing to unlink it; "+
 		"if no crewship instance is running, remove the socket file manually)", path, err)
+}
+
+// nonListenerInodeKind names the file type at the socket path when that type
+// provably cannot have an AF_UNIX listener bound to it *and* is not something
+// this process may delete on that basis. It returns "" for the types
+// ensureSocketPathFree still has to probe (socket, symlink, irregular) and for
+// regular files, which carry their own size-based rule.
+//
+// The string is used in the refusal, so it reads as a noun phrase: the operator
+// gets "is a directory, not a socket" rather than a mode bitmask.
+func nonListenerInodeKind(mode fs.FileMode) string {
+	switch {
+	case mode&fs.ModeDir != 0:
+		return "a directory"
+	case mode&fs.ModeNamedPipe != 0:
+		return "a named pipe (FIFO)"
+	// ModeCharDevice is only meaningful alongside ModeDevice, so it is tested
+	// first; a block device is ModeDevice on its own.
+	case mode&fs.ModeCharDevice != 0:
+		return "a character device"
+	case mode&fs.ModeDevice != 0:
+		return "a block device"
+	}
+	return ""
 }
 
 // wsaeconnrefused is Winsock's WSAECONNREFUSED, spelled numerically because Go

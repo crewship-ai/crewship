@@ -158,6 +158,36 @@ func TestEnsureSocketPathFree_Corners(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// A directory is a non-socket inode just like a regular file, so
+			// connect() refuses on it and the staleness test read that as "the
+			// owner is gone". os.Remove then rmdir's an empty one without a
+			// word. Nothing here can be listening, but nothing here is ours to
+			// delete either.
+			name: "empty directory is refused",
+			setup: func(t *testing.T, dir string) string {
+				p := filepath.Join(dir, "i.sock")
+				if err := os.Mkdir(p, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				return p
+			},
+			wantErr: true,
+		},
+		{
+			name: "directory with contents is refused",
+			setup: func(t *testing.T, dir string) string {
+				p := filepath.Join(dir, "i.sock")
+				if err := os.Mkdir(p, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(p, "state.db"), []byte("x"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return p
+			},
+			wantErr: true,
+		},
+		{
 			name: "dangling symlink is not a listener",
 			setup: func(t *testing.T, dir string) string {
 				p := filepath.Join(dir, "i.sock")
@@ -417,6 +447,133 @@ func TestStartIPC_RefusesLiveSocketRecoversStale(t *testing.T) {
 				tt.after(t, path)
 			}
 		})
+	}
+}
+
+// TestStartIPC_DoesNotDeleteNonSocketInode extends the data-loss guard past
+// regular files. The regular-file check exists because Linux answers connect()
+// on a non-socket inode with ECONNREFUSED, which the staleness test reads as
+// "the owner is gone, unlink it" — but a *directory* is a non-socket inode too
+// and is not Mode().IsRegular(), so it fell through to the dial and was
+// classified stale. startIPC then handed it to removeSocketFile, which rmdir'd
+// an empty directory outright and failed on a non-empty one with a message
+// about removing a "socket file" that named neither the mistake nor the knob
+// that caused it.
+//
+// The assertion that matters is not "startIPC returned an error" — an
+// implementation that deletes the directory and then complains would pass
+// that, and that deletion is the entire failure mode this guard exists to
+// prevent. It is that the inode, and anything inside it, is still there
+// afterwards.
+func TestStartIPC_DoesNotDeleteNonSocketInode(t *testing.T) {
+	tests := []struct {
+		name string
+		// setup creates the inode at the socket path.
+		setup func(t *testing.T, path string)
+		// verify asserts it survived startIPC untouched.
+		verify func(t *testing.T, path string)
+	}{
+		{
+			// The silent case: os.Remove happily rmdir's an empty directory, so
+			// the operator lost the directory and then got a healthy daemon
+			// listening where it used to be.
+			name: "empty directory",
+			setup: func(t *testing.T, path string) {
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+			verify: func(t *testing.T, path string) {
+				info, err := os.Lstat(path)
+				if err != nil {
+					t.Fatalf("the directory at the socket path was deleted: %v", err)
+				}
+				if !info.IsDir() {
+					t.Fatalf("the directory at the socket path was replaced by %s", info.Mode().Type())
+				}
+			},
+		},
+		{
+			// ipc.socket_path aimed one component short — at the data dir
+			// itself, say — which is a directory full of things that matter.
+			name: "directory with contents",
+			setup: func(t *testing.T, path string) {
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(path, "state.db"), []byte("SQLite format 3\x00"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			verify: func(t *testing.T, path string) {
+				info, err := os.Lstat(path)
+				if err != nil {
+					t.Fatalf("the directory at the socket path was deleted: %v", err)
+				}
+				if !info.IsDir() {
+					t.Fatalf("the directory at the socket path was replaced by %s", info.Mode().Type())
+				}
+				got, err := os.ReadFile(filepath.Join(path, "state.db"))
+				if err != nil {
+					t.Fatalf("the file inside the directory was deleted: %v", err)
+				}
+				if !bytes.Equal(got, []byte("SQLite format 3\x00")) {
+					t.Errorf("file inside the directory changed: got %q", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Short dir name: sockaddr_un caps the path near 100 bytes.
+			path := filepath.Join(t.TempDir(), "i.sock")
+			tt.setup(t, path)
+
+			startIPCExpectingRefusal(t, path)
+
+			tt.verify(t, path)
+		})
+	}
+}
+
+// startIPCExpectingRefusal runs the real startIPC against path and asserts it
+// declined to take it over, with a message an operator can act on. Shared with
+// the unix-only inode cases (FIFOs, device nodes) in the sibling file.
+//
+// It deliberately does not assert what is left on disk: that is the caller's
+// job, because "returned an error" is satisfied by an implementation that
+// deletes the path first and complains afterwards.
+func startIPCExpectingRefusal(t *testing.T, path string) {
+	t.Helper()
+
+	s := newTestServerForT(t)
+	s.cfg.IPC.SocketPath = path
+
+	// A refusal returns immediately; only the success path blocks in Serve,
+	// and reaching it here would itself be the bug.
+	errCh := make(chan error, 1)
+	go func() { errCh <- s.startIPC() }()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("startIPC() = nil; want a refusal to reuse a non-socket path")
+		}
+		if !strings.Contains(err.Error(), path) {
+			t.Errorf("error %q does not name the socket path %q", err, path)
+		}
+		// The operator has to learn which knob to correct; "remove socket
+		// file: directory not empty" does not say that.
+		if !strings.Contains(err.Error(), "ipc.socket_path") {
+			t.Errorf("error %q does not point at ipc.socket_path", err)
+		}
+	case <-time.After(10 * time.Second):
+		// The pre-fix shape of this failure: startIPC removed the inode, bound
+		// a socket over it and blocked in Serve().
+		info, statErr := os.Lstat(path)
+		t.Fatalf("startIPC neither refused nor returned within 10s "+
+			"(it bound the path instead); path is now %v (stat err %v)", info.Mode(), statErr)
 	}
 }
 
