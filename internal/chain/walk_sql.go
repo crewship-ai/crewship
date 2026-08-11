@@ -57,15 +57,16 @@ func routineNode(id, name, slug, status string) Node {
 // a run always knows when it happened; ended_at is NULL until it stops, and
 // then the node reports no end and no duration rather than a finished-looking
 // zero. See Node.OccurredAt.
-func runNode(id, pipelineSlug, status string, chainDepth int, startedAt, endedAt string) Node {
+func runNode(id, pipelineSlug, status string, chainDepth int, chainOrigin, startedAt, endedAt string) Node {
 	return withSpan(Node{
-		ID:         nodeID(KindRun, id),
-		Kind:       KindRun,
-		Ref:        id,
-		Key:        pipelineSlug,
-		Label:      pipelineSlug,
-		Status:     status,
-		ChainDepth: chainDepth,
+		ID:          nodeID(KindRun, id),
+		Kind:        KindRun,
+		Ref:         id,
+		Key:         pipelineSlug,
+		Label:       pipelineSlug,
+		Status:      status,
+		ChainDepth:  chainDepth,
+		ChainOrigin: chainOrigin,
 	}, startedAt, endedAt)
 }
 
@@ -245,21 +246,21 @@ func (w *walker) lookupIssueByID(ctx context.Context, anchor string) (Node, bool
 }
 
 func (w *walker) lookupRunByID(ctx context.Context, anchor string) (Node, bool, error) {
-	var id, slug, status, startedAt, endedAt string
+	var id, slug, status, chainOrigin, startedAt, endedAt string
 	var chainDepth int
 	err := w.db.QueryRowContext(ctx, `
 		SELECT `+runColumns+`
 		FROM pipeline_runs
 		WHERE workspace_id = ? AND id = ?`,
 		w.workspaceID, anchor,
-	).Scan(&id, &slug, &status, &chainDepth, &startedAt, &endedAt)
+	).Scan(&id, &slug, &status, &chainDepth, &chainOrigin, &startedAt, &endedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, false, nil
 	}
 	if err != nil {
 		return Node{}, false, err
 	}
-	return runNode(id, slug, status, chainDepth, startedAt, endedAt), true, nil
+	return runNode(id, slug, status, chainDepth, chainOrigin, startedAt, endedAt), true, nil
 }
 
 func (w *walker) lookupRoutineByID(ctx context.Context, anchor string) (Node, bool, error) {
@@ -408,7 +409,7 @@ func (w *walker) expandIssue(ctx context.Context, n Node) ([]neighbour, error) {
 	// join and not merely in the WHERE.
 	if err := w.collect(ctx, &out, `
 		SELECT r.id, COALESCE(r.pipeline_slug,''), COALESCE(r.status,''), COALESCE(r.chain_depth, 0),
-		       COALESCE(r.started_at,''), COALESCE(r.ended_at,'')
+		       COALESCE(r.chain_origin,''), COALESCE(r.started_at,''), COALESCE(r.ended_at,'')
 		FROM missions m
 		JOIN pipeline_runs r
 		  ON r.triggered_by_id = m.identifier
@@ -694,19 +695,19 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 // needs `i.`. Those must stay in step with the list here; the scanners' Scan is
 // what fails loudly if they drift.
 const (
-	runColumns        = `id, COALESCE(pipeline_slug,''), COALESCE(status,''), COALESCE(chain_depth, 0), COALESCE(started_at,''), COALESCE(ended_at,'')`
+	runColumns        = `id, COALESCE(pipeline_slug,''), COALESCE(status,''), COALESCE(chain_depth, 0), COALESCE(chain_origin,''), COALESCE(started_at,''), COALESCE(ended_at,'')`
 	assignmentColumns = `id, COALESCE(task,''), COALESCE(status,''), COALESCE(started_at,''), COALESCE(finished_at,'')`
 	inboxColumns      = `id, kind, title, COALESCE(state,''), COALESCE(created_at,'')`
 )
 
 func (w *walker) scanRunNeighbour(fromID string, kind EdgeKind) func(*sql.Rows) (neighbour, error) {
 	return func(rows *sql.Rows) (neighbour, error) {
-		var id, slug, status, startedAt, endedAt string
+		var id, slug, status, chainOrigin, startedAt, endedAt string
 		var chainDepth int
-		if err := rows.Scan(&id, &slug, &status, &chainDepth, &startedAt, &endedAt); err != nil {
+		if err := rows.Scan(&id, &slug, &status, &chainDepth, &chainOrigin, &startedAt, &endedAt); err != nil {
 			return neighbour{}, err
 		}
-		to := runNode(id, slug, status, chainDepth, startedAt, endedAt)
+		to := runNode(id, slug, status, chainDepth, chainOrigin, startedAt, endedAt)
 		return neighbour{node: to, edge: Edge{From: fromID, To: to.ID, Kind: kind}}, nil
 	}
 }

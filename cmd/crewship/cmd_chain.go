@@ -49,6 +49,18 @@ type chainNode struct {
 	// anchor (that is Depth). Rendered only when non-zero, so an ordinary run
 	// reads exactly as it did before.
 	ChainDepth int `json:"chain_depth"`
+	// ChainOrigin is which chain a run BELONGS to — pipeline_runs.chain_origin,
+	// the id of the run that started it.
+	//
+	// Carried but not rendered, and that is deliberate. The walk expands a run
+	// to its routine and a routine to every run of it, so a graph anchored at
+	// one run comes back holding every run that routine has ever had; this is
+	// the only field that tells the chain's own members from those siblings, and
+	// the dashboard needed it for exactly that. Nothing in the human rendering
+	// asks the question yet, so nothing prints it — but `-f json` is the
+	// supported way an agent drives this command, and an agent that cannot see
+	// the field cannot make the distinction at all.
+	ChainOrigin string `json:"chain_origin"`
 	// OccurredAt / EndedAt / DurationMS are when the node happened and how long
 	// it took. Only run, assignment and inbox carry them; issue, routine, agent
 	// and automation are nouns and send nothing rather than their row's

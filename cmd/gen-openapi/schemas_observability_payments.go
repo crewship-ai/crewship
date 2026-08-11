@@ -57,9 +57,19 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	// timestamp is 1970 and sorts to the top of every timeline. duration_ms is
 	// nullable for the same reason chains[].duration_ms is: 0 means "finished
 	// inside a millisecond", absent means "no span to measure".
+	//
+	// chain_origin is on run nodes only and names WHICH CHAIN the run belongs to
+	// (pipeline_runs.chain_origin, the same value chains[].origin groups by). It
+	// is carried because membership cannot be read off the graph's shape: the
+	// walk reaches a run's routine, the routine reaches every run it ever had,
+	// and a rule reaches every run it ever caused, so a sibling and a member
+	// arrive over the same edge kinds. Absent on the other kinds and on runs
+	// written before the column existed — see has_unrecorded_runs on the index
+	// for that same era.
 	chainNode := object(map[string]any{
 		"id": str(), "kind": str(), "ref": str(), "key": str(), "label": str(),
-		"status": str(), "depth": integer(), "chain_depth": integer(), "anchor": boolean(),
+		"status": str(), "depth": integer(), "chain_depth": integer(), "chain_origin": str(),
+		"anchor":      boolean(),
 		"occurred_at": dateTime(), "ended_at": dateTime(), "duration_ms": integer(),
 		"partial": boolean(), "partial_reason": str(),
 	})

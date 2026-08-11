@@ -35,6 +35,21 @@ import { formatDurationMs } from "@/lib/activity-stream"
  * ------------------------------------------------------------------ */
 
 /**
+ * One walked node, plus the field this module reads that ChainNode does not
+ * yet declare.
+ *
+ * `chain_origin` is on the wire — internal/chain stamps it on every run node
+ * from pipeline_runs.chain_origin — and is the only thing in the graph that
+ * says WHICH CHAIN a run belongs to. It is widened here rather than in
+ * lib/trace/build-chain-graph because this module already declares its own
+ * structural subset of the walk for exactly this reason: a caller can hand over
+ * any walk-shaped object, and the shaper reads only what it needs. Optional, so
+ * a server that predates the field still type-checks — see workflowRuns for
+ * what absence means.
+ */
+export type TimelineNode = ChainNode & { chain_origin?: string }
+
+/**
  * What the timeline needs out of GET /api/v1/chains/{anchor}.
  *
  * A structural subset of ChainGraph rather than the whole thing: the gaps and
@@ -42,15 +57,9 @@ import { formatDurationMs } from "@/lib/activity-stream"
  * read here keeps a caller free to hand over any walk-shaped object.
  */
 export interface TimelineSource {
-  nodes: ChainNode[]
+  nodes: TimelineNode[]
   edges: ChainEdge[]
-  /**
-   * The graph-wide id of the node the walk started from ("run:run_abc").
-   *
-   * Optional because this type is a structural subset a caller may hand over
-   * without it; when it is absent workflowRuns keeps every run rather than
-   * guessing which are members. See there for why that is the safe direction.
-   */
+  /** The graph-wide id of the node the walk started from ("run:run_abc"). */
   anchor_node?: string
 }
 
@@ -488,47 +497,64 @@ export interface WorkflowRun {
 }
 
 /**
- * Which run nodes are MEMBERS of this chain rather than siblings of its
- * routine, or null when the graph does not say.
- *
- * The walk expands a run to its routine and a routine to every run of it, so a
- * chain holding ONE run comes back carrying every run that routine has ever
- * had. The Runs card built from the raw node list therefore listed eight rows
- * beside a header reading "1 run" — two numbers on one page describing
- * different things, which is the defect this card exists to avoid.
- *
- * The discriminator is the EDGE, not the depth. `routine --runs--> run` is the
- * sibling edge and nothing else produces it; a run this chain actually caused
- * arrives over `triggers`. Depth would not work: a genuinely composed chain has
- * members two and three hops out, at the same depth as the siblings.
- *
- * The anchor is kept by identity, because the walk reaches it by that same
- * sibling edge — it is how a run's own routine is drawn.
- *
- * null when the graph names no anchor. Dropping rows on a guess would hide real
- * runs; showing them all is what this card did before, and is the safe
- * direction to be wrong in.
- */
-function chainRunIDs(graph: TimelineSource): Set<string> | null {
-  const anchor = graph.anchor_node
-  if (!anchor) return null
-  const keep = new Set<string>()
-  if (anchor.startsWith("run:")) keep.add(anchor.slice("run:".length))
-  for (const e of graph.edges) {
-    if (String(e.kind) === "runs") continue
-    const to = String(e.to ?? "")
-    if (to.startsWith("run:")) keep.add(to.slice("run:".length))
-  }
-  return keep
-}
-
-/**
  * The chain's runs, oldest first.
  *
  * Derived from the walk this page already fetched rather than from a second
  * request: a run node IS a row of pipeline_runs, and the graph carries its id,
  * status and both stamps. A separate GET would be a second answer to a question
  * already answered, and the two would disagree the moment one of them is cached.
+ *
+ * # Which runs are MEMBERS of the chain
+ *
+ * A walk anchored inside a chain comes back carrying runs that are not in it.
+ * The walk expands a run to its routine, the routine to every run it has ever
+ * had, and a rule to every run it has ever caused — so a chain of ONE run can
+ * arrive with eight, and a card built from the raw node list lists eight rows
+ * beside a header reading "Runs 1".
+ *
+ * This was previously answered from the graph's SHAPE — keep any run that
+ * arrives over an edge other than `routine --runs--> run`, on the theory that
+ * the routine fan-out is the only way a sibling can appear. That theory is
+ * false. One automation firing one routine three times, anchored at run-1,
+ * really emits:
+ *
+ *   routine:p1       --runs-->     run:run-1   (anchor)
+ *   automation:aut_1 --triggers--> run:run-1
+ *   routine:p1       --runs-->     run:run-2
+ *   routine:p1       --runs-->     run:run-3
+ *   automation:aut_1 --triggers--> routine:p1
+ *   automation:aut_1 --triggers--> run:run-2   ← sibling, re-admitted
+ *   automation:aut_1 --triggers--> run:run-3   ← sibling, re-admitted
+ *
+ * The rule expands DOWN to every run it caused and the walker records an edge
+ * onto an already-seen node, so a sibling and a genuinely composed run reach
+ * the client over the identical edge kind. The old rule happened to hold for
+ * `manual` and `schedule` triggers, which emit no upward `triggers` edge at
+ * all, and failed for every rule-fired routine — the commonest shape there is.
+ *
+ * So membership is not inferred here any more. `pipeline_runs.chain_origin`
+ * records it exactly, the walk carries it on each run node (ChainNode
+ * .chain_origin), and a run is a member when that equals the chain's own
+ * `origin`. It is compared against the ORIGIN and never against an id: a
+ * composed run has its own id and its ancestor's origin, so an id-shaped test
+ * drops the very runs composition exists to produce.
+ *
+ * # When the graph cannot say
+ *
+ * Two absences, both answered by keeping every run — the same safe direction
+ * this card was wrong in before, since hiding a real run is the worse error:
+ *
+ *   · no `chainOrigin` supplied — a caller handing over a walk-shaped object
+ *     without saying which chain it asked about;
+ *   · no run node carries `chain_origin` — a server older than the field.
+ *
+ * A run left unattributed in a graph the server DID stamp is a different case
+ * and is dropped: `chain_origin` is NULL only on runs written before migration
+ * 20260807160100, which cannot be backfilled, and GET /api/v1/chains excludes
+ * that era from the index outright rather than folding it into somebody's
+ * chain (reporting it as `has_unrecorded_runs`). This card follows that.
+ *
+ * # Order
  *
  * Oldest first, against the rail's newest-first order and deliberately: this is
  * a SEQUENCE — what ran, then what that caused — and reading a causal chain
@@ -538,11 +564,20 @@ function chainRunIDs(graph: TimelineSource): Set<string> | null {
  * A run with no readable start sorts last rather than first. Undated rows
  * cannot be placed, and placing them at the top puts the least certain row
  * where the reader looks first.
+ *
+ * @param chainOrigin ChainSummary.origin — the id of the run that started the
+ *   chain being shown.
  */
-export function workflowRuns(graph: TimelineSource): WorkflowRun[] {
-  const member = chainRunIDs(graph)
-  const runs = graph.nodes
-    .filter((n) => String(n.kind) === "run" && (member == null || member.has(String(n.ref ?? ""))))
+export function workflowRuns(graph: TimelineSource, chainOrigin?: string): WorkflowRun[] {
+  const runNodes = (graph.nodes ?? []).filter((n) => String(n.kind) === "run")
+  // Whether the SERVER answered, not whether this particular run did — one
+  // stamped node is proof the walk carries the field, and only then is an
+  // unstamped run a statement rather than a silence.
+  const attributed = runNodes.some((n) => (n.chain_origin ?? "") !== "")
+  const decidable = attributed && (chainOrigin ?? "") !== ""
+
+  const runs = runNodes
+    .filter((n) => !decidable || (n.chain_origin ?? "") === chainOrigin)
     .map((n) => ({
       id: String(n.ref ?? ""),
       label: String(n.label ?? n.ref ?? ""),

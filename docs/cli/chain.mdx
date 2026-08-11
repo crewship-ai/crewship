@@ -82,6 +82,13 @@ WHEN    STARTED BY                    ROUTINE  RUNS  DEPTH  STATUS  ORIGIN
   `agent_count`, and `duration_ms` — which is what tells two runs of the same
   routine apart. Both lists are capped at 5 per row server-side; the counts are
   not. See [the API reference](/api-reference/chains#fan-out-and-its-cap).
+
+  It also carries `running_runs` and `waiting_runs`: how many of the chain's
+  runs are still in flight, and how many are parked on a person. The timestamps
+  cannot answer either — `last_activity` falls back to `started_at` while a run
+  is going, so a chain waiting on an approval since Tuesday and one that
+  finished on Tuesday carry the same instant. Use `waiting_runs > 0` to find
+  what needs a human.
 </Note>
 
 ### Paging
@@ -146,6 +153,22 @@ tree and `--format json` describe the same thing.
 - A run still in flight prints its start and **no duration**, because it has
   not finished. `0ms` means the opposite — it finished inside a millisecond —
   so the two are never spelled the same way.
+
+<Warning>
+  **Not every run in the tree belongs to the chain you anchored on.** The walk
+  expands a run up to its routine and a routine back down to every run of it, so
+  anchoring on one run shows that run's routine with its whole run history
+  hanging off it. The tree is honest about this — those runs sit under the
+  routine, not under your run — but a script counting `run` lines will
+  over-count.
+
+  `--format json` carries `chain_origin` on every run node for exactly this:
+  a run belongs to the chain when its `chain_origin` equals the origin you
+  anchored on. Do not try to work it out from the edges — a routine fired by a
+  rule gets an `automation → run` edge for every run that rule ever caused, so
+  filtering by edge kind keeps the siblings too. See
+  [Telling members from siblings](/api-reference/chains#telling-members-from-siblings).
+</Warning>
 
 ## Edge kinds
 

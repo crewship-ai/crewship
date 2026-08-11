@@ -96,10 +96,24 @@ func (r *rig) seedRoutine(t *testing.T, id, wsID, slug string) string {
 
 func (r *rig) seedRun(t *testing.T, id, wsID, pipelineID, slug, via, byID string) string {
 	t.Helper()
+	return r.seedRunInChain(t, id, wsID, pipelineID, slug, via, byID, "")
+}
+
+// seedRunInChain is seedRun plus pipeline_runs.chain_origin — the id of the run
+// that STARTED the chain this run belongs to, which is what makes a run a member
+// of one chain rather than another.
+//
+// A separate entry point rather than a seventh parameter on seedRun because the
+// column is genuinely optional: it is NULL on every run written before migration
+// 20260807160100, and a fixture that always set it would stop the package's
+// other tests from covering that era at all. "" writes NULL, which is exactly
+// the pre-migration row.
+func (r *rig) seedRunInChain(t *testing.T, id, wsID, pipelineID, slug, via, byID, chainOrigin string) string {
+	t.Helper()
 	r.exec(t, `
-		INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, started_at, triggered_via, triggered_by_id)
-		VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)`,
-		id, wsID, pipelineID, slug, time.Now().UTC().Format(time.RFC3339Nano), via, nullable(byID))
+		INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, started_at, triggered_via, triggered_by_id, chain_origin)
+		VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?)`,
+		id, wsID, pipelineID, slug, time.Now().UTC().Format(time.RFC3339Nano), via, nullable(byID), nullable(chainOrigin))
 	return id
 }
 
@@ -1062,6 +1076,104 @@ func TestWalk_RunNodeCarriesChainDepth(t *testing.T) {
 		n := nodeByID(t, g, "run:run-1")
 		if n.ChainDepth != 3 {
 			t.Errorf("anchor %q: chain_depth = %d, want 3", anchor, n.ChainDepth)
+		}
+	}
+}
+
+// chain_origin says WHICH CHAIN a run belongs to, and nothing else in the graph
+// does. A client cannot work it out from the topology: the walk reaches a run's
+// routine, the routine reaches every run it has ever had, and an automation
+// reaches every run it has ever caused — so the same run node arrives over three
+// different edge kinds depending on which way the walk got there. Only the
+// column is stable.
+//
+// Covered from four anchors because the projection is spelled out in more than
+// one place: lookupRunByID (anchoring on the run), expandAutomation and
+// expandRoutine (both through scanRunNeighbour), and expandIssue, which cannot
+// use the runColumns constant at all because it needs the `r.` table alias and
+// therefore spells the list out by hand. A column added to the constant and
+// missed on the hand-written copy is the exact drift runColumns' own doc comment
+// warns about.
+func TestWalk_RunNodeCarriesChainOrigin(t *testing.T) {
+	r := newRig(t, "ws-chain-origin")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage", "run.failed", "triage", true)
+	r.seedIssue(t, "m1", r.ws, "ENG-1", "something broke")
+	r.seedRunInChain(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1", "run-root")
+	// A second run of the same routine, this one discovered through the issue
+	// that fired it, so the hand-written projection in expandIssue is exercised.
+	r.seedRunInChain(t, "run-2", r.ws, "p1", "triage", "issue", "ENG-1", "run-root")
+
+	for _, tc := range []struct{ anchor, node string }{
+		{"run-1", "run:run-1"},
+		{"aut_1", "run:run-1"},
+		{"p1", "run:run-1"},
+		{"ENG-1", "run:run-2"},
+	} {
+		g := walk(t, r, tc.anchor, Options{MaxDepth: 4, MaxNodes: 100})
+		n := nodeByID(t, g, tc.node)
+		if n.ChainOrigin != "run-root" {
+			t.Errorf("anchor %q: %s chain_origin = %q, want run-root", tc.anchor, tc.node, n.ChainOrigin)
+		}
+	}
+}
+
+// A run's SIBLINGS — the other runs of the same routine — arrive in the graph
+// over a `triggers` edge, not only over `runs`.
+//
+// This is the shape that broke the client's old membership rule. The client
+// decided membership from the edge kind: keep any run reached by anything other
+// than `routine --runs--> run`, on the theory that the routine fan-out was the
+// only way a sibling could arrive. Anchored at run-1, this walk emits
+//
+//	routine:p1       --runs-->     run:run-1   (anchor)
+//	automation:aut_1 --triggers--> run:run-1
+//	routine:p1       --runs-->     run:run-2
+//	routine:p1       --runs-->     run:run-3
+//	automation:aut_1 --triggers--> routine:p1
+//	automation:aut_1 --triggers--> run:run-2
+//	automation:aut_1 --triggers--> run:run-3
+//
+// because expandAutomation walks DOWN to every run the rule ever caused and the
+// walker records an edge onto an already-seen node. The last two lines re-admit
+// both siblings. The rule holds only for `manual` and `schedule` triggers, which
+// emit no upward `triggers` edge at all — and rule-fired is the common shape.
+//
+// So the graph must carry the answer rather than imply it: each run names its
+// own chain, and a reader compares that to the chain it asked about.
+func TestWalk_SiblingRunsCarryTheirOwnChainOrigin(t *testing.T) {
+	r := newRig(t, "ws-chain-origin-siblings")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage on failure", "run.failed", "triage", true)
+	// One rule, one routine, three firings — three separate chains, each rooted
+	// at its own run, which is what the dispatcher writes for a rule-fired run.
+	for _, id := range []string{"run-1", "run-2", "run-3"} {
+		r.seedRunInChain(t, id, r.ws, "p1", "triage", "automation", "aut_1", id)
+	}
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	// The edge that defeats an edge-kind discriminator. Asserted, not assumed:
+	// if the walker ever stops emitting it, the reason this field exists has
+	// changed and whoever changed it should have to say so here.
+	for _, sib := range []string{"run:run-2", "run:run-3"} {
+		if !hasEdge(g, "automation:aut_1", sib, EdgeTriggers) {
+			t.Fatalf("expected automation:aut_1 --triggers--> %s; edges = %v", sib, g.Edges)
+		}
+	}
+
+	anchor := nodeByID(t, g, "run:run-1")
+	if anchor.ChainOrigin != "run-1" {
+		t.Fatalf("anchor chain_origin = %q, want run-1", anchor.ChainOrigin)
+	}
+	for _, sib := range []string{"run:run-2", "run:run-3"} {
+		n := nodeByID(t, g, sib)
+		if n.ChainOrigin == "" {
+			t.Errorf("%s carries no chain_origin, so a client cannot tell it from a member", sib)
+		}
+		if n.ChainOrigin == anchor.ChainOrigin {
+			t.Errorf("%s chain_origin = %q, same as the anchor's — a sibling of the routine is "+
+				"being reported as a member of this chain", sib, n.ChainOrigin)
 		}
 	}
 }

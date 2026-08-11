@@ -9,6 +9,7 @@ import {
   rowStatusToken,
   startedByPhrase,
   workflowRuns,
+  type TimelineNode,
   type TimelineSource,
 } from "@/lib/workflow-timeline"
 
@@ -584,81 +585,111 @@ describe("workflowRuns", () => {
 })
 
 describe("workflowRuns — the chain's runs, not the routine's", () => {
-  const graph = (nodes: ChainNode[], edges: { from: string; to: string; kind: string }[], anchor?: string) =>
-    ({ nodes, edges, anchor_node: anchor }) as unknown as TimelineSource
+  /**
+   * The walk one rule firing one routine three times actually produces,
+   * anchored at run-1.
+   *
+   * Not invented: printed from internal/chain's walker and pinned server-side by
+   * TestWalk_SiblingRunsCarryTheirOwnChainOrigin. Note the last two edges — the
+   * automation expands DOWN to every run it ever caused, and the walker records
+   * an edge onto an already-seen node. That is why an edge-kind discriminator
+   * cannot answer membership: run-2 and run-3 arrive over `triggers`, exactly
+   * like a run this chain really did cause.
+   *
+   * Each firing is its own chain, rooted at its own run, which is what the
+   * dispatcher writes for a rule-fired run.
+   */
+  const PROBE_NODES: TimelineNode[] = [
+    {
+      ...node({ id: "run-1", occurred_at: "2026-08-10T10:00:00.000000000Z", anchor: true }),
+      chain_origin: "run-1",
+    },
+    node({ id: "p1", kind: "routine", depth: 1 }),
+    node({ id: "aut_1", kind: "automation", depth: 1 }),
+    {
+      ...node({ id: "run-2", occurred_at: "2026-08-09T10:00:00.000000000Z", depth: 2 }),
+      chain_origin: "run-2",
+    },
+    {
+      ...node({ id: "run-3", occurred_at: "2026-08-08T10:00:00.000000000Z", depth: 2 }),
+      chain_origin: "run-3",
+    },
+  ]
 
-  it("drops the routine's OTHER runs, which the walk reaches through it", () => {
-    // The walk goes run → its routine → every run of that routine. So a chain
-    // with ONE run comes back carrying eight, and a card built from the node
-    // list said "8" beside a header saying "1 run". Two numbers on one page
-    // describing different things.
-    const rows = workflowRuns(
-      graph(
-        [
-          node({ id: "run_mine", occurred_at: "2026-08-10T10:00:00.000000000Z" }),
-          node({ id: "run_sibling_a", occurred_at: "2026-08-10T09:00:00.000000000Z" }),
-          node({ id: "run_sibling_b", occurred_at: "2026-08-10T08:00:00.000000000Z" }),
-          node({ id: "pln_1", kind: "routine" }),
-        ],
-        [
-          { from: "routine:pln_1", to: "run:run_mine", kind: "runs" },
-          { from: "routine:pln_1", to: "run:run_sibling_a", kind: "runs" },
-          { from: "routine:pln_1", to: "run:run_sibling_b", kind: "runs" },
-        ],
-        "run:run_mine",
-      ),
-    )
-    expect(rows.map((r) => r.id)).toEqual(["run_mine"])
+  const PROBE_EDGES = [
+    { from: "routine:p1", to: "run:run-1", kind: "runs" },
+    { from: "automation:aut_1", to: "run:run-1", kind: "triggers" },
+    { from: "routine:p1", to: "run:run-2", kind: "runs" },
+    { from: "routine:p1", to: "run:run-3", kind: "runs" },
+    { from: "automation:aut_1", to: "routine:p1", kind: "triggers" },
+    { from: "automation:aut_1", to: "run:run-2", kind: "triggers" },
+    { from: "automation:aut_1", to: "run:run-3", kind: "triggers" },
+  ]
+
+  const graph = (nodes: TimelineNode[], edges = PROBE_EDGES) =>
+    ({ nodes, edges }) as unknown as TimelineSource
+
+  it("drops the routine's OTHER runs even when a rule re-admits them", () => {
+    // The chain is ONE run — the Runs card sits under a header reading "Runs 1".
+    // Listing three rows beside that number is two numbers on one page
+    // describing different things, which is the defect this card exists to
+    // avoid.
+    expect(workflowRuns(graph(PROBE_NODES), "run-1").map((r) => r.id)).toEqual(["run-1"])
   })
 
-  it("keeps a run this chain actually caused", () => {
-    // A composed chain: the anchor triggered a second run. That edge is not a
-    // `runs` edge, so the run is a member rather than a sibling.
+  it("keeps a composed run whose own id is not the chain's origin", () => {
+    // The membership test is the run's chain_origin against the CHAIN's origin.
+    // A nested run has its own id and its ancestor's origin, so comparing
+    // anything id-shaped drops the very runs composition exists to produce.
     const rows = workflowRuns(
-      graph(
-        [
-          node({ id: "run_root", occurred_at: "2026-08-10T10:00:00.000000000Z" }),
-          node({ id: "run_child", occurred_at: "2026-08-10T10:00:01.000000000Z" }),
-          node({ id: "run_sibling", occurred_at: "2026-08-10T09:00:00.000000000Z" }),
-          node({ id: "pln_1", kind: "routine" }),
-        ],
-        [
-          { from: "routine:pln_1", to: "run:run_root", kind: "runs" },
-          { from: "routine:pln_1", to: "run:run_sibling", kind: "runs" },
-          { from: "run:run_root", to: "run:run_child", kind: "triggers" },
-        ],
-        "run:run_root",
-      ),
+      graph([
+        ...PROBE_NODES,
+        {
+          ...node({ id: "run-1-nested", occurred_at: "2026-08-10T10:00:01.000000000Z", depth: 1 }),
+          chain_origin: "run-1",
+        },
+      ]),
+      "run-1",
     )
-    expect(rows.map((r) => r.id)).toEqual(["run_root", "run_child"])
+    expect(rows.map((r) => r.id)).toEqual(["run-1", "run-1-nested"])
   })
 
-  it("keeps every run when the walk names no anchor", () => {
-    // Older server, or a caller handing over a graph-shaped object without the
-    // field. Dropping rows on a guess would hide real runs; showing them all is
-    // what this card did before and is the safe direction to be wrong in.
-    const rows = workflowRuns(
-      graph(
-        [node({ id: "run_a" }), node({ id: "run_b" })],
-        [
-          { from: "routine:pln_1", to: "run:run_a", kind: "runs" },
-          { from: "routine:pln_1", to: "run:run_b", kind: "runs" },
-        ],
-      ),
-    )
-    expect(rows).toHaveLength(2)
+  it("keeps every run when no chain origin is supplied", () => {
+    // A caller handing over a graph-shaped object without saying which chain it
+    // asked about. Dropping rows on a guess hides real runs; showing them all is
+    // what this card did before, and is the safe direction to be wrong in.
+    expect(workflowRuns(graph(PROBE_NODES))).toHaveLength(3)
   })
 
-  it("keeps the anchor even when it is only reachable as a sibling", () => {
-    // The anchor is reached by the same `runs` edge as its siblings — that is
-    // how the walk renders it — so it must be kept by identity, not by edge.
+  it("keeps every run when the walk carries no chain_origin at all", () => {
+    // A server from before the field existed. Its silence is not evidence that
+    // every run belongs to some other chain.
+    const older = PROBE_NODES.map(({ chain_origin: _dropped, ...n }) => n)
+    expect(workflowRuns(graph(older), "run-1")).toHaveLength(3)
+  })
+
+  it("drops a run the server left unattributed when it attributed the others", () => {
+    // Runs written before migration 20260807160100 carry no origin and cannot be
+    // backfilled. Once the server HAS stamped the graph, an unstamped run is one
+    // this chain cannot claim — the same call GET /api/v1/chains makes when it
+    // excludes that era from the index and reports it as has_unrecorded_runs
+    // rather than folding it into somebody's chain.
+    const mixed: TimelineNode[] = [...PROBE_NODES, node({ id: "run-ancient" })]
+    expect(workflowRuns(graph(mixed), "run-1").map((r) => r.id)).toEqual(["run-1"])
+  })
+
+  it("still sorts oldest first, undated last, once membership is decided", () => {
     const rows = workflowRuns(
-      graph(
-        [node({ id: "run_mine" })],
-        [{ from: "routine:pln_1", to: "run:run_mine", kind: "runs" }],
-        "run:run_mine",
-      ),
+      graph([
+        ...PROBE_NODES,
+        { ...node({ id: "run-1-undated", depth: 1 }), chain_origin: "run-1" },
+        {
+          ...node({ id: "run-1-early", occurred_at: "2026-08-10T09:59:00.000000000Z", depth: 1 }),
+          chain_origin: "run-1",
+        },
+      ]),
+      "run-1",
     )
-    expect(rows.map((r) => r.id)).toEqual(["run_mine"])
+    expect(rows.map((r) => r.id)).toEqual(["run-1-early", "run-1", "run-1-undated"])
   })
 })

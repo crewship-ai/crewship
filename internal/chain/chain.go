@@ -82,6 +82,30 @@ type Node struct {
 	// "started by a human".
 	ChainDepth int `json:"chain_depth,omitempty"`
 
+	// ChainOrigin is pipeline_runs.chain_origin on a run node: the id of the run
+	// that STARTED the chain this run belongs to. It is the answer to "is this
+	// run part of the chain I asked about, or merely next to it", and it is a
+	// property of the RUN — the same value whoever asks, from whatever anchor —
+	// in exactly the way ChainDepth is and Depth is not.
+	//
+	// It is carried because that question CANNOT be answered from the graph's
+	// shape, and every attempt to has been wrong. A walk reaches a run's routine,
+	// the routine reaches every run it has ever had, and a rule reaches every run
+	// it has ever caused; the walker records an edge onto an already-seen node,
+	// so one run arrives over `runs` from its routine AND over `triggers` from
+	// the rule. A client filtering on the edge kind therefore keeps the routine's
+	// entire history the moment a rule is involved — which is the common shape,
+	// not an exotic one. The database has recorded the membership all along; this
+	// field is the walk carrying it instead of asking the client to guess.
+	//
+	// Empty on every kind but run — no other table has the column — and empty on
+	// a run written before migration 20260807160100 added it, which cannot be
+	// backfilled: nothing else records what a finished run's chain was. An empty
+	// value therefore means "not recorded", never "belongs to no chain", and a
+	// reader that treats it as a mismatch will hide real runs. See
+	// ChainIndex.HasUnrecordedRuns, which surfaces that same era at the index.
+	ChainOrigin string `json:"chain_origin,omitempty"`
+
 	// OccurredAt is WHEN THIS NODE HAPPENED, and EndedAt/DurationMS are how
 	// long it took. All three are absent — never zero — on a kind that cannot
 	// answer, and absent is a load-bearing answer: a zero timestamp renders as

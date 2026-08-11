@@ -37440,6 +37440,9 @@
                           "chain_depth": {
                             "type": "integer"
                           },
+                          "chain_origin": {
+                            "type": "string"
+                          },
                           "depth": {
                             "type": "integer"
                           },

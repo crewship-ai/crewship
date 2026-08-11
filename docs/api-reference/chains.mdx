@@ -81,6 +81,8 @@ is the busiest table in the schema. There is no "return everything" mode.
       "max_chain_depth": 2,
       "failed_runs": 1,
       "failed": true,
+      "running_runs": 1,
+      "waiting_runs": 0,
       "first_activity": "2026-08-07T12:00:00.000000000Z",
       "last_activity": "2026-08-07T12:09:00.000000000Z",
       "duration_ms": 540000,
@@ -122,6 +124,8 @@ is the busiest table in the schema. There is no "return everything" mode.
 | `chains[].max_chain_depth` | integer | The deepest `chain_depth` any run in the chain reached. `0` with one run is a run somebody started by hand; `3` is a chain that built itself. |
 | `chains[].failed_runs` | integer | Runs with status `failed`. `interrupted` is **not** counted — a process that died mid-run is an operational event, and folding it in would make the flag mean two things. |
 | `chains[].failed` | boolean | `failed_runs > 0`. True when **any** run in the chain failed, not only the root. |
+| `chains[].running_runs` | integer | Runs still in flight — status `running` or `queued`. A queued run rides with running because from a reader's side it is accepted work that has not finished. **Always present**, including when 0. |
+| `chains[].waiting_runs` | integer | Runs parked on a person — status `waiting` or `paused`. Split from `running_runs` rather than folded into one "active" count because the two ask different things: a running chain resolves itself, a waiting one never will. Both are derived from **status**, not from a missing `ended_at` — that cheaper test would report every interrupted run as running forever. **Always present**, including when 0. |
 | `chains[].first_activity` | string | Earliest `started_at` in the chain. |
 | `chains[].last_activity` | string | Latest `ended_at`, falling back to `started_at` for a run still going. Rows are ordered by this, descending, with `origin` descending as the tiebreak. |
 | `chains[].duration_ms` | integer \| null | Wall clock from `first_activity` to `last_activity`. **Always present**, and `null` when there is no span to measure between. See [How long it took](#how-long-it-took). |
@@ -363,6 +367,7 @@ reports the consequence.
 | `nodes[].status` | string | Row status, verbatim from its table. |
 | `nodes[].depth` | integer | Shortest distance from the anchor, in hops. A property of **this query**: the same row reports a different value depending on where you started. |
 | `nodes[].chain_depth` | integer | `run` nodes only. `pipeline_runs.chain_depth` — how many **composed** hops separate this run from whatever a human did. A property of **the run**, identical whoever asks. Omitted when zero, so an absent field means "not composed" rather than "unknown". |
+| `nodes[].chain_origin` | string | `run` nodes only. Which chain the run **belongs to** — `pipeline_runs.chain_origin`, the id of the run that started it, and the same value [the index](#list-chains) groups on. A property of **the run**, identical whoever asks. Absent on runs written before chain recording, which means "not recorded", never "belongs to no chain". See [Telling members from siblings](#telling-members-from-siblings). |
 | `nodes[].occurred_at` | string | When this node **happened**, RFC3339 UTC. Only `run`, `assignment` and `inbox` carry it — see [When a node happened](#when-a-node-happened). **Absent, never zero**, on every other kind. |
 | `nodes[].ended_at` | string | When it stopped, RFC3339 UTC. `run` and `assignment` only, and only once they have stopped. Absent while the work is still in flight, and absent whenever `occurred_at` is. |
 | `nodes[].duration_ms` | integer | Wall clock between the two, in milliseconds. `0` is a real answer (it finished inside a millisecond); **absent** means there is no span to measure. Test for presence, not for truthiness. |
@@ -489,6 +494,40 @@ by several producers in three different shapes — including SQLite's
 rejects outright elsewhere — so the endpoint parses and re-emits rather than
 passing the stored string through. A stamp it cannot parse is reported as
 absent rather than forwarded raw.
+
+### Telling members from siblings
+
+**Not every `run` node in the response belongs to the chain you anchored on.**
+This surprises every consumer once, so it is worth stating plainly.
+
+The walk expands a run up to its routine, and a routine down to every run of
+it. So anchoring on one run returns that run, its routine, and *every other run
+that routine has ever had* — a chain of one run can come back carrying eight
+`run` nodes. That is correct for the picture the walk draws; it is wrong for any
+caller counting runs.
+
+Filter on `chain_origin`. A run node belongs to the chain when its
+`chain_origin` equals the origin you anchored on:
+
+```js
+const members = graph.nodes.filter(
+  (n) => n.kind === "run" && n.chain_origin === origin,
+)
+```
+
+Do **not** try to derive membership from the edges. The obvious rule — "a
+sibling arrives over a `runs` edge, so keep everything else" — is false: a
+routine fired by a rule gets an `automation --triggers--> run` edge for *every*
+run that rule ever caused, so its siblings arrive over `triggers` as well and
+survive the filter. That rule happens to work for `manual` and `schedule`
+triggers and silently fails for automations, which is the commonest shape in the
+product.
+
+A run whose `chain_origin` is absent predates chain recording. It cannot be
+attributed to any chain — see [What the index does not cover](#what-the-index-does-not-cover)
+— so treat it as unattributable rather than as a member. If **no** run node in a
+response carries the field, you are talking to a server older than this field
+and should keep every run rather than drop them all.
 
 ### Links that do not exist
 
