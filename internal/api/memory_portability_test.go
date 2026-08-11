@@ -236,11 +236,12 @@ func TestHostPlacerRefusesTraversal(t *testing.T) {
 
 	destinationParent := t.TempDir()
 	root := filepath.Join(destinationParent, "memory")
-	if err := (hostPlacer{root: root}).Place(context.Background(), staging, []string{"../secret.md"}); err == nil {
-		t.Fatal("hostPlacer accepted a path outside staging and destination roots")
-	}
+	err := (hostPlacer{root: root}).Place(context.Background(), staging, []string{"../secret.md"})
 	if _, err := os.Stat(filepath.Join(destinationParent, "secret.md")); !os.IsNotExist(err) {
 		t.Fatalf("traversal created a destination outside root: %v", err)
+	}
+	if err == nil {
+		t.Fatal("hostPlacer accepted a path outside staging and destination roots")
 	}
 }
 
