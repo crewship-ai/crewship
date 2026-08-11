@@ -43,7 +43,11 @@ crewship start [flags]
    container provider — useful for read-only browse mode without
    running agents.
 8. **HTTP server starts.** Binds `0.0.0.0:8080` by default. WebSocket
-   on the same port at `/ws`. IPC socket at `/tmp/crewship.sock`.
+   on the same port at `/ws`. IPC socket at `/tmp/crewship.sock`
+   (or `$CREWSHIP_DATA_DIR/crewship.sock` when the data dir is set to
+   something other than the packaged `/var/lib/crewship`). If another
+   process is already listening on that socket, start fails with an
+   error naming the path instead of taking the socket over.
 9. **First-run welcome.** If post-migration the `users` table is empty
    AND stdout is a TTY, prints a one-screen banner pointing at the
    browser onboarding wizard (PR #441). Suppressed on non-TTY so
@@ -79,7 +83,7 @@ Beyond the flags above, `crewship start` respects:
 | Var | Default | Effect |
 |-----|---------|--------|
 | `CREWSHIP_PORT` | `8080` | HTTP listen port. (There is no `--port` flag — set it here.) |
-| `CREWSHIP_SOCKET_PATH` | `/tmp/crewship.sock` | IPC socket for sidecar coordination. |
+| `CREWSHIP_SOCKET_PATH` | `/tmp/crewship.sock`, or `$CREWSHIP_DATA_DIR/crewship.sock` for a relocated data dir | IPC socket for sidecar coordination. See [Environment](/configuration/environment#ipc) for the derivation. |
 | `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge name for agent containers. |
 | `CREWSHIP_CONTAINER_PROVIDER` | `docker` | `docker`, `apple`, or `auto`. |
 | `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Where workspace files live. |
@@ -107,6 +111,14 @@ CREWSHIP_PORT=8082 crewship start --db file:/opt/crewship-2/crewship.db
 Each instance is fully isolated — separate DB, separate container
 network (`CREWSHIP_CONTAINER_NETWORK=crewship-agents-1`), separate
 IPC socket (`CREWSHIP_SOCKET_PATH=/tmp/crewship-1.sock`).
+
+Giving each instance its own `CREWSHIP_DATA_DIR` (anything other than
+the packaged `/var/lib/crewship`) already derives a distinct IPC socket
+and bbolt file under that directory, so the explicit
+`CREWSHIP_SOCKET_PATH` / `CREWSHIP_BOLT_PATH` overrides above are only
+needed when you want specific paths. Both files are exclusive by nature:
+sharing the bbolt file makes the second instance block on its lock, and
+sharing the socket is refused at startup.
 
 ## Graceful shutdown
 
