@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
 
@@ -81,6 +83,11 @@ func NewModelsHandler(db *sql.DB, logger *slog.Logger, ollamaURL string) *Models
 	}
 }
 
+// ollamaListTimeout bounds a model-discovery call. It matches the 15s the
+// admin judge path uses for the same operation (admin_keeper_judge.go), so a
+// slow daemon behaves the same whichever surface asked.
+const ollamaListTimeout = 15 * time.Second
+
 // defaultModelLister wires the concrete providers. OPENAI / ANTHROPIC need an
 // API key; OLLAMA needs only the daemon URL.
 func defaultModelLister(provider, apiKey, ollamaURL string) (llm.ModelLister, bool) {
@@ -93,7 +100,18 @@ func defaultModelLister(provider, apiKey, ollamaURL string) (llm.ModelLister, bo
 		if ollamaURL == "" {
 			return nil, false
 		}
-		return llm.NewOllama(ollamaURL, ""), true
+		// Through the endpoint client, not http.DefaultTransport. This URL is
+		// operator-set (POST /api/v1/admin/keeper/judge/*, roleManage) and
+		// every other place it is dialled already goes through
+		// httpsafe.TrustedEndpointClient — admin_keeper_judge.go at the probe,
+		// the model list and the connect path. This one did not, so the same
+		// address those refuse at 169.254.169.254 was reachable here.
+		//
+		// TrustedEndpointClient and not the strict fence: an operator naming
+		// their own Ollama box on localhost or the LAN is the normal case and
+		// must keep working. It refuses only the hard-blocked tier — cloud
+		// metadata and friends — at dial time.
+		return llm.NewOllamaWithClient(ollamaURL, "", httpsafe.TrustedEndpointClient(ollamaListTimeout)), true
 	default:
 		// GOOGLE and anything else have no live lister yet — curated only.
 		return nil, false
