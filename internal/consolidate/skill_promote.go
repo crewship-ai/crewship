@@ -29,9 +29,17 @@ import (
 // than a learned-rule line.
 type SkillPromoteOptions struct {
 	OutputDir    string
+	OutputRoot   string
 	Now          time.Time
 	MinRecall    int
 	MinComposite float64
+
+	// afterProposedDirValidated is a test seam for deterministic directory-swap
+	// attacks between validation and the staged skill write.
+	afterProposedDirValidated func()
+	// afterProposedRootOpened swaps the pathname after its directory handle is
+	// anchored, proving the skill write uses the handle rather than the name.
+	afterProposedRootOpened func()
 }
 
 // defaultMinRecall / defaultMinComposite are the production thresholds.
@@ -84,13 +92,24 @@ func PromoteRuleToSkill(rule LearnedRule, score ScoreResult, opts SkillPromoteOp
 	if err := memory.EnsureDirNoFollow(opts.OutputDir, proposedDir); err != nil {
 		return "", fmt.Errorf("promote: mkdir .proposed: %w", err)
 	}
+	if opts.afterProposedDirValidated != nil {
+		opts.afterProposedDirValidated()
+	}
+	proposedRoot, err := openProposedRoot(opts.OutputRoot, opts.OutputDir)
+	if err != nil {
+		return "", fmt.Errorf("promote: %w", err)
+	}
+	defer proposedRoot.Close()
+	if opts.afterProposedRootOpened != nil {
+		opts.afterProposedRootOpened()
+	}
 
 	body := renderSkillMarkdown(rule, score, slug, opts.Now)
 	// Atomic create-or-fail so concurrent promotions never clobber
 	// each other's staged files. Two consolidator passes that pick
 	// the same slug both race uniqueSkillPath + WriteFile separately;
 	// O_EXCL serializes them at the kernel level.
-	path, err := writeUniqueSkillFile(proposedDir, slug, []byte(body))
+	path, err := skills.WriteUniqueSkillFileRoot(proposedRoot, proposedDir, slug, []byte(body))
 	if err != nil {
 		return "", err
 	}
