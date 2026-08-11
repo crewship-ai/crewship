@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -194,8 +193,9 @@ const dbProbeTimeout = 5 * time.Second
 // database at dbPath open — the actual question `restore-snapshot` needs
 // answered before it overwrites that file.
 //
-// It replaces a health-endpoint probe (localServerRunning, below) that had no
-// connection to dbPath whatsoever and was wrong in both directions: it
+// It replaces a health-endpoint probe (localServerRunning, now deleted along
+// with its last caller) that had no connection to dbPath whatsoever and was
+// wrong in both directions: it
 // refused to restore a sandbox database because an unrelated production
 // instance answered on :8080, and — the dangerous half — it happily restored
 // a database that a crewshipd on some other port was holding open, tearing
@@ -211,22 +211,32 @@ const dbProbeTimeout = 5 * time.Second
 //
 // What this detects, precisely:
 //
-//   - Any other connection that has the database open in WAL mode, even a
-//     completely idle one. That is the live-crewshipd case: a WAL connection
-//     holds a shared lock on the dead-man-switch byte for its whole lifetime,
-//     and locking_mode=EXCLUSIVE needs that byte exclusively, so the probe
-//     gets SQLITE_BUSY. Plain `BEGIN EXCLUSIVE` without the pragma is NOT
-//     enough here — measured: against a held-open idle WAL connection it
-//     succeeds in ~250µs, because in WAL mode it only contends with an
-//     in-flight writer. That distinction is the whole reason for the pragma.
+//   - Any other connection holding the WAL index (the -shm file) open, idle
+//     or not. That is the live-crewshipd case: such a connection holds a
+//     shared lock on the dead-man-switch byte until it closes, and
+//     locking_mode=EXCLUSIVE needs that byte exclusively, so the probe gets
+//     SQLITE_BUSY. Plain `BEGIN EXCLUSIVE` without the pragma is NOT enough
+//     here — measured: against a held-open idle WAL connection it succeeds in
+//     ~250µs, because in WAL mode it only contends with an in-flight writer.
+//     That distinction is the whole reason for the pragma.
 //   - Another writer mid-transaction, in any journal mode.
 //
-// What it does NOT detect: an idle connection to a database in rollback-journal
-// mode, which holds no OS-level lock between transactions and is therefore
-// invisible to any lock-based check. Crewship's own Open always sets WAL, so
-// every crewshipd is covered; a hand-rolled non-WAL connection from some other
-// tool is the residual gap, and there the "stop the server first" instruction
-// in the command help is still the operator's job.
+// What it does NOT detect, both measured rather than reasoned:
+//
+//   - An idle connection to a database in rollback-journal mode. It holds no
+//     OS-level lock between transactions and is invisible to any lock-based
+//     check. Crewship's own Open always sets WAL, so every crewshipd is
+//     covered; a hand-rolled non-WAL connection from another tool is the gap.
+//   - A connection that opened the file and has not executed a single
+//     statement yet, in the specific case where opening it converted the
+//     file from rollback-journal to WAL: the WAL index is not materialised
+//     until the first read or write, so there is briefly nothing to collide
+//     with. One statement — which a booting crewshipd runs long before an
+//     operator reaches these commands — closes that window for good.
+//
+// In both gaps the "stop the server first" instruction in the command help is
+// still doing real work; this probe narrows what the operator has to get
+// right, it does not eliminate it.
 //
 // Closing the probe connection on a WAL database checkpoints and removes the
 // -wal/-shm sidecars. That is harmless-to-helpful here: it folds committed
@@ -313,36 +323,4 @@ func isSQLiteBusy(err error) bool {
 		return true
 	}
 	return false
-}
-
-// localServerRunning best-effort detects a local crewshipd by probing the
-// health endpoint on the configured/default port ($CREWSHIP_PORT, else 8080).
-//
-// Know what it is before gating anything destructive on it: it answers "is
-// something answering HTTP on one port", and nothing more. It has no idea
-// which database the responder uses — so it fires for an unrelated instance
-// that shares no state with this data dir, and stays silent for a crewshipd on
-// any other port. restore-snapshot used to gate on it and got burned both
-// ways; it now locks the target file itself (databaseInUse, above).
-//
-// The remaining caller is `db repair-ledger`, where it is a nudge rather than
-// a guard: that command rewrites the ledger inside a single transaction on a
-// connection it opens itself, so the actual serialization comes from SQLite,
-// not from this function.
-func localServerRunning() (bool, string) {
-	port := os.Getenv("CREWSHIP_PORT")
-	if port == "" {
-		port = "8080"
-	}
-	url := "http://localhost:" + port + "/api/health"
-	client := &http.Client{Timeout: 800 * time.Millisecond}
-	resp, err := client.Get(url)
-	if err != nil {
-		return false, ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusOK {
-		return true, url
-	}
-	return false, ""
 }

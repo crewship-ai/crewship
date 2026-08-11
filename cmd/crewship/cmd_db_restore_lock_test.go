@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/database"
@@ -107,6 +108,26 @@ func serveHealthOn(t *testing.T) {
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
 	t.Setenv("CREWSHIP_PORT", strconv.Itoa(ln.Addr().(*net.TCPAddr).Port))
+}
+
+// healthPortAnswers reports whether something answers /api/health on
+// $CREWSHIP_PORT — the exact probe the old guard used, reimplemented here
+// rather than called from production code, which no longer contains it. It
+// exists so a case labelled "an unrelated server IS answering" can assert its
+// own premise instead of trusting the fixture.
+func healthPortAnswers(t *testing.T) bool {
+	t.Helper()
+	port := os.Getenv("CREWSHIP_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	client := &http.Client{Timeout: 800 * time.Millisecond}
+	resp, err := client.Get("http://localhost:" + port + "/api/health")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // pinDeadPort points $CREWSHIP_PORT at a port nothing listens on, so a dev
@@ -210,18 +231,23 @@ func TestRestoreSnapshotDatabaseInUseGuard(t *testing.T) {
 				if err != nil {
 					t.Fatalf("hold db open: %v", err)
 				}
-				// Deliberately idle: no transaction in flight. A live
-				// crewshipd spends most of its time exactly like this, and a
-				// guard that only catches an active writer would wave it
-				// through.
 				t.Cleanup(func() { _ = held.Close() })
+				// One read, then idle — a live crewshipd's normal state, and
+				// the one the guard must catch. The read also pins the
+				// fixture to a holder that definitely has the WAL index
+				// mapped, rather than one that happens to because this
+				// database was already in WAL mode on disk.
+				var marker string
+				if err := held.QueryRow(`SELECT v FROM marker`).Scan(&marker); err != nil {
+					t.Fatalf("holder query: %v", err)
+				}
 			}
 
-			// Cross-check the fixture against the old port probe, so a case
-			// labelled "unrelated server answering" cannot silently degrade
-			// into "nothing answering" and pass for the wrong reason.
-			if running, _ := localServerRunning(); running != tt.healthServer {
-				t.Fatalf("fixture: port probe sees a server = %v, want %v", running, tt.healthServer)
+			// Cross-check the fixture, so a case labelled "unrelated server
+			// answering" cannot silently degrade into "nothing answering" and
+			// pass for the wrong reason.
+			if answers := healthPortAnswers(t); answers != tt.healthServer {
+				t.Fatalf("fixture: health port answers = %v, want %v", answers, tt.healthServer)
 			}
 
 			restoreSnapshotList = false

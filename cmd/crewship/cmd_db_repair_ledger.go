@@ -65,15 +65,15 @@ Stop crewshipd first: a running server holds the database open.`,
 		// Read-only inspection is safe against a live server; writing is not.
 		// The guard therefore sits between the plan and the apply, so
 		// --dry-run stays useful while the server is still up.
-		db, err := sql.Open("sqlite", dbPath)
+		inspect, err := sql.Open("sqlite", dbPath)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", dbPath, err)
 		}
-		defer db.Close()
+		defer func() { _ = inspect.Close() }()
 
 		ctx := cmdContext(cmd)
 
-		applied, err := database.ReadLedger(ctx, db)
+		applied, err := database.ReadLedger(ctx, inspect)
 		if errors.Is(err, database.ErrNoLedger) {
 			// Almost always the wrong directory rather than a corrupt file, so
 			// lead with that instead of the driver's "no such table".
@@ -117,14 +117,59 @@ Stop crewshipd first: a running server holds the database open.`,
 			return nil
 		}
 
-		if running, where := localServerRunning(); running {
-			return fmt.Errorf("a Crewship server appears to be running (%s) — stop it before repairing (the DB is held open)", where)
+		// Everything above this line only read. Everything below rewrites the
+		// ledger, so this is where "is anyone else using this database" has to
+		// be answered — and answered about the FILE. The health-endpoint probe
+		// that used to sit here knew nothing about dbPath: it blocked a repair
+		// on a sandbox database because an unrelated instance answered on the
+		// probed port, and waved one through against a crewshipd running on any
+		// other port. Renumbering the ledger under a server that has already
+		// booted against the old numbers is the failure that guard existed to
+		// prevent, and it is the one it did not prevent.
+		//
+		// Close our own handle first. Measured, on the fixture in
+		// cmd_db_repair_ledger_test.go: `sql.Open` alone leaves inUse false
+		// (database/sql is lazy — no connection exists yet), but after
+		// ReadLedger has run a query the pooled idle connection keeps the WAL
+		// dead-man-switch lock and databaseInUse reports true. ReadLedger
+		// always runs by the time we get here, so probing without closing
+		// would refuse every repair, every time, in our own name.
+		//
+		// Nothing carries over from that handle: `plan` is a plain value, and
+		// ApplyLedgerRepair opens its own transaction which re-reads every row
+		// it is about to move and aborts with ErrLedgerChanged if the ledger
+		// drifted. A fresh handle is not a compromise here — that in-transaction
+		// re-check is the same consistency story the apply already relied on.
+		if err := inspect.Close(); err != nil {
+			return fmt.Errorf("close inspection handle on %s: %w", dbPath, err)
 		}
+
+		if inUse, err := databaseInUse(dbPath); err != nil {
+			// Fail closed, but honestly: "we could not open the file" is not
+			// "a server is running", and sending the operator to hunt for a
+			// process that does not exist is how the old message wasted time.
+			return fmt.Errorf("cannot determine whether %s is in use, so not repairing: %w", dbPath, err)
+		} else if inUse {
+			return fmt.Errorf("%s is open by another process (most likely a running crewshipd) — stop it before repairing; a server that has already booted holds the old version numbers in memory", dbPath)
+		}
+
 		if !repairLedgerYes && !confirmInteractive("Apply this repair?") {
 			return fmt.Errorf("aborted (pass --yes to skip confirmation)")
 		}
 
-		if err := database.ApplyLedgerRepair(ctx, db, plan); err != nil {
+		// Reopen for the write. The probe deliberately does not hold its lock
+		// (see databaseInUse), so there is nothing here to inherit — and the
+		// prompt above is an unbounded window in which the operator could start
+		// the server anyway, which no lock held across it could close either.
+		// ApplyLedgerRepair's in-transaction re-check is what actually covers
+		// that window.
+		apply, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			return fmt.Errorf("reopen %s for the repair: %w", dbPath, err)
+		}
+		defer func() { _ = apply.Close() }()
+
+		if err := database.ApplyLedgerRepair(ctx, apply, plan); err != nil {
 			return fmt.Errorf("repair failed — the ledger is unchanged (the whole repair runs in one transaction): %w", err)
 		}
 
