@@ -33,12 +33,14 @@ moves ledger version numbers only; it does not change table data or schema.
 crewship db repair-ledger --dry-run   # inspect the plan
 crewship db repair-ledger             # show plan and confirm before writing
 crewship db repair-ledger --yes       # skip confirmation
+crewship db repair-ledger --force     # override an indeterminate in-use probe
 ```
 
 `--dry-run` is read-only and may be used while the server is running. Applying
-the repair refuses to proceed while a local server is detected. The command
-fails closed when the ledger names a migration unknown to the current binary;
-that case requires a newer binary or a snapshot restore.
+the repair refuses to proceed while the database is in use — see
+[When the in-use check cannot answer](#when-the-in-use-check-cannot-answer).
+The command fails closed when the ledger names a migration unknown to the
+current binary; that case requires a newer binary or a snapshot restore.
 
 ## `crewship db restore-snapshot`
 
@@ -51,8 +53,30 @@ crewship db restore-snapshot --list        # list snapshots only
 crewship db restore-snapshot               # restore newest, with confirmation
 crewship db restore-snapshot snapshot.bak  # restore a named snapshot
 crewship db restore-snapshot --yes         # skip confirmation
+crewship db restore-snapshot --force       # override an indeterminate in-use probe
 ```
 
 Restoring is the database half of a downgrade: run the matching older binary
 afterwards. A remote `--server` target does not change which local file this
 command operates on.
+
+### When the in-use check cannot answer
+
+Both commands ask the database file itself whether anything is holding it
+open, rather than probing a port — a server on a non-standard port used to
+sail straight through. The probe is checked twice: once up front, and again
+immediately before the write, because the confirmation prompt is unbounded
+and a supervised `crewshipd` can come back while you are reading it.
+
+There are three outcomes, and `--force` only lifts one of them:
+
+| Probe says | Result |
+|---|---|
+| Not in use | Proceeds. |
+| **In use** | Refuses. `--force` does **not** override this — a live server holding the database is a knowable answer, and writing anyway tears the file. Stop the server. |
+| **Cannot tell** | Refuses, naming the underlying error. `--force` overrides this one, with warnings. |
+
+"Cannot tell" is mostly one situation: a database corrupt enough that it
+cannot answer the probe — `file is not a database (26)` — which is exactly
+the state a snapshot restore exists for. Check that no `crewshipd` is
+running, then re-run with `--force`.

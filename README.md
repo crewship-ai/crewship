@@ -307,7 +307,7 @@ saying the web UI was not built. That is deliberate — see
 | Database | SQLite via `modernc.org/sqlite`, Go-side migrations (no Prisma at runtime) |
 | Backend | Go 1.26 (`crewship`) — REST + WebSocket, Docker orchestration |
 | Agent runtime | Docker containers; Ollama / OpenCode / Claude Code adapters (plus scaffolds) |
-| IPC | HTTP-over-Unix-socket on `/tmp/crewship.sock`, or `$CREWSHIP_DATA_DIR/crewship.sock` for a relocated data dir (X-Internal-Token auth) |
+| IPC | HTTP-over-Unix-socket, `<data dir>/crewship.sock` — `/tmp/crewship.sock` only for the packaged `/var/lib/crewship` install (X-Internal-Token auth) |
 
 > **Prisma is TypeScript-types only.** All schema changes go through
 > `internal/database/migrate.go`. Never run `prisma migrate`.

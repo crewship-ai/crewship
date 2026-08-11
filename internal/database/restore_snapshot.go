@@ -83,8 +83,16 @@ func ListSnapshots(dbPath string) ([]Snapshot, error) {
 //   - then copies the snapshot into place.
 //
 // The caller MUST ensure crewshipd is not running against dbPath (a live
-// server holds the DB open and would see a torn file); the CLI wrapper checks
-// for a running local server before calling this.
+// server holds the DB open and would see a torn file). This function does not
+// check that itself and cannot: it is a file operation with no view of who
+// else has the database open.
+//
+// The CLI wrapper does check, by asking the database file for an exclusive
+// lock — twice, since its confirmation prompt is unbounded and a supervised
+// crewshipd can return while the operator reads it. Any other caller has to
+// establish the same thing for itself; an earlier version of this comment
+// said the wrapper "checks for a running local server", which described a
+// port probe that had no relationship to dbPath at all.
 func RestoreSnapshot(dbPath, snapshotPath string) error {
 	// Safety: the snapshot must be one of THIS db's pre-migrate snapshots.
 	valid := false
