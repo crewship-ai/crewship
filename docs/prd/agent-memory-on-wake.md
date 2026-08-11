@@ -76,7 +76,9 @@ recall, memory nudge, cost awareness.
 
 The consolidator's `.proposed` staging directory is created one component at a time and
 refuses symlinks. Both consolidation proposals and memory-derived skill candidates share
-this boundary, preventing the agent-writable tree from redirecting host-side staging.
+this boundary. Subsequent locks, durable proposal writes, cleanup, and skill creation stay
+anchored to an open directory root, so replacing the validated pathname cannot redirect
+host-side staging.
 Proposal mode requires the configured topics output directory to exist before staging;
 it does not create an unanchored output path.
 

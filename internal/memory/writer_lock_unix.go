@@ -32,6 +32,39 @@ func (l *writeLock) Lock() error {
 	return nil
 }
 
+// Lock acquires an exclusive advisory lock beneath the opened root.
+func (l *RootFileLock) Lock() error {
+	if l.root == nil {
+		return fmt.Errorf("open lockfile: root is nil")
+	}
+	f, err := l.root.OpenFile(l.name, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return fmt.Errorf("open lockfile: %w", err)
+	}
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("flock: %w", err)
+	}
+	l.f = f
+	return nil
+}
+
+// Unlock releases the root-anchored advisory lock and closes its fd.
+func (l *RootFileLock) Unlock() error {
+	if l.f == nil {
+		return nil
+	}
+	var firstErr error
+	if err := unix.Flock(int(l.f.Fd()), unix.LOCK_UN); err != nil {
+		firstErr = err
+	}
+	if err := l.f.Close(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	l.f = nil
+	return firstErr
+}
+
 // Unlock releases the advisory lock and closes the underlying fd.
 // Idempotent — calling Unlock on an unlocked writeLock is a no-op.
 func (l *writeLock) Unlock() error {

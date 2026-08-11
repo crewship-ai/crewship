@@ -50,6 +50,13 @@ type Config struct {
 	// caller supplied an already-existing, trusted OutputDir (primarily tests).
 	OutputRoot string
 
+	// afterProposedDirValidated is a test seam for deterministic directory-swap
+	// attacks between validation and the first staged write.
+	afterProposedDirValidated func()
+	// afterProposedRootOpened swaps the pathname after its directory handle is
+	// anchored, proving later operations use the handle rather than the name.
+	afterProposedRootOpened func()
+
 	// ProposalMode flips the consolidator to HITL-staging behaviour.
 	// When true:
 	//   - rules are written to {OutputDir}/.proposed/proposal-{runID}.md
