@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -78,23 +79,38 @@ func Upsert(ctx context.Context, db *sql.DB, j journal.Emitter, s Snapshot) erro
 		}
 	}
 
-	// Read prior status first so we know whether to emit. One extra
-	// query per Upsert is cheap and keeps the journal clean.
+	// Read the prior status and write the new one in ONE transaction. The
+	// read decides whether this write is a transition worth journalling, so
+	// the two must observe the same database state: as two standalone
+	// statements, a second writer landing in between made both callers
+	// decide against a status that was already gone and emit an
+	// agent.status_change for a transition that never happened. The journal
+	// is a transition log, not a log of what each racing goroutine saw.
+	//
+	// database.Open sets `_txlock=immediate`, so BeginTx is a BEGIN
+	// IMMEDIATE: the single database-wide writer lock is held from the start,
+	// a concurrent Upsert waits it out under busy_timeout instead of racing,
+	// and there is no deferred read-then-upgrade deadlock. The window covers
+	// two local statements and nothing else — the journal emit below runs
+	// AFTER the commit, because the Emitter writes through its own pool and
+	// would otherwise contend with the lock this transaction holds.
 	var prev sql.NullString
-	_ = db.QueryRowContext(ctx, `SELECT status FROM agent_status WHERE agent_id = ?`, s.AgentID).Scan(&prev)
+	if err := database.WithTx(ctx, db, func(tx *sql.Tx) error {
+		_ = tx.QueryRowContext(ctx, `SELECT status FROM agent_status WHERE agent_id = ?`, s.AgentID).Scan(&prev)
 
-	_, err := db.ExecContext(ctx, `INSERT INTO agent_status
-		(agent_id, workspace_id, crew_id, status, since, details)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(agent_id) DO UPDATE SET
-			workspace_id = excluded.workspace_id,
-			crew_id      = excluded.crew_id,
-			status       = excluded.status,
-			since        = excluded.since,
-			details      = excluded.details`,
-		s.AgentID, s.WorkspaceID, nullable(s.CrewID),
-		string(s.Status), s.Since.UTC().Format(time.RFC3339Nano), details)
-	if err != nil {
+		_, err := tx.ExecContext(ctx, `INSERT INTO agent_status
+			(agent_id, workspace_id, crew_id, status, since, details)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(agent_id) DO UPDATE SET
+				workspace_id = excluded.workspace_id,
+				crew_id      = excluded.crew_id,
+				status       = excluded.status,
+				since        = excluded.since,
+				details      = excluded.details`,
+			s.AgentID, s.WorkspaceID, nullable(s.CrewID),
+			string(s.Status), s.Since.UTC().Format(time.RFC3339Nano), details)
+		return err
+	}); err != nil {
 		return fmt.Errorf("presence: upsert: %w", err)
 	}
 
