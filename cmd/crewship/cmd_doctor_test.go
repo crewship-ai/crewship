@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
@@ -165,18 +166,32 @@ func TestCheckDsnReachability(t *testing.T) {
 	})
 
 	t.Run("opted in + DSN unreachable → WARN", func(t *testing.T) {
-		// The check dials host:443; we point it at a DNS name guaranteed
-		// not to resolve so the dialer fails fast. WARN (not FAIL) because
-		// Sentry being unreachable is not a Crewship health signal —
-		// it's an external service outage. CodeRabbit flagged the prior
-		// version: subtest title said "reachable → PASS" but the body
-		// asserted the unreachable path. Renamed to match what it
-		// actually tests, and removed the leftover net.Listen setup that
-		// the comment explained but the code never used.
+		// The check dials host:443. WARN (not FAIL) because Sentry being
+		// unreachable is not a Crewship health signal — it's an external
+		// service outage. CodeRabbit flagged the prior version: subtest
+		// title said "reachable → PASS" but the body asserted the
+		// unreachable path. Renamed to match what it actually tests, and
+		// removed the leftover net.Listen setup that the comment explained
+		// but the code never used.
+		//
+		// The host is an RFC 5737 TEST-NET-1 literal, not a .invalid name.
+		// A name assumes the resolver refuses it, and that assumption is
+		// false on any host with a DNS search domain and a wildcard record:
+		// on crewship-dev, `search unifylab.cz` turns
+		// 127.0.0.1.unreachable.invalid into
+		// 127.0.0.1.unreachable.invalid.unifylab.cz → 192.168.1.200, which
+		// answers on 443 — so this subtest asserted WARN and got PASS on
+		// every dev box while staying green in CI. A literal cannot be
+		// resolved into something reachable. The short deadline keeps it
+		// fast: 192.0.2.0/24 is unrouted, so the dial hangs rather than
+		// being refused, and the 5 s dialer timeout would otherwise be
+		// paid in full on every run.
 		if _, _, err := crashreport.SetOptIn(ctx, db.DB, true); err != nil {
 			t.Fatalf("SetOptIn: %v", err)
 		}
-		got := checkDsnReachability(ctx, db.DB, "https://k@127.0.0.1.unreachable.invalid/1")
+		dialCtx, cancelDial := context.WithTimeout(ctx, 300*time.Millisecond)
+		defer cancelDial()
+		got := checkDsnReachability(dialCtx, db.DB, "https://k@192.0.2.1/1")
 		if got.status != "WARN" {
 			t.Errorf("status = %q, want WARN for unreachable host; detail=%q", got.status, got.detail)
 		}
