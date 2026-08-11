@@ -263,6 +263,7 @@ func consolidateAllCrews(ctx context.Context, db *sql.DB, c *Consolidator, opts 
 			MinEntries:   opts.MinEntries,
 			LLMModel:     opts.LLMModel,
 			OutputDir:    outputDir,
+			OutputRoot:   opts.StorageBasePath,
 			ProposalMode: hitlEnabled(),
 			BlobRoot:     opts.BlobRoot,
 		}

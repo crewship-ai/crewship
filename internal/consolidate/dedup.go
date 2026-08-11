@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // dedupAgainstPrior filters out candidate rules whose normalised
@@ -140,7 +142,7 @@ func loadPriorPatternHashes(outputDir string, now time.Time, window time.Duratio
 // consolidator emits: `- **Pattern:** X happens  ` (trailing double-
 // space is markdown line break; trailing newline is line terminator).
 func extractPatterns(path string) []string {
-	f, err := os.Open(path)
+	f, err := memory.OpenNoFollow(path)
 	if err != nil {
 		return nil
 	}

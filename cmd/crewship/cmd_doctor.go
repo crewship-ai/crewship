@@ -975,6 +975,17 @@ func runCheckDsnReachability(ctx context.Context) checkResult {
 	return checkDsnReachability(ctx, db, crashreport.ResolveDSN())
 }
 
+// dialTCP is the indirection through which checkDsnReachability opens its
+// probe connection. Production always dials the real network; tests
+// substitute a stub (saving/restoring the var) so the WARN/PASS branches
+// are deterministic — independent of the host's DNS resolver (a wildcard
+// search domain can make every hostname "resolve") and of whatever
+// happens to be listening on the network.
+var dialTCP = func(ctx context.Context, network, address string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	return dialer.DialContext(ctx, network, address)
+}
+
 func checkDsnReachability(ctx context.Context, db *sql.DB, dsn string) checkResult {
 	enabled, asked, _, err := crashreport.Status(ctx, db)
 	if err != nil || !asked || !enabled {
@@ -1001,8 +1012,7 @@ func checkDsnReachability(ctx context.Context, db *sql.DB, dsn string) checkResu
 		}
 	}
 	target := host + ":443"
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	conn, err := dialer.DialContext(ctx, "tcp", target)
+	conn, err := dialTCP(ctx, "tcp", target)
 	if err != nil {
 		return checkResult{
 			name:   "telemetry endpoint",

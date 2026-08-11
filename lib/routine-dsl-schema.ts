@@ -52,6 +52,7 @@ const KIND_DETAIL: Record<string, string> = {
   script: "Runs a file from the crew shared dir — deterministic",
   query: "Read-only aggregate over run data — deterministic",
   foreach: "A loop — the body runs once per item",
+  crewship: "Acts on Crewship's own nouns — creates an issue, a comment, an escalation",
 }
 
 /** Sub-object each kind carries its body in, when it has one. */

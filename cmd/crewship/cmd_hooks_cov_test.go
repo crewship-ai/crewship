@@ -11,12 +11,19 @@ import (
 func TestHooksListRunE_TableOutput(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
+	// Fixture matches what GET /api/v1/hooks actually emits. It used to
+	// carry a top-level `target` field, which the handler has never sent —
+	// the command decoded it and rendered a permanently blank column. The
+	// target is derived from handler_config, so that is what the fixture
+	// has to carry for the truncation assertion below to mean anything.
 	s.OnGet("/api/v1/hooks", clitest.JSONResponse(200, map[string]any{
 		"rows": []map[string]any{
-			{"id": "hk_1", "crew_id": "cc1", "event": "assignment.completed", "handler_kind": "webhook",
-				"target": "https://example.com/hook", "enabled": true, "created_at": "2026-06-01"},
-			{"id": "hk_2", "crew_id": "cc1", "event": "journal.entry", "handler_kind": "script",
-				"target": strings.Repeat("x", 50), "enabled": false, "created_at": "2026-06-02"},
+			{"id": "hk_1", "crew_id": "cc1", "event": "post_tool_call", "handler_kind": "http",
+				"handler_config": map[string]any{"url": "https://example.com/hook"},
+				"enabled":        true, "created_at": "2026-06-01"},
+			{"id": "hk_2", "crew_id": "cc1", "event": "post_memory_write", "handler_kind": "shell",
+				"handler_config": map[string]any{"command": strings.Repeat("x", 50)},
+				"enabled":        false, "created_at": "2026-06-02"},
 		},
 		"count": 2,
 	}))
@@ -28,7 +35,7 @@ func TestHooksListRunE_TableOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "hk_1") || !strings.Contains(out, "assignment.completed") {
+	if !strings.Contains(out, "hk_1") || !strings.Contains(out, "post_tool_call") {
 		t.Errorf("row missing:\n%s", out)
 	}
 	if !strings.Contains(out, "yes") || !strings.Contains(out, "no") {
@@ -71,8 +78,8 @@ func TestHooksListRunE_JSONFormat(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
 	s.OnGet("/api/v1/hooks", clitest.JSONResponse(200, map[string]any{
-		"rows": []map[string]any{{"id": "hk_9", "event": "keeper.decision", "handler_kind": "webhook",
-			"target": "t", "enabled": true, "created_at": "2026-06-01"}},
+		"rows": []map[string]any{{"id": "hk_9", "event": "on_guardrail_triggered", "handler_kind": "http",
+			"handler_config": map[string]any{"url": "https://t.test"}, "enabled": true, "created_at": "2026-06-01"}},
 		"count": 1,
 	}))
 	covSetupCli10(t, s.URL())
@@ -84,7 +91,7 @@ func TestHooksListRunE_JSONFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, `"hk_9"`) || !strings.Contains(out, `"keeper.decision"`) {
+	if !strings.Contains(out, `"hk_9"`) || !strings.Contains(out, `"on_guardrail_triggered"`) {
 		t.Errorf("json rows missing: %q", out)
 	}
 }

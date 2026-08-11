@@ -278,6 +278,14 @@ type FileLock struct {
 	f    *os.File
 }
 
+// RootFileLock is a FileLock whose sentinel is resolved beneath an already-open
+// directory root rather than by pathname.
+type RootFileLock struct {
+	root *os.Root
+	name string
+	f    *os.File
+}
+
 // writeLock is the unexported alias WriteFile uses internally so older
 // call sites do not need to import the public surface to talk to
 // themselves. Same machinery.
@@ -287,6 +295,11 @@ type writeLock = FileLock
 // given sentinel path. Construction does no I/O.
 func NewFileLock(path string) *FileLock {
 	return &FileLock{path: path}
+}
+
+// NewRootFileLock anchors the lock sentinel to an already-open root.
+func NewRootFileLock(root *os.Root, name string) *RootFileLock {
+	return &RootFileLock{root: root, name: name}
 }
 
 func newWriteLock(path string) *writeLock {

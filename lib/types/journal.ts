@@ -84,6 +84,77 @@ export const JOURNAL_ENTRY_TYPES = [
   "notification.delivered",
   "notification.failed",
   "notification.dropped",
+
+  // ── Added 2026-08-07 after measuring a 50-type drift against
+  // internal/journal/types.go. lib/__tests__/activity-stream.test.ts now
+  // reads that Go file directly, so this list cannot fall behind silently
+  // again.
+  // Routines
+  "pipeline.run.started",
+  "pipeline.run.completed",
+  "pipeline.run.failed",
+  "pipeline.step.started",
+  "pipeline.step.completed",
+  "pipeline.step.failed",
+  "pipeline.step.validation_failed",
+  "pipeline.dry_run",
+  "pipeline.step.skipped",
+  "pipeline.step.retrying",
+  "pipeline.step.container_ready",
+  "pipeline.schedule.circuit_breaker_tripped",
+  "pipeline.schedule.missed_occurrences",
+  "pipeline.runs_swept",
+  // Chat
+  "conversation.compacted",
+  "chat.user_message",
+  "chat.agent_response",
+  // Provisioning
+  "sidecar.stale",
+  "image.stale",
+  "provisioning.queued",
+  "provisioning.building",
+  "provisioning.complete",
+  "provisioning.failed",
+  "provisioning.build_failed",
+  "provisioning.step",
+  // Credentials
+  "credential.revealed",
+  "credential.reveal_policy_changed",
+  "credential.sensitivity_lowered",
+  "credential.auto_assign_failed",
+  "credential.auto_assign_empty",
+  "credential.lease_issued",
+  // Skills
+  "skill.imported",
+  "skill.deleted",
+  "skill.assigned",
+  "skill.unassigned",
+  "skill.invoked",
+  // Audit
+  "audit.entity_created",
+  "audit.entity_updated",
+  "audit.entity_deleted",
+  "audit.entity_restored",
+  // Memory (extended)
+  "memory.write_rejected",
+  "memory.consolidation_proposed",
+  "memory.write_verifier_blocked",
+  "memory.searched",
+  "memory.versions_swept",
+  "memory.config_updated",
+  "memory.skill_proposed",
+  "memory.skill_approved",
+  "memory.skill_rejected",
+  // Runs (extended)
+  "run.agent_span",
+  "agent.error",
+  // Automations — the composition substrate. Both mean work did NOT
+  // happen: throttled is a rule over its hourly cap, depth_exceeded is a
+  // composed chain refused at the shared ceiling. Someone asking "why did
+  // my routine not run" needs to find these, so they live under Routines
+  // rather than in System where they would be filed and forgotten.
+  "automation.throttled",
+  "automation.depth_exceeded",
 ] as const
 
 export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number]

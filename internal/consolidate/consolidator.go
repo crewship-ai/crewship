@@ -457,8 +457,10 @@ func snapshotPins(cfg Config, entries []journal.Entry) (wrote bool, err error) {
 	if len(pins) == 0 {
 		return false, nil
 	}
-	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
-		return false, fmt.Errorf("pins mkdir: %w", err)
+	if cfg.OutputRoot != "" {
+		if err := memory.EnsureDirNoFollow(cfg.OutputRoot, cfg.OutputDir); err != nil {
+			return false, fmt.Errorf("pins output: %w", err)
+		}
 	}
 	root, err := os.OpenRoot(cfg.OutputDir)
 	if err != nil {

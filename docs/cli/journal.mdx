@@ -28,7 +28,8 @@ The top-level command is the list view. `--follow` opens an SSE connection to `/
 | `--crew` | `string` | | Filter by crew slug or ID. |
 | `--agent` | `string` | | Filter by agent ID. |
 | `--mission` | `string` | | Filter by mission ID. |
-| `--trace-id` | `string` | | Narrow to a single run's spans (`trace_id` == run id). |
+| `--trace-id` | `string` | | Narrow to entries whose `trace_id` column matches. Reaches ad-hoc **agent** runs only — routine runs never set it. |
+| `--run-id` | `string` | | Narrow to one run whichever engine ran it. Matches `trace_id`, `actor_id` and `payload.run_id`, so it reaches both agent runs and routine runs. Prefer this over `--trace-id`. |
 | `--type` | `string` | | Comma-separated entry types (e.g. `peer.escalation,keeper.decision`). |
 | `--exclude-type` | `string` | | Comma-separated entry types to exclude (NOT IN). Useful for hiding `container.metrics` noise. |
 | `--severity` | `string` | | Comma-separated severities (`info`, `notice`, `warn`, `error`). |
@@ -39,6 +40,16 @@ The top-level command is the list view. `--follow` opens an SSE connection to `/
 | `--follow` | `bool` | `false` | Live tail via SSE — Ctrl-C to exit, reconnects on transient failure. |
 
 Global output flags apply: `--format text|json|yaml|ndjson` (default text). Enum values for `--severity`, `--actor-type`, and `--priority` are validated client-side before the request goes out, so a typo fails fast with a list of allowed values.
+
+
+<Note>
+  **`--run-id` or `--trace-id`?** A run id reaches the journal by three
+  doors and which one depends on the engine: agent runs stamp `trace_id`,
+  routine runs stamp `actor_id` and `payload.run_id`. `--trace-id` matches
+  only the first, so on a routine run it returns the one entry that happens
+  to carry a trace and misses the rest of the chain. `--run-id` matches all
+  three. Measured on a live routine run: 1 entry versus 19.
+</Note>
 
 ## Examples
 
@@ -63,7 +74,8 @@ crewship journal --query "OOMKilled" --since 24h
 crewship journal -q "ratelimit" --severity warn,error
 
 # One run's full trace, including LLM/exec/network spans
-crewship journal --trace-id <run-id>
+crewship journal --trace-id <run-id>   # one AGENT run's spans
+crewship journal --run-id <run-id>     # one run, agent or routine
 
 # Hide container.metrics noise from a long timeline
 crewship journal --exclude-type container.metrics,exec.output_chunk --lines 200

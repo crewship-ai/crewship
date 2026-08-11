@@ -10,6 +10,17 @@ tests=(
   test-keeper-aux.sh
   test-inbox.sh
   test-orphan-token-reap.sh
+  # The composition depth cap. It belongs on the per-PR gate rather than the
+  # nightly for the reason its own header gives: the property it asserts —
+  # that a cycle of rules and routines terminates — has already been broken
+  # twice by changes that no unit test could see, once because the unit test
+  # modelled a world where every emitter stamps the causing run id and
+  # production only did so from one. A safety property proven nightly is a
+  # safety property that ships broken for a day.
+  #
+  # Deterministic and provider-free like the rest of the list: the routines it
+  # drives are `crewship` and `transform` steps, so it calls no model.
+  test-automation-loop.sh
 )
 
 # Every suite runs, and EVERY failure counts. A bare `for … done` exits with the

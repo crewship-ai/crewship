@@ -84,6 +84,8 @@ _, err := hooks.Register(ctx, db, h, allowedShell)
 
 `allowedShell` is the trailing boolean argument to `hooks.Register` (`internal/hooks/store.go:22`); the `hooks_config` table has no `allowed_shell` column. Callers that resolve role lazily (HTTP handlers, admin CLI) pass `true` only after confirming the request originated from an OWNER session.
 
+The same gate applies on **update**: `PATCH /api/v1/hooks/{id}` refuses an ADMIN who converts an existing `http` hook into a `shell` hook, and refuses an ADMIN editing a hook that is *already* `shell` — editing the command is editing what runs on the host, whether or not the `handler_kind` field is in the request body.
+
 ### http
 
 POSTs the event context as JSON to `handler_config.url`. Supports HMAC signing via `handler_config.hmac_secret` (header `X-Crewship-Signature: sha256=<hex>`). Timeout defaults to 30s, overridable via `handler_config.timeout_secs`.
@@ -124,7 +126,21 @@ All fields optional and AND-combined. Empty matcher matches every event.
 
 ## Registration
 
-There is **no runtime create/delete endpoint** by design. Hooks are registered at config time via `hooks.Register(ctx, db, Hook{...})`, typically from a workspace seed or a dedicated provisioning script. The API surface is strictly read + enable/disable.
+Register a hook with `crewship hooks create` (or `POST /api/v1/hooks`). Registration requires `OWNER` or `ADMIN`; `--handler shell` requires `OWNER`.
+
+```bash
+crewship hooks create --event on_approval_requested --handler http \
+    --url https://hooks.slack.com/services/... \
+    --matcher-severities 'high,critical' --crew backend-team
+```
+
+New hooks are **enabled** on creation unless you pass `--disabled`.
+
+<Note>
+  Earlier releases had no create endpoint — registration was a Go-only operation, which meant the dispatcher and all three handlers were unreachable from a running deployment. `hooks.Register` is still the single write chokepoint; the API is now a caller of it rather than a replacement for it.
+</Note>
+
+The equivalent in Go, for provisioning code that runs in-process:
 
 ```go
 _, err := hooks.Register(ctx, db, hooks.Hook{
@@ -143,13 +159,20 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
 }, true /* allowedShell — only true for confirmed OWNER */)
 ```
 
+### Event names are validated on write
+
+`hooks_config` has a `CHECK` constraint on `handler_kind` but **not** on `event`. A misspelled event therefore used to insert cleanly, never match `ListByEvent`'s predicate, and silently never fire — the hook listed, toggled, and looked healthy. `hooks.Register` and `hooks.Update` now reject any event outside the fifteen above, and the error message enumerates the legal values. The CLI checks the same list client-side before it sends anything.
+
 ## Endpoints
 
 - `GET /api/v1/hooks[?crew_id=...]` -- list registered hooks (workspace-scoped).
+- `POST /api/v1/hooks` -- register a hook. OWNER/ADMIN; shell handlers OWNER only.
+- `PATCH /api/v1/hooks/{id}` -- partial update. Same roles.
+- `DELETE /api/v1/hooks/{id}` -- remove a hook. Same roles.
 - `POST /api/v1/hooks/{id}/enable` -- OWNER/ADMIN only.
 - `POST /api/v1/hooks/{id}/disable` -- OWNER/ADMIN only.
 
-Toggling emits `system.hook_toggled` with the actor's user ID so the audit trail captures who flipped which hook when.
+Toggling emits `system.hook_toggled` with the actor's user ID. Create / update / delete write an `audit_logs` row (`hook.create`, `hook.update`, `hook.delete`) carrying the event, handler kind, and crew scope, so the audit trail captures who registered or removed which hook — the record that matters most for a shell hook, which is unrecoverable after deletion.
 
 See [Hooks API](/api-reference/hooks) for schemas.
 
@@ -158,11 +181,15 @@ See [Hooks API](/api-reference/hooks) for schemas.
 ```bash
 crewship hooks list
 crewship hooks list --crew backend-team
+crewship hooks create --event pre_tool_call --handler shell \
+    --command /usr/local/bin/gate.sh --matcher-tools 'Bash,Write' --blocking
+crewship hooks update hk_abc --url https://new.test/hook
+crewship hooks delete hk_abc --yes
 crewship hooks enable hk_abc
 crewship hooks disable hk_abc
 ```
 
-Full reference: [`crewship hooks`](/cli/hooks). No `register` subcommand -- config-time only.
+`crewship hook` (singular) is an alias for the whole group. Full reference: [`crewship hooks`](/cli/hooks).
 
 ## Journal entries
 

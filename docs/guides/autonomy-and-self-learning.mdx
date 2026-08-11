@@ -60,6 +60,37 @@ The same dial governs the `/api/v1/internal/*` routes an agent reaches through i
 
 Note that this is an **oversight** decision, not a security one. The autonomy escape it was introduced alongside — an agent in a `strict` crew creating a `guided` one and acting there — is closed by two other things: `strict` refuses crew creation outright, and a created crew **inherits its creator's autonomy level** rather than the column default, so no child crew is ever more permissive than its parent. Loosening the `guided` cells would cost visibility, not containment.
 
+### What a routine may do to the board
+
+The same dial governs the [`crewship` step](/guides/routines#crewship-act-on-crewships-own-nouns) — a routine writing back into Crewship's own nouns. Three more actions:
+
+| Level | Write to an issue<br/>(update · comment · link) | Create an assignment | Raise an escalation |
+|---|---|---|---|
+| `strict` | Inbox approve | Inbox approve | Auto-log to journal |
+| `guided` | Auto-log to journal | Auto + non-blocking inbox | Auto-log to journal |
+| `trusted` | Auto-log to journal | Auto-log to journal | Auto-log to journal |
+| `full` | Auto + journal | Auto + journal | Auto + journal |
+
+<Warning>
+On the routine path, **"Inbox approve" means refused.** A routine firing at 03:00 has nobody attached to approve anything, so a held decision is reported as a refusal naming the level and the `crewship policy set` that would lift it. A `strict` crew's routines therefore do not write to issues and do not dispatch work.
+</Warning>
+
+**Why issue writes are journal-only from `guided` up.** Every other row here governs a rare, durable event — a crew, an agent, a cron entry, a plan. A triage routine writes to thirty issues in one run. One inbox item per write is how an inbox stops being read, and it would be a *duplicate*: every issue write already lands in that issue's own activity trail, keyed to the issue, which is where an operator looks. What `guided` gives up is a blocking hold that bought neither containment (the crew binding does that — a routine can only touch its author crew's issues) nor visibility.
+
+**Why assignments get a notice where issue writes get silence.** An issue write costs a row; an assignment costs a container start, a system prompt and a model turn, and it is the moment a routine stops editing records and starts making the crew work. It does not *block* at `guided` for the same reason `mission_create` does not: the fan-out is bounded on the dispatch door itself (`delegation.max_depth` + the fan-out cap), and a hold here would push the author to an `agent_run` step whose agent calls `/assign` with no policy row at all.
+
+**Why escalation is flat across all four levels.** Every other action bounds what the crew may do to the *system*, and trust is the right axis for that. An escalation's cost is a **human's attention**, and both inbox-shaped decisions are self-defeating: an approval to authorise an interrupt *is* the interrupt, and a notice about an escalation duplicates the escalation. Refusing it at `strict` was considered and rejected — a `notify` step already reaches the same human with no policy row at all, so refusing the structured, resolvable, audited path would degrade the record without removing the interrupt, and "ask before you act" cannot coherently forbid asking.
+
+**The volume bound escalation needs instead.** The dial decides per call and cannot express a rate, so the number lives on the door: `escalation.max_pending_per_crew` (default **10**, `0` switches routine-raised escalations off) bounds how many **unresolved** escalations a crew may have before a *routine* may add another. It counts a backlog rather than a rate, so resolving the queue gives the budget straight back — no window, no timer. It bounds the routine door only; an agent escalating is a live session reporting it is stuck, and refusing that would strand the work with nobody told.
+
+```bash
+crewship instance settings set escalation.max_pending_per_crew 25
+```
+
+<Note>
+**These three actions are not new restrictions on agents.** All of them are already reachable, ungated, by an agent inside a crew container — the sidecar's issue verbs, `/assign`, and the escalation route consult no autonomy level. Declaring an action does not close that; it makes it closeable. Today the enforcement hangs off the routine door, which means at `strict` a routine is refused what an agent in the same crew may still do. That asymmetry is the argument for gating the sidecar adapters on these same actions next — it is stated here rather than implied, because a control believed to cover more than it does is worse than a missing one.
+</Note>
+
 **Held (`202 Accepted`)** means the row is written but inert until an operator decides:
 
 - a held **crew** is pinned to `autonomy_level=strict`, so nothing can be created inside it; approving restores the *creating* crew's level, never higher

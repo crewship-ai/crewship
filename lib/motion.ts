@@ -45,7 +45,8 @@ export const stagger = {
 } as const;
 
 // Right/left side detail panel. Spring values lifted verbatim from the
-// original trace-side-panel implementation that the team already vetted.
+// trace side panel /activity has since dropped — vetted there, kept here
+// because SidePanel inherited both the pattern and the numbers.
 export const panel = {
   side: {
     initial: { x: 360, opacity: 0 },

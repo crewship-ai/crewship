@@ -399,6 +399,39 @@ func (c *pipelineEmitContext) emitValidationFailed(ctx context.Context, step Ste
 	c.broadcast("pipeline.step.validation_failed", p)
 }
 
+// emitDepthExceeded records that a COMPOSED edge was refused because the
+// chain had reached MaxChainDepth. It is the only externally visible trace of
+// a loop that the cap stopped: without it the symptom is a routine that
+// "sometimes doesn't run" and no way to tell a depth refusal from a bug.
+//
+// edge names what was refused ("call_pipeline <slug>", "crewship <verb>") so
+// an operator reading the feed can see WHERE the chain was cut, not just that
+// it was. Severity error, because a refused edge is work an author expected
+// to happen that did not.
+func (c *pipelineEmitContext) emitDepthExceeded(ctx context.Context, chainDepth int, origin, edge string) {
+	if c == nil {
+		return
+	}
+	p := map[string]any{
+		"chain_depth":     chainDepth,
+		"max_chain_depth": MaxChainDepth,
+		"chain_origin":    origin,
+		"edge":            edge,
+	}
+	_, _ = c.emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: c.workspaceID,
+		CrewID:      c.authorCrewID,
+		Type:        journal.EntryAutomationDepthExceeded,
+		Severity:    journal.SeverityError,
+		ActorType:   journal.ActorOrchestrator,
+		ActorID:     c.runID,
+		Summary: "Composition chain refused at depth " + intToA(chainDepth) +
+			" (cap " + intToA(MaxChainDepth) + "): " + edge,
+		Payload: mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
+	})
+	c.broadcast("automation.depth_exceeded", p)
+}
+
 func (c *pipelineEmitContext) emitRunCompleted(ctx context.Context, totalDurationMs int64, totalCostUSD float64, selfAnnounced bool) {
 	if c == nil {
 		return

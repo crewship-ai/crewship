@@ -36,6 +36,11 @@ type PipelineHandler struct {
 	codeRunner   pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
 	scriptRunner pipeline.ScriptRunner    // optional; nil → type:script steps fail closed with a wiring hint
 	signals      *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
+	// crewshipActions dispatches `crewship` steps over loopback HTTP to the
+	// daemon's own internal API. Set by the router once the loopback URL and
+	// internal token are known; nil → crewship steps fail closed with a
+	// wiring hint (they are pure side effect — silence would be worse).
+	crewshipActions pipeline.CrewshipActions
 	// trustGrantStore backs the standing-approval endpoints. Assigned by
 	// NewPipelineHandler before the handler serves anything; nil only in
 	// tests that build this struct as a literal, where trustGrants()
@@ -144,6 +149,24 @@ func (h *PipelineHandler) SetSaveTokenSecret(secret []byte) {
 // and list-runs falls back to the legacy scan path.
 func (h *PipelineHandler) SetRunStore(s *pipeline.RunStore) {
 	h.runStore = s
+}
+
+// SetCrewshipActions wires the `crewship` step kind's dispatcher. Called by
+// the router after options are applied, since the loopback URL and internal
+// token arrive that way.
+func (h *PipelineHandler) SetCrewshipActions(a pipeline.CrewshipActions) {
+	h.crewshipActions = a
+}
+
+// CrewshipActions exposes the wired dispatcher (nil until set) so the
+// boot-time executors in cmd/crewship/cmd_start.go share it with the HTTP
+// path — a step kind that works when you click Run and fails at 03:00 is the
+// exact drift NewWiredExecutor exists to prevent.
+func (h *PipelineHandler) CrewshipActions() pipeline.CrewshipActions {
+	if h == nil {
+		return nil
+	}
+	return h.crewshipActions
 }
 
 // SetSignalRegistry wires the shared in-process run-signal registry so
@@ -284,6 +307,11 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 		ScriptRunner: h.scriptRunner,
 		Signals:      h.signals,
 		RunVerdict:   h.runVerdict,
+		// Dispatch gates on the in-process call_pipeline path, so a nested
+		// run faces the same integration/resource/credential preconditions
+		// InternalRun applies to the agent-facing one.
+		Preflight: h.RunPreflight(),
+		Crewship:  h.crewshipActions,
 		// Shared verdict WaitGroup: every ephemeral executor this handler
 		// builds registers its async verdict goroutine here so shutdown can
 		// drain them all (DrainVerdicts) before the journal writer closes.
@@ -620,6 +648,43 @@ func truncateErrorForList(s string) string {
 		cut--
 	}
 	return s[:cut] + "…"
+}
+
+// automationProvenance recovers the automation that caused a run from the
+// run's metadata_json, returning ("", "", "") when no rule did.
+//
+// Why this is read from metadata rather than a column: an automation parks a
+// deferred run in pending_runs, and PendingRunDispatcher fires EVERY deferred
+// run with triggered_via="schedule" (internal/pipeline/pending_dispatcher.go).
+// The enum therefore reports a cron schedule and an automation identically.
+// internal/automation's flusher writes the rule's identity into the pending
+// run's metadata, which is the only place the distinction survives.
+//
+// metadata_json is an opaque, ROUTINE-WRITABLE scratchpad — a step can set
+// {{ run.metadata.X }} — so nothing here may assume a shape. Unparseable
+// metadata, missing keys and non-string values all yield empty results rather
+// than an error: a malformed scratchpad on one row must not sink a list.
+//
+// AutomationName is the gate. A run is reported as rule-fired only when the
+// rule's NAME is present and non-empty, so a cron run whose metadata happens
+// to carry an unrelated key is never promoted to "started by a rule".
+func automationProvenance(metadataJSON string) (id, name, eventType string) {
+	if metadataJSON == "" || metadataJSON == "{}" {
+		return "", "", ""
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(metadataJSON), &meta); err != nil {
+		return "", "", ""
+	}
+	str := func(k string) string {
+		s, _ := meta[k].(string)
+		return s
+	}
+	name = str("automation_name")
+	if name == "" {
+		return "", "", ""
+	}
+	return str("automation_id"), name, str("trigger_event_type")
 }
 
 // parseSmallInt parses a small positive integer without pulling in

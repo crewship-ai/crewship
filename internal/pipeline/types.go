@@ -288,6 +288,15 @@ type Step struct {
 	PipelineSlug string         `json:"pipeline_slug,omitempty"`
 	NestedInputs map[string]any `json:"inputs,omitempty"`
 
+	// crewship fields (Type == StepCrewship). Action is a namespaced verb
+	// ("issue.comment") from the registry in crewship_step.go; Args are the
+	// verb's arguments, template-rendered before dispatch. Both sit at the
+	// step level rather than in a body object, like agent_run's prompt and
+	// call_pipeline's pipeline_slug — the two other kinds whose whole payload
+	// is one identifier plus its arguments.
+	Action string         `json:"action,omitempty"`
+	Args   map[string]any `json:"args,omitempty"`
+
 	// http fields (only populated when Type == StepHTTP).
 	// HTTP steps run a single outbound HTTP call without invoking
 	// any agent — useful for non-LLM workflow steps (Slack post,
@@ -594,6 +603,7 @@ const (
 	StepScript       StepType = "script"
 	StepQuery        StepType = "query"
 	StepForeach      StepType = "foreach"
+	StepCrewship     StepType = "crewship"
 )
 
 // Complexity tags a step's reasoning depth, mapping to a workspace-

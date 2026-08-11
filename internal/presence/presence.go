@@ -14,6 +14,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/tsformat"
+
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -78,23 +81,48 @@ func Upsert(ctx context.Context, db *sql.DB, j journal.Emitter, s Snapshot) erro
 		}
 	}
 
-	// Read prior status first so we know whether to emit. One extra
-	// query per Upsert is cheap and keeps the journal clean.
+	// Read the prior status and write the new one in ONE transaction. The
+	// read decides whether this write is a transition worth journalling, so
+	// the two must observe the same database state: as two standalone
+	// statements, a second writer landing in between made both callers
+	// decide against a status that was already gone and emit an
+	// agent.status_change for a transition that never happened. The journal
+	// is a transition log, not a log of what each racing goroutine saw.
+	//
+	// database.Open sets `_txlock=immediate`, so BeginTx is a BEGIN
+	// IMMEDIATE: the single database-wide writer lock is held from the start,
+	// a concurrent Upsert waits it out under busy_timeout instead of racing,
+	// and there is no deferred read-then-upgrade deadlock. The window covers
+	// two local statements and nothing else — the journal emit below runs
+	// AFTER the commit, because the Emitter writes through its own pool and
+	// would otherwise contend with the lock this transaction holds.
 	var prev sql.NullString
-	_ = db.QueryRowContext(ctx, `SELECT status FROM agent_status WHERE agent_id = ?`, s.AgentID).Scan(&prev)
+	if err := database.WithTx(ctx, db, func(tx *sql.Tx) error {
+		_ = tx.QueryRowContext(ctx, `SELECT status FROM agent_status WHERE agent_id = ?`, s.AgentID).Scan(&prev)
 
-	_, err := db.ExecContext(ctx, `INSERT INTO agent_status
-		(agent_id, workspace_id, crew_id, status, since, details)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(agent_id) DO UPDATE SET
-			workspace_id = excluded.workspace_id,
-			crew_id      = excluded.crew_id,
-			status       = excluded.status,
-			since        = excluded.since,
-			details      = excluded.details`,
-		s.AgentID, s.WorkspaceID, nullable(s.CrewID),
-		string(s.Status), s.Since.UTC().Format(time.RFC3339Nano), details)
-	if err != nil {
+		_, err := tx.ExecContext(ctx, `INSERT INTO agent_status
+			(agent_id, workspace_id, crew_id, status, since, details)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(agent_id) DO UPDATE SET
+				workspace_id = excluded.workspace_id,
+				crew_id      = excluded.crew_id,
+				status       = excluded.status,
+				since        = excluded.since,
+				details      = excluded.details`,
+			s.AgentID, s.WorkspaceID, nullable(s.CrewID),
+			// tsformat rather than the stdlib nano layout: `since` is both
+			// ORDER BY'd and compared (`since < ?` in SweepOffline), and that
+			// layout truncates trailing zeros — so two timestamps inside the
+			// same second render at different widths and string-compare in
+			// the wrong order, which is the exact defect internal/tsformat
+			// exists to remove. Rows
+			// written before this line carry the old form, but every live
+			// agent rewrites `since` on its next heartbeat and the sweep
+			// threshold is five minutes, so a sub-second discrepancy during
+			// the changeover cannot flip an outcome.
+			string(s.Status), tsformat.Format(s.Since), details)
+		return err
+	}); err != nil {
 		return fmt.Errorf("presence: upsert: %w", err)
 	}
 
@@ -177,7 +205,9 @@ func SweepOffline(ctx context.Context, db *sql.DB, j journal.Emitter, threshold 
 	if threshold <= 0 {
 		threshold = 5 * time.Minute
 	}
-	cutoff := time.Now().UTC().Add(-threshold).Format(time.RFC3339Nano)
+	// Same width as the values written above, or the comparison is
+	// meaningless — see the note at the Upsert.
+	cutoff := tsformat.Format(time.Now().Add(-threshold))
 	rows, err := db.QueryContext(ctx, `SELECT agent_id, workspace_id, crew_id
 		FROM agent_status WHERE status != 'offline' AND since < ?`, cutoff)
 	if err != nil {

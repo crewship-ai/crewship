@@ -21,6 +21,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/admission"
 	api "github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/automation"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/chatnotify"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -185,11 +186,27 @@ var startCmd = &cobra.Command{
 			cfg.IPC.SocketPath = startSocketPath(cfg.IPC.SocketPath, dataDir.Root)
 		}
 
-		db, err := database.Open(databaseURL)
+		// WithManagedWAL turns SQLite's inline autocheckpoint OFF, which is
+		// only safe because the checkpointer below takes over the job. The
+		// daemon is the one process long-lived enough to run it; every
+		// other database.Open caller (telemetry, admin, tests) deliberately
+		// keeps the built-in autocheckpoint. See internal/database/
+		// checkpoint.go for the measurements — the point is to stop random
+		// agent write transactions from paying to fold the WAL back.
+		db, err := database.Open(databaseURL, database.WithManagedWAL())
 		if err != nil {
 			return fmt.Errorf("failed to open database: %w", err)
 		}
 		defer db.Close()
+
+		// Started before the migrations on purpose: a migration run is the
+		// most write-heavy phase of a boot, and with autocheckpoint off it
+		// is exactly when an unattended WAL would grow fastest.
+		//
+		// Deferred here rather than at the ctx created further down so the
+		// stop (which performs a final TRUNCATE) is guaranteed to run
+		// BEFORE the deferred db.Close() above — defers unwind LIFO.
+		defer database.StartCheckpointerAsync(db, logger, database.CheckpointerConfig{})()
 
 		if err := database.SnapshotBeforeMigrate(context.Background(), db, logger); err != nil {
 			return fmt.Errorf("failed to snapshot database before migrations: %w", err)
@@ -432,6 +449,45 @@ var startCmd = &cobra.Command{
 			apiRouter.SetBuild(version, commit, date)
 			if ph := apiRouter.Provisioning(); ph != nil {
 				bridge.SetProvisioningEnqueuer(provisioningAdapter{h: ph})
+			}
+		}
+
+		// Automations: the third journal commit observer. It matches committed
+		// entries against the workspace's automation rules in memory and parks
+		// a debounced run in pending_runs — completing the trigger path
+		// journal → observer → pending_runs, whose only missing hop was this
+		// one. AddCommitObserver for the same reason the two above use it.
+		if deps.DB != nil {
+			if jw := srv.JournalWriter(); jw != nil {
+				autoReg := automation.NewRegistry(
+					automation.NewStore(deps.DB),
+					pipeline.NewPendingRunStore(deps.DB),
+					automation.Options{Journal: jw, Logger: logger},
+				)
+				if err := autoReg.Refresh(ctx); err != nil {
+					logger.Error("automation: initial registry load failed", "err", err)
+				}
+				// Without this the registry prices every hop at depth 1 and a
+				// composed cycle re-enters the process with a fresh budget —
+				// which is exactly how a two-rule loop ran 59 hops past a cap
+				// of 8.
+				autoReg.SetChainSource(pipeline.NewRunChainReader(deps.DB))
+				autoReg.Start(ctx)
+				defer autoReg.Stop()
+				jw.AddCommitObserver(autoReg.Observer)
+				// A rule saved through the API must fire on the NEXT event,
+				// not up to a minute later — otherwise the first thing an
+				// author sees after saving is nothing happening.
+				if apiRouter := srv.APIRouter(); apiRouter != nil {
+					if ah := apiRouter.Automations(); ah != nil {
+						ah.SetRefresh(func(c context.Context) {
+							if err := autoReg.Refresh(c); err != nil {
+								logger.Error("automation: registry refresh after write failed", "err", err)
+							}
+						})
+					}
+				}
+				logger.Info("automation registry wired (journal commit → pending_runs)")
 			}
 		}
 
@@ -812,6 +868,11 @@ var startCmd = &cobra.Command{
 						ScriptRunner: ph.ScriptRunner(),
 						Signals:      signalRegistry,
 						RunVerdict:   srv.APIRouter().RunVerdict,
+						// Dispatch gates on the in-process call_pipeline path,
+						// and `crewship` step dispatch — both shared with the
+						// HTTP path so an unattended run behaves identically.
+						Preflight: ph.RunPreflight(),
+						Crewship:  ph.CrewshipActions(),
 						// Share the pipeline handler's verdict WaitGroup so
 						// this boot executor's async verdicts drain at shutdown.
 						VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),
@@ -882,6 +943,11 @@ var startCmd = &cobra.Command{
 						ScriptRunner: ph.ScriptRunner(),
 						Signals:      signalRegistry,
 						RunVerdict:   srv.APIRouter().RunVerdict,
+						// Dispatch gates on the in-process call_pipeline path,
+						// and `crewship` step dispatch — both shared with the
+						// HTTP path so an unattended run behaves identically.
+						Preflight: ph.RunPreflight(),
+						Crewship:  ph.CrewshipActions(),
 						// Share the pipeline handler's verdict WaitGroup so
 						// this resume executor's async verdicts drain at shutdown.
 						VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),
@@ -922,6 +988,14 @@ var startCmd = &cobra.Command{
 			// scope already has wired for the pipeline stores above.
 			if deps.DB != nil {
 				pipeline.StartRunRetentionSweeper(ctx, deps.DB, srv.JournalWriter(), 24*time.Hour)
+
+				// Audit retention (#1887) — the same daily shape, for the two
+				// audit tables that had no pruning at all. credential_audit
+				// defaults to 90 days; audit_logs defaults to keeping
+				// everything, because a retention obligation is the
+				// operator's to declare and not ours to assume. See
+				// internal/api/audit_retention.go.
+				go api.StartAuditRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
 			}
 
 			// Pipeline schedules — cron triggers for saved pipelines.
@@ -971,6 +1045,11 @@ var startCmd = &cobra.Command{
 					ScriptRunner: ph.ScriptRunner(),
 					Signals:      signalRegistry,
 					RunVerdict:   srv.APIRouter().RunVerdict,
+					// Dispatch gates on the in-process call_pipeline path,
+					// and `crewship` step dispatch — both shared with the
+					// HTTP path so an unattended run behaves identically.
+					Preflight: ph.RunPreflight(),
+					Crewship:  ph.CrewshipActions(),
 					// Share the pipeline handler's verdict WaitGroup so this
 					// scheduler executor's async verdicts drain at shutdown.
 					VerdictWG: srv.APIRouter().PipelinesHandler.VerdictWaitGroup(),

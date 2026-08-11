@@ -204,6 +204,11 @@ type Router struct {
 	hybridSearchEmbedder episodic.Embedder
 	hybridSearchProvider WorkspaceMemoryProvider
 	provisioning         *ProvisioningHandler // exposed via Provisioning() so chatbridge can auto-trigger builds
+	// automations is exposed via Automations() so cmd_start can hand the
+	// handler a refresh hook into the in-memory automation.Registry. Without
+	// it a newly created rule would not fire until the 60s tick, which reads
+	// as "the automation is broken" to whoever just saved it.
+	automations *AutomationHandler
 	// PipelinesHandler is exposed (capitalised) so the orchestrator
 	// boot path can hand it the AgentRunner adapter post-construction.
 	// The router builds handlers before the orchestrator is fully
@@ -606,6 +611,12 @@ func (r *Router) SetBuild(version, commit, date string) {
 // when registerRoutes hasn't run yet (e.g. tests that build a Router by hand).
 func (r *Router) Provisioning() *ProvisioningHandler {
 	return r.provisioning
+}
+
+// Automations returns the registered AutomationHandler so cmd_start can wire
+// its registry-refresh hook. Returns nil when registerRoutes hasn't run yet.
+func (r *Router) Automations() *AutomationHandler {
+	return r.automations
 }
 
 // AuthHandler returns the registered AuthHandler so server startup code can

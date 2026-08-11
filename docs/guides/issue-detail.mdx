@@ -71,7 +71,8 @@ could.
 | **Due date, Estimate, Milestone** | Same card. Milestone existed only on the inline panel; the shipped page never had it. |
 | **Project** | Picker in the Project card, with a link through to the project board. |
 | **Labels** | Add, remove, or **create** one that does not exist yet, from the Labels card. |
-| **Routine** | Bind, unbind, and **Run now** when one is bound. |
+| **Routine** | Bind, unbind, and **Run now** when one is bound. Below it, **Recent runs started by** — how the bound routine's runs actually began, grouped by source, so "starting this issue runs that routine" is not the only half of the story you get. |
+| **Automations** | The [rules](/guides/automations) an event from this issue could set off, with the event each one watches. Absent when none are in scope. |
 | **Links** | Add a relation by identifier (blocks / blocked by / relates to / duplicate of), remove one, and follow it. Sub-issues are listed alongside. |
 | **Comments** | With `@` mentions — see [Issue mentions](/guides/issue-mentions). |
 | **Workflow** | Start work · Stop · Approve · Request changes (with a reason) · Reopen, top-right of the identity card, gated on status the way the server gates them. |
@@ -86,6 +87,23 @@ Two of these did not work before this landed, and now do:
   indistinguishable from an omitted field and the clear arrived as an empty
   patch. The handler now reads it as raw JSON and tells `null` apart from
   absent. A non-number is a `400`.
+
+### Who started the bound routine
+
+The Routine card used to say one true and incomplete thing: *starting this
+issue runs that routine*. The same routine also runs on a clock and on rules,
+and an operator asking why it ran at 03:00 had nowhere on this page to look.
+
+The breakdown groups the routine's recent runs by source — `issue`, `manual`,
+`schedule`, `automation` — counting repeats rather than listing every run,
+because the question is "does this thing run without me", not "list the runs".
+
+<Warning>
+`automation` and `schedule` are counted separately on purpose. Every deferred
+run is stored with `triggered_via: "schedule"`, cron and rule alike, so folding
+them together would report that a schedule did something a
+[rule](/guides/automations) did. An `automation` row names the rule.
+</Warning>
 
 ## The layout
 

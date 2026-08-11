@@ -1,9 +1,11 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -543,13 +545,28 @@ type internalSaveRequest struct {
 // authors pin a specific crew context for runtime; without it, runs
 // fall back to the first crew the saving user belongs to.
 type userSaveRequest struct {
-	Slug              string          `json:"slug"`
-	Name              string          `json:"name"`
-	Description       string          `json:"description"`
-	Definition        json.RawMessage `json:"definition"`
-	AuthorCrewID      string          `json:"author_crew_id,omitempty"`
-	LastTestRunAt     string          `json:"last_test_run_at,omitempty"` // RFC3339
-	LastTestRunPassed bool            `json:"last_test_run_passed,omitempty"`
+	Slug         string          `json:"slug"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	Definition   json.RawMessage `json:"definition"`
+	AuthorCrewID string          `json:"author_crew_id,omitempty"`
+	// AuthorAgentID names the agent the routine ACTS AS at run time. It is not
+	// a credit line: crewship_actions.go injects it as the dispatched verb's
+	// agent_id, and issue.comment has no other source for one, so a routine
+	// saved without it cannot comment on an issue at all. Until this field
+	// existed the CLI's --author-agent was read and discarded, which made that
+	// verb unreachable from every CLI-authored routine.
+	//
+	// Must name an agent of AuthorCrewID — the same crew the DSL's agent_slug
+	// references resolve against — and it is proved here rather than trusted,
+	// because on the user door the body is written by whoever is calling.
+	//
+	// authored_via stays "user_api" when it is set. A human saved this; naming
+	// an acting agent does not make the routine agent-authored, and the audit
+	// trail must not claim it does.
+	AuthorAgentID     string `json:"author_agent_id,omitempty"`
+	LastTestRunAt     string `json:"last_test_run_at,omitempty"` // RFC3339
+	LastTestRunPassed bool   `json:"last_test_run_passed,omitempty"`
 	// SkipTestGate is honored only when the caller's role is
 	// OWNER or ADMIN; lower roles get a 403 if they try. Used by
 	// UI flows that have already test-run'd the definition through
@@ -575,6 +592,47 @@ type userSaveRequest struct {
 	// pipeline_versions row (surfaced in the versions UI and `routine
 	// versions`). `routine iterate` writes its round/score here.
 	ChangeSummary string `json:"change_summary,omitempty"`
+}
+
+// assertAuthorAgentInCrew proves author_agent_id names a live agent of the
+// routine's author crew, and writes the refusal if it does not.
+//
+// Both halves matter. The WORKSPACE check is the tenancy fence: an agent id is
+// injected into every crewship verb this routine dispatches, and the internal
+// routes read it as the actor, so an unchecked value is a way to act as another
+// tenant's agent. The CREW check is the one the runtime needs: the acting agent
+// is resolved in the routine's author-crew context (the same context agent_slug
+// references resolve in), and a sibling crew's agent would be an actor the
+// routine's own autonomy bound was never computed for.
+//
+// An agent in another workspace and an agent that does not exist get the SAME
+// message, so this is not an existence oracle for ids the caller cannot read.
+//
+// Returns false when it has already written a response.
+func (h *PipelineHandler) assertAuthorAgentInCrew(w http.ResponseWriter, r *http.Request, workspaceID, crewID, agentID string) bool {
+	if strings.TrimSpace(agentID) == "" {
+		return true
+	}
+	if strings.TrimSpace(crewID) == "" {
+		replyError(w, http.StatusBadRequest,
+			"author_agent_id requires author_crew_id — the acting agent is resolved in the routine's author crew")
+		return false
+	}
+	var found string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT id FROM agents WHERE id = ? AND crew_id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		agentID, crewID, workspaceID).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusBadRequest,
+			"author_agent_id does not name an agent in this routine's author crew")
+		return false
+	}
+	if err != nil {
+		h.logger.Error("pipeline save: resolve author agent", "error", err, "crew", crewID)
+		replyError(w, http.StatusInternalServerError, "Failed to resolve author agent")
+		return false
+	}
+	return true
 }
 
 // denyNonPrivilegedFlag writes a 403 and returns true when a save escape-hatch
@@ -663,6 +721,21 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	// Who this routine ACTS AS. Proved before the acting-agent gate below, so
+	// that gate reads "a real agent of this crew was named" rather than "the
+	// field was non-empty" — otherwise any string would satisfy it and the
+	// run-time 400 would come back with an extra step in front of it.
+	if !h.assertAuthorAgentInCrew(w, r, workspaceID, body.AuthorCrewID, body.AuthorAgentID) {
+		return
+	}
+	// …and refuse now what would otherwise fail at 03:00. A crewship step whose
+	// verb requires an acting agent (issue.comment) cannot run on a routine
+	// that names none — the dispatcher has nothing to inject and the internal
+	// route answers "agent_id is required". Knowable here; refused here.
+	if err := pipeline.ValidateCrewshipActingAgent(dsl, body.AuthorAgentID != ""); err != nil {
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
 	// Draft-aware resolver so a B→A / A→B cycle authored in the wrong order
 	// is caught: the being-saved draft is fed back for its own slug rather
 	// than its stale persisted definition (#1427, 2.3a).
@@ -715,8 +788,12 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		DefinitionJSON: string(body.Definition),
 		Author: pipeline.AuthorMeta{
 			CrewID: body.AuthorCrewID,
-			UserID: user.ID,
-			Via:    pipeline.AuthoredViaUser,
+			// The agent the routine acts as (validated above). Via stays
+			// "user_api": a human authored this, and naming an acting agent
+			// must not let the audit trail claim otherwise.
+			AgentID: body.AuthorAgentID,
+			UserID:  user.ID,
+			Via:     pipeline.AuthoredViaUser,
 		},
 		// Default the gate to UNMET. The user save path does NOT trust the
 		// body's last_test_run_passed claim (it's forgeable — that's the whole
@@ -853,6 +930,19 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		pipelineSlugs = nil
 	}
 	if err := pipeline.Validate(dsl, agentSlugs, pipelineSlugs); err != nil {
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	// The author agent is the identity every crewship verb this routine
+	// dispatches will act under, so it gets the same crew+workspace proof the
+	// user door applies. This path is master-token trusted for its OWN
+	// identity, not for an arbitrary agent id it puts in the body — that is the
+	// distinction assertBoundCrewWorkspaceDB draws for author_crew_id just
+	// above, and the acting agent is the same kind of claim.
+	if !h.assertAuthorAgentInCrew(w, r, body.WorkspaceID, body.AuthorCrewID, body.AuthorAgentID) {
+		return
+	}
+	if err := pipeline.ValidateCrewshipActingAgent(dsl, body.AuthorAgentID != ""); err != nil {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}

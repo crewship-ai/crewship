@@ -34,6 +34,13 @@ CREATE TABLE journal_entries (
     summary TEXT NOT NULL,
     payload TEXT NOT NULL DEFAULT '{}',
     refs TEXT NOT NULL DEFAULT '{}',
+    -- v120's generated column, mirrored so query tests exercise the same
+    -- shape production runs against. Without it these schemas sat ~68
+    -- migrations behind on this table and a filter over run_id could pass
+    -- review, pass tests, and fail on a real database.
+    run_id TEXT GENERATED ALWAYS AS (
+        CASE WHEN json_valid(payload) THEN json_extract(payload, '$.run_id') END
+    ) VIRTUAL,
     trace_id TEXT,
     span_id TEXT,
     expires_at TEXT,

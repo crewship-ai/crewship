@@ -257,6 +257,29 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/checkpoints/{id}/fork", roleCreate, ch.Fork)
 	r.authedMut("DELETE", "/api/v1/checkpoints/{id}", roleCreate, ch.Delete)
 
+	// Automations: workspace rules that turn a journal event into a deferred
+	// routine run (internal/automation). Reads are any authenticated member —
+	// "what fires in this workspace" is not a secret and is the first thing
+	// someone debugging an unexpected run needs. Writes are ADMIN+
+	// (roleManage): creating one grants AUTONOMOUS routine execution across
+	// the workspace on events the author may never produce themselves, which
+	// is an administration capability rather than a create-a-resource one.
+	//
+	// Registered through a local `auh` rather than r.automations directly:
+	// cmd/gen-openapi resolves a handler's concrete type from the
+	// `name := NewXxx(...)` declaration beside the registration, and without
+	// one it falls back to merging the query parameters of EVERY method of
+	// that name in the package — 5.5k lines of spurious spec for four routes.
+	auh := NewAutomationHandler(r.db, r.logger)
+	r.automations = auh
+	r.mux.Handle("GET /api/v1/automations", authed(wsCtx(http.HandlerFunc(auh.List))))
+	r.authedMut("POST", "/api/v1/automations", roleManage, auh.Create)
+	// Read-only: it replays entries already written and never enqueues a
+	// run, so it is a create-level permission rather than manage.
+	r.authedMut("POST", "/api/v1/automations/preview", roleCreate, auh.PreviewMatch)
+	r.authedMut("PATCH", "/api/v1/automations/{id}", roleManage, auh.Patch)
+	r.authedMut("DELETE", "/api/v1/automations/{id}", roleManage, auh.Delete)
+
 	// Notification channels: outbound e-mail / signed-webhook / shoutrrr
 	// (Slack, Discord, Telegram) delivery targets (#850, widened by
 	// #1412). A WORKSPACE-scoped channel write requires MANAGER+ — TIGHTENED
@@ -348,6 +371,31 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/paymaster/top-spenders", authed(wsCtx(http.HandlerFunc(ph.TopSpenders))))
 	// openapi: query range:string since:string until:string
 	r.mux.Handle("GET /api/v1/paymaster/subscriptions", authed(wsCtx(http.HandlerFunc(ph.SubscriptionUsage))))
+
+	// Chains: the causal graph around one anchor (issue identifier, issue id,
+	// run id, routine id or slug, assignment id, inbox item id) in a single
+	// call. One route, not one per anchor type — a client asking "why did
+	// this run happen" and one asking "what did this issue set off" want the
+	// same connected component from different ends, and two routes would
+	// duplicate the traversal and let it drift. Read-only; every query inside
+	// internal/chain carries the workspace from wsCtx.
+	// openapi: query depth:integer limit:integer; responses 200,400,401,403,404,500
+	chainH := NewChainHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/chains/{anchor}", authed(wsCtx(http.HandlerFunc(chainH.Get))))
+
+	chainsListH := NewChainsListHandler(r.db, r.logger)
+	// The index the walk above cannot be: one row per chain run, newest
+	// first, so a client can ask "what workflows ran here" without already
+	// knowing an anchor. A GROUP BY over pipeline_runs.chain_origin rather
+	// than a traversal — every row's origin is a valid anchor for the walk,
+	// which is how the list and the graph stay one feature.
+	//
+	// The paging goes through parsePagination (helpers.go), which the spec
+	// generator cannot see into, so ?limit/?offset are declared here — same
+	// reason as the mcp-registry routes below. The annotation has to sit in
+	// the comment run IMMEDIATELY above the registration or it is ignored.
+	// openapi: query limit:integer offset:integer
+	r.mux.Handle("GET /api/v1/chains", authed(wsCtx(http.HandlerFunc(chainsListH.List))))
 
 	// Harbor Master: HITL approvals inbox. Enqueue side runs inside
 	// the orchestrator's gate; this handler is list + decide for humans.
@@ -485,11 +533,18 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedSelfMut("DELETE", "/api/v1/feedback", mfh.Delete)
 
 	// Hooks registry: lifecycle intercepts. List is available to every
-	// workspace member for auditability; enable/disable is OWNER/ADMIN
-	// only because flipping a hook can invoke shell commands.
+	// workspace member for auditability; every write is OWNER/ADMIN
+	// (roleManage) because a hook can invoke shell commands, hit
+	// third-party endpoints, or dispatch subagents. Create/Update layer a
+	// further OWNER-only gate on handler_kind='shell' inside the handler
+	// — that one is not a plain role check (it depends on the body), so
+	// it cannot be declared at the route table.
 	hh := NewHooksHandler(r.db, r.logger)
 	hh.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/hooks", authed(wsCtx(http.HandlerFunc(hh.List))))
+	r.authedMut("POST", "/api/v1/hooks", roleManage, hh.Create)
+	r.authedMut("PATCH", "/api/v1/hooks/{id}", roleManage, hh.Update)
+	r.authedMut("DELETE", "/api/v1/hooks/{id}", roleManage, hh.Delete)
 	r.authedMut("POST", "/api/v1/hooks/{id}/enable", roleManage, hh.Enable)
 	r.authedMut("POST", "/api/v1/hooks/{id}/disable", roleManage, hh.Disable)
 

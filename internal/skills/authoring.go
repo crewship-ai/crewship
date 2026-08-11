@@ -87,3 +87,36 @@ func WriteUniqueSkillFile(dir, slug string, body []byte) (string, error) {
 	}
 	return "", fmt.Errorf("write skill file: ran out of suffixes disambiguating skill-%s.md", slug)
 }
+
+// WriteUniqueSkillFileRoot writes beneath an already-open directory root.
+func WriteUniqueSkillFileRoot(root *os.Root, dir, slug string, body []byte) (string, error) {
+	if root == nil {
+		return "", fmt.Errorf("write skill file: root is nil")
+	}
+	if slug == "" || slug != filepath.Base(slug) || strings.ContainsAny(slug, `/\`) || strings.Contains(slug, "..") {
+		return "", fmt.Errorf("write skill file: unsafe slug %q", slug)
+	}
+	for i := 1; i < 100; i++ {
+		name := "skill-" + slug + ".md"
+		if i > 1 {
+			name = fmt.Sprintf("skill-%s-%d.md", slug, i)
+		}
+		f, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return "", fmt.Errorf("write skill file: open: %w", err)
+		}
+		if _, err := f.Write(body); err != nil {
+			_ = f.Close()
+			_ = root.Remove(name)
+			return "", fmt.Errorf("write skill file: write body: %w", err)
+		}
+		if err := f.Close(); err != nil {
+			return "", fmt.Errorf("write skill file: close: %w", err)
+		}
+		return filepath.Join(dir, name), nil
+	}
+	return "", fmt.Errorf("write skill file: ran out of suffixes disambiguating skill-%s.md", slug)
+}

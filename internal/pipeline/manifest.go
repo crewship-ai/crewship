@@ -25,10 +25,12 @@ type Manifest struct {
 }
 
 // ExtractManifest computes the routine's full capability manifest from the DSL
-// alone (no DB, no crew context). It mirrors StaticRiskReasons' walk — the same
-// recursion over top-level steps plus routine-level and per-step lifecycle hooks
-// — so a capability hidden in an on_failure hook is part of the blast radius the
-// UI renders and governance reasons about.
+// alone (no DB, no crew context). It SHARES StaticRiskReasons' walk rather than
+// mirroring it (walkAllSteps, risk.go) — top-level steps, routine-level and
+// per-step lifecycle hooks, and foreach bodies — so a capability hidden in an
+// on_failure hook or inside a fan-out is part of the blast radius the UI renders
+// and governance reasons about. The two used to keep separate copies of that
+// recursion and drifted from the truth in the same direction at the same time.
 //
 // Derivation rules:
 //   - Integrations = NormalizedIntegrationsRequired (lowercased, deduped).
@@ -75,11 +77,7 @@ func (d *DSL) ExtractManifest() *Manifest {
 	var agents, routines []string
 	var tools []ToolRef
 
-	var scan func(st *Step)
-	scan = func(st *Step) {
-		if st == nil {
-			return
-		}
+	walkAllSteps(d, func(st *Step) {
 		switch st.Type {
 		case StepAgentRun:
 			if st.AgentSlug != "" {
@@ -102,19 +100,7 @@ func (d *DSL) ExtractManifest() *Manifest {
 				tools = append(tools, ToolRef{Type: st.Code.Runtime})
 			}
 		}
-		if st.Hooks != nil {
-			scan(st.Hooks.Before)
-			scan(st.Hooks.After)
-		}
-	}
-	for i := range d.Steps {
-		scan(&d.Steps[i])
-	}
-	if d.Hooks != nil {
-		scan(d.Hooks.BeforeAll)
-		scan(d.Hooks.AfterAll)
-		scan(d.Hooks.OnFailure)
-	}
+	})
 
 	// Merge declared resources.
 	if d.Resources != nil {

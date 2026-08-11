@@ -172,6 +172,25 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 		descVal = body.Description
 	}
 
+	// The cleartext token is never written to disk (#1888). registry.Add
+	// below records the digest and would redact this column a moment later
+	// anyway, but "a moment later" is long enough for a crash, a WAL
+	// checkpoint or a backup to capture a live capability token — and that
+	// window is precisely what hashing exists to close.
+	//
+	// The dead marker rather than an empty string because `token` is
+	// NOT NULL UNIQUE: derived from the primary key it stays unique, is
+	// obviously spent, and is recognised as such by the boot-time loader.
+	//
+	// The digest column is deliberately NOT named here. It is added by
+	// migration 20260810171000, but PortExposeRegistry carries a runtime
+	// guard for schemas built without the migration (hand-rolled test
+	// fixtures), and an INSERT naming a column that may be absent would fail
+	// on exactly those. Letting Add own the digest keeps one writer for it.
+	//
+	// The failure mode if the process dies between the two is a row with a
+	// spent token and no digest — an exposure that resolves for nobody. That
+	// is the right direction to fail.
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO port_exposures (
 			id, workspace_id, crew_id, agent_id, chat_id, token,
@@ -179,7 +198,8 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 			status, expires_at, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
 	`,
-		id, body.WorkspaceID, body.CrewID, body.AgentID, chatIDVal, token,
+		id, body.WorkspaceID, body.CrewID, body.AgentID, chatIDVal,
+		redactedExposeToken(id),
 		body.ContainerID, containerIP, body.Port, descVal,
 		expiresAt.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
@@ -188,6 +208,9 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The cleartext stays on the in-memory entry — it is what the caller is
+	// handed back in the capability URL — while the row on disk only ever
+	// learns the digest.
 	entry := &ExposeEntry{
 		ID:            id,
 		Token:         token,

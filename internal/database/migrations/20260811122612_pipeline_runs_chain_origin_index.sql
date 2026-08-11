@@ -1,0 +1,69 @@
+-- Index chain_origin, which is what the chain queries actually select on, and
+-- drop the chain_depth index that was added for a query nobody wrote.
+--
+-- 20260807160100 added both columns and one index:
+--
+--   idx_pipeline_runs_chain (workspace_id, chain_depth) WHERE chain_depth > 0
+--
+-- justified as serving "show me the chains" — "rows in this workspace with
+-- chain_depth > 0". That query never arrived. When the question was finally
+-- asked for real (GET /api/v1/chains), it was asked a different way, because
+-- chain_depth answers "how deep is this hop" while the page needs "which chain
+-- is this run part of" — and that is chain_origin. Three shipping queries
+-- select on it and it was on no index at all:
+--
+--   1. chains_list.go's grouped CTE — the index page itself;
+--   2. hasUnrecordedRuns — the pre-migration probe on every page view;
+--   3. chainIssuesQuery's chain_runs arm — the touched-issues fan-out.
+--
+-- WHAT WAS ACTUALLY WRONG. Not a table scan: pipeline_runs already carries
+-- several indexes LEADING with workspace_id (idx_pipeline_runs_workspace_status
+-- among them), so the planner reached the table through one of those and
+-- re-checked chain_origin against each fetched row. The plan reads
+-- "SEARCH pipeline_runs USING INDEX ... (workspace_id=?)" and looks healthy
+-- while touching every run the workspace has ever recorded — three times per
+-- page view, plus a temp B-tree to group them. That is the shape this fixes,
+-- and it is worth naming precisely: a workspace-leading index makes a missing
+-- index look present.
+--
+-- With (workspace_id, chain_origin), query 3 becomes a handful of seeks (it
+-- names its origins), query 2 becomes two, and query 1 stops sorting — the
+-- rows arrive in GROUP BY order. TestChainsList_HotQueriesReachRunsByChainOrigin
+-- asserts each of those against the planner rather than by inspection.
+--
+-- NOT PARTIAL, though `WHERE chain_origin IS NOT NULL` would be smaller and
+-- would suit queries 1 and 3. Query 2 exists precisely to find the rows such a
+-- predicate would exclude, and an index that answers two of three questions
+-- leaves the third reading the whole workspace — the exact failure above. The
+-- full index is the one that covers all three.
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_chain_origin
+    ON pipeline_runs (workspace_id, chain_origin);
+
+-- And the one it replaces.
+--
+-- idx_pipeline_runs_chain is not REDUNDANT in the sense 20260810120000 and
+-- 20260811081130 meant — its columns are nobody's prefix, and the planner could
+-- choose it the moment a `chain_depth > 0` predicate is written. It is
+-- SPECULATIVE: it indexes an access path the code does not have, and now will
+-- not grow, because the question it anticipated ships against chain_origin
+-- instead.
+--
+-- The tree agrees. Every read of chain_depth is either by run id
+-- (pending_runs.go's cycle budget, chain/walk_sql.go's node expansion — primary
+-- key lookups) or an aggregate over rows already selected by something else
+-- (chains_list.go's MAX). None of them can use this index.
+--
+-- Speculative indexes are not free on SQLite: every INSERT and every UPDATE of
+-- a composed run maintains this B-tree while holding the single database-wide
+-- write lock, and pipeline_runs is one of the two busiest tables in the schema.
+-- The partial predicate keeps the cost small — only composed runs are in it —
+-- but small times zero readers is still waste, and 20260810154153 already
+-- settled the policy in the other direction: it declined to add 32 plausible
+-- indexes precisely because "every index is paid for on every INSERT and UPDATE
+-- of the child".
+--
+-- Reversible, and stated so it can be reversed for the right reason: if a
+-- loop-audit query filtering `chain_depth > 0` is ever written, recreate this
+-- index IN THE SAME CHANGE as that query, so the index and its reader arrive
+-- together rather than one waiting years for the other.
+DROP INDEX IF EXISTS idx_pipeline_runs_chain;

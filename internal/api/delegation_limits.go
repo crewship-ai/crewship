@@ -100,6 +100,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 const (
@@ -200,9 +202,53 @@ func (c dispatchCaller) selfFiled() bool { return c.ActorAgentID == "" }
 // not itself running a delegated task (a lead in a chat, a mission lead's
 // planning turn before its own row exists). Depth is what the NEW assignment
 // would carry: parent depth + 1, or 1 at the root.
+//
+// ChainOrigin is which CHAIN the new row belongs to — the trace id
+// pipeline_runs already carries under that exact name. It sits here, with the
+// other two, because it is the same kind of value: derived by the server from
+// rows the caller cannot write. A chain_origin an agent could supply would be
+// laundering of a different sort than depth's — not "I am shallower than I am"
+// but "my work belongs to somebody else's story".
 type delegationScope struct {
 	ParentID string
 	Depth    int
+	// ChainOrigin is WHICH trace this work belongs to — the same value on
+	// every hop of a workflow, which is what collapses one into a single row.
+	ChainOrigin string
+	// ParentRunID is WHAT DISPATCHED it, when a routine did. Distinct from the
+	// origin on purpose: the origin is shared by the whole trace, so a tree
+	// built from it alone is a star. Exactly one parent is ever set — a
+	// delegation carries ParentID, a routine dispatch carries this — because a
+	// row with two parents can be reached by two paths and drawn twice.
+	ParentRunID string
+}
+
+// rootedAt names a chain for a scope that could not derive one from the tree.
+//
+// It is deliberately a FILL, not a set: a scope with a parent already answered
+// the question, and letting a second source overwrite that answer is how one
+// chain becomes two — the immediate-parent renumbering bug internal/pipeline's
+// chainOrigin exists to avoid, arriving through a different door. The only
+// caller is the routine hop, where "the run that dispatched this" is the only
+// origin there is.
+func (s delegationScope) rootedAt(origin string) delegationScope {
+	if s.ChainOrigin == "" {
+		s.ChainOrigin = origin
+	}
+	return s
+}
+
+// dispatchedBy records the run that made a routine's assignment.create call.
+//
+// A fill like rootedAt, and for a sharper reason: a scope with a ParentID came
+// from the delegation tree, where the edge is parent_assignment_id. Setting a
+// run parent there too would give the row two parents, and the walk would
+// reach the same work down both and draw it twice.
+func (s delegationScope) dispatchedBy(runID string) delegationScope {
+	if s.ParentID == "" {
+		s.ParentRunID = runID
+	}
+	return s
 }
 
 // resolveDelegationScope finds where a dispatch by actorAgentID sits.
@@ -223,14 +269,15 @@ func resolveDelegationScope(ctx context.Context, db *sql.DB, actorAgentID, works
 	}
 	var parentID string
 	var parentDepth int
+	var parentOrigin sql.NullString
 	err := db.QueryRowContext(ctx, `
-		SELECT id, depth
+		SELECT id, depth, chain_origin
 		  FROM assignments
 		 WHERE assigned_to_id = ?
 		   AND workspace_id = ?
 		   AND status IN ('PENDING','QUEUED','RUNNING')
 		 ORDER BY depth DESC, created_at DESC
-		 LIMIT 1`, actorAgentID, workspaceID).Scan(&parentID, &parentDepth)
+		 LIMIT 1`, actorAgentID, workspaceID).Scan(&parentID, &parentDepth, &parentOrigin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return delegationScope{Depth: 1}, nil
 	}
@@ -242,7 +289,61 @@ func resolveDelegationScope(ctx context.Context, db *sql.DB, actorAgentID, works
 	if parentDepth < 0 {
 		parentDepth = 0
 	}
-	return delegationScope{ParentID: parentID, Depth: parentDepth + 1}, nil
+	// A chain has ONE root. Inherit the parent's origin when it has one;
+	// otherwise the parent IS the root, so name it. Naming the immediate parent
+	// in BOTH cases would renumber the chain at every hop, which reads as N
+	// unrelated one-hop chains — the bug 20260807220000 fixed for pipeline_runs,
+	// stated here in the same words so the two sides cannot drift apart.
+	origin := parentOrigin.String
+	if origin == "" {
+		origin = parentID
+	}
+	return delegationScope{ParentID: parentID, Depth: parentDepth + 1, ChainOrigin: origin}, nil
+}
+
+// chainOriginForCausingRun resolves which chain a run belongs to, for the hop
+// where a ROUTINE dispatches an agent (the assignment.create crewship verb).
+// The dispatcher injects author_run_id — a field crewshipBody strips from the
+// author's args first, so it names the real run — and this turns that run id
+// into the chain the new assignment joins.
+//
+// It reuses pipeline.RunChainReader rather than issuing a second query for
+// pipeline_runs.chain_origin: that package owns the column, and a second reader
+// is a second answer to "which chain is this", which is the drift the single
+// reader exists to prevent.
+//
+// Three answers, matching automation.Registry.Flush's resolution exactly:
+//
+//   - the run has an origin → that origin (the run is mid-chain);
+//   - the run exists with none → the run itself IS the root, so name it;
+//   - the run does not resolve in this workspace → "", i.e. say nothing.
+//
+// The last is the one worth stating. An unresolvable run is a swept row or
+// another tenant's id, and copying it in would put an id nobody can walk into a
+// column readers treat as evidence. Empty is honest: this row starts its own
+// trace.
+//
+// A READ ERROR degrades to "" rather than failing the dispatch. This is the one
+// place these rules differ from the composed-depth cap next door, and
+// deliberately: depth is a safety property, so an unreadable depth must fail
+// closed, whereas an origin is provenance, and refusing an agent's work because
+// its provenance could not be read trades a real capability for a field in a
+// trace. The caller logs it.
+func chainOriginForCausingRun(ctx context.Context, db *sql.DB, workspaceID, runID string) (string, error) {
+	if db == nil || workspaceID == "" || runID == "" {
+		return "", nil
+	}
+	pos, ok, err := pipeline.NewRunChainReader(db).ChainOf(ctx, workspaceID, runID)
+	if err != nil {
+		return "", fmt.Errorf("resolve causing run chain: %w", err)
+	}
+	if !ok {
+		return "", nil
+	}
+	if pos.Origin != "" {
+		return pos.Origin, nil
+	}
+	return runID, nil
 }
 
 // The three fan-out buckets, as one WHERE clause each.
@@ -425,11 +526,11 @@ type cappedAssignment struct {
 // write in one statement, so SQLite serialises the racers instead of admitting
 // them all.
 //
-// depth/parent_assignment_id come from the scope the caller was GIVEN by
-// enforceDelegationCaps, never from a request — see the file header. A root
-// dispatch stores NULL for the parent so the fan-out count for a lead's chat
-// keeps working off the in-flight predicate rather than a self-referential
-// chain.
+// depth/parent_assignment_id/chain_origin come from the scope the caller was
+// GIVEN by enforceDelegationCaps, never from a request — see the file header. A
+// root dispatch stores NULL for the parent so the fan-out count for a lead's
+// chat keeps working off the in-flight predicate rather than a self-referential
+// chain, and NULL for the origin so it reads as the chain root it is.
 //
 // A lost race returns a *delegationRefusal, so both callers answer it the same
 // way instead of one of them treating "no row written" as success.
@@ -446,14 +547,27 @@ func insertCappedAssignment(
 	if scope.ParentID != "" {
 		parentVal = scope.ParentID
 	}
+	// NULL rather than '' when the scope derived no chain: an empty string is a
+	// value that says "belongs to the chain named by nothing", which every
+	// reader would then have to special-case. NULL is the column's own word for
+	// "did not say", and it is what the migration's untouched rows hold.
+	var originVal any
+	if scope.ChainOrigin != "" {
+		originVal = scope.ChainOrigin
+	}
+	// Same NULL-not-empty-string reasoning as originVal above.
+	var parentRunVal any
+	if scope.ParentRunID != "" {
+		parentRunVal = scope.ParentRunID
+	}
 	guardSQL, guardArgs := fanoutGuard(scope, caller, a.ChatID, lim.MaxFanout)
 	insertArgs := append([]any{
 		assignmentID, a.WorkspaceID, a.ChatID, caller.FanoutSubjectID, a.TargetID,
-		a.Task, a.GroupID, scope.Depth, parentVal, a.CreatedAt,
+		a.Task, a.GroupID, scope.Depth, parentVal, originVal, parentRunVal, a.CreatedAt,
 	}, guardArgs...)
 	res, err := db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, created_at)
-		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, parent_assignment_id, chain_origin, parent_run_id, created_at)
+		SELECT ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?
 		 WHERE `+guardSQL, insertArgs...)
 	if err != nil {
 		return "", err

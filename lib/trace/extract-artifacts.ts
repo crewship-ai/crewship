@@ -12,7 +12,7 @@ export interface Artifact {
   kind: ArtifactKind
   // Truncated preview shown inline before the user opens the artifact.
   preview: string
-  // For JSON artifacts: the parsed value, ready for the JSONViewer.
+  // For JSON artifacts: the parsed value, ready for a JSON viewer.
   // For file_ref: the inferred path string.
   // For text: the raw content.
   content: unknown

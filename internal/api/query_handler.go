@@ -32,7 +32,7 @@ type QueryHandler struct {
 	resolver agentConfigResolver
 
 	escalationMu      sync.Mutex
-	escalationWaiters map[string]chan escalationResult
+	escalationWaiters map[string][]chan escalationResult
 }
 
 // SetResolver wires the agent-config resolver so a peer query builds its run
@@ -58,7 +58,7 @@ func NewQueryHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, i
 		logger:            logger,
 		internalToken:     internalToken,
 		journal:           noopEmitter{},
-		escalationWaiters: make(map[string]chan escalationResult),
+		escalationWaiters: make(map[string][]chan escalationResult),
 	}
 }
 
