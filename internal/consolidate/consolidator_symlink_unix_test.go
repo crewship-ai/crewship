@@ -5,7 +5,6 @@ package consolidate
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -26,15 +25,18 @@ func TestSnapshotPinsRefusesSymlinkedTarget(t *testing.T) {
 	_, err := snapshotPins(Config{OutputDir: dir}, []journal.Entry{{
 		ID: "pin-1", Type: "test", Priority: journal.PriorityPin, Summary: "must stay confined",
 	}})
-	if err == nil || !strings.Contains(err.Error(), "symlink") {
-		t.Fatalf("snapshotPins symlink error = %v, want explicit refusal", err)
-	}
+	// Check the victim before the error: without either defense snapshotPins
+	// can return nil after following the link, and the write-through is the
+	// security invariant this test must report.
 	got, readErr := os.ReadFile(victim)
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
 	if string(got) != original {
 		t.Fatalf("outside target changed to %q", got)
+	}
+	if err == nil {
+		t.Fatal("snapshotPins accepted a symlinked target")
 	}
 }
 
@@ -72,14 +74,16 @@ func TestAppendRulesRefusesSymlinkedTarget(t *testing.T) {
 
 	c := &Consolidator{}
 	_, _, err := c.appendRules(dir, now, []LearnedRule{{Pattern: "p", Action: "a"}})
-	if err == nil || !strings.Contains(err.Error(), "symlink") {
-		t.Fatalf("appendRules symlink error = %v, want explicit refusal", err)
-	}
+	// An unrooted write can change the victim before the rooted readback
+	// returns an error, so error wording must not hide the write-through.
 	got, readErr := os.ReadFile(victim)
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
 	if string(got) != original {
 		t.Fatalf("outside target changed to %q", got)
+	}
+	if err == nil {
+		t.Fatal("appendRules accepted a symlinked target")
 	}
 }
