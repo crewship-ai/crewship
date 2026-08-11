@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -128,7 +129,25 @@ func TestEnsureSocketPathFree_Corners(t *testing.T) {
 			},
 		},
 		{
-			name: "regular file is not a listener",
+			// A zero-length file holds no data, so unlinking it destroys
+			// nothing an operator could miss. This is the shape a half-created
+			// socket or a `> ipc.sock` shell redirect leaves behind, and
+			// refusing here would wedge boot over an empty file.
+			name: "zero-length regular file is reclaimable",
+			setup: func(t *testing.T, dir string) string {
+				p := filepath.Join(dir, "i.sock")
+				if err := os.WriteFile(p, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return p
+			},
+		},
+		{
+			// The fail-open branch this replaced: "a regular file cannot have
+			// a listener, therefore it is junk" also describes a mistyped
+			// ipc.socket_path pointed at state.db, which now lives in the same
+			// derived data dir one tab-completion away.
+			name: "non-empty regular file is refused",
 			setup: func(t *testing.T, dir string) string {
 				p := filepath.Join(dir, "i.sock")
 				if err := os.WriteFile(p, []byte("junk"), 0o600); err != nil {
@@ -136,6 +155,7 @@ func TestEnsureSocketPathFree_Corners(t *testing.T) {
 				}
 				return p
 			},
+			wantErr: true,
 		},
 		{
 			name: "dangling symlink is not a listener",
@@ -299,11 +319,13 @@ func TestStartIPC_RefusesLiveSocketRecoversStale(t *testing.T) {
 			setup: makeStaleSocket,
 		},
 		{
-			// Not a socket at all: nothing can be listening on it, so there is
-			// no peer to protect and the path must be reclaimed.
-			name: "regular file at the socket path is reclaimed",
+			// Not a socket, but empty: nothing can be listening on it and
+			// nothing is lost by unlinking it, so the path must be reclaimed.
+			// (A *non-empty* file is refused instead — see
+			// TestStartIPC_DoesNotDeleteNonSocketFile.)
+			name: "zero-length file at the socket path is reclaimed",
 			setup: func(t *testing.T, path string) {
-				if err := os.WriteFile(path, []byte("junk"), 0o600); err != nil {
+				if err := os.WriteFile(path, nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -393,6 +415,90 @@ func TestStartIPC_RefusesLiveSocketRecoversStale(t *testing.T) {
 			}
 			if tt.after != nil {
 				tt.after(t, path)
+			}
+		})
+	}
+}
+
+// TestStartIPC_DoesNotDeleteNonSocketFile pins the data-loss half of the
+// guard. The original rule was "a regular file cannot have a listener bound to
+// it, therefore it is junk, therefore unlink it" — but the same description
+// fits an operator who typed the wrong path into ipc.socket_path or
+// CREWSHIP_SOCKET_PATH. state.db and crewship.db now live in the *same* derived
+// data dir as the socket, one tab-completion away, so that mistake silently
+// deleted a database at boot and then reported a healthy daemon listening
+// where it used to be.
+//
+// The assertion that matters is not "startIPC returned an error" — a fix that
+// deleted the file and then failed to listen would pass that. It is that the
+// bytes are still on disk afterwards.
+func TestStartIPC_DoesNotDeleteNonSocketFile(t *testing.T) {
+	tests := []struct {
+		name    string
+		content []byte
+	}{
+		{
+			// The motivating accident: ipc.socket_path aimed at state.db.
+			name:    "sqlite database",
+			content: append([]byte("SQLite format 3\x00"), bytes.Repeat([]byte{0xAB}, 64)...),
+		},
+		{
+			name:    "text file",
+			content: []byte("not a socket\n"),
+		},
+		{
+			// One byte is enough to make the file non-disposable: we cannot
+			// tell a truncated database from a scratch file, and the fail-closed
+			// answer to "I cannot tell" is to keep it.
+			name:    "single byte",
+			content: []byte{'x'},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Short dir name: sockaddr_un caps the path near 100 bytes.
+			path := filepath.Join(t.TempDir(), "i.sock")
+			if err := os.WriteFile(path, tt.content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			s := newTestServerForT(t)
+			s.cfg.IPC.SocketPath = path
+
+			// A refusal returns immediately; only the success path blocks in
+			// Serve, and reaching it here would itself be the bug.
+			errCh := make(chan error, 1)
+			go func() { errCh <- s.startIPC() }()
+
+			select {
+			case err := <-errCh:
+				if err == nil {
+					t.Fatal("startIPC() = nil; want a refusal to reuse a non-socket path")
+				}
+				if !strings.Contains(err.Error(), path) {
+					t.Errorf("error %q does not name the socket path %q", err, path)
+				}
+			case <-time.After(10 * time.Second):
+				// The pre-fix shape of this failure: startIPC unlinked the
+				// file, bound a socket over it and blocked in Serve(). Say
+				// whether the bytes survived, so the output names the data
+				// loss rather than just "timed out".
+				survived := false
+				if got, readErr := os.ReadFile(path); readErr == nil {
+					survived = bytes.Equal(got, tt.content)
+				}
+				t.Fatalf("startIPC neither refused nor returned within 10s "+
+					"(it bound the path instead); original file contents survived = %v", survived)
+			}
+
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("the file at the socket path was deleted: %v", err)
+			}
+			if !bytes.Equal(got, tt.content) {
+				t.Errorf("file contents changed: got %d bytes %q, want %d bytes %q",
+					len(got), got, len(tt.content), tt.content)
 			}
 		})
 	}

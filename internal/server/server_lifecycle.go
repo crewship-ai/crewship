@@ -643,11 +643,13 @@ const socketProbeTimeout = 250 * time.Millisecond
 // done nothing wrong (B-04 follow-up, #1922).
 //
 // The discriminator is simply whether anything answers. Errors are read
-// conservatively: only a positive proof of deadness ("connection refused", or
-// the file vanishing under us) licenses the unlink. "I could not check" —
-// EACCES on a socket owned by another user, a hung connect, an unreadable
-// parent directory — is reported as a refusal, never silently downgraded to
-// "stale", because treating an unverifiable path as dead is precisely the bug.
+// conservatively: only a positive proof that the unlink destroys nothing —
+// "connection refused", the file vanishing under us, or a zero-length file —
+// licenses it. "I could not check" — EACCES on a socket owned by another user,
+// a hung connect, an unreadable parent directory, a regular file whose contents
+// we cannot identify — is reported as a refusal, never silently downgraded to
+// "stale", because treating an unverifiable path as disposable is precisely the
+// bug.
 func ensureSocketPathFree(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -662,15 +664,41 @@ func ensureSocketPathFree(path string) error {
 	}
 
 	// A regular file at the socket path cannot have a listener behind it — no
-	// kernel object is attached to it — so there is no peer to protect. This is
-	// leftover junk (a stray redirect, a restored backup, a test fixture) and
-	// clearing it is the only way to make progress. Everything that is NOT a
-	// plain file is probed, including symlinks (which are followed by the dial,
-	// so a link aimed at the live daemon's socket is correctly refused) and
-	// anything Lstat reports oddly on platforms where AF_UNIX files are not
-	// stat'able as sockets.
+	// kernel object is attached to it — so there is no *peer* to protect. That
+	// is not the same as there being nothing to protect. The path is operator
+	// input (ipc.socket_path, CREWSHIP_SOCKET_PATH), and this branch is
+	// everything the operator could have typed by mistake: since the databases
+	// moved into the same derived data dir as the socket, state.db and
+	// crewship.db are one tab-completion away from it. Unlinking on the theory
+	// that "not a socket means junk" deleted that file at boot and then brought
+	// the daemon up green on top of where it used to be, with no way back.
+	//
+	// So the split is by what is at stake, not by what is plausible:
+	//
+	//   - Zero length: nothing can be lost by removing it, whatever it was
+	//     meant to be. This keeps the recovery cases working — a half-created
+	//     socket, a `> ipc.sock` redirect, a filesystem that materialised the
+	//     path without an inode behind it — without having to guess intent.
+	//   - Non-empty: refuse. We cannot tell a scratch file from a database
+	//     from a key, and "I cannot tell" is the case this whole function
+	//     exists to answer with a refusal rather than a delete. The cost of
+	//     being wrong is asymmetric: a needless refusal costs one `rm` by an
+	//     operator who can see the file, a needless delete costs the file.
+	//
+	// Everything that is NOT a plain file is still probed, including symlinks
+	// (followed by the dial, so a link aimed at the live daemon's socket is
+	// correctly refused) and anything Lstat reports oddly on platforms where
+	// AF_UNIX files are not stat'able as sockets. Note the regular-file check
+	// must come *before* the dial: Linux answers connect() on a non-socket
+	// inode with ECONNREFUSED, which the staleness test below would otherwise
+	// read as proof of a dead daemon.
 	if info.Mode().IsRegular() {
-		return nil
+		if info.Size() == 0 {
+			return nil
+		}
+		return fmt.Errorf("IPC socket path %s is a regular file with %d bytes of content, not a socket: "+
+			"refusing to delete it (check ipc.socket_path / CREWSHIP_SOCKET_PATH; "+
+			"if the file really is disposable, remove it manually)", path, info.Size())
 	}
 
 	conn, err := net.DialTimeout("unix", path, socketProbeTimeout)
@@ -679,15 +707,55 @@ func ensureSocketPathFree(path string) error {
 		return fmt.Errorf("IPC socket %s is already accepting connections: another crewship instance appears to be running on this host; "+
 			"give this instance its own socket via ipc.socket_path or CREWSHIP_DATA_DIR", path)
 	}
-	// ECONNREFUSED is the kernel saying "this socket file has no listener bound
-	// to it" — the exact signature of the crashed-daemon corpse this cleanup
-	// exists for. ErrNotExist covers the narrow race where the owner shut down
-	// cleanly between the Lstat above and the dial.
-	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, fs.ErrNotExist) {
+	// "Connection refused" is the kernel saying "this socket file has no
+	// listener bound to it" — the exact signature of the crashed-daemon corpse
+	// this cleanup exists for. It is asked via isConnRefused rather than
+	// errors.Is because windows spells it differently (see wsaeconnrefused).
+	// ErrNotExist covers the narrow race where the owner shut down cleanly
+	// between the Lstat above and the dial.
+	if isConnRefused(err) || errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	return fmt.Errorf("cannot determine whether IPC socket %s is in use: %w (refusing to unlink it; "+
 		"if no crewship instance is running, remove the socket file manually)", path, err)
+}
+
+// wsaeconnrefused is Winsock's WSAECONNREFUSED, spelled numerically because Go
+// does not export it: syscall's windows types name only WSAEACCES,
+// WSAENOPROTOOPT, WSAECONNABORTED and WSAECONNRESET, so there is no symbol to
+// reference and referencing one would not compile on unix anyway.
+//
+// It has to be matched separately from syscall.ECONNREFUSED because on windows
+// those are two unrelated numbers. syscall.ECONNREFUSED there is an *invented*
+// value (APPLICATION_ERROR + 22 = 536870934) that exists only so package os
+// compiles; nothing in the kernel ever produces it. A refused AF_UNIX connect()
+// goes through syscall.Connect — net's ConnectEx path is tcp-only — and comes
+// back as the raw Winsock code 10061. syscall.Errno.Is bridges only the four
+// oserror sentinels (ErrPermission, ErrExist, ErrNotExist, ErrUnsupported),
+// never one Errno to another, so errors.Is(err, syscall.ECONNREFUSED) is dead
+// code on windows.
+//
+// Left unmatched, the failure inverts this guard's purpose: a crewshipd killed
+// by power loss leaves a socket file, the next start cannot classify it as
+// stale, and every subsequent start refuses — a permanent wedge, where the old
+// unconditional unlink was at worst a transient one.
+//
+// Comparing the number on unix is harmless: errno values there run to roughly
+// 150, so nothing can collide with 10061 (asserted by
+// TestWSAECONNREFUSEDIsNotAPosixErrno).
+const wsaeconnrefused = syscall.Errno(10061)
+
+// isConnRefused reports whether err is the OS saying "that address exists but
+// nothing is bound to it" — the corpse signature ensureSocketPathFree treats as
+// a licence to unlink. Matching is by errno on purpose: the error *strings*
+// agree across platforms ("connection refused") but string matching would also
+// accept an unrelated wrapped message, and this decision deletes a file.
+func isConnRefused(err error) bool {
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+	var errno syscall.Errno
+	return errors.As(err, &errno) && errno == wsaeconnrefused
 }
 
 func (s *Server) startIPC() error {
