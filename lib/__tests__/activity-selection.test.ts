@@ -19,7 +19,7 @@ import {
   type ActivityStop,
 } from "@/lib/activity-selection"
 
-// The four things /activity-new can be pointed at. The routine and the workflow
+// The four things /activity can be pointed at. The routine and the workflow
 // are the pair from the reported screenshot: the chip read "routine: Normalize
 // dates to ISO 8601" while the card below it still drew the
 // on-close-file-followup chain.
@@ -398,7 +398,7 @@ describe("stopMatcher narrows the window to one node", () => {
 
 describe("activity-stream-view wiring", () => {
   const src = readFileSync(
-    resolve(process.cwd(), "components/features/activity-new/activity-stream-view.tsx"),
+    resolve(process.cwd(), "components/features/activity-stream/activity-stream-view.tsx"),
     "utf8",
   )
 

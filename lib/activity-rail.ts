@@ -1,5 +1,5 @@
 /**
- * The decisions the /activity-new left rail makes, as plain functions.
+ * The decisions the /activity left rail makes, as plain functions.
  *
  * The rail is NAVIGATION: one line of status segments, then the workflow
  * list. Everything else — crews, issues, routines, sources, severities,

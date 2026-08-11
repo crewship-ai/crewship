@@ -46,10 +46,10 @@ import { FeedRow } from "./feed-row"
 import { iconFor } from "./activity-overview"
 import { TopologyCard } from "./topology-card"
 
-// React Flow (~200 KB+) loads only when a graph actually renders. /activity
-// made this call deliberately (activity-trace-page.tsx:32) to keep
-// @xyflow/react out of its initial route chunk; importing it statically here
-// put it straight back into activity-new's, for a card most visits never open.
+// React Flow (~200 KB+) loads only when a graph actually renders. The trace
+// canvas this route replaced made the same call for the same reason — keeping
+// @xyflow/react out of /activity's initial chunk — and importing it statically
+// here would put it straight back, for a card most visits never open.
 const TraceCanvas = dynamic(
   () => import("@/components/features/activity/trace-canvas").then((m) => m.TraceCanvas),
   {

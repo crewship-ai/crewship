@@ -8,11 +8,12 @@ import {
 } from "lucide-react"
 
 // Run-status visual helpers — single source of truth for icon + tint
-// per pipeline_run status. Both the legacy RunsView (table) and the
-// new RunTimelineRail (left rail in /activity) used to inline these
-// as private helpers; same map, slightly different output shape, and
+// per pipeline_run status. Two surfaces used to inline these as private
+// helpers — RunsView's table and the trace rail /activity has since
+// dropped — with the same map in slightly different output shapes, and
 // they drifted on every status addition. Lifted here so future status
-// values land in one place.
+// values land in one place; the Activity stream and the workflow page
+// read it now.
 
 export function statusIcon(status: string): LucideIcon {
   switch (status) {

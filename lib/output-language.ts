@@ -19,7 +19,7 @@ export type DetectedLanguage = "json" | "yaml" | "bash" | "markdown"
 /** How an output value should be rendered. */
 export type OutputKind =
   | "markdown" // has fenced code blocks → chat markdown renderer
-  | "json" //     whole value is a JSON object/array → JSONViewer
+  | "json" //     whole value is a JSON object/array → a JSON viewer
   | "code" //     raw single-language block → CodeBlock(language)
   | "text" //     plain text / logs → monospace, preserved whitespace
 

@@ -148,7 +148,16 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
 
   // The runs, out of the same walk. See workflowRuns for why this is not a
   // second request against the endpoint the sequence already read.
-  const runs = React.useMemo(() => (graph ? workflowRuns(graph) : []), [graph])
+  //
+  // chain.origin is what makes them THIS chain's runs: a walk anchored inside a
+  // chain also returns the routine's other runs and the rule's other firings,
+  // and only pipeline_runs.chain_origin — which the walk carries on each run
+  // node — tells the two apart. Without it this card counted a routine's whole
+  // history under a header reading "Runs 1".
+  const runs = React.useMemo(
+    () => (graph ? workflowRuns(graph, chain.origin) : []),
+    [graph, chain.origin],
+  )
 
   // The shape, matching the rail row that led here. Naming this page after the
   // routine put the same words on it as the routine's own page, which is what

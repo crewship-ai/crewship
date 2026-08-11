@@ -1,6 +1,6 @@
 "use client"
 
-// /activity-new — the shell: SubBar, rail, and whichever main surface the
+// /activity — the shell: SubBar, rail, and whichever main surface the
 // current scope calls for.
 //
 // Two modes, one page:
@@ -15,6 +15,7 @@
 // panel — see activity-detail.tsx for why.
 
 import * as React from "react"
+import { useSearchParams } from "next/navigation"
 import { Activity, ArrowLeft, ChevronRight, FilterX } from "lucide-react"
 
 import { SubBar } from "@/components/layout/sub-bar"
@@ -69,7 +70,8 @@ import {
   type SidebarRoutine,
 } from "./activity-sidebar"
 import { useChains } from "@/hooks/use-chains"
-import type { LensKey } from "@/lib/activity-lenses"
+import { narrowChains, type LensKey } from "@/lib/activity-lenses"
+import { activityDeepLink } from "@/lib/activity-deeplink"
 import { ActivityOverview, iconFor } from "./activity-overview"
 import { ActivityDetail } from "./activity-detail"
 import { WorkflowPage } from "./workflow-page"
@@ -119,7 +121,25 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const isMobile = useIsMobile()
   const lookup = useJournalLookup()
 
-  const [facets, setFacets] = React.useState<FacetState>(EMPTY_FACETS)
+  // What the URL asked for, read ONCE at mount.
+  //
+  // /activity carried a query string long before this view existed — the
+  // trace canvas defined ?run / ?pipeline / ?mission / ?status, and fourteen
+  // places across the product still link that way. Those links survive the
+  // page they were written against; see lib/activity-deeplink for the mapping
+  // and for what `?step` cannot mean here.
+  //
+  // Read once rather than subscribed to, because after mount this view owns
+  // the selection: the path changes on every rail pick and drill-down, and a
+  // component that kept re-deriving state from a URL it does not write would
+  // snap the reader back to where they arrived every time the params object
+  // changed identity.
+  const searchParams = useSearchParams()
+  const deepLink = React.useMemo(() => activityDeepLink(searchParams), [])
+
+  const [facets, setFacets] = React.useState<FacetState>(() =>
+    deepLink?.scope ? { ...EMPTY_FACETS, scope: deepLink.scope as FacetState["scope"] } : EMPTY_FACETS,
+  )
   const [search, setSearch] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
   const [pinned, setPinned] = React.useState<SpineLink | null>(null)
@@ -145,7 +165,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   //
   // The path is that same one value grown a memory: its LAST stop is the
   // selection, the ones before it are only there so back has somewhere to go.
-  const [path, setPath] = React.useState<ActivityPath>(ACTIVITY_HOME)
+  const [path, setPath] = React.useState<ActivityPath>(deepLink?.path ?? ACTIVITY_HOME)
   const stop = React.useMemo(() => currentStop(path), [path])
   const surface = React.useMemo(() => activitySurface(stop), [stop])
   const focus = surface.focus
@@ -240,7 +260,11 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // must answer "where can I go" even when the current filters answer nothing,
   // and tying it to the same window is what made the rail collapse to a single
   // row the moment an issue was focused.
-  const { chains, hasUnrecordedRuns: chainsHaveUnrecorded } = useChains(workspaceId)
+  const {
+    chains,
+    hasUnrecordedRuns: chainsHaveUnrecorded,
+    hasMore: chainsHaveMore,
+  } = useChains(workspaceId)
 
   // Picking a workflow is a selection like any other, so it goes through the
   // same setter — which is what makes it impossible for the graph to outlive
@@ -363,6 +387,33 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
       })),
     [pipelines],
   )
+
+  // The routine behind a chain, for a row's icon, colour and human name — and
+  // for resolving that name when the search matches against it. Built HERE
+  // rather than inside the rail because both the rail and the narrowing below
+  // need it, and a map built in two places is a map with two contents the day
+  // one of them grows a rule.
+  const routineBySlug = React.useMemo(() => {
+    const m = new Map<string, SidebarRoutine>()
+    for (const r of routines) m.set(r.slug, r)
+    return m
+  }, [routines])
+
+  // ONE narrowing of the chain index, read by every surface on the page.
+  //
+  // The rail used to do this privately while the shell handed the unnarrowed
+  // array to the three lens dashboards beside it — so typing in the search box
+  // left the rail showing two rows next to a dashboard reporting twenty, under a
+  // comment in lens-overviews.tsx promising the two could not disagree because
+  // they read "the SAME ChainSummary[]". They did not. They do now.
+  //
+  // `visible` goes to every list, dashboard and drill-down. `searched` goes to
+  // the status segments alone, so their counts survive their own selection.
+  const narrowedChains = React.useMemo(
+    () => narrowChains(chains, search, facets.scope, (slug) => routineBySlug.get(slug)?.name),
+    [chains, search, facets.scope, routineBySlug],
+  )
+  const visibleChains = narrowedChains.visible
 
   const labels = React.useMemo<SpineLabels>(() => {
     const issues: Record<string, string> = {}
@@ -671,8 +722,12 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
             </div>
           ) : (
             <ActivitySidebar
-              chains={chains}
+              chains={visibleChains}
+              chainsBeforeStatus={narrowedChains.searched}
+              loadedChainCount={chains.length}
+              chainsHaveMore={chainsHaveMore}
               chainsHaveUnrecorded={chainsHaveUnrecorded}
+              routineBySlug={routineBySlug}
               selectedChain={railChain}
               onSelectChain={selectChain}
               search={search}
@@ -789,8 +844,13 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
               {openIssue && (
                 <IssueDrillDown
                   workspaceId={workspaceId}
-                  identifier={openIssue.label}
-                  chains={chains}
+                  // The mission ID, not the label. The label is
+                  // `identifier || title || id`, so on a workspace without issue
+                  // identifiers it is the TITLE — nothing matched, and the deep
+                  // link pointed at a URL-encoded sentence.
+                  issueId={openIssue.id}
+                  label={openIssue.label}
+                  chains={visibleChains}
                   onOpenWorkflow={selectChain}
                 />
               )}
@@ -800,7 +860,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   workspaceId={workspaceId}
                   agentID={openAgent.id}
                   name={openAgent.label}
-                  chains={chains}
+                  chains={visibleChains}
                   onOpenWorkflow={selectChain}
                 />
               )}
@@ -812,9 +872,20 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   // The routine is whichever one the reader walked through to
                   // get here — a run is opened from its routine's list or from
                   // a workflow, and both leave that stop on the path.
+                  //
+                  // The third arm is for a run that was DEEP-LINKED. `?run=<id>`
+                  // is the commonest legacy link in the product (the inbox, the
+                  // bell, a routine's run rows) and it carries no routine, so
+                  // the first two arms find nothing and the page renders "this
+                  // run's record is not loaded" over a run the index can name.
+                  // A run that is a chain's origin has its routine right there
+                  // on the row; reading it costs nothing and is exact. A run
+                  // that is NOT an origin still falls through to undefined,
+                  // which is the honest answer rather than a guess.
                   routineSlug={
                     path.stops.find((s) => s.kind === "routine")?.id ??
-                    chains.find((c) => c.origin === workflowAnchor(path))?.routine_slug
+                    chains.find((c) => c.origin === workflowAnchor(path))?.routine_slug ??
+                    chains.find((c) => c.origin === openRun.id)?.routine_slug
                   }
                 />
               )}
@@ -911,7 +982,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
 
               {lensOverviewShown && lens === "issues" && (
                 <IssuesOverview
-                  chains={chains}
+                  chains={visibleChains}
                   rangeLabel={range.label}
                   issueMeta={issueMeta}
                   onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
@@ -921,7 +992,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
 
               {lensOverviewShown && lens === "agents" && (
                 <AgentsOverview
-                  chains={chains}
+                  chains={visibleChains}
                   rangeLabel={range.label}
                   hiredCount={agents.length}
                   onOpenEntity={(kind, id, label) => setPath(selectStop({ kind, id, label }))}
@@ -931,7 +1002,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
 
               {lensOverviewShown && lens === "routines" && (
                 <RoutinesLensOverview
-                  chains={chains}
+                  chains={visibleChains}
                   routines={routines}
                   rangeLabel={range.label}
                   catalogueCount={pipelines.length}

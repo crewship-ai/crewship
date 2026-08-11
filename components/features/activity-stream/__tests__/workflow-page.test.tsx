@@ -39,6 +39,14 @@ import { WorkflowPage } from "../workflow-page"
  * Two runs are dated and carry a duration; the routine and the rule carry
  * neither, because internal/chain dates events and not nouns. Half a real
  * chain being undatable is the normal case, so it is the fixture.
+ *
+ * `chain_origin` is the one field added since that capture — the walk now
+ * carries pipeline_runs.chain_origin on every run node. The values are the ones
+ * that row of pipeline_runs holds: the rule fired this routine twice, two
+ * minutes apart, and each firing is its own chain rooted at its own run. So the
+ * anchor's origin is the chain this page is showing (CHAIN.origin) and the
+ * earlier run's is its own id. That is precisely why this walk of ONE run comes
+ * back carrying two.
  */
 const LIVE_GRAPH: TimelineSource = {
   nodes: [
@@ -54,6 +62,7 @@ const LIVE_GRAPH: TimelineSource = {
       occurred_at: "2026-08-10T06:37:58.366620000Z",
       ended_at: "2026-08-10T06:37:58.379865000Z",
       duration_ms: 13,
+      chain_origin: "run_cmsmv0tzx001693a3ed64",
     },
     {
       id: "routine:pln_cmsmuxliu0001d886758f",
@@ -84,6 +93,7 @@ const LIVE_GRAPH: TimelineSource = {
       occurred_at: "2026-08-10T06:35:58.384405000Z",
       ended_at: "2026-08-10T06:35:58.422991000Z",
       duration_ms: 38,
+      chain_origin: "run_cmsmuy9f30013ffeaf4f6",
     },
   ],
   edges: [
@@ -205,6 +215,38 @@ describe("WorkflowPage", () => {
     expect(sequence.getByText("38ms")).toBeInTheDocument()
   })
 
+  // Two numbers on one page describing the same thing must agree.
+  //
+  // This is the rule-fired shape, which is the common one: the walk reaches the
+  // anchor's routine and comes back carrying the rule's OTHER firings too. The
+  // header says "Runs 1" from ChainSummary.runs; the card listed both runs.
+  // Membership comes from pipeline_runs.chain_origin now — see workflowRuns.
+  it("lists as many runs as the chain says it has, not the routine's other firings", async () => {
+    renderPage()
+    const card = within(await screen.findByRole("region", { name: "Runs" }))
+    await waitFor(() => expect(card.getAllByRole("button")).toHaveLength(CHAIN.runs))
+    // The one it kept is this chain's, by id — a count alone would pass on the
+    // wrong run.
+    expect(card.getByText(CHAIN.origin)).toBeInTheDocument()
+    expect(card.queryByText("run_cmsmuy9f30013ffeaf4f6")).toBeNull()
+  })
+
+  it("keeps every run when the server is older than chain_origin", async () => {
+    // Hiding a real run is the worse error, so a walk that cannot say which
+    // chain a run belongs to gets the whole list, exactly as this card behaved
+    // before the field existed.
+    apiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        nodes: LIVE_GRAPH.nodes.map(({ chain_origin: _dropped, ...n }) => n),
+        edges: LIVE_GRAPH.edges,
+      }),
+    })
+    renderPage()
+    const card = within(await screen.findByRole("region", { name: "Runs" }))
+    await waitFor(() => expect(card.getAllByRole("button")).toHaveLength(2))
+  })
+
   it("says out loud which steps the order is not a claim about", async () => {
     renderPage()
     expect(await screen.findByText(/2 of 4 steps are not dated/)).toBeInTheDocument()
@@ -255,7 +297,7 @@ describe("WorkflowPage", () => {
   // survives every theme change, so it is caught by reading the source — the
   // same trick lib/__tests__/theme-contrast.test.ts uses on the stylesheet.
   it("takes every colour from a token, never from a literal", () => {
-    const files = ["components/features/activity-new/workflow-page.tsx", "lib/workflow-timeline.ts"]
+    const files = ["components/features/activity-stream/workflow-page.tsx", "lib/workflow-timeline.ts"]
     const HEX = /#[0-9a-fA-F]{3,8}\b/
     const PALETTE_CLASS =
       /\b(?:text|bg|border|fill|stroke|ring)-(?:red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-\d{2,3}\b/

@@ -1,4 +1,4 @@
-// What /activity-new is currently pointed at — one value, one answer.
+// What /activity is currently pointed at — one value, one answer.
 //
 // The page can be aimed at four things: a workflow (one chain, drawn as a
 // graph), or an issue / routine / crew (a lens over the same activity feed).

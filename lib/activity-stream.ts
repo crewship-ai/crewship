@@ -1,4 +1,4 @@
-// Pure helpers behind /activity-new — the merged activity stream.
+// Pure helpers behind /activity — the merged activity stream.
 //
 // The journal already IS the merged feed: `/api/v1/journal` carries runs,
 // issues, approvals, keeper decisions, cost and memory as one typed,
