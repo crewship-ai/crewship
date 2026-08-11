@@ -12,10 +12,14 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+var cleanupSwapDriverSeq atomic.Uint64
 
 type cleanupSwapDriver struct {
 	proposalPath string
@@ -169,7 +173,7 @@ func TestWriteProposalInsertCleanupUnlinksLeafSymlinkNotVictim(t *testing.T) {
 	t.Cleanup(func() { cryptorand.Reader = oldReader })
 	now := time.Date(2026, 8, 11, 8, 1, 0, 0, time.UTC)
 	proposalPath := filepath.Join(proposedDir, "proposal-20260811080100-0000000000000000.md")
-	driverName := "cleanup-swap-" + strings.ReplaceAll(t.Name(), "/", "-")
+	driverName := "cleanup-swap-" + strconv.FormatUint(cleanupSwapDriverSeq.Add(1), 10)
 	sql.Register(driverName, cleanupSwapDriver{proposalPath: proposalPath, victimPath: victim})
 	db, err := sql.Open(driverName, "")
 	if err != nil {
