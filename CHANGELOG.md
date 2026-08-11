@@ -138,6 +138,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `run_retention_days` does not make, because nobody has a legal duty to retain
   a pipeline run.
 
+  Upgrading never deletes anything on its own: the migration pins every
+  workspace that already existed to an explicit "keep forever", so the 90-day
+  default only ever applies to workspaces created after it. Otherwise the first
+  restart after the upgrade would have swept a year of credential history away
+  before the API that sets the override was even listening.
+
   The sweep deletes in bounded batches so no single statement can stall every
   writer, and says how much backlog is left if it stops at its cap. Since
   `audit_logs` is unlimited by default, it also warns when a workspace has no
@@ -231,8 +237,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   authentication in front of it — by design, the token *is* the authorization
   — so anyone who could read the database file walked away with every live
   exposure URL and every configured webhook on the instance. Both columns now
-  carry an HMAC-SHA256 digest and are resolved by digest, the way `cli_tokens`
-  has worked since Patch J.
+  carry a SHA-256 digest and are resolved by digest, the way `cli_tokens` has
+  worked since Patch J.
 
   **Existing tokens keep working.** The migration hashes the cleartext already
   in the row rather than rotating it: invalidating would have broken every
@@ -242,18 +248,39 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `NOT NULL UNIQUE`, which SQLite's `DROP COLUMN` refuses, and one is still
   named by the create path) so each holds `redacted:<row id>` afterwards.
 
-  The digest is keyed by a subkey derived from **`ENCRYPTION_KEY`**, not from
-  `CREWSHIP_ADMIN_TOKEN_HMAC_KEY`. The admin key is optional — `cli_tokens`
-  disables its whole ADMIN tier when it is unset — and a migration that has to
-  preserve every already-published URL cannot depend on a variable an instance
-  is allowed not to have. `ENCRYPTION_KEY` is the one that cannot be missing on
-  a running server: `crewship start` generates and persists it before the
-  database is opened, then refuses to boot if it does not resolve.
+  **The digest is unkeyed SHA-256** (hex, behind an `sh1:` scheme prefix), not
+  an HMAC. A key protects a digest whose input space is small enough to
+  enumerate offline; both of these tokens are 32 bytes of `crypto/rand`, so the
+  preimage search is 2^256 wide either way and a key buys nothing. It would
+  have cost a great deal: an earlier revision of this work keyed the digest off
+  `ENCRYPTION_KEY`, and the documented master-key rotation
+  (`CREWSHIP_ENCRYPTION_KEY_VERSION` + `ENCRYPTION_KEY_V2` +
+  `POST /admin/reencrypt`) **retires that variable as its final step** — after
+  which every presented token would hash under a different scheme than every
+  stored digest, with the cleartext already overwritten and nothing to recover.
+  The keyed `hk1:` scheme never shipped and is not supported; a **dev instance**
+  that ran the earlier revision must re-create those webhooks and re-request
+  those exposures.
+
+  A row the backfill cannot hash is no longer stranded either. The backfill
+  continues past a failed `UPDATE` (SQLite has one writer; a moment of
+  contention used to abort the loop and 404 every remaining webhook until the
+  next restart) and, while any row still holds cleartext, the webhook lookup
+  falls back to it — bounded to rows whose digest is missing, and re-hashing
+  each one it resolves. On the exposure side, an `ACTIVE` row whose hashing
+  failed is hashed at boot and keeps serving; one that nothing can resolve is
+  flipped to `EXPIRED` instead of being reported live with a future expiry.
+  Revoking an exposure now drops it from the registry by row id when the row
+  carries no digest — the previous fallback read a column that always holds
+  `redacted:<id>`, so a revoke could answer `200` while the capability URL kept
+  reverse-proxying into the crew container until the process restarted.
 
   One behaviour change follows from it: a webhook's token is now **shown once**,
   in the create response. `GET`/`PATCH` and the list endpoint no longer return
   it, because it is no longer recoverable. A webhook whose token was lost has to
-  be re-created.
+  be re-created, and `crewship routine webhooks url <id>` now says so and exits
+  non-zero instead of printing `…/api/v1/webhooks/` with nothing after the
+  slash.
 
   For port exposures the cleartext never reaches disk at all: the create path
   writes the spent marker and the digest directly, rather than inserting the

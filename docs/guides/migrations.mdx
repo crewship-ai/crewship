@@ -290,6 +290,19 @@ impossible to switch off, and "keep this forever" is a retention decision an
 operator has to be able to express.
 </Warning>
 
+<Warning>
+`20260811082000` pins every workspace that **predates** the migration to an
+explicit `0` (keep forever) for `credential_audit`, leaving `NULL` — and so the
+90-day default — only for workspaces created afterwards.
+
+Without it, upgrading is destructive: the sweeper performs one immediate sweep
+at boot, every existing workspace resolves `NULL` to 90 days, and a year of
+credential access history is deleted on the first restart — before the API that
+sets the override is listening. Shipping a default is fine; applying it
+retroactively to history that accumulated under "we never delete this" is not.
+New installs are bounded, existing installs are asked.
+</Warning>
+
 The sweeper (`internal/api/audit_retention.go`) runs daily, deletes in bounded
 batches so one statement cannot stall every writer, and logs the remaining
 backlog if it stops at its cap. Because `audit_logs` is kept forever by
@@ -324,30 +337,52 @@ sender on every instance, with no evidence any cleartext leaked.
 
 <Note>
 **The backfill is Go, not SQL, and that is why it is not in the `.sql` file.**
-SQLite has no HMAC and no SHA-256, so the digest cannot be computed in a
-migration. The file adds the column and the index; the hashing runs the first
-time the owning component is constructed, which on the server path is before
+SQLite has no SHA-256, so the digest cannot be computed in a migration. The
+file adds the column and the index; the hashing runs the first time the owning
+component is constructed, which on the server path is before
 anything serves a request — `PortExposeRegistry.LoadFromDB` for
 `port_exposures`, `NewWebhookStore` for `pipeline_webhooks`. Both select on
 `token_hash IS NULL`, so they are idempotent and normally read zero rows.
 </Note>
 
-**The key comes from `ENCRYPTION_KEY`.** Not from
-`CREWSHIP_ADMIN_TOKEN_HMAC_KEY`, which is deliberately optional —
-`internal/api/cli_token.go` disables the entire ADMIN tier when it is unset —
-and a migration that has to preserve every already-published URL on every
-existing instance cannot depend on a variable an instance is allowed not to
-have. `ENCRYPTION_KEY` cannot be absent on a running server: `crewship start`
-calls `secrets.LoadOrGenerate` before the database is opened, which generates
-and persists it when missing, and then refuses to boot at all if
-`encryption.VerifyCurrentKey` cannot resolve it. The value actually used is a
-subkey derived from it (`HMAC-SHA256(ENCRYPTION_KEY, "crewship/capability-token-hash/v1")`),
-so the AES key is never used directly as an HMAC key.
+**The digest is unkeyed SHA-256**, hex, behind an `sh1:` scheme prefix — not an
+HMAC. A key protects a digest whose input space is small enough to enumerate
+offline; these two tokens are 32 bytes of `crypto/rand` each
+(`internal/pipeline.generateWebhookToken`, `internal/api.generateExposeToken`),
+so the preimage search is 2^256 wide either way and the key adds nothing.
 
-Every stored digest carries a scheme prefix (`hk1:` keyed, `sh1:` unkeyed
-fallback) and lookups accept either, so an instance that had no key when a row
-was written keeps resolving it once one appears, and a future key rotation adds
-a prefix rather than rewriting one.
+<Warning>
+**An earlier revision of this migration keyed the digest off `ENCRYPTION_KEY`,
+and that was a latent outage.** The documented master-key rotation
+(`CREWSHIP_ENCRYPTION_KEY_VERSION` + `ENCRYPTION_KEY_V2` +
+`POST /admin/reencrypt`) **retires `ENCRYPTION_KEY` as its final step**. After
+that, every presented token hashes under a different scheme than every stored
+digest — and the cleartext has already been overwritten with `redacted:<row
+id>`, so nothing is recoverable. Every webhook sender and every published
+`/exposed/` URL would 404, permanently. The digest now depends on the token and
+on nothing else, so no key operation can invalidate it.
+
+The keyed `hk1:` scheme is **not supported** and never shipped: it existed only
+on the branch that developed this migration. A **dev instance** that ran the
+earlier revision holds `hk1:` digests nothing will match — re-create those
+webhooks and re-request those exposures, or delete the rows.
+</Warning>
+
+The scheme prefix stays for two reasons: it makes a stored digest recognisable
+as one, so replaying a value read out of the database file at the public
+endpoint resolves to nothing, and it lets a future algorithm change add a prefix
+rather than rewrite one.
+
+**A row the backfill could not hash is not stranded.** The backfill continues
+past a failed `UPDATE` (SQLite has a single writer; one moment of contention
+used to abort the whole loop) and counts what it missed. While any row still
+holds cleartext, `WebhookStore.GetByToken` arms a second, bounded lookup against
+the cleartext column for tokens the digest index does not resolve — matching
+only rows whose `token_hash` is still empty, whose cleartext is in the table
+anyway, and re-hashing each one as it is matched. `PortExposeRegistry.LoadFromDB`
+does the equivalent at boot: an `ACTIVE` row whose cleartext survived is hashed
+and served, and one with nothing left to resolve it is flipped to `EXPIRED`
+rather than reported live with a future expiry.
 
 <Warning>
 **The cleartext columns stay, holding `redacted:<row id>`.** Neither can be
@@ -361,7 +396,8 @@ to the row it belonged to.
 The consequence for webhooks is that the token is now **shown once**, in the
 create response. `GET`, `PATCH` and the list endpoint return an empty token,
 because there is nothing left to return. A webhook whose token was lost must be
-re-created.
+re-created — and `crewship routine webhooks url <id>` says exactly that and
+exits non-zero, rather than printing a URL with nothing after the last slash.
 </Warning>
 
 `pipeline_waitpoints.token` is the same kind of secret and is **not** covered

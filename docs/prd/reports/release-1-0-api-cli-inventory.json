@@ -2325,7 +2325,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_reencrypt_test.go",
-        "internal/api/admin_reencrypt_test.go"
+        "internal/api/admin_reencrypt_test.go",
+        "internal/pipeline/webhook_token_hash_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -2345,7 +2346,8 @@
           "source_file": "cmd/crewship/cmd_admin_reencrypt.go",
           "test_signals": [
             "cmd/crewship/cmd_admin_reencrypt_test.go",
-            "internal/api/admin_reencrypt_test.go"
+            "internal/api/admin_reencrypt_test.go",
+            "internal/pipeline/webhook_token_hash_test.go"
           ]
         }
       }
@@ -43366,8 +43368,7 @@
       "docs": [
         "docs/configuration/environment.mdx",
         "docs/guides/auth.mdx",
-        "docs/guides/installation.mdx",
-        "docs/guides/migrations.mdx"
+        "docs/guides/installation.mdx"
       ],
       "status": "documented"
     },
@@ -43617,6 +43618,7 @@
       "name": "CREWSHIP_ENCRYPTION_KEY_VERSION",
       "docs": [
         "docs/guides/credentials.mdx",
+        "docs/guides/migrations.mdx",
         "docs/security/encryption.mdx"
       ],
       "status": "documented"
