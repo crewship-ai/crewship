@@ -716,3 +716,183 @@ func TestObserver_ClosedLoopStopsAtMaxChainDepth(t *testing.T) {
 			journal.EntryAutomationDepthExceeded)
 	}
 }
+
+// The same closed loop, shaped the way the RUN LIFECYCLE emitter actually
+// shapes it — and this is the shape a user reaches for first.
+//
+// TestObserver_ClosedLoopStopsAtMaxChainDepth above hands the triggering entry
+// a TraceID, with the comment "trace_id IS the originating run id". That is
+// true of exactly one emitter: internal/api/issue_events.go, which overrides
+// TraceID with the causing run. It is NOT true of internal/pipeline/journal.go,
+// which writes pipeline.run.completed / .failed / .started and every
+// pipeline.step.* with ActorID and payload.run_id and leaves TraceID to the
+// telemetry middleware (an OTel trace id, or empty).
+//
+// So a rule armed on `pipeline.run.completed` whose routine completes — the
+// most obvious cycle anyone can build, and one this branch made reachable —
+// never priced its hop. Measured on a live instance before this test existed:
+// 12 runs, every one at chain_depth 1 with its own chain_origin, zero
+// automation.depth_exceeded, and the only thing that stopped it was
+// max_per_hour, which the rule's own author picks.
+//
+// The unit test above passed throughout, because it modelled a world where
+// every emitter stamps TraceID. This one models the other world, which is the
+// one production is in.
+func TestObserver_ClosedLoopOnRunLifecycleStopsAtMaxChainDepth(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	enq := &recordingEnqueuer{}
+	jrn := &recordingJournal{}
+	reg := NewRegistry(nil, enq, Options{Journal: jrn, Now: func() time.Time { return now }})
+	reg.SetChainSource(enqueuedDepths{enq})
+
+	r := rule("a1", "ws_1", string(journal.EntryPipelineRunCompleted))
+	r.MaxPerHour = 10000
+	r.DebounceSeconds = 1
+	reg.Load([]Resolved{r})
+
+	// How internal/pipeline/journal.go emitRunCompleted builds it: the causing
+	// run is in ActorID and payload.run_id. TraceID is left alone.
+	completed := func(runID string) journal.Entry {
+		e := entry("ws_1", string(journal.EntryPipelineRunCompleted), "")
+		e.ActorType = journal.ActorOrchestrator
+		e.ActorID = runID
+		e.Payload = map[string]any{"pipeline_slug": "triage", "run_id": runID}
+		return e
+	}
+
+	// Hop 0: a person starts the routine by hand. No parent run — depth 1.
+	reg.Observer([]journal.Entry{completed("")})
+	reg.Flush(context.Background())
+
+	const hops = 30
+	for i := 0; i < hops; i++ {
+		if enq.n() == 0 {
+			break
+		}
+		parent := enq.at(enq.n() - 1)
+		now = now.Add(2 * time.Second)
+		reg.Observer([]journal.Entry{completed(parent.ID)})
+		reg.Flush(context.Background())
+	}
+
+	if want := pipeline.MaxChainDepth + 1; enq.n() > want {
+		t.Fatalf("run-lifecycle loop produced %d enqueues, want at most %d "+
+			"(1 human-caused + %d composed hops): the hop is priced from "+
+			"journal.Entry.TraceID, and this emitter puts the causing run in "+
+			"payload.run_id — so every lap roots a fresh chain at depth 1 and "+
+			"GuardChainDepth is never reached",
+			enq.n(), want, pipeline.MaxChainDepth)
+	}
+	if got := jrn.count(journal.EntryAutomationDepthExceeded); got == 0 {
+		t.Errorf("no %s entry emitted; the cycle was stopped by something other "+
+			"than the depth cap, or not stopped at all",
+			journal.EntryAutomationDepthExceeded)
+	}
+}
+
+// A chain source that fails, and one that answers for a chosen id only.
+type erroringChains struct{ err error }
+
+func (e erroringChains) ChainOf(context.Context, string, string) (ChainPos, bool, error) {
+	return ChainPos{}, false, e.err
+}
+
+// An unreadable chain position must REFUSE the hop, not wave it through.
+//
+// emitChainUnreadable carries a paragraph explaining why the refusal has to be
+// loud, and nothing asserted that it happens at all — the whole fail-closed
+// path was untested. A mutation that turned the error into "skip this candidate
+// and carry on" left every test in this package green while the guarantee was
+// gone: an unknown depth that defaults to shallow is how a cycle buys itself a
+// fresh budget every lap, which is the one thing this cap exists to prevent.
+func TestFlush_UnreadableChainPositionRefusesTheHop(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	enq := &recordingEnqueuer{}
+	jrn := &recordingJournal{}
+	reg := NewRegistry(nil, enq, Options{Journal: jrn, Now: func() time.Time { return now }})
+	reg.SetChainSource(erroringChains{err: errors.New("db is locked")})
+
+	reg.Load([]Resolved{rule("a1", "ws_1", "mission.status_change")})
+	e := entry("ws_1", "mission.status_change", "m_1")
+	e.TraceID = "run_parent"
+	reg.Observer([]journal.Entry{e})
+	reg.Flush(context.Background())
+
+	if enq.n() != 0 {
+		t.Errorf("enqueued %d run(s) on an unreadable chain position, want 0: "+
+			"a hop whose depth cannot be read must be refused, not priced as shallow",
+			enq.n())
+	}
+	// Same entry TYPE as a real depth refusal; `reason` is what tells the two
+	// apart, and asserting on the type alone would pass on the wrong refusal.
+	if got := jrn.count(journal.EntryAutomationDepthExceeded); got != 1 {
+		t.Fatalf("%s entries = %d, want 1: a silently dropped run is "+
+			"indistinguishable from a rule that stopped matching",
+			journal.EntryAutomationDepthExceeded, got)
+	}
+	if got := jrn.reasonOf(journal.EntryAutomationDepthExceeded); got != "unreadable" {
+		t.Errorf("refusal reason = %q, want \"unreadable\"", got)
+	}
+}
+
+// When an entry offers two candidates, the FIRST that resolves is the parent.
+//
+// Order is not cosmetic. TraceID is checked before payload.run_id because the
+// issue path OVERRIDES TraceID with the true causing run, while payload.run_id
+// on that same entry may name something else entirely. Taking the last match
+// instead of the first survived every other test in this package.
+func TestFlush_FirstResolvingCandidateIsTheParent(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	enq := &recordingEnqueuer{}
+	reg := NewRegistry(nil, enq, Options{Now: func() time.Time { return now }})
+	// Both candidates name a real run; they sit at different depths, so which
+	// one was chosen is readable off the enqueued run.
+	reg.SetChainSource(bothResolve{
+		first:  ChainPos{Depth: 5, Origin: "run_root_a"},
+		second: ChainPos{Depth: 1, Origin: "run_root_b"},
+	})
+
+	reg.Load([]Resolved{rule("a1", "ws_1", "mission.status_change")})
+	e := entry("ws_1", "mission.status_change", "m_1")
+	e.TraceID = "run_first"
+	e.Payload["run_id"] = "run_second"
+	reg.Observer([]journal.Entry{e})
+	reg.Flush(context.Background())
+
+	if enq.n() != 1 {
+		t.Fatalf("enqueues = %d, want 1", enq.n())
+	}
+	got := enq.at(0)
+	if got.ChainDepth != 6 || got.ChainOrigin != "run_root_a" {
+		t.Errorf("priced from the wrong candidate: depth=%d origin=%q, want 6 and run_root_a "+
+			"(TraceID is checked first because the issue path overrides it with the true cause)",
+			got.ChainDepth, got.ChainOrigin)
+	}
+}
+
+type bothResolve struct{ first, second ChainPos }
+
+func (b bothResolve) ChainOf(_ context.Context, _, runID string) (ChainPos, bool, error) {
+	switch runID {
+	case "run_first":
+		return b.first, true, nil
+	case "run_second":
+		return b.second, true, nil
+	}
+	return ChainPos{}, false, nil
+}
+
+// reasonOf returns the `reason` payload of the first entry of this type, or "".
+// The unreadable refusal and the depth refusal share an entry type on purpose
+// (see emitChainUnreadable); this is what separates them in an assertion.
+func (j *recordingJournal) reasonOf(t journal.EntryType) string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for _, e := range j.entries {
+		if e.Type == t {
+			s, _ := e.Payload["reason"].(string)
+			return s
+		}
+	}
+	return ""
+}

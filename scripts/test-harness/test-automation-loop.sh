@@ -265,4 +265,108 @@ may be holding for some other reason."
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# The OTHER closed loop: a rule on the run's own completion.
+#
+# Everything above drives the cycle through `crewship issue.update` →
+# mission.status_change, and that is the one emitter that overrides
+# journal.Entry.TraceID with the causing run id (internal/api/issue_events.go).
+# The hop was priced from TraceID alone, so this suite passed 8/8 while the
+# shape below — one rule, `--event pipeline.run.completed`, pointed at the
+# routine whose completion it watches — ran unbounded. It is also the first
+# thing anyone tries.
+#
+# Measured on a live instance before the fix: 13 runs, every one at
+# chain_depth 1 with its own chain_origin, zero depth_exceeded, stopped only by
+# max_per_hour. After: nine runs at depths 0..8, ONE chain_origin,
+# depth_exceeded written, throttled zero.
+#
+# max_per_hour is at the ceiling again, for the same reason as above.
+# ---------------------------------------------------------------------------
+
+section "The cycle, armed on the run's own completion"
+
+cat > "$WORKDIR/self.yaml" <<YAML
+dsl_version: "1.0"
+name: loop-self-$TAG
+description: A routine whose completion re-fires it. Half of a deliberate cycle.
+steps:
+  - id: tick
+    type: transform
+    transform:
+      input: tick
+      expression: "."
+YAML
+if ! out="$(cs routine save --name "loop-self-$TAG" --definition "$WORKDIR/self.yaml" \
+      --author-crew "$CREW" 2>&1)"; then
+  _fail "save routine loop-self" "$(printf '%s' "$out" | tail -c 200)"
+  finish
+fi
+
+SELF_BEFORE_DEPTH="$(type_count automation.depth_exceeded)"
+SELF_BEFORE_THROTTLE="$(type_count automation.throttled)"
+
+self_out="$(cs automation create --name "loop-self-$TAG" \
+  --event pipeline.run.completed \
+  --payload-equals "pipeline_slug=loop-self-$TAG" \
+  --routine "loop-self-$TAG" --max-per-hour 10000 --debounce-seconds 1 2>&1)"
+self_id="$(printf '%s' "$self_out" | sed -n 's/^Automation \(aut_[a-z0-9]*\) created.*/\1/p')"
+if [[ -z "$self_id" ]]; then
+  _fail "arm the self-firing rule" "$(printf '%s' "$self_out" | tail -c 200)"
+  finish
+fi
+_CREATED_AUTOMATIONS+=("$self_id")
+_pass "rule armed on pipeline.run.completed, max_per_hour 10000"
+
+cs routine run "loop-self-$TAG" >/dev/null 2>&1
+info "kicked; settling for ${SETTLE_SECONDS}s"
+sleep "$SETTLE_SECONDS"
+
+SELF_RUNS="$(cs routine records "loop-self-$TAG" -f json 2>/dev/null | python3 -c '
+import sys,json
+try: rs=json.load(sys.stdin)
+except Exception: sys.exit(0)
+print(len(rs))
+' 2>/dev/null || echo "")"
+SELF_MAXDEPTH="$(cs routine records "loop-self-$TAG" -f json 2>/dev/null | python3 -c '
+import sys,json
+try: rs=json.load(sys.stdin)
+except Exception: sys.exit(0)
+print(max([r.get("chain_depth") or 0 for r in rs], default=0))
+' 2>/dev/null || echo "")"
+SELF_DEPTH_DELTA=$(( $(type_count automation.depth_exceeded) - SELF_BEFORE_DEPTH ))
+SELF_THROTTLE_DELTA=$(( $(type_count automation.throttled) - SELF_BEFORE_THROTTLE ))
+
+if [[ -z "$SELF_RUNS" || "$SELF_RUNS" == "0" ]]; then
+  skip "the self-firing cycle is bounded" "the rule never fired — nothing to bound"
+else
+  info "runs produced by the self-firing cycle: $SELF_RUNS (deepest chain_depth $SELF_MAXDEPTH)"
+  if (( SELF_RUNS > MAX_CHAIN_DEPTH + 2 )); then
+    _fail "the self-firing cycle terminated" \
+      "$SELF_RUNS runs from one kick. The hop is not spending from the composition budget: \
+this emitter puts the causing run in payload.run_id, not in trace_id."
+  else
+    _pass "the self-firing cycle terminated (at $SELF_RUNS runs)"
+  fi
+  if [[ "$SELF_MAXDEPTH" != "$MAX_CHAIN_DEPTH" ]]; then
+    _fail "the deepest run sits exactly at MaxChainDepth ($MAX_CHAIN_DEPTH)" \
+      "deepest was $SELF_MAXDEPTH. Short of it means something else stopped the cycle."
+  else
+    _pass "the deepest run sits exactly at MaxChainDepth ($MAX_CHAIN_DEPTH)"
+  fi
+  if (( SELF_DEPTH_DELTA < 1 )); then
+    _fail "automation.depth_exceeded records the refusal" \
+      "no new entry: the cycle ended for some reason other than the cap."
+  else
+    _pass "automation.depth_exceeded records the refusal"
+  fi
+  if (( SELF_THROTTLE_DELTA > 0 )); then
+    _fail "no throttle fired: the depth cap is what stopped the cycle" \
+      "$SELF_THROTTLE_DELTA automation.throttled entries — max_per_hour is doing the work, \
+so this proves nothing about the cap."
+  else
+    _pass "no throttle fired: the depth cap is what stopped the cycle"
+  fi
+fi
+
 finish

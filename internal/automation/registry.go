@@ -156,9 +156,17 @@ type intent struct {
 	inputsJSON     string
 	fireAt         time.Time
 	debounceMaxAt  time.Time
-	// originRunID is the run whose work produced the triggering entry, taken
-	// from the entry at match time — NOT looked up, because Observer runs on
-	// the journal write path. Flush prices the hop from it, off that path.
+	// originCandidates names the run whose work produced the triggering entry,
+	// best first, taken from the entry at match time — NOT looked up, because
+	// Observer runs on the journal write path. Flush resolves them there, off
+	// that path, and takes the first that names a real run.
+	//
+	// Plural because the journal has never had one place for this; see
+	// originCandidates() for which two fields and why neither alone is enough.
+	originCandidates []string
+	// originRunID is whichever candidate resolved, set by Flush. It is what the
+	// depth and the refusal entries are reported against, so a reader can tell
+	// which parent the hop was priced from rather than guessing among them.
 	originRunID string
 	// chainDepth is what the enqueued run will start at: the origin run's
 	// depth + 1, or 1 when a human caused the entry.
@@ -521,9 +529,52 @@ func (r *Registry) coalesceLocked(rule Resolved, e journal.Entry, key string, no
 	// path and must not touch the database; the LOOKUP happens in Flush.
 	// Last writer wins: a coalesced burst fires once, and the deepest
 	// contributor is the honest cost of that one run.
-	if e.TraceID != "" {
-		it.originRunID = e.TraceID
+	if cands := originCandidates(e); len(cands) > 0 {
+		it.originCandidates = cands
 	}
+}
+
+// originCandidates names every field of an entry that might hold the run whose
+// work produced it, best first. Pure and allocation-light: this runs on the
+// journal write path.
+//
+// There are two, because the journal has never had ONE place for this and the
+// depth cap was built as if it had:
+//
+//	TraceID         internal/api/issue_events.go overrides it with the causing
+//	                run id, and internal/chain's chainIssuesQuery joins on it.
+//	                That override is the exception, not the rule — Entry.TraceID
+//	                is documented as populated from context by the telemetry
+//	                middleware, i.e. an OTel trace id.
+//	payload.run_id  internal/pipeline/journal.go writes it on every
+//	                pipeline.run.* and pipeline.step.* entry, alongside ActorID,
+//	                and leaves TraceID to telemetry.
+//
+// Pricing the hop from TraceID alone is why a rule armed on
+// `pipeline.run.completed` never spent from the composition budget: the field it
+// read was empty, so every lap resolved to nothing, started at depth 1 and
+// rooted a fresh chain. Measured on a live instance built from this branch —
+// 13 runs, 13 distinct chain_origins, zero depth_exceeded, stopped only by
+// max_per_hour, which the rule's own author picks and which resets on restart.
+//
+// Both are returned rather than one preferred outright, and Flush takes the
+// first that RESOLVES against pipeline_runs. A telemetry-populated TraceID is a
+// well-formed string naming no run, so "non-empty" cannot be the test; only a
+// lookup tells the two apart, and a lookup is not allowed here.
+//
+// ActorID is deliberately NOT a candidate. It holds the run id on pipeline
+// entries and an agent or user id on most others, so reading it would price a
+// hop from whatever happened to be there — and a wrong parent is worse than no
+// parent, because the hop inherits a depth and a chain that are not its own.
+func originCandidates(e journal.Entry) []string {
+	out := make([]string, 0, 2)
+	if e.TraceID != "" {
+		out = append(out, e.TraceID)
+	}
+	if id, _ := e.Payload["run_id"].(string); id != "" && id != e.TraceID {
+		out = append(out, id)
+	}
+	return out
 }
 
 // Flush drains the coalesced intents into the Enqueuer and emits any queued
@@ -577,30 +628,53 @@ func (r *Registry) Flush(ctx context.Context) int {
 		// correct for a human-caused entry and wrong for a composed one — see
 		// the origin resolution below.
 		origin := ""
-		if it.originRunID != "" && r.chains != nil {
-			if pos, ok, err := r.chains.ChainOf(ctx, it.workspaceID, it.originRunID); err != nil {
-				// Fail CLOSED on an unreadable position. An unknown depth that
-				// defaults to "shallow" is how a cycle buys itself a fresh
-				// budget every lap.
-				//
-				// Recorded in the JOURNAL as well as the log. Refusing the hop
-				// discards a run the operator was expecting, and a server log
-				// line is not somewhere they will look — from the outside a
-				// dropped run is indistinguishable from a rule that quietly
-				// stopped matching. The depth refusal writes an entry for
-				// exactly this reason; so does this.
-				r.emitChainUnreadable(ctx, it, err)
-				continue
-			} else if ok {
-				depth = pos.Depth + 1
-				// A chain has ONE root. Inherit the parent's if it has one;
-				// otherwise the parent IS the root, so name it. Taking the
-				// immediate parent in both cases would renumber the chain
-				// every hop, which is the bug this replaced.
-				origin = pos.Origin
-				if origin == "" {
-					origin = it.originRunID
+		// Resolve the candidates in order and take the FIRST that names a real
+		// run. A candidate resolving to nothing is neither an error nor a
+		// refusal: a person's action genuinely has no parent run, and so does a
+		// telemetry-populated trace id. It simply is not the parent, so the next
+		// candidate gets its turn — and when none is, depth 1 rooting its own
+		// chain is the right answer, which is what this starts at.
+		var (
+			pos      ChainPos
+			resolved bool
+			readErr  error
+		)
+		if r.chains != nil {
+			for _, cand := range it.originCandidates {
+				p, ok, err := r.chains.ChainOf(ctx, it.workspaceID, cand)
+				if err != nil {
+					it.originRunID, readErr = cand, err
+					break
 				}
+				if ok {
+					it.originRunID, pos, resolved = cand, p, true
+					break
+				}
+			}
+		}
+		switch {
+		case readErr != nil:
+			// Fail CLOSED on an unreadable position. An unknown depth that
+			// defaults to "shallow" is how a cycle buys itself a fresh
+			// budget every lap.
+			//
+			// Recorded in the JOURNAL as well as the log. Refusing the hop
+			// discards a run the operator was expecting, and a server log
+			// line is not somewhere they will look — from the outside a
+			// dropped run is indistinguishable from a rule that quietly
+			// stopped matching. The depth refusal writes an entry for
+			// exactly this reason; so does this.
+			r.emitChainUnreadable(ctx, it, readErr)
+			continue
+		case resolved:
+			depth = pos.Depth + 1
+			// A chain has ONE root. Inherit the parent's if it has one;
+			// otherwise the parent IS the root, so name it. Taking the
+			// immediate parent in both cases would renumber the chain
+			// every hop, which is the bug this replaced.
+			origin = pos.Origin
+			if origin == "" {
+				origin = it.originRunID
 			}
 		}
 		if err := pipeline.GuardChainDepth(depth); err != nil {
