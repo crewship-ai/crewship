@@ -1,0 +1,31 @@
+-- Drop idx_waitpoint_trust_grants_lookup: it is a prefix of the unique index
+-- beside it, on the same rows.
+--
+-- v20260809120000 (waitpoint_trust_grants) created both:
+--
+--   idx_waitpoint_trust_grants_live   UNIQUE (workspace_id, pipeline_id,
+--                                             step_id, definition_hash)
+--                                     WHERE revoked_at IS NULL
+--   idx_waitpoint_trust_grants_lookup        (workspace_id, pipeline_id,
+--                                             step_id)
+--                                     WHERE revoked_at IS NULL
+--
+-- SQLite uses an index for any leading prefix of its columns, and both carry
+-- the identical partial predicate — so `_live` already answers every query
+-- `_lookup` was added for. Its comment says "the hot path ... must not scan",
+-- and it does not: the scan was never on the table.
+--
+-- What `_lookup` does do is cost a second B-tree update on every insert,
+-- revoke and use-count bump of a trust grant, while the planner can never
+-- choose it. Being UNIQUE does not stop `_live` from covering reads — a
+-- unique index is an index; the constraint is extra, not a restriction on how
+-- it can be read.
+--
+-- This is the same shape as the eleven removed by 20260810120000, and it was
+-- found the same way: TestRedundantIndexPolicy re-derives redundancy from the
+-- live schema rather than from a list, so it caught this the moment the two
+-- branches met. That is the test earning its keep rather than a criticism of
+-- the migration that added them — the pair only reads as redundant once you
+-- line the two definitions up, which is exactly what a machine is better at.
+
+DROP INDEX IF EXISTS idx_waitpoint_trust_grants_lookup;

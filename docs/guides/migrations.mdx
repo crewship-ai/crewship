@@ -372,6 +372,31 @@ public `POST /api/v1/waitpoint-tokens/{token}` callback URL on demand. It is a
 *retrievable* shared secret by contract rather than a show-once credential, so
 hashing it means redesigning that contract first.
 
+## 20260811081130 — Drop a redundant trust-grant index
+
+`v20260809120000` (`waitpoint_trust_grants`) created two indexes on the same
+rows, and the shorter is a strict prefix of the longer:
+
+```
+idx_waitpoint_trust_grants_live   UNIQUE (workspace_id, pipeline_id, step_id, definition_hash) WHERE revoked_at IS NULL
+idx_waitpoint_trust_grants_lookup        (workspace_id, pipeline_id, step_id)                  WHERE revoked_at IS NULL
+```
+
+SQLite uses an index for any leading prefix of its columns, and the partial
+predicates are identical — so `_live` already answers everything `_lookup` was
+added for. Being `UNIQUE` does not stop it covering reads; the constraint is
+extra, not a restriction.
+
+`_lookup` therefore cost a second B-tree update on every insert, revoke and
+use-count bump while the planner could never choose it.
+
+<Note>
+Found by `TestRedundantIndexPolicy`, which re-derives redundancy from the live
+schema rather than from a list — so it fired the moment this branch met the one
+that added the pair. The two definitions only read as redundant once you line
+them up, which is what the machine is better at.
+</Note>
+
 ## How to read this in operation
 
 When `crewshipd` starts, it logs each migration as it applies:
