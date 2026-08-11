@@ -311,6 +311,7 @@ func (h *ConsolidateHandler) runOnce(ctx context.Context, workspaceID, crewID st
 			CrewID:      c.ID,
 			Since:       since,
 			OutputDir:   outputDir,
+			OutputRoot:  h.storageBasePath,
 		}
 		res, err := h.consolidator.Run(ctx, cfg)
 		if err != nil {
