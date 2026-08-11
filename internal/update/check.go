@@ -366,16 +366,55 @@ func decodeReleaseResponse(resp *http.Response, v any, what string) error {
 
 	// Allow exactly one byte past the cap. That byte is the probe: if it was
 	// reachable, the body is over the limit — whether or not the JSON
-	// happened to end there — and the size check below runs BEFORE the decode
-	// error is considered, so an oversized response can never masquerade as
-	// malformed JSON the way it did in B-01.
+	// happened to end there.
 	counter := &countingReader{r: io.LimitReader(resp.Body, maxReleaseResponseBytes+1)}
-	err := json.NewDecoder(counter).Decode(v)
+	dec := json.NewDecoder(counter)
+	decErr := dec.Decode(v)
+
+	// json.Decoder.Decode returns as soon as it has read ONE complete value:
+	// it does not require EOF and does not consume what follows. So a body of
+	// "<valid releases array><10 MB of anything>" decodes successfully while
+	// counter.n reflects only the few hundred bytes the decoder happened to
+	// buffer — the cap would not be enforced at all, which is precisely the
+	// property this function exists to establish. Requiring io.EOF from a
+	// second Decode closes that hole, and is safe for a body that ends in a
+	// newline or other whitespace: the decoder skips whitespace before
+	// reporting EOF (checked for "\n", "\t", "\r" and combinations).
+	var trailingData bool
+	if decErr == nil {
+		var trailing json.RawMessage
+		trailingData = !errors.Is(dec.Decode(&trailing), io.EOF)
+	}
+
+	// Neither Decode is obliged to reach the probe byte before it stops: the
+	// first stops at the end of the value, the second at the first byte that
+	// cannot begin one. counter.n is only a truthful size signal once the
+	// limited reader is exhausted, so drain it first. The drain is bounded by
+	// the LimitReader, so it can never read more than the cap + 1 bytes.
+	_, _ = io.Copy(io.Discard, counter)
+
+	// Precedence is the whole point of B-01: an over-cap body must report
+	// errResponseTooLarge and NEVER a parse or trailing-data error. Reporting
+	// "unexpected end of JSON input" for a response that was merely too big is
+	// what made B-01 cost a production upgrade to diagnose, so the size verdict
+	// is decided before either message below can be reached.
 	if counter.n > maxReleaseResponseBytes {
 		return fmt.Errorf("%w: read past the %d-byte limit", errResponseTooLarge, maxReleaseResponseBytes)
 	}
-	if err != nil {
-		return fmt.Errorf("parse %s: %w", what, err)
+	if decErr != nil {
+		return fmt.Errorf("parse %s: %w", what, decErr)
+	}
+	// Trailing garbage that fits *under* the cap is reported as a parse
+	// failure, not a size failure: the size guard has nothing true to say
+	// about a small body, and a response that is not one single JSON document
+	// is malformed in exactly the way a syntax error is malformed. It is
+	// refused rather than ignored because the GitHub API returns exactly one
+	// document — anything appended means we are not reading what we think we
+	// are (an injecting proxy, a spliced or concatenated response), and
+	// silently keeping the prefix is the same "quietly accept a mangled body"
+	// behaviour B-01 existed to remove.
+	if trailingData {
+		return fmt.Errorf("parse %s: unexpected data after the JSON document", what)
 	}
 	return nil
 }

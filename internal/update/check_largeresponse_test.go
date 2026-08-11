@@ -222,6 +222,132 @@ func TestFetchRelease_OverCapFailsLoudly(t *testing.T) {
 	}
 }
 
+// TestFetchRelease_ValidDocumentThenOversizedSuffix pins the hole that the
+// first version of the size guard left open.
+//
+// json.Decoder.Decode stops at the end of the first JSON value; it neither
+// requires EOF nor consumes trailing bytes. So a *valid* releases array
+// followed by megabytes of anything decoded successfully while counter.n held
+// only the few hundred bytes the decoder had buffered, and the fetch returned
+// a tag as if nothing were wrong. Measured before the fix: a 524396-byte body
+// under a 1132-byte cap returned tag="nightly-20260722-r010", err=nil. The
+// bound was therefore decorative — exactly the property the B-01 commit claims
+// to have established.
+func TestFetchRelease_ValidDocumentThenOversizedSuffix(t *testing.T) {
+	endpoints := []struct {
+		name  string
+		valid string
+		fetch func(context.Context, string) (string, string, string, error)
+	}{
+		{
+			"nightly list endpoint",
+			`[{"tag_name":"nightly-20260722-r010","html_url":"https://example.test/n","body":"notes","draft":false}]`,
+			fetchLatestNightly,
+		},
+		{
+			"prerelease list endpoint",
+			`[{"tag_name":"v0.1.0-beta.3","html_url":"https://example.test/b","body":"notes","draft":false}]`,
+			fetchLatest,
+		},
+	}
+
+	for _, ep := range endpoints {
+		t.Run(ep.name, func(t *testing.T) {
+			// The suffix is not JSON, so the trailing-data check alone would
+			// reject it; the assertions below are what make this a *size* test
+			// — an over-cap body must never be reported as a parse problem.
+			body := ep.valid + strings.Repeat("A", 512<<10)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer srv.Close()
+
+			// Cap sits above the valid prefix and far below the whole body, so
+			// success can only mean the guard never looked past the decoder's
+			// buffer.
+			capBytes := int64(len(ep.valid)) + 1024
+			defer setMaxReleaseResponseBytes(capBytes)()
+
+			tag, _, _, err := ep.fetch(context.Background(), srv.URL)
+			if err == nil {
+				t.Fatalf("a %d-byte body under a %d-byte cap decoded to tag %q; the cap was not enforced", len(body), capBytes, tag)
+			}
+			if !errors.Is(err, errResponseTooLarge) {
+				t.Fatalf("err = %v, want it to wrap errResponseTooLarge", err)
+			}
+			if strings.Contains(err.Error(), "parse ") || strings.Contains(err.Error(), "unexpected end of JSON input") {
+				t.Errorf("over-cap response surfaced as a JSON parse error: %v", err)
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf("%d", capBytes)) {
+				t.Errorf("err = %v, want it to name the %d-byte limit", err, capBytes)
+			}
+		})
+	}
+}
+
+// TestFetchRelease_TrailingDataUnderCap pins the other half of the precedence
+// decision. Under the cap the size guard has nothing true to say, so a body
+// that carries junk after an otherwise valid document is reported as a parse
+// failure — refused, not silently accepted for its prefix, because the GitHub
+// API returns exactly one document and anything appended means we are not
+// reading what we think we are.
+//
+// The whitespace case is the reason this is a table: requiring io.EOF from a
+// second Decode would be unusable if a trailing newline counted as data, and
+// real HTTP bodies routinely end in one.
+func TestFetchRelease_TrailingDataUnderCap(t *testing.T) {
+	const valid = `[{"tag_name":"nightly-20260722-r010","html_url":"https://example.test/n","body":"notes","draft":false}]`
+
+	cases := []struct {
+		name     string
+		suffix   string
+		wantErr  bool
+		wantTag  string
+		errMatch string
+	}{
+		{name: "no suffix", suffix: "", wantTag: "nightly-20260722-r010"},
+		{name: "trailing newline", suffix: "\n", wantTag: "nightly-20260722-r010"},
+		{name: "trailing whitespace mix", suffix: "  \n\t \r\n", wantTag: "nightly-20260722-r010"},
+		{name: "trailing junk", suffix: "AAAA", wantErr: true, errMatch: "unexpected data after the JSON document"},
+		{name: "trailing second document", suffix: `{"tag_name":"v9.9.9"}`, wantErr: true, errMatch: "unexpected data after the JSON document"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := valid + tc.suffix
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer srv.Close()
+
+			tag, _, _, err := fetchLatestNightly(context.Background(), srv.URL)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("body %q should decode: %v", body, err)
+				}
+				if tag != tc.wantTag {
+					t.Errorf("tag = %q, want %q", tag, tc.wantTag)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("body %q should be refused, got tag %q", body, tag)
+			}
+			if errors.Is(err, errResponseTooLarge) {
+				t.Errorf("err = %v, want a parse failure — the body is far under the cap", err)
+			}
+			if !strings.Contains(err.Error(), "parse release list JSON") {
+				t.Errorf("err = %v, want the parse release list JSON wrapper", err)
+			}
+			if !strings.Contains(err.Error(), tc.errMatch) {
+				t.Errorf("err = %v, want it to contain %q", err, tc.errMatch)
+			}
+		})
+	}
+}
+
 // TestCheck_NightlyChannelOverLargeReleaseList drives the same payload through
 // the public entry points, which is where the operator saw B-01: every
 // `crewship self-update` and every dashboard poll on a nightly build failed
