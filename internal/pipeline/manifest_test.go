@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // TestExtractManifest_NilSafe — a nil DSL returns an empty, never-nil manifest.
@@ -193,6 +194,128 @@ func TestExtractManifest_WalksHooks(t *testing.T) {
 	// expr runtime from the after hook lands in Tools.
 	if len(m.Tools) != 1 || m.Tools[0].Type != "expr" {
 		t.Errorf("Tools = %+v, want one expr (from hook code step)", m.Tools)
+	}
+}
+
+// TestExtractManifest_WalksForeachBody — a foreach body is part of the blast
+// radius the UI renders.
+//
+// Same gap as StaticRiskReasons', with a different consequence: the manifest is
+// what the data-flow diagram draws, so a routine whose only http call sits
+// inside a fan-out reported `has_http:false` and an empty egress list — a
+// screen that positively asserts "this routine reaches nothing" about a routine
+// that reaches the internet. Agents and code runtimes disappeared the same way.
+func TestExtractManifest_WalksForeachBody(t *testing.T) {
+	d := &DSL{
+		Name: "p",
+		Steps: []Step{{
+			ID: "fan", Type: StepForeach,
+			Foreach: &ForeachStep{Items: "{{ inputs.rows }}", Steps: []Step{
+				{ID: "b1", Type: StepAgentRun, AgentSlug: "worker"},
+				{ID: "b2", Type: StepHTTP, HTTP: &HTTPStep{Method: "POST", URL: "https://body.example.com/x"}},
+				{ID: "b3", Type: StepCode, Code: &CodeStep{Runtime: "expr", Code: "1"}},
+			}},
+		}},
+	}
+	m := d.ExtractManifest()
+	if !m.HasHTTP {
+		t.Error("HasHTTP should be true from an http step inside the foreach body")
+	}
+	if !m.HasCode {
+		t.Error("HasCode should be true from a code step inside the foreach body")
+	}
+	if !reflect.DeepEqual(m.Egress, []string{"body.example.com"}) {
+		t.Errorf("Egress = %v, want [body.example.com] (host from a body http step)", m.Egress)
+	}
+	if !reflect.DeepEqual(m.Agents, []string{"worker"}) {
+		t.Errorf("Agents = %v, want [worker] (agent_run inside the foreach body)", m.Agents)
+	}
+	if len(m.Tools) != 1 || m.Tools[0].Type != "expr" {
+		t.Errorf("Tools = %+v, want one expr (runtime of the body code step)", m.Tools)
+	}
+}
+
+// TestExtractManifest_ForeachNestedAndHooked — the walk reaches a capability
+// however deeply it is wrapped: a foreach parked in a routine hook, a foreach
+// inside a foreach, and a per-step hook hanging off a body step.
+//
+// Nested foreach is refused by validateForeachStep today, so this shape does
+// not arrive through the save door. It is pinned anyway because the manifest is
+// also computed for imported bundles and for rows already stored, where no such
+// refusal ran.
+func TestExtractManifest_ForeachNestedAndHooked(t *testing.T) {
+	// Built bottom-up: the interesting shape is the nesting, and a single
+	// literal that deep reads as bracket soup.
+	leaf := Step{
+		ID: "leaf", Type: StepAgentRun, AgentSlug: "deep",
+		Hooks: &StepHooks{After: &Step{
+			ID: "leaf-after", Type: StepHTTP,
+			HTTP: &HTTPStep{Method: "GET", URL: "https://nested.example.com/y"},
+		}},
+	}
+	inner := Step{
+		ID: "inner", Type: StepForeach,
+		Foreach: &ForeachStep{Items: "{{ inputs.b }}", Steps: []Step{leaf}},
+	}
+	outer := Step{
+		ID: "outer", Type: StepForeach,
+		Foreach: &ForeachStep{Items: "{{ inputs.a }}", Steps: []Step{inner}},
+	}
+	d := &DSL{
+		Name:  "p",
+		Steps: []Step{outer},
+		Hooks: &RoutineHooks{OnFailure: &Step{
+			ID: "cleanup", Type: StepForeach,
+			Foreach: &ForeachStep{Items: "{{ inputs.c }}", Steps: []Step{
+				{ID: "notify-fail", Type: StepHTTP, HTTP: &HTTPStep{Method: "POST", URL: "https://hook.example.com/z"}},
+			}},
+		}},
+	}
+	m := d.ExtractManifest()
+	if !reflect.DeepEqual(m.Agents, []string{"deep"}) {
+		t.Errorf("Agents = %v, want [deep] (two foreach levels down)", m.Agents)
+	}
+	want := []string{"hook.example.com", "nested.example.com"}
+	if !reflect.DeepEqual(m.Egress, want) {
+		t.Errorf("Egress = %v, want %v (body-step hook + foreach inside a routine hook)", m.Egress, want)
+	}
+	if !m.HasHTTP {
+		t.Error("HasHTTP should be true")
+	}
+}
+
+// TestExtractManifest_ForeachNilBody — a malformed foreach step (no block) is
+// skipped, not a panic. ExtractManifest runs on unvalidated DSLs.
+func TestExtractManifest_ForeachNilBody(t *testing.T) {
+	d := &DSL{Name: "p", Steps: []Step{{ID: "fan", Type: StepForeach}}}
+	m := d.ExtractManifest()
+	assertNeverNil(t, m)
+	if m.HasHTTP || m.HasCode {
+		t.Errorf("empty foreach should flag nothing: %+v", m)
+	}
+}
+
+// TestExtractManifest_CyclicDSLTerminates — see the twin in risk_test.go. A
+// self-referential Step graph is unreachable from JSON but constructible in Go,
+// and the manifest walk is called on the same save path as the classifier, so
+// it carries the same bound.
+func TestExtractManifest_CyclicDSLTerminates(t *testing.T) {
+	fe := &ForeachStep{Items: "{{ inputs.x }}", Steps: []Step{
+		{ID: "inner", Type: StepAgentRun, AgentSlug: "worker"},
+		{ID: "loop", Type: StepForeach},
+	}}
+	fe.Steps[1].Foreach = fe // self-reference
+	d := &DSL{Name: "p", Steps: []Step{{ID: "fan", Type: StepForeach, Foreach: fe}}}
+
+	done := make(chan *Manifest, 1)
+	go func() { done <- d.ExtractManifest() }()
+	select {
+	case m := <-done:
+		if !reflect.DeepEqual(m.Agents, []string{"worker"}) {
+			t.Errorf("Agents = %v, want [worker]", m.Agents)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ExtractManifest did not terminate on a cyclic DSL")
 	}
 }
 
