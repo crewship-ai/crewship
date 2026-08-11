@@ -26,7 +26,7 @@ All Crewship configuration can be set via environment variables. These override 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CREWSHIP_SOCKET_PATH` | `/tmp/crewship.sock` | Unix socket path for internal IPC |
+| `CREWSHIP_SOCKET_PATH` | `<data dir>/crewship.sock` — `/tmp/crewship.sock` for the packaged install | Unix socket path for internal IPC. The socket follows the **resolved** data dir, which is `CREWSHIP_DATA_DIR` when set and `$HOME/.crewship` when it is not. The `/tmp/crewship.sock` literal survives for exactly one case: a data dir of `/var/lib/crewship`, which is what the deb/rpm unit pins — so a packaged install keeps the path it has always had, and two instances anywhere else get their own. If the derived path would exceed the ~100-byte `sockaddr_un` limit, the default falls back to `<tmpdir>/crewship-<hash-of-data-dir>.sock`, hashed so the fallback is still per-instance. Starting the server refuses outright if something is already listening on the socket path, rather than unlinking a running instance's socket. |
 
 ## Container
 
@@ -121,7 +121,7 @@ These are not configuration — Crewship sets them on the crew container itself,
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_STATE_PROVIDER` | `bbolt` | State store: `bbolt` (postgres on the v0.2 roadmap) |
-| `CREWSHIP_BOLT_PATH` | `/var/lib/crewship/state.db` | BoltDB file path |
+| `CREWSHIP_BOLT_PATH` | `<data dir>/state.db` — `/var/lib/crewship/state.db` for the packaged install | BoltDB file path. Same rule as `CREWSHIP_SOCKET_PATH`: it follows the resolved data dir, which is `CREWSHIP_DATA_DIR` when set and `$HOME/.crewship` when it is not, so the `/var/lib/crewship` literal is the default only for the packaged install. The bbolt file is exclusively locked by whichever process opens it, so instances must not share one. |
 
 ## Public-facing URL
 

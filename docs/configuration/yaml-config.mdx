@@ -35,7 +35,13 @@ server:
 
 # Inter-process communication
 ipc:
-  socket_path: "/tmp/crewship.sock"  # Unix socket for internal API
+  socket_path: "/tmp/crewship.sock"  # Unix socket for internal API. The default
+                                     # follows the resolved data dir —
+                                     # CREWSHIP_DATA_DIR when set, else
+                                     # $HOME/.crewship — so <dataDir>/crewship.sock
+                                     # is the normal case and this /tmp literal is
+                                     # the default only for the packaged
+                                     # /var/lib/crewship install.
 
 # Container provider
 container:
@@ -62,7 +68,10 @@ storage:
 # State store (agent run states)
 state:
   provider: "bbolt"             # "bbolt" (postgres on the v0.2 roadmap)
-  bolt_path: "/var/lib/crewship/state.db"
+  bolt_path: "/var/lib/crewship/state.db"   # <dataDir>/state.db when
+                                            # CREWSHIP_DATA_DIR is set to
+                                            # something other than
+                                            # /var/lib/crewship
 
 # Logging
 logging:
@@ -184,6 +193,8 @@ state:
 ```
 
 BoltDB is the default state store for agent run tracking. A PostgreSQL state provider for high-throughput deployments is on the v0.2 roadmap.
+
+The `/var/lib/crewship/state.db` default holds for a packaged install (the deb/rpm unit pins `CREWSHIP_DATA_DIR=/var/lib/crewship`). Point `CREWSHIP_DATA_DIR` anywhere else and the default becomes `<dataDir>/state.db` — the bbolt file is exclusively locked by one process, so instances that share a data root cannot share it. The IPC `socket_path` default follows the same rule.
 
 ### Auth
 

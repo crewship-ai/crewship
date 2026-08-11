@@ -51,5 +51,22 @@
 #                    It does now (depth) and the chain no longer re-roots every
 #                    hop (origin), so both are unskipped and green rather than
 #                    left standing as documentation of a fixed defect.
+#   125  2026-08-11  +2 net from the prod-upgrade findings branch, which added
+#                    12 skips and keeps 2. Ten were eliminated rather than
+#                    waived: the six runtime.GOOS == "windows" guards became
+#                    `unix` build tags (cmd_start_socket_unix_test.go,
+#                    internal/config/paths_unix_test.go,
+#                    server_ipc_conn_refused_unix_test.go), the mkfifo and
+#                    /dev/null guards became t.Fatalf (a unix box missing either
+#                    is broken, not a reason to report ok), and the two
+#                    socket-guard root guards were rewritten to reach the same
+#                    branches via ENOTDIR and ELOOP, which no euid can bypass.
+#                    The 2 that remain are cmd_doctor_nocreate_test.go's
+#                    unwritable-data-dir pair: an unwritable directory IS their
+#                    premise and root writes through mode 0500, so at euid 0
+#                    they would pass while asserting the opposite. Both carry
+#                    SKIP-WAIVER(#1929); walIndexUnbuildable, the decision they
+#                    drive, now has a permission-free direct test that does run
+#                    as root.
 
-123
+125

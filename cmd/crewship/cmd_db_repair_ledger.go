@@ -15,6 +15,7 @@ import (
 var (
 	repairLedgerDryRun bool
 	repairLedgerYes    bool
+	repairLedgerForce  bool
 )
 
 // cmdContext returns the command's context, or Background when there is
@@ -52,7 +53,13 @@ and the fix there is a newer binary or "crewship db restore-snapshot".
   crewship db repair-ledger --dry-run   # show the plan, change nothing
   crewship db repair-ledger             # apply it, after confirming
 
-Stop crewshipd first: a running server holds the database open.`,
+Stop crewshipd first: a running server holds the database open. The repair
+checks that by locking the database file, once before asking you to confirm and
+again immediately before it writes — a server restarted while you were reading
+the plan would otherwise be missed. If the file is too damaged to answer that
+check, the command stops and says what the check hit; "--force" continues past
+that one case, on your word that no crewshipd is running. It does not override
+a database that is definitely in use.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dd, err := database.DefaultDataDir()
@@ -65,15 +72,15 @@ Stop crewshipd first: a running server holds the database open.`,
 		// Read-only inspection is safe against a live server; writing is not.
 		// The guard therefore sits between the plan and the apply, so
 		// --dry-run stays useful while the server is still up.
-		db, err := sql.Open("sqlite", dbPath)
+		inspect, err := sql.Open("sqlite", dbPath)
 		if err != nil {
 			return fmt.Errorf("open %s: %w", dbPath, err)
 		}
-		defer db.Close()
+		defer func() { _ = inspect.Close() }()
 
 		ctx := cmdContext(cmd)
 
-		applied, err := database.ReadLedger(ctx, db)
+		applied, err := database.ReadLedger(ctx, inspect)
 		if errors.Is(err, database.ErrNoLedger) {
 			// Almost always the wrong directory rather than a corrupt file, so
 			// lead with that instead of the driver's "no such table".
@@ -117,14 +124,74 @@ Stop crewshipd first: a running server holds the database open.`,
 			return nil
 		}
 
-		if running, where := localServerRunning(); running {
-			return fmt.Errorf("a Crewship server appears to be running (%s) — stop it before repairing (the DB is held open)", where)
+		// Everything above this line only read. Everything below rewrites the
+		// ledger, so this is where "is anyone else using this database" has to
+		// be answered — and answered about the FILE. The health-endpoint probe
+		// that used to sit here knew nothing about dbPath: it blocked a repair
+		// on a sandbox database because an unrelated instance answered on the
+		// probed port, and waved one through against a crewshipd running on any
+		// other port. Renumbering the ledger under a server that has already
+		// booted against the old numbers is the failure that guard existed to
+		// prevent, and it is the one it did not prevent.
+		//
+		// Close our own handle first. Measured, on the fixture in
+		// cmd_db_repair_ledger_test.go: `sql.Open` alone leaves inUse false
+		// (database/sql is lazy — no connection exists yet), but after
+		// ReadLedger has run a query the pooled idle connection keeps the WAL
+		// dead-man-switch lock and databaseInUse reports true. ReadLedger
+		// always runs by the time we get here, so probing without closing
+		// would refuse every repair, every time, in our own name.
+		//
+		// Nothing carries over from that handle: `plan` is a plain value, and
+		// ApplyLedgerRepair opens its own transaction which re-reads every row
+		// it is about to move and aborts with ErrLedgerChanged if the ledger
+		// drifted. A fresh handle is not a compromise here — that in-transaction
+		// re-check is the same consistency story the apply already relied on.
+		if err := inspect.Close(); err != nil {
+			return fmt.Errorf("close inspection handle on %s: %w", dbPath, err)
 		}
-		if !repairLedgerYes && !confirmInteractive("Apply this repair?") {
+
+		guard := dbWriteGuard{
+			path:  dbPath,
+			verb:  "repairing",
+			risk:  "a server that has already booted holds the old version numbers in memory",
+			force: repairLedgerForce,
+		}
+		if err := guard.check(true); err != nil {
+			return err
+		}
+
+		if !repairLedgerYes && !dbConfirm("Apply this repair?") {
 			return fmt.Errorf("aborted (pass --yes to skip confirmation)")
 		}
 
-		if err := database.ApplyLedgerRepair(ctx, db, plan); err != nil {
+		// Ask again, immediately before the write. The prompt above is an
+		// unbounded window — long enough for systemd's Restart=always to bring
+		// crewshipd back while the operator reads the plan — and the earlier
+		// comment here was wrong about what covers it: ApplyLedgerRepair's
+		// in-transaction re-check compares the LEDGER ROWS against the plan and
+		// raises ErrLedgerChanged only if they moved. A server that starts
+		// during the prompt moves nothing (on a collision it refuses to boot;
+		// an older binary that boots on the old numbers has no reason to
+		// rewrite them), so the repair sails past that check and renumbers
+		// under a running server — which then fails to start next time, on a
+		// collision in the opposite direction, with nothing on the box
+		// explaining why. "Did the ledger change" and "is anyone holding this
+		// database" are different questions; only the second is this guard's.
+		//
+		// The probe deliberately does not hold its lock (see databaseInUse), so
+		// there is nothing for the write below to inherit.
+		if err := guard.check(false); err != nil {
+			return err
+		}
+
+		apply, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			return fmt.Errorf("reopen %s for the repair: %w", dbPath, err)
+		}
+		defer func() { _ = apply.Close() }()
+
+		if err := database.ApplyLedgerRepair(ctx, apply, plan); err != nil {
 			return fmt.Errorf("repair failed — the ledger is unchanged (the whole repair runs in one transaction): %w", err)
 		}
 
@@ -137,5 +204,7 @@ Stop crewshipd first: a running server holds the database open.`,
 func init() {
 	repairLedgerCmd.Flags().BoolVar(&repairLedgerDryRun, "dry-run", false, "show the plan without changing anything")
 	repairLedgerCmd.Flags().BoolVar(&repairLedgerYes, "yes", false, "skip the confirmation prompt")
+	repairLedgerCmd.Flags().BoolVar(&repairLedgerForce, "force", false,
+		"repair even though the in-use check could not answer (corrupt or unreadable database); never overrides a database that IS in use")
 	dbCmd.AddCommand(repairLedgerCmd)
 }

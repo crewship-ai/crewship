@@ -4,10 +4,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -83,15 +86,28 @@ var telemetryStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current telemetry consent state",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := openLocalDB(cmd.Context())
-		if err != nil {
+		// `status` reports; it does not provision. It takes the read-only
+		// route for the same reason `doctor` does (B-02): a query about
+		// consent that materialises a migrated database as a side effect is
+		// answering a different question than the one asked. `on` and `off`
+		// still create-and-init through openLocalDB — they have consent to
+		// write, and somewhere to write it is the point.
+		var enabled, asked bool
+		var installID string
+		db, err := openLocalDBReadOnly(cmd.Context())
+		switch {
+		case errors.Is(err, errNoLocalDB):
+			// No database means no app_settings row, which is exactly the
+			// "not yet configured" state printed below — zero values already
+			// say so, so fall through with them.
+		case err != nil:
 			return err
-		}
-		defer db.Close()
-
-		enabled, asked, installID, err := crashreport.Status(cmd.Context(), db.DB)
-		if err != nil {
-			return fmt.Errorf("read telemetry status: %w", err)
+		default:
+			defer db.Close()
+			enabled, asked, installID, err = crashreport.Status(cmd.Context(), db)
+			if err != nil {
+				return fmt.Errorf("read telemetry status: %w", err)
+			}
 		}
 		// Resolved DSN tells the operator WHERE events would route — important
 		// when CREWSHIP_SENTRY_DSN is set and we're not using the vendor
@@ -263,4 +279,138 @@ func openLocalDB(ctx context.Context) (*database.DB, error) {
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}
 	return db, nil
+}
+
+// errNoLocalDB marks "the data directory has no database yet" so callers can
+// tell that apart from a real open failure with errors.Is. The distinction is
+// the whole point of the read-only route: a missing database is a normal state
+// with a known answer (nothing has been configured yet), while a failed open is
+// something the operator has to look at.
+var errNoLocalDB = errors.New("database not found")
+
+// openLocalDBReadOnly is the diagnostic counterpart to openLocalDB: it reads an
+// existing database and REFUSES to bring one into existence.
+//
+// openLocalDB creates and, on a fresh install, migrates — deliberately, because
+// `crewship telemetry on` has to have somewhere to write consent before the
+// first `crewship start`. Handing that same helper to `crewship doctor` was
+// bug B-02: doctor against an empty data dir printed
+//
+//	[WARN] db migration version   database file does not exist (crewshipd has never run)
+//
+// from checkDBMigrationVersion (which only stats) and then created a fully
+// migrated 3 MB crewship.db from the telemetry probes three rows further down.
+// Two costs, in ascending order of seriousness:
+//
+//   - The output contradicted itself, and `doctor` — the command operators run
+//     precisely because they are unsure what state the box is in — mutated that
+//     state as a side effect of reporting on it.
+//   - The database `crewship start` then found was one it had not provisioned:
+//     schema applied outside SnapshotBeforeMigrate and without
+//     secrets.LoadOrGenerate, which is the same hazard the refusal above exists
+//     to prevent, just reached from the empty side.
+//
+// Two things make this route safe where openLocalDB is not:
+//
+//   - We stat before opening. sql.Open is lazy and the driver always passes
+//     SQLITE_OPEN_CREATE, so "open and see what happens" would create the file
+//     before any query proved it was missing.
+//   - mode=ro on the URI, which downgrades the connection past the driver's
+//     hardcoded CREATE|READWRITE flags. It is only honoured because
+//     DatabaseURL() yields a "file:" URI — SQLite parses query parameters only
+//     in URI form, and modernc.org/sqlite strips the query off a bare path
+//     before handing it to sqlite3_open_v2. A read-only connection also can't
+//     be talked into a schema upgrade later by accident.
+//
+// busy_timeout matches what a reader wants against a live crewshipd: WAL lets
+// us read alongside the writer, and the few seconds cover a checkpoint rather
+// than surfacing SQLITE_BUSY as "doctor can't read your database".
+//
+// What mode=ro does NOT buy is freedom from the filesystem. Our database is in
+// WAL mode, and no connection — read-only included — can read a WAL database
+// without the "-shm" WAL index. So a read-only open needs ONE of:
+//
+//   - an existing crewship.db-shm (crewshipd is up, or some other reader is),
+//     in which case we just join it and the directory's mode is irrelevant; or
+//   - write permission on the DIRECTORY holding the database (not on the
+//     database file), so SQLite can create the -shm itself.
+//
+// With neither, the open fails at Ping with SQLITE_CANTOPEN ("unable to open
+// database file (14)") when a stale -wal is present, or SQLITE_READONLY_DIRECTORY
+// ("attempt to write a readonly database (1544)") when it is not — and doctor
+// renders that as `[WARN] db migration version  could not open DB: …`. Neither
+// SQLite message mentions the directory, which is the one thing the operator
+// needs to hear, so the error is annotated below. This is exactly the state a
+// post-crash box is in: crewshipd died leaving a -wal but no -shm, and doctor
+// is the first thing anyone runs.
+//
+// The consequence of the second bullet is that a read-only probe can leave a
+// crewship.db-shm behind where there was none. That is not a B-02 relapse: the
+// -shm is a rebuildable index over an existing database, holds no schema and no
+// data, and the next crewshipd start would create it regardless. The invariant
+// that matters — never bring a DATABASE into existence — is upheld by the stat
+// above, which is why this helper refuses before it ever reaches sqlite.
+func openLocalDBReadOnly(ctx context.Context) (*sql.DB, error) {
+	// ResolveDefaultDataDir, not DefaultDataDir: the latter creates the root
+	// and output/chats/logs/skills on the way to telling us where they are, so
+	// this helper's refusal to create a database was undermined one call up —
+	// doctor still materialised the tree on a box that had never run crewshipd.
+	dataDir, err := database.ResolveDefaultDataDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve data directory: %w", err)
+	}
+	dbPath := dataDir.DatabasePath()
+	if _, err := os.Stat(dbPath); err != nil {
+		// Only ENOENT means "not initialised" — mirroring openAdminDB, a
+		// permission error or symlink loop must surface verbatim so the
+		// operator fixes access rights instead of chasing `crewship start`.
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w at %s", errNoLocalDB, dbPath)
+		}
+		return nil, fmt.Errorf("stat database path %s: %w", dbPath, err)
+	}
+	db, err := sql.Open("sqlite", dataDir.DatabaseURL()+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, fmt.Errorf("open database read-only: %w", err)
+	}
+	// sql.Open does not connect. Ping here so a corrupt file or a lock we
+	// cannot get is reported by the probe that owns the database row, rather
+	// than leaking out later as a confusing "read consent" error.
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		if walIndexUnbuildable(dbPath) {
+			return nil, fmt.Errorf("open database read-only: %w (WAL index %s-shm is missing and %s is not writable — reading a WAL database needs one or the other; make the directory writable, or run this while crewshipd is up)",
+				err, filepath.Base(dbPath), filepath.Dir(dbPath))
+		}
+		return nil, fmt.Errorf("open database read-only: %w", err)
+	}
+	return db, nil
+}
+
+// walIndexUnbuildable reports whether a failed read-only open is the WAL-index
+// case described on openLocalDBReadOnly: no -shm to join and no way to make
+// one. Only ever called after an open has already failed, so it decides the
+// wording of an error, never whether we try.
+//
+// It is asked in that order deliberately. An existing -shm means the WAL index
+// was not the problem — the failure is corruption, or a lock we waited out and
+// lost — and claiming otherwise would send the operator to chmod a directory
+// that is fine. The writability test is the same touch-and-remove
+// checkDataDirWritable uses rather than an inspection of the mode bits,
+// because the bits lie in both directions (a 0755 directory owned by someone
+// else is not writable by us; an ACL or a read-only mount overrides them
+// either way) and here the answer goes straight into what we tell the
+// operator to fix.
+func walIndexUnbuildable(dbPath string) bool {
+	if _, err := os.Stat(dbPath + "-shm"); err == nil {
+		return false
+	}
+	f, err := os.CreateTemp(filepath.Dir(dbPath), ".crewship-ro-probe-*.tmp")
+	if err != nil {
+		return true
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return false
 }

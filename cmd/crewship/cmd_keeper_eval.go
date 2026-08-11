@@ -85,7 +85,21 @@ Examples:
 
 		// mode=ro: a replay only reads, and the server may well be up holding
 		// the file. Opening read-write would take a lock for no reason.
-		db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+		//
+		// mode=ro only takes effect on a "file:" URI — modernc.org/sqlite
+		// drops the query string from a bare path and always passes
+		// SQLITE_OPEN_CREATE, so the previous `dbPath+"?mode=ro"` was a
+		// read-WRITE connection that would happily conjure an empty database
+		// for a replay to find nothing in. Stat first so a missing file says
+		// so, rather than surfacing as SQLite's "unable to open database
+		// file (14)".
+		if _, statErr := os.Stat(dbPath); statErr != nil {
+			if os.IsNotExist(statErr) {
+				return fmt.Errorf("database not found at %s — run `crewship start` first", dbPath)
+			}
+			return fmt.Errorf("stat %s: %w", dbPath, statErr)
+		}
+		db, err := sql.Open("sqlite", dd.DatabaseURL()+"?mode=ro")
 		if err != nil {
 			return fmt.Errorf("open %s: %w", dbPath, err)
 		}

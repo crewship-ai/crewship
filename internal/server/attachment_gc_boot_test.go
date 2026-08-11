@@ -46,9 +46,10 @@ func TestStart_AttachmentBlobGC_ReclaimsAnOrphanedBlob(t *testing.T) {
 		t.Fatalf("write blob: %v", err)
 	}
 
-	// Unix sockets have a tight path-length limit; short unique name in /tmp.
-	sockPath := filepath.Join("/tmp", "cs-attgc-"+randomShort()+".sock")
-	t.Cleanup(func() { _ = os.Remove(sockPath) })
+	// Unix sockets have a tight path-length limit; shortSocketPath keeps this
+	// under it and asserts it, rather than trusting a hand-rolled short name
+	// (see testMaxSocketPath in socket_test.go).
+	sockPath := shortSocketPath(t, "i.sock")
 
 	cfg := silentCfg()
 	cfg.IPC.SocketPath = sockPath

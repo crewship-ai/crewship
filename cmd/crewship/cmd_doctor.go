@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -304,7 +305,12 @@ func installHintForOS(goos string) string {
 // checkDataDir verifies the data directory exists. With fixMode, it
 // creates the directory if missing — the only auto-fix doctor performs.
 func checkDataDir(fixMode bool) checkResult {
-	dataDir, err := database.DefaultDataDir()
+	// ResolveDefaultDataDir resolves the path without creating it. With
+	// DefaultDataDir the "does not exist" branch below was unreachable — the
+	// resolve call had already created the root (and output/chats/logs/skills)
+	// at 0755, so doctor reported PASS on a directory it had just made and
+	// --fix, which creates it at 0700, never got to run. See B-02.
+	dataDir, err := database.ResolveDefaultDataDir()
 	if err != nil {
 		return checkResult{
 			name:   "data directory",
@@ -352,7 +358,9 @@ func checkDataDir(fixMode bool) checkResult {
 // creating a temp file. Catches the "directory exists but root mounted
 // it read-only" footgun before crewshipd hits it at runtime.
 func checkDataDirWritable() checkResult {
-	dataDir, err := database.DefaultDataDir()
+	// Path-only resolve: the touch test is meaningless if getting the path
+	// created the directory being tested.
+	dataDir, err := database.ResolveDefaultDataDir()
 	if err != nil {
 		return checkResult{name: "data dir writable", status: "FAIL", detail: err.Error()}
 	}
@@ -401,12 +409,30 @@ func checkDataDirWritable() checkResult {
 // internal/database/migrate_registry.go.
 func checkDBMigrationVersion(ctx context.Context) checkResult {
 	expectedLatest := database.MaxKnownMigrationVersion()
-	dataDir, err := database.DefaultDataDir()
-	if err != nil {
+	// Resolved first, and without creating anything, purely to keep an
+	// unusable data dir (root exists but is a file, unreadable parent, …) a
+	// FAIL: that is an environment fault the operator must fix, not the
+	// transient-lock WARN the open failures below describe.
+	if _, err := database.ResolveDefaultDataDir(); err != nil {
 		return checkResult{name: "db migration version", status: "FAIL", detail: err.Error()}
 	}
-	dbPath := dataDir.DatabasePath()
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	// Through openLocalDBReadOnly rather than a hand-rolled sql.Open, so this
+	// probe behaves like the three telemetry probes under a live server. Its
+	// own DSN omitted _pragma=busy_timeout(5000) and never Pinged, so a
+	// SQLITE_BUSY from a concurrent checkpoint surfaced at row.Scan below and
+	// was rendered "could not read _migrations …" with the hint "crewshipd may
+	// not have run against this DB yet" — telling an operator whose server is
+	// demonstrably running that the database has never been migrated.
+	//
+	// The shared helper also stats before opening and uses a "file:" URI, which
+	// is what makes mode=ro stick: modernc.org/sqlite strips the query string
+	// off a BARE path before handing it to sqlite3_open_v2 and always passes
+	// SQLITE_OPEN_CREATE, so the `dbPath+"?mode=ro"` this used to open with was
+	// silently read-write. Nothing was harmed — we only ever SELECT — but the
+	// comment promised a guarantee the code did not provide, which is how B-02
+	// happened one probe over.
+	db, err := openLocalDBReadOnly(ctx)
+	if errors.Is(err, errNoLocalDB) {
 		return checkResult{
 			name:   "db migration version",
 			status: "WARN",
@@ -414,10 +440,6 @@ func checkDBMigrationVersion(ctx context.Context) checkResult {
 			hint:   "run 'crewship start' to initialise the database",
 		}
 	}
-	// Read-only open keeps doctor diagnostic-only: no WAL pragma (which
-	// would mutate state) and no risk of fighting crewshipd for an
-	// exclusive lock.
-	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
 	if err != nil {
 		return checkResult{
 			name:   "db migration version",
@@ -531,7 +553,7 @@ func checkNextAuthSecret() checkResult {
 	// would write. Missing == "crewship start hasn't been run yet on
 	// this data dir", which is fine; the next `crewship start` will
 	// generate the value.
-	dataDir, err := database.DefaultDataDir()
+	dataDir, err := database.ResolveDefaultDataDir()
 	if err != nil {
 		return checkResult{
 			name:   "NEXTAUTH_SECRET",
@@ -734,8 +756,18 @@ func checkServerReachable(ctx context.Context) checkResult {
 // `crewship doctor` output after install should see *something* about
 // telemetry — the first `crewship start` will flip it to default-on per
 // the beta opt-out policy, and we want that visible before it happens.
+//
+// The database is opened through openLocalDBReadOnly, not openLocalDB: a
+// diagnostic must not create the database it is reporting on (B-02 — see the
+// comment on openLocalDBReadOnly). When there is no database at all we answer
+// from that fact instead of from a file we just made: consent lives in
+// app_settings, so no database is proof consent has never been recorded, which
+// is precisely the "not asked" state. Same row, same hint, nothing written.
 func runCheckTelemetryStatus(ctx context.Context) checkResult {
-	db, err := openLocalDB(ctx)
+	db, err := openLocalDBReadOnly(ctx)
+	if errors.Is(err, errNoLocalDB) {
+		return telemetryNotConfiguredResult()
+	}
 	if err != nil {
 		return checkResult{
 			name:   "telemetry status",
@@ -745,7 +777,34 @@ func runCheckTelemetryStatus(ctx context.Context) checkResult {
 		}
 	}
 	defer db.Close()
-	return checkTelemetryStatus(ctx, db.DB, crashreport.ResolveDSN())
+	return checkTelemetryStatus(ctx, db, crashreport.ResolveDSN())
+}
+
+// telemetryNotConfiguredResult is the row for "consent has never been
+// recorded", shared by the no-database path above and the !asked branch below
+// so the two cannot drift into describing the same situation differently.
+//
+// WARN rather than PASS is deliberate: operators reading `crewship doctor`
+// after install should see *something* about telemetry before the first
+// `crewship start` settles the default for them.
+func telemetryNotConfiguredResult() checkResult {
+	// Default-by-version (crashreport.DefaultOptIn): prerelease/dev builds
+	// flip to ENABLED on next start, stable builds stay off until the
+	// operator opts in. Surface the one that applies.
+	if crashreport.DefaultOptIn(version) {
+		return checkResult{
+			name:   "telemetry status",
+			status: "WARN",
+			detail: "telemetry not yet configured (prerelease/dev build: will default to ENABLED on next start)",
+			hint:   "run 'crewship telemetry status' for details, or opt out with 'crewship telemetry off'",
+		}
+	}
+	return checkResult{
+		name:   "telemetry status",
+		status: "WARN",
+		detail: "telemetry not yet configured (stable build: stays DISABLED until you opt in)",
+		hint:   "opt in with 'crewship telemetry on'",
+	}
 }
 
 // checkTelemetryStatus is the testable inner form. dsn is the resolved DSN
@@ -762,21 +821,7 @@ func checkTelemetryStatus(ctx context.Context, db *sql.DB, dsn string) checkResu
 		}
 	}
 	if !asked {
-		// Default-by-version (crashreport.DefaultOptIn): prerelease/dev
-		// builds flip to ENABLED on next start, stable builds stay off
-		// until the operator opts in. Surface the one that applies.
-		detail := "telemetry not yet configured (stable build: stays DISABLED until you opt in)"
-		hint := "opt in with 'crewship telemetry on'"
-		if crashreport.DefaultOptIn(version) {
-			detail = "telemetry not yet configured (prerelease/dev build: will default to ENABLED on next start)"
-			hint = "run 'crewship telemetry status' for details, or opt out with 'crewship telemetry off'"
-		}
-		return checkResult{
-			name:   "telemetry status",
-			status: "WARN",
-			detail: detail,
-			hint:   hint,
-		}
+		return telemetryNotConfiguredResult()
 	}
 	if !enabled {
 		return checkResult{
@@ -817,8 +862,15 @@ func checkTelemetryStatus(ctx context.Context, db *sql.DB, dsn string) checkResu
 // Splitting the wrapper from the inner helper mirrors checkTelemetryStatus:
 // the inner form takes db + dsn as parameters so tests can drive every
 // branch without touching env vars or rebuilding with ldflags.
+//
+// Read-only open, and a missing database answers the same way an unasked
+// consent row does — see runCheckTelemetryStatus for why that is exact rather
+// than a convenient guess.
 func runCheckSentryDSNWiring(ctx context.Context) checkResult {
-	db, err := openLocalDB(ctx)
+	db, err := openLocalDBReadOnly(ctx)
+	if errors.Is(err, errNoLocalDB) {
+		return dsnWiringNotConfiguredResult()
+	}
 	if err != nil {
 		return checkResult{
 			name:   "sentry DSN wiring",
@@ -827,7 +879,21 @@ func runCheckSentryDSNWiring(ctx context.Context) checkResult {
 		}
 	}
 	defer db.Close()
-	return checkSentryDSNWiring(ctx, db.DB, crashreport.ResolveDSN())
+	return checkSentryDSNWiring(ctx, db, crashreport.ResolveDSN())
+}
+
+// dsnWiringNotConfiguredResult is the "consent not recorded yet" row, shared by
+// the no-database path and the !asked branch. Prerelease/dev builds flip
+// consent on at first start and a stable-build operator may opt in at any
+// time — either way the DSN should be wired before it matters. INFO + hint is
+// the right shape: nothing is broken yet, but here is what to set.
+func dsnWiringNotConfiguredResult() checkResult {
+	return checkResult{
+		name:   "sentry DSN wiring",
+		status: "INFO",
+		detail: "telemetry not yet configured; DSN wiring will matter on first start",
+		hint:   dsnWiringHint,
+	}
 }
 
 // dsnWiringHint is the single source of truth for the "how do I fix this"
@@ -850,16 +916,7 @@ func checkSentryDSNWiring(ctx context.Context, db *sql.DB, dsn string) checkResu
 		}
 	}
 	if !asked {
-		// Prerelease/dev builds flip consent on at first start, and a
-		// stable-build operator may opt in any time — either way the DSN
-		// should be wired before it matters. INFO + hint is the right
-		// shape: nothing is broken yet, but here's what to set.
-		return checkResult{
-			name:   "sentry DSN wiring",
-			status: "INFO",
-			detail: "telemetry not yet configured; DSN wiring will matter on first start",
-			hint:   dsnWiringHint,
-		}
+		return dsnWiringNotConfiguredResult()
 	}
 	if !enabled {
 		// Operator deliberately opted out. No DSN required, no hint —
@@ -894,8 +951,19 @@ func checkSentryDSNWiring(ctx context.Context, db *sql.DB, dsn string) checkResu
 // Result is intentionally never FAIL: an unreachable Sentry endpoint is a
 // soft problem (events buffer or drop locally) that should not gate
 // `crewship doctor` for the rest of the system.
+//
+// Read-only open. With no database there is nothing to probe and nothing to
+// create: consent cannot have been granted, so telemetry is off by definition
+// and the row is skipped exactly as it would be for a recorded opt-out.
 func runCheckDsnReachability(ctx context.Context) checkResult {
-	db, err := openLocalDB(ctx)
+	db, err := openLocalDBReadOnly(ctx)
+	if errors.Is(err, errNoLocalDB) {
+		return checkResult{
+			name:   "telemetry endpoint",
+			status: "INFO",
+			detail: "skipped (telemetry not yet configured)",
+		}
+	}
 	if err != nil {
 		return checkResult{
 			name:   "telemetry endpoint",
@@ -904,7 +972,7 @@ func runCheckDsnReachability(ctx context.Context) checkResult {
 		}
 	}
 	defer db.Close()
-	return checkDsnReachability(ctx, db.DB, crashreport.ResolveDSN())
+	return checkDsnReachability(ctx, db, crashreport.ResolveDSN())
 }
 
 // dialTCP is the indirection through which checkDsnReachability opens its
@@ -971,7 +1039,10 @@ func checkDsnReachability(ctx context.Context, db *sql.DB, dsn string) checkResu
 // Posix-only semantics: we skip the perm bits entirely on Windows where
 // the SQLite file inherits ACLs we can't usefully assert on with os.FileMode.
 func runCheckDataDirPerms() checkResult {
-	dataDir, err := database.DefaultDataDir()
+	// Path-only resolve, or the "data dir does not exist (skipped)" branch in
+	// checkDataDirPerms could never fire and doctor would be reporting the
+	// permissions of a directory it had just created itself.
+	dataDir, err := database.ResolveDefaultDataDir()
 	if err != nil {
 		return checkResult{name: "data dir perms", status: "FAIL", detail: err.Error()}
 	}

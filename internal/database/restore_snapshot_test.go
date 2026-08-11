@@ -63,8 +63,11 @@ func TestRestoreSnapshot_RoundTripWithGuard(t *testing.T) {
 
 	// Snapshot the DB at its current (known-good) version, exactly as
 	// SnapshotBeforeMigrate names them, then close so the file is consistent.
+	// Staged through the same copy the server uses, so this test also covers
+	// "a snapshot taken by SnapshotBeforeMigrate is restorable" rather than
+	// "a file VACUUM INTO happened to write is restorable".
 	snapPath := filepath.Join(dir, "crewship.db.pre-migrate-v"+itoa(maxV)+"-to-v"+itoa(maxV+1)+"-20260709T000000Z.bak")
-	if _, err := db.ExecContext(ctx, "VACUUM INTO ?", snapPath); err != nil {
+	if err := snapshotDatabase(ctx, db.DB, snapPath); err != nil {
 		t.Fatalf("stage snapshot: %v", err)
 	}
 

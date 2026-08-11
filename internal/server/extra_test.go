@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -40,26 +39,6 @@ func dialUnix(p string) (io.ReadWriteCloser, error) {
 		return nil, err
 	}
 	return c, nil
-}
-
-func randomShort() string {
-	b := make([]byte, 4)
-	_, _ = io.ReadFull(cryptoReader{}, b)
-	return hexEncode(b)
-}
-
-type cryptoReader struct{}
-
-func (cryptoReader) Read(p []byte) (int, error) { return rand.Read(p) }
-
-func hexEncode(b []byte) string {
-	const hex = "0123456789abcdef"
-	out := make([]byte, len(b)*2)
-	for i, v := range b {
-		out[i*2] = hex[v>>4]
-		out[i*2+1] = hex[v&0x0f]
-	}
-	return string(out)
 }
 
 // silentCfg returns a fresh Default() config.
@@ -737,10 +716,10 @@ func TestServer_Accessors(t *testing.T) {
 
 func TestStartIPC_BindsAndCleansUpStaleSocket(t *testing.T) {
 	t.Parallel()
-	// Unix sockets have a tight path-length limit (~104 chars on macOS),
-	// shorter than t.TempDir() can produce. Use a short, unique name in /tmp.
-	sockPath := filepath.Join("/tmp", "cs-ipc-"+randomShort()+".sock")
-	t.Cleanup(func() { _ = os.Remove(sockPath) })
+	// Unix sockets have a tight path-length limit (~104 bytes on macOS),
+	// shorter than t.TempDir() can produce; shortSocketPath asserts the budget
+	// instead of assuming it (see testMaxSocketPath in socket_test.go).
+	sockPath := shortSocketPath(t, "i.sock")
 	// Pre-create a stale socket file to exercise the cleanup path.
 	if err := touch(sockPath); err != nil {
 		t.Fatal(err)

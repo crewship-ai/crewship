@@ -18,8 +18,6 @@ package server
 import (
 	"context"
 	"database/sql"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -81,8 +79,9 @@ func TestStart_RecoversOrphanedRunningAssignment_AndFreesSlot(t *testing.T) {
 	db := openTestDB(t)
 	orphanID, queuedID := seedOrphanedRunningAssignment(t, db)
 
-	sockPath := filepath.Join("/tmp", "cs-runrec-"+randomShort()+".sock")
-	t.Cleanup(func() { _ = os.Remove(sockPath) })
+	// Unix sockets have a ~104-byte path limit on macOS — shorter than
+	// t.TempDir() can produce (see testMaxSocketPath in socket_test.go).
+	sockPath := shortSocketPath(t, "i.sock")
 
 	cfg := silentCfg()
 	cfg.IPC.SocketPath = sockPath
