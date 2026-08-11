@@ -79,6 +79,15 @@ func isUnder(canonRoot, canon string) bool {
 // chain segment by segment is what makes "the directory I created is
 // the directory I will write into" true.
 func EnsureDirNoFollow(root, dir string) error {
+	return ensureDirNoFollow(root, dir, ensureDirHooks{})
+}
+
+type ensureDirHooks struct {
+	afterSegment func(string)
+	beforeMkdir  func(string)
+}
+
+func ensureDirNoFollow(root, dir string, hooks ensureDirHooks) error {
 	if root == "" {
 		return fmt.Errorf("memory confinement: empty root")
 	}
@@ -105,7 +114,11 @@ func EnsureDirNoFollow(root, dir string) error {
 		return nil
 	}
 
-	cur := canonRoot
+	cur, err := os.OpenRoot(canonRoot)
+	if err != nil {
+		return fmt.Errorf("open memory root: %w", err)
+	}
+	defer func() { _ = cur.Close() }()
 	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
 		if seg == "" || seg == "." {
 			continue
@@ -118,17 +131,18 @@ func EnsureDirNoFollow(root, dir string) error {
 		if _, err := safepath.ValidateComponent(seg); err != nil {
 			return fmt.Errorf("memory directory component: %w", err)
 		}
-		cur = filepath.Join(cur, seg)
-		info, err := os.Lstat(cur)
+		info, err := cur.Lstat(seg)
 		switch {
 		case err == nil && info.Mode()&os.ModeSymlink != 0:
 			return fmt.Errorf("refusing symlinked memory directory: %s", seg)
 		case err == nil && !info.IsDir():
 			return fmt.Errorf("memory path component is not a directory: %s", seg)
 		case err == nil:
-			continue
 		case os.IsNotExist(err):
-			if mkErr := os.Mkdir(cur, 0o755); mkErr != nil {
+			if hooks.beforeMkdir != nil {
+				hooks.beforeMkdir(seg)
+			}
+			if mkErr := cur.Mkdir(seg, 0o755); mkErr != nil {
 				if !os.IsExist(mkErr) {
 					return fmt.Errorf("create memory directory %s: %w", seg, mkErr)
 				}
@@ -137,7 +151,7 @@ func EnsureDirNoFollow(root, dir string) error {
 				// whatever won the race — including a symlink planted by
 				// the very process this walk exists to defend against. Look
 				// again.
-				info, statErr := os.Lstat(cur)
+				info, statErr := cur.Lstat(seg)
 				if statErr != nil {
 					return fmt.Errorf("stat memory directory %s: %w", seg, statErr)
 				}
@@ -150,6 +164,15 @@ func EnsureDirNoFollow(root, dir string) error {
 			}
 		default:
 			return fmt.Errorf("stat memory directory %s: %w", seg, err)
+		}
+		next, err := cur.OpenRoot(seg)
+		if err != nil {
+			return fmt.Errorf("open memory directory %s: %w", seg, err)
+		}
+		_ = cur.Close()
+		cur = next
+		if hooks.afterSegment != nil {
+			hooks.afterSegment(seg)
 		}
 	}
 	return nil

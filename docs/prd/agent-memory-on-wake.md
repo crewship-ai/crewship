@@ -75,10 +75,12 @@ context (LEAD) or peer communication (non-LEAD), the memory context, language.
 recall, memory nudge, cost awareness.
 
 The consolidator's `.proposed` staging directory is created one component at a time and
-refuses symlinks. Both consolidation proposals and memory-derived skill candidates share
-this boundary. Subsequent locks, durable proposal writes, cleanup, and skill creation stay
-anchored to an open directory root, so replacing the validated pathname cannot redirect
-host-side staging.
+refuses symlinks. The creation walk opens each accepted directory and performs the next
+lookup, mkdir, and race recheck through that handle, so replacing a validated parent path
+cannot redirect a later segment. Both consolidation proposals and memory-derived skill
+candidates share this boundary. Subsequent locks, durable proposal writes, cleanup, and
+skill creation stay anchored to an open directory root, so replacing the validated
+pathname cannot redirect host-side staging.
 Proposal mode requires the configured topics output directory to exist before staging;
 it does not create an unanchored output path.
 
