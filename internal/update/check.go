@@ -58,6 +58,34 @@ const (
 	requestTimeout = 5 * time.Second
 )
 
+// maxReleaseResponseBytes bounds a GitHub Releases API response. It is an
+// absurdity guard (a hijacked endpoint, a proxy streaming garbage forever),
+// NOT a statement about how big a legitimate response is, and it is enforced
+// by *failing* — never by handing the parser a truncated document.
+//
+// That distinction is the whole of B-01. The previous bound was 1 MiB applied
+// as io.ReadAll(io.LimitReader(body, 1<<20)), and io.LimitReader reports a
+// clean EOF at the cap rather than an error: the body was silently cut off
+// mid-array and every nightly check failed with "unexpected end of JSON
+// input", a parse error that points nowhere near the actual cause. GitHub
+// inlines every asset object and the full release notes into every list
+// entry, so `releases?per_page=30` is ~7.9 MB for this repo (~44 assets per
+// release) — even per_page=5 was over the old cap. Only the stable channel's
+// single-object /releases/latest response stayed under it, which is why the
+// bug survived to production. 32 MiB is several times the largest plausible
+// list response; exceeding it now yields errResponseTooLarge, which names the
+// limit and is actionable.
+//
+// A var, not a const, so tests can shrink it — the same trick
+// latestNightlyListURL uses, and cheaper than generating 32 MB per test.
+var maxReleaseResponseBytes int64 = 32 << 20
+
+// errResponseTooLarge reports a releases response that ran past
+// maxReleaseResponseBytes. It is deliberately distinct from a JSON parse
+// failure: conflating the two is what made B-01 cost a production upgrade to
+// diagnose.
+var errResponseTooLarge = errors.New("release API response too large")
+
 // latestNightlyListURL lists enough recent releases to reliably contain the
 // newest nightly-<date>-r<n> pre-release even when a stable cut lands in
 // between: nightlies are pruned after 7 days (nightly.yml) but can land many
@@ -299,6 +327,59 @@ func CheckExplicit(ctx context.Context, currentVersion string) (*Result, error) 
 	}, nil
 }
 
+// countingReader tallies the bytes read through it. Paired with an
+// io.LimitReader it is how we tell "the response fit" from "the response was
+// cut off at the bound" — a distinction io.LimitReader alone cannot express,
+// since it signals both with a plain io.EOF.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// decodeReleaseResponse validates the status of a GitHub Releases API
+// response and decodes its body into v. `what` names the shape being parsed
+// and appears in the parse-failure message ("release JSON", "release list
+// JSON").
+//
+// Decoding off the stream rather than io.ReadAll-into-a-fixed-buffer is the
+// point: response size is a function of how many assets the release workflow
+// uploads, which is not something this package gets to have an opinion about.
+// The decoder grows its buffer to fit whatever arrived.
+//
+// The status check is shared because both callers must agree on it: 404 on
+// the /releases/latest endpoint just means no non-prerelease has been
+// published yet, which is a soft no-op (first-beta deployments shouldn't log
+// scary messages), while any other non-200 is a real failure.
+func decodeReleaseResponse(resp *http.Response, v any, what string) error {
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return errors.New("no published release")
+		}
+		return fmt.Errorf("github API status %d", resp.StatusCode)
+	}
+
+	// Allow exactly one byte past the cap. That byte is the probe: if it was
+	// reachable, the body is over the limit — whether or not the JSON
+	// happened to end there — and the size check below runs BEFORE the decode
+	// error is considered, so an oversized response can never masquerade as
+	// malformed JSON the way it did in B-01.
+	counter := &countingReader{r: io.LimitReader(resp.Body, maxReleaseResponseBytes+1)}
+	err := json.NewDecoder(counter).Decode(v)
+	if counter.n > maxReleaseResponseBytes {
+		return fmt.Errorf("%w: read past the %d-byte limit", errResponseTooLarge, maxReleaseResponseBytes)
+	}
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", what, err)
+	}
+	return nil
+}
+
 // fetchLatest hits the GitHub Releases API. When `url` is the single-release
 // endpoint we get a JSON object; when it's the list endpoint we get an
 // array and pick the first entry (GitHub returns them newest-first).
@@ -327,20 +408,6 @@ func fetchLatest(ctx context.Context, url string) (tag, notes, htmlURL string, e
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", "", "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		// 404 on the /releases/latest endpoint just means no non-prerelease
-		// has been published yet. Treat as a soft no-op rather than an error
-		// so first-beta deployments don't log scary messages.
-		if resp.StatusCode == http.StatusNotFound {
-			return "", "", "", errors.New("no published release")
-		}
-		return "", "", "", fmt.Errorf("github API status %d", resp.StatusCode)
-	}
-
 	type release struct {
 		TagName string `json:"tag_name"`
 		HTMLURL string `json:"html_url"`
@@ -348,9 +415,20 @@ func fetchLatest(ctx context.Context, url string) (tag, notes, htmlURL string, e
 		Draft   bool   `json:"draft"`
 	}
 
+	// Which shape we get (object or array) depends on which endpoint the
+	// caller picked, so pull the whole document off the stream as raw JSON
+	// once and try both shapes against it. json.RawMessage keeps the
+	// decoder's grow-to-fit behavior — unlike the old fixed-size read, an
+	// oversized response is now either decoded or reported as oversized,
+	// never truncated.
+	var raw json.RawMessage
+	if err := decodeReleaseResponse(resp, &raw, "release JSON"); err != nil {
+		return "", "", "", err
+	}
+
 	// Try array first (list endpoint), fall back to single object.
 	var list []release
-	if err := json.Unmarshal(body, &list); err == nil && len(list) > 0 {
+	if err := json.Unmarshal(raw, &list); err == nil && len(list) > 0 {
 		for _, r := range list {
 			if r.Draft {
 				continue
@@ -361,7 +439,7 @@ func fetchLatest(ctx context.Context, url string) (tag, notes, htmlURL string, e
 	}
 
 	var single release
-	if err := json.Unmarshal(body, &single); err != nil {
+	if err := json.Unmarshal(raw, &single); err != nil {
 		return "", "", "", fmt.Errorf("parse release JSON: %w", err)
 	}
 	if single.TagName == "" {
@@ -394,26 +472,19 @@ func fetchLatestNightly(ctx context.Context, url string) (tag, notes, htmlURL st
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", "", "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusNotFound {
-			return "", "", "", errors.New("no published release")
-		}
-		return "", "", "", fmt.Errorf("github API status %d", resp.StatusCode)
-	}
-
 	type release struct {
 		TagName string `json:"tag_name"`
 		HTMLURL string `json:"html_url"`
 		Body    string `json:"body"`
 		Draft   bool   `json:"draft"`
 	}
+	// This is the endpoint that actually broke under the old 1 MiB read cap
+	// (B-01): per_page=30 against this repo is ~7.9 MB, so every nightly
+	// check failed here with "unexpected end of JSON input". Decoding off the
+	// stream removes response size from the correctness equation.
 	var list []release
-	if err := json.Unmarshal(body, &list); err != nil {
-		return "", "", "", fmt.Errorf("parse release list JSON: %w", err)
+	if err := decodeReleaseResponse(resp, &list, "release list JSON"); err != nil {
+		return "", "", "", err
 	}
 	for _, r := range list {
 		if r.Draft {
