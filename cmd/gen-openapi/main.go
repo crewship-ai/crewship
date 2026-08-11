@@ -763,6 +763,7 @@ func responseComponents() map[string]any {
 	}
 	return map[string]any{"schemas": schemas}
 }
+
 // errorBodySchema picks the envelope an operation's error responses actually
 // carry. A handler that reaches for both gets a oneOf rather than a guess:
 // over-narrowing the contract is worse than admitting the ambiguity, because a
