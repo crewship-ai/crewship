@@ -314,7 +314,14 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Status != nil {
-		ev(actionStatusChanged, fmt.Sprintf("%s → %s", currentStatus, *req.Status))
+		// The prose AND the fields. Details is what a human reads; from/to
+		// are what a matcher can predicate on.
+		evs = append(evs, issueEvent{
+			MissionID: missionID, ActorType: actorType, ActorID: actorID,
+			Action:  actionStatusChanged,
+			Details: fmt.Sprintf("%s → %s", currentStatus, *req.Status),
+			From:    currentStatus, To: *req.Status,
+		})
 	}
 	if req.AssigneeID != nil {
 		ev(actionAssigneeChanged, fmt.Sprintf("assignee_id: %s", *req.AssigneeID))

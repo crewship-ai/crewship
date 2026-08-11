@@ -129,6 +129,43 @@ type issueEvent struct {
 	ActorID   string
 	Action    issueAction
 	Details   string
+	// From/To carry a status transition as data. Details keeps the prose
+	// ("BACKLOG → TODO") because that is what a human reads in the timeline;
+	// these are what an automation matcher can predicate on. Both emit sites
+	// already held them and joined them into the sentence, so the structure
+	// was being thrown away — which is why "fire when an issue moves to DONE"
+	// was not expressible at all.
+	From string
+	To   string
+	// RunID is the routine run that caused this change, when one did. It
+	// becomes the journal entry's TraceID, and that pointer is what the
+	// composition depth cap is built on: Registry.Flush resolves it, reads
+	// that run's chain_depth, and spends depth+1, so a chain leaving the
+	// process through the journal and coming back keeps ONE budget.
+	//
+	// Empty for a human moving a card, and it must stay empty there — an
+	// entry naming a run that never ran gives the causal walk a parent to
+	// follow into nothing and makes a person's action read as a composed hop.
+	RunID string
+}
+
+// issueEventPayload is the journal payload for one issue event.
+//
+// Extracted so the shape has a name and a test: the automation matcher
+// predicates on these keys, and until they were pinned the docs described a
+// key (`to`) the emitter never produced.
+func issueEventPayload(ev issueEvent) map[string]any {
+	p := map[string]any{"action": string(ev.Action), "details": ev.Details}
+	// Only on a transition. A key that is always present and always empty is
+	// a predicate that always fails, which is the failure mode this whole
+	// change exists to remove.
+	if ev.From != "" {
+		p["from"] = ev.From
+	}
+	if ev.To != "" {
+		p["to"] = ev.To
+	}
+	return p
 }
 
 // issueEvents fans an issue event out to the audit row, the journal and the
@@ -190,8 +227,12 @@ func (e issueEvents) log(ctx context.Context, ev issueEvent) {
 		ActorType:   actor,
 		ActorID:     ev.ActorID,
 		Summary:     string(ev.Action) + ": " + truncate(ev.Details, 120),
-		Payload:     map[string]any{"action": string(ev.Action), "details": ev.Details},
-		Refs:        map[string]any{"mission_id": ev.MissionID, "activity_id": actID},
+		// The run that caused it, when one did. journal.prepareEntry treats
+		// trace_id as the originating run id, which is the pointer
+		// automation.Registry.Flush resolves to price a composed hop.
+		TraceID: ev.RunID,
+		Payload: issueEventPayload(ev),
+		Refs:    map[string]any{"mission_id": ev.MissionID, "activity_id": actID},
 	})
 }
 

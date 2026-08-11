@@ -20,8 +20,8 @@ interface SidePanelProps {
 }
 
 // SidePanel — right/left detail panel with spring slide animation.
-// Modeled on the trace-side-panel.tsx pattern (the only previously
-// well-animated panel). ESC dismisses; no backdrop dim by design —
+// Modeled on the trace side panel that /activity carried before the
+// stream replaced it (the only previously well-animated panel). ESC dismisses; no backdrop dim by design —
 // the list behind stays visible and clickable so users can hop between
 // items without dismissing the panel each time.
 export function SidePanel({

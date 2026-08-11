@@ -222,6 +222,20 @@ const (
 	EntryHookFired   EntryType = "hook.fired"
 	EntryHookBlocked EntryType = "hook.blocked"
 
+	// Automations — workspace-scoped rules that turn a journal event into a
+	// deferred routine run (`automations` table, internal/automation). Both
+	// entries below describe a REFUSAL, which is why they exist at all: an
+	// automation that silently stops firing is indistinguishable from one
+	// nobody triggered, and that is the failure mode a rules engine gets
+	// support tickets for.
+	//
+	// EntryAutomationThrottled fires when an automation exceeds its
+	// max_per_hour budget. Exactly ONE per automation per hour, never one
+	// per dropped event — a storm that trips the cap 10,000 times must not
+	// write 10,000 rows saying so. Payload: automation_id, automation_name,
+	// event_type, max_per_hour, window_started_at.
+	EntryAutomationThrottled EntryType = "automation.throttled"
+
 	// Pipelines — declarative AI-authored workflows persisted per-
 	// workspace and reusable across crews. See PIPELINES.md for the
 	// full design. Run-level entries (started/completed/failed) frame
@@ -290,6 +304,23 @@ const (
 	// routine maintenance, mirrors EntryMemoryVersionsSwept's contract.
 	// See issue #1407.
 	EntryPipelineRunsSwept EntryType = "pipeline.runs_swept"
+
+	// EntryAutomationDepthExceeded fires when a COMPOSED edge is refused
+	// because the chain it belongs to is already at the depth cap
+	// (pipeline.MaxChainDepth). Composition — an automation firing a routine
+	// that acts on an issue whose change fires an automation — makes cycles
+	// trivially constructible, and a cap that refuses silently is a cap
+	// nobody can debug: this entry is how an operator finds out that a loop
+	// exists at all. Payload carries chain_depth (the depth that would have
+	// been created), max_chain_depth, chain_origin, and the edge that was
+	// refused (pipeline_slug / run_id for a call_pipeline edge). Severity is
+	// error — a refused edge means work the author expected did not happen.
+	//
+	// Namespaced `automation.` rather than `pipeline.` because the cap is a
+	// property of the composition substrate, not of routines: the automation
+	// dispatcher refuses at the same ceiling, through the same
+	// pipeline.GuardChainDepth, and emits the same type.
+	EntryAutomationDepthExceeded EntryType = "automation.depth_exceeded"
 
 	// EntryRunAgentSpan is one INTERNAL action of an agent_run step — a single
 	// tool the agent invoked (Bash/Write/Edit/Read/MCP/HTTP). It is the leaf of

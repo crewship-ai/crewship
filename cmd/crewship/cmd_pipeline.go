@@ -293,7 +293,15 @@ agent_run prompt instead of a JSON-escaped one.
 You also need to supply --author-crew so the runtime knows which
 crew owns the routine. The agent_slug references inside the DSL
 are resolved against THIS crew, not the caller's crew (cross-crew
-reuse contract).`,
+reuse contract).
+
+--author-agent names the agent the routine ACTS AS. It is not a
+credit line: every 'crewship' step dispatches under that agent's
+identity, and the issue.comment verb has no other source for one —
+a comment needs an author it can name. A routine containing an
+issue.comment step is refused at save unless --author-agent is set,
+because without it every run of that step would fail. The agent must
+belong to --author-crew.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -350,6 +358,26 @@ reuse contract).`,
 			return fmt.Errorf("resolve --author-crew: %w", err)
 		}
 
+		// --author-agent names the agent the routine ACTS AS, and the save
+		// endpoint binds it by ID for the same reason author_crew_id is bound
+		// by ID: a slug on the wire is rejected as "not an agent in this
+		// routine's author crew". Resolve it here, the way every other
+		// agent-taking flag does.
+		//
+		// Until this was wired the flag was read and discarded (`_ =
+		// authorAgent`) — so every CLI-authored routine saved with
+		// author_agent_id = "", and the `crewship` step's issue.comment verb,
+		// whose acting agent is injected from exactly that column, failed at
+		// RUN time with "400: agent_id is required". A documented flag that
+		// does nothing is worse than an absent one; it now does what it says.
+		var authorAgentID string
+		if authorAgent != "" {
+			authorAgentID, err = resolveAgentID(client, authorAgent)
+			if err != nil {
+				return fmt.Errorf("resolve --author-agent: %w", err)
+			}
+		}
+
 		// Save clears its test-gate via an HMAC save_token (the server no
 		// longer trusts a body "it passed" claim), so the CLI mirrors the UI:
 		// dry-run-validate the draft via /test_run first, then pass the returned
@@ -359,7 +387,6 @@ reuse contract).`,
 		// (workspace, definition_hash, this user). The internal
 		// /api/v1/internal/pipelines/save route is internalAuth (sidecar only);
 		// a user CLI token always 403s there (issue #654), so we never touch it.
-		_ = authorAgent // recorded only on the sidecar path; user saves attribute the calling user
 		fmt.Println("Validating routine (server-side dry-run)...")
 		testBody := map[string]any{
 			"definition":     json.RawMessage(definitionRaw),
@@ -393,6 +420,9 @@ reuse contract).`,
 			"description":    description,
 			"definition":     json.RawMessage(definitionRaw),
 			"author_crew_id": authorCrewID,
+		}
+		if authorAgentID != "" {
+			saveBody["author_agent_id"] = authorAgentID
 		}
 		if changeSummary != "" {
 			saveBody["change_summary"] = changeSummary
@@ -1004,7 +1034,7 @@ func init() {
 	pipelineSaveCmd.Flags().String("description", "", "one-line description shown in [AVAILABLE ROUTINES] block")
 	pipelineSaveCmd.Flags().String("definition", "", "path to a JSON DSL file (REQUIRED)")
 	pipelineSaveCmd.Flags().String("author-crew", "", "crew slug or id that owns this routine (REQUIRED)")
-	pipelineSaveCmd.Flags().String("author-agent", "", "agent_id that authored this routine (optional but recommended)")
+	pipelineSaveCmd.Flags().String("author-agent", "", "agent slug or id the routine ACTS AS (must be in --author-crew). Required for a crewship issue.comment step")
 	pipelineSaveCmd.Flags().String("sample-inputs", "", "JSON inputs the test_run uses to validate the DSL")
 	pipelineSaveCmd.Flags().String("change-summary", "", "one-line note stored on the version row (shown by 'routine versions' and the versions UI)")
 

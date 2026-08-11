@@ -1,0 +1,272 @@
+---
+title: "crewship chain"
+description: "Follow what caused what across automations, issues, routines, runs and delegated assignments from a single anchor."
+icon: "share-nodes"
+stability: experimental
+tag: Experimental
+---
+
+# `crewship chain`
+
+Reconstruct the causal chain around one anchor and print it as a tree.
+
+```bash
+crewship chain list
+crewship chain ENG-7
+crewship chain prn_01hy
+crewship chain nightly-deploy --depth 6 --limit 400
+crewship chain aut_01hx
+crewship chain ENG-7 --format json
+```
+
+Two commands, one feature: `crewship chain list` finds a chain,
+`crewship chain <anchor>` opens it. Every origin the list prints is a valid
+anchor.
+
+The anchor is whatever you have to hand — an issue identifier, an issue id, a
+run id, a routine id or slug, an assignment id, an inbox item id, or an
+automation id. The server resolves it and walks outward across **both**
+execution substrates (routine runs and agent delegation), so you do not have to
+know which one your anchor lives in.
+
+```
+issue ENG-7  Deploy is flaky on cold start  (IN_PROGRESS) (partial)
+├─ [triggers ->] routine deploy  Deploy  (active)
+│  └─ [runs ->] run prn_01hy  deploy  (failed)  2h ago · 1m30s
+│     ├─ [triggers ->] run prn_01hz  deploy  (failed)  2h ago · 12.4s
+│     │  └─ [produces ->] inbox/failed_run ibx_01j2  deploy failed  (unread)  2h ago
+│     └─ [<- executes] agent viktor  Viktor  (IDLE)
+└─ [triggers ->] run prn_01hy (shown above)
+
+6 nodes, 6 edges (depth<=4, limit 200)
+
+Not walkable (the schema carries no link here):
+  ENG-7: inbox items raised while this issue was worked cannot be linked to it: inbox_items carries no mission/issue column.
+  viktor: agents are chain leaves: this agent's other assignments are not part of this chain.
+```
+
+## `crewship chain list` — what ran here
+
+The index. One row per chain, newest first, so you can find a chain without
+already knowing an anchor.
+
+```bash
+crewship chain list
+crewship chain list --limit 100
+crewship chain list --limit 50 --offset 50
+crewship chain list --format json
+```
+
+```
+WHEN    STARTED BY                    ROUTINE  RUNS  DEPTH  STATUS  ORIGIN
+2h ago  automation Triage on failure  triage   3     2      FAILED  prn_01j4
+5h ago  issue Deploy is flaky         deploy   2     1      ok      prn_01hy
+1d ago  user Pavel                    deploy   1     0      ok      prn_01hb
+
+3 chains (limit 50, offset 0)
+```
+
+- **STARTED BY** is the root run's trigger resolved into something you
+  recognise: a rule name, an issue title, the person who pressed the button,
+  a schedule. When the pointer resolves to nothing — a rule deleted since — the
+  cell falls back to the bare trigger word rather than inventing a name.
+- **DEPTH** is the deepest `chain_depth` the chain reached. `0` is a run
+  somebody started by hand; anything higher is a chain that built itself.
+- **STATUS** is `FAILED` when **any** run in the chain failed, not only the
+  root. `interrupted` runs are not counted as failures — a process that died is
+  an operational event, not the chain's verdict.
+- **ORIGIN** is the anchor. Feed it straight back: `crewship chain prn_01j4`.
+
+<Note>
+  The table is a summary of a wider row. `--format json` also carries what the
+  chain **touched** — `issues[]` (with `created` marking the ones it authored),
+  `agents[]` with a per-agent work count, the uncapped `issue_count` /
+  `agent_count`, and `duration_ms` — which is what tells two runs of the same
+  routine apart. Both lists are capped at 5 per row server-side; the counts are
+  not. See [the API reference](/api-reference/chains#fan-out-and-its-cap).
+
+  It also carries `running_runs` and `waiting_runs`: how many of the chain's
+  runs are still in flight, and how many are parked on a person. The timestamps
+  cannot answer either — `last_activity` falls back to `started_at` while a run
+  is going, so a chain waiting on an approval since Tuesday and one that
+  finished on Tuesday carry the same instant. Use `waiting_runs > 0` to find
+  what needs a human.
+</Note>
+
+### Paging
+
+The page is capped server-side — default 50, ceiling 200 — because the index
+groups over every run in the workspace. When more exists the footer says so and
+names the offset that continues:
+
+```
+2 chains (limit 2, offset 0)
+More chains beyond this page. Continue with --offset 2.
+```
+
+### Runs that predate chain recording
+
+Runs recorded before the `chain_origin` column landed are **not** in the index,
+and the footer says so:
+
+```
+No chains recorded in this workspace yet.
+Some runs in this workspace predate chain recording (the chain_origin column)
+and are not indexed here: the link that would group them was never written.
+```
+
+They cannot be backfilled — nothing in those rows says whether a run was a
+chain root or the third hop of a chain since swept — so they are excluded
+rather than shown as single-run chains they may never have been. The note is
+there so an empty list never reads as "nothing has ever run here".
+
+<Note>
+  `list` is a subcommand, so it shadows an anchor literally spelled `list` (a
+  routine could be slugged that). The escape is the standard one:
+  `crewship chain -- list` passes the word through as the anchor.
+</Note>
+
+## Reading the tree
+
+The API returns a **graph**; a terminal has one dimension to spend, so this
+renders a tree. Every edge in the response still gets exactly one line, so the
+tree and `--format json` describe the same thing.
+
+- **Direction is on the edge, not in the nesting.** The layout walks the graph
+  undirected, because the anchor is usually in the *middle* of its chain —
+  `crewship chain <run-id>` has to show the routine and the issue above the run
+  as well as the nested runs below it. `[triggers ->]` means the parent line
+  caused the child; `[<- executes]` means the child line executes the parent.
+- **`(shown above)`** is a second edge into a node that is already on the page.
+  It is not a duplicate: it is the edge that makes the graph a graph, and when
+  it points back up it is a cycle closing.
+- **`(partial)`** marks a node whose expansion stops here, with the reason
+  listed under *Not walkable*.
+- **`[composed depth N]`** on a run is `chain_depth`: how many *composed* hops
+  separate it from whatever a human did. It is a property of the run, not of
+  your query — unlike the tree's indentation, it does not change with the
+  anchor you chose. Runs a person started carry 0 and print nothing.
+- **`2h ago · 1m30s`** is when the node happened and how long it took. It
+  appears on `run`, `assignment` and `inbox` lines and on nothing else, because
+  nothing else can answer honestly: an issue's, a routine's, an agent's or a
+  rule's `created_at` is when it was *filed / written / hired / authored*, not
+  when anything in this chain happened. A blank means "this kind has no time",
+  not "the time is missing".
+- A run still in flight prints its start and **no duration**, because it has
+  not finished. `0ms` means the opposite — it finished inside a millisecond —
+  so the two are never spelled the same way.
+
+<Warning>
+  **Not every run in the tree belongs to the chain you anchored on.** The walk
+  expands a run up to its routine and a routine back down to every run of it, so
+  anchoring on one run shows that run's routine with its whole run history
+  hanging off it. The tree is honest about this — those runs sit under the
+  routine, not under your run — but a script counting `run` lines will
+  over-count.
+
+  `--format json` carries `chain_origin` on every run node for exactly this:
+  a run belongs to the chain when its `chain_origin` equals the origin you
+  anchored on. Do not try to work it out from the edges — a routine fired by a
+  rule gets an `automation → run` edge for every run that rule ever caused, so
+  filtering by edge kind keeps the siblings too. See
+  [Telling members from siblings](/api-reference/chains#telling-members-from-siblings).
+</Warning>
+
+## Edge kinds
+
+| Kind | Meaning |
+|---|---|
+| `triggers` | The parent caused the child to start. |
+| `runs` | The parent is the routine definition, the child is one run of it. |
+| `executes` | The parent is the agent carrying the child out. |
+| `produces` | The parent emitted the child — an inbox approval, a failure alert. |
+| `relates` | An author-declared issue↔issue link, not a causal one. |
+
+Every one is backed by a real column; the table of which column is in the
+[Chains API reference](/api-reference/chains#edge-kinds-and-the-columns-behind-them).
+
+## Automations — where a chain began
+
+A rule that turns an event into a routine run is what makes a chain *start*.
+Anchor on one to see what it is wired to and what it has actually done:
+
+```
+automation/run.failed aut_01hx  Triage on failure  (enabled)
+├─ [triggers ->] routine triage  Triage  (active)
+└─ [triggers ->] run prn_01j4  triage  (completed)  18m ago · 4.2s [composed depth 1]
+
+3 nodes, 2 edges (depth<=4, limit 200)
+```
+
+Anchored on a run instead, the rule appears *above* it, so `crewship chain
+prn_01j4` answers "why did this happen" with the rule rather than stopping at
+the routine.
+
+<Note>
+  **A rule is only shown where it actually fired.** Walking a routine does not
+  list the rules that merely point at it — they would be drawn with the same
+  `triggers` edge as the one that really fired, and a chain offering four
+  candidate causes for a run you started by hand is worse than one offering
+  none. The rules that *did* fire stay reachable through the runs they caused.
+  The reasoning is in the [API reference](/api-reference/chains#a-rule-is-only-drawn-where-it-actually-fired).
+</Note>
+
+Disabling a rule keeps the runs it already caused attached to it. Deleting one
+removes it from the walk — the run still records that an automation started it,
+but the rule itself is no longer readable.
+
+## What it cannot show you
+
+Two links the product implies do not exist in the schema, and this command
+reports them rather than guessing:
+
+- **Inbox items cannot be traced to an issue.** `inbox_items` has no mission
+  column on any kind, so the approvals and failure alerts raised while an issue
+  was worked are not reachable from it.
+- **Escalations cannot be traced to a run or an issue.** `escalations` carries
+  only crew, chat and from-agent, so an escalation cannot be attached to what
+  provoked it.
+
+Pass `--gaps` to print the full text of both.
+
+## Truncation
+
+The walk is bounded on two axes, and both caps are enforced server-side. When
+one bites, the footer says so and names the flag that would widen it:
+
+```
+12 nodes, 14 edges (depth<=2, limit 200)
+Truncated: the depth cap was reached, so this is NOT the whole chain. Raise --depth.
+```
+
+A short tree is never silently presented as a complete chain.
+
+## Flags
+
+`crewship chain <anchor>`:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--depth` | server default `4`, ceiling `10` | How many hops from the anchor to walk. |
+| `--limit` | server default `200`, ceiling `1000` | Maximum nodes to return. |
+| `--gaps` | off | Print the full text of the links the data model cannot carry. |
+
+`crewship chain list`:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--limit` | server default `50`, ceiling `200` | Chains per page. |
+| `--offset` | `0` | Chains to skip. |
+
+Global flags apply as usual — `--format json|yaml|ndjson` emits the raw graph
+(nodes, edges, `truncated`, `gaps`) for a script to consume.
+
+## Aliases
+
+`crewship why <anchor>` is an alias for `crewship chain <anchor>`.
+
+## See also
+
+- [Chains API reference](/api-reference/chains)
+- [`crewship routine tree`](/cli/routine) — nested runs only, without the issue
+  and delegation substrates.

@@ -746,6 +746,7 @@ Creates or updates a pipeline for the calling user. `authored_via` is always set
 | `description` | string | no | -- |
 | `definition` | object | yes | DSL JSON document |
 | `author_crew_id` | string | no | Pin a crew context for runtime resolution; without it, runs fall back to the first crew the saving user belongs to |
+| `author_agent_id` | string | no | The agent the routine **acts as** — every `crewship` step dispatches under this identity. Must be an agent of `author_crew_id` (`400` otherwise). Required when the definition contains a `crewship` step using `issue.comment`, which cannot be attributed to "nobody"; `authored_via` still records `user_api` |
 | `last_test_run_at` | string | conditional | RFC 3339 timestamp (within the last 5 minutes) clearing the validation gate; required unless `skip_test_gate` is used |
 | `last_test_run_passed` | boolean | conditional | Must be `true` if relying on body-trust |
 | `skip_test_gate` | boolean | no | OWNER/ADMIN-only escape hatch -- bypass the 5-minute validation gate entirely |
@@ -754,11 +755,11 @@ Creates or updates a pipeline for the calling user. `authored_via` is always set
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `slug` or `definition`, invalid JSON |
+| `400` | Missing `slug` or `definition`, invalid JSON, or `author_agent_id` that is not an agent of `author_crew_id` |
 | `401` | Not authenticated |
 | `403` | Role below `MANAGER`, or `skip_test_gate` requested without OWNER/ADMIN |
 | `409` | Slug already exists in this workspace |
-| `422` | DSL parse / validate / cycle-detect failure, or validation gate not satisfied |
+| `422` | DSL parse / validate / cycle-detect failure, a `crewship` step needing an acting agent on a routine with no `author_agent_id`, or validation gate not satisfied |
 
 <Note>
 There is **no public `test_run` endpoint.** You cannot run an agent "dry" (its scripts have uninterceptable side effects), so a real run is just [Run](#run-pipeline). Drafts are validated server-side on `/save` (parse + schema + cycle detection), and the sidecar agent-authoring flow validates a draft via the internal dry-run gate (`/api/v1/internal/pipelines/test_run`, X-Internal-Token) before persisting.

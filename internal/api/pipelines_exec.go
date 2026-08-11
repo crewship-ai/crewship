@@ -147,17 +147,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// dashboard can trust the value without sanitizing again. Anything
 	// outside the enum falls back to "manual" — same forgive-and-carry-on
 	// semantics as TierOverride above.
-	triggeredVia := pipeline.TriggeredVia(body.TriggeredVia)
-	switch triggeredVia {
-	case pipeline.TriggeredViaManual,
-		pipeline.TriggeredViaSchedule,
-		pipeline.TriggeredViaWebhook,
-		pipeline.TriggeredViaCallPipeline,
-		pipeline.TriggeredViaIssue:
-		// accepted
-	default:
-		triggeredVia = pipeline.TriggeredViaManual
-	}
+	triggeredVia := acceptedTriggerSource(body.TriggeredVia)
 
 	// Integration gate (run-time enforcement of integrations_required).
 	// Block the run before any dispatch when the routine declares
@@ -703,6 +693,28 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 		TriggeredVia     string  `json:"triggered_via"`
 		TriggeredByID    string  `json:"triggered_by_id,omitempty"`
 		IdempotencyKey   string  `json:"idempotency_key,omitempty"`
+		// ChainDepth is how many COMPOSED hops separate this run from
+		// whatever a human did (migration v20260807160100). 0 — a run
+		// somebody started — is the overwhelming majority, so it is the
+		// one field here that is always emitted: a caller can then tell
+		// "root" from "this server predates the column" without guessing.
+		ChainDepth int `json:"chain_depth"`
+		// ChainOrigin is the run or journal entry that started the chain.
+		// Empty on a root, where the run's own id is the origin.
+		ChainOrigin string `json:"chain_origin,omitempty"`
+		// AutomationID / AutomationName / TriggerEventType recover the
+		// RULE behind a rule-fired run.
+		//
+		// They are not derivable from TriggeredVia. PendingRunDispatcher
+		// fires every deferred run with triggered_via="schedule"
+		// (internal/pipeline/pending_dispatcher.go), automations included,
+		// so the enum reports a cron and a rule identically. The rule's
+		// identity survives only in metadata_json, written by the
+		// automation flusher. Lifting it here is what lets a page say
+		// "started by <rule>" instead of misreporting it as a schedule.
+		AutomationID     string `json:"automation_id,omitempty"`
+		AutomationName   string `json:"automation_name,omitempty"`
+		TriggerEventType string `json:"trigger_event_type,omitempty"`
 	}
 	out := make([]runRecordDTO, 0, len(records))
 	for _, rec := range records {
@@ -730,7 +742,10 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 			TriggeredVia:     string(rec.TriggeredVia),
 			TriggeredByID:    rec.TriggeredByID,
 			IdempotencyKey:   rec.IdempotencyKey,
+			ChainDepth:       rec.ChainDepth,
+			ChainOrigin:      rec.ChainOrigin,
 		}
+		dto.AutomationID, dto.AutomationName, dto.TriggerEventType = automationProvenance(rec.MetadataJSON)
 		if rec.EndedAt != nil && !rec.EndedAt.IsZero() {
 			dto.EndedAt = rec.EndedAt.Format(time.RFC3339Nano)
 		}
@@ -987,4 +1002,35 @@ LIMIT 200`, workspaceID)
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// acceptedTriggerSource decides what a caller-supplied `triggered_via` is
+// allowed to claim on the user-facing run endpoint.
+//
+// A named function rather than an inline switch because it answers a security
+// question, and an inline switch cannot be tested without standing up an HTTP
+// request: "automation" is refused here, and only that refusal keeps the
+// causal graph honest.
+//
+// triggered_by_id is body-supplied on this route, so accepting the pair would
+// let any member stamp a hand-started run as rule-fired and name an existing
+// rule as its cause. internal/chain reads exactly that pair to draw "this rule
+// caused this run" — a topology whose whole job is explaining what caused what
+// must not take the answer from the caller. Only PendingRunDispatcher sets it,
+// from the pending row Registry.Flush wrote.
+//
+// Anything unrecognised — including "automation" — downgrades to manual rather
+// than erroring, matching the forgive-and-carry-on handling of TierOverride
+// above: the run is legitimate, only its claimed provenance is not.
+func acceptedTriggerSource(raw string) pipeline.TriggeredVia {
+	switch v := pipeline.TriggeredVia(raw); v {
+	case pipeline.TriggeredViaManual,
+		pipeline.TriggeredViaSchedule,
+		pipeline.TriggeredViaWebhook,
+		pipeline.TriggeredViaCallPipeline,
+		pipeline.TriggeredViaIssue:
+		return v
+	default:
+		return pipeline.TriggeredViaManual
+	}
 }

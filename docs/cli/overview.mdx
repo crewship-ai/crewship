@@ -689,6 +689,30 @@ exits with the not-found code (`3`) rather than a confusing server-side error.
 
 ---
 
+## Trace and automation workflows
+
+The orchestration surfaces answer four related operational questions:
+
+- **What caused this?** `crewship chain <anchor>` follows the causal graph around
+  an issue, run, routine, assignment, or journal entry. Use `--format json` when a
+  script needs the graph. See the [`chain` reference](/cli/chain).
+- **Why did this run start?** `crewship routine records <slug>` exposes run
+  provenance such as `chain_depth`, `chain_origin`, and the automation that fired
+  the run. See the [routine reference](/cli/routine#crewship-routine-records-slug).
+- **What will start future work?** `crewship automation list|create|update|enable|disable|delete`
+  manages workspace rules that enqueue routines from journal events. Automations
+  enqueue deferred work; they do not execute routines inline. See the
+  [`automation` reference](/cli/automation) and [automations guide](/guides/automations).
+- **Does the crew match its declared runtime?** `crewship crew container-status
+  <slug-or-id>` compares configured and effective container limits and explains
+  whether an operator needs to act. Use `--format json` for scripts. See the
+  [crew reference](/cli/crew#crewship-crew-container-status).
+
+Start with `chain` when the origin is unknown, inspect `routine records` to identify
+the trigger, then use the journal or run detail command for the complete evidence.
+
+---
+
 ## Other commands (run `--help` for details)
 
 The list below covers top-level commands that ship in the binary but
@@ -707,12 +731,13 @@ reference.
 | `crewship integration` | Manage workspace integrations (Linear, GitHub App, Slack, …) | See the [Integrations guide](/guides/integrations) |
 | `crewship mcp` | Inspect, register, and remove MCP servers attached to an agent | See the [MCP / multi-CLI guide](/guides/mcp-multi-cli) |
 | `crewship notify` | Manage desktop notifications (`enable` / `disable` / `status` / `test` / `send`) | — |
-| `crewship routine` | Manage workspace routines (declarative DSL workflows; alias: `pipeline`) | See the [Routines guide](/guides/routines) |
+| `crewship routine` | Manage workspace routines (declarative DSL workflows; alias: `pipeline`) | See the [routine CLI reference](/cli/routine) and [Routines guide](/guides/routines) |
 | `crewship plan` | Run the default agent in read-only PLAN mode (architect mode; no tools, no changes) | — |
 | `crewship project` | Manage projects (and `project milestone` subcommands) inside the issue tracker | — |
 | `crewship recap` | AI-generated summary of a chat session (`recap <chat-id>`) | — |
 | `crewship resume` | Pick up an existing CLI session by chat-id, run-id, or PR URL | — |
 | `crewship session` | List and revoke the caller's active browser sessions (`list` / `revoke`) | — |
+| `crewship signal` | Wake every routine run parked on a named event (`signal send --event-type ...`) | See the [signal CLI](/cli/signal) |
 | `crewship setup` | Finish onboarding on an already-authenticated instance (first crew template + adapter + CLI token) | — |
 | `crewship shell` | Interactive REPL: each line is a prompt to the default agent (slash-commands control state) | — |
 | `crewship slash` | Run a saved slash-command shortcut against the default agent | — |

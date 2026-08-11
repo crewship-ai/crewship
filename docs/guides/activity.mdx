@@ -1,6 +1,6 @@
 ---
 title: "Activity"
-description: "Workspace-wide live trace of agent runs as a single canvas — nodes are steps, edges are data flow, inline Approve/Deny on paused gates."
+description: "The workspace activity stream — four lenses over the workflows that ran, each row leading to the thing itself: a workflow's causal graph, a run's steps, an issue, an agent."
 icon: "activity"
 stability: experimental
 tag: Experimental
@@ -10,275 +10,277 @@ tag: Experimental
 
 ## Overview
 
-**Activity** is the live operator surface for "what is happening right now". It lives at `/activity` in the running web UI, under the **Run** group of the sidebar, and replaces the legacy four-tab Orchestration shell (Runs / Graph / Timeline / Feed) with a single ReactFlow canvas that paints every step of every run as you watch.
+**Activity** lives at `/activity`, under the **Run** group of the sidebar. It answers the question people arrive with — *what is happening, and where do I look* — as a stream: a left rail listing what has been **active in the loaded window**, and a main column that changes with whatever the reader picked.
 
-The intent is "one canvas, no switching" — open Activity, pick a run from the left rail, watch the steps light up in real time, click any node for the detail panel, and approve a paused waitpoint inline without ever leaving the page. The page is purely operational: it doesn't author routines (that's [Routines](/guides/routines)), doesn't surface the per-user inbox (that's [Inbox](/guides/inbox)), and doesn't carry workspace-wide settings. It's the answer to one question — "what is running right now, and is anything stuck?" — and it commits to that focus by routing every other concern elsewhere.
+The page is built from two independent reads:
 
-Architecturally, Activity is a thin reactive shell over the journal: the run + DSL payload comes from `/api/v1/runs/{id}`, realtime `pipeline.run.*` and `pipeline.step.*` events from the workspace WebSocket channel refresh that payload on each tick, and `buildTraceGraph` (`lib/trace/build-trace-graph.ts`) rebuilds the React Flow node array on the next render. No imperative graph mutation, no per-event DOM diffing — the canvas is a function of run state, and the framework handles the diff.
+- **The workflow index** — `GET /api/v1/chains` (`hooks/use-chains.ts`), one row per chain. A *chain* is every run sharing one `chain_origin`: the rule or person that started it, the routine runs it caused, and the agent work those dispatched. It is fetched on demand, not streamed.
+- **The journal** — `GET /api/v1/journal`, which feeds the event list, the Overview dashboard and the opened-event detail. It streams over SSE and falls back to polling.
+
+The two are deliberately separate: the rail must still answer "where can I go" when the current filters answer nothing.
+
+<Note>
+`/activity` used to be a single-canvas run **trace**: a rail of runs, one run's execution chain on a ReactFlow canvas, a step side panel. That page is gone — with its saved views, heatmap toolbar, step selection and inline waitpoint buttons. A run's execution was not lost; see [Where the run trace went](#where-the-run-trace-went).
+</Note>
 
 ## When to use it
 
-Reach for Activity in these situations — every other surface either answers a different question or makes the answer slower to find:
+- **Something ran and you want to know what it caused.** A workflow row opens the whole chain — its runs, its causal graph, the sequence it happened in, and the issues and agents it touched.
+- **You want a routine's runs, not its definition.** The Routines lens opens a routine's runs grouped by the hour, with each run's own result on the row instead of its id. The definition stays on [Routines](/guides/routines).
+- **You want to know what your agents did.** The Agents lens lists agents that took work in the window, how much, and in which workflows.
+- **An issue moved and you want to know what moved it.** The Issues lens lists issues touched in the window with the routine and agent that reached each one.
+- **You are chasing a failure.** The **Failed** status segment narrows both the rail and the feed.
 
-- **A run is stuck and you don't know which step.** Open the canvas, watch which node is in the amber `waiting` ring or pulsing blue `running` state for an unreasonable time. The trace graph makes "where did execution park" a visual question, not a log-grep question.
-- **A `wait` step needs approval and you don't want to context-switch.** Inline Approve / Deny on the node body is the canonical resolution path — same `waitpointDecide` helper as Inbox, so either surface clears the badge on the other.
-- **You're chasing a regression and want it scoped fast.** Filter the left rail to `failed` + `last 24h`, group by routine, and the rail rolls 200 failed runs of `daily-etl` into one expandable parent so a one-off outlier doesn't get drowned by an ongoing flake.
-- **You're hunting a cost or latency spike.** Toggle the heatmap to Cost or Time. The single dark-bordered node in the chain is the `agent_run` or `http` step that ate the budget; no per-node math required.
-- **You want to share *exactly what you're looking at* with a peer.** The URL (`/activity?run=<id>&step=<id>`) is the single source of truth for selection, so a copy-paste reconstructs the same canvas, the same selected node, and the same detail panel on someone else's screen.
-
-If you instead want to *author* a routine, look in [Routines](/guides/routines); to triage your own personal queue of waitpoints/escalations across all workspaces, use [Inbox](/guides/inbox); to read the underlying event log, use the [Crew Journal](/guides/crew-journal) API directly.
+To *author* a routine, go to [Routines](/guides/routines). To decide a waitpoint or clear an escalation, go to [Inbox](/guides/inbox) — nothing on this page approves anything. To read the raw event log, use `/journal` or the [Crew Journal](/guides/crew-journal) API.
 
 ## Key concepts
 
-The canvas is small but every visual element has a specific meaning — getting the vocabulary right makes the page much faster to read.
-
 | Term | What it means here |
-|------|-------------------|
-| **Run** | One execution of a routine, identified by `run_id`. Every node on the canvas, every status pip, and the URL's `?run=…` parameter all hang off this. |
-| **Trace graph** | The directed graph drawn for the selected run. Built by `buildTraceGraph` (`lib/trace/build-trace-graph.ts`) from the run's DSL + recorded state. |
-| **Trigger node** | The single synthetic entry-point node that sits above every chain — labels the run's `triggered_via` (issue id, schedule cron, webhook name, sub-run, or `manual`). |
-| **Step node** | One node per DSL step (`agent_run`, `http`, `script`, `code`, `transform`, `query`, `wait`, `notify`, `foreach`, `call_pipeline`). Its border colour is the status pip; its body shows the rendered prompt or expression. |
-| **Sequencing edge** | Solid arrow. Drawn from a step to every other step that lists it in `needs[]`. Means *must run first*. Routed along dagre's own path so a skip edge steps around the nodes it passes instead of cutting across them. |
-| **Data-flow edge** | Dashed arrow, labelled with a JSON path. Parsed from `{{ steps.X.output[.path] }}` templates in any input field. Means *this value flows here*. |
-| **Waitpoint** | A `wait` step parked on a Harbormaster gate. Renders inline **Approve** / **Deny** in its body; mirrored as an `inbox_items` row so Inbox and Activity stay in lock-step. |
-| **Saved view** | A pinned snapshot of `(filter, sort, group, search)` on the left rail. Per-user, persisted, re-opens by name. |
-| **Heatmap mode** | A toolbar segmented control (Off / Cost / Time). Colours each node's border by the percentile bucket of its cost or duration in the run. Persisted per user. |
-| **Overview mode** | What the canvas shows when no run is selected — issues, their bound routines, and the last run of each chain. Click a last-run node to flip into trace mode for that run. |
-| **Trace selection** | URL state (`?run=<id>&step=<id>`) that uniquely identifies a single node + side panel. Copy-paste reconstructs the exact view on another machine. |
+|------|--------------------|
+| **Chain** | Every run sharing one `chain_origin`. The unit the index groups by, and a valid anchor for `GET /api/v1/chains/{anchor}`. |
+| **Workflow** | A chain that **composed** something — see [What earns the word "workflow"](#what-earns-the-word-workflow). A bare run of a known routine is a run, and lives under the Routines lens. |
+| **Lens** | Which catalogue the rail lists: Workflows, Issues, Agents, Routines. All four are derived from the same loaded chain list, so no two can disagree about what happened. |
+| **Sentence** | A workflow row's first line — the *shape*, not the routine's name: `file a follow-up when an issue closes → Follow up on close → riley → ENG-7`. Two runs of one routine render the same name; what they reached differs. |
+| **Handle** | The last 8 characters of the chain origin, on the right of a row. Derived, never generated — it is what tells two runs of one routine apart. |
+| **Status segment** | All · Running · Waiting · Failed, one line, one choice. Counts **chains**, which is what the list under it holds. |
+| **Stop / trail** | Where the reader is standing. Every pick is one stop on a path; the breadcrumb above the column is the walk, with Back and a jump to any crumb. Capped at 6 stops (`ACTIVITY_MAX_DEPTH`), and the trail says when earlier stops fell off. |
+| **Drill-down** | What a row leads to: a run's steps, an issue's "what reached it", an agent's work, a routine's runs. |
 
-## Usage
+## The rail
 
-The page is designed to be scanned, not learned — every visible element is wired up. The shortest path through it:
+One column, and it is navigation: a search box, a filter popover, four lens tabs, four status segments, then the list. Every *narrowing* lives in the popover; every *place you can go* is a row.
 
-1. **Open `/activity`.** With no run selected you land in overview mode (issues → routines → last run). If you came from somewhere with a specific run in mind, paste the URL and you'll skip straight to step 4.
-2. **Find your run on the left rail.** Default sort is newest first across everything; reach for `[Filter • N]` if the rail is too noisy. `failed` + last 24h grouped by routine is the canonical regression-hunting filter set. Save it as a view if you'll want it tomorrow morning.
-3. **Click the run row.** The canvas paints the trace graph top to bottom. Status pips light up live from the workspace's `pipeline.step.*` events — no refresh needed.
-4. **Read the canvas.** Solid edges show *what must run first* (`needs[]`); dashed edges show *what value flows where* (`{{ steps.X.output }}` templates). A pulsing blue node is mid-flight; an amber node is parked on a waitpoint; a rose node failed and shows its error message in the side panel.
-5. **Click a step** to open the right-hand detail panel — rendered prompt, output, duration/cost from the journal, and (for failures) the captured error. The URL updates to `?run=<id>&step=<id>` so anything you select is shareable.
-6. **For waitpoints, decide inline.** Approve / Deny buttons sit in the node body. The run resumes immediately on Approve and the badge clears on Inbox within the realtime round-trip. Click the node body (not the buttons) to see the prompt that produced the value you're being asked to approve.
+### The four lenses
 
-Toggle the **Heatmap** segmented control to Cost or Time when you want the canvas to surface the one node that ate the budget instead of reading them all by hand — the percentile colouring is relative to the rest of the *current* run, so the dark border is always the right node to investigate first.
+Each lens lists only the members that were **active in the loaded window**. An issue nobody touched today is in [Issues](/guides/issue-detail), not here.
 
-## Examples
+| Lens | A row is | Sorted by |
+|------|----------|-----------|
+| **Workflows** | One causal run: what started it and everything it caused | Time bucket, then newest first |
+| **Issues** | An issue something touched in this window — not the backlog | Busiest first (chains touching it) |
+| **Agents** | An agent that took work in this window | Busiest first (assignments) |
+| **Routines** | A routine that **ran** in this window — not the catalogue | Busiest first (runs, not chains) |
 
-### Finding the cost spike in last night's nightly-etl
+Workflow rows are grouped into **Active now**, **Today** and **Earlier**. "Active now" is a *state*, not a time: a chain parked on a human approval since Tuesday is the most urgent row on the page and must not sort to the bottom by its timestamp.
 
-The Paymaster digest flagged `nightly-etl` at 3× its usual cost. To isolate which step regressed:
+Each workflow row wears its routine's own icon and colour (the same derivation the Routines rail uses), a status dot notched into the corner, a halo while something is live, its sentence, `relative time · duration · what it touched`, and its handle.
 
-1. Open `/activity`, filter the rail to `routine = nightly-etl` + `date = last 24h`, group by `none` so individual runs are visible.
-2. Click the most expensive run (sort by `costliest`). The canvas paints the chain.
-3. Flip the heatmap toolbar to **Cost**. One `agent_run` node lights up dark amber while everything else is muted — that's the regression.
-4. Click that node. The side panel shows the rendered prompt; comparing it to the previous night's run (open in a second tab via `?run=<previous_id>`) reveals the prompt grew by 40k tokens because an upstream `transform` step started returning the full document instead of a summary.
+### Status segments
 
-The whole investigation is three clicks plus one URL copy, no log-greps.
+**All · Running · Waiting · Failed** — mutually exclusive. **Completed** joins the line only while it is the current scope, because the Overview's KPI cards can send the page into any scope and a control that cannot draw the state it was handed reads as broken.
 
-### Approving a paused waitpoint without leaving the canvas
+The counts are taken over the window **with the search applied but not the segment**, so a number survives its own selection: counting after the pick would render "Failed 3 · Waiting 0 · Running 0" — what is left rather than what there is to pick. A segment showing no number holds nothing in this window.
 
-A teammate pings you: "the publish-blog-post run is stuck waiting for approval." Paste the URL they shared (`/activity?run=run_abc123`):
+The same choice narrows the journal query server-side (`active`/`waiting` become an `entry_type` filter, `failed` becomes `severity=error`); `done` is the one bucket with no server-side expression, so it is filtered client-side.
 
-1. The canvas opens already focused on `run_abc123`. One node sits in the amber `waiting` ring with **Approve** / **Deny** buttons in its body.
-2. Click the node body (not the buttons) — the side panel shows the rendered draft post produced by the previous `agent_run` step. You scan it, decide it's fine.
-3. Click **Approve**. The waitpoint resolves, the node flips to `success`, the next step starts, and the badge counter on Inbox clears at the same time (same `waitpointDecide` helper backs both surfaces).
+### Search and filters
 
-No tab-switch, no re-reading the routine's DSL.
+The search box narrows two things at once: the rail's workflow list (client-side, over the loaded index page — matching the routine's name and slug, what started the chain, the handle, and the identifiers, titles and agent names it touched) and the journal query (server-side, as `q`).
 
-### Sharing exactly what you're looking at
+The **Filter** trigger carries a count of active narrowings and opens a popover holding:
 
-You're on `/activity?run=run_xyz&step=transform-2` and need a second pair of eyes. Copy the URL to Slack. Whoever opens it lands on the same run, the same selected step, the same side panel with the same rendered output — `useTraceSelection` keeps URL ↔ canvas in lock-step, so there is no "scroll down to the third box" instruction needed.
-
-## API reference
-
-Activity is a thin UI shell over two existing backend surfaces — it has no dedicated REST endpoint of its own. The full schemas live with their owning subsystems:
-
-- [`/api-reference/runs`](/api-reference/runs) — the run + DSL payload. `GET /api/v1/runs/{id}` is the single fetch the canvas does per selection; everything visible on the canvas comes from this one response.
-- [`/api-reference/journal`](/api-reference/journal) — the event stream the heatmap and side-panel duration/cost values read from. `useStepMetrics` queries `pipeline.step.completed` entries for the run.
-
-For waitpoint Approve / Deny, the canvas calls into the same `waitpointDecide` helper (`lib/api/waitpoints.ts`) that the Inbox uses; the underlying endpoint is documented under the [Harbormaster](/guides/harbormaster) guide.
-
-Realtime updates arrive over the workspace WebSocket channel (`/ws?workspace=<id>`). The events the page subscribes to, all broadcast by `internal/pipeline/journal.go`:
-
-| Event | When it fires | What the canvas does |
-|-------|---------------|----------------------|
-| `pipeline.run.started` / `completed` / `failed` | Run terminal hooks | Run row in the left rail refreshes; trigger node's status pip repaints |
-| `pipeline.step.started` / `completed` / `failed` / `skipped` / `retry` / `validation_failed` | Per-step lifecycle | Step node's status ring + pip repaint; side panel (if step is selected) re-renders with new output / error |
-
-A wait-step parking on an approval gate fires the same `pipeline.step.started` event as any other step — the node flips to the `waiting` ring and the Approve / Deny buttons render from the run's DSL + waitpoint token surfaced on the run payload. There is no separate `pipeline.waitpoint.created` event.
-
-There's nothing imperative on the consumer side — every event triggers a re-fetch of the run payload, and `buildTraceGraph` rebuilds the node array on the next render. The same shape as REST polling, just with a WebSocket-driven invalidation cadence.
-
-## The trace graph
-
-When you select a run, the canvas builds a directed graph from the routine's DSL and the run's recorded state:
-
-| Layer | What it is | Source |
-|-------|------------|--------|
-| **Trigger** | One synthetic entry-point node — issue identifier, schedule cron, webhook name, sub-run, or "manual" | The run's `triggered_via` |
-| **Steps** | One node per DSL step (`agent_run`, `http`, `script`, `code`, `transform`, `query`, `wait`, `notify`, `foreach`, `call_pipeline`) | DSL `steps[]` |
-| **Sequencing edges** | Solid edges from a step to every step that lists it in `needs[]` | DSL `needs` arrays |
-| **Data-flow edges** | Dashed edges parsed from `{{ steps.X.output[.path] }}` references in any input field, labelled with the JSON path | `lib/trace/parse-data-flow.ts` |
-
-The layout is top-to-bottom via dagre, so the chain reads like a flowchart and parallel branches sit side by side at the same depth. Depth is the dimension a routine grows without bound, so it runs down the page — the direction the pane can scroll. The canvas also refuses to zoom out past legibility: a long routine overflows and pans rather than shrinking until its labels disappear.
-
-Sequencing edges show *what must run first*; data-flow edges show *what value flows where* — distinct line styles so the two graph topologies don't visually collide.
+| Facet | Notes |
+|-------|-------|
+| **Crew** | Dropping a crew drops its agents with it. Rendered only when the workspace has crews. |
+| **Agent** | Narrowed to the selected crews when any are picked. |
+| **Issue** | An issue focus goes to the server as `mission_id`. |
+| **Routine** | A routine focus cannot go to the server — the slug lives inside the payload — so it narrows the **loaded window** only, and the chip says so. |
+| **Time range** | Past hour / Past 24 hours / Past 7 days / Past 30 days. 24h is the default, and selecting it is not counted as a filter. |
+| **Source** | Runs, Routines, Issues, Security, Cost, Memory, Comms, System. |
+| **Severity** | Warning, Notice, Info. |
+| **Noise** | *Show system telemetry* — puts back `container.metrics`, `file.written`, `network.egress`, `exec.output_chunk` and friends, which are excluded by default because they were 86% of the feed. |
 
 <Note>
-A `foreach` step draws as a single node. Its per-item body (`foreach.steps`) is not expanded onto the canvas yet, so a loop shows as one box regardless of how many items it processes.
+`error` is deliberately absent from Severity and `human` from Source: they **are** the Failed and Waiting segments, and one filter reachable from two controls is how the two quietly contradict each other. See `lib/activity-rail.ts`.
 </Note>
 
-<Note>
-The data-flow graph is regex-parsed from the DSL on the frontend, mirroring the Go runtime regex in `internal/pipeline/dsl.go`. The backend doesn't ship resolved dependency lists — the DSL already has everything the canvas needs, and keeping the parse on the FE means changes to the regex don't require an API version bump.
-</Note>
+A filter combination that matches nothing says so — "the loaded window holds N events, and none of them satisfies all M filters at once. This is an empty question, not a quiet system." — with one button that clears everything. An empty lens gets one of five distinct sentences depending on *which* emptiness it is (`emptyLensCopy`), because they want different actions from the reader.
 
-### Step status painting
+## The main column
 
-Each node paints its current status, derived from the run state:
+One selection, one column — never a stack.
 
-| Status | Visual |
-|--------|--------|
-| `pending` | Muted ring, no pip |
-| `running` | Pulsing blue ring + spinner pip |
-| `waiting` | Amber ring + pause pip — used while a `wait` step is parked on a waitpoint |
-| `success` | Emerald ring + check pip |
-| `failed` | Rose ring + glow + X pip |
-| `skipped` | Faded, 60% opacity |
+| What is selected | What the column draws |
+|------------------|-----------------------|
+| Nothing, Workflows lens, scope **All** | The **Overview** dashboard |
+| Nothing, Issues / Agents / Routines lens | That lens's own dashboard |
+| A status segment, or a node walked into from a graph | The feed as a list, with **Load older** |
+| A workflow row | The [workflow page](#a-workflow-page) |
+| An issue / agent / run / routine row | Its [drill-down](#where-a-row-leads) |
+| A feed row | That [event, opened](#opening-one-event) |
 
-The status logic lives in `buildTraceGraph` (`lib/trace/build-trace-graph.ts`) so the canvas component itself is a thin React Flow wrapper. Realtime `pipeline.step.*` and `pipeline.run.*` events refresh the run row, and the next render repaints — no per-event imperative DOM diffing.
+### Overview (Workflows lens)
 
-## Inline approvals
+Four KPI cards — **Running now**, **Waiting on you**, **Failures**, **Spend** — where the first three are places to go rather than numbers to read (clicking one selects that status segment). Under them: **Open asks** and **What is broken** side by side with their evidence, then **Latest activity** and, only when the loaded window spans two days or more, a **Failures · N days** bar chart. A zero says *which* zero it is: "nothing broke" is a claim about the world, and this window only ever knew about itself.
 
-The killer feature: when a routine hits a `wait` step of `kind: approval` (a Harbormaster gate), the corresponding node renders **Approve** and **Deny** buttons in its body. Click Approve, the run resumes, the node flips from `waiting` to `success`, and the next step starts — all without leaving the canvas.
+### Issues, Agents, Routines
 
-This is the canvas-as-resolution-surface pattern. The same `waitpointDecide` helper (`lib/api/waitpoints.ts`) backs both this inline button and the Inbox's detail-pane Approve button, so the two surfaces stay in lock-step. Approving from one tab clears the badge on the other within the realtime round-trip.
+Each lens owns the column, so pressing a tab changes what is *shown* and not only what is selected.
+
+- **Issues** — Touched / Created by agents / Changed / Agents involved, then one line per issue carrying the issue's real status and priority glyph, with an indented `↳ routine → agent` line that opens the workflow behind it.
+- **Agents** — Agents at work (of N hired) / Assignments / In workflows / Busiest, then one line per agent with a proportion bar and what it worked on. "In workflows" is the wall clock of the chains the agent worked in, **not** billed agent time — the index does not carry that.
+- **Routines** — Routines that ran (of N in the catalogue) / Runs / Success / Failing, one line per routine with a success-rate bar, plus a **Firing next** card listing the schedules due next with their cron and a countdown.
+
+## A workflow page
+
+Picking a workflow row opens it as a page, answering five questions in order:
+
+1. **What was this?** — the sentence as the heading, who started it, the raw `triggered_via`, when (absolute and relative), and the chain origin. Then a strip: Duration, Runs, Failed, Depth, Issues, Agents.
+2. **Which runs?** — the **Runs** card, derived from the chain walk and filtered to *this* chain's origin. Each row opens that run.
+3. **How did it happen?** — the **topology** card: the causal graph from `GET /api/v1/chains/{anchor}`, drawn left to right. Nodes are clickable and walk one level down.
+4. **What happened, then?** — **What happened, in sequence**, beside the graph: the same nodes as dated rows, indented by cause, time in a fixed left gutter and duration in a fixed right one.
+5. **What did it touch?** — the issues and agents, clickable.
 
 <Warning>
-Clicks on Approve/Deny `stopPropagation()` to prevent React Flow's `onNodeClick` from also selecting the step — without the guard, pressing Approve would also pop the detail panel. The pattern is intentional and worth knowing if you fork the trace node.
+Both halves of the picture declare what they cannot show. The topology card lists the links the schema cannot carry (`inbox_items` has no issue pointer; `escalations` has neither a run nor a mission column) and says when the walk was truncated. The sequence says when rows are undated: the server dates events — runs, agent work, inbox items — and not the routines, rules and agents behind them, so an undated level keeps the walk's order rather than being placed by a time nobody recorded.
 </Warning>
 
-For waitpoints that need more context before you decide — what produced the value being approved, what each preceding step output looked like — pop the side panel (click the node body, not the button) and review the rendered prompt + step output. Or jump to the Inbox: every waitpoint is mirrored as an `inbox_items` row with the same Approve/Deny action.
+## Where a row leads
 
-## Run timeline rail
+Each kind gets the surface that kind already has elsewhere, not a fifth rendering of the feed.
 
-The left rail lists recent runs for the workspace, persisted-per-user filter, sort, and grouping:
+| Row | Opens |
+|-----|-------|
+| **Run** | Status, started, duration, cost, trigger and composed depth; the run's **Result** (its output, or the error and the step it failed at); and **Steps** — the live run-activity rail from the journal. The run's record comes from the routine's `run-records` list, so a run opened without a routine on the path says so and still shows its journal. |
+| **Issue** | What Activity knows that `/issues` does not: which workflows reached this issue, whether it was **created here** or merely changed, which agents did the reaching. An **Open issue ↗** link appears only when the workspace uses issue identifiers — `/issues/[identifier]` resolves nothing else, and a button that 404s is worse than an absent one. |
+| **Agent** | Workflows, assignments, issues reached, and the wall clock of the chains it worked in, with a link to the agent's own page. Its sessions and messages stay there. |
+| **Routine** | That routine's runs, grouped by the reader's local hour. |
 
-- **Filter dimensions**: status (active / completed / failed), crew, agent, routine, trigger source (manual / schedule / webhook / issue / sub-run), issue identifier, date range (1h / 24h / 7d / all), cost min/max, duration min/max, "has waitpoint".
-- **Sort axes**: newest, oldest, slowest, costliest.
-- **Group axes**: source (default — collapses 234 cron runs of `daily-etl` into one parent node so the rail isn't flooded), routine, crew, issue, none.
+### A routine's runs
 
-The toolbar at the top of the rail shows a `[Filter • N]` badge counting active dimensions; clearing them all puts the rail back into "newest run first across everything". The filter set itself is captured in `lib/activity/run-filters.ts` as pure functions so the predicate is testable without React.
+Thirty runs of a one-minute routine are thirty rows that read the same, so this page makes three deliberate choices (all pure functions in `lib/run-digest.ts`):
 
-Saved views land here too: a stored snapshot of `(filter, sort, group, search)` you can pin and reopen by name. The use case is "the things I check every morning" — failed runs in the last 24h grouped by crew, say.
+- **Absolute time, to the second** — the reader already knows it was recent and is asking *which one*.
+- **The run's own result instead of its id** — the first line of its output ("3 tickets classified"), or the error for a failure, or a `slow — 4.2s` note when the run is past 1.4× its peers' median. An empty output renders as a dash rather than a stock phrase repeated on every row.
+- **An hour header that summarises** — "12 runs · all ok" is skippable; "3 runs · 1 failed" is where you stop. The header carries its date only when the page holds more than one day.
 
-### URL pre-filters
+The strip reports Runs, Pass rate (over runs that reached a verdict), Typical duration (median, not mean), Slowest, Newest and Failed.
 
-Two query params seed the rail's filter on arrival, each applied exactly once (after that the filter is yours — clearing it isn't fought by re-applies):
+<Note>
+This page's "failed" folds in `cancelled` and `interrupted`, while a chain row's `failed_runs` does not. That is not a bug to align: a chain row answers *did this workflow fail*, where a process killed by a deploy is the operator's problem; this page answers *which of these thirty runs did not produce the thing I came for*, and a run killed mid-flight produced it exactly as little as one that threw.
+</Note>
 
-- `/activity?pipeline=<slug>` — pins the routine filter to one routine. Emitted by the routine Overview tab's "view all →".
-- `/activity?status=active|completed|failed|all` — pre-selects a status bucket. Emitted by the header live-runs chip's "View all N running →". The `active` bucket covers `running`, `queued`, `paused` and `waiting` (a run parked on a HITL waitpoint approval).
+## Opening one event
 
-### Keyboard nav
+A row in the feed opens as a full-width page, not a side panel — an activity has a shape, and a 340px column is where that shape goes to die. It carries: four KPIs (this event, chain duration, chain cost, errors in chain), an **Execution graph** for the run behind the event, a **topology** card, the **Chain** (every journal entry under the same trace, oldest first), and the raw **Record**.
 
-- `↑` / `↓` — step between adjacent runs in the rail. Skipped if you're typing in the search field.
-- `Esc` — close the detail panel.
+<Note>
+The execution graph here is the same `TraceCanvas` component the old trace page drew — but inline waitpoint decisions and heatmap shading are **not** wired to it. Decide waitpoints in [Inbox](/guides/inbox).
+</Note>
 
-## Selecting a step
+## Where the run trace went
 
-Clicking any step node opens a right-hand detail panel with:
+This is the question every reader of the old page arrives with. The trace canvas as a *page* — pick a run from a rail, read its steps in a side panel — no longer exists. What it showed is in three places:
 
-- **Input** — the step's declared DSL inputs with `{{ steps.X.output }}` / `{{ inputs.Y }}` refs resolved against the run's outputs (a `resolved` badge marks what flowed in from upstream). Every value renders through the shared content-aware renderer: a markdown prompt shows **formatted** (headings, bold, links, fenced code via shiki), JSON shows pretty / as a table, other code is syntax-highlighted — no plain-text `<pre>` walls. Each renderable value carries a **raw ⇄ rendered** toggle for copy-paste fidelity.
-- **Output** — the recorded text from `run.step_outputs[stepId]`, through the same renderer (markdown / JSON / code detected automatically) with the same raw toggle.
-- **Heatmap context** — duration and cost from the journal's `pipeline.step.completed` event.
-- **Error message** — for failed steps, the captured error and which step the run failed at.
+| You want | Go to |
+|----------|-------|
+| A run's steps, duration, cost and journal | The **run drill-down** — open a run from a workflow's Runs card, from a routine's runs, or with `/activity?run=<id>` |
+| The causal graph — what called what | The **topology** card on the workflow page (and on an opened event) |
+| One run's execution graph as a picture | Open any event of that run from the feed |
+| Approving a paused waitpoint | [Inbox](/guides/inbox), or the **Waiting on you** card on the [Routines](/guides/routines) overview |
 
-The renderer is one shared component (`components/features/activity/output-view.tsx`) driven by pure detection (`lib/output-language.ts` `analyzeOutput`) — the same treatment the agent's chat reply gets, so a step's input/output reads consistently across the Input, Output, and per-action drill-down surfaces.
+There is no step object on this page: a run's steps **are** its drill-down. Saved views, the heatmap toolbar, group-by axes and keyboard step selection went with the canvas and have no replacement.
 
-### Agent action drill-down
+## Deep links
 
-For an `agent_run` step, the detail panel carries a **waterfall of the agent's internal tool calls** — every Bash command, file `Read`/`Write`/`Edit`, and MCP tool call the agent made inside that step, positioned by start time and duration (`lib/trace/sub-spans.ts`, persisted as `run.agent_span` journal entries). Expand any action to see:
+Fourteen places across the product link into `/activity` with a query string the trace canvas defined. Those links still work — the parameters are translated rather than dropped (`lib/activity-deeplink.ts`). They are read **once, at mount**; after that the page owns the selection.
 
-- **input** — the full (scrubbed, capped) arguments the tool was called with — e.g. the exact `python3 parse_vypis.py` command and its `description`, or an MCP call's params. Older runs fall back to a one-line **command** summary.
-- **output** — the tool result body (scrubbed, capped tail): a script's stdout, a file's contents, an MCP reply. This is what lets you confirm *a deterministic script actually ran and what it returned*, post-hoc and from another session — not just that it was invoked.
+| Parameter | Lands on | Emitted by |
+|-----------|----------|------------|
+| `?run=<id>` | That run's drill-down | The Activity Bar, an inbox waitpoint, a routine's run rows |
+| `?pipeline=<slug>` | The overview narrowed to that routine, over the loaded window | A routine's "view runs" |
+| `?mission=<id>` | That issue's drill-down | An issue card's "activity" |
+| `?status=active\|waiting\|failed\|done` | Selects that status segment — a narrowing, not a destination | The Activity Bar's "view all" |
+| `?step=<id>` | **Ignored** | The old canvas's own URL bar |
 
-Both are captured for every CLI adapter (the recorder taps the shared tool-call/tool-result stream, so it's adapter-agnostic) and size-bounded per action — **input at 2 KB** (args are context) and **output at 16 KB** (roomy on purpose: a strict-JSON deliverable, like a month of parsed transactions, must survive whole, since a JSON body cut mid-object no longer renders as structured data) — plus a per-step cap of 200 actions, so a chatty agent can't bloat the journal. When a value *is* cut, it's marked `...(truncated)` and the action shows a **`truncated` chip** — the full, untruncated result is always on the step's **Output** tab (`run.step_outputs`), so the cap never hides data, it just points at where the whole thing lives. Secrets in an argument or a result are redacted before capture. The same data is returned by `GET /api/v1/workspaces/{ws}/pipeline-runs/{runId}` under each step's `sub_spans[]`, and renders through the same shared `OutputView` as the Input/Output tabs.
+Two rules are worth knowing:
 
-The per-action **input/output bodies are fetched lazily**: the live canvas poll (which refetches this run on every step event + a 3 s tick) requests only span *metadata* — name, status, duration, and the truncated flags — so a watched long run's payload stays flat as actions accumulate. Opening a step's Actions tab fetches that one step's I/O on demand (`?io_step=<stepId>`; `?include_io=1` returns it for every step, e.g. for a CLI dump). The `truncated` chips render in the light view too, before the body arrives.
+- **Order is by specificity, not by the URL.** `?mission=` then `?pipeline=` then `?run=` are pushed as stops in that order, so `?pipeline=<slug>&run=<id>` — the link routine cards build — lands on the run with the routine *behind* it, and **Back** returns to the routine rather than to the overview.
+- **A status this page has no segment for is ignored rather than obeyed.** A link written against some other vocabulary lands on everything, because a page that renders empty because it did not recognise a word is indistinguishable from a page with no data.
 
-URL state is the single source of truth for selection (`useTraceSelection`):
+<Warning>
+`?step=` is accepted and does nothing. The canvas focused one step in a side panel; the stream has no step object. Pasting an old `/activity?run=<id>&step=<id>` URL lands you on the run — the half of it that still means something — and silently drops the rest.
+</Warning>
 
-```
-/activity?run=<runId>&step=<stepId>
-```
+## What the numbers can and cannot say
 
-So a copy-paste of the URL recreates the exact view you were on. Shared with a peer over Slack: same canvas, same selection, same side panel.
+Every count on this page is a claim about a window, and the page says so where the numbers are. Repeated here so nothing is implied by omission:
 
-## Overview mode
+- **One page of the index.** The lens tabs, the status segments and every KPI on every lens dashboard are derived from the loaded chain index page — the newest 25 rows in the dashboard. When the workspace holds more, the rail prints *"Newest N workflows. Every count on this page describes these, not the whole workspace."* (`has_more` from the API; the client treats a missing field as "there are more"). The API itself defaults to 50 rows and caps at 200.
+- **The Agents lens sees only routine-dispatched work.** The index groups `pipeline_runs`, so an agent whose work no routine dispatched has no chain to belong to and is not indexed. That is a hole in the index, not in the lens — and the empty state says it rather than reading as "nobody worked".
+- **The Issues lens is issues touched in the window**, not the backlog. An issue with no activity has no row here at all.
+- **Issue writes an agent makes from inside its own assignment do not attach to the chain.** Those journal entries carry the assignment's own journal run id as their trace, and that id is not recorded on the assignments row, so nothing joins them back. The issues a chain's **routine runs** touched are complete; the ones its **agents** touched are not reachable. Stated as a KNOWN GAP on `chainIssuesQuery` in `internal/api/chains_list.go`.
+- **Chains whose runs predate `chain_origin` are not in the index at all.** The link was never written and cannot be reconstructed, so listing them would mean claiming each run was its own chain root. Their existence is reported instead — the rail prints *"Older runs are not indexed here — the link that would group them was never written."*
+- **A row's issue and agent lists are capped at 5 each**, with the exact totals alongside, so a cut list reads as cut ("+N more, not carried on this row").
+- **A routine, run or step crumb narrows the loaded window only** — those ids live inside the journal payload, which the API cannot filter on. The chip says `(loaded window)` rather than implying a full-table match.
+- **A workflow chip narrows nothing.** The journal has no `chain_origin` column, so a chain is not expressible as a filter over journal rows; picking one re-points the column. It is therefore not counted by the "none satisfies all N filters" banner.
+- **The index is fetched, not streamed.** A row can be picked and then swept from the list — the page says "This workflow is no longer in the index" rather than drawing a graph-shaped hole.
 
-With **no run selected**, the canvas switches to overview mode: a "what's bound to what" snapshot showing issues that have a routine bound to them, the routines themselves, and the most recent run of each chain. Clicking an issue node jumps to `/issues/<id>`; clicking a routine node opens it in `/routines`; clicking the last-run node sets `?run=<id>` and the canvas flips into trace mode.
+### What earns the word "workflow"
 
-This is the answer to "I just opened /activity, what should I look at" — the overview surfaces the chains the workspace is currently running on, without forcing you to pick a run blindly from the rail.
+The Workflows lens lists only chains that **composed** something: more than one run, a composed hop, an agent dispatched, or an issue touched. Plus two exceptions that are not about composition — a chain that failed, is running or is waiting on a person (that is why somebody opened this page), and a chain no other lens can list (one whose root run retention swept has no routine slug, so the Routines lens has no row for it).
 
-## Heatmap shading
+Nothing is deleted by this. A bare run of a known routine is still a run, and the rail says where it went: *"N runs composed nothing and are listed under Routines."*
 
-A toolbar segmented control switches the node border palette between **Off**, **Cost**, and **Time**. With Cost or Time on, every step node's border colour is set by the percentile bucket of its cost or duration relative to the rest of the run — so you instantly spot the one `agent_run` that ate 80% of the budget without reading every node.
+## Keyboard
 
-The metrics come from the journal's `pipeline.step.completed` events via `useStepMetrics`. If you're looking at an old run that's rolled out of the metrics window (the journal-fetch is capped at 200 entries per pipeline), the heatmap surfaces the gap honestly — an amber banner appears explaining "Heatmap data not available for this run" rather than silently showing every node in the same colour.
+- `j` / `k` — step to the next or previous event in the feed, opening it. From nothing open, `j` opens the newest.
+- `Esc` — close an opened event; with nothing open it steps one stop back up the trail, rather than doing nothing once you are already at the top.
 
-The choice is persisted per user, so a viewer who always wants Time shading gets it back on next load.
-
-## Filtering and search
-
-The rail's free-text search box matches against `run.id`, `pipeline_slug`, `pipeline_name`, and `issue_identifier` — the same fields visible on each row, so the match feels predictable. Search is layered with the filter dimensions, not in lieu of them: "failed runs of `daily-etl` matching 'auth'" is one search box + two filter chips.
+Both are ignored while the focus is in a text field.
 
 ## Realtime
 
-The page subscribes to:
+The journal feed subscribes to the workspace stream and prepends live entries; the badge next to the event count reads **live** (SSE), **polling** (the stream is unavailable, falling back to a 5s poll) or **connecting**. There is no Pause and no Refresh: the surface is always live, so a Refresh button would only advertise a staleness that is not there and a Pause is a way to be shown old numbers by accident.
 
-| Event | Source | What changes |
-|-------|--------|--------------|
-| `pipeline.run.started` / `completed` / `failed` | `internal/pipeline/journal.go` terminal hooks | Run row refreshes; status pip on the trigger node repaints |
-| `pipeline.step.started` / `completed` / `failed` / `skipped` / `retry` / `validation_failed` | Same | Step node's status ring + pip repaint |
+The chain index is **not** streamed. The rail is a place you return to between actions, not a tape you watch — one query per look, rather than one per event, and no re-sorting under the cursor.
 
-Wait-step parking is just a `pipeline.step.started` on the wait node — Approve / Deny render from the run payload's DSL + waitpoint token, not from a dedicated waitpoint event.
+## API and CLI
 
-The trace hook (`hooks/use-trace.ts`) refetches on each — cheap because the run + DSL payload is small. No imperative graph mutation; the next render rebuilds the node array via `buildTraceGraph` and React Flow diffs it.
+Activity is a shell over existing endpoints; each has a CLI command with the same shape.
 
-## What this replaces
+| Endpoint | CLI | What it is |
+|----------|-----|------------|
+| `GET /api/v1/chains` | `crewship chain list` (`ls`) | The workflow index — one row per chain, newest first. `--limit` / `--offset`; default 50, ceiling 200. |
+| `GET /api/v1/chains/{anchor}` | `crewship chain <anchor>` (`why`) | The walk behind the topology card and the sequence. `--depth`, `--limit`, `--gaps`. |
+| `GET /api/v1/journal` | `crewship activity`, `crewship journal` | The event feed, the Overview and the opened-event chain. |
+| `GET /api/v1/workspaces/{ws}/pipelines/{slug}/run-records` | `crewship routine records <slug>` | A routine's runs, which the runs page and the run drill-down read. |
 
-Before the IA refactor, the same information was split across four tabs of an `OrchestrationPageShell`: **Runs** (list view), **Graph** (the canvas, but per-mission rather than per-run), **Timeline** (waterfall), **Feed** (event stream). Each tab answered part of "what's happening", none of them the whole question.
+Schemas: [`/api-reference/chains`](/api-reference/chains), [`/api-reference/journal`](/api-reference/journal), [`/api-reference/runs`](/api-reference/runs). CLI pages: [`crewship chain`](/cli/chain), [`crewship activity`](/cli/activity).
 
-The single-canvas trace view is intentionally a step back from that fragmentation. The legacy `/orchestration` route still 302s to `/activity` for ~1 release window so external bookmarks don't break.
-
-## Common pitfalls
-
-- **Frontend data-flow regex must mirror `internal/pipeline/dsl.go`.** The dashed edges come from a regex parse on the client (`lib/trace/parse-data-flow.ts`). If you change the template syntax server-side and forget to update the FE regex, the canvas silently stops drawing the data-flow edges — sequencing still works, so the symptom is "graph looks right but feels less informative". Keep the two regexes in lock-step on every DSL change.
-- **Approve / Deny clicks need `stopPropagation()`.** Without it, React Flow's `onNodeClick` fires alongside the button's `onClick`, popping the side panel at the same instant the run resumes. The current pattern is intentional; if you fork the trace node, preserve the guard.
-- **Heatmap metrics window is 200 entries per pipeline.** Runs from far back in history fall outside the window and the heatmap shows an honest amber "data not available" banner. Don't paper over it — the silent "all nodes the same colour" alternative would be worse.
-- **Group-by axis is single-level.** "Group by crew then by routine" isn't possible in one pass — the rail picks the most-asked-for axis (`source` by default). Need a second level? Filter first, then group.
-- **No multi-run overlay on the canvas.** Comparing two runs requires opening them in two browser tabs side-by-side. An overlay-on-canvas mode is a follow-up, not shipping today.
-- **WebSocket drop ≠ stale canvas, but only if reconnect succeeds.** The trace hook (`hooks/use-trace.ts`) refetches on every `pipeline.*` event, so a brief disconnect that reconnects within a few seconds catches up automatically. A *failed* reconnect (laptop sleep, VPN flap) leaves the canvas frozen with the last-seen state — there's no "stale data" banner today. If a run looks suspiciously inactive, hard-refresh.
-- **Filter dimensions are computed client-side.** With ~5k runs in the rail, every filter chip toggle runs `lib/activity/run-filters.ts` over the whole list. Performance is fine at current data volume; if you're testing against a 50k-run workspace, expect a noticeable hitch on filter changes.
+The legacy `/orchestration` route still redirects to `/activity` so old bookmarks keep working.
 
 ## Activity Bar (toolbar)
 
-The full `/activity` canvas answers "what's happening" in depth; the **Activity Bar** answers it at a glance, from anywhere in the app. It's the `Activity` icon in the top toolbar (next to the Inbox bell), with a green badge counting runs currently in flight.
+The `/activity` page answers "what happened" in depth; the **Activity Bar** answers "what is running right now" at a glance, from anywhere in the app. It is the Activity icon in the top toolbar next to the Inbox bell, with a badge counting live runs — amber the moment anything waits on a human approval, blue while routines run.
 
-Click it for a dropdown of everything executing right now — both **agent runs** (an issue's `Start`, an assignment) and **routine runs** — each row showing the agent name or routine slug, a pulsing "running" dot, and how long it's been going. Clicking a row jumps to the relevant surface; the footer link opens the full `/activity` canvas.
+The dropdown holds **LIVE** (up to six active routine runs with their current step, elapsed time and cost, each with Review / Trace / Cancel, plus any in-flight agent runs) and **RECENT** (the last few terminal routine runs, so "did my run just finish?" costs no page hop). The footer opens `/activity?status=active` while anything is live, and `/activity` otherwise.
 
-The server is the source of truth: the bar fetches `GET /api/v1/runs?status=RUNNING` (agent runs) and `GET /api/v1/workspaces/{ws}/pipelines/runs/active` (routine runs) on load and re-fetches on a short poll, with every relevant lifecycle event (`assignment.updated`, `run.*`, `mission.updated`, `pipeline.run.*`, `pipeline.step.started`) triggering an immediate refetch — so a dropped frame can't leave the badge stale. Nothing in flight → the badge disappears and the dropdown reads "Nothing running right now". It's purely a launcher into detail — no actions live here.
+The server is the source of truth: `GET /api/v1/runs?status=RUNNING` for agent runs and `GET /api/v1/workspaces/{ws}/pipelines/runs/active` for routine runs, re-fetched on a short poll and immediately on `assignment.updated`, `run.*`, `mission.updated`, `pipeline.run.*` and `pipeline.step.started` — so a dropped frame cannot leave the badge stale. Nothing in flight, and the badge disappears.
 
 ## Run activity rail
 
-Individual issue and routine pages carry an inline **Run activity** rail — the readable, human-first timeline of what an agent actually *did* during a run, built from the journal. Each step is one line: a toned icon, the time, a plain-language title ("Fetched news.ycombinator.com", "Wrote file", "Ran command"), an optional detail line (the path / command / url), and right-aligned metadata (`exit 0 · 1.2s`, `412 B`, `$0.0021`). Machine noise (output chunks, container metrics) is dropped so the rail stays the highlights reel.
+Individual issue and routine pages carry an inline **Run activity** rail — the readable, human-first timeline of what an agent actually *did* during a run, built from the journal. Each step is one line: a toned icon, the time, a plain-language title ("Ran command", "Wrote file"), an optional detail line (the path, command or url) and right-aligned metadata (`exit 0 · 1.2s`, `412 B`, `$0.0021`). Machine noise — output chunks, container metrics — is dropped so the rail stays the highlights reel.
 
-- **On an issue** (`/issues/<id>`): once the issue is started, a "Run activity" section appears below the description, scoped to that issue's run via `GET /api/v1/journal?mission_id=<id>` and filtered to work entry types (`exec.command`, `file.written`, `network.egress`, `llm.call`, `run.*`). It's distinct from the issue's lifecycle "Activity" feed (assignee/status changes) right below it. Hidden until the run produces entries.
-- **On a routine** (`/routines`): right after you click **Run** or **Test run**, the rail shows the just-started run inline so status is visible immediately — no hunting for the Runs tab. Routine runs group by `payload.run_id` (not `trace_id`) and render the same rail from `pipeline.run.*` / `pipeline.step.*` entries.
+- **On an issue** (`/issues/<id>`): once the issue is started, a "Run activity" section appears below the description, scoped to that issue's runs via the journal's `mission_id` filter and narrowed to work entry types (`run.*`, `assignment.*`, `exec.command`, `file.written`, `network.egress`, `llm.call`, `keeper.*`, `summary.generated`). It is distinct from the issue's lifecycle Activity feed below it, and hidden while the issue is still in Backlog or Todo.
+- **On a routine** (`/routines`): right after you click **Run** or **Test run**, the rail shows the just-started run inline so status is visible immediately.
+- **On a run drill-down here**: the same component renders the **Steps** card, so a run reads the same wherever it is opened.
 
-The rail and the canvas read the same journal; the rail is the compact "what did it do" list, the canvas is the spatial "how do the steps connect" graph.
+## Common pitfalls
+
+- **"Agents 4" is a fact about the window, not the workspace.** Read the line at the bottom of the rail before quoting a number from this page.
+- **An empty Agents lens does not mean nobody worked.** Work no routine dispatched is not in the chain index at all.
+- **A short "what it touched" list is a cut list.** The row carries at most five issues and five agents; the exact totals are on the workflow page's strip.
+- **`?pipeline=<slug>` narrows, it does not open the routine.** To get a routine's runs, switch the rail to the Routines lens and pick it there.
+- **Two crumbs can intersect to the empty set.** A run pinned from an event's spine plus an issue focused in the rail is one click away; the page says the question is empty rather than reporting a quiet system.
+- **The workflow you picked can vanish.** The index is fetched once per look, so a row can be swept between the click and the render. The runs it held are still in the feed.
+- **A server that records runs in the journal only has no per-run list.** The routine runs page says so instead of rendering an empty table.
 
 ## Related
 
-- [Inbox](/guides/inbox) — the per-user feed that mirrors every waitpoint, escalation, failed-run, and message.
-- [Routines](/guides/routines) — the workflow recipes whose runs you're watching on the canvas.
-- [Orchestration](/guides/orchestration) — the engine subsystem behind the trace (mission lifecycle, retry loops, deadlock detection).
-- [Crew Journal](/guides/crew-journal) — the event log Activity reads from; useful when you want to query the same data programmatically.
-- [Harbormaster](/guides/harbormaster) — the approval-gate subsystem that creates the waitpoints Activity surfaces inline.
-- [Paymaster](/guides/paymaster) — the cost ledger that feeds the Heatmap mode's per-step `$` values.
+- [Inbox](/guides/inbox) — where waitpoints, escalations and failed runs are actually decided.
+- [Routines](/guides/routines) — the definitions whose runs this page streams.
+- [Crew Journal](/guides/crew-journal) — the event log Activity reads from, and how to query it programmatically.
+- [Orchestration](/guides/orchestration) — the engine behind the runs (lifecycle, retries, deadlock detection).
+- [Harbormaster](/guides/harbormaster) — the approval gates that put a chain into the **Waiting** segment.
+- [Paymaster](/guides/paymaster) — the cost ledger behind the Spend KPI and a run's cost.

@@ -9,6 +9,15 @@ export interface KpiCardProps {
   subtitle?: string
   deltaLabel?: string
   deltaDirection?: "up" | "down" | "flat"
+  /**
+   * Makes the tile a place to go rather than a number to read.
+   *
+   * Optional, and absent by default: a card that looks interactive and is not
+   * teaches a reader to stop trying. When it is passed the root becomes a real
+   * <button>, so the tile is reachable by keyboard and announced as an action
+   * instead of being a div with a click handler bolted on.
+   */
+  onClick?: () => void
 }
 
 /**
@@ -29,6 +38,7 @@ export function KpiCard({
   subtitle,
   deltaLabel,
   deltaDirection = "flat",
+  onClick,
 }: KpiCardProps) {
   const deltaArrow = deltaDirection === "up" ? "▲" : deltaDirection === "down" ? "▼" : ""
   const deltaClass =
@@ -36,8 +46,15 @@ export function KpiCard({
       : deltaDirection === "down" ? "text-destructive"
       : "text-muted-foreground"
 
+  const Root = onClick ? "button" : "div"
   return (
-    <div className="flex flex-col gap-1 px-4 py-4 rounded-xl border border-border/60 bg-card">
+    <Root
+      {...(onClick ? { type: "button" as const, onClick } : {})}
+      className={cn(
+        "flex flex-col gap-1 px-4 py-4 rounded-xl border border-border/60 bg-card",
+        onClick && "text-left transition-colors hover:border-border hover:bg-card/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      )}
+    >
       <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
         {label}
       </div>
@@ -55,6 +72,6 @@ export function KpiCard({
       ) : subtitle ? (
         <div className="text-[11px] text-muted-foreground mt-1">{subtitle}</div>
       ) : null}
-    </div>
+    </Root>
   )
 }

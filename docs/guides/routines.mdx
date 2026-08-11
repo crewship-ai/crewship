@@ -63,10 +63,18 @@ Opening a routine gives you one scrolling surface of cards, not a tab bar:
 |------|-----------------|
 | **Definition** | What it does. The step graph, drawn by the same renderer Activity uses for live runs — so a definition and a run of it read as one picture. **Edit code** opens the DSL editor beside it; the expand button takes it full screen over a blurred page, carrying the unsaved buffer both ways. |
 | **Last run** | How the most recent invocation ended, tinted by outcome, linking to its full trace. |
-| **Triggers** | Cron schedules and inbound webhooks. **Manage** reveals the full editors. |
-| **Access** | Integrations, credentials, agents and egress — everything the routine can reach if it misbehaves. |
+| **Triggers** | Cron schedules, inbound webhooks, and — when at least one exists — the [automations](/guides/automations) that can start this routine, with the event each one watches and whether it is armed. |
+| **Access** | Integrations, credentials, agents and egress — everything the routine can reach if it misbehaves — plus **Writes to Crewship**, the [`crewship` step](#crewship--act-on-crewships-own-nouns) verbs the definition acts on the board with. |
 | **Versions** | Head version and metadata; **History** reveals the full version list and rollback. |
-| **Runs** | Recent invocations, each linking into Activity filtered to this routine. **Manage** reveals per-run controls, including cancelling an active run. |
+| **Runs** | Recent invocations, each linking into Activity filtered to this routine, and each saying **how it started**. A run that was composed rather than started directly carries a `chain N` badge — hops from whatever a human did, capped at 8. |
+
+<Warning>
+On the Runs card, **automation** and **schedule** are different words for a
+reason. Every deferred run — cron and rule alike — is stored with
+`triggered_via: "schedule"`, so the raw field cannot tell them apart. The page
+reads the rule's name off the run instead. If a row says `automation`, a
+[rule](/guides/automations) started it; if it says `schedule`, a cron did.
+</Warning>
 
 A routine's **monthly budget** is on its own card here. It used to be a workspace-wide roll-up on the overview, which put a third card about money on one row — and before that a tab nobody opened. It is kept as a per-routine guardrail; it is not a bill, and nothing on the overview sums it.
 
@@ -212,7 +220,7 @@ The main win is a real multiline `prompt` via YAML's literal block scalar (`|`) 
 | `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
 | `guardrails` | object | Per-routine [Lookout](/guides/lookout) policy. `guardrails.input.prompt_injection.action`: `block` (default) \| `sanitize` \| `log`. |
 | `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
-| `agentless` | boolean | Token-zero guarantee: the routine may only contain `http` / `code` / `wait` / `transform` / `notify` steps and can never invoke an LLM. See [Agentless routines](#agentless-routines). |
+| `agentless` | boolean | Token-zero guarantee: the routine may only contain steps that can never invoke an LLM — `agent_run`, `call_pipeline` and `crewship` are rejected. See [Agentless routines](#agentless-routines). |
 
 ### InputSpec
 
@@ -614,6 +622,38 @@ The loop is **cost-aware and predictive**: after each failed attempt it estimate
 
 Composition primitive. Save-time cycle detection rejects loops; runtime depth limit caps at 10 levels.
 
+A called routine faces the **same dispatch gates** as one run directly: its
+author crew must have the integrations, datastores/tools and credentials the
+called routine declares. If it does not, the `call_pipeline` step fails with
+the same sentence the direct run would have returned (`routine "x": routine
+requires credential of type "stripe" not present in the vault for crew "y"`)
+— calling a routine is not a way around a precondition it does not meet.
+
+`dry_run` is exempt, as it is on the direct path: it touches no vault.
+
+#### Chain depth — the composition budget
+
+Nesting depth is not the only way a routine can call itself. A routine can act
+on an issue, that change can fire an automation, and the automation can run the
+routine again — a loop that never appears on any one run's call stack, because
+each hop is a *new* top-level run.
+
+Every composed edge therefore also spends from a **chain depth** budget carried
+on the run itself (`chain_depth` on `pipeline_runs`, alongside `chain_origin` —
+the id of whatever started the chain):
+
+- A run a person started is depth **0**.
+- A routine called by `call_pipeline` is parent + 1.
+- A run fired by an automation reacting to an event is that event's run + 1.
+
+**The cap is 8.** The ninth hop is refused before it dispatches: the step fails,
+and an `automation.depth_exceeded` entry lands in the activity feed naming the
+edge that was cut, the depth, and the chain origin — so a loop shows up as a
+readable event rather than as a routine that "sometimes doesn't run".
+
+The number is deliberately small. It can be raised later; it cannot be lowered
+once people have built chains that depend on it.
+
 ### `http`
 
 ```json
@@ -701,6 +741,25 @@ Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `e
 **Async, non-blocking.** Hitting a `kind: approval` gate does **not** hold a goroutine or fail the run. A foreground `crewship routine run` returns promptly with `status: WAITING` (exit 0) and a waitpoint token, and **releases its execution slot** while it waits. Approving **or** rejecting resumes the run from the gate (already-completed steps are restored/skipped); a rejection resolves the run to `FAILED` cleanly rather than stranding it. Parked approvals whose `timeout_sec` elapsed are reconciled at the next boot scan.
 
 Approve via UI Inbox, CLI `crewship routine waitpoints approve <token>`, or API.
+
+**Waking an `event` wait: by run, or by topic.** There are two doors, and which one you use depends on whether the sender knows the run id.
+
+| | Endpoint | Use when |
+|---|---|---|
+| Per run | `POST /api/v1/workspaces/{ws}/pipeline-runs/{runId}/signal` | You triggered the run and kept its id — an external system finishing a job it was handed. |
+| Per topic | `POST /api/v1/workspaces/{ws}/signals` | You are announcing that something happened and do not know who cares. Wakes **every** run in the workspace parked on that `event_type`. |
+
+```bash
+# one run you already have the id for
+crewship routine signal run_cmox... --event deploy.finished --payload "v1.4.2"
+
+# every run parked on the event, whoever they are
+crewship signal send --event-type deploy.finished --payload "v1.4.2"
+```
+
+The topic form is what makes `wait: event` usable as a subscription rather than a callback: several routines can park on `mission.status_change` and one delivery resumes all of them, each with the payload as its wait step's output. The `event_type` is a free-form string — there is no registry to add to, so a producer and a consumer only have to agree on a name.
+
+Both forms are workspace-fenced: a topic delivery never reaches a run in another workspace, and each parked wait is claimed exactly once, so two producers announcing the same event at the same instant cannot resume one run twice. Delivering a topic nobody is waiting on is a success with `delivered: 0`, not a `404` — an event source emits whether or not anything is listening. (The per-run form still answers `404` when that specific run is not at the wait step, because there the caller named a run and was wrong about it.)
 
 ### `code`
 
@@ -983,6 +1042,105 @@ Runs the **body** once per element of a JSON array, collecting each item's resul
 
 Within an item the body runs like a mini-pipeline: per-step `retry:`, `validation`, `outcomes`, and tier escalation all apply. **Cost is summed across every item** and attributed to the `foreach` step, so `max_cost_usd` still bounds the whole fan-out. The first item that fails cancels the rest and fails the step (fail-fast). `wait`, `call_pipeline`, and a nested `foreach` are **not allowed** inside the body — the fan-out is a bounded, self-contained unit.
 
+### `crewship` — act on Crewship's own nouns
+
+Every other step kind reaches **outward**: an `http` step to a third party, an
+`agent_run` to a model. `crewship` reaches **inward** — it lets a routine write
+back into the product it runs inside, so the loop *"issue changes → routine
+runs → routine comments on the issue"* closes without an `http` step aimed at
+your own API and a token you have to manage.
+
+```yaml
+- id: file_it
+  type: crewship
+  action: issue.create          # namespaced verb
+  args:
+    title: "Nightly check failed: {{ steps.probe.output }}"
+    priority: high
+```
+
+| Field | Notes |
+| --- | --- |
+| `action` | The verb. Required. See the table below. |
+| `args` | Arguments for the verb, template-substituted (including strings nested inside lists and objects). |
+
+The step's output is the API's JSON response, so a later step can pick a field
+out of it — `transform` with `.identifier` gives you the new issue's key.
+
+#### Verbs
+
+| verb | does | required `args` | policy action |
+| --- | --- | --- | --- |
+| `issue.create` | Creates an issue in the routine's author crew | `title` | `mission_create` |
+| `issue.update` | Changes an issue's status, priority, assignee, labels or due date | `identifier` | `issue_write` |
+| `issue.comment` | Comments on an issue | `identifier`, `body` | `issue_write` |
+| `issue.link` | Relates two issues | `identifier`, `target_identifier`, `relation_type` | `issue_write` |
+| `assignment.create` | Delegates a task to an agent in the author crew | `target_slug`, `task`, `chat_id` | `assignment_create` |
+| `escalation.create` | Raises an escalation to a human | `from_slug`, `reason`, `chat_id` | `escalation_create` |
+
+`relation_type` is one of `blocks`, `blocked_by`, `relates_to`, `duplicate_of`,
+`sub_issue_of`. A missing required arg is a **save-time** error, not a 400 at
+03:00 — as is a verb with no policy action behind it, which is how a new
+capability is kept from shipping ungoverned by being forgotten.
+
+The loop the kind exists for, end to end — a probe, a comment on the issue that
+triggered the run, and the issue moved on:
+
+```yaml
+inputs:
+  - name: issue
+    type: string          # e.g. ENG-42, passed by the webhook or schedule
+steps:
+  - id: probe
+    type: http
+    http: { method: GET, url: "https://status.example.com/api/health" }
+  - id: report
+    type: crewship
+    action: issue.comment
+    args:
+      identifier: "{{ inputs.issue }}"
+      body: |
+        Nightly probe says: {{ steps.probe.output }}
+  - id: close_it
+    type: crewship
+    action: issue.update
+    if: "{{ steps.probe.output }}"
+    args:
+      identifier: "{{ inputs.issue }}"
+      status: DONE
+```
+
+#### What bounds it
+
+- **Autonomy.** The verb is gated on the author crew's `autonomy_level`. A crew
+  whose level would *hold the action for approval* gets a refusal instead — a
+  routine has nobody attached to approve it — so on a `strict` crew, issue
+  writes and assignments do not happen. Raise the level with `crewship policy
+  set`. The full per-level table, and the reasoning for each cell, is in
+  [Autonomy → what a routine may do to the board](/guides/autonomy-and-self-learning#what-a-routine-may-do-to-the-board).
+- **Escalation volume.** `escalation.create` is allowed at *every* autonomy
+  level, because an approval to authorise an interrupt is itself the interrupt.
+  What bounds it is a backlog instead: a routine may not escalate while the crew
+  already has `escalation.max_pending_per_crew` (default 10) **unresolved**
+  escalations. Resolving them returns the budget.
+- **Identity is not yours to set.** `workspace_id`, `crew_id`, `agent_id`,
+  `actor_agent_id`, `author_agent_id` and `author_run_id` are injected from the
+  run and override anything in `args`. A routine cannot act as another
+  workspace, a sibling crew, or a different agent — the last one matters
+  because the acting agent is what the delegation depth cap is measured from.
+  A routine with no author agent cannot use `issue.comment`, which needs an
+  author it can name — so a routine containing that step is **refused at save**
+  unless one is set. Set it with `crewship routine save --author-agent
+  <slug|id>` (the agent must belong to `--author-crew`), or `author_agent_id`
+  on the save API. The refusal is deliberate: the same routine used to save
+  clean and then fail every run at 03:00 with `400: agent_id is required`. The
+  other five verbs have a documented no-agent fallback and are unaffected.
+- **Chain depth.** Whatever the verb creates records the run that created it,
+  so an automation reacting to it inherits this run's chain budget rather than
+  starting a new one. See [Chain depth](#chain-depth-the-composition-budget).
+- **`dry_run` does not write.** A preview that files a real issue is not a
+  preview; the step reports what it would have called.
+
 ### Conditional `if`
 
 Any step can carry an `if:` gate. Two forms, chosen automatically:
@@ -1114,7 +1272,7 @@ The probe's verdict comes from data reshaping plus a single comparison, not scri
 
 Enforced at two layers:
 
-- **Save time** — validation rejects `agent_run` (direct LLM spend), `call_pipeline` (the target resolves by slug at runtime, so a nested routine could gain an agent step later and silently break the guarantee), and `eval.online` with `sample_rate > 0` (online grading runs a grader agent against the routine's runs).
+- **Save time** — validation rejects `agent_run` (direct LLM spend), `call_pipeline` (the target resolves by slug at runtime, so a nested routine could gain an agent step later and silently break the guarantee), `crewship` (an @mention in an issue body wakes an agent, an assignment dispatches one — whether it happens depends on rendered content, not on anything provable at save time), and `eval.online` with `sample_rate > 0` (online grading runs a grader agent against the routine's runs).
 - **Run time** — the executor independently refuses to dispatch an LLM-capable step inside an agentless run, so even a definition written before the validator existed fails closed.
 
 Everything else works as usual: egress allowlist, credentials, versioning, dry-run, schedules, webhooks. Agentless routines are also the only valid probes for [wake gates](#wake-gates).

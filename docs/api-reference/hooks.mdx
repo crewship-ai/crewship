@@ -1,15 +1,15 @@
 ---
 title: "Hooks"
-description: "Lifecycle hook registry -- read + enable/disable only."
+description: "Lifecycle hook registry -- list, register, update, delete, and toggle."
 icon: "webhook"
 stability: experimental
 tag: Experimental
 ---
 
-The lifecycle hook registry is **read + enable/disable only** over HTTP. Hooks fire shell commands, HTTP webhooks, or subagents on lifecycle events; the API lets operators list them and toggle them on or off, but registration itself is a config-time operation via `hooks.Register` in Go — there is no create or delete endpoint. See the [Hooks guide](/guides/hooks).
+The lifecycle hook registry. Hooks fire shell commands, HTTP webhooks, or subagents on lifecycle events; this API registers them, edits them, removes them, and toggles them on or off. See the [Hooks guide](/guides/hooks).
 
 <Note>
-  All endpoints require authentication and are workspace-scoped. Enable / disable additionally require `OWNER` or `ADMIN`.
+  All endpoints require authentication and are workspace-scoped. Every write (create / update / delete / enable / disable) requires `OWNER` or `ADMIN`. Creating or editing a `shell` handler additionally requires `OWNER` — see [the shell gate](#the-shell-gate).
 </Note>
 
 ## Endpoints
@@ -17,10 +17,11 @@ The lifecycle hook registry is **read + enable/disable only** over HTTP. Hooks f
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | [`/api/v1/hooks`](#list-hooks) | List hooks (optionally filtered by crew) |
+| POST | [`/api/v1/hooks`](#create-a-hook) | Register a hook |
+| PATCH | [`/api/v1/hooks/{id}`](#update-a-hook) | Partially update a hook |
+| DELETE | [`/api/v1/hooks/{id}`](#delete-a-hook) | Remove a hook |
 | POST | [`/api/v1/hooks/{id}/enable`](#enable) | Enable a hook |
 | POST | [`/api/v1/hooks/{id}/disable`](#disable) | Disable a hook |
-
-Registration is Go-only — see [Registration](#registration-go-only).
 
 ---
 
@@ -87,6 +88,105 @@ GET /api/v1/hooks?crew_id=<optional>
 
 ---
 
+## Writing hooks
+
+### Create a hook
+
+```
+POST /api/v1/hooks
+```
+
+**Auth:** `OWNER` or `ADMIN`. `handler_kind: "shell"` requires `OWNER`.
+
+**Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `event` | string | yes | One of the 15 lifecycle events. An unknown value is a `400` whose message lists every legal one. |
+| `handler_kind` | string | yes | `shell`, `http`, or `subagent`. |
+| `handler_config` | object | yes* | `{"url": ...}` for http, `{"command": ...}` for shell. Optional for subagent. |
+| `matcher` | object | no | `tools`, `agent_ids`, `crew_ids`, `severities`, `when`. Empty (default) matches every event. |
+| `crew_id` | string | no | Scope to one crew. Omit for workspace-wide. Cross-tenant IDs return `404`. |
+| `blocking` | boolean | no | Default `false`. When `true`, a `block` outcome cancels the triggering operation. |
+| `enabled` | boolean | no | Default **`true`**. Pass `false` to register without arming. |
+
+```json
+{
+  "event": "pre_tool_call",
+  "handler_kind": "http",
+  "handler_config": { "url": "https://hooks.slack.test/services/XXX" },
+  "matcher": { "tools": ["Bash", "Write"] },
+  "blocking": true
+}
+```
+
+**Response:** `201 Created`, body is the created hook in the same shape [list](#list-hooks) returns per row.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Unknown `event` (message lists the 15 valid names); unknown `handler_kind`; missing `handler_config.url` / `.command`; malformed JSON. |
+| 401 | Not authenticated / no workspace. |
+| 403 | Not `OWNER`/`ADMIN`; or `shell` requested by a non-`OWNER`. |
+| 404 | `crew_id` names a crew outside your workspace. |
+
+Writes an `audit_logs` row with action `hook.create`.
+
+<Warning>
+  A hook whose `event` is misspelled would insert cleanly (the `hooks_config` schema constrains `handler_kind`, not `event`), never match the dispatcher's query, and silently never fire — while still listing and toggling like a healthy hook. That is why an unknown event is a hard `400` rather than a warning.
+</Warning>
+
+---
+
+### Update a hook
+
+```
+PATCH /api/v1/hooks/{id}
+```
+
+**Auth:** `OWNER` or `ADMIN`. `OWNER` is required to set `handler_kind: "shell"` **or** to edit a hook that is already `shell`.
+
+Semantics are **patch, not put**: only the fields present in the body change. An omitted field keeps its current value, so `{"event": "post_tool_call"}` does not clear the matcher, the blocking flag, or the enabled flag.
+
+Accepts the same fields as [create](#create-a-hook), all optional.
+
+**Response:** `200 OK` with the updated hook.
+
+**Errors:** as create, plus `404` when the hook is outside your workspace (cross-tenant IDs are indistinguishable from missing ones).
+
+Writes an `audit_logs` row with action `hook.update`.
+
+---
+
+### Delete a hook
+
+```
+DELETE /api/v1/hooks/{id}
+```
+
+**Auth:** `OWNER` or `ADMIN`. The request has no body.
+
+**Response:** `200 OK`
+
+```json
+{ "id": "hk_abc123", "deleted": true }
+```
+
+**Errors:** `401` unauthenticated, `403` for a non-`OWNER`/`ADMIN`, `404` when the hook is not in your workspace.
+
+Deletion is permanent. To stop a hook firing while keeping its definition, use [disable](#disable) instead. Writes an `audit_logs` row with action `hook.delete` carrying the deleted hook's event, handler kind, and crew scope — after the delete there is nothing left to reconstruct it from.
+
+---
+
+### The shell gate
+
+`handler_kind: "shell"` runs a command on the crewshipd **host**, outside container isolation, with the privileges of the `crewship` process. That is a strictly larger grant than the rest of the ADMIN surface, so it needs `OWNER` — on create and on update alike. An `http` hook PATCHed into a `shell` hook is the same grant by a longer road, and is refused for the same reason.
+
+The gate is enforced twice on purpose: in the handler (which knows the caller's role) and again in `hooks.Register` / `hooks.Update` (which is the only write path into `hooks_config`). Either alone would be sufficient; both means a future call site that forgets the check still cannot land a shell hook.
+
+---
+
 ## Toggling hooks
 
 Flip a hook on or off. Both transitions emit `system.hook_toggled` into the journal with the actor's user ID.
@@ -138,9 +238,9 @@ Same auth rules, same response shape with `"enabled": false`.
 **Errors:** `401` when unauthenticated, `403` for a non-`OWNER`/`ADMIN`,
 `404` when the hook is outside the workspace, and `500` on a database error.
 
-## Registration (Go only)
+## Registration from Go
 
-No HTTP endpoint. Call `hooks.Register` from workspace provisioning code:
+In-process provisioning code can skip HTTP and call the store directly. This is the same function the endpoints above call — there is one write path, not two:
 
 ```go
 const allowedShell = false // flip to true only when the caller has confirmed OWNER
@@ -155,7 +255,9 @@ _, err := hooks.Register(ctx, db, hooks.Hook{
 }, allowedShell)
 ```
 
-The trailing `allowedShell bool` argument is the gate on `HandlerKindShell`: pass `false` for any non-OWNER context — the function returns `hooks.ErrShellHookNotAllowed` if the hook is a shell kind and this flag is `false`. HTTP / subagent hooks are unaffected by the flag.
+The trailing `allowedShell bool` argument is the gate on `HandlerKindShell`: pass `false` for any non-OWNER context — the function returns `hooks.ErrShellHookNotAllowed` if the hook is a shell kind and this flag is `false`. HTTP / subagent hooks are unaffected by the flag. `Register` also returns `hooks.ErrUnknownEvent` for an event outside the declared fifteen.
+
+`hooks.Update(ctx, db, workspaceID, hook, allowedShell)` is the equivalent for edits. It takes the **full** desired hook (not a patch — merging is the HTTP layer's job), pins `id` + `workspace_id` from its arguments so a struct naming another workspace cannot move the row, and never rewrites `created_at` / `created_by`.
 
 ## Related
 

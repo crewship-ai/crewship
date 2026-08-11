@@ -71,15 +71,3 @@ export const SUB_SPAN_STATUS_COLOR: Record<SubSpanStatus, string> = {
   error: "text-destructive",
   running: "text-warn",
 }
-
-// Waterfall bar gradient per kind — mirrors the mockup's lane colors.
-export const SUB_SPAN_BAR_CLASS: Record<SubSpanKind, string> = {
-  bash: "bg-gradient-to-r from-emerald-800/70 to-emerald-600/70",
-  write: "bg-gradient-to-r from-amber-800/70 to-amber-600/70",
-  edit: "bg-gradient-to-r from-amber-800/70 to-amber-600/70",
-  read: "bg-gradient-to-r from-sky-800/70 to-sky-600/70",
-  mcp_tool: "bg-gradient-to-r from-violet-800/70 to-violet-600/70",
-  http: "bg-gradient-to-r from-blue-800/70 to-blue-600/70",
-  tool: "bg-gradient-to-r from-violet-800/70 to-violet-600/70",
-  think: "bg-gradient-to-r from-indigo-800/70 to-indigo-600/70",
-}

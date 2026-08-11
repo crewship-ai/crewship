@@ -59,14 +59,20 @@ function asArrayOfObjects(v: unknown): Array<Record<string, unknown>> {
 
 // Trigger source taxonomy. The backend stores the literal string in
 // pipeline_runs.triggered_via; map it to an icon + human label here.
-// 'agent_tool_call' and 'issue' aren't in the canonical enum yet but
-// the API surface accepts them, so we handle them defensively.
-type TriggerKey = PipelineRunRecord["triggered_via"] | "agent_tool_call" | "issue" | "unknown"
+// 'issue' and 'wake_check' ARE in the canonical enum now (they were handled
+// defensively before the hook's union caught up); 'agent_tool_call' still is
+// not, and stays for the same defensive reason.
+//
+// Note this map cannot distinguish an automation from a cron: the backend
+// stores both as "schedule". The run row's automation_name is what tells them
+// apart — see lib/run-provenance.ts and the Runs list on the card detail.
+type TriggerKey = PipelineRunRecord["triggered_via"] | "agent_tool_call" | "unknown"
 const TRIGGER_META: Record<TriggerKey, { label: string; Icon: typeof Play; tone: string }> = {
   manual: { label: "Manual", Icon: Play, tone: "text-accent-foreground" },
   schedule: { label: "Schedule", Icon: Calendar, tone: "text-purple" },
   webhook: { label: "Webhook", Icon: Webhook, tone: "text-warn" },
   call_pipeline: { label: "Called by routine", Icon: Link2, tone: "text-notice" },
+  wake_check: { label: "Wake probe", Icon: Calendar, tone: "text-purple" },
   agent_tool_call: { label: "Agent tool", Icon: Bot, tone: "text-pink-400" },
   issue: { label: "From issue", Icon: CircleDot, tone: "text-blue-400" },
   unknown: { label: "Unknown", Icon: Play, tone: "text-muted-foreground" },

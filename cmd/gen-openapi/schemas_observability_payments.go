@@ -46,6 +46,79 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	missionSpend := object(map[string]any{"mission_id": str(), "cost_usd": number(), "call_count": integer(), "input_tokens": integer(), "output_tokens": integer(), "first_ts": dateTime(), "last_ts": dateTime()})
 	topPaymaster := object(map[string]any{"scope_kind": str(), "scope_id": str(), "cost_usd": number(), "call_count": integer()})
 	subscription := object(map[string]any{"subscription_plan": str(), "provider": str(), "call_count": integer(), "input_tokens": integer(), "output_tokens": integer(), "last_ts": dateTime()})
+	// Chain graph (GET /api/v1/chains/{anchor}). Flat node/edge lists rather
+	// than a nested tree, because the underlying data is a graph: a run
+	// reached from both its routine and its issue has two parents, and any
+	// tree encoding would have to drop one of those edges.
+	// occurred_at/ended_at/duration_ms are OMITTED, never zeroed, on a kind that
+	// cannot answer: only run, assignment and inbox are events. issue, routine,
+	// agent and automation are nouns whose created_at is a different fact from
+	// "when this happened in this chain", so they send nothing — a zero
+	// timestamp is 1970 and sorts to the top of every timeline. duration_ms is
+	// nullable for the same reason chains[].duration_ms is: 0 means "finished
+	// inside a millisecond", absent means "no span to measure".
+	//
+	// chain_origin is on run nodes only and names WHICH CHAIN the run belongs to
+	// (pipeline_runs.chain_origin, the same value chains[].origin groups by). It
+	// is carried because membership cannot be read off the graph's shape: the
+	// walk reaches a run's routine, the routine reaches every run it ever had,
+	// and a rule reaches every run it ever caused, so a sibling and a member
+	// arrive over the same edge kinds. Absent on the other kinds and on runs
+	// written before the column existed — see has_unrecorded_runs on the index
+	// for that same era.
+	chainNode := object(map[string]any{
+		"id": str(), "kind": str(), "ref": str(), "key": str(), "label": str(),
+		"status": str(), "depth": integer(), "chain_depth": integer(), "chain_origin": str(),
+		"anchor":      boolean(),
+		"occurred_at": dateTime(), "ended_at": dateTime(), "duration_ms": integer(),
+		"partial": boolean(), "partial_reason": str(),
+	})
+	chainEdge := object(map[string]any{"from": str(), "to": str(), "kind": str()})
+	// gaps names the links the schema does not carry, so a client can tell
+	// "nothing is attached" apart from "we cannot see what is attached".
+	chainGap := object(map[string]any{"from": str(), "to": str(), "reason": str()})
+	chainGraph := object(map[string]any{
+		"anchor": str(), "anchor_node": str(), "max_depth": integer(), "max_nodes": integer(),
+		"nodes": array(chainNode), "edges": array(chainEdge),
+		"truncated": boolean(), "truncated_by": str(), "gaps": array(chainGap),
+	})
+	// Chain index (GET /api/v1/chains). One row per chain run — a GROUP BY
+	// over pipeline_runs.chain_origin — so a client can find a chain without
+	// already holding an anchor. started_by_* is the root run's
+	// triggered_via/triggered_by_id pair resolved into something human.
+	//
+	// issues/agents are the nouns that tell two runs of one routine apart, and
+	// are capped per row (5); issue_count/agent_count are the uncapped totals,
+	// so a client can render "+N more" rather than mistaking a cut list for the
+	// whole story. duration_ms is nullable on purpose — null means "no span to
+	// measure between", which 0 would misreport as "instant".
+	chainIssueRef := object(map[string]any{
+		"id": str(), "identifier": str(), "title": str(), "created": boolean(),
+	})
+	chainAgentRef := object(map[string]any{
+		"id": str(), "slug": str(), "name": str(), "assignments": integer(),
+	})
+	chainSummary := object(map[string]any{
+		"origin": str(), "started_by_kind": str(), "started_by_id": str(), "started_by_key": str(),
+		"started_by": str(), "triggered_via": str(), "routine_id": str(), "routine_slug": str(),
+		"runs": integer(), "max_chain_depth": integer(), "failed_runs": integer(), "failed": boolean(),
+		// Non-terminal runs, split by whether anything moves without a person.
+		// The timestamps cannot answer it: last_activity falls back to
+		// started_at while a run is in flight.
+		"running_runs": integer(), "waiting_runs": integer(),
+		"first_activity": dateTime(), "last_activity": dateTime(),
+		"duration_ms": map[string]any{"type": "integer", "nullable": true},
+		"issues":      array(chainIssueRef), "issue_count": integer(),
+		"agents": array(chainAgentRef), "agent_count": integer(),
+	})
+	// has_unrecorded_runs is load-bearing the way truncated is on the walk:
+	// runs from before the chain_origin column are absent from the index and
+	// cannot be backfilled, and a client needs to tell that absence apart from
+	// "nothing ever ran here".
+	chainIndex := object(map[string]any{
+		"chains": array(chainSummary), "count": integer(), "limit": integer(), "offset": integer(),
+		"has_more": boolean(), "has_unrecorded_runs": boolean(),
+	})
 	flag := object(map[string]any{
 		"id": str(), "key": str(), "description": nullableString(), "enabled": boolean(), "percentage": integer(),
 		"created_at": dateTime(), "updated_at": dateTime(), "override_enabled": map[string]any{"type": "boolean", "nullable": true},
@@ -108,6 +181,8 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"GET /api/v1/paymaster/spend/by-mission/{missionId}": {Response: object(map[string]any{"row": missionSpend, "mission_id": str()})},
 		"GET /api/v1/paymaster/top-spenders":                 {Response: object(map[string]any{"rows": array(topPaymaster), "limit": integer(), "since": dateTime()})},
 		"GET /api/v1/paymaster/subscriptions":                {Response: object(map[string]any{"rows": array(subscription), "since": dateTime(), "until": dateTime()})},
+		"GET /api/v1/chains/{anchor}":                        {Response: chainGraph},
+		"GET /api/v1/chains":                                 {Response: chainIndex},
 		"GET /api/v1/metrics/timeseries":                     {Response: timeseries},
 		"GET /api/v1/mission-metrics":                        {Response: missionMetrics},
 		"GET /api/v1/feature-flags":                          {Response: array(flag)},
