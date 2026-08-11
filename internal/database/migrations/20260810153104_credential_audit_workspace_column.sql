@@ -1,0 +1,64 @@
+-- credential_audit carries its own workspace_id, so the audit view can be
+-- answered by an index instead of a join plus a sort of everything that
+-- matched.
+--
+-- The table records who read which credential, when, and from where. It had
+-- no workspace column, so the only way to scope it to a tenant was through
+-- the credential:
+--
+--   SELECT ... FROM credential_audit ca
+--   JOIN credentials cr ON cr.id = ca.credential_id
+--   WHERE cr.workspace_id = ?
+--   ORDER BY ca.occurred_at DESC LIMIT ? OFFSET ?
+--
+-- Nothing indexes that combination. The existing indexes are
+-- (credential_id, occurred_at DESC) and (occurred_at) — neither begins with
+-- a workspace — so SQLite either walks credential_audit in time order
+-- probing credentials for every row, or gathers the whole matching set and
+-- builds a temporary B-tree to sort it before LIMIT throws almost all of it
+-- away. The admin audit page then pays for that a second time on the same
+-- request, because its COUNT(*) runs the identical join.
+--
+-- That cost grows with the table, and the table only grows: credential_audit
+-- has no retention sweep at all, and gains a row on every credential read by
+-- every agent. On a dev instance with almost no real use it was already the
+-- second-largest table in the database.
+--
+-- audit_logs and keeper_request_events both already carry workspace_id
+-- directly and are queried that way; this brings the third audit source into
+-- line with them rather than inventing a new shape.
+--
+-- Nullable, defaulting to NULL, deliberately:
+--
+--   * SQLite's ALTER TABLE ADD COLUMN cannot add a NOT NULL column without a
+--     non-NULL default, and there is no sensible constant default for a
+--     tenant id. Making it NOT NULL would mean rebuilding the table, which is
+--     a great deal of risk for a column every writer populates anyway.
+--   * A REFERENCES clause added by ALTER TABLE is only legal when the column
+--     defaults to NULL — SQLite requires exactly this shape.
+--
+-- The single writer (RecordCredentialEventTx in internal/api/credential_audit.go)
+-- derives the value with a sub-SELECT against credentials in the same INSERT,
+-- so the column cannot disagree with the credential it describes and no
+-- caller has to know the workspace to write an audit row.
+--
+-- Existing rows are populated by the companion migration
+-- 20260810153105_credential_audit_workspace_backfill. It is a separate file
+-- because ADD COLUMN cannot be re-applied (SQLite has no
+-- ADD COLUMN IF NOT EXISTS) while a backfill both can and must be: a restore
+-- whose ledger was rolled back re-runs it, and it has to be a no-op the
+-- second time.
+
+ALTER TABLE credential_audit
+    ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;
+
+-- The index the audit view wanted all along: scope first, then time, in the
+-- order the page reads them. DESC matches the query's ORDER BY so the LIMIT
+-- can stop early instead of sorting the whole match set.
+--
+-- It also covers the foreign key added above. An unindexed child column makes
+-- every workspace deletion full-scan this table to enforce the constraint,
+-- which on the fastest-growing audit table would be a poor trade for the
+-- cascade.
+CREATE INDEX IF NOT EXISTS idx_credential_audit_workspace_time
+    ON credential_audit(workspace_id, occurred_at DESC);

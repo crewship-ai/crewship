@@ -161,10 +161,18 @@ func RecordCredentialEventTx(
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// workspace_id is derived from the credential in the same statement
+	// rather than taken as a parameter. Two reasons: no caller has to know
+	// the workspace to write an audit row (there are a dozen call sites and
+	// several only hold a credential id), and the column physically cannot
+	// disagree with the credential it describes — which is the failure a
+	// denormalised tenant column invites. See the migration
+	// 20260810153104_credential_audit_workspace_scope for why the column
+	// exists at all.
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO credential_audit (id, credential_id, event_type, agent_id, ip_address, metadata_json, occurred_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		generateCUID(), credentialID, string(event), agentArg, ipArg, metaJSON, now); err != nil {
+		INSERT INTO credential_audit (id, credential_id, workspace_id, event_type, agent_id, ip_address, metadata_json, occurred_at)
+		VALUES (?, ?, (SELECT workspace_id FROM credentials WHERE id = ?), ?, ?, ?, ?, ?)`,
+		generateCUID(), credentialID, credentialID, string(event), agentArg, ipArg, metaJSON, now); err != nil {
 		return fmt.Errorf("insert audit row: %w", err)
 	}
 

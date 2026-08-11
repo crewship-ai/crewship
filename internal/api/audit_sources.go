@@ -54,19 +54,28 @@ var auditSourceQueries = map[string]auditSourceQuery{
 		order: "ORDER BY c.created_at DESC",
 	},
 
+	// The scope predicate reads credential_audit's OWN workspace_id, which
+	// idx_credential_audit_workspace_time(workspace_id, occurred_at DESC)
+	// serves directly — so the ORDER BY below is satisfied by the index walk
+	// instead of a temporary B-tree over every row that matched. Scoping
+	// through the join (cr.workspace_id) had no index to stand on and got
+	// slower as the table grew, which on the one audit table with no
+	// retention sweep meant forever.
+	//
+	// The join survives in `list` only because the response carries the
+	// credential's name. `count` no longer needs it at all.
 	auditSourceCredentials: {
 		list: `
-			SELECT ca.id, cr.workspace_id, NULL, ca.event_type, 'CREDENTIAL',
+			SELECT ca.id, ca.workspace_id, NULL, ca.event_type, 'CREDENTIAL',
 			       ca.credential_id, ca.metadata_json, ca.ip_address, NULL, ca.occurred_at,
 			       NULL, NULL,
 			       cr.name
 			FROM credential_audit ca
 			JOIN credentials cr ON cr.id = ca.credential_id
-			WHERE cr.workspace_id = ?`,
+			WHERE ca.workspace_id = ?`,
 		count: `
 			SELECT COUNT(*) FROM credential_audit ca
-			JOIN credentials cr ON cr.id = ca.credential_id
-			WHERE cr.workspace_id = ?`,
+			WHERE ca.workspace_id = ?`,
 		ts:    "ca.occurred_at",
 		order: "ORDER BY ca.occurred_at DESC",
 	},
