@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -324,6 +325,31 @@ var errNoLocalDB = errors.New("database not found")
 // busy_timeout matches what a reader wants against a live crewshipd: WAL lets
 // us read alongside the writer, and the few seconds cover a checkpoint rather
 // than surfacing SQLITE_BUSY as "doctor can't read your database".
+//
+// What mode=ro does NOT buy is freedom from the filesystem. Our database is in
+// WAL mode, and no connection — read-only included — can read a WAL database
+// without the "-shm" WAL index. So a read-only open needs ONE of:
+//
+//   - an existing crewship.db-shm (crewshipd is up, or some other reader is),
+//     in which case we just join it and the directory's mode is irrelevant; or
+//   - write permission on the DIRECTORY holding the database (not on the
+//     database file), so SQLite can create the -shm itself.
+//
+// With neither, the open fails at Ping with SQLITE_CANTOPEN ("unable to open
+// database file (14)") when a stale -wal is present, or SQLITE_READONLY_DIRECTORY
+// ("attempt to write a readonly database (1544)") when it is not — and doctor
+// renders that as `[WARN] db migration version  could not open DB: …`. Neither
+// SQLite message mentions the directory, which is the one thing the operator
+// needs to hear, so the error is annotated below. This is exactly the state a
+// post-crash box is in: crewshipd died leaving a -wal but no -shm, and doctor
+// is the first thing anyone runs.
+//
+// The consequence of the second bullet is that a read-only probe can leave a
+// crewship.db-shm behind where there was none. That is not a B-02 relapse: the
+// -shm is a rebuildable index over an existing database, holds no schema and no
+// data, and the next crewshipd start would create it regardless. The invariant
+// that matters — never bring a DATABASE into existence — is upheld by the stat
+// above, which is why this helper refuses before it ever reaches sqlite.
 func openLocalDBReadOnly(ctx context.Context) (*sql.DB, error) {
 	// ResolveDefaultDataDir, not DefaultDataDir: the latter creates the root
 	// and output/chats/logs/skills on the way to telling us where they are, so
@@ -352,7 +378,39 @@ func openLocalDBReadOnly(ctx context.Context) (*sql.DB, error) {
 	// than leaking out later as a confusing "read consent" error.
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
+		if walIndexUnbuildable(dbPath) {
+			return nil, fmt.Errorf("open database read-only: %w (WAL index %s-shm is missing and %s is not writable — reading a WAL database needs one or the other; make the directory writable, or run this while crewshipd is up)",
+				err, filepath.Base(dbPath), filepath.Dir(dbPath))
+		}
 		return nil, fmt.Errorf("open database read-only: %w", err)
 	}
 	return db, nil
+}
+
+// walIndexUnbuildable reports whether a failed read-only open is the WAL-index
+// case described on openLocalDBReadOnly: no -shm to join and no way to make
+// one. Only ever called after an open has already failed, so it decides the
+// wording of an error, never whether we try.
+//
+// It is asked in that order deliberately. An existing -shm means the WAL index
+// was not the problem — the failure is corruption, or a lock we waited out and
+// lost — and claiming otherwise would send the operator to chmod a directory
+// that is fine. The writability test is the same touch-and-remove
+// checkDataDirWritable uses rather than an inspection of the mode bits,
+// because the bits lie in both directions (a 0755 directory owned by someone
+// else is not writable by us; an ACL or a read-only mount overrides them
+// either way) and here the answer goes straight into what we tell the
+// operator to fix.
+func walIndexUnbuildable(dbPath string) bool {
+	if _, err := os.Stat(dbPath + "-shm"); err == nil {
+		return false
+	}
+	f, err := os.CreateTemp(filepath.Dir(dbPath), ".crewship-ro-probe-*.tmp")
+	if err != nil {
+		return true
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return false
 }

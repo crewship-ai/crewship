@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -267,5 +268,216 @@ func TestOpenLocalDBReadOnly_ReadsAnExistingDatabase(t *testing.T) {
 	// than silently accepted on a handle doctor holds.
 	if _, err := db.ExecContext(ctx, "CREATE TABLE doctor_should_not_write (x INTEGER)"); err == nil {
 		t.Error("read-only handle accepted a write")
+	}
+}
+
+// crashedDatabase stages the state a killed crewshipd leaves behind: a WAL
+// database with a stale "-wal" and NO "-shm", and returns the data dir holding
+// it (already installed as CREWSHIP_DATA_DIR).
+//
+// Copying the files out from under a live writer is what produces that pair
+// honestly. Closing the seed first would checkpoint the WAL into the main file
+// and unlink both sidecars, i.e. stage the one state the tests below are not
+// about. It also covers the other route to the same place — a backup taken
+// with `cp` that picked up the -wal and not the -shm.
+func crashedDatabase(t *testing.T) *database.DataDir {
+	t.Helper()
+	ctx := context.Background()
+
+	src := t.TempDir()
+	seed, err := database.Open("file:" + filepath.Join(src, "crewship.db"))
+	if err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	if err := database.Migrate(ctx, seed.DB, covLogger()); err != nil {
+		t.Fatalf("seed migrate: %v", err)
+	}
+	dst := t.TempDir()
+	for _, suffix := range []string{"", "-wal"} {
+		in, err := os.ReadFile(filepath.Join(src, "crewship.db"+suffix))
+		if err != nil {
+			t.Fatalf("read seed crewship.db%s: %v", suffix, err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, "crewship.db"+suffix), in, 0o600); err != nil {
+			t.Fatalf("stage crewship.db%s: %v", suffix, err)
+		}
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("seed close: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "crewship.db-shm")); !os.IsNotExist(err) {
+		t.Fatalf("staged copy has a -shm; the crash state was not reproduced (%v)", err)
+	}
+	t.Setenv("CREWSHIP_DATA_DIR", dst)
+	return &database.DataDir{Root: dst}
+}
+
+// unwritableDir drops the write bit on a directory for the rest of the test,
+// restoring it first thing afterwards — t.TempDir's own cleanup cannot remove
+// a directory it may not write to.
+func unwritableDir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+}
+
+// The post-crash state is the one an operator runs `doctor` IN, so the
+// diagnostic route has to survive it.
+//
+// A WAL database cannot be read at all — read-only included — without the
+// "-shm" WAL index, and a crashed crewshipd leaves a "-wal" with no "-shm". A
+// read-only connection is then allowed to rebuild the index only if it can
+// create the file, which needs write permission on the DIRECTORY. Here it has
+// it, so the open must succeed and doctor must report the migration version
+// instead of "could not open DB".
+//
+// The -shm assertion is the point of the test, not incidental: building it is
+// the only reason this case works, so a future "diagnostics create nothing at
+// all" tightening that blocked it would silently make doctor useless in
+// exactly the state it exists for. It is a rebuildable index over an existing
+// database — no schema, no data, recreated by the next crewshipd start — which
+// is why it does not offend the B-02 invariant that the tests above pin.
+func TestOpenLocalDBReadOnly_StaleWALWithoutIndex(t *testing.T) {
+	dd := crashedDatabase(t)
+	ctx := context.Background()
+
+	db, err := openLocalDBReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("read-only open of a crashed WAL database in a writable dir: %v", err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM _migrations").Scan(&n); err != nil {
+		t.Fatalf("read _migrations after a crash: %v", err)
+	}
+	if n == 0 {
+		t.Error("_migrations is empty — the staged database did not carry the seed's migrations")
+	}
+	if _, err := os.Stat(dd.DatabasePath() + "-shm"); err != nil {
+		t.Errorf("stat -shm after a successful read-only open: %v (the WAL index is what makes this case work)", err)
+	}
+
+	// The probe that owns the row must agree, since that is what the operator
+	// actually sees.
+	if r := checkDBMigrationVersion(ctx); r.status != "PASS" {
+		t.Errorf("db migration version after a crash: got %+v, want PASS", r)
+	}
+}
+
+// The other half of the same rule: with no -shm AND no way to create one, the
+// read-only open cannot succeed — SQLite has nowhere to put the WAL index.
+//
+// That is a real regression against the pre-mode=ro behaviour, where the probe
+// opened read-write and this never came up, so it is pinned rather than left to
+// be rediscovered. What is testable is that the failure is legible: SQLite says
+// only "unable to open database file (14)" (stale -wal) or "attempt to write a
+// readonly database (1544)" (no -wal — the database is still WAL-mode, so the
+// index is still required), neither of which mentions the directory that is
+// actually at fault. Both states are exercised because they produce different
+// SQLite errors and must produce the same explanation.
+func TestOpenLocalDBReadOnly_UnwritableDirWithoutWALIndex(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permissions are not enforced")
+	}
+	ctx := context.Background()
+
+	cases := []struct {
+		name  string
+		setup func(t *testing.T) *database.DataDir
+	}{
+		{"stale wal, no shm", crashedDatabase},
+		{"no sidecars at all", func(t *testing.T) *database.DataDir {
+			dd := tempDataDir(t)
+			seed, err := database.Open(dd.DatabaseURL())
+			if err != nil {
+				t.Fatalf("seed open: %v", err)
+			}
+			if err := database.Migrate(ctx, seed.DB, covLogger()); err != nil {
+				t.Fatalf("seed migrate: %v", err)
+			}
+			// Checkpoints the WAL into the main file and unlinks both
+			// sidecars. journal_mode=WAL persists in the header regardless,
+			// which is why the index is still needed to read it.
+			if err := seed.Close(); err != nil {
+				t.Fatalf("seed close: %v", err)
+			}
+			return dd
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dd := tc.setup(t)
+			unwritableDir(t, dd.Root)
+
+			db, err := openLocalDBReadOnly(ctx)
+			if err == nil {
+				db.Close()
+				t.Fatal("read-only open succeeded with no WAL index and an unwritable directory")
+			}
+			// Not errNoLocalDB: the database is right there. Confusing the two
+			// would have doctor say "crewshipd has never run" about a
+			// populated database, the same class of lie as B-02.
+			if errors.Is(err, errNoLocalDB) {
+				t.Errorf("an unreadable database was reported as absent: %v", err)
+			}
+			for _, want := range []string{"-shm", "not writable", dd.Root} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not mention %q, so the operator cannot act on it: %v", want, err)
+				}
+			}
+
+			// And the row the operator reads carries the same explanation.
+			r := checkDBMigrationVersion(ctx)
+			if r.status != "WARN" || !strings.Contains(r.detail, "not writable") {
+				t.Errorf("db migration version with an unbuildable WAL index: got %+v", r)
+			}
+		})
+	}
+}
+
+// The rescue clause, and the case that must NOT be annotated: where the -shm
+// already exists, a read-only open works no matter what the directory's mode
+// is, because we only join an index we are not creating.
+//
+// This is the live-crewshipd case with a hardened data dir, and it is why the
+// fix for the test above is "make the directory writable OR run this while the
+// server is up" rather than a single instruction. It also pins the order
+// walIndexUnbuildable asks its two questions in: -shm first, so that a failure
+// with an index present is never mis-blamed on directory permissions.
+func TestOpenLocalDBReadOnly_UnwritableDirWithExistingWALIndex(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permissions are not enforced")
+	}
+	dd := tempDataDir(t)
+	ctx := context.Background()
+
+	// Held open for the duration: this is crewshipd, and its connection is
+	// what keeps the -shm on disk.
+	seed, err := database.Open(dd.DatabaseURL())
+	if err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	defer seed.Close()
+	if err := database.Migrate(ctx, seed.DB, covLogger()); err != nil {
+		t.Fatalf("seed migrate: %v", err)
+	}
+	if _, err := os.Stat(dd.DatabasePath() + "-shm"); err != nil {
+		t.Fatalf("stat -shm while the writer is open: %v", err)
+	}
+	unwritableDir(t, dd.Root)
+
+	db, err := openLocalDBReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("read-only open with an existing WAL index in an unwritable dir: %v", err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM _migrations").Scan(&n); err != nil {
+		t.Fatalf("read _migrations: %v", err)
+	}
+	if n == 0 {
+		t.Error("_migrations is empty — the seed did not migrate")
 	}
 }
