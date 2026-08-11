@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/tsformat"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -104,7 +106,7 @@ func TestUpsertReadAndWriteSeeTheSameState(t *testing.T) {
 
 			if _, err := holder.ExecContext(ctx,
 				`UPDATE agent_status SET status = ?, since = ? WHERE agent_id = 'a1'`,
-				string(tc.concurrent), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+				string(tc.concurrent), tsformat.Format(time.Now())); err != nil {
 				t.Fatalf("holder write: %v", err)
 			}
 			if err := holder.Commit(); err != nil {
