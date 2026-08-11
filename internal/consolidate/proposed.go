@@ -56,13 +56,6 @@ func (c *Consolidator) writeProposal(
 	}
 
 	runID := newProposalID(now)
-	outputInfo, err := os.Lstat(cfg.OutputDir)
-	if err != nil {
-		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("stat output: %w", err)
-	}
-	if outputInfo.Mode()&os.ModeSymlink != 0 || !outputInfo.IsDir() {
-		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("output path is not a regular directory")
-	}
 	proposedDir := filepath.Join(cfg.OutputDir, ".proposed")
 	if err := memory.EnsureDirNoFollow(cfg.OutputDir, proposedDir); err != nil {
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("mkdir proposed: %w", err)
