@@ -10,8 +10,10 @@ import (
 // (owner-only) rather than a group/other-accessible mode. Defense-in-depth:
 // the socket file is already 0600, the containing dir should match.
 func TestSecSocketDirMode(t *testing.T) {
-	base := t.TempDir()
-	path := filepath.Join(base, "secdir", "test.sock")
+	// shortSocketDir, not t.TempDir(): every socket path in this package has to
+	// fit sockaddr_un, and the path built here is one rename of the test away
+	// from being bound by a listener. See socket_test.go.
+	path := shortSocketPath(t, "secdir", "test.sock")
 
 	if err := removeSocketFile(path); err != nil {
 		t.Fatalf("removeSocketFile: %v", err)

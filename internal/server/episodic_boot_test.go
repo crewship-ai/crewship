@@ -23,8 +23,6 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -129,10 +127,10 @@ func TestStart_EpisodicIndexerSweepsAtBoot(t *testing.T) {
 	const entryID = "je-epi-boot-1"
 	seedEmbeddableEntry(t, db, entryID)
 
-	// Unix sockets have a ~104-char path limit on macOS — shorter than
-	// t.TempDir() can produce. Same workaround as the startIPC test.
-	sockPath := filepath.Join("/tmp", "cs-epi-"+randomShort()+".sock")
-	t.Cleanup(func() { _ = os.Remove(sockPath) })
+	// Unix sockets have a ~104-byte path limit on macOS — shorter than
+	// t.TempDir() can produce. shortSocketPath stays under it and says so if
+	// it ever cannot (see testMaxSocketPath in socket_test.go).
+	sockPath := shortSocketPath(t, "i.sock")
 
 	cfg := silentCfg()
 	cfg.Server.Host = "127.0.0.1"

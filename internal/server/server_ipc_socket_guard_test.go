@@ -56,6 +56,10 @@ func dialUnixOnce(t *testing.T, path string) error {
 // net.Listen callers normally do.
 func startEchoListener(t *testing.T, path string) {
 	t.Helper()
+	// Check the length before bind(), so an over-long path is reported as such
+	// rather than as an unexplained "bind: invalid argument" (see
+	// testMaxSocketPath in socket_test.go).
+	requireShortSocketPath(t, path)
 	l, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("listen unix %s: %v", path, err)
@@ -89,6 +93,7 @@ func startEchoListener(t *testing.T, path string) {
 // clean shutdown never produces this state, only a SIGKILL/panic does.
 func makeStaleSocket(t *testing.T, path string) {
 	t.Helper()
+	requireShortSocketPath(t, path)
 	l, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("listen unix %s: %v", path, err)
@@ -278,7 +283,15 @@ func TestEnsureSocketPathFree_Corners(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := tt.setup(t, t.TempDir())
+			// shortSocketDir, not t.TempDir(): the subtest names here are long
+			// and t.TempDir() interpolates them, which overflows
+			// sockaddr_un.sun_path on darwin. The cases that bind or dial then
+			// fail with EINVAL — and "stale socket is free" and "dangling
+			// symlink is not a listener" are exactly that, the second reaching
+			// ensureSocketPathFree's "cannot tell, refuse" branch because
+			// connect() answered EINVAL rather than ECONNREFUSED/ENOENT. The
+			// classification is right; the path was wrong.
+			path := requireShortSocketPath(t, tt.setup(t, shortSocketDir(t)))
 
 			err := ensureSocketPathFree(path)
 			if tt.wantErr {
@@ -306,7 +319,7 @@ func TestEnsureSocketPathFree_Corners(t *testing.T) {
 // guard runs on every start, and the common case must not pay the probe
 // timeout. A missing path is answered by a single stat.
 func TestEnsureSocketPathFree_MissingPathIsCheap(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "absent.sock")
+	path := shortSocketPath(t, "absent.sock")
 	start := time.Now()
 	if err := ensureSocketPathFree(path); err != nil {
 		t.Fatalf("ensureSocketPathFree: %v", err)
@@ -376,9 +389,10 @@ func TestStartIPC_RefusesLiveSocketRecoversStale(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Short dir name: sockaddr_un caps the path near 100 bytes and
-			// t.TempDir() already embeds the subtest name.
-			path := filepath.Join(t.TempDir(), "i.sock")
+			// shortSocketDir, not t.TempDir(): sockaddr_un caps the path at
+			// 104 bytes on darwin and t.TempDir() embeds the subtest name,
+			// which overflows it and turns every bind here into EINVAL.
+			path := shortSocketPath(t, "i.sock")
 			tt.setup(t, path)
 
 			s := newTestServerForT(t)
@@ -533,8 +547,9 @@ func TestStartIPC_DoesNotDeleteNonSocketInode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Short dir name: sockaddr_un caps the path near 100 bytes.
-			path := filepath.Join(t.TempDir(), "i.sock")
+			// shortSocketDir, not t.TempDir(): sockaddr_un caps the path at
+			// 104 bytes on darwin and t.TempDir() embeds the subtest name.
+			path := shortSocketPath(t, "i.sock")
 			tt.setup(t, path)
 
 			startIPCExpectingRefusal(t, path)
@@ -621,8 +636,9 @@ func TestStartIPC_DoesNotDeleteNonSocketFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Short dir name: sockaddr_un caps the path near 100 bytes.
-			path := filepath.Join(t.TempDir(), "i.sock")
+			// shortSocketDir, not t.TempDir(): sockaddr_un caps the path at
+			// 104 bytes on darwin and t.TempDir() embeds the subtest name.
+			path := shortSocketPath(t, "i.sock")
 			if err := os.WriteFile(path, tt.content, 0o600); err != nil {
 				t.Fatal(err)
 			}

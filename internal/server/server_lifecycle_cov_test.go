@@ -232,11 +232,16 @@ func TestStartIPC_ListenErrorPropagates(t *testing.T) {
 	// returning the expected error. (Locally on macOS the missing-dir variant
 	// only "passed" by accident, because the long /var/folders TempDir path
 	// blew the unix-socket path limit; on Linux CI it hung.)
-	notADir := filepath.Join(t.TempDir(), "not-a-dir")
+	//
+	// That accident is also why the path is built from shortSocketDir rather
+	// than t.TempDir(): with a /var/folders TempDir this test still passes on
+	// darwin, but on EINVAL from an over-long sun_path instead of the ENOTDIR
+	// it means to pin — a pass for the wrong reason that hides the branch.
+	notADir := filepath.Join(shortSocketDir(t), "not-a-dir")
 	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s.cfg.IPC.SocketPath = filepath.Join(notADir, "ipc.sock")
+	s.cfg.IPC.SocketPath = requireShortSocketPath(t, filepath.Join(notADir, "i.sock"))
 
 	err := s.startIPC()
 	if err == nil {
@@ -309,8 +314,10 @@ func TestStart_FullDepsBootAndShutdown(t *testing.T) {
 		VALUES ('je_boot2','ws_boot2','ag_boot2', strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 		        'run.started','info','sidecar','orphan','{}','{}','tr_boot2','normal')`)
 
-	sockPath := filepath.Join("/tmp", "cs-cov-"+randomShort()+".sock")
-	t.Cleanup(func() { _ = os.Remove(sockPath) })
+	// Unix sockets have a tight path-length limit (~104 bytes on macOS),
+	// shorter than t.TempDir() can produce (see testMaxSocketPath in
+	// socket_test.go).
+	sockPath := shortSocketPath(t, "i.sock")
 
 	cfg := silentCfg()
 	cfg.IPC.SocketPath = sockPath
@@ -399,8 +406,10 @@ func TestStart_HTTPListenErrorPropagates(t *testing.T) {
 		t.Fatalf("unexpected listener addr %q", addr)
 	}
 
-	sockPath := filepath.Join("/tmp", "cs-cov-"+randomShort()+".sock")
-	t.Cleanup(func() { _ = os.Remove(sockPath) })
+	// Unix sockets have a tight path-length limit (~104 bytes on macOS),
+	// shorter than t.TempDir() can produce (see testMaxSocketPath in
+	// socket_test.go).
+	sockPath := shortSocketPath(t, "i.sock")
 
 	cfg := silentCfg()
 	cfg.IPC.SocketPath = sockPath

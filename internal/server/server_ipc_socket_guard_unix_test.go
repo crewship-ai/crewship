@@ -83,7 +83,12 @@ func TestEnsureSocketPathFree_UnixInodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			path := tt.setup(t, t.TempDir())
+			// shortSocketDir, not t.TempDir(): ensureSocketPathFree dials the
+			// path, and a path over sockaddr_un's 104-byte darwin limit makes
+			// connect() answer EINVAL — a "cannot tell" the guard rightly
+			// refuses, which would pass here for the wrong reason and hide
+			// whether the inode was classified at all.
+			path := requireShortSocketPath(t, tt.setup(t, shortSocketDir(t)))
 
 			err := ensureSocketPathFree(path)
 			if err == nil {
@@ -111,8 +116,9 @@ func TestEnsureSocketPathFree_UnixInodes(t *testing.T) {
 // pipe is still a pipe afterwards — an error alone would also be returned by
 // an implementation that unlinked it and then failed to listen.
 func TestStartIPC_DoesNotDeleteFIFO(t *testing.T) {
-	// Short dir name: sockaddr_un caps the path near 100 bytes.
-	path := filepath.Join(t.TempDir(), "i.sock")
+	// shortSocketDir, not t.TempDir(): sockaddr_un caps the path at 104 bytes
+	// on darwin and t.TempDir() embeds the test name.
+	path := shortSocketPath(t, "i.sock")
 	mkfifo(t, path)
 
 	startIPCExpectingRefusal(t, path)
