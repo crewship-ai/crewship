@@ -53,10 +53,15 @@ func TestDefaultModelLister_OllamaRefusesHardBlockedEndpoint(t *testing.T) {
 // a conditional skip on host state, which is the exact hazard the rest of this
 // change removes, and the t.Skip ratchet was right to reject it.
 func TestDefaultModelLister_OllamaStillReachesLoopback(t *testing.T) {
-	// A real listener, so the dial demonstrably completes. What it serves does
-	// not matter: the assertion is that httpsafe did not refuse the address.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
+	// A stub daemon serving a real /api/tags payload, so this asserts the call
+	// completes rather than merely that it was not refused. "Not blocked" and
+	// "works" are different claims, and only the second one is what an
+	// operator with Ollama on their laptop cares about.
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"name":"qwen2.5:7b"},{"name":"llama3:8b"}]}`))
 	}))
 	defer srv.Close()
 
@@ -65,19 +70,23 @@ func TestDefaultModelLister_OllamaStillReachesLoopback(t *testing.T) {
 		t.Fatal("expected an OLLAMA lister for a non-empty URL")
 	}
 
-	// 404 from the stub, so ListModels errors — but on the response, not on
-	// the dial. Either outcome is fine here; an httpsafe refusal is not.
-	_, err := lister.ListModels(context.Background())
-	if err == nil {
-		return
+	models, err := lister.ListModels(context.Background())
+	if err != nil {
+		// Distinguish the two failures explicitly: a refusal means the fence
+		// is too strict for loopback, anything else means the stub is wrong.
+		if strings.Contains(err.Error(), "httpsafe:") {
+			t.Fatalf("loopback must not be refused by the endpoint client: %v", err)
+		}
+		t.Fatalf("ListModels against a loopback stub failed: %v", err)
 	}
-	// Match on the "httpsafe:" prefix, not on one refusal's wording. The two
-	// clients word it differently — TrustedEndpointClient says "blocked
-	// address", SafeClient says "blocked outbound connection to
-	// private/internal address" — and an assertion pinned to either would
-	// have missed a swap to the strict fence, which refuses loopback and
-	// would break every self-hosted Ollama.
-	if strings.Contains(err.Error(), "httpsafe:") {
-		t.Errorf("loopback must not be refused by the endpoint client: %v", err)
+
+	if gotPath != "/api/tags" {
+		t.Errorf("stub saw %q, want /api/tags", gotPath)
+	}
+	if len(models) != 2 {
+		t.Fatalf("got %d models, want 2: %+v", len(models), models)
+	}
+	if models[0].ID != "qwen2.5:7b" {
+		t.Errorf("first model = %q, want qwen2.5:7b", models[0].ID)
 	}
 }
