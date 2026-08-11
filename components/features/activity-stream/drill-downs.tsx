@@ -33,6 +33,7 @@ import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { formatDurationMs } from "@/lib/activity-stream"
 import { relTime } from "@/lib/time"
 import { runHeadline } from "@/lib/run-digest"
+import { assignmentsOf } from "@/lib/activity-lenses"
 import type { ChainSummary } from "@/hooks/use-chains"
 
 /** The page shell every drill-down shares — one width, one rhythm. */
@@ -46,8 +47,20 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 export interface IssueDrillDownProps {
   workspaceId: string
-  /** ENG-7 — what both URLs carry and what the surface resolves by. */
-  identifier: string
+  /**
+   * `missions.id` — the key the chain index carries on every ChainIssueRef, and
+   * therefore the only one that matches on every workspace.
+   *
+   * This took the DISPLAY LABEL before, under the name `identifier`, and the
+   * shell obliged with `stop.label`. That label is `identifier || title || id`,
+   * so on a workspace that does not use issue identifiers it is the TITLE: no
+   * chain matched, the page rendered "Nothing reached it in this window" over an
+   * issue with workflows on it, and the deep link pointed at a URL-encoded
+   * sentence. The id is what the rail already held; taking it is the fix.
+   */
+  issueId: string
+  /** What the row the reader clicked said. The heading falls back to it. */
+  label: string
   /** Chains that touched it, for the strip and the "who did this" line. */
   chains: ChainSummary[]
   onOpenWorkflow: (origin: string) => void
@@ -67,17 +80,28 @@ export interface IssueDrillDownProps {
  * first is that a reader who came here wanting the issue's body would have gone
  * to /issues.
  */
-export function IssueDrillDown({ workspaceId, identifier, chains, onOpenWorkflow }: IssueDrillDownProps) {
+export function IssueDrillDown({ workspaceId, issueId, label, chains, onOpenWorkflow }: IssueDrillDownProps) {
   // Which chains reached this issue. The strip's numbers come from the same
   // ChainSummary[] the rail lists, so they cannot disagree with the row that
-  // led here.
+  // led here. Matched on the id alone: an identifier-or-id predicate looks
+  // forgiving and is how the wrong key went unnoticed.
   const touching = React.useMemo(
-    () => chains.filter((c) => (c.issues ?? []).some((i) => i.identifier === identifier || i.id === identifier)),
-    [chains, identifier],
+    () => chains.filter((c) => (c.issues ?? []).some((i) => i.id === issueId)),
+    [chains, issueId],
   )
-  const created = touching.some((c) =>
-    (c.issues ?? []).some((i) => (i.identifier === identifier || i.id === identifier) && i.created),
+  const created = touching.some((c) => (c.issues ?? []).some((i) => i.id === issueId && i.created))
+  // The human handle, read off the refs rather than taken from the caller: the
+  // chain index carries it, and it is what /issues/[identifier] resolves by.
+  // Absent on a workspace that does not use identifiers, which is a fact about
+  // the workspace and not a lookup failure — see the link below.
+  const identifier = React.useMemo(
+    () =>
+      touching
+        .flatMap((c) => c.issues ?? [])
+        .find((i) => i.id === issueId && i.identifier)?.identifier,
+    [touching, issueId],
   )
+  const heading = identifier || label || issueId
   const agents = React.useMemo(
     () => [...new Set(touching.flatMap((c) => (c.agents ?? []).map((a) => a.name || a.slug || a.id)))],
     [touching],
@@ -100,14 +124,20 @@ export function IssueDrillDown({ workspaceId, identifier, chains, onOpenWorkflow
       <Appear order={0}>
         <div className="flex flex-wrap items-center gap-2">
           <CircleDot className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <h1 className="min-w-0 font-mono text-base font-semibold tracking-tight">{identifier}</h1>
+          <h1 className="min-w-0 font-mono text-base font-semibold tracking-tight">{heading}</h1>
           {created && <Pill tone="success">created here</Pill>}
-          <a
-            href={`/issues/${encodeURIComponent(identifier)}`}
-            className="ml-auto rounded-md border border-white/[0.08] px-2 py-1 text-[11px] text-primary transition-colors hover:bg-white/[0.04]"
-          >
-            Open issue ↗
-          </a>
+          {/* Rendered only when there is an identifier to render it with.
+              /issues/[identifier] resolves an identifier and nothing else, so a
+              workspace that does not use them has no URL for this issue — and a
+              button that leads to a 404 is worse than an absent one. */}
+          {identifier && (
+            <a
+              href={`/issues/${encodeURIComponent(identifier)}`}
+              className="ml-auto rounded-md border border-white/[0.08] px-2 py-1 text-[11px] text-primary transition-colors hover:bg-white/[0.04]"
+            >
+              Open issue ↗
+            </a>
+          )}
         </div>
       </Appear>
 
@@ -192,6 +222,31 @@ export interface RunDrillDownProps {
  * and error and the list is one indexed query the page beside this already
  * makes.
  */
+/**
+ * A run's status as a tone, for the strip and the pill.
+ *
+ * `failed ? destructive : success` was the whole rule, so a run that was
+ * cancelled, interrupted or still going rendered GREEN beside the word naming
+ * its state — the strip's one job is to be readable at a glance, and a green
+ * "cancelled" is read as fine. An unknown status gets the neutral tone rather
+ * than a guess, the same rule rowStatusToken follows for colours.
+ */
+function runStatusTone(status: string): StatItem["tone"] {
+  switch (status.toLowerCase()) {
+    case "completed":
+      return "success"
+    case "failed":
+    case "timeout":
+      return "destructive"
+    case "cancelled":
+    case "interrupted":
+    case "waiting":
+      return "warn"
+    default:
+      return "default"
+  }
+}
+
 export function RunDrillDown({ workspaceId, runID, routineSlug }: RunDrillDownProps) {
   const { records, loading } = usePipelineRunRecords(workspaceId, routineSlug ?? null)
   const run = React.useMemo(() => records.find((r) => r.id === runID), [records, runID])
@@ -209,7 +264,7 @@ export function RunDrillDown({ workspaceId, runID, routineSlug }: RunDrillDownPr
 
   const stats: StatItem[] = run
     ? [
-        { label: "Status", value: run.status, tone: run.status === "failed" ? "destructive" : "success" },
+        { label: "Status", value: run.status, tone: runStatusTone(run.status) },
         { label: "Started", value: new Date(run.started_at).toLocaleTimeString(undefined, { hour12: false }), mono: true },
         { label: "Duration", value: formatDurationMs(run.duration_ms), mono: true },
         { label: "Cost", value: run.cost_usd > 0 ? `$${run.cost_usd.toFixed(4)}` : "—", mono: true },
@@ -225,7 +280,7 @@ export function RunDrillDown({ workspaceId, runID, routineSlug }: RunDrillDownPr
       <Appear order={0}>
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="min-w-0 font-mono text-base font-semibold tracking-tight">{runID}</h1>
-          {run && <Pill tone={run.status === "failed" ? "destructive" : "success"}>{run.status}</Pill>}
+          {run && <Pill tone={runStatusTone(run.status)}>{run.status}</Pill>}
           {routineSlug && <Pill tone="default">{routineSlug}</Pill>}
         </div>
       </Appear>
@@ -313,10 +368,14 @@ export function AgentDrillDown({ workspaceId, agentID, name, chains, onOpenWorkf
     () => chains.filter((c) => (c.agents ?? []).some((a) => a.id === agentID)),
     [chains, agentID],
   )
-  const assignments = worked.reduce(
-    (n, c) => n + ((c.agents ?? []).find((a) => a.id === agentID)?.assignments ?? 0),
-    0,
-  )
+  // assignmentsOf, not a local `?? 0`: a ref that arrived without a count still
+  // means one piece of work. Three files decided this separately and two of them
+  // decided differently, so the rail's row read "×1" while this page's strip
+  // read "0 assignments" for the same agent in the same window.
+  const assignments = worked.reduce((n, c) => {
+    const mine = (c.agents ?? []).find((a) => a.id === agentID)
+    return n + (mine ? assignmentsOf(mine) : 0)
+  }, 0)
   const issues = [...new Set(worked.flatMap((c) => (c.issues ?? []).map((i) => i.identifier || i.id)))]
   // Wall clock of the chains it worked in. Named as such on the strip — it is
   // not billed agent time, which the index does not carry.
@@ -371,7 +430,7 @@ export function AgentDrillDown({ workspaceId, agentID, name, chains, onOpenWorkf
                     />
                     <span className="min-w-0 truncate">{c.routine_slug || c.started_by}</span>
                     <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-                      ×{mine?.assignments ?? 1}
+                      ×{mine ? assignmentsOf(mine) : 1}
                     </span>
                     <span className="w-16 shrink-0 text-right font-mono text-[10px] text-muted-foreground-soft">
                       {relTime(c.last_activity)}

@@ -193,6 +193,14 @@ export function IssuesOverview({
     return m
   }, [chains])
 
+  // Distinct chains that reached ANY issue — the denominator the "Touched" KPI
+  // actually means. Counted off `touchedBy` rather than filtered again so the
+  // number and the rows under it cannot drift apart.
+  const touchingCount = React.useMemo(
+    () => new Set([...touchedBy.values()].flat().map((c) => c.origin)).size,
+    [touchedBy],
+  )
+
   return (
     <Shell>
       <Head
@@ -201,10 +209,15 @@ export function IssuesOverview({
       />
       <Appear order={1}>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {/* The denominator is the workflows that REACHED an issue, not every
+              workflow in the window. `chains.length` read "12 issues touched by
+              40 workflows" on a window where five of the forty went near an
+              issue — a subtitle on a KPI is read as its explanation, so a number
+              that answers a different question is a wrong one. */}
           <KpiCard
             label="Touched"
             value={rows.length}
-            subtitle={`by ${chains.length} ${chains.length === 1 ? "workflow" : "workflows"}`}
+            subtitle={`by ${touchingCount} ${touchingCount === 1 ? "workflow" : "workflows"}`}
           />
           <KpiCard
             label="Created by agents"
@@ -467,13 +480,30 @@ export function RoutinesLensOverview({
   // says 45m and the next says 44m for the same instant reads as a bug.
   const upcoming = React.useMemo(() => firingNext(schedules, Date.now()), [schedules])
 
+  // Both halves of the ratio come from the SAME population, and that is the
+  // whole point of computing them together here.
+  //
+  // The numerator used to be summed over every chain in the window while the
+  // denominator came from routineLens, which SKIPS a chain with no
+  // `routine_slug` — a chain whose root run retention swept. So that chain's
+  // failures were subtracted from a total its runs were never counted in: four
+  // clean routine runs beside one orphaned chain with two failures rendered
+  // "Success 50% · 2 of 4 runs", a red number over a routine that had not
+  // failed once. A ratio whose two sides count different things is not a
+  // narrowed measurement, it is arithmetic on unrelated numbers.
+  const routineChains = React.useMemo(
+    () => chains.filter((c) => (c.routine_slug ?? "").trim() !== ""),
+    [chains],
+  )
   const totalRuns = rows.reduce((n, r) => n + r.runs, 0)
-  const failedChains = chains.filter((c) => chainStatus(c) === "failed").length
-  const failingRoutines = rows.filter((r) => r.failed).length
-  // Runs, not chains: "34 of 37 runs worked" is the sentence. Derived from the
-  // chains' own failed_runs so it agrees with the rail beside it.
-  const failedRuns = chains.reduce((n, c) => n + (c.failed_runs ?? 0), 0)
+  const failedRuns = routineChains.reduce((n, c) => n + (c.failed_runs ?? 0), 0)
   const okRuns = Math.max(0, totalRuns - failedRuns)
+
+  // "Workflows affected" counts the same population for the same reason: it
+  // sits under a routine count, so a chain no routine ran cannot be one of the
+  // workflows those routines affected.
+  const failedChains = routineChains.filter((c) => chainStatus(c) === "failed").length
+  const failingRoutines = rows.filter((r) => r.failed).length
 
   return (
     <Shell>

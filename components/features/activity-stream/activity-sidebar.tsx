@@ -1,6 +1,6 @@
 "use client"
 
-// Left rail for /activity-new.
+// Left rail for /activity.
 //
 // The rail is NAVIGATION and nothing else: one line of status segments, then
 // the workflow list. That is the whole column.
@@ -65,10 +65,8 @@ import {
   bucketChains,
   chainScopeCounts,
   chainStatus,
-  chainsInScope,
   isComposed,
   issueLens,
-  matchesQuery,
   routineLens,
   workflowHandle,
   workflowSentence,
@@ -427,6 +425,58 @@ function WorkflowRow({
   )
 }
 
+/** What an empty lens needs to say, and the facts that decide which sentence. */
+export interface EmptyLensFacts {
+  lens: LensKey
+  /** Chains in the window that composed nothing — the Workflows lens's own case. */
+  bareRuns: number
+  /** Rows the index returned before any narrowing. 0 means an empty workspace. */
+  loadedChainCount: number
+  /** The search box emptied the window. */
+  narrowedAway: boolean
+  /** The status segment emptied what the search left. */
+  scopedAway: boolean
+  chainsHaveUnrecorded: boolean
+}
+
+/**
+ * The sentence under an empty lens.
+ *
+ * Five distinct emptinesses reach this column and they want five different
+ * actions from the reader, so they get five sentences. Collapsing them into one
+ * "Nothing here" is what the rail did before, and it sent a reader hunting for
+ * a broken page when the answer was "clear the search".
+ *
+ * Pure and exported because these are the branches worth testing: which
+ * sentence a state produces is a decision, and asserting it through a mounted
+ * component tests React.
+ */
+export function emptyLensCopy(f: EmptyLensFacts): string {
+  if (f.loadedChainCount === 0) {
+    return f.chainsHaveUnrecorded
+      ? "No workflows recorded yet. Runs from before chain recording cannot be grouped — the link was never written."
+      : "No workflows yet. One appears the first time something causes something else."
+  }
+  if (f.narrowedAway) return "Nothing in this window matches the search. Clear it to see the rest."
+  if (f.scopedAway) return "Nothing in this window has that status. Pick another, or All."
+  // Past here the window HAS chains — the lens simply holds none of them, which
+  // is an answer about the work rather than about the filters.
+  switch (f.lens) {
+    case "workflows":
+      return f.bareRuns > 0
+        ? `Nothing composed a process in this window. ${f.bareRuns} ${
+            f.bareRuns === 1 ? "run" : "runs"
+          } happened on their own — they are under Routines.`
+        : "Nothing composed a process in this window."
+    case "issues":
+      return "Nothing touched an issue in this window. Issues with no activity are in Issues, not here."
+    case "agents":
+      return "No agent took work inside a workflow in this window. Work no routine dispatched has no chain to belong to, so it is not indexed here."
+    case "routines":
+      return "No routine ran in this window. The catalogue of every routine — including the ones that have never run — is on the Routines page."
+  }
+}
+
 export interface ActivitySidebarProps {
   search: string
   onSearchChange: (v: string) => void
@@ -442,16 +492,47 @@ export interface ActivitySidebarProps {
   focus: EntityFocus | null
   onFocus: (f: EntityFocus | null) => void
   /**
-   * The workflow runs in this workspace, newest first. Each is every piece of
-   * work that shares one cause — the rule or person that started it, the
-   * routine runs it caused, the agent work those dispatched.
+   * The workflow runs this whole page is looking at, newest first — the loaded
+   * index window with the search box and the status segment already applied.
    *
-   * The only list left in the rail, because it is the question the rail exists
-   * to answer. Everything that used to sit beside it sliced the same activity
-   * by type, which is a filter, and filters live behind the Filter button.
+   * Narrowed by the SHELL rather than here, and that is the point. The rail used
+   * to filter its own private copy while the shell handed the unnarrowed array
+   * to the three lens dashboards beside it, so a search left this column showing
+   * two rows next to a dashboard reporting twenty. One narrowing, one call, both
+   * halves of the screen reading its result. See narrowChains.
    */
   chains: ChainSummary[]
+  /**
+   * The same window with the search applied but NOT the status segment.
+   *
+   * The segments count over this, because a count has to survive its own
+   * selection: counting over `chains` would make picking "Failed" render
+   * "Failed 3 · Waiting 0 · Running 0" — what is left after the pick rather
+   * than what there is to pick.
+   */
+  chainsBeforeStatus: ChainSummary[]
+  /**
+   * How many rows the index returned before any narrowing.
+   *
+   * Only used to tell two emptinesses apart, and they need opposite actions:
+   * "nothing here matches, widen the question" versus "nothing has ever run in
+   * this workspace".
+   */
+  loadedChainCount: number
+  /**
+   * The workspace holds more chains than this window. Every number in this
+   * column describes the window, so when this is true the column says so.
+   */
+  chainsHaveMore: boolean
   chainsHaveUnrecorded: boolean
+  /**
+   * Routines by slug, for a row's icon, colour and human name.
+   *
+   * Built by the shell rather than here because the shell also needs it to
+   * resolve names for the search — and a map built in two places is a map with
+   * two contents the day one of them grows a rule.
+   */
+  routineBySlug: Map<string, SidebarRoutine>
   selectedChain: string | null
   onSelectChain: (origin: string | null) => void
   /** Which catalogue the rail is listing. Owned by the shell so it survives a drill-down. */
@@ -485,7 +566,11 @@ export function ActivitySidebar({
   focus,
   onFocus,
   chains,
+  chainsBeforeStatus,
+  loadedChainCount,
+  chainsHaveMore,
   chainsHaveUnrecorded,
+  routineBySlug,
   selectedChain,
   onSelectChain,
   lens,
@@ -512,30 +597,10 @@ export function ActivitySidebar({
     [agents, facets.crewIDs],
   )
 
-  // The routine behind a chain, so a workflow row can wear its icon, colour and
-  // human name. Indexed once per render of the list rather than searched per
-  // row: the rail holds every routine in the workspace and the list is a
-  // screenful, so the linear scan was O(rows × routines) for a lookup that is a
-  // map.
-  const routineBySlug = React.useMemo(() => {
-    const m = new Map<string, SidebarRoutine>()
-    for (const r of routines) m.set(r.slug, r)
-    return m
-  }, [routines])
-
-  // Search and the status segment narrow the CHAIN list here, over the loaded
-  // index page. Both are client-side because the index is one grouped query
-  // with no search or status parameter — and saying so is why the rail's own
-  // copy names the window rather than implying the whole table.
-  const searched = React.useMemo(
-    () =>
-      chains.filter((c) => matchesQuery(c, search, routineBySlug.get(c.routine_slug ?? "")?.name)),
-    [chains, search, routineBySlug],
-  )
-  const scopedChains = React.useMemo(
-    () => chainsInScope(searched, facets.scope),
-    [searched, facets.scope],
-  )
+  // `chains` arrives already narrowed by the shell — search and status segment
+  // both applied — so this column and the dashboard beside it cannot disagree
+  // about what happened. See ActivitySidebarProps.chains.
+  const scopedChains = chains
 
   // Only composed chains are workflows. A bare run — one routine, invoked,
   // nothing bound to anything — is a run of that routine and belongs in the
@@ -570,12 +635,20 @@ export function ActivitySidebar({
   // The segments count CHAINS, which is what the list under them holds. They
   // counted journal entries before, so "Failed 9" sat above three failed
   // workflows — one control, one list, two numbers describing different objects.
-  // Complete, because the chain index is fetched independently of the scope
-  // facet, so every bucket is genuinely known whichever one is picked.
-  const chainCounts = React.useMemo(() => chainScopeCounts(searched), [searched])
+  //
+  // Counted over `chainsBeforeStatus`, i.e. everything the search left, so a
+  // number survives its own selection. Marked complete because the chain index
+  // is fetched independently of the scope facet, so all four buckets of THIS
+  // WINDOW are genuinely held whichever segment is picked — which is a
+  // different claim from "these are all the chains there are", and the one
+  // `chainsHaveMore` is rendered for.
+  const chainCounts = React.useMemo(
+    () => chainScopeCounts(chainsBeforeStatus),
+    [chainsBeforeStatus],
+  )
   const segments = React.useMemo(
-    () => railSegments(facets.scope, chainCounts, searched.length, true),
-    [facets.scope, chainCounts, searched.length],
+    () => railSegments(facets.scope, chainCounts, chainsBeforeStatus.length, true),
+    [facets.scope, chainCounts, chainsBeforeStatus.length],
   )
 
   const facetKeys = filterFacets({
@@ -848,23 +921,22 @@ export function ActivitySidebar({
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-        {(lens === "workflows" ? workflowChains.length : scopedChains.length) === 0 ? (
+        {lensCounts[lens] === 0 ? (
+          // Emptiness is measured on THE LENS THAT IS OPEN, not on the chain
+          // list behind it. Measuring the chains meant an Issues lens with no
+          // issue-touching chain fell through to the list branch and rendered a
+          // section header reading "ISSUES TOUCHED 0" with nothing under it and
+          // no sentence saying why — a bare zero over a blank column, which is
+          // the exact wall of zeros this rail was rebuilt to delete.
           <p className="px-3 py-2 text-[11px] leading-snug text-muted-foreground-soft">
-            {lens === "workflows" && bareRuns > 0
-              ? // The third emptiness, and the one a reader would otherwise
-                // read as a broken page: things DID run, none of them composed
-                // anything. Naming where they are is the whole point.
-                `Nothing composed a process in this window. ${bareRuns} ${
-                  bareRuns === 1 ? "run" : "runs"
-                } happened on their own — they are under Routines.`
-              : chains.length > 0
-              ? // Told apart from an empty workspace, because the two need
-                // opposite actions: one is "widen the question", the other is
-                // "nothing has run here yet".
-                "Nothing in this window matches. Clear the search, or pick another status."
-              : chainsHaveUnrecorded
-                ? "No workflows recorded yet. Runs from before chain recording cannot be grouped — the link was never written."
-                : "No workflows yet. One appears the first time something causes something else."}
+            {emptyLensCopy({
+              lens,
+              bareRuns,
+              loadedChainCount,
+              narrowedAway: loadedChainCount > 0 && chainsBeforeStatus.length === 0,
+              scopedAway: chainsBeforeStatus.length > 0 && scopedChains.length === 0,
+              chainsHaveUnrecorded,
+            })}
           </p>
         ) : lens === "workflows" ? (
           // Radix needs a provider in scope or every TooltipTrigger renders a
@@ -924,7 +996,14 @@ export function ActivitySidebar({
             {lensAgents.map((a) => (
               <SidebarRow
                 key={a.id}
-                selected={focus?.kind === ("agent" as never) && focus.id === a.id}
+                // No `selected` here, and that is now stated rather than faked.
+                // This read `focus?.kind === ("agent" as never)`, which the cast
+                // made compile and which is false for every value focus can
+                // hold — EntityFocus knows issue, routine and crew. An agent row
+                // opens a STOP on the path, not a focus, so the rail has nothing
+                // to highlight from; the trail above the column is what says
+                // where the reader is. The cast is gone because its only effect
+                // was to hide that from the type checker.
                 onSelect={() => onOpenEntity("agent", a.id, a.name || a.slug || a.id)}
               >
                 <AgentAvatar seed={a.id} alt="" className="h-4 w-4 shrink-0 rounded-full" />
@@ -968,6 +1047,20 @@ export function ActivitySidebar({
           <p className="px-3 pb-1 pt-1.5 text-[10.5px] leading-snug text-muted-foreground-soft">
             {bareRuns} {bareRuns === 1 ? "run" : "runs"} composed nothing and {bareRuns === 1 ? "is" : "are"}{" "}
             listed under Routines.
+          </p>
+        )}
+
+        {/* The edge of what this column can see, stated where the numbers are.
+            Every count above — four lens tabs, four status segments — is derived
+            from ONE PAGE of the index, and without this line "Agents 4" over a
+            workspace with a thousand workflows reads as a fact about the
+            workspace while being a fact about the newest {loadedChainCount}. The
+            server has always sent has_more; nothing read it until the counts
+            started depending on it. */}
+        {chainsHaveMore && loadedChainCount > 0 && (
+          <p className="px-3 pb-1 pt-1.5 text-[10.5px] leading-snug text-muted-foreground-soft">
+            Newest {loadedChainCount} workflows. Every count on this page describes these, not the
+            whole workspace.
           </p>
         )}
 

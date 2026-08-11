@@ -17,7 +17,14 @@
 //     human reads, "3 tickets classified" versus "no tickets" is the difference
 //     they came for;
 //   · an hour header that summarises, so a quiet hour is skipped rather than
-//     read.
+//     read — carrying its DATE only when the page holds more than one, because
+//     a daily cron's headers all read "09:00" and a per-minute routine's are
+//     all today.
+//
+// Every count on this page comes from lib/run-digest's predicates rather than
+// from a status string matched here. The strip and the hour headers report the
+// same facts a few pixels apart, and the moment each derives its own the two
+// disagree in public.
 //
 // No new endpoint. GET .../pipelines/{slug}/run-records has carried `output`
 // since v83; a summary column would be a second place for the same fact to be
@@ -31,11 +38,18 @@ import { Appear, StatStrip } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
+import { isActiveRunStatus, usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { routineHref } from "@/lib/routine-href"
 import { formatDurationMs } from "@/lib/activity-stream"
-import { groupRunsByHour, medianRunDuration, runHeadline, type DigestRun } from "@/lib/run-digest"
+import {
+  groupRunsByHour,
+  isFailedRunStatus,
+  medianRunDuration,
+  runHeadline,
+  slowestRunDuration,
+  type DigestRun,
+} from "@/lib/run-digest"
 import type { SidebarRoutine } from "./activity-sidebar"
 
 /** Tone token per headline tone — the four the rest of the page already reads. */
@@ -86,10 +100,37 @@ export function RoutineRunsPage({
   const median = React.useMemo(() => medianRunDuration(runs), [runs])
   const buckets = React.useMemo(() => groupRunsByHour(runs), [runs])
 
-  const failed = runs.filter((r) => r.status === "failed").length
-  const ok = runs.length - failed
-  const slowest = runs.reduce((m, r) => Math.max(m, r.duration_ms), 0)
-  const newest = runs.find((r) => !Number.isNaN(Date.parse(r.started_at)))
+  // The SAME predicate the hour headers count with. Each side owned its own
+  // idea of the word before this — the header folded cancelled and interrupted
+  // in, the strip matched "failed" alone — so one completed run and one
+  // cancelled one rendered "2 runs · 1 failed" directly above "Failed 0". Two
+  // meanings of one word, six pixels apart. lib/run-digest owns the vocabulary
+  // and states there why this page's "failed" is wider than the one a chain row
+  // reports.
+  const failed = runs.filter((r) => isFailedRunStatus(r.status)).length
+  // Pass rate over the runs that reached a VERDICT. Counting the whole list
+  // makes a page of thirty queued runs read "Pass rate 100%", which is a claim
+  // about work that has not happened; the rate then falls as reality arrives.
+  // isActiveRunStatus is the hook's, mirroring the backend's in-flight set —
+  // the same set the digest calls "running" and the one the server scopes
+  // "active" to.
+  const settled = runs.filter((r) => !isActiveRunStatus(r.status)).length
+  const passed = settled - failed
+  // Finished runs only, for the reason medianRunDuration gives about the
+  // median: a live run's duration_ms is a partial value rewritten at every step
+  // boundary, so a max over it reports how far a run has GOT as how long it
+  // took, and the number shrinks on reload. Failures stay in — see the
+  // function's comment.
+  const slowest = slowestRunDuration(runs)
+  // The latest stamp, found rather than assumed. The endpoint sorts newest
+  // first today, but "the first element" is an assertion about somebody else's
+  // ORDER BY that this page cannot see change, and the fallback when it does is
+  // a "Newest" cell quietly showing the oldest run.
+  const newest = runs.reduce<DigestRun | undefined>((best, r) => {
+    const t = Date.parse(r.started_at)
+    if (Number.isNaN(t)) return best
+    return best === undefined || t > Date.parse(best.started_at) ? r : best
+  }, undefined)
 
   return (
     <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
@@ -132,8 +173,8 @@ export function RoutineRunsPage({
             { label: "Runs", value: String(runs.length) },
             {
               label: "Pass rate",
-              value: runs.length > 0 ? `${Math.round((ok / runs.length) * 100)}%` : "—",
-              tone: runs.length === 0 ? "default" : failed > 0 ? "warn" : "success",
+              value: settled > 0 ? `${Math.round((passed / settled) * 100)}%` : "—",
+              tone: settled === 0 ? "default" : failed > 0 ? "warn" : "success",
             },
             {
               // The MEDIAN, not the mean: one 40-second outlier among thirty
@@ -144,9 +185,9 @@ export function RoutineRunsPage({
             },
             {
               label: "Slowest",
-              value: slowest > 0 ? formatDurationMs(slowest) : "—",
+              value: slowest != null ? formatDurationMs(slowest) : "—",
               mono: true,
-              tone: slowest > 0 && median != null && slowest > median * 2 ? "warn" : "default",
+              tone: slowest != null && median != null && slowest > median * 2 ? "warn" : "default",
             },
             {
               label: "Newest",
@@ -202,12 +243,27 @@ export function RoutineRunsPage({
 
           {buckets.length > 0 && (
             <div className="flex flex-col gap-0.5">
+              {/* Keyed on the bucket's own identity, never on its label: a
+                  routine on a daily 09:00 cron labels every one of its hours
+                  "09:00", and React given that key sees one hour repeated
+                  rather than one per day. */}
               {buckets.map((b) => (
-                <React.Fragment key={b.label}>
+                <React.Fragment key={b.key}>
                   {/* The header is what makes thirty rows skippable: a reader
                       passes "12 runs · all ok" without reading twelve rows to
                       learn it, and stops at the one that says "2 failed". */}
                   <div className="mt-2 flex items-center gap-2 px-1.5 pb-1 pt-1 first:mt-0">
+                    {/* The date leads when there is more than one — it is the
+                        coarser unit and, on a daily cron, the only thing that
+                        differs between two headers. It is absent on a page of
+                        one day, so the common case stays as bare as it was.
+                        Carried in its own element rather than inside the label
+                        so it can read at the reader's weight, not the clock's. */}
+                    {b.day && (
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {b.day}
+                      </span>
+                    )}
                     <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground-soft">
                       {b.label}
                     </span>
