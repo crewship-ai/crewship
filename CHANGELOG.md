@@ -86,6 +86,131 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   The setup guide also claimed the SDK appends `/v1/traces` to a project-scoped
   prefix such as `/api/public/otel`. It never did, in any version — if you
   configured a bare prefix, set the full URL your backend documents.
+- **WAL checkpointing moved off the request path.** Every commit appends
+  frames to the `-wal` sidecar, and SQLite folds them back inside whichever
+  write transaction happens to cross the threshold — so the cost landed on a
+  random agent. The daemon now disables the inline autocheckpoint
+  (`database.WithManagedWAL`) and runs a dedicated checkpointer that does the
+  work on a goroutine nobody is waiting on. At 100 concurrent agents, three
+  runs per policy, p99 write latency went **26.1 ms → 8.9 ms** and the WAL
+  ended at 0 instead of 13.6 MB.
+
+  Two findings are recorded in `internal/database/checkpoint.go` because both
+  contradict the obvious guess: a `PASSIVE`-only checkpointer is **worse than
+  doing nothing** (it folds frames back but never resets the `-wal` file, which
+  grew to 98 MB), and the win comes from *who pays* for the checkpoint, not
+  from checkpointing more often. Only the long-lived daemon disables
+  autocheckpoint; short-lived CLI commands keep SQLite's built-in behaviour,
+  and the pairing is enforced by a test.
+
+- **The port-exposure purge no longer stalls every writer.** The sweeper runs
+  every 30 s and issued one unbounded `UPDATE`, so its cost scaled with the
+  backlog: measured at 41 ms of held write lock for 5,000 rows and **486 ms
+  for 50,000**, with a concurrent live write blocked for 449 ms. That is the
+  same sweeper whose lock hold took logins down on 2026-05-25 and is why
+  `busy_timeout` was raised to 30 s. It now drains in bounded batches,
+  releasing the lock between each, and logs the remaining backlog if it ever
+  stops at its iteration cap.
+
+  Bounding is right here because the job is *frequent* and its backlog grows.
+  It is the wrong move for a large infrequent job: chunking a daily
+  20,000-row sweep measured **worse** (150 ms → 405 ms total, live-writer p95
+  4.1 ms → 21.5 ms), because re-acquiring the write lock costs more than the
+  shorter holds save. Both numbers are in the code comment so the pattern is
+  not copied blindly.
+
+- **The two audit tables that grew forever now have retention windows
+  (#1887).** `credential_audit` and `audit_logs` were the only tables in the
+  schema with no pruning at all — `pipeline_runs`, `inbox_items` and
+  `journal_entries` are all swept, these two never were. `credential_audit`
+  gains a row on every credential read by every agent; on a dev instance with
+  almost no real use it was already the second-largest table in the database.
+
+  The defaults differ deliberately. `credential_audit` keeps **90 days**,
+  matching the pipeline-run window — it is operational telemetry, and the
+  answer an operator actually reads (`last_used_at`, the `last_used_ips` ring)
+  lives on `credentials` and is untouched. `audit_logs` keeps **everything**,
+  because it is the compliance trail and `docs/security/gdpr.mdx` says audit
+  records have to survive the operator's own retention obligations. Crewship is
+  self-hosted: that duty is theirs to know, so the mechanism ships and the
+  decision does not. Both are overridable per workspace, where `NULL` means
+  "use the default" and `0` means an explicit "keep forever" — a distinction
+  `run_retention_days` does not make, because nobody has a legal duty to retain
+  a pipeline run.
+
+  Upgrading never deletes anything on its own: the migration pins every
+  workspace that already existed to an explicit "keep forever", so the 90-day
+  default only ever applies to workspaces created after it. Otherwise the first
+  restart after the upgrade would have swept a year of credential history away
+  before the API that sets the override was even listening.
+
+  The sweep deletes in bounded batches so no single statement can stall every
+  writer, and says how much backlog is left if it stops at its cap. Since
+  `audit_logs` is unlimited by default, it also warns when a workspace has no
+  window and the table passes a million rows — an operator should hear about
+  that from a log line, not from a full disk.
+
+- **The credential audit view stops sorting the whole table to answer one
+  page (#1889).** `credential_audit` had no `workspace_id`, so scoping it to a
+  tenant meant joining through `credentials` — a shape no index could serve.
+  SQLite either walked the table in time order probing `credentials` for every
+  row, or gathered the entire matching set and built a temporary B-tree to sort
+  it before `LIMIT` threw almost all of it away; the page's `COUNT(*)` then ran
+  the same join again. That cost grows with the table, and this is the one
+  audit table with no retention sweep at all.
+
+  The column is now carried directly, with
+  `(workspace_id, occurred_at DESC)` behind it, matching how `audit_logs` and
+  `keeper_request_events` have always worked. The single writer derives the
+  value from the credential inside the same `INSERT`, so it cannot disagree
+  with the row it describes and no caller has to know the workspace to write an
+  audit row. Existing rows are backfilled. No behaviour change — the same rows
+  come back.
+
+- **Sixteen foreign keys indexed, thirty-two deliberately not (#1890).** With
+  foreign keys enforced, deleting a parent row scans every child table whose
+  referencing column does not lead an index — once per deleted row, holding the
+  write lock. 48 columns were in that state. The ones now indexed are those
+  where the parent is genuinely hard-deleted *and* the child table grows;
+  `DELETE FROM missions WHERE crew_id = ?` drove three of them on its own,
+  because it deletes many missions in one statement and re-checks every child
+  of `missions` for each.
+
+  The 32 skipped are the interesting half. Nine reference `users`, and nothing
+  in the tree hard-deletes a user row — so an index there is write cost with no
+  delete to accelerate. The rest are settings and small config tables where a
+  scan costs nothing. Both exclusions are pinned by tests, so they stay
+  decisions rather than oversights, and a ratchet makes the remaining count
+  visible if a new table adds foreign keys nobody sized.
+
+- **A task whose assignment link failed is now FAILED, not stranded (#1892).**
+  `scheduleTask` inserted the assignment and then linked it to the task in two
+  separate statements. A failure between them logged a warning and reported
+  success, leaving the task `IN_PROGRESS` with no assignment — a state
+  `resolveReadyFromTasks` never re-picks, so the work sat there forever with no
+  operator-visible symptom. Both writes are now one transaction, and a link
+  failure surfaces as a failed task. The dependent-task cascades
+  (`unblockDependentTasks`, `failDependentTasksRecurse`) also stopped issuing
+  one standalone `UPDATE` per row: each level is now a single batched
+  transaction, so a mid-cascade failure unblocks nobody instead of half the
+  graph.
+
+- **`presence.Track` no longer fabricates a transition.** The prior status was
+  read and the new one written in two statements, so a losing writer could emit
+  `online → busy` for a transition that had already happened, or report a
+  `prev` that was never the state it overwrote. The journal is consumed as a
+  transition log and is hash-chained, so a wrong `prev` is worse than a
+  redundant row. Read and write now share one transaction; the journal emit
+  stays outside it.
+
+- **Eleven redundant indexes dropped
+  (`20260810120000_drop_redundant_indexes`).** Each was a leading-prefix
+  duplicate of a longer index on the same table, so the planner could never
+  choose it while every write still maintained it — on `missions`, `chats`,
+  `assignments`, `credentials`, `journal_entries` and others.
+  `idx_journal_trace_id` and `idx_journal_trace` turned out to be the same
+  index under two names. A schema invariant test now fails the build if the
+  shape is reintroduced.
 
 - **One attachments table, and `chat_attachments` is gone (#1768).** The schema
   carried two attachment tables that no product code had ever read or written —
@@ -105,6 +230,108 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   guards.
 
 ### Security
+
+- **Capability tokens are hashed at rest (#1888).** `port_exposures.token` and
+  `pipeline_webhooks.token` were stored in the clear and looked up by equality.
+  Neither `/exposed/{token}/…` nor `POST /api/v1/webhooks/{token}` has any
+  authentication in front of it — by design, the token *is* the authorization
+  — so anyone who could read the database file walked away with every live
+  exposure URL and every configured webhook on the instance. Both columns now
+  carry a SHA-256 digest and are resolved by digest, the way `cli_tokens` has
+  worked since Patch J.
+
+  **Existing tokens keep working.** The migration hashes the cleartext already
+  in the row rather than rotating it: invalidating would have broken every
+  published exposure URL and every already-configured sender, on every
+  instance, and nothing suggests the cleartext leaked. What changes is that the
+  cleartext is then overwritten — neither column can be dropped (both are
+  `NOT NULL UNIQUE`, which SQLite's `DROP COLUMN` refuses, and one is still
+  named by the create path) so each holds `redacted:<row id>` afterwards.
+
+  **The digest is unkeyed SHA-256** (hex, behind an `sh1:` scheme prefix), not
+  an HMAC. A key protects a digest whose input space is small enough to
+  enumerate offline; both of these tokens are 32 bytes of `crypto/rand`, so the
+  preimage search is 2^256 wide either way and a key buys nothing. It would
+  have cost a great deal: an earlier revision of this work keyed the digest off
+  `ENCRYPTION_KEY`, and the documented master-key rotation
+  (`CREWSHIP_ENCRYPTION_KEY_VERSION` + `ENCRYPTION_KEY_V2` +
+  `POST /admin/reencrypt`) **retires that variable as its final step** — after
+  which every presented token would hash under a different scheme than every
+  stored digest, with the cleartext already overwritten and nothing to recover.
+  The keyed `hk1:` scheme never shipped and is not supported; a **dev instance**
+  that ran the earlier revision must re-create those webhooks and re-request
+  those exposures.
+
+  A row the backfill cannot hash is no longer stranded either. The backfill
+  continues past a failed `UPDATE` (SQLite has one writer; a moment of
+  contention used to abort the loop and 404 every remaining webhook until the
+  next restart) and, while any row still holds cleartext, the webhook lookup
+  falls back to it — bounded to rows whose digest is missing, and re-hashing
+  each one it resolves. On the exposure side, an `ACTIVE` row whose hashing
+  failed is hashed at boot and keeps serving; one that nothing can resolve is
+  flipped to `EXPIRED` instead of being reported live with a future expiry.
+  Revoking an exposure now drops it from the registry by row id when the row
+  carries no digest — the previous fallback read a column that always holds
+  `redacted:<id>`, so a revoke could answer `200` while the capability URL kept
+  reverse-proxying into the crew container until the process restarted.
+
+  One behaviour change follows from it: a webhook's token is now **shown once**,
+  in the create response. `GET`/`PATCH` and the list endpoint no longer return
+  it, because it is no longer recoverable. A webhook whose token was lost has to
+  be re-created, and `crewship routine webhooks url <id>` now says so and exits
+  non-zero instead of printing `…/api/v1/webhooks/` with nothing after the
+  slash.
+
+  For port exposures the cleartext never reaches disk at all: the create path
+  writes the spent marker and the digest directly, rather than inserting the
+  live token and redacting it a moment later. That window was short — one
+  request — but a crash, a WAL checkpoint or a backup taken inside it captures
+  a working capability URL, which is the whole exposure being closed. If the
+  process dies between the insert and the registry write, the row is left
+  resolving for nobody, which is the right direction to fail.
+
+  `pipeline_waitpoints.token` is **not** covered. It is the same kind of
+  secret, but it is also that table's primary key, the handle
+  `inbox_items.source_id` and a WAITING run's `waitpoint_token` carry, and the
+  value `GET …/pipelines/waitpoints` reads back out of the column to rebuild
+  the public callback URL. It is a retrievable shared secret by contract rather
+  than a show-once credential, so hashing it means redesigning that contract
+  first; tracked separately.
+
+- **`workspace_members.role` is constrained to the roles that exist (#1893).**
+  `crew_members.role` has carried a `CHECK` since v99; the column deciding what
+  a member can do across a whole *workspace* carried nothing and would accept
+  any string. The API validates today, so this is defense in depth — but the
+  read tier is where it would have mattered: `canRole`'s write tiers switch
+  over the known roles and deny anything else, while its `read` tier accepts
+  any non-empty string. Write fails closed, read fails open, and only the
+  schema can refuse the value independently of whichever write path appears
+  next.
+
+  Enforced with `BEFORE INSERT` / `BEFORE UPDATE` triggers rather than a
+  `CHECK`, because SQLite cannot add one without a full table rebuild — not a
+  trade worth making on the table that decides workspace ownership. The
+  difference is deliberate: a stored legacy row keeps working and is refused
+  only when something tries to write it back, where a rebuilt `CHECK` would
+  have refused to apply at all and failed the boot.
+
+- **The escalation wait endpoint now scopes to the caller's token binding.**
+  `GET /api/v1/internal/escalations/{id}/wait` loaded the escalation by id
+  alone, with no workspace or crew predicate — and when the escalation's type
+  is `CREDENTIAL`, that handler **decrypts the resolution and returns the
+  secret in the clear**. A crew-bound (`crwv1`) sidecar token could therefore
+  wait on another crew's escalation, in another workspace, and be handed its
+  plaintext the moment a human approved it. Both halves leaked: an
+  already-`RESOLVED` foreign escalation returned immediately, and a foreign
+  `PENDING` one long-polled and was delivered on resolve.
+
+  The lookup now carries the predicate its sibling `CreateEscalation` has
+  used since PR-F24: crew-bound callers match their own `crew_id` exactly (a
+  sibling crew in the same workspace is as foreign as another tenant, which
+  is what `crwv1` tokens exist to enforce), workspace-bound callers match
+  their workspace, and the unbound master token stays unrestricted. A refusal
+  is the same `404` as an unknown id rather than a `403`, so the endpoint is
+  not an existence oracle.
 
 - **The Docker API surface the server can reach is now specified, published
   and gated (#1826).** The server talks to Docker directly, which is

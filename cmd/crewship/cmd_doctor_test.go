@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -165,20 +166,31 @@ func TestCheckDsnReachability(t *testing.T) {
 	})
 
 	t.Run("opted in + DSN unreachable → WARN", func(t *testing.T) {
-		// The check dials host:443; we point it at a DNS name guaranteed
-		// not to resolve so the dialer fails fast. WARN (not FAIL) because
-		// Sentry being unreachable is not a Crewship health signal —
-		// it's an external service outage. CodeRabbit flagged the prior
-		// version: subtest title said "reachable → PASS" but the body
-		// asserted the unreachable path. Renamed to match what it
-		// actually tests, and removed the leftover net.Listen setup that
-		// the comment explained but the code never used.
+		// The check dials host:443 through the package-level dialTCP hook
+		// (cmd_doctor.go), so this subtest never touches the real network
+		// or DNS resolver. It used to pick a hostname assumed not to
+		// resolve ("*.unreachable.invalid"), but a host with a wildcard
+		// search domain (e.g. crewship-dev's *.unifylab.cz) resolves every
+		// name and something answers on :443 — a latent environment
+		// dependency, not a bug in checkDsnReachability. Stubbing the dial
+		// function makes the WARN branch deterministic regardless of the
+		// resolver or of what happens to be listening on the network.
+		orig := dialTCP
+		stubErr := errors.New("stub: connection refused")
+		dialTCP = func(ctx context.Context, network, address string) (net.Conn, error) {
+			return nil, stubErr
+		}
+		t.Cleanup(func() { dialTCP = orig })
+
 		if _, _, err := crashreport.SetOptIn(ctx, db.DB, true); err != nil {
 			t.Fatalf("SetOptIn: %v", err)
 		}
-		got := checkDsnReachability(ctx, db.DB, "https://k@127.0.0.1.unreachable.invalid/1")
+		got := checkDsnReachability(ctx, db.DB, "https://k@sentry.example.com/1")
 		if got.status != "WARN" {
 			t.Errorf("status = %q, want WARN for unreachable host; detail=%q", got.status, got.detail)
+		}
+		if !strings.Contains(got.detail, stubErr.Error()) {
+			t.Errorf("expected stubbed dial error in detail, got %q", got.detail)
 		}
 	})
 

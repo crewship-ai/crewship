@@ -67,8 +67,13 @@ func coreResourceSchemas() map[string]any {
 		"currentUserRole":              nullableString(),
 		"currentUserCapabilities":      arrayOf(stringSchema()),
 		"allow_privileged_credentials": boolSchema(),
-		"run_retention_days":           nullableInt(), "_count": ref("WorkspaceCounts"),
-		"_count_crews": intSchema(), "_count_agents": intSchema(), "_count_members": intSchema(),
+		"run_retention_days":           nullableInt(),
+		// #1887 — audit retention windows. Nullable because null ("use the
+		// product default") and 0 ("keep forever") are different answers.
+		"credential_audit_retention_days": nullableInt(),
+		"audit_log_retention_days":        nullableInt(),
+		"_count":                          ref("WorkspaceCounts"),
+		"_count_crews":                    intSchema(), "_count_agents": intSchema(), "_count_members": intSchema(),
 	}, "id", "name", "slug", "created_at", "updated_at", "allow_privileged_credentials")
 
 	crew := object(map[string]any{
@@ -123,6 +128,7 @@ func coreResourceSchemas() map[string]any {
 		"WorkspaceUpdateRequest": requestObject(map[string]any{
 			"name": nullableString(), "slug": nullableString(), "preferred_language": nullableString(),
 			"allow_privileged_credentials": nullableBool(), "run_retention_days": nullableInt(),
+			"credential_audit_retention_days": nullableInt(), "audit_log_retention_days": nullableInt(),
 		}),
 		"CrewCreateRequest": requestObject(map[string]any{
 			"name": stringSchema(), "slug": stringSchema(), "description": nullableString(), "color": nullableString(), "icon": nullableString(),

@@ -73,9 +73,13 @@ func TestAuditSources_CredentialStreamIsReadable(t *testing.T) {
 		wsID, userID); err != nil {
 		t.Fatalf("seed credential: %v", err)
 	}
+	// workspace_id is named explicitly because the production writer names it
+	// (RecordCredentialEventTx derives it from the credential in the same
+	// INSERT). A fixture that omits it writes a row no workspace-scoped read
+	// can see, which is a state the running system never produces.
 	if _, err := db.Exec(`
-		INSERT INTO credential_audit (id, credential_id, event_type, occurred_at)
-		VALUES (?, 'cred-src', 'revealed', datetime('now'))`, generateCUID()); err != nil {
+		INSERT INTO credential_audit (id, credential_id, workspace_id, event_type, occurred_at)
+		VALUES (?, 'cred-src', ?, 'revealed', datetime('now'))`, generateCUID(), wsID); err != nil {
 		t.Fatalf("seed credential audit: %v", err)
 	}
 
@@ -137,8 +141,8 @@ func TestAuditSources_HonourTheDateRange(t *testing.T) {
 				t.Fatalf("seed credential: %v", err)
 			}
 			if _, err := db.Exec(`
-				INSERT INTO credential_audit (id, credential_id, event_type, occurred_at)
-				VALUES (?, ?, 'revealed', ?)`, generateCUID(), credID, when); err != nil {
+				INSERT INTO credential_audit (id, credential_id, workspace_id, event_type, occurred_at)
+				VALUES (?, ?, ?, 'revealed', ?)`, generateCUID(), credID, wsID, when); err != nil {
 				t.Fatalf("seed credential audit: %v", err)
 			}
 		}},

@@ -15,12 +15,51 @@ import (
 type DB struct {
 	*sql.DB
 	path string
+	// managedWAL records that this handle was opened with WithManagedWAL,
+	// i.e. SQLite's inline autocheckpoint is OFF and a StartCheckpointer
+	// goroutine is responsible for folding the WAL back. Read by
+	// ManagedWAL() so the boot-wiring test can assert the pairing.
+	managedWAL bool
 }
+
+// Option customises Open. The zero set of options is the safe standalone
+// configuration every short-lived caller (CLI commands, migrations, tests)
+// should use.
+type Option func(*openOptions)
+
+type openOptions struct {
+	managedWAL bool
+}
+
+// WithManagedWAL disables SQLite's inline autocheckpoint
+// (`wal_autocheckpoint=0`) so that no request-serving write transaction
+// ever pays to fold the WAL back into the database.
+//
+// This is ONLY safe for a process that also runs StartCheckpointer: with
+// autocheckpoint off, that goroutine becomes the only thing reclaiming the
+// WAL, and without it the -wal file grows until the disk fills. Long-lived
+// daemon only — see the measurements in checkpoint.go for why it is worth
+// the coupling (p99 write latency at 100 concurrent agents: 26.1ms → 8.9ms).
+//
+// The pragma has to be set here rather than by the checkpointer itself
+// because `wal_autocheckpoint` is per-connection state and the pool holds
+// several connections; only the DSN reaches all of them.
+func WithManagedWAL() Option {
+	return func(o *openOptions) { o.managedWAL = true }
+}
+
+// ManagedWAL reports whether this handle was opened with WithManagedWAL.
+func (d *DB) ManagedWAL() bool { return d.managedWAL }
 
 // Open parses the given database URL (e.g. "file:/path/to/db"), creates the
 // parent directory if needed, and opens an SQLite connection with WAL mode,
 // foreign keys, and a 5-second busy timeout.
-func Open(databaseURL string) (*DB, error) {
+func Open(databaseURL string, opts ...Option) (*DB, error) {
+	var o openOptions
+	for _, fn := range opts {
+		fn(&o)
+	}
+
 	path, err := parseDSN(databaseURL)
 	if err != nil {
 		return nil, err
@@ -79,6 +118,12 @@ func Open(databaseURL string) (*DB, error) {
 		"&_pragma=temp_store(MEMORY)" +
 		"&_pragma=mmap_size(268435456)" +
 		"&_txlock=immediate"
+	if o.managedWAL {
+		// See WithManagedWAL and the measurements at the top of
+		// checkpoint.go. Must be in the DSN: wal_autocheckpoint is
+		// per-connection and the pool opens up to five of them.
+		dsn += "&_pragma=wal_autocheckpoint(0)"
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -173,7 +218,7 @@ func Open(databaseURL string) (*DB, error) {
 		_ = os.Chmod(filePath+"-shm", 0600)
 	}
 
-	return &DB{DB: db, path: path}, nil
+	return &DB{DB: db, path: path, managedWAL: o.managedWAL}, nil
 }
 
 // Path returns the resolved filesystem path of the SQLite database file.

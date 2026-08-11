@@ -289,6 +289,20 @@ var routineWebhooksUrlCmd = &cobra.Command{
 		}
 		for _, w := range rows {
 			if w.ID == args[0] {
+				if w.Token == "" {
+					// #1888: the token is hashed at rest, so list/get
+					// return an empty one and there is no URL to print.
+					// This used to print "…/api/v1/webhooks/" with
+					// nothing after the slash and exit 0 — the user
+					// pasted a truncated URL into their sender config
+					// and it 404'd with no clue why.
+					return fmt.Errorf(
+						"webhook %s exists but its token is not retrievable: tokens are stored hashed and shown only once, in the create response.\n"+
+							"Re-create the webhook to get a new URL (senders must be updated):\n"+
+							"  crewship routine webhooks delete %s --yes\n"+
+							"  crewship routine webhooks create --slug %s",
+						args[0], args[0], routineSlugOrPlaceholder(w))
+				}
 				baseURL, _ := cmd.Flags().GetString("base-url")
 				if baseURL == "" {
 					baseURL = clientBaseURL(client)
@@ -335,6 +349,16 @@ var routineWebhooksDeleteCmd = &cobra.Command{
 		fmt.Printf("Webhook %s deleted.\n", args[0])
 		return nil
 	},
+}
+
+// routineSlugOrPlaceholder names the routine to re-create a webhook against.
+// The list response usually carries the slug; when it does not, the message
+// still has to be copy-pasteable, so it says what to fill in.
+func routineSlugOrPlaceholder(w webhookRow) string {
+	if w.TargetPipelineSlug != "" {
+		return w.TargetPipelineSlug
+	}
+	return "<routine-slug>"
 }
 
 // clientBaseURL pulls the API base URL from the cli.Client config so

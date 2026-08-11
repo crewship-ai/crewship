@@ -323,7 +323,11 @@ func TestRevoke_RoleCheckAndStatusTransition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.registry.Add(&ExposeEntry{Token: "tok1", ContainerIP: "10.0.0.2", ContainerPort: 8000,
+	// ID is set because every production writer sets it (the create path and
+	// LoadFromDB both do), and revoke now uses it: the row's cleartext is
+	// `redacted:<id>` post-#1888, so the id is the only handle both the row
+	// and the in-memory entry are guaranteed to share.
+	h.registry.Add(&ExposeEntry{ID: "e1", Token: "tok1", ContainerIP: "10.0.0.2", ContainerPort: 8000,
 		ExpiresAt: time.Now().Add(time.Hour)})
 
 	// MEMBER (read-only) cannot revoke.

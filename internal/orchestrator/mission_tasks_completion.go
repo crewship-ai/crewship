@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -295,21 +296,78 @@ func (e *MissionEngine) failDependentTasksRecurse(ctx context.Context, missionID
 	ms := e.active[missionID]
 	e.mu.Unlock()
 
+	batch := make([]string, 0, len(toFail))
 	for _, id := range toFail {
 		if visited[id] {
 			continue
 		}
-		if _, err := e.db.ExecContext(ctx,
-			`UPDATE mission_tasks SET status = 'FAILED', error_message = ?, updated_at = ?, completed_at = ? WHERE id = ?`,
-			reason, now, now, id); err != nil {
-			e.logger.Error("cascade fail task", "task_id", id, "error", err)
-			continue
-		}
+		batch = append(batch, id)
+	}
+	if len(batch) == 0 {
+		return
+	}
+
+	// One transaction per cascade level instead of one per row: the rows all
+	// take the identical FAILED stamp, and SQLite's single writer lock was
+	// being acquired N times to write it. All-or-nothing is also the honest
+	// semantics — a half-failed dependency frontier leaves tasks BLOCKED on
+	// something that will never complete.
+	if err := e.updateTasksBatch(ctx,
+		`status = 'FAILED', error_message = ?, updated_at = ?, completed_at = ?`,
+		[]any{reason, now, now}, batch); err != nil {
+		e.logger.Error("cascade fail tasks", "mission_id", missionID, "count", len(batch), "error", err)
+		return
+	}
+
+	// Broadcasts and the next level go outside the transaction — the level is
+	// committed before recursing, so the recursive BLOCKED query sees it.
+	for _, id := range batch {
 		if ms != nil {
 			e.broadcastTaskStatus(ms, id, "FAILED")
 		}
 		e.failDependentTasksRecurse(ctx, missionID, id, reason, visited)
 	}
+}
+
+// taskBatchChunk caps how many ids go into a single `id IN (...)` list.
+// SQLite's default host-parameter ceiling is 999 and the SET clause spends a
+// few of those slots; 400 is the same conservative chunk
+// internal/journal/verify.go settled on for exactly this reason.
+const taskBatchChunk = 400
+
+// updateTasksBatch applies one SET clause to every id in ids inside a SINGLE
+// transaction, chunked at taskBatchChunk ids per statement.
+//
+// SQLite allows exactly one writer database-wide, so a loop of standalone
+// UPDATEs re-acquires that lock once per row and — worse — can stop halfway,
+// leaving the mission's dependency graph in a state no caller expects. The
+// callers here all stamp identical values on every row, so collapsing them
+// into one statement is behaviour-preserving.
+func (e *MissionEngine) updateTasksBatch(ctx context.Context, setClause string, setArgs []any, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return database.WithTx(ctx, e.db, func(tx *sql.Tx) error {
+		for start := 0; start < len(ids); start += taskBatchChunk {
+			end := start + taskBatchChunk
+			if end > len(ids) {
+				end = len(ids)
+			}
+			chunk := ids[start:end]
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+			args := make([]any, 0, len(setArgs)+len(chunk))
+			args = append(args, setArgs...)
+			for _, id := range chunk {
+				args = append(args, id)
+			}
+			if _, err := tx.ExecContext(ctx,
+				fmt.Sprintf(`UPDATE mission_tasks SET %s WHERE id IN (%s)`, setClause, placeholders),
+				args...); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // checkMissionCompletion checks if all tasks are in a terminal state
@@ -516,6 +574,7 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 	statusRows.Close()
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	ready := make([]string, 0, len(candidates))
 	for _, bt := range candidates {
 		allDone := true
 		for _, d := range bt.deps {
@@ -524,25 +583,36 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 				break
 			}
 		}
-
 		if allDone {
-			if _, err := e.db.ExecContext(ctx,
-				`UPDATE mission_tasks SET status = 'PENDING', updated_at = ? WHERE id = ?`,
-				now, bt.id); err != nil {
-				e.logger.Error("unblock task", "task_id", bt.id, "error", err)
-			}
-
-			e.mu.Lock()
-			ms := e.active[missionID]
-			e.mu.Unlock()
-			if ms != nil {
-				e.broadcastTaskStatus(ms, bt.id, "PENDING")
-				e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
-					Type:   "task_unblocked",
-					TaskID: bt.id,
-				})
-			}
+			ready = append(ready, bt.id)
 		}
+	}
+	if len(ready) == 0 {
+		return
+	}
+
+	// One transaction for the whole frontier: every row takes the identical
+	// PENDING stamp, and a per-row loop both re-took SQLite's single writer
+	// lock N times and could unblock half a frontier before failing.
+	if err := e.updateTasksBatch(ctx, `status = 'PENDING', updated_at = ?`, []any{now}, ready); err != nil {
+		e.logger.Error("unblock tasks", "mission_id", missionID, "count", len(ready), "error", err)
+		return
+	}
+
+	// Fan-out notification happens after the commit — never inside the write
+	// window.
+	e.mu.Lock()
+	ms := e.active[missionID]
+	e.mu.Unlock()
+	if ms == nil {
+		return
+	}
+	for _, id := range ready {
+		e.broadcastTaskStatus(ms, id, "PENDING")
+		e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
+			Type:   "task_unblocked",
+			TaskID: id,
+		})
 	}
 }
 

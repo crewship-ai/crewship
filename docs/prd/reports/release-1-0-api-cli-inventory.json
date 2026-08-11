@@ -46,6 +46,7 @@
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/param_inference_test.go",
         "internal/api/middleware_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
       "concrete_response_schema": true,
@@ -68,6 +69,7 @@
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/param_inference_test.go",
             "internal/api/middleware_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/unauth_reachability_test.go"
           ]
         }
@@ -2323,7 +2325,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_reencrypt_test.go",
-        "internal/api/admin_reencrypt_test.go"
+        "internal/api/admin_reencrypt_test.go",
+        "internal/pipeline/webhook_token_hash_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -2343,7 +2346,8 @@
           "source_file": "cmd/crewship/cmd_admin_reencrypt.go",
           "test_signals": [
             "cmd/crewship/cmd_admin_reencrypt_test.go",
-            "internal/api/admin_reencrypt_test.go"
+            "internal/api/admin_reencrypt_test.go",
+            "internal/pipeline/webhook_token_hash_test.go"
           ]
         }
       }
@@ -5298,6 +5302,7 @@
         "internal/api/auth_recovery_cov2_test.go",
         "internal/api/auth_recovery_cov_test.go",
         "internal/api/auth_recovery_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
       "concrete_response_schema": true,
@@ -5319,6 +5324,7 @@
             "internal/api/auth_recovery_cov2_test.go",
             "internal/api/auth_recovery_cov_test.go",
             "internal/api/auth_recovery_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/unauth_reachability_test.go"
           ]
         }
@@ -5345,6 +5351,7 @@
         "cmd/gen-openapi/schemas_final_admin_platform_test.go",
         "internal/api/google_disabled_test.go",
         "internal/api/openapi_google_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
       "concrete_response_schema": true,
@@ -5369,6 +5376,7 @@
             "cmd/gen-openapi/schemas_final_admin_platform_test.go",
             "internal/api/google_disabled_test.go",
             "internal/api/openapi_google_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/route_read_scope_invariant_test.go"
           ]
         }
@@ -5437,7 +5445,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_login_cov_test.go",
-        "internal/api/cli_pair_test.go"
+        "internal/api/cli_pair_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -5457,7 +5466,8 @@
           "source_file": "cmd/crewship/cmd_login.go",
           "test_signals": [
             "cmd/crewship/cmd_login_cov_test.go",
-            "internal/api/cli_pair_test.go"
+            "internal/api/cli_pair_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go"
           ]
         }
       }
@@ -5523,6 +5533,7 @@
         "internal/api/auth_recovery_cov_test.go",
         "internal/api/auth_recovery_sec_test.go",
         "internal/api/auth_recovery_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/provision_takeover_test.go"
       ],
       "concrete_response_schema": true,
@@ -5545,6 +5556,7 @@
             "internal/api/auth_recovery_cov_test.go",
             "internal/api/auth_recovery_sec_test.go",
             "internal/api/auth_recovery_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/provision_takeover_test.go"
           ]
         }
@@ -16201,8 +16213,8 @@
         "internal/api/oauth_flow_cov2_test.go",
         "internal/api/oauth_flow_cov_test.go",
         "internal/api/oauth_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/route_read_scope_invariant_test.go",
-        "internal/api/unauth_reachability_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -16227,8 +16239,8 @@
             "internal/api/oauth_flow_cov2_test.go",
             "internal/api/oauth_flow_cov_test.go",
             "internal/api/oauth_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/route_read_scope_invariant_test.go",
-            "internal/api/unauth_reachability_test.go",
             "…"
           ]
         }
@@ -18616,6 +18628,7 @@
         "cmd/crewship/cmd_seed_with_users_gate_test.go",
         "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
         "internal/api/openapi_conformance_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/setup_status_test.go",
         "internal/api/unauth_reachability_test.go"
@@ -18640,6 +18653,7 @@
             "cmd/crewship/cmd_seed_with_users_gate_test.go",
             "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
             "internal/api/openapi_conformance_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/route_read_scope_invariant_test.go",
             "internal/api/setup_status_test.go",
             "internal/api/unauth_reachability_test.go"
@@ -18659,6 +18673,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_setup_cov_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/system_telemetry_test.go",
         "internal/api/unauth_reachability_test.go"
@@ -18681,6 +18696,7 @@
           "source_file": "cmd/crewship/cmd_setup.go",
           "test_signals": [
             "cmd/crewship/cmd_setup_cov_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/route_read_scope_invariant_test.go",
             "internal/api/system_telemetry_test.go",
             "internal/api/unauth_reachability_test.go"
@@ -19663,11 +19679,13 @@
         "docs/api-reference/pipelines.mdx",
         "docs/api-reference/waitpoints.mdx",
         "docs/api-reference/workspaces.mdx",
+        "docs/guides/migrations.mdx",
         "docs/manifest/routine.md"
       ],
       "status": "documented_exact",
       "test_signals": [
-        "cmd/gen-openapi/schemas_final_21_generic_responses_test.go"
+        "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -19685,7 +19703,8 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
-            "cmd/gen-openapi/schemas_final_21_generic_responses_test.go"
+            "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go"
           ]
         }
       }
@@ -19705,7 +19724,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
-        "internal/api/openapi_conformance_test.go"
+        "internal/api/openapi_conformance_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -19724,7 +19744,8 @@
           "openapi_operation": true,
           "test_signals": [
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
-            "internal/api/openapi_conformance_test.go"
+            "internal/api/openapi_conformance_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go"
           ]
         }
       }
@@ -19741,6 +19762,7 @@
         "docs/api-reference/workspaces.mdx",
         "docs/cli/routine.mdx",
         "docs/cli/webhook.mdx",
+        "docs/guides/migrations.mdx",
         "docs/guides/routines.mdx"
       ],
       "resource_docs": [
@@ -19749,6 +19771,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_auth_integrations_credentials_notifications_users_webhooks_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/pipeline_webhooks_async_test.go"
       ],
       "concrete_response_schema": true,
@@ -19768,6 +19791,7 @@
           "openapi_operation": true,
           "test_signals": [
             "cmd/gen-openapi/schemas_final_auth_integrations_credentials_notifications_users_webhooks_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/pipeline_webhooks_async_test.go"
           ]
         }
@@ -41542,8 +41566,8 @@
         "cmd/crewship/cmd_mission_run_cov_test.go",
         "cmd/crewship/cmd_root_headless_test.go",
         "cmd/crewship/cmd_start_admission_test.go",
+        "cmd/crewship/cmd_start_checkpointer_test.go",
         "cmd/crewship/cmd_start_cov_test.go",
-        "cmd/crewship/cmd_start_provider_order_test.go",
         "…"
       ],
       "flags": [
@@ -43294,12 +43318,16 @@
       ],
       "flags": [
         "allow-privileged-credentials",
+        "audit-log-retention-days",
+        "credential-audit-retention-days",
         "language",
         "name",
         "slug"
       ],
       "documented_flags": [
         "allow-privileged-credentials",
+        "audit-log-retention-days",
+        "credential-audit-retention-days",
         "language",
         "name",
         "slug"
@@ -43590,6 +43618,7 @@
       "name": "CREWSHIP_ENCRYPTION_KEY_VERSION",
       "docs": [
         "docs/guides/credentials.mdx",
+        "docs/guides/migrations.mdx",
         "docs/security/encryption.mdx"
       ],
       "status": "documented"
@@ -44306,6 +44335,7 @@
         "docs/api-reference/integrations.mdx",
         "docs/cli/connector.mdx",
         "docs/cli/integration.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -44451,6 +44481,7 @@
     {
       "name": "CrewTemplate",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -44463,6 +44494,7 @@
     {
       "name": "FeatureFlag",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -44475,6 +44507,7 @@
       "docs": [
         "docs/api-reference/hooks.mdx",
         "docs/cli/hooks.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/harbormaster.mdx",
         "docs/guides/hooks.mdx",
@@ -44490,6 +44523,7 @@
     {
       "name": "InstanceSetting",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -44507,6 +44541,7 @@
         "docs/cli/agent.mdx",
         "docs/cli/integration.mdx",
         "docs/cli/mcp.mdx",
+        "docs/concepts.mdx",
         "docs/guides/integrations.mdx",
         "docs/guides/lookout.mdx",
         "docs/guides/manifests.mdx",
@@ -44555,6 +44590,7 @@
         "docs/api-reference/issues.mdx",
         "docs/api-reference/labels.mdx",
         "docs/cli/label.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -44578,6 +44614,7 @@
         "docs/api-reference/websocket.mdx",
         "docs/cli/issue.mdx",
         "docs/cli/recurring.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/guides/manifests.mdx",
@@ -44629,6 +44666,7 @@
       "docs": [
         "docs/api-reference/recipes.mdx",
         "docs/cli/recipe.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/routines-cookbook.mdx",
@@ -44643,6 +44681,7 @@
     {
       "name": "RecurringIssue",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -44689,6 +44728,7 @@
     {
       "name": "SavedView",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -44735,6 +44775,7 @@
     {
       "name": "TriageRule",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -44754,6 +44795,7 @@
       "docs": [
         "docs/api-reference/workflow-templates.mdx",
         "docs/cli/workflow.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -44836,11 +44878,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 3947,
-    "api_path_references": 1998,
-    "environment_references": 401,
+    "command_references": 3954,
+    "api_path_references": 2000,
+    "environment_references": 402,
     "manifest_kind_references": 209,
-    "flag_references": 1828,
+    "flag_references": 1831,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

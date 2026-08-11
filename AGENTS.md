@@ -118,10 +118,36 @@ Frontend: `app/` (Next.js App Router), `components/` (`ui/` = shadcn), `hooks/`,
 
 ## Migrations
 
-Go-only, in `internal/database/migrate.go`. Add `const migrationXxx = ...`, append
-`{N, "name", migrationXxx}` to the `migrations` slice (N = previous + 1). Runs at
-startup, tracked in `_migrations`. **Prisma is for TypeScript types only — never run
-`prisma migrate`.**
+**One `.sql` file per migration** in `internal/database/migrations/`. The
+directory *is* the registry — there is no central list to edit, which is the
+point: two people adding a migration add two files and cannot conflict.
+
+```bash
+date -u +%Y%m%d%H%M%S    # the version stamp — filenames are
+                         # <YYYYMMDDHHMMSS>_<snake_case_name>.sql
+```
+
+Versions must be strictly ascending, so **append, never insert** a stamp older
+than one already committed. Sequential numbers are gone: `v1..v169` were
+allocated that way and are frozen in the `legacyMigrations` slice in
+`migrate.go` — **nothing at or below v169 may move or change**, they are
+applied in databases nobody controls (`migrate_version_scheme.go` enforces
+this at startup).
+
+Migrations that genuinely need Go (schema discovery at apply time, SQLite
+table rebuilds) still go in that slice with a timestamp version. Everything
+expressible as plain SQL belongs in a file. `migrations/post_deploy/` runs
+after the server is serving instead of blocking boot — read its README first,
+it is a contract about what the running code must tolerate, not a free win.
+
+Runs at startup, tracked in `_migrations`. Check your work with
+`go run ./scripts/lint-migrations`, which fails if an already-shipped
+migration's SQL changed under it.
+
+**Prisma is for TypeScript types only — never run `prisma migrate`.**
+
+Full detail: [`internal/database/migrations/README.md`](internal/database/migrations/README.md)
+and [`docs/guides/migrations.mdx`](docs/guides/migrations.mdx).
 
 ## NEVER DO
 

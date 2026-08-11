@@ -1,0 +1,159 @@
+---
+title: "Database Performance"
+description: "How Crewship's SQLite layer behaves under concurrent agents — the write-lock model, WAL checkpointing, and what the measured ceilings actually are."
+icon: "gauge"
+stability: stable
+tag: Stable
+---
+
+# Database Performance
+
+Crewship stores everything in a single SQLite file. That is a deliberate
+choice — no separate database process to run, back up, or upgrade — but it
+comes with one property that shapes the whole design: **SQLite allows
+exactly one writer at a time, for the entire database.**
+
+This page is what an operator needs to reason about that: what the ceiling
+is, where it actually binds, and which knobs exist.
+
+## The write-lock model
+
+WAL mode (enabled at open) lets readers run alongside the writer, so reads
+never queue behind a write. Writes do queue — behind each other, across
+every table. A write to `journal_entries` and a write to `missions` contend
+for the same lock.
+
+The connection pool is capped at 5. That does not give five concurrent
+writers; it gives roughly four readers plus one writer, which is the shape
+WAL is designed for. Writers that arrive while the lock is held wait out
+`busy_timeout` (30 s) rather than failing.
+
+<Note>
+The 30-second `busy_timeout` is not arbitrary. It was raised from 5 s after
+a background sweeper held the write lock long enough that a concurrent
+login lockout check timed out and surfaced to the user as "Invalid email or
+password". See `internal/database/database.go`.
+</Note>
+
+## Measured ceilings
+
+Benchmarked against the real schema on a 12-core host, with agents on a
+realistic duty cycle — think for 300–900 ms, then commit one small
+transaction:
+
+| Concurrent agents | Write transactions/s | p50 | p99 |
+| --- | --- | --- | --- |
+| 5 (one crew) | 8 | 245 µs | 412 µs |
+| 25 | 41 | 225 µs | 4.0 ms |
+| 100 | 162 | 227 µs | 46.8 ms |
+| saturation | 2,911 | 13.4 ms | 253 ms |
+
+One ten-step agent assignment costs roughly 20–25 write transactions; a
+ten-step routine run costs 30–35. So a hundred agents each finishing an
+assignment every minute is on the order of 37 write transactions per
+second, against a measured ceiling near 2,900.
+
+**Throughput is not the constraint.** What degrades first is tail latency,
+and the causes are specific: WAL checkpointing (below) and background
+sweepers that hold the lock while they work.
+
+<Warning>
+The single most important property holding this up is that **no database
+transaction is ever held open across an LLM call or a container exec**. A
+transaction that spans a multi-second model round-trip does not slow one
+query down — it serializes the entire database for that duration. If you
+add a code path that writes before and after a network call, commit before
+the call and open a second transaction after it.
+</Warning>
+
+## WAL checkpointing
+
+Every commit appends frames to the `-wal` sidecar file. Those frames are
+folded back into the main database by a *checkpoint*. Left alone, SQLite
+runs that checkpoint inline, inside whichever write transaction happens to
+push the WAL past its threshold — so the cost lands on a random agent.
+
+Crewship's daemon instead disables SQLite's inline autocheckpoint and runs
+a dedicated checkpointer goroutine (`internal/database/checkpoint.go`).
+Measured at 100 concurrent agents, three runs per policy:
+
+| Policy | p99 write latency | WAL at end |
+| --- | --- | --- |
+| SQLite's inline autocheckpoint | 26.1 ms | 13.6 MB |
+| `PASSIVE` checkpoint every 500 ms | 32.2 ms | 98.0 MB |
+| **Dedicated checkpointer (shipped)** | **8.9 ms** | **0 KB** |
+
+Two results are worth knowing, because both contradict the obvious guess:
+
+1. **A `PASSIVE`-only checkpointer is worse than doing nothing.** `PASSIVE`
+   folds frames back but never resets the `-wal` *file*, so the file grows
+   without bound. Only `TRUNCATE` returns the space.
+2. **The win is not from checkpointing more often.** It is from
+   checkpointing on a goroutine that is not serving a request. The work
+   still costs what it costs; it just stops being billed to an agent.
+
+The shipped policy runs `PASSIVE` on each tick (3 µs when there is nothing
+to do) and escalates to `TRUNCATE` only once the `-wal` file exceeds
+16 MiB. On shutdown it truncates once more, so a restart never inherits a
+large WAL.
+
+### Operational notes
+
+- The `-wal` file growing steadily while the daemon runs is **not** normal.
+  It means the checkpointer is not running or cannot get a window. Check
+  the logs for `wal checkpoint failed`.
+- A large `-wal` after an unclean shutdown **is** normal. SQLite replays it
+  on the next open.
+- Only the long-running daemon disables autocheckpoint. Short-lived
+  commands (`crewship telemetry`, `crewship admin …`) keep SQLite's
+  built-in behaviour, because they never run the checkpointer. This pairing
+  is enforced by a test — see `TestDaemonPairsManagedWALWithCheckpointer`.
+- Do not copy a live database file by itself. Use `crewship backup`, which
+  takes a consistent snapshot, or copy the `.db`, `-wal` and `-shm` files
+  together.
+
+## Background sweepers
+
+Roughly two dozen periodic goroutines write to the database — expiring
+exposures, timing out approvals, draining queues, running retention.
+Because they share the single write lock with live agent traffic, the
+metric that matters for each is **how long it holds the lock**, not how
+often it runs.
+
+The rule when adding or changing one:
+
+<Tip>
+**Bound work per tick for frequent sweepers. Do not chunk infrequent ones.**
+
+A frequent sweeper whose backlog can grow (the port-exposure purge runs
+every 30 s) must cap rows per statement, or one tick eventually stalls
+every agent — measured at 486 ms of held lock for a 50,000-row backlog.
+
+A daily job is the opposite case. Splitting a 20,000-row daily upsert into
+500-row transactions made it *slower* overall (150 ms → 405 ms) and pushed
+a live writer's p95 from 4.1 ms to 21.5 ms, because re-acquiring the write
+lock costs more than it saves. Leave those in one transaction.
+</Tip>
+
+## Tuning knobs
+
+All of these live in `internal/database/database.go` and
+`internal/database/checkpoint.go`, and each carries a comment explaining
+the measurement behind its value. Change them only with a measurement of
+your own.
+
+| Setting | Value | What it trades |
+| --- | --- | --- |
+| `busy_timeout` | 30 s | How long a blocked writer waits before failing |
+| `cache_size` | 64 MiB/conn | Memory against page re-reads |
+| `mmap_size` | 256 MiB | Reads come off the mapping while the DB fits |
+| `synchronous` | `NORMAL` | Durability of the last commit before an OS crash, against write speed |
+| Pool size | 5 | Concurrency against memory; 16 measured no better |
+| Checkpoint interval | 2 s | How promptly the WAL is reclaimed |
+| Truncate threshold | 16 MiB | Peak WAL size against how often `TRUNCATE` runs |
+
+## Related
+
+- [Backup and restore](/guides/backup)
+- [Migrations catalog](/guides/migrations)
+- [Troubleshooting](/guides/troubleshooting)

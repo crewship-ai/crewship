@@ -177,11 +177,27 @@ var startCmd = &cobra.Command{
 			}
 		}
 
-		db, err := database.Open(databaseURL)
+		// WithManagedWAL turns SQLite's inline autocheckpoint OFF, which is
+		// only safe because the checkpointer below takes over the job. The
+		// daemon is the one process long-lived enough to run it; every
+		// other database.Open caller (telemetry, admin, tests) deliberately
+		// keeps the built-in autocheckpoint. See internal/database/
+		// checkpoint.go for the measurements — the point is to stop random
+		// agent write transactions from paying to fold the WAL back.
+		db, err := database.Open(databaseURL, database.WithManagedWAL())
 		if err != nil {
 			return fmt.Errorf("failed to open database: %w", err)
 		}
 		defer db.Close()
+
+		// Started before the migrations on purpose: a migration run is the
+		// most write-heavy phase of a boot, and with autocheckpoint off it
+		// is exactly when an unattended WAL would grow fastest.
+		//
+		// Deferred here rather than at the ctx created further down so the
+		// stop (which performs a final TRUNCATE) is guaranteed to run
+		// BEFORE the deferred db.Close() above — defers unwind LIFO.
+		defer database.StartCheckpointerAsync(db, logger, database.CheckpointerConfig{})()
 
 		if err := database.SnapshotBeforeMigrate(context.Background(), db, logger); err != nil {
 			return fmt.Errorf("failed to snapshot database before migrations: %w", err)
@@ -914,6 +930,14 @@ var startCmd = &cobra.Command{
 			// scope already has wired for the pipeline stores above.
 			if deps.DB != nil {
 				pipeline.StartRunRetentionSweeper(ctx, deps.DB, srv.JournalWriter(), 24*time.Hour)
+
+				// Audit retention (#1887) — the same daily shape, for the two
+				// audit tables that had no pruning at all. credential_audit
+				// defaults to 90 days; audit_logs defaults to keeping
+				// everything, because a retention obligation is the
+				// operator's to declare and not ours to assume. See
+				// internal/api/audit_retention.go.
+				go api.StartAuditRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
 			}
 
 			// Pipeline schedules — cron triggers for saved pipelines.
