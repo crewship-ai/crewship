@@ -158,6 +158,15 @@ database file).
 
 The `*.pre-migrate-*.bak` snapshot is the one Crewship takes automatically before applying pending migrations (see below) — so a bad upgrade is a one-step rollback: put the old binary back **and** restore the matching snapshot.
 
+<Warning>
+The guard runs in the binary that boots, so it only protects you if the version
+you are rolling back **to** has it. It was added on 2026-07-08; anything older
+boots over a newer schema without a word. Verified against a build from
+2026-07-06: it started, served traffic, and reported nothing. Restoring the
+snapshot is what makes a rollback safe — the guard only catches you when you
+forget.
+</Warning>
+
 ## Authoring a migration
 
 **One file per migration.** The registry is the directory

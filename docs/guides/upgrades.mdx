@@ -302,6 +302,20 @@ the database was migrated by a NEWER Crewship. … either upgrade this binary �
 restore the pre-migration snapshot taken before the upgrade.
 ```
 
+<Warning>
+**The guard lives in the binary you roll back *to*, and it was added on
+2026-07-08.** Builds older than that have no version-skew check at all: they
+boot straight over a newer schema, start serving, and report nothing. So does
+`crewship db restore-snapshot`, added 2026-07-09 — an older binary may not have
+the command either.
+
+This matters most in exactly the case you'd reach for it: upgrading from a
+long-stale install and then needing to go back. If the version you are
+returning to predates 2026-07-08, **nothing will stop it** from writing into a
+schema it doesn't understand. Treat step 2 below as mandatory, not as a
+fallback the guard will enforce for you.
+</Warning>
+
 Do it in this order — **restore the snapshot with your CURRENT binary first,
 then reinstall the older one**. `crewship db restore-snapshot` was introduced
 alongside the version-skew guard, so the older binary you're rolling back to
@@ -330,9 +344,11 @@ only accepts a genuine `*.pre-migrate-*.bak` snapshot of your database, and
 copies the current database aside to `<db>.before-restore-<ts>` before the
 swap, so the restore is itself reversible.
 
-Skipping step 2 leaves the newer schema in place, which the older binary
-rejects on start (by design). See [Migrations](/guides/migrations) for the
-version-skew guard and snapshot naming.
+Skipping step 2 leaves the newer schema in place. A binary from 2026-07-08 or
+later rejects that on start, by design — but that rejection is a safety net
+under the procedure, not a substitute for it, and an older binary doesn't have
+it. Restore the snapshot every time. See [Migrations](/guides/migrations) for
+the version-skew guard and snapshot naming.
 
 ## Related
 
