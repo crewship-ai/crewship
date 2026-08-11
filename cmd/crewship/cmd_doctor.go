@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -417,7 +418,18 @@ func checkDBMigrationVersion(ctx context.Context) checkResult {
 	// Read-only open keeps doctor diagnostic-only: no WAL pragma (which
 	// would mutate state) and no risk of fighting crewshipd for an
 	// exclusive lock.
-	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	//
+	// The "file:" prefix is load-bearing. modernc.org/sqlite strips the query
+	// string off a BARE path before handing it to sqlite3_open_v2 and always
+	// passes SQLITE_OPEN_CREATE, so `dbPath+"?mode=ro"` — what this line used
+	// to say — was silently ignored and the connection was read-write.
+	// Verified: a bare path with ?mode=ro creates the file it claims it
+	// cannot write to; the same DSN as a file: URI correctly refuses with
+	// "unable to open database file (14)". Nothing was harmed here because
+	// the os.Stat above means we never reach this on a missing file and we
+	// only ever SELECT — but the comment promised a guarantee the code did
+	// not provide, which is how B-02 happened one probe over.
+	db, err := sql.Open("sqlite", dataDir.DatabaseURL()+"?mode=ro")
 	if err != nil {
 		return checkResult{
 			name:   "db migration version",
@@ -734,8 +746,18 @@ func checkServerReachable(ctx context.Context) checkResult {
 // `crewship doctor` output after install should see *something* about
 // telemetry — the first `crewship start` will flip it to default-on per
 // the beta opt-out policy, and we want that visible before it happens.
+//
+// The database is opened through openLocalDBReadOnly, not openLocalDB: a
+// diagnostic must not create the database it is reporting on (B-02 — see the
+// comment on openLocalDBReadOnly). When there is no database at all we answer
+// from that fact instead of from a file we just made: consent lives in
+// app_settings, so no database is proof consent has never been recorded, which
+// is precisely the "not asked" state. Same row, same hint, nothing written.
 func runCheckTelemetryStatus(ctx context.Context) checkResult {
-	db, err := openLocalDB(ctx)
+	db, err := openLocalDBReadOnly(ctx)
+	if errors.Is(err, errNoLocalDB) {
+		return telemetryNotConfiguredResult()
+	}
 	if err != nil {
 		return checkResult{
 			name:   "telemetry status",
@@ -745,7 +767,34 @@ func runCheckTelemetryStatus(ctx context.Context) checkResult {
 		}
 	}
 	defer db.Close()
-	return checkTelemetryStatus(ctx, db.DB, crashreport.ResolveDSN())
+	return checkTelemetryStatus(ctx, db, crashreport.ResolveDSN())
+}
+
+// telemetryNotConfiguredResult is the row for "consent has never been
+// recorded", shared by the no-database path above and the !asked branch below
+// so the two cannot drift into describing the same situation differently.
+//
+// WARN rather than PASS is deliberate: operators reading `crewship doctor`
+// after install should see *something* about telemetry before the first
+// `crewship start` settles the default for them.
+func telemetryNotConfiguredResult() checkResult {
+	// Default-by-version (crashreport.DefaultOptIn): prerelease/dev builds
+	// flip to ENABLED on next start, stable builds stay off until the
+	// operator opts in. Surface the one that applies.
+	if crashreport.DefaultOptIn(version) {
+		return checkResult{
+			name:   "telemetry status",
+			status: "WARN",
+			detail: "telemetry not yet configured (prerelease/dev build: will default to ENABLED on next start)",
+			hint:   "run 'crewship telemetry status' for details, or opt out with 'crewship telemetry off'",
+		}
+	}
+	return checkResult{
+		name:   "telemetry status",
+		status: "WARN",
+		detail: "telemetry not yet configured (stable build: stays DISABLED until you opt in)",
+		hint:   "opt in with 'crewship telemetry on'",
+	}
 }
 
 // checkTelemetryStatus is the testable inner form. dsn is the resolved DSN
@@ -762,21 +811,7 @@ func checkTelemetryStatus(ctx context.Context, db *sql.DB, dsn string) checkResu
 		}
 	}
 	if !asked {
-		// Default-by-version (crashreport.DefaultOptIn): prerelease/dev
-		// builds flip to ENABLED on next start, stable builds stay off
-		// until the operator opts in. Surface the one that applies.
-		detail := "telemetry not yet configured (stable build: stays DISABLED until you opt in)"
-		hint := "opt in with 'crewship telemetry on'"
-		if crashreport.DefaultOptIn(version) {
-			detail = "telemetry not yet configured (prerelease/dev build: will default to ENABLED on next start)"
-			hint = "run 'crewship telemetry status' for details, or opt out with 'crewship telemetry off'"
-		}
-		return checkResult{
-			name:   "telemetry status",
-			status: "WARN",
-			detail: detail,
-			hint:   hint,
-		}
+		return telemetryNotConfiguredResult()
 	}
 	if !enabled {
 		return checkResult{
@@ -817,8 +852,15 @@ func checkTelemetryStatus(ctx context.Context, db *sql.DB, dsn string) checkResu
 // Splitting the wrapper from the inner helper mirrors checkTelemetryStatus:
 // the inner form takes db + dsn as parameters so tests can drive every
 // branch without touching env vars or rebuilding with ldflags.
+//
+// Read-only open, and a missing database answers the same way an unasked
+// consent row does — see runCheckTelemetryStatus for why that is exact rather
+// than a convenient guess.
 func runCheckSentryDSNWiring(ctx context.Context) checkResult {
-	db, err := openLocalDB(ctx)
+	db, err := openLocalDBReadOnly(ctx)
+	if errors.Is(err, errNoLocalDB) {
+		return dsnWiringNotConfiguredResult()
+	}
 	if err != nil {
 		return checkResult{
 			name:   "sentry DSN wiring",
@@ -827,7 +869,21 @@ func runCheckSentryDSNWiring(ctx context.Context) checkResult {
 		}
 	}
 	defer db.Close()
-	return checkSentryDSNWiring(ctx, db.DB, crashreport.ResolveDSN())
+	return checkSentryDSNWiring(ctx, db, crashreport.ResolveDSN())
+}
+
+// dsnWiringNotConfiguredResult is the "consent not recorded yet" row, shared by
+// the no-database path and the !asked branch. Prerelease/dev builds flip
+// consent on at first start and a stable-build operator may opt in at any
+// time — either way the DSN should be wired before it matters. INFO + hint is
+// the right shape: nothing is broken yet, but here is what to set.
+func dsnWiringNotConfiguredResult() checkResult {
+	return checkResult{
+		name:   "sentry DSN wiring",
+		status: "INFO",
+		detail: "telemetry not yet configured; DSN wiring will matter on first start",
+		hint:   dsnWiringHint,
+	}
 }
 
 // dsnWiringHint is the single source of truth for the "how do I fix this"
@@ -850,16 +906,7 @@ func checkSentryDSNWiring(ctx context.Context, db *sql.DB, dsn string) checkResu
 		}
 	}
 	if !asked {
-		// Prerelease/dev builds flip consent on at first start, and a
-		// stable-build operator may opt in any time — either way the DSN
-		// should be wired before it matters. INFO + hint is the right
-		// shape: nothing is broken yet, but here's what to set.
-		return checkResult{
-			name:   "sentry DSN wiring",
-			status: "INFO",
-			detail: "telemetry not yet configured; DSN wiring will matter on first start",
-			hint:   dsnWiringHint,
-		}
+		return dsnWiringNotConfiguredResult()
 	}
 	if !enabled {
 		// Operator deliberately opted out. No DSN required, no hint —
@@ -894,8 +941,19 @@ func checkSentryDSNWiring(ctx context.Context, db *sql.DB, dsn string) checkResu
 // Result is intentionally never FAIL: an unreachable Sentry endpoint is a
 // soft problem (events buffer or drop locally) that should not gate
 // `crewship doctor` for the rest of the system.
+//
+// Read-only open. With no database there is nothing to probe and nothing to
+// create: consent cannot have been granted, so telemetry is off by definition
+// and the row is skipped exactly as it would be for a recorded opt-out.
 func runCheckDsnReachability(ctx context.Context) checkResult {
-	db, err := openLocalDB(ctx)
+	db, err := openLocalDBReadOnly(ctx)
+	if errors.Is(err, errNoLocalDB) {
+		return checkResult{
+			name:   "telemetry endpoint",
+			status: "INFO",
+			detail: "skipped (telemetry not yet configured)",
+		}
+	}
 	if err != nil {
 		return checkResult{
 			name:   "telemetry endpoint",
@@ -904,7 +962,7 @@ func runCheckDsnReachability(ctx context.Context) checkResult {
 		}
 	}
 	defer db.Close()
-	return checkDsnReachability(ctx, db.DB, crashreport.ResolveDSN())
+	return checkDsnReachability(ctx, db, crashreport.ResolveDSN())
 }
 
 func checkDsnReachability(ctx context.Context, db *sql.DB, dsn string) checkResult {
