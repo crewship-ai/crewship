@@ -85,6 +85,7 @@ func EnsureDirNoFollow(root, dir string) error {
 type ensureDirHooks struct {
 	afterSegment func(string)
 	beforeMkdir  func(string)
+	beforeOpen   func(string)
 }
 
 func ensureDirNoFollow(root, dir string, hooks ensureDirHooks) error {
@@ -114,11 +115,11 @@ func ensureDirNoFollow(root, dir string, hooks ensureDirHooks) error {
 		return nil
 	}
 
-	cur, err := os.OpenRoot(canonRoot)
+	cur, err := openConfinedDir(canonRoot)
 	if err != nil {
 		return fmt.Errorf("open memory root: %w", err)
 	}
-	defer func() { _ = cur.Close() }()
+	defer func() { _ = cur.close() }()
 	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
 		if seg == "" || seg == "." {
 			continue
@@ -131,45 +132,41 @@ func ensureDirNoFollow(root, dir string, hooks ensureDirHooks) error {
 		if _, err := safepath.ValidateComponent(seg); err != nil {
 			return fmt.Errorf("memory directory component: %w", err)
 		}
-		info, err := cur.Lstat(seg)
+		exists, symlink, isDir, err := cur.kind(seg)
 		switch {
-		case err == nil && info.Mode()&os.ModeSymlink != 0:
+		case err == nil && exists && symlink:
 			return fmt.Errorf("refusing symlinked memory directory: %s", seg)
-		case err == nil && !info.IsDir():
+		case err == nil && exists && !isDir:
 			return fmt.Errorf("memory path component is not a directory: %s", seg)
-		case err == nil:
+		case err == nil && exists:
 		case os.IsNotExist(err):
 			if hooks.beforeMkdir != nil {
 				hooks.beforeMkdir(seg)
 			}
-			if mkErr := cur.Mkdir(seg, 0o755); mkErr != nil {
+			if mkErr := cur.mkdir(seg, 0o755); mkErr != nil {
 				if !os.IsExist(mkErr) {
 					return fmt.Errorf("create memory directory %s: %w", seg, mkErr)
-				}
-				// EEXIST means something appeared between the Lstat above
-				// and this Mkdir. Treating that as success would accept
-				// whatever won the race — including a symlink planted by
-				// the very process this walk exists to defend against. Look
-				// again.
-				info, statErr := cur.Lstat(seg)
-				if statErr != nil {
-					return fmt.Errorf("stat memory directory %s: %w", seg, statErr)
-				}
-				if info.Mode()&os.ModeSymlink != 0 {
-					return fmt.Errorf("refusing symlinked memory directory: %s", seg)
-				}
-				if !info.IsDir() {
-					return fmt.Errorf("memory path component is not a directory: %s", seg)
 				}
 			}
 		default:
 			return fmt.Errorf("stat memory directory %s: %w", seg, err)
 		}
-		next, err := cur.OpenRoot(seg)
+		if hooks.beforeOpen != nil {
+			hooks.beforeOpen(seg)
+		}
+		next, err := cur.openChild(seg)
 		if err != nil {
+			if exists, symlink, isDir, statErr := cur.kind(seg); statErr == nil && exists {
+				switch {
+				case symlink:
+					return fmt.Errorf("refusing symlinked memory directory: %s", seg)
+				case !isDir:
+					return fmt.Errorf("memory path component is not a directory: %s", seg)
+				}
+			}
 			return fmt.Errorf("open memory directory %s: %w", seg, err)
 		}
-		_ = cur.Close()
+		_ = cur.close()
 		cur = next
 		if hooks.afterSegment != nil {
 			hooks.afterSegment(seg)

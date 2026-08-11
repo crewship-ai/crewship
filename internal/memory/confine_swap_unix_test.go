@@ -5,6 +5,7 @@ package memory
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,38 @@ func swapOpenedDirectoryPath(t *testing.T, root, outside string) func(string) {
 		if err := os.Symlink(outside, filepath.Join(root, "a")); err != nil {
 			t.Fatalf("replace validated parent: %v", err)
 		}
+	}
+}
+
+func TestEnsureDirNoFollow_RefusesInRootSymlinkSwapDuringOpen(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a", "redirect"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := ensureDirNoFollow(root, filepath.Join(root, "a", "b"), ensureDirHooks{
+		beforeOpen: func(seg string) {
+			if seg != "a" {
+				return
+			}
+			if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "a-original")); err != nil {
+				t.Fatalf("rename checked component: %v", err)
+			}
+			if err := os.Symlink("redirect", filepath.Join(root, "a")); err != nil {
+				t.Fatalf("replace checked component: %v", err)
+			}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("EnsureDirNoFollow in-root swap error = %v, want symlink refusal", err)
+	}
+	entries, readErr := os.ReadDir(filepath.Join(root, "redirect"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("in-root replacement directory changed: %v", entries)
 	}
 }
 
