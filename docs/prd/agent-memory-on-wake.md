@@ -80,6 +80,10 @@ this boundary, preventing the agent-writable tree from redirecting host-side sta
 Proposal mode requires the configured topics output directory to exist before staging;
 it does not create an unanchored output path.
 
+The consolidator's dedup scan accepts only regular `learned-*.md` files opened without
+following a final-component symlink. This prevents an agent-writable topics directory
+from redirecting the privileged host scan to unrelated files.
+
 The host consolidator treats `pins.md` and daily `learned-*.md` files as
 agent-writable trust boundaries. Reads and appends are anchored to the resolved topics
 directory and explicitly refuse a final-component symlink, so a link planted in the
