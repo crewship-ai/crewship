@@ -25,6 +25,9 @@ func TestSnapshotPinsRefusesSymlinkedTarget(t *testing.T) {
 	_, err := snapshotPins(Config{OutputDir: dir}, []journal.Entry{{
 		ID: "pin-1", Type: "test", Priority: journal.PriorityPin, Summary: "must stay confined",
 	}})
+	// Check the victim before the error: without either defense snapshotPins
+	// can return nil after following the link, and the write-through is the
+	// security invariant this test must report.
 	got, readErr := os.ReadFile(victim)
 	if readErr != nil {
 		t.Fatal(readErr)
@@ -71,6 +74,8 @@ func TestAppendRulesRefusesSymlinkedTarget(t *testing.T) {
 
 	c := &Consolidator{}
 	_, _, err := c.appendRules(dir, now, []LearnedRule{{Pattern: "p", Action: "a"}})
+	// An unrooted write can change the victim before the rooted readback
+	// returns an error, so error wording must not hide the write-through.
 	got, readErr := os.ReadFile(victim)
 	if readErr != nil {
 		t.Fatal(readErr)
