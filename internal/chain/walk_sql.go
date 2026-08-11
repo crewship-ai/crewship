@@ -53,16 +53,21 @@ func routineNode(id, name, slug, status string) Node {
 	}
 }
 
-func runNode(id, pipelineSlug, status string, chainDepth int) Node {
-	return Node{
-		ID:         nodeID(KindRun, id),
-		Kind:       KindRun,
-		Ref:        id,
-		Key:        pipelineSlug,
-		Label:      pipelineSlug,
-		Status:     status,
-		ChainDepth: chainDepth,
-	}
+// runNode carries the run's own span: pipeline_runs.started_at is NOT NULL, so
+// a run always knows when it happened; ended_at is NULL until it stops, and
+// then the node reports no end and no duration rather than a finished-looking
+// zero. See Node.OccurredAt.
+func runNode(id, pipelineSlug, status string, chainDepth int, chainOrigin, startedAt, endedAt string) Node {
+	return withSpan(Node{
+		ID:          nodeID(KindRun, id),
+		Kind:        KindRun,
+		Ref:         id,
+		Key:         pipelineSlug,
+		Label:       pipelineSlug,
+		Status:      status,
+		ChainDepth:  chainDepth,
+		ChainOrigin: chainOrigin,
+	}, startedAt, endedAt)
 }
 
 // automationNode carries what an automation card draws: the rule's name as the
@@ -100,14 +105,18 @@ func automationNode(id, name, eventType string, enabled, deleted bool) Node {
 	}
 }
 
-func assignmentNode(id, task, status string) Node {
-	return Node{
+// assignmentNode carries (started_at, finished_at) — the only pair on that
+// table that names when the work happened on every row that did work, and NOT
+// queued_at/running_at/created_at. Node.OccurredAt spells out why each of the
+// other three would be wrong.
+func assignmentNode(id, task, status, startedAt, finishedAt string) Node {
+	return withSpan(Node{
 		ID:     nodeID(KindAssignment, id),
 		Kind:   KindAssignment,
 		Ref:    id,
 		Label:  task,
 		Status: status,
-	}
+	}, startedAt, finishedAt)
 }
 
 func agentNode(id, name, slug, status string) Node {
@@ -146,9 +155,14 @@ func inboxPartial(kind string) (bool, string) {
 	}
 }
 
-func inboxNode(id, kind, title, state string) Node {
+// inboxNode carries created_at as the instant it happened and nothing else.
+// The row is written at the moment of the thing it reports (internal/inbox
+// stamps created_at then), so its creation IS the event — unlike the noun
+// kinds, whose created_at is a different fact from "when this happened here".
+// resolved_at is deliberately not reported as an end: see Node.OccurredAt.
+func inboxNode(id, kind, title, state, createdAt string) Node {
 	partial, reason := inboxPartial(kind)
-	return Node{
+	return withInstant(Node{
 		ID:            nodeID(KindInbox, id),
 		Kind:          KindInbox,
 		Ref:           id,
@@ -157,7 +171,7 @@ func inboxNode(id, kind, title, state string) Node {
 		Status:        state,
 		Partial:       partial,
 		PartialReason: reason,
-	}
+	}, createdAt)
 }
 
 // ---------------------------------------------------------------------------
@@ -232,21 +246,21 @@ func (w *walker) lookupIssueByID(ctx context.Context, anchor string) (Node, bool
 }
 
 func (w *walker) lookupRunByID(ctx context.Context, anchor string) (Node, bool, error) {
-	var id, slug, status string
+	var id, slug, status, chainOrigin, startedAt, endedAt string
 	var chainDepth int
 	err := w.db.QueryRowContext(ctx, `
-		SELECT id, COALESCE(pipeline_slug,''), COALESCE(status,''), COALESCE(chain_depth, 0)
+		SELECT `+runColumns+`
 		FROM pipeline_runs
 		WHERE workspace_id = ? AND id = ?`,
 		w.workspaceID, anchor,
-	).Scan(&id, &slug, &status, &chainDepth)
+	).Scan(&id, &slug, &status, &chainDepth, &chainOrigin, &startedAt, &endedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, false, nil
 	}
 	if err != nil {
 		return Node{}, false, err
 	}
-	return runNode(id, slug, status, chainDepth), true, nil
+	return runNode(id, slug, status, chainDepth, chainOrigin, startedAt, endedAt), true, nil
 }
 
 func (w *walker) lookupRoutineByID(ctx context.Context, anchor string) (Node, bool, error) {
@@ -278,20 +292,20 @@ func (w *walker) lookupRoutine(ctx context.Context, pred, arg string) (Node, boo
 }
 
 func (w *walker) lookupAssignmentByID(ctx context.Context, anchor string) (Node, bool, error) {
-	var id, task, status string
+	var id, task, status, startedAt, finishedAt string
 	err := w.db.QueryRowContext(ctx, `
-		SELECT id, COALESCE(task,''), COALESCE(status,'')
+		SELECT `+assignmentColumns+`
 		FROM assignments
 		WHERE workspace_id = ? AND id = ?`,
 		w.workspaceID, anchor,
-	).Scan(&id, &task, &status)
+	).Scan(&id, &task, &status, &startedAt, &finishedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, false, nil
 	}
 	if err != nil {
 		return Node{}, false, err
 	}
-	return assignmentNode(id, task, status), true, nil
+	return assignmentNode(id, task, status, startedAt, finishedAt), true, nil
 }
 
 // lookupAutomationByID resolves an automations.id inside this workspace,
@@ -333,20 +347,20 @@ func (w *walker) lookupAutomationByID(ctx context.Context, anchor string) (Node,
 }
 
 func (w *walker) lookupInboxByID(ctx context.Context, anchor string) (Node, bool, error) {
-	var id, kind, title, state string
+	var id, kind, title, state, createdAt string
 	err := w.db.QueryRowContext(ctx, `
-		SELECT id, kind, title, COALESCE(state,'')
+		SELECT `+inboxColumns+`
 		FROM inbox_items
 		WHERE workspace_id = ? AND id = ?`,
 		w.workspaceID, anchor,
-	).Scan(&id, &kind, &title, &state)
+	).Scan(&id, &kind, &title, &state, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Node{}, false, nil
 	}
 	if err != nil {
 		return Node{}, false, err
 	}
-	return inboxNode(id, kind, title, state), true, nil
+	return inboxNode(id, kind, title, state, createdAt), true, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -394,7 +408,8 @@ func (w *walker) expandIssue(ctx context.Context, n Node) ([]neighbour, error) {
 	// 20260806203901 migration, which is exactly why r.workspace_id is in the
 	// join and not merely in the WHERE.
 	if err := w.collect(ctx, &out, `
-		SELECT r.id, COALESCE(r.pipeline_slug,''), COALESCE(r.status,''), COALESCE(r.chain_depth, 0)
+		SELECT r.id, COALESCE(r.pipeline_slug,''), COALESCE(r.status,''), COALESCE(r.chain_depth, 0),
+		       COALESCE(r.chain_origin,''), COALESCE(r.started_at,''), COALESCE(r.ended_at,'')
 		FROM missions m
 		JOIN pipeline_runs r
 		  ON r.triggered_by_id = m.identifier
@@ -412,7 +427,8 @@ func (w *walker) expandIssue(ctx context.Context, n Node) ([]neighbour, error) {
 	// has no workspace_id either, so the tenant fence is the join to missions
 	// and to assignments, both carrying it.
 	if err := w.collect(ctx, &out, `
-		SELECT a.id, COALESCE(a.task,''), COALESCE(a.status,'')
+		SELECT a.id, COALESCE(a.task,''), COALESCE(a.status,''),
+		       COALESCE(a.started_at,''), COALESCE(a.finished_at,'')
 		FROM mission_tasks mt
 		JOIN missions m ON m.id = mt.mission_id
 		JOIN assignments a
@@ -422,14 +438,7 @@ func (w *walker) expandIssue(ctx context.Context, n Node) ([]neighbour, error) {
 		ORDER BY mt.task_order ASC, a.id ASC
 		LIMIT ?`,
 		[]any{n.Ref, w.workspaceID, w.fanOutLimit()},
-		func(rows *sql.Rows) (neighbour, error) {
-			var id, task, status string
-			if err := rows.Scan(&id, &task, &status); err != nil {
-				return neighbour{}, err
-			}
-			to := assignmentNode(id, task, status)
-			return neighbour{node: to, edge: Edge{From: n.ID, To: to.ID, Kind: EdgeTriggers}}, nil
-		}); err != nil {
+		w.scanAssignmentNeighbour(n.ID, EdgeTriggers)); err != nil {
 		return nil, err
 	}
 
@@ -581,6 +590,24 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 		return nil, err
 	}
 
+	// Agents this run put to work, through the crewship assignment.create verb.
+	//
+	// The other half of the edge expandAssignment follows upward. Both halves
+	// exist because a reader arrives from either end: from the routine (the
+	// common case — "what did this do?") and from the agent's work ("why am I
+	// doing this?"). One direction only leaves half the readers at a dead end,
+	// which is what the trace looked like before parent_run_id existed.
+	if err := w.collect(ctx, &out, `
+		SELECT `+assignmentColumns+`
+		FROM assignments
+		WHERE workspace_id = ? AND parent_run_id = ?
+		ORDER BY created_at ASC, id ASC
+		LIMIT ?`,
+		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
+		w.scanAssignmentNeighbour(n.ID, EdgeTriggers)); err != nil {
+		return nil, err
+	}
+
 	// Which agents actually did the work in this run.
 	//
 	// There is no agent column on pipeline_runs that survives the DAG —
@@ -620,7 +647,7 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 	// Inbox, kind 'waitpoint': inbox_items.source_id is the waitpoint TOKEN,
 	// and pipeline_waitpoints.pipeline_run_id is what names the run.
 	if err := w.collect(ctx, &out, `
-		SELECT i.id, i.kind, i.title, COALESCE(i.state,'')
+		SELECT i.id, i.kind, i.title, COALESCE(i.state,''), COALESCE(i.created_at,'')
 		FROM inbox_items i
 		JOIN pipeline_waitpoints wp
 		  ON wp.token = i.source_id
@@ -635,7 +662,7 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 
 	// Inbox, kind 'failed_run': the run id is in the payload, not source_id.
 	if err := w.collect(ctx, &out, `
-		SELECT id, kind, title, COALESCE(state,'')
+		SELECT `+inboxColumns+`
 		FROM inbox_items
 		WHERE workspace_id = ?
 		  AND kind = 'failed_run'
@@ -651,37 +678,63 @@ func (w *walker) expandRun(ctx context.Context, n Node) ([]neighbour, error) {
 	return out, nil
 }
 
-// runColumns is the run projection, in the order scanRunNeighbour reads it.
-// One constant so a column added to the run node cannot land on some discovery
-// paths and silently miss others — which is exactly how chain_depth would have
-// ended up set on an anchored run and zero on the same run reached from its
-// routine.
+// runColumns / assignmentColumns / inboxColumns are the per-kind projections,
+// each in the order its scanner reads it. One constant per kind so a column
+// added to a node cannot land on some discovery paths and silently miss others
+// — which is exactly how chain_depth would have ended up set on an anchored run
+// and zero on the same run reached from its routine, and how a timeline would
+// have shown the same assignment at 09:41 from one anchor and nowhere from
+// another.
 //
-// Two queries cannot use it and spell the same list out: expandIssue needs the
-// `r.` table alias, and lookupRunByID scans a single row. Both must stay in
-// step with this list; scanRunNeighbour's Scan is what fails loudly if they
-// drift.
-const runColumns = `id, COALESCE(pipeline_slug,''), COALESCE(status,''), COALESCE(chain_depth, 0)`
+// The timestamps ride these existing projections rather than a lookup of their
+// own: the walk already reads each of these rows, so "when did it happen" costs
+// two more columns, not one more query per node.
+//
+// Three queries cannot use the constants and spell the same list out:
+// expandIssue needs the `r.` and `a.` table aliases, and the waitpoint join
+// needs `i.`. Those must stay in step with the list here; the scanners' Scan is
+// what fails loudly if they drift.
+const (
+	runColumns        = `id, COALESCE(pipeline_slug,''), COALESCE(status,''), COALESCE(chain_depth, 0), COALESCE(chain_origin,''), COALESCE(started_at,''), COALESCE(ended_at,'')`
+	assignmentColumns = `id, COALESCE(task,''), COALESCE(status,''), COALESCE(started_at,''), COALESCE(finished_at,'')`
+	inboxColumns      = `id, kind, title, COALESCE(state,''), COALESCE(created_at,'')`
+)
 
 func (w *walker) scanRunNeighbour(fromID string, kind EdgeKind) func(*sql.Rows) (neighbour, error) {
 	return func(rows *sql.Rows) (neighbour, error) {
-		var id, slug, status string
+		var id, slug, status, chainOrigin, startedAt, endedAt string
 		var chainDepth int
-		if err := rows.Scan(&id, &slug, &status, &chainDepth); err != nil {
+		if err := rows.Scan(&id, &slug, &status, &chainDepth, &chainOrigin, &startedAt, &endedAt); err != nil {
 			return neighbour{}, err
 		}
-		to := runNode(id, slug, status, chainDepth)
+		to := runNode(id, slug, status, chainDepth, chainOrigin, startedAt, endedAt)
+		return neighbour{node: to, edge: Edge{From: fromID, To: to.ID, Kind: kind}}, nil
+	}
+}
+
+// scanAssignmentNeighbour reads assignmentColumns for the three expansions that
+// discover an assignment downward (from its issue, from the run that dispatched
+// it, from the assignment that delegated it). All three point from → to, so one
+// scanner serves them; the timing is therefore identical whichever way a reader
+// arrived.
+func (w *walker) scanAssignmentNeighbour(fromID string, kind EdgeKind) func(*sql.Rows) (neighbour, error) {
+	return func(rows *sql.Rows) (neighbour, error) {
+		var id, task, status, startedAt, finishedAt string
+		if err := rows.Scan(&id, &task, &status, &startedAt, &finishedAt); err != nil {
+			return neighbour{}, err
+		}
+		to := assignmentNode(id, task, status, startedAt, finishedAt)
 		return neighbour{node: to, edge: Edge{From: fromID, To: to.ID, Kind: kind}}, nil
 	}
 }
 
 func (w *walker) scanInboxNeighbour(fromID string) func(*sql.Rows) (neighbour, error) {
 	return func(rows *sql.Rows) (neighbour, error) {
-		var id, kind, title, state string
-		if err := rows.Scan(&id, &kind, &title, &state); err != nil {
+		var id, kind, title, state, createdAt string
+		if err := rows.Scan(&id, &kind, &title, &state, &createdAt); err != nil {
 			return neighbour{}, err
 		}
-		to := inboxNode(id, kind, title, state)
+		to := inboxNode(id, kind, title, state, createdAt)
 		return neighbour{node: to, edge: Edge{From: fromID, To: to.ID, Kind: EdgeProduces}}, nil
 	}
 }
@@ -777,13 +830,14 @@ func (w *walker) expandAutomation(ctx context.Context, n Node) ([]neighbour, err
 func (w *walker) expandAssignment(ctx context.Context, n Node) ([]neighbour, error) {
 	var out []neighbour
 
-	var assignedTo, parentID string
+	var assignedTo, parentID, parentRunID string
 	err := w.db.QueryRowContext(ctx, `
-		SELECT COALESCE(assigned_to_id,''), COALESCE(parent_assignment_id,'')
+		SELECT COALESCE(assigned_to_id,''), COALESCE(parent_assignment_id,''),
+		       COALESCE(parent_run_id,'')
 		FROM assignments
 		WHERE id = ? AND workspace_id = ?`,
 		n.Ref, w.workspaceID,
-	).Scan(&assignedTo, &parentID)
+	).Scan(&assignedTo, &parentID, &parentRunID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -817,21 +871,30 @@ func (w *walker) expandAssignment(ctx context.Context, n Node) ([]neighbour, err
 		}
 	}
 
+	// The routine hop. A routine's assignment.create names the run that made
+	// the call, and until that column existed the trace could group this work
+	// and never say what dispatched it — the graph had the node and not the
+	// edge. lookupRunByID is workspace-scoped, so a run named across the tenant
+	// boundary resolves to nothing rather than into this graph.
+	//
+	// Exactly one of the two parents is ever set (the insert enforces it), so
+	// this cannot double an assignment that already has a delegation parent.
+	if parentRunID != "" {
+		if rn, ok, err := w.lookupRunByID(ctx, parentRunID); err != nil {
+			return nil, err
+		} else if ok {
+			out = append(out, neighbour{node: rn, edge: Edge{From: rn.ID, To: n.ID, Kind: EdgeTriggers}})
+		}
+	}
+
 	if err := w.collect(ctx, &out, `
-		SELECT id, COALESCE(task,''), COALESCE(status,'')
+		SELECT `+assignmentColumns+`
 		FROM assignments
 		WHERE workspace_id = ? AND parent_assignment_id = ?
 		ORDER BY created_at ASC, id ASC
 		LIMIT ?`,
 		[]any{w.workspaceID, n.Ref, w.fanOutLimit()},
-		func(rows *sql.Rows) (neighbour, error) {
-			var id, task, status string
-			if err := rows.Scan(&id, &task, &status); err != nil {
-				return neighbour{}, err
-			}
-			to := assignmentNode(id, task, status)
-			return neighbour{node: to, edge: Edge{From: n.ID, To: to.ID, Kind: EdgeTriggers}}, nil
-		}); err != nil {
+		w.scanAssignmentNeighbour(n.ID, EdgeTriggers)); err != nil {
 		return nil, err
 	}
 

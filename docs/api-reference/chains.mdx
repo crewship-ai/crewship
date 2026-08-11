@@ -29,7 +29,251 @@ id.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
+| GET | [`/api/v1/chains`](#list-chains) | The index: one row per chain that ran, newest first |
 | GET | [`/api/v1/chains/{anchor}`](#get-a-chain) | The causal graph around one anchor |
+
+The two are a pair. The index answers "what ran here", the walk answers "what
+caused what" — and every row's `origin` is a valid anchor, so a client lists to
+find a chain and walks to open it.
+
+---
+
+## List chains
+
+```
+GET /api/v1/chains?limit=50&offset=0
+```
+
+**Auth:** bearer token, workspace-scoped (`RequireAuth` + `RequireWorkspace`).
+The workspace comes from the authenticated session, never from a parameter.
+
+One row per **chain**, not per run. A chain is identified by
+`pipeline_runs.chain_origin` — the run that started it — which the executor
+stamps on every run it persists: its own id when the run is the root, the
+inherited one when a rule or a nested call carried it. The index is therefore a
+`GROUP BY` over that column rather than a traversal.
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `limit` | integer | Rows per page. Default `50`, ceiling `200`. Values above the ceiling are clamped down, not reset. |
+| `offset` | integer | Rows to skip. Default `0`. |
+
+The page is capped because the query groups over this workspace's runs, which
+is the busiest table in the schema. There is no "return everything" mode.
+
+**Response:** `200 OK`
+
+```json
+{
+  "chains": [
+    {
+      "origin": "prn_01j4",
+      "started_by_kind": "automation",
+      "started_by_id": "aut_01hx",
+      "started_by_key": "run.failed",
+      "started_by": "Triage on failure",
+      "triggered_via": "automation",
+      "routine_id": "pl_01hx",
+      "routine_slug": "triage",
+      "runs": 3,
+      "max_chain_depth": 2,
+      "failed_runs": 1,
+      "failed": true,
+      "running_runs": 1,
+      "waiting_runs": 0,
+      "first_activity": "2026-08-07T12:00:00.000000000Z",
+      "last_activity": "2026-08-07T12:09:00.000000000Z",
+      "duration_ms": 540000,
+      "issues": [
+        {
+          "id": "mis_01hx",
+          "identifier": "ENG-7",
+          "title": "Deploy is flaky on cold start",
+          "created": true
+        },
+        { "id": "mis_01hy", "identifier": "ENG-4", "title": "Sidecar leaks a socket" }
+      ],
+      "issue_count": 2,
+      "agents": [
+        { "id": "agt_01hx", "slug": "ada", "name": "Ada", "assignments": 3 },
+        { "id": "agt_01hy", "slug": "bo", "name": "Bo", "assignments": 1 }
+      ],
+      "agent_count": 2
+    }
+  ],
+  "count": 1,
+  "limit": 50,
+  "offset": 0,
+  "has_more": false,
+  "has_unrecorded_runs": true
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `chains[].origin` | string | `pipeline_runs.chain_origin`: the id of the run that started the chain. Also a valid anchor for [the walk](#get-a-chain). |
+| `chains[].started_by_kind` | string | What set the chain off, resolved from the root run's `triggered_via`: `automation`, `issue`, `run`, `user`, `schedule`, `webhook`, or `unknown`. Open set — treat an unknown kind as opaque. |
+| `chains[].started_by_id` | string | The row it points at: a rule id, a mission id, a schedule id, a user id. Omitted when nothing resolved. |
+| `chains[].started_by_key` | string | The handle a human recognises: the event that arms a rule, the issue identifier. Omitted where the kind has none. |
+| `chains[].started_by` | string | Human label — a rule name, an issue title, a person's name. Falls back to the raw trigger word when the pointer resolves to nothing. User- and agent-written; escape before rendering. |
+| `chains[].triggered_via` | string | The root run's raw `triggered_via`, unresolved, so `manual` and `wake_check` stay distinguishable even where both render the same. |
+| `chains[].routine_id` / `routine_slug` | string | The root run's routine. Absent when the root run itself is no longer in the table. |
+| `chains[].runs` | integer | Runs still recorded for this chain, including the root. |
+| `chains[].max_chain_depth` | integer | The deepest `chain_depth` any run in the chain reached. `0` with one run is a run somebody started by hand; `3` is a chain that built itself. |
+| `chains[].failed_runs` | integer | Runs with status `failed`. `interrupted` is **not** counted — a process that died mid-run is an operational event, and folding it in would make the flag mean two things. |
+| `chains[].failed` | boolean | `failed_runs > 0`. True when **any** run in the chain failed, not only the root. |
+| `chains[].running_runs` | integer | Runs still in flight — status `running` or `queued`. A queued run rides with running because from a reader's side it is accepted work that has not finished. **Always present**, including when 0. |
+| `chains[].waiting_runs` | integer | Runs parked on a person — status `waiting` or `paused`. Split from `running_runs` rather than folded into one "active" count because the two ask different things: a running chain resolves itself, a waiting one never will. Both are derived from **status**, not from a missing `ended_at` — that cheaper test would report every interrupted run as running forever. **Always present**, including when 0. |
+| `chains[].first_activity` | string | Earliest `started_at` in the chain. |
+| `chains[].last_activity` | string | Latest `ended_at`, falling back to `started_at` for a run still going. Rows are ordered by this, descending, with `origin` descending as the tiebreak. |
+| `chains[].duration_ms` | integer \| null | Wall clock from `first_activity` to `last_activity`. **Always present**, and `null` when there is no span to measure between. See [How long it took](#how-long-it-took). |
+| `chains[].issues[]` | array | Issues this chain created or changed, **capped at 5**. Absent when it touched none. |
+| `chains[].issues[].id` / `identifier` | string | The mission id and its human handle (`ENG-7`). The identifier is also a valid anchor for [the walk](#get-a-chain). |
+| `chains[].issues[].title` | string | User- and agent-written; escape before rendering. |
+| `chains[].issues[].created` | boolean | The chain **authored** this issue rather than moving one that already existed. Absent means changed, which is a weaker claim. |
+| `chains[].issue_count` | integer | Total issues touched, **uncapped**. `issue_count > issues.length` is the "+N more" case. |
+| `chains[].agents[]` | array | Agents this chain dispatched, **capped at 5**, most work first. Absent when it dispatched none. |
+| `chains[].agents[].id` / `slug` / `name` | string | The agent. `name` is user-written; escape before rendering. |
+| `chains[].agents[].assignments` | integer | Pieces of work that agent took **in this chain** — what separates "asked Ada once" from "handed Ada the whole thing in six parts". |
+| `chains[].agent_count` | integer | Total distinct agents, **uncapped**. Same "+N more" rule as `issue_count`. |
+| `count` | integer | Rows in this page. |
+| `limit` / `offset` | integer | The bounds actually applied, after clamping. |
+| `has_more` | boolean | Another page exists. Computed by reading one row past the page, so it is a fact rather than an inference from a full page. |
+| `has_unrecorded_runs` | boolean | This workspace holds runs from before chain recording. See below. **Always present**, including when false. |
+
+### Why a row carries nouns
+
+Two runs of one routine are the same sentence twice — the slug, the trigger
+kind, and the number `1` — and a list of those is not navigable. What makes a
+row identify a **run** is what that run actually touched: the issues it named
+and the agents it put to work. Those are the fields you render beside the
+routine slug; the routine slug alone is the thing the reader already knew.
+
+`duration_ms` and `issues[].created` carry the two distinctions that survive
+scanning: how long it took, and whether an issue exists *because of* this run.
+
+### How long it took
+
+`duration_ms` is the **wall clock** between `first_activity` and
+`last_activity`. It is deliberately not the sum of the runs' own
+`pipeline_runs.duration_ms`, for three reasons:
+
+- a routine of agentless steps records `duration_ms` `0` on every run, so the
+  sum reports "instant" for a chain that took three minutes;
+- a nested run's time is counted twice, once in itself and once inside the run
+  that contains it;
+- the sum cannot see the gaps *between* runs, and on a composed chain — one
+  waiting on a rule's debounce — those gaps are most of the elapsed time.
+
+This is the same decision the dashboard's `chainElapsedMs` made client-side; the
+server now answers it so every client answers it the same way.
+
+`null` means there is nothing to measure between: one datable moment, which on
+this endpoint is a single run that has not ended yet (`last_activity` falls back
+to `started_at`). Render it as "running". **Do not substitute `0`** — `0`
+asserts the work was instantaneous, which is a different and wrong claim.
+
+### Fan-out and its cap
+
+`issues[]` and `agents[]` are capped at **5 per row**. This is a list: every
+noun costs a join over tables that grow with every dispatch, and doing that per
+row without a bound is the slow query behind an authenticated route — the same
+argument that caps the page itself.
+
+The cap is per row, so one request costs at most `limit × 5` issues and
+`limit × 5` agents. Both queries are issued **once per page**, not once per row,
+and keep the top *N* per chain with a window function.
+
+`issue_count` and `agent_count` are **not** capped. A short list next to a
+larger count is how a client knows it was cut; a capped count would leave a
+truncated row indistinguishable from a complete one.
+
+Ordering inside a capped list is stable and meaningful rather than arbitrary:
+issues the chain created come first, then the ones it touched most; agents come
+by how much work they took.
+
+#### The columns behind the nouns
+
+| Noun | Column |
+|---|---|
+| chain → agent | `assignments.chain_origin` (every hop of a chain carries the same value), joined to `agents.assigned_to_id` |
+| chain → issue (created) | `missions.author_run_id` = a run in the chain — written by the `issue.create` crewship verb through `insertIssueTx` |
+| chain → issue (changed) | `journal_entries.trace_id` = a run in the chain, on entry types `mission.status_change`, `mission.assigned`, `mission.comment` — the run pointer `issueEvents` stamps |
+
+<Note>
+  **A gap worth knowing.** Issue writes an *agent* makes from inside its own
+  assignment do not appear on the row. Those journal entries carry the
+  assignment's own run id as their trace, and that id is not recorded on the
+  `assignments` row, so no column joins them back to the chain. The issues a
+  chain's **routine runs** touched are complete; the ones its **agents** touched
+  are not reachable from here. The agents themselves are — they come from
+  `assignments.chain_origin`, which is exact.
+
+  `mission.created` is not in the entry-type list above because nothing emits
+  it: the journal type exists but the issue action behind it has no producer, so
+  matching on it would be a predicate that can never fire. Creation is read from
+  `missions.author_run_id` instead, which is a column production actually writes.
+</Note>
+
+### What the index does not cover
+
+Runs recorded before migration `20260807160100` — the one that added
+`chain_origin` — carry `NULL` and are **excluded**.
+
+They cannot be backfilled: the link was never written, so nothing in the row
+says whether it was a chain root or the third hop of a composed chain that has
+since been swept. Synthesising an origin from the run's own id would assert the
+former for every one of them, which is exactly the claim the data cannot
+support — and it would show a composed chain from that era as three unrelated
+single-run chains, silently.
+
+So the index covers **chains recorded since the column landed**, and says so
+through `has_unrecorded_runs` rather than leaving the absence to be inferred
+from a short list.
+
+Two related cases that are *not* excluded:
+
+- A chain whose **root run has been swept** by retention is still listed: its
+  surviving runs still carry the origin id. `started_by_kind` is `unknown`,
+  and `routine_id`/`routine_slug` are absent, because the row that held the
+  provenance is gone.
+- A chain started by a rule that was **soft-deleted since** keeps
+  `started_by_kind: "automation"` with the rule's id. The label falls back to
+  `"automation"` rather than inventing a name — the run records that a rule
+  started it, and that fact outlives the rule.
+
+### Tenancy
+
+The joins that fill `issues[]` and `agents[]` carry the workspace on every arm,
+for the same reason the label lookups do: `assignments.chain_origin`,
+`journal_entries.trace_id`, `journal_entries.mission_id` and
+`missions.author_run_id` are untyped string columns whose foreign keys (where
+they exist at all) constrain the row but not the tenant. Two distinct holes are
+closed, not one — a row *another tenant* stamped with your chain's origin, and a
+row of *yours* pointing at another tenant's agent or issue.
+
+Every predicate carries the workspace, including the five label lookups. That
+is not defence in depth layered over a scoped entry point: `chain_origin` and
+`triggered_by_id` are untyped string columns with no foreign key behind them,
+and issue identifiers are only unique **per workspace**, so an unfenced label
+lookup would happily hand another tenant's issue title or rule name to a run of
+yours. The labels are correlated subqueries rather than joins for the same
+reason a duplicate must not matter: a subquery cannot multiply the row count,
+so one chain can never split into two index rows.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | No authenticated session, or no workspace resolvable. |
+| 403 | Caller is not a member of the workspace. |
+| 500 | Query failed. |
+
+An empty `chains[]` is `200`, not `404`: a workspace where nothing has run yet
+is a valid answer, and one where everything predates chain recording is a
+different answer that `has_unrecorded_runs` distinguishes.
 
 ---
 
@@ -89,7 +333,10 @@ reports the consequence.
       "key": "deploy",
       "label": "deploy",
       "status": "failed",
-      "depth": 1
+      "depth": 1,
+      "occurred_at": "2026-08-07T09:41:02.000000000Z",
+      "ended_at": "2026-08-07T09:42:32.000000000Z",
+      "duration_ms": 90000
     }
   ],
   "edges": [
@@ -120,6 +367,10 @@ reports the consequence.
 | `nodes[].status` | string | Row status, verbatim from its table. |
 | `nodes[].depth` | integer | Shortest distance from the anchor, in hops. A property of **this query**: the same row reports a different value depending on where you started. |
 | `nodes[].chain_depth` | integer | `run` nodes only. `pipeline_runs.chain_depth` — how many **composed** hops separate this run from whatever a human did. A property of **the run**, identical whoever asks. Omitted when zero, so an absent field means "not composed" rather than "unknown". |
+| `nodes[].chain_origin` | string | `run` nodes only. Which chain the run **belongs to** — `pipeline_runs.chain_origin`, the id of the run that started it, and the same value [the index](#list-chains) groups on. A property of **the run**, identical whoever asks. Absent on runs written before chain recording, which means "not recorded", never "belongs to no chain". See [Telling members from siblings](#telling-members-from-siblings). |
+| `nodes[].occurred_at` | string | When this node **happened**, RFC3339 UTC. Only `run`, `assignment` and `inbox` carry it — see [When a node happened](#when-a-node-happened). **Absent, never zero**, on every other kind. |
+| `nodes[].ended_at` | string | When it stopped, RFC3339 UTC. `run` and `assignment` only, and only once they have stopped. Absent while the work is still in flight, and absent whenever `occurred_at` is. |
+| `nodes[].duration_ms` | integer | Wall clock between the two, in milliseconds. `0` is a real answer (it finished inside a millisecond); **absent** means there is no span to measure. Test for presence, not for truthiness. |
 | `nodes[].anchor` | boolean | True on exactly one node. |
 | `nodes[].partial` | boolean | The node's outward expansion is known to be incomplete. |
 | `nodes[].partial_reason` | string | Why. Present whenever `partial` is true. |
@@ -203,6 +454,81 @@ Two consequences worth knowing:
   `triggered_via='automation'`, so the fact that *a* rule started it survives
   in the run record even when the rule itself is no longer readable.
 
+### When a node happened
+
+A chain answers "what caused what". `occurred_at` / `ended_at` / `duration_ms`
+answer "and when", which is what a timeline needs — but only three of the seven
+kinds can answer it honestly, and the other four send **nothing** rather than a
+plausible number.
+
+| Kind | Carries time? | Where it comes from |
+|---|---|---|
+| `run` | yes, with a span | `pipeline_runs.started_at` (never NULL) and `ended_at`. `ended_at` and the duration are absent while the run is in flight. |
+| `assignment` | yes, with a span | `assignments.started_at` and `finished_at`. |
+| `inbox` | an instant only | `inbox_items.created_at`. The row is written at the moment of the thing it reports, so its creation *is* the event. |
+| `issue` | **no** | `missions.created_at` is when the issue was **filed**. The issue spans the whole chain; what happened inside it are the runs and assignments, which carry their own times. |
+| `routine` | **no** | `pipelines.created_at` is when somebody **wrote** the routine — possibly months before this chain. |
+| `agent` | **no** | `agents.created_at` is when the agent was **hired**. |
+| `automation` | **no** | `automations.created_at` is when the rule was **authored**. When it *fired* is the `occurred_at` of the run it caused, already on that run's node. |
+
+Absence is the answer, not a gap. A zero timestamp renders as 1 January 1970
+and sorts above everything real, and a zero duration reads as "it was instant";
+both are confident lies about work whose time simply is not recorded. Do not
+substitute `0` or `""` on the way to a chart.
+
+Two details the wire format pins down:
+
+- **`duration_ms` is nullable, and `0` is meaningful.** `0` means the work
+  finished inside a millisecond. Absent means the span could not be derived —
+  it has not finished, or a stamp was unreadable. A client that treats `0` and
+  absent alike will draw an in-flight run as instantaneous.
+- **`ended_at` is never sent without `occurred_at`.** An assignment cancelled
+  before it ever started holds `finished_at` with `started_at` still NULL. A
+  node with an end and no beginning is not a shorter bar on a timeline, it is
+  an unplaceable one, so both are withheld.
+
+The two instants are normalised: always UTC, always RFC3339 with a `Z`,
+whatever syntax the underlying column held. The columns behind them are written
+by several producers in three different shapes — including SQLite's
+`2026-08-07 09:41:02.317`, which `new Date()` reads as *local* time in V8 and
+rejects outright elsewhere — so the endpoint parses and re-emits rather than
+passing the stored string through. A stamp it cannot parse is reported as
+absent rather than forwarded raw.
+
+### Telling members from siblings
+
+**Not every `run` node in the response belongs to the chain you anchored on.**
+This surprises every consumer once, so it is worth stating plainly.
+
+The walk expands a run up to its routine, and a routine down to every run of
+it. So anchoring on one run returns that run, its routine, and *every other run
+that routine has ever had* — a chain of one run can come back carrying eight
+`run` nodes. That is correct for the picture the walk draws; it is wrong for any
+caller counting runs.
+
+Filter on `chain_origin`. A run node belongs to the chain when its
+`chain_origin` equals the origin you anchored on:
+
+```js
+const members = graph.nodes.filter(
+  (n) => n.kind === "run" && n.chain_origin === origin,
+)
+```
+
+Do **not** try to derive membership from the edges. The obvious rule — "a
+sibling arrives over a `runs` edge, so keep everything else" — is false: a
+routine fired by a rule gets an `automation --triggers--> run` edge for *every*
+run that rule ever caused, so its siblings arrive over `triggers` as well and
+survive the filter. That rule happens to work for `manual` and `schedule`
+triggers and silently fails for automations, which is the commonest shape in the
+product.
+
+A run whose `chain_origin` is absent predates chain recording. It cannot be
+attributed to any chain — see [What the index does not cover](#what-the-index-does-not-cover)
+— so treat it as unattributable rather than as a member. If **no** run node in a
+response carries the field, you are talking to a server older than this field
+and should keep every run rather than drop them all.
+
 ### Links that do not exist
 
 Two links the product implies are not in the schema, and are reported rather
@@ -244,9 +570,11 @@ a dangling reference from a rendering bug of its own.
 
 ## CLI
 
-The same data, rendered as a tree:
+The same data — the index as a table, the walk as a tree:
 
 ```
+crewship chain list
+crewship chain list --limit 100 --offset 100
 crewship chain ENG-7
 crewship chain ENG-7 --depth 6 --limit 400 --gaps
 crewship chain prn_01hy --format json

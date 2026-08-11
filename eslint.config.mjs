@@ -55,11 +55,8 @@ const paletteRestrictions = [
 // purpose; see the brief §2.
 const PALETTE_ALLOWLIST = [
   "components/admin/backup-list.tsx",
-  "components/features/activity/json-viewer.tsx",
   "components/features/activity/overview-nodes.tsx",
-  "components/features/activity/rail/run-group-tree.tsx",
   "components/features/activity/sub-span-visual.tsx",
-  "components/features/activity/sub-span-waterfall.tsx",
   "components/features/activity/trace-step-node.tsx",
   "components/features/chat/chat-tree-row.tsx",
   "components/features/crews/__tests__/crew-icon-picker-dialog.test.tsx",

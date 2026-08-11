@@ -96,10 +96,24 @@ func (r *rig) seedRoutine(t *testing.T, id, wsID, slug string) string {
 
 func (r *rig) seedRun(t *testing.T, id, wsID, pipelineID, slug, via, byID string) string {
 	t.Helper()
+	return r.seedRunInChain(t, id, wsID, pipelineID, slug, via, byID, "")
+}
+
+// seedRunInChain is seedRun plus pipeline_runs.chain_origin — the id of the run
+// that STARTED the chain this run belongs to, which is what makes a run a member
+// of one chain rather than another.
+//
+// A separate entry point rather than a seventh parameter on seedRun because the
+// column is genuinely optional: it is NULL on every run written before migration
+// 20260807160100, and a fixture that always set it would stop the package's
+// other tests from covering that era at all. "" writes NULL, which is exactly
+// the pre-migration row.
+func (r *rig) seedRunInChain(t *testing.T, id, wsID, pipelineID, slug, via, byID, chainOrigin string) string {
+	t.Helper()
 	r.exec(t, `
-		INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, started_at, triggered_via, triggered_by_id)
-		VALUES (?, ?, ?, ?, 'completed', ?, ?, ?)`,
-		id, wsID, pipelineID, slug, time.Now().UTC().Format(time.RFC3339Nano), via, nullable(byID))
+		INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, started_at, triggered_via, triggered_by_id, chain_origin)
+		VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?)`,
+		id, wsID, pipelineID, slug, time.Now().UTC().Format(time.RFC3339Nano), via, nullable(byID), nullable(chainOrigin))
 	return id
 }
 
@@ -1066,6 +1080,104 @@ func TestWalk_RunNodeCarriesChainDepth(t *testing.T) {
 	}
 }
 
+// chain_origin says WHICH CHAIN a run belongs to, and nothing else in the graph
+// does. A client cannot work it out from the topology: the walk reaches a run's
+// routine, the routine reaches every run it has ever had, and an automation
+// reaches every run it has ever caused — so the same run node arrives over three
+// different edge kinds depending on which way the walk got there. Only the
+// column is stable.
+//
+// Covered from four anchors because the projection is spelled out in more than
+// one place: lookupRunByID (anchoring on the run), expandAutomation and
+// expandRoutine (both through scanRunNeighbour), and expandIssue, which cannot
+// use the runColumns constant at all because it needs the `r.` table alias and
+// therefore spells the list out by hand. A column added to the constant and
+// missed on the hand-written copy is the exact drift runColumns' own doc comment
+// warns about.
+func TestWalk_RunNodeCarriesChainOrigin(t *testing.T) {
+	r := newRig(t, "ws-chain-origin")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage", "run.failed", "triage", true)
+	r.seedIssue(t, "m1", r.ws, "ENG-1", "something broke")
+	r.seedRunInChain(t, "run-1", r.ws, "p1", "triage", "automation", "aut_1", "run-root")
+	// A second run of the same routine, this one discovered through the issue
+	// that fired it, so the hand-written projection in expandIssue is exercised.
+	r.seedRunInChain(t, "run-2", r.ws, "p1", "triage", "issue", "ENG-1", "run-root")
+
+	for _, tc := range []struct{ anchor, node string }{
+		{"run-1", "run:run-1"},
+		{"aut_1", "run:run-1"},
+		{"p1", "run:run-1"},
+		{"ENG-1", "run:run-2"},
+	} {
+		g := walk(t, r, tc.anchor, Options{MaxDepth: 4, MaxNodes: 100})
+		n := nodeByID(t, g, tc.node)
+		if n.ChainOrigin != "run-root" {
+			t.Errorf("anchor %q: %s chain_origin = %q, want run-root", tc.anchor, tc.node, n.ChainOrigin)
+		}
+	}
+}
+
+// A run's SIBLINGS — the other runs of the same routine — arrive in the graph
+// over a `triggers` edge, not only over `runs`.
+//
+// This is the shape that broke the client's old membership rule. The client
+// decided membership from the edge kind: keep any run reached by anything other
+// than `routine --runs--> run`, on the theory that the routine fan-out was the
+// only way a sibling could arrive. Anchored at run-1, this walk emits
+//
+//	routine:p1       --runs-->     run:run-1   (anchor)
+//	automation:aut_1 --triggers--> run:run-1
+//	routine:p1       --runs-->     run:run-2
+//	routine:p1       --runs-->     run:run-3
+//	automation:aut_1 --triggers--> routine:p1
+//	automation:aut_1 --triggers--> run:run-2
+//	automation:aut_1 --triggers--> run:run-3
+//
+// because expandAutomation walks DOWN to every run the rule ever caused and the
+// walker records an edge onto an already-seen node. The last two lines re-admit
+// both siblings. The rule holds only for `manual` and `schedule` triggers, which
+// emit no upward `triggers` edge at all — and rule-fired is the common shape.
+//
+// So the graph must carry the answer rather than imply it: each run names its
+// own chain, and a reader compares that to the chain it asked about.
+func TestWalk_SiblingRunsCarryTheirOwnChainOrigin(t *testing.T) {
+	r := newRig(t, "ws-chain-origin-siblings")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedAutomation(t, "aut_1", r.ws, "Triage on failure", "run.failed", "triage", true)
+	// One rule, one routine, three firings — three separate chains, each rooted
+	// at its own run, which is what the dispatcher writes for a rule-fired run.
+	for _, id := range []string{"run-1", "run-2", "run-3"} {
+		r.seedRunInChain(t, id, r.ws, "p1", "triage", "automation", "aut_1", id)
+	}
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	// The edge that defeats an edge-kind discriminator. Asserted, not assumed:
+	// if the walker ever stops emitting it, the reason this field exists has
+	// changed and whoever changed it should have to say so here.
+	for _, sib := range []string{"run:run-2", "run:run-3"} {
+		if !hasEdge(g, "automation:aut_1", sib, EdgeTriggers) {
+			t.Fatalf("expected automation:aut_1 --triggers--> %s; edges = %v", sib, g.Edges)
+		}
+	}
+
+	anchor := nodeByID(t, g, "run:run-1")
+	if anchor.ChainOrigin != "run-1" {
+		t.Fatalf("anchor chain_origin = %q, want run-1", anchor.ChainOrigin)
+	}
+	for _, sib := range []string{"run:run-2", "run:run-3"} {
+		n := nodeByID(t, g, sib)
+		if n.ChainOrigin == "" {
+			t.Errorf("%s carries no chain_origin, so a client cannot tell it from a member", sib)
+		}
+		if n.ChainOrigin == anchor.ChainOrigin {
+			t.Errorf("%s chain_origin = %q, same as the anchor's — a sibling of the routine is "+
+				"being reported as a member of this chain", sib, n.ChainOrigin)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Option clamping.
 // ---------------------------------------------------------------------------
@@ -1148,4 +1260,125 @@ func TestWalk_RunTriggeredByAutomationNamesTheRule(t *testing.T) {
 	t.Fatalf("no node for automation aut_1; got %v — a run stamped triggered_via=automation "+
 		"is rendered as a chain root, so the one surface that answers \"what caused this\" "+
 		"cannot see the composition edge", got)
+}
+
+// ── The routine → agent edge ────────────────────────────────────────────────
+
+// seedDispatchedAssignment writes an assignment the way a ROUTINE's
+// assignment.create verb writes one: no parent assignment, a parent_run_id
+// naming the run that dispatched it. Raw SQL for the same reason
+// seedAutomation is — the walk reads the schema, so the fixture asserts
+// against the schema.
+func (r *rig) seedDispatchedAssignment(t *testing.T, id, wsID, task, runID string) string {
+	t.Helper()
+	r.exec(t, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, parent_run_id)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)`,
+		id, wsID, r.chat, r.agent, r.agent, task, nullable(runID))
+	return id
+}
+
+// The hop the whole trace was missing. A routine dispatches an agent, and
+// until parent_run_id existed nothing recorded which run did it — so the walk
+// could group the work into the trace and never draw the line, which is the
+// one sentence the picture exists to say.
+func TestWalk_AssignmentWalksBackToTheRunThatDispatchedIt(t *testing.T) {
+	r := newRig(t, "ws-dispatch-up")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "manual", "")
+	r.seedDispatchedAssignment(t, "asg-1", r.ws, "summarise the thread", "run-1")
+
+	g := walk(t, r, "asg-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if !hasNode(g, "run:run-1") {
+		t.Fatalf("the run that dispatched this agent is not in the graph; nodes = %v", nodeIDs(g))
+	}
+	if !hasEdge(g, "run:run-1", "assignment:asg-1", EdgeTriggers) {
+		t.Errorf("missing run -> assignment edge; edges: %#v", g.Edges)
+	}
+}
+
+// And downward: from a run, the agents it put to work. Without this half a
+// reader who starts at the routine — the common case — sees the run and never
+// the work it caused.
+func TestWalk_RunReachesTheAgentsItDispatched(t *testing.T) {
+	r := newRig(t, "ws-dispatch-down")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "manual", "")
+	r.seedDispatchedAssignment(t, "asg-1", r.ws, "first", "run-1")
+	r.seedDispatchedAssignment(t, "asg-2", r.ws, "second", "run-1")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	for _, id := range []string{"assignment:asg-1", "assignment:asg-2"} {
+		if !hasNode(g, id) {
+			t.Errorf("%s missing; nodes = %v", id, nodeIDs(g))
+		}
+		if !hasEdge(g, "run:run-1", id, EdgeTriggers) {
+			t.Errorf("missing run -> %s edge", id)
+		}
+	}
+}
+
+// An assignment nobody dispatched must not gain an edge. An invented one reads
+// exactly like a real one and points at nothing — worse than the gap, which
+// the walk at least declares.
+func TestWalk_AnUndispatchedAssignmentGainsNoRunEdge(t *testing.T) {
+	r := newRig(t, "ws-dispatch-none")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "manual", "")
+	r.seedAssignment(t, "asg-1", r.ws, "nobody sent me", "")
+
+	g := walk(t, r, "asg-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasNode(g, "run:run-1") {
+		t.Errorf("an unrelated run was drawn as the dispatcher; nodes = %v", nodeIDs(g))
+	}
+}
+
+// The tenant fence, on the new edge too. Every other lookup in this walk is
+// workspace-scoped and this one carries the same risk: a dispatching run named
+// across the boundary would put another tenant's run id into this graph.
+func TestWalk_ADispatchingRunInAnotherWorkspaceStaysInvisible(t *testing.T) {
+	r := newRig(t, "ws-dispatch-fence")
+	r.seedWorkspace(t, "ws-somebody-else", "somebody-else")
+	r.seedRoutine(t, "p1", "ws-somebody-else", "triage")
+	r.seedRun(t, "run-foreign", "ws-somebody-else", "p1", "triage", "manual", "")
+	r.seedDispatchedAssignment(t, "asg-1", r.ws, "mine", "run-foreign")
+
+	g := walk(t, r, "asg-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasNode(g, "run:run-foreign") {
+		t.Errorf("a run from another workspace leaked in; nodes = %v", nodeIDs(g))
+	}
+}
+
+// The fence on the DOWNWARD half too. Asserting it upward is not enough: this
+// direction is the more dangerous one, because a run enumerates rows rather
+// than dereferencing a single id, so a missing fence lists another tenant's
+// agent work inside this workspace's graph.
+//
+// Added after a mutation that removed this exact WHERE clause left every test
+// green — the upward fence test could not see it.
+func TestWalk_ARunNeverListsAnotherWorkspacesAssignments(t *testing.T) {
+	r := newRig(t, "ws-dispatch-fence-down")
+	r.seedRoutine(t, "p1", r.ws, "triage")
+	r.seedRun(t, "run-1", r.ws, "p1", "triage", "manual", "")
+
+	// Same dispatching run id, an assignment belonging to somebody else.
+	r.seedWorkspace(t, "ws-other-tenant", "other-tenant")
+	r.exec(t, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, parent_run_id)
+		VALUES ('asg-theirs', 'ws-other-tenant', ?, ?, ?, 'their work', 'PENDING', 'run-1')`,
+		r.chat, r.agent, r.agent)
+	r.seedDispatchedAssignment(t, "asg-mine", r.ws, "my work", "run-1")
+
+	g := walk(t, r, "run-1", Options{MaxDepth: 4, MaxNodes: 100})
+
+	if hasNode(g, "assignment:asg-theirs") {
+		t.Errorf("another tenant's assignment was listed under this run; nodes = %v", nodeIDs(g))
+	}
+	if !hasNode(g, "assignment:asg-mine") {
+		t.Errorf("the workspace's own assignment went missing; nodes = %v", nodeIDs(g))
+	}
 }

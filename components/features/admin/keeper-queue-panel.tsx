@@ -97,10 +97,9 @@ function decisionStatusKey(decision: string | null | undefined): string {
 const ROW_CELL = "text-[11px] text-muted-foreground"
 
 // The LLM prompt / raw response are potentially long verbatim dumps, shown in
-// a scrollable monospace box — the same role and density
-// components/features/activity/json-viewer.tsx uses for a raw-text viewer
-// elsewhere in the app. Shared because the prompt and response panes are
-// otherwise identical.
+// a scrollable monospace box — the same role and density the trace side
+// panel's raw-text viewer used before /activity dropped it. Shared because
+// the prompt and response panes are otherwise identical.
 const RAW_DUMP_CLASS =
   "text-[10px] bg-muted/60 border border-border/60 rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap font-mono max-h-[280px] overflow-y-auto"
 

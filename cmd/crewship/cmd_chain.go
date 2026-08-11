@@ -28,6 +28,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -47,7 +48,31 @@ type chainNode struct {
 	// ChainDepth is the run's own composition depth, not its distance from the
 	// anchor (that is Depth). Rendered only when non-zero, so an ordinary run
 	// reads exactly as it did before.
-	ChainDepth    int    `json:"chain_depth"`
+	ChainDepth int `json:"chain_depth"`
+	// ChainOrigin is which chain a run BELONGS to — pipeline_runs.chain_origin,
+	// the id of the run that started it.
+	//
+	// Carried but not rendered, and that is deliberate. The walk expands a run
+	// to its routine and a routine to every run of it, so a graph anchored at
+	// one run comes back holding every run that routine has ever had; this is
+	// the only field that tells the chain's own members from those siblings, and
+	// the dashboard needed it for exactly that. Nothing in the human rendering
+	// asks the question yet, so nothing prints it — but `-f json` is the
+	// supported way an agent drives this command, and an agent that cannot see
+	// the field cannot make the distinction at all.
+	ChainOrigin string `json:"chain_origin"`
+	// OccurredAt / EndedAt / DurationMS are when the node happened and how long
+	// it took. Only run, assignment and inbox carry them; issue, routine, agent
+	// and automation are nouns and send nothing rather than their row's
+	// created_at, which is a different fact. See internal/chain.Node.
+	//
+	// DurationMS is a POINTER for the reason the server made it one: 0 is a run
+	// that finished inside a millisecond, and absent is a span that could not be
+	// derived. A plain int64 would decode both as 0 and this command would print
+	// "0ms" over work that is still running.
+	OccurredAt    string `json:"occurred_at"`
+	EndedAt       string `json:"ended_at"`
+	DurationMS    *int64 `json:"duration_ms"`
 	Anchor        bool   `json:"anchor"`
 	Partial       bool   `json:"partial"`
 	PartialReason string `json:"partial_reason"`
@@ -75,6 +100,77 @@ type chainGraph struct {
 	Truncated   bool        `json:"truncated"`
 	TruncatedBy string      `json:"truncated_by"`
 	Gaps        []chainGap  `json:"gaps"`
+}
+
+// chainSummary / chainList mirror the wire types of GET /api/v1/chains
+// (internal/api/chains_list.go). Same rule as above: --format json prints the
+// decoded struct, so a field added server-side needs a field here too.
+type chainSummary struct {
+	Origin        string `json:"origin"`
+	StartedByKind string `json:"started_by_kind"`
+	StartedByID   string `json:"started_by_id"`
+	StartedByKey  string `json:"started_by_key"`
+	StartedBy     string `json:"started_by"`
+	TriggeredVia  string `json:"triggered_via"`
+	RoutineID     string `json:"routine_id"`
+	RoutineSlug   string `json:"routine_slug"`
+	Runs          int    `json:"runs"`
+	MaxChainDepth int    `json:"max_chain_depth"`
+	FailedRuns    int    `json:"failed_runs"`
+	Failed        bool   `json:"failed"`
+	// Non-terminal runs, split by whether anything moves without a person.
+	// Timestamps cannot answer this: last_activity falls back to started_at
+	// while a run is in flight, so a chain parked on an approval since Tuesday
+	// and one that finished on Tuesday carry the same instant.
+	RunningRuns   int    `json:"running_runs"`
+	WaitingRuns   int    `json:"waiting_runs"`
+	FirstActivity string `json:"first_activity"`
+	LastActivity  string `json:"last_activity"`
+	// DurationMS is wall clock first-to-last, and a POINTER for the reason the
+	// server made it one: null is a chain with nothing to measure between (a
+	// single run still going), and 0 would assert the work was instant.
+	DurationMS *int64 `json:"duration_ms"`
+	// What the chain reached. These are what tell two runs of ONE routine
+	// apart — the routine name is identical on both, the nouns are not.
+	//
+	// The lists are capped server-side; the counts are not. Rendering only the
+	// returned refs would make a chain that touched forty issues read as one
+	// that touched five, so both travel together and the count is the truth.
+	Issues     []chainIssueRef `json:"issues"`
+	IssueCount int             `json:"issue_count"`
+	Agents     []chainAgentRef `json:"agents"`
+	AgentCount int             `json:"agent_count"`
+}
+
+// chainIssueRef / chainAgentRef mirror internal/api. They exist here for one
+// reason: `-f json` re-marshals this struct, so a field this file does not
+// declare is silently absent from the output — the server answers and the
+// consumer sees null. TestChainSummary_CarriesEveryFieldTheServerSends pins
+// that, because the comment above them saying so was not enough.
+type chainIssueRef struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Created    bool   `json:"created,omitempty"`
+}
+
+type chainAgentRef struct {
+	ID          string `json:"id"`
+	Slug        string `json:"slug,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Assignments int    `json:"assignments"`
+}
+
+type chainList struct {
+	Chains  []chainSummary `json:"chains"`
+	Count   int            `json:"count"`
+	Limit   int            `json:"limit"`
+	Offset  int            `json:"offset"`
+	HasMore bool           `json:"has_more"`
+	// HasUnrecordedRuns says this workspace holds runs from before the
+	// chain_origin column existed. They are not in the index and cannot be —
+	// see the note the renderer prints.
+	HasUnrecordedRuns bool `json:"has_unrecorded_runs"`
 }
 
 var chainCmd = &cobra.Command{
@@ -171,6 +267,176 @@ Examples:
 			}
 		})
 	},
+}
+
+// chainListCmd is the index: every chain that ran here, newest first.
+//
+// A subcommand rather than a flag on `chain`, because it answers a different
+// question and takes different arguments — but that does mean it shadows an
+// anchor literally spelled "list" (a routine could be slugged that). The
+// escape is the standard one: `crewship chain -- list` stops cobra looking for
+// a subcommand and passes the word through as the anchor.
+var chainListCmd = &cobra.Command{
+	Use:     "list",
+	Aliases: []string{"ls"},
+	Short:   "List the chains that have run in this workspace, newest first",
+	Long: `List chain runs — one row per chain, newest first.
+
+A chain is a workflow run: whatever started it, plus every run it went on to
+cause. This is the index that "crewship chain <anchor>" cannot be — it answers
+"what ran here" without you already knowing an anchor. Every row's origin is a
+valid anchor, so the pair is: list to find it, chain to open it.
+
+Each row carries what set the chain off (a rule name, an issue, a person, a
+schedule), how many runs it grew to, the deepest composed hop it reached, the
+window it covers, and whether any run in it failed.
+
+The page is capped server-side (default 50, ceiling 200): the index is a
+grouped scan of this workspace's runs, so it is paged rather than dumped.
+
+Runs recorded before the chain_origin column landed are NOT indexed. The link
+was never written and cannot be reconstructed, so listing them would mean
+claiming each one was its own chain root. Their existence is reported in the
+footer instead.
+
+Examples:
+  crewship chain list
+  crewship chain list --limit 100
+  crewship chain list --limit 50 --offset 50
+  crewship chain list --format json`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
+
+		q := url.Values{}
+		if limit > 0 {
+			q.Set("limit", strconv.Itoa(limit))
+		}
+		if offset > 0 {
+			q.Set("offset", strconv.Itoa(offset))
+		}
+		qs := ""
+		if len(q) > 0 {
+			qs = "?" + q.Encode()
+		}
+		// Inlined Sprintf for the reason spelled out on chainCmd: a path
+		// assembled into a local first is dropped from the CLI↔route contract
+		// gate silently.
+		resp, err := client.Get(fmt.Sprintf("/api/v1/chains%s", qs))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var l chainList
+		if err := cli.ReadJSON(resp, &l); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		return f.AutoHuman(l, func() {
+			for _, line := range renderChainList(l) {
+				fmt.Println(line)
+			}
+		})
+	},
+}
+
+// renderChainList lays the index out as a table. Pure function of the decoded
+// payload, same as renderChainTree, so the layout is testable without HTTP.
+func renderChainList(l chainList) []string {
+	if len(l.Chains) == 0 {
+		out := []string{"No chains recorded in this workspace yet."}
+		return append(out, chainListNotes(l)...)
+	}
+
+	header := []string{"WHEN", "STARTED BY", "ROUTINE", "RUNS", "DEPTH", "STATUS", "ORIGIN"}
+	rows := [][]string{header}
+	for _, c := range l.Chains {
+		status := "ok"
+		if c.Failed {
+			status = "FAILED"
+		}
+		rows = append(rows, []string{
+			issueRelativeTime(c.LastActivity),
+			chainCauseCell(c),
+			orDash(sanitizeTerminal(c.RoutineSlug)),
+			strconv.Itoa(c.Runs),
+			strconv.Itoa(c.MaxChainDepth),
+			status,
+			truncateID(sanitizeTerminal(c.Origin), 24),
+		})
+	}
+
+	// Widths are measured on the plain cells, in RUNES, and the colour is
+	// applied after padding — so neither an ANSI sequence nor a non-ASCII
+	// label (an em dash, an accented name) can push a column out of line.
+	width := make([]int, len(header))
+	for _, row := range rows {
+		for i, cell := range row {
+			if n := utf8.RuneCountInString(cell); n > width[i] {
+				width[i] = n
+			}
+		}
+	}
+
+	var out []string
+	for r, row := range rows {
+		var b strings.Builder
+		for i, cell := range row {
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			padded := cell + strings.Repeat(" ", width[i]-utf8.RuneCountInString(cell))
+			switch {
+			case r == 0:
+				fmt.Fprintf(&b, "%s%s%s", cli.Dim, padded, cli.Reset)
+			case i == 5 && cell == "FAILED":
+				fmt.Fprintf(&b, "%s%s%s", cli.Yellow, padded, cli.Reset)
+			default:
+				b.WriteString(padded)
+			}
+		}
+		out = append(out, strings.TrimRight(b.String(), " "))
+	}
+
+	out = append(out, "")
+	out = append(out, fmt.Sprintf("%d chains (limit %d, offset %d)", len(l.Chains), l.Limit, l.Offset))
+	if l.HasMore {
+		out = append(out, fmt.Sprintf("%sMore chains beyond this page. Continue with --offset %d.%s",
+			cli.Dim, l.Offset+l.Limit, cli.Reset))
+	}
+	return append(out, chainListNotes(l)...)
+}
+
+// chainListNotes carries the absences the index cannot show, in both the empty
+// and the populated case — an empty list that says nothing reads as "nothing
+// ever ran here", which for a pre-migration database is false.
+func chainListNotes(l chainList) []string {
+	if !l.HasUnrecordedRuns {
+		return nil
+	}
+	return []string{fmt.Sprintf("%sSome runs in this workspace predate chain recording (the chain_origin column) "+
+		"and are not indexed here: the link that would group them was never written.%s", cli.Dim, cli.Reset)}
+}
+
+// chainCauseCell is the "what set this off" column: the kind first so the rows
+// scan, then the human label. Labels are rule names and issue titles — user-
+// and agent-written — so they are stripped before they reach a terminal.
+func chainCauseCell(c chainSummary) string {
+	kind := sanitizeTerminal(c.StartedByKind)
+	label := sanitizeTerminal(strings.ReplaceAll(c.StartedBy, "\n", " "))
+	if label == "" || label == kind {
+		return orDash(kind)
+	}
+	return truncateStr(kind+" "+label, 44)
 }
 
 // renderChainTree returns the human view as lines. A pure function of the
@@ -338,6 +604,9 @@ func chainNodeLine(n chainNode, edgeLabel string) string {
 	if n.Status != "" {
 		fmt.Fprintf(&b, "  %s(%s)%s", cli.Dim, sanitizeTerminal(n.Status), cli.Reset)
 	}
+	if when := chainWhen(n); when != "" {
+		fmt.Fprintf(&b, "  %s%s%s", cli.Dim, when, cli.Reset)
+	}
 	// A composed run says so. Printed only above zero: every hand-started run
 	// carries 0, and a "composed 0" on each of them would bury the handful that
 	// are actually composed.
@@ -348,6 +617,31 @@ func chainNodeLine(n chainNode, edgeLabel string) string {
 		fmt.Fprintf(&b, " %s(partial)%s", cli.Yellow, cli.Reset)
 	}
 	return b.String()
+}
+
+// chainWhen is the "…and when" half of a node line: a relative start, then the
+// span if there is one, e.g. "3h ago · 1m30s".
+//
+// Printed only from what the server sent, and the server sends nothing for a
+// kind that cannot answer — issue, routine, agent and automation are nouns, and
+// their row's created_at is a different fact from when anything in this chain
+// happened. So a blank here means "this kind has no time", not "the time is
+// missing", and inventing one would put a routine written last March on the
+// same line as the run it produced this morning.
+//
+// The duration is printed only when the server sent one. It is a POINTER on the
+// wire precisely so this can tell 0 (a run that finished inside a millisecond)
+// from absent (a run that has not finished): decoded into an int64 both would
+// arrive as 0, and "0ms" over an in-flight run reads as "instant".
+func chainWhen(n chainNode) string {
+	if n.OccurredAt == "" {
+		return ""
+	}
+	when := issueRelativeTime(n.OccurredAt)
+	if n.DurationMS == nil {
+		return when
+	}
+	return when + " · " + formatDurMs(*n.DurationMS)
 }
 
 // chainShortRef is the handle a reader uses to identify a node — and, more
@@ -412,5 +706,8 @@ func init() {
 	chainCmd.Flags().Int("depth", 0, "How many hops from the anchor to walk (server default 4, max 10)")
 	chainCmd.Flags().Int("limit", 0, "Maximum nodes to return (server default 200, max 1000)")
 	chainCmd.Flags().Bool("gaps", false, "Print the full text of the links the data model cannot carry")
+	chainListCmd.Flags().Int("limit", 0, "Chains per page (server default 50, ceiling 200)")
+	chainListCmd.Flags().Int("offset", 0, "Skip this many chains (for paging)")
+	chainCmd.AddCommand(chainListCmd)
 	rootCmd.AddCommand(chainCmd)
 }

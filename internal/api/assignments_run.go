@@ -40,7 +40,22 @@ type createAssignmentBody struct {
 	// would file a sub-agent's dispatch under its lead — and then the depth cap
 	// would measure the LEAD's position in the tree, i.e. 1, on every hop
 	// forever. Empty (a legacy sidecar) falls back to the chat's agent.
-	ActorAgentID string                    `json:"actor_agent_id,omitempty"`
+	ActorAgentID string `json:"actor_agent_id,omitempty"`
+	// AuthorRunID is the ROUTINE RUN that made this call, injected by the
+	// crewship-step dispatcher (crewship_actions.go's crewshipBody, which strips
+	// the key from the author's args before setting it — so it names the run
+	// that actually executed, not one a routine author chose).
+	//
+	// It is what lets agent work join the trace routine work already has: the
+	// run's chain_origin (or the run itself, when the run IS the root) becomes
+	// the new assignment's chain_origin. Without it a routine that dispatches an
+	// agent ends its own chain at that boundary, and the causal walk over an
+	// issue answers one node.
+	//
+	// Empty for the sidecar's /assign — an agent's own delegation inherits its
+	// chain from the assignment it is executing instead, which is the stronger
+	// answer and takes precedence.
+	AuthorRunID  string                    `json:"author_run_id,omitempty"`
 	CrewMembers  []orchestrator.CrewMember `json:"-"` // populated internally for mission dispatches
 	LeadPlanning bool                      `json:"-"` // when true, run as LEAD with sidecar
 	// Creator attribution ([4], #810) — copied from the mission's v129
@@ -165,6 +180,30 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "evaluate delegation caps", capErr)
 		return
 	}
+	// Which chain this work belongs to. The scope has already answered when the
+	// caller is executing an assignment of its own (agent → agent); rootedAt
+	// fills the gap for the other producer, a ROUTINE dispatching an agent,
+	// where the only ancestor is the run that made the call. A caller with
+	// neither leaves the column NULL and starts its own trace — the row says
+	// "did not say" rather than asserting a parentage nothing recorded.
+	if scope.ChainOrigin == "" && body.AuthorRunID != "" {
+		origin, originErr := chainOriginForCausingRun(r.Context(), h.db, body.WorkspaceID, body.AuthorRunID)
+		if originErr != nil {
+			// Provenance, not a cap: the dispatch proceeds untraced rather than
+			// being refused over a field nobody's safety depends on. Logged at
+			// warn because a chain silently losing a hop is exactly the failure
+			// that made the causal walk unreliable in the first place.
+			h.logger.Warn("could not resolve the causing run's chain; assignment will root its own",
+				"error", originErr, "author_run_id", body.AuthorRunID, "workspace_id", body.WorkspaceID)
+		}
+		scope = scope.rootedAt(origin)
+	}
+	// Outside the branch above on purpose. That branch already excludes the
+	// delegation case (a caller mid-assignment has an origin), so calling this
+	// inside it would make dispatchedBy's own guard unreachable — a guard that
+	// cannot run is indistinguishable from one that works, which is the failure
+	// this whole change is chasing. Here it is the single live decision.
+	scope = scope.dispatchedBy(body.AuthorRunID)
 	if assignerCrewID != body.CrewID {
 		connected, connErr := AreCrewsConnected(r.Context(), h.db, assignerCrewID, body.CrewID)
 		if connErr != nil {
