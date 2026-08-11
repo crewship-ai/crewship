@@ -29631,27 +29631,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -29661,27 +29649,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -29691,27 +29667,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -29721,27 +29685,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30043,27 +29995,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30073,27 +30013,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30103,27 +30031,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30133,27 +30049,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30288,27 +30192,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30318,27 +30210,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30348,27 +30228,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30378,27 +30246,15 @@
           },
           "404": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30408,27 +30264,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30487,27 +30331,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30517,27 +30349,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30547,27 +30367,15 @@
           },
           "404": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30577,27 +30385,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30809,27 +30605,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30839,27 +30623,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30869,27 +30641,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30899,27 +30659,15 @@
           },
           "404": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -30929,27 +30677,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -31522,27 +31258,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -31552,27 +31276,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -31582,27 +31294,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -31612,27 +31312,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -31817,27 +31505,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -31847,27 +31523,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -31877,27 +31541,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -31907,27 +31559,15 @@
           },
           "404": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -31937,27 +31577,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -55672,27 +55300,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -55702,27 +55318,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -55732,27 +55336,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -55811,27 +55403,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -55841,27 +55421,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -55871,27 +55439,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -55901,27 +55457,15 @@
           },
           "404": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -55931,27 +55475,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -56148,27 +55680,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -56178,27 +55698,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -56208,27 +55716,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -56238,27 +55734,15 @@
           },
           "404": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -56268,27 +55752,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -94563,27 +94035,15 @@
           },
           "400": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -94593,27 +94053,15 @@
           },
           "401": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -94623,27 +94071,15 @@
           },
           "403": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -94653,27 +94089,15 @@
           },
           "500": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
@@ -94683,27 +94107,15 @@
           },
           "503": {
             "content": {
-              "application/problem+json": {
+              "application/json": {
                 "schema": {
                   "properties": {
-                    "detail": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "type": {
+                    "error": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "type",
-                    "title",
-                    "status",
-                    "detail"
+                    "error"
                   ],
                   "type": "object"
                 }
