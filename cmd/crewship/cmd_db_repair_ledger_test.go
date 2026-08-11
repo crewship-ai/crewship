@@ -393,6 +393,121 @@ func TestRepairLedger_DatabaseInUseGuard(t *testing.T) {
 	}
 }
 
+// TestRepairLedger_RechecksBeforeTheApply covers the same prompt-shaped window
+// as TestRestoreSnapshotRechecksBeforeTheSwap, and the reason it is a separate
+// test rather than an assumed-covered case is worth stating.
+//
+// The code claimed ApplyLedgerRepair's in-transaction re-check closed this
+// window. It does not: that check compares the LEDGER ROWS against the plan
+// and raises ErrLedgerChanged only if they moved. A crewshipd that starts
+// during the prompt moves nothing — on a collision it refuses to boot, and an
+// older binary that can boot on the old numbers has no reason to rewrite them
+// — so the repair sails past the re-check and renumbers the ledger under a
+// running server. That server keeps working (renumbering touches no schema)
+// and then fails to start the next time, on a collision in the opposite
+// direction, with nothing on the box explaining why.
+//
+// Two different questions, in other words: "did the ledger change" and "is
+// anyone holding this database". Only the second one is this guard's.
+func TestRepairLedger_RechecksBeforeTheApply(t *testing.T) {
+	tests := []struct {
+		name string
+		// takeDatabaseAtThePrompt: crewshipd comes back while the operator is
+		// still reading the plan.
+		takeDatabaseAtThePrompt bool
+		force                   bool
+		wantRefused             bool
+		wantRepaired            bool
+	}{
+		{
+			name:                    "crewshipd returns while the operator reads the plan: refuse",
+			takeDatabaseAtThePrompt: true,
+			wantRefused:             true,
+			wantRepaired:            false,
+		},
+		{
+			// --force is for an indeterminate probe only. A database that is
+			// definitely held is exactly the case where continuing is known
+			// to be wrong, so the flag must not reach it.
+			name:                    "…and --force does not override that",
+			takeDatabaseAtThePrompt: true,
+			force:                   true,
+			wantRefused:             true,
+			wantRepaired:            false,
+		},
+		{
+			name:         "nothing takes the database during the prompt: repair",
+			wantRefused:  false,
+			wantRepaired: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, from, to := stageRenumberedLedger(t)
+			pinDeadPort(t)
+			dbPath := stagedDBPath(t)
+
+			origConfirm := dbConfirm
+			t.Cleanup(func() { dbConfirm = origConfirm })
+			dbConfirm = func(string) bool {
+				if tt.takeDatabaseAtThePrompt {
+					held, err := database.Open("file:" + dbPath)
+					if err != nil {
+						t.Fatalf("hold db open: %v", err)
+					}
+					t.Cleanup(func() { _ = held.Close() })
+					// One statement, so the WAL index exists and the holder is
+					// visible to a lock probe — see the note in
+					// TestRepairLedger_DatabaseInUseGuard.
+					var n int
+					if err := held.QueryRow(`SELECT COUNT(*) FROM _migrations`).Scan(&n); err != nil {
+						t.Fatalf("holder query: %v", err)
+					}
+				}
+				return true
+			}
+
+			repairLedgerDryRun, repairLedgerYes = false, false
+			repairLedgerForce = tt.force
+			t.Cleanup(func() {
+				repairLedgerDryRun, repairLedgerYes, repairLedgerForce = false, false, false
+			})
+
+			var runErr error
+			out := captureStdoutCovCli2(t, func() {
+				runErr = repairLedgerCmd.RunE(newFlagCmd(nil, nil), nil)
+			})
+
+			switch {
+			case tt.wantRefused && runErr == nil:
+				t.Fatalf("repair was allowed, want refusal; output:\n%s", out)
+			case !tt.wantRefused && runErr != nil:
+				t.Fatalf("repair refused (%v), want it to proceed; output:\n%s", runErr, out)
+			}
+			if tt.wantRefused {
+				if !strings.Contains(runErr.Error(), "crewship.db") {
+					t.Errorf("error %q does not name the database file", runErr)
+				}
+				if tt.force && !strings.Contains(runErr.Error(), "--force does not override") {
+					t.Errorf("error %q should say --force cannot lift a definite 'in use'", runErr)
+				}
+			}
+
+			led := readStagedLedger(t)
+			got := led[len(led)-1].Version
+			want := from
+			if tt.wantRepaired {
+				want = to
+			}
+			if got != want {
+				t.Errorf("highest applied version = %d, want %d (repair %s)", got, want,
+					map[bool]string{true: "should have run", false: "should NOT have run"}[tt.wantRepaired])
+			}
+		})
+	}
+}
+
 // An operator running this on a broken box may well have the wrong data
 // directory. "no such table: _migrations" is a database internal, not an
 // answer, so the command has to recognise "there is no Crewship database

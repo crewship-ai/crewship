@@ -3,11 +3,13 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -279,6 +281,388 @@ func TestRestoreSnapshotDatabaseInUseGuard(t *testing.T) {
 			}
 		})
 	}
+}
+
+// corruptLiveDatabase replaces the live database with bytes that are not a
+// SQLite file at all, leaving the snapshot beside it intact.
+//
+// This is not a contrived state: it is precisely the state restore-snapshot
+// exists for. It is also the one state the lock probe cannot answer — SQLite
+// cannot take a lock on a file it refuses to recognise — so it is where "the
+// probe failed" and "someone is using the file" have to stay different
+// answers.
+func corruptLiveDatabase(t *testing.T, dbPath string) []byte {
+	t.Helper()
+	garbage := []byte("this is not a SQLite database at all, it is a torn file")
+	if err := os.WriteFile(dbPath, garbage, 0o600); err != nil {
+		t.Fatalf("corrupt db: %v", err)
+	}
+	// A stale WAL beside a corrupt main file is what a killed server leaves;
+	// remove ours so the probe fails on the header rather than on WAL replay,
+	// keeping the case pinned to the error the finding named.
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Remove(dbPath + suffix); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove %s%s: %v", dbPath, suffix, err)
+		}
+	}
+	return garbage
+}
+
+// holdDatabase opens dbPath and keeps it open for the rest of the test,
+// running one statement so the WAL index is mapped — without it an
+// as-yet-unused connection holds no lock for the probe to see (see
+// databaseInUse's own notes). This is the stand-in for a live crewshipd.
+func holdDatabase(t *testing.T, dbPath string) {
+	t.Helper()
+	held, err := database.Open("file:" + dbPath)
+	if err != nil {
+		t.Fatalf("hold db open: %v", err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+	var n int
+	if err := held.QueryRow(`SELECT COUNT(*) FROM marker`).Scan(&n); err != nil {
+		t.Fatalf("holder query: %v", err)
+	}
+}
+
+// TestRestoreSnapshotRechecksBeforeTheSwap covers the window the guard's own
+// documentation claims to cover but did not: the confirmation prompt.
+//
+// The probe ran, then snapshot selection, then an UNBOUNDED prompt, then the
+// swap. An operator who stops crewshipd, starts the restore and pauses to read
+// the prompt gives systemd's Restart=always (or a colleague) all the time it
+// needs to bring the server back; the swap then renames a file into place
+// under a process holding it open, which is the exact torn-database outcome
+// the guard exists to prevent. Answering "is it in use" once, before a wait of
+// unknown length, answers about a moment that has passed.
+//
+// The prompt is where the window is, so the test takes the database inside the
+// prompt.
+func TestRestoreSnapshotRechecksBeforeTheSwap(t *testing.T) {
+	tests := []struct {
+		name string
+		// takeDatabaseAtThePrompt: crewshipd comes back while the operator is
+		// still reading the confirmation.
+		takeDatabaseAtThePrompt bool
+		wantRefused             bool
+		wantMarker              string
+	}{
+		{
+			name:                    "crewshipd returns while the operator reads the prompt: refuse",
+			takeDatabaseAtThePrompt: true,
+			wantRefused:             true,
+			wantMarker:              "live",
+		},
+		{
+			name:                    "nothing takes the database during the prompt: restore",
+			takeDatabaseAtThePrompt: false,
+			wantRefused:             false,
+			wantMarker:              "snapshot",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CREWSHIP_SERVER", "")
+			t.Setenv("CREWSHIP_PROFILE", "")
+			flagServer, flagProfile = "", ""
+			cliCfg = &cli.CLIConfig{}
+
+			dbPath := stageRestoreFixture(t)
+			pinDeadPort(t)
+
+			// The prompt is the window, so it is also the seam: confirming is
+			// what the operator does slowly, and dbConfirm is where the test
+			// gets to act "during" it.
+			origConfirm := dbConfirm
+			t.Cleanup(func() { dbConfirm = origConfirm })
+			dbConfirm = func(string) bool {
+				if tt.takeDatabaseAtThePrompt {
+					holdDatabase(t, dbPath)
+				}
+				return true
+			}
+
+			restoreSnapshotList, restoreSnapshotYes, restoreSnapshotForce = false, false, false
+			t.Cleanup(func() {
+				restoreSnapshotList, restoreSnapshotYes, restoreSnapshotForce = false, false, false
+			})
+
+			var err error
+			out := covCaptureAll(t, func() {
+				err = restoreSnapshotCmd.RunE(restoreSnapshotCmd, nil)
+			})
+
+			switch {
+			case tt.wantRefused && err == nil:
+				t.Fatalf("restore was allowed after the database was taken during the prompt; output:\n%s", out)
+			case !tt.wantRefused && err != nil:
+				t.Fatalf("restore refused (%v), want it to proceed; output:\n%s", err, out)
+			}
+			if tt.wantRefused && !strings.Contains(err.Error(), "crewship.db") {
+				t.Errorf("error %q does not name the database file", err)
+			}
+			if got := readMarker(t, dbPath); got != tt.wantMarker {
+				t.Errorf("marker = %q, want %q", got, tt.wantMarker)
+			}
+		})
+	}
+}
+
+// TestRestoreSnapshotForce pins the two halves of --force apart.
+//
+// Refusing on ANY probe failure locked the operator out of the one command
+// that exists for a broken database: a corrupt file cannot answer the probe,
+// so restore-snapshot refused to restore over it, and the project rule is that
+// everything goes through the CLI — never a DB shell — so there was nothing
+// legitimate left to do. --force lifts that. It does NOT lift a definite "in
+// use": that answer is knowable, and writing anyway tears the file under a
+// running server, which is the defect this whole guard exists for.
+func TestRestoreSnapshotForce(t *testing.T) {
+	tests := []struct {
+		name string
+		// corrupt: the live database is not a SQLite file, so the probe
+		// errors and can say nothing about who holds it.
+		corrupt bool
+		// heldOpen: a live crewshipd stand-in — the probe answers "in use",
+		// definitely.
+		heldOpen     bool
+		force        bool
+		wantRefused  bool
+		wantErrParts []string
+		// wantWarning: the loud stderr paragraph naming what is being
+		// overridden. An override the operator cannot see in the transcript
+		// afterwards is not an override, it is a silent fail-open.
+		wantWarning []string
+	}{
+		{
+			name:        "corrupt database, no --force: refuse and say the probe failed",
+			corrupt:     true,
+			wantRefused: true,
+			wantErrParts: []string{
+				"cannot determine",
+				"crewship.db",
+				"not a database", // the underlying probe error, not a guess
+				"--force",        // and the way out
+			},
+		},
+		{
+			name:        "corrupt database with --force: restore proceeds",
+			corrupt:     true,
+			force:       true,
+			wantRefused: false,
+			wantWarning: []string{"--force", "not a database", "crewship.db"},
+		},
+		{
+			name:        "database genuinely in use, with --force: still refuse",
+			heldOpen:    true,
+			force:       true,
+			wantRefused: true,
+			wantErrParts: []string{
+				"open by another process",
+				"--force does not override",
+			},
+		},
+		{
+			name:         "database genuinely in use, no --force: refuse",
+			heldOpen:     true,
+			wantRefused:  true,
+			wantErrParts: []string{"open by another process"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CREWSHIP_SERVER", "")
+			t.Setenv("CREWSHIP_PROFILE", "")
+			flagServer, flagProfile = "", ""
+			cliCfg = &cli.CLIConfig{}
+
+			dbPath := stageRestoreFixture(t)
+			pinDeadPort(t)
+
+			if tt.heldOpen {
+				holdDatabase(t, dbPath)
+			}
+			var garbage []byte
+			if tt.corrupt {
+				garbage = corruptLiveDatabase(t, dbPath)
+			}
+
+			restoreSnapshotList, restoreSnapshotYes = false, true
+			restoreSnapshotForce = tt.force
+			t.Cleanup(func() {
+				restoreSnapshotList, restoreSnapshotYes, restoreSnapshotForce = false, false, false
+			})
+
+			var err error
+			out := covCaptureAll(t, func() {
+				err = restoreSnapshotCmd.RunE(restoreSnapshotCmd, nil)
+			})
+
+			switch {
+			case tt.wantRefused && err == nil:
+				t.Fatalf("restore was allowed, want refusal; output:\n%s", out)
+			case !tt.wantRefused && err != nil:
+				t.Fatalf("restore refused (%v), want it to proceed; output:\n%s", err, out)
+			}
+			for _, want := range tt.wantErrParts {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should mention %q", err, want)
+				}
+			}
+			for _, want := range tt.wantWarning {
+				if !strings.Contains(out, want) {
+					t.Errorf("forced run should warn about %q; output:\n%s", want, out)
+				}
+			}
+
+			// What actually happened on disk. A refusal must leave the file
+			// exactly as it was — including when it was already garbage.
+			switch {
+			case tt.wantRefused && tt.corrupt:
+				raw, rerr := os.ReadFile(dbPath)
+				if rerr != nil {
+					t.Fatalf("read db: %v", rerr)
+				}
+				if !bytes.Equal(raw, garbage) {
+					t.Errorf("refused restore rewrote the database file")
+				}
+			case tt.wantRefused:
+				if got := readMarker(t, dbPath); got != "live" {
+					t.Errorf("marker = %q, want %q (restore should NOT have run)", got, "live")
+				}
+			default:
+				if got := readMarker(t, dbPath); got != "snapshot" {
+					t.Errorf("marker = %q, want %q (restore should have run)", got, "snapshot")
+				}
+			}
+		})
+	}
+}
+
+// TestDBWriteGuardOutcomes pins the guard's three-way decision directly, since
+// it is shared by restore-snapshot and repair-ledger and the third outcome —
+// "the probe could not answer" — is not reachable end-to-end from every
+// command (repair-ledger reads the ledger first, so a file corrupt enough to
+// defeat the probe fails earlier, on the read).
+func TestDBWriteGuardOutcomes(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, dir string) string
+		force       bool
+		wantErr     []string
+		wantWarning bool
+	}{
+		{
+			name: "free database: proceed",
+			setup: func(t *testing.T, dir string) string {
+				p := filepath.Join(dir, "free.db")
+				db, err := database.Open("file:" + p)
+				if err != nil {
+					t.Fatalf("open: %v", err)
+				}
+				if _, err := db.Exec(`CREATE TABLE t (x)`); err != nil {
+					t.Fatalf("exec: %v", err)
+				}
+				if err := db.Close(); err != nil {
+					t.Fatalf("close: %v", err)
+				}
+				return p
+			},
+		},
+		{
+			name: "held open: refuse",
+			setup: func(t *testing.T, dir string) string {
+				return guardHeldDB(t, dir, "held.db")
+			},
+			wantErr: []string{"open by another process", "--force does not override"},
+		},
+		{
+			name: "held open, with --force: still refuse",
+			setup: func(t *testing.T, dir string) string {
+				return guardHeldDB(t, dir, "held-force.db")
+			},
+			force:   true,
+			wantErr: []string{"open by another process", "--force does not override"},
+		},
+		{
+			name: "probe cannot answer: refuse, naming the probe error",
+			setup: func(t *testing.T, dir string) string {
+				p := filepath.Join(dir, "garbage.db")
+				if err := os.WriteFile(p, []byte("not a database"), 0o600); err != nil {
+					t.Fatalf("write: %v", err)
+				}
+				return p
+			},
+			wantErr: []string{"cannot determine", "not a database", "--force"},
+		},
+		{
+			name: "probe cannot answer, with --force: proceed, loudly",
+			setup: func(t *testing.T, dir string) string {
+				p := filepath.Join(dir, "garbage-force.db")
+				if err := os.WriteFile(p, []byte("not a database"), 0o600); err != nil {
+					t.Fatalf("write: %v", err)
+				}
+				return p
+			},
+			force:       true,
+			wantWarning: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := tt.setup(t, t.TempDir())
+			g := dbWriteGuard{
+				path:  path,
+				verb:  "restoring",
+				risk:  "a live server holds the database open and would see a torn file",
+				force: tt.force,
+			}
+			var err error
+			out := covCaptureAll(t, func() { err = g.check(true) })
+
+			if len(tt.wantErr) == 0 && err != nil {
+				t.Fatalf("guard refused (%v), want it to allow the write", err)
+			}
+			if len(tt.wantErr) > 0 && err == nil {
+				t.Fatalf("guard allowed the write, want a refusal")
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q should mention %q", err, want)
+				}
+			}
+			if warned := strings.Contains(out, "WARNING"); warned != tt.wantWarning {
+				t.Errorf("warning printed = %v, want %v; output:\n%s", warned, tt.wantWarning, out)
+			}
+			// The re-probe must not repeat the paragraph: two copies read as
+			// two separate problems.
+			if tt.wantWarning {
+				quiet := covCaptureAll(t, func() { _ = g.check(false) })
+				if strings.Contains(quiet, "WARNING") {
+					t.Errorf("re-probe repeated the --force warning:\n%s", quiet)
+				}
+			}
+		})
+	}
+}
+
+// guardHeldDB creates a database under dir and keeps a connection on it for
+// the rest of the test.
+func guardHeldDB(t *testing.T, dir, name string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	db, err := database.Open("file:" + p)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t (x)`); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return p
 }
 
 // TestDatabaseInUseProbeErrors: "I could not open the file" and "someone is

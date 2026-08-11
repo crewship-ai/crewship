@@ -21,9 +21,84 @@ import (
 )
 
 var (
-	restoreSnapshotList bool
-	restoreSnapshotYes  bool
+	restoreSnapshotList  bool
+	restoreSnapshotYes   bool
+	restoreSnapshotForce bool
 )
+
+// dbConfirm is confirmInteractive, indirected so the tests can occupy the
+// window the prompt opens. That window is the whole point of the re-probe
+// below: the prompt blocks for as long as the operator takes to read it, and
+// what a test needs to do is take the database *during* it. Nothing in
+// production reassigns this.
+var dbConfirm = confirmInteractive
+
+// dbWriteGuard answers "may this command rewrite the database at path right
+// now?" for the two commands that do it in place.
+//
+// Three outcomes, deliberately not collapsed into two:
+//
+//   - free — proceed.
+//   - definitely in use — hard refusal, which --force does NOT lift. A live
+//     crewshipd holding the file is a knowable fact, and writing under it is
+//     the torn-database outcome the guard exists for.
+//   - indeterminate, i.e. the probe itself failed (corrupt header, unreadable
+//     file) — refusal by default, liftable with --force. Refusing outright
+//     locked the operator out of the recovery path: a corrupt database cannot
+//     answer the probe, and a corrupt database is exactly what
+//     restore-snapshot is for. With "everything goes through the CLI, never a
+//     DB shell" there was then nothing legitimate left to do. Fail-open
+//     ("could not probe, assume free") is not the alternative — that is the
+//     original defect this guard replaced — so the override is explicit,
+//     per-invocation and loud.
+type dbWriteGuard struct {
+	path  string // the database file about to be rewritten
+	verb  string // present participle for the refusals: "restoring", "repairing"
+	risk  string // what a live server suffers if we write anyway
+	force bool
+}
+
+// check probes the database and reports why the command must not continue.
+//
+// announce covers the --force warning only. The guard runs twice per command —
+// once before the confirmation prompt, once immediately before the write — and
+// printing the same paragraph twice would read like two separate problems.
+func (g dbWriteGuard) check(announce bool) error {
+	inUse, err := databaseInUse(g.path)
+	switch {
+	case err != nil && !g.force:
+		// Fail closed, but honestly: "we could not open the file" is not "a
+		// server is running", and sending the operator to hunt for a process
+		// that does not exist is how the old message wasted time. Name the
+		// probe's own error, and name the one flag that gets past it.
+		return fmt.Errorf("cannot determine whether %s is in use, so not %s: %w — "+
+			"a corrupt or unreadable database cannot answer this probe, which is exactly the state this command exists for; "+
+			"if you have checked that no crewshipd is running, re-run with --force",
+			g.path, g.verb, err)
+
+	case err != nil:
+		// --force, and the probe could not answer. Proceed, but leave a
+		// record: an override nobody can see in the transcript afterwards is
+		// indistinguishable from the silent fail-open this guard replaced.
+		if announce {
+			fmt.Fprintf(os.Stderr,
+				"WARNING: --force: could not determine whether %s is in use: %v\n"+
+					"WARNING: %s it anyway, on your word that no crewshipd holds it open.\n"+
+					"WARNING: If one does, %s.\n",
+				g.path, err, g.verb, g.risk)
+		}
+		return nil
+
+	case inUse:
+		// Not overridable. --force exists for the question the probe could not
+		// answer; this one it answered, and the answer is the failure mode the
+		// guard was written for.
+		return fmt.Errorf("%s is open by another process (most likely a running crewshipd) — stop it before %s; %s "+
+			"(--force does not override this: it lifts an indeterminate probe, not a database that is definitely in use)",
+			g.path, g.verb, g.risk)
+	}
+	return nil
+}
 
 // warnDBLocalOnly prints a stderr notice when the CLI's effective server
 // target is a non-local host: `crewship db` never touches that remote.
@@ -76,7 +151,16 @@ binary until the snapshot is restored.
 
 Stop crewshipd before restoring — a running server holds the database open.
 The current database is copied aside to "<db>.before-restore-<ts>" first, so
-the restore is itself reversible.`,
+the restore is itself reversible.
+
+Before overwriting, and again immediately before the swap, the command checks
+whether anything still has the database open, by locking the file itself. If
+the file is too damaged to answer that check — which is one of the reasons you
+would be restoring a snapshot in the first place — it stops and tells you what
+the check hit. "--force" continues past THAT, and only that: it is your
+statement that no crewshipd is running. It does not override a database that
+is definitely in use; that answer is knowable, and restoring under a live
+server tears the file.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dd, err := database.DefaultDataDir()
@@ -121,10 +205,20 @@ the restore is itself reversible.`,
 		// have no idea whether a server holds it, and guessing "free" is how
 		// you tear a live DB. Fail closed, but say what actually happened
 		// instead of claiming a server is running.
-		if inUse, err := databaseInUse(dbPath); err != nil {
-			return fmt.Errorf("cannot determine whether %s is in use, so not restoring: %w", dbPath, err)
-		} else if inUse {
-			return fmt.Errorf("%s is open by another process (most likely a running crewshipd) — stop it before restoring; a live server holds the database open and would see a torn file", dbPath)
+		//
+		// This first check is here, before the snapshot is chosen and the
+		// confirmation asked, so an operator who left crewshipd running is
+		// told immediately rather than after answering a question that could
+		// never have been honoured. It is NOT the check that makes the swap
+		// safe — see the re-probe below.
+		guard := dbWriteGuard{
+			path:  dbPath,
+			verb:  "restoring",
+			risk:  "a live server holds the database open and would see a torn file",
+			force: restoreSnapshotForce,
+		}
+		if err := guard.check(true); err != nil {
+			return err
 		}
 
 		// Pick the snapshot: explicit arg, else the most recent.
@@ -144,8 +238,22 @@ the restore is itself reversible.`,
 
 		fmt.Printf("Restore %s\n     ← %s\n", dbPath, target)
 		fmt.Println("The current database will be copied aside to a .before-restore-* file first.")
-		if !restoreSnapshotYes && !confirmInteractive("Proceed?") {
+		if !restoreSnapshotYes && !dbConfirm("Proceed?") {
 			return fmt.Errorf("aborted (pass --yes to skip confirmation)")
+		}
+
+		// Ask again, immediately before the swap. The prompt above is unbounded
+		// — it blocks for as long as the operator takes to read it — and that
+		// is ample time for systemd's Restart=always to bring crewshipd back,
+		// or for a colleague to start it. RestoreSnapshot then renames a file
+		// into place under a process holding the old one open, which is
+		// precisely the torn database this guard exists to prevent; the first
+		// probe answered about a moment that has already passed. Unlike
+		// repair-ledger, whose write is one transaction that SQLite serialises
+		// against other connections, a rename has nothing underneath it to
+		// catch this, so the re-probe is the only backstop there is.
+		if err := guard.check(false); err != nil {
+			return err
 		}
 
 		if err := database.RestoreSnapshot(dbPath, target); err != nil {
@@ -164,6 +272,8 @@ the restore is itself reversible.`,
 func init() {
 	restoreSnapshotCmd.Flags().BoolVar(&restoreSnapshotList, "list", false, "list available snapshots and exit")
 	restoreSnapshotCmd.Flags().BoolVar(&restoreSnapshotYes, "yes", false, "skip the confirmation prompt")
+	restoreSnapshotCmd.Flags().BoolVar(&restoreSnapshotForce, "force", false,
+		"restore even though the in-use check could not answer (corrupt or unreadable database); never overrides a database that IS in use")
 	dbCmd.AddCommand(restoreSnapshotCmd)
 	rootCmd.AddCommand(dbCmd)
 }
