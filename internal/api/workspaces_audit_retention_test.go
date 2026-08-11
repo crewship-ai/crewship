@@ -158,3 +158,70 @@ func fmtIntPtr(p *int) string {
 	}
 	return fmt.Sprintf("%d", *p)
 }
+
+// TestWorkspaceRead_ReportsTheStoredRetentionWindows closes the loop between
+// writing a window and being able to see it.
+//
+// The PATCH response echoing the value is not enough: List and Get are what
+// `crewship workspace get`, `workspace list` and the settings UI read, and the
+// fields are declared non-optional in the OpenAPI schema. If those queries do
+// not select the columns, every read serialises null — which, per the field's
+// own documented contract, means "use the product default". An operator would
+// be told audit_logs pruning is off while a finite window is actually in
+// force, on a setting they may be answerable for.
+func TestWorkspaceRead_ReportsTheStoredRetentionWindows(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := &WorkspaceHandler{db: db, logger: slog.Default()}
+
+	if rr := patchWorkspaceRetention(t, h, wsID,
+		`{"credential_audit_retention_days":30,"audit_log_retention_days":365}`); rr.Code != http.StatusOK {
+		t.Fatalf("PATCH = %d: %s", rr.Code, rr.Body.String())
+	}
+
+	t.Run("Get", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+wsID, nil)
+		ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+		ctx = context.WithValue(ctx, ctxRole, "OWNER")
+		ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: userID})
+		rr := httptest.NewRecorder()
+		h.Get(rr, req.WithContext(ctx))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("Get = %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp workspaceResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v (%s)", err, rr.Body.String())
+		}
+		assertIntPtr(t, "credential_audit_retention_days", resp.CredentialAuditRetentionDays, intPtr(30))
+		assertIntPtr(t, "audit_log_retention_days", resp.AuditLogRetentionDays, intPtr(365))
+	})
+
+	t.Run("List", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces", nil)
+		ctx := context.WithValue(req.Context(), ctxUser, &AuthUser{ID: userID})
+		rr := httptest.NewRecorder()
+		h.List(rr, req.WithContext(ctx))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("List = %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp []workspaceResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v (%s)", err, rr.Body.String())
+		}
+		var found bool
+		for _, ws := range resp {
+			if ws.ID != wsID {
+				continue
+			}
+			found = true
+			assertIntPtr(t, "credential_audit_retention_days", ws.CredentialAuditRetentionDays, intPtr(30))
+			assertIntPtr(t, "audit_log_retention_days", ws.AuditLogRetentionDays, intPtr(365))
+		}
+		if !found {
+			t.Fatalf("workspace %s not in the list response", wsID)
+		}
+	})
+}

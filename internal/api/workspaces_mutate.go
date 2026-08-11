@@ -287,6 +287,17 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.RunRetentionDays != nil {
 		changed = append(changed, "run_retention_days")
 	}
+	// Both retention windows belong in the trail for the same reason the
+	// others do, and one of them more than any: turning on deletion of
+	// audit_logs is a decision about the compliance record itself. An entry
+	// that says "workspace.update" with no field names is what an operator
+	// would find months later while asking why the trail has a hole in it.
+	if req.CredentialAuditRetentionDays != nil {
+		changed = append(changed, "credential_audit_retention_days")
+	}
+	if req.AuditLogRetentionDays != nil {
+		changed = append(changed, "audit_log_retention_days")
+	}
 	meta := map[string]interface{}{"fields": changed}
 	if req.AllowPrivilegedCredentials != nil {
 		changed = append(changed, "allow_privileged_credentials")

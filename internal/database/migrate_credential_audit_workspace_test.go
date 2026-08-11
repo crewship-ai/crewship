@@ -283,3 +283,43 @@ func scopedRead(t *testing.T, db *DB) {
 		t.Errorf("scoped audit read still sorts the whole match set — the index is not satisfying ORDER BY:\n%s", plan)
 	}
 }
+
+// TestAuditRetentionMigrationPinsExistingWorkspacesToKeepForever covers the
+// destructive-upgrade case.
+//
+// The sweeper performs one immediate sweep at boot. Without the backfill in
+// 20260810170000, every workspace that predates the migration resolves NULL to
+// the 90-day credential_audit default and a year of credential access history
+// is DELETEd on the first restart after the upgrade — before the API that sets
+// the override is even listening, so the operator has no way to say "keep it"
+// and nothing to recover from short of a pre-upgrade backup.
+//
+// The backfill pins existing workspaces to an explicit 0 ("keep forever") and
+// leaves the column NULL for workspaces created afterwards, which get the
+// default. New installs are bounded; existing installs are asked.
+func TestAuditRetentionMigrationPinsExistingWorkspacesToKeepForever(t *testing.T) {
+	t.Parallel()
+	db, ctx, silent := credentialAuditTestDB(t)
+
+	execMigrationFixture(t, db, `INSERT INTO workspaces (id, name, slug) VALUES ('ws_pre', 'Pre', 'ws-pre')`)
+	// Reconstruct the pre-migration state for that row, then re-apply.
+	execMigrationFixture(t, db, `UPDATE workspaces SET credential_audit_retention_days = NULL WHERE id = 'ws_pre'`)
+	if _, err := db.Exec(`DELETE FROM _migrations WHERE version = 20260811082000`); err != nil {
+		t.Fatalf("clear marker: %v", err)
+	}
+	if err := Migrate(ctx, db.DB, silent); err != nil {
+		t.Fatalf("re-Migrate: %v", err)
+	}
+
+	var got *int
+	if err := db.QueryRow(
+		`SELECT credential_audit_retention_days FROM workspaces WHERE id = 'ws_pre'`).Scan(&got); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got == nil {
+		t.Fatal("credential_audit_retention_days is NULL for a pre-existing workspace — it will resolve to the 90-day default and the first boot sweep will delete its history")
+	}
+	if *got != 0 {
+		t.Errorf("credential_audit_retention_days = %d, want 0 (keep forever) for a workspace that predates the window", *got)
+	}
+}

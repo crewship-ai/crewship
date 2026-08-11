@@ -46,6 +46,13 @@
 -- impossible to switch off, which is not a choice to make on someone else's
 -- behalf on a self-hosted product.
 
+-- Existing workspaces are pinned to "keep forever" by the companion migration
+-- 20260811082000_audit_retention_pin_existing_workspaces. Separate file for
+-- the same reason the credential_audit pair is split: ADD COLUMN cannot be
+-- re-applied (SQLite has no ADD COLUMN IF NOT EXISTS) while a backfill both
+-- can and must be, so keeping them apart is what makes the backfill testable
+-- and safe for a restore whose ledger was rolled back.
+
 ALTER TABLE workspaces
     ADD COLUMN credential_audit_retention_days INTEGER;
 
