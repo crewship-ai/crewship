@@ -338,8 +338,16 @@ export function agentLens(chains: ChainSummary[]): AgentLensRow[] {
   )
 }
 
-/** A ref that arrived without a count still means one piece of work, not zero. */
-function assignmentsOf(a: ChainAgentRef): number {
+/**
+ * A ref that arrived without a count still means one piece of work, not zero.
+ *
+ * Exported because three surfaces were each deciding this for themselves and
+ * two of them decided differently: the rail's row read `×1`, the agent
+ * drill-down's row read `×1`, and the strip at the top of that same drill-down
+ * read `0 assignments` — one agent, one window, two numbers. A fallback that
+ * lives in three places is a fallback with three values.
+ */
+export function assignmentsOf(a: ChainAgentRef): number {
   return a.assignments > 0 ? a.assignments : 1
 }
 
@@ -433,6 +441,62 @@ export function chainsInScope(chains: ChainSummary[], scope: string): ChainSumma
 }
 
 // ---------------------------------------------------------------------------
+// The one narrowing every surface reads.
+// ---------------------------------------------------------------------------
+
+/**
+ * The loaded index page, at the two stages the screen needs it.
+ *
+ * Two stages rather than one, because the status segments have to survive their
+ * own selection. They count over `searched`; every list and dashboard renders
+ * `visible`. Counting over `visible` instead would make picking "Failed" render
+ * "Failed 3 · Waiting 0 · Running 0" — three numbers describing what is left
+ * after the pick rather than what there is to pick, and no way back out except
+ * by guessing.
+ */
+export interface NarrowedChains {
+  /** Search applied, status segment NOT. What the segment counts are over. */
+  searched: ChainSummary[]
+  /** Search AND status segment applied. What every list and dashboard shows. */
+  visible: ChainSummary[]
+}
+
+/**
+ * Narrows the loaded chain index by the rail's search box and status segment.
+ *
+ * This function exists because the narrowing used to be PRIVATE to the rail.
+ * ActivitySidebar filtered its own copy while the shell handed the same
+ * unnarrowed array to the three lens dashboards beside it, so typing in the
+ * search box left the rail showing two rows next to a dashboard reporting
+ * twenty — under a comment in lens-overviews.tsx promising that the two could
+ * not disagree, because they read "the SAME ChainSummary[]". They did not. One
+ * function, called once in the shell, is what makes that sentence true.
+ *
+ * `routineNameOf` resolves a slug to the routine's human name and is what the
+ * search matches against, because it is what the row RENDERS: a reader
+ * searching "follow up" is typing the words on their screen, and
+ * `on-close-file-followup` is not those words. Optional — a caller without the
+ * pipelines list loaded still gets slug, cause, handle and touched-noun
+ * matching, which is the same graceful floor matchesQuery already had.
+ *
+ * Client-side, over the loaded page only, and deliberately: the index is one
+ * grouped query with no search or status parameter. What that does NOT cover is
+ * stated by the caller — see ActivitySidebar's window notice — rather than
+ * implied by a confident-looking count.
+ */
+export function narrowChains(
+  chains: ChainSummary[],
+  query: string,
+  scope: string,
+  routineNameOf?: (slug: string) => string | undefined,
+): NarrowedChains {
+  const searched = chains.filter((c) =>
+    matchesQuery(c, query, routineNameOf?.(c.routine_slug ?? "")),
+  )
+  return { searched, visible: chainsInScope(searched, scope) }
+}
+
+// ---------------------------------------------------------------------------
 // What earns the word "workflow".
 // ---------------------------------------------------------------------------
 
@@ -457,21 +521,35 @@ const MAX_REACH_NOUNS = 3
  *   agent_count > 0       a routine put an agent to work
  *   issue_count > 0       it reached into the tracker
  *
- * Plus one exception that is not about composition at all: a chain that FAILED,
- * is still running, or is waiting on a person. A single run that broke is the
- * reason somebody opened this page, and filing it under its routine would hide
- * exactly what the rail exists to surface. The rule is "compose, or need me".
+ * Plus two exceptions that are not about composition at all.
  *
- * Nothing is deleted by this — a bare run is still a run of its routine, and the
- * Routines lens is where runs live. This only decides which of the two lists it
- * belongs in.
+ * The first is a chain that FAILED, is still running, or is waiting on a person.
+ * A single run that broke is the reason somebody opened this page, and filing it
+ * under its routine would hide exactly what the rail exists to surface.
+ *
+ * The second is a chain NO OTHER LENS CAN LIST. "It belongs in Routines
+ * instead" is the argument this whole predicate rests on, and it holds only
+ * while there is a Routines row to hold it: routineLens keys on
+ * `routine_slug` and skips a chain without one, which is the honest thing for a
+ * catalogue of routines to do. A chain whose root run was swept by retention
+ * has no slug — so before this clause it was in the Workflows lens (dropped for
+ * composing nothing) and in the Routines lens (dropped for having no routine),
+ * which is to say nowhere. An index may cap, elide or defer a row; it may not
+ * silently have no place for one.
+ *
+ * The rule, then, is "compose, or need me, or belong to no catalogue".
+ *
+ * Nothing is deleted by this — a bare run of a KNOWN routine is still a run, and
+ * the Routines lens is where runs live. This only decides which list it is in.
  */
 export function isComposed(c: ChainSummary): boolean {
   if (c.runs > 1) return true
   if (c.max_chain_depth > 0) return true
   if ((c.agent_count ?? 0) > 0) return true
   if ((c.issue_count ?? 0) > 0) return true
-  return chainStatus(c) !== "done"
+  if (chainStatus(c) !== "done") return true
+  // No slug means routineLens has no row for it. See above.
+  return !c.routine_slug?.trim()
 }
 
 /**

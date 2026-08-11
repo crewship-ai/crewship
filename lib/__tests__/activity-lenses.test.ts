@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   ACTIVITY_LENSES,
   agentLens,
+  assignmentsOf,
   bucketChains,
   chainScopeCounts,
   chainStatus,
@@ -10,6 +11,7 @@ import {
   isComposed,
   issueLens,
   matchesQuery,
+  narrowChains,
   routineLens,
   workflowHandle,
   workflowName,
@@ -316,7 +318,14 @@ describe("isComposed — what earns the word workflow", () => {
     // one run, depth 0, no issue, no agent. Nothing was composed, so calling it
     // a workflow makes the word mean "a run" — and then the Workflows lens is
     // the Routines lens with worse naming.
-    expect(isComposed(chain({ runs: 1, max_chain_depth: 0 }))).toBe(false)
+    //
+    // The slug is spelled out rather than left to the fixture's default,
+    // because it is load-bearing here and was not: `crewship routine run X`
+    // names a routine, so a chain standing in for that command has one. Without
+    // it this asserted the ORPHAN case — a chain routineLens cannot list — and
+    // passed for a reason the sentence above does not give. See the "nothing
+    // falls out of every list" block.
+    expect(isComposed(chain({ routine_slug: "triage", runs: 1, max_chain_depth: 0 }))).toBe(false)
   })
 
   it("is true when something caused something else", () => {
@@ -385,5 +394,87 @@ describe("workflowName — the sentence that is not the routine's name", () => {
       issue_count: 9,
     })
     expect(workflowSentence(c, "Sweep")).toContain("+6")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// One narrowing, read by every surface.
+//
+// The rail used to narrow the chain list PRIVATELY — search and status segment
+// were applied inside ActivitySidebar — while the shell handed the same
+// unnarrowed array to the three lens dashboards beside it. So typing in the
+// search box left the rail showing two rows and the dashboard next to it
+// reporting twenty, over a comment in lens-overviews.tsx claiming the two could
+// not disagree. narrowChains is that comment made true: one function, called
+// once, and both halves of the screen read its result.
+// ---------------------------------------------------------------------------
+
+describe("narrowChains", () => {
+  const rows = [
+    chain({ origin: "run_a", routine_slug: "triage", failed: true, failed_runs: 1 }),
+    chain({ origin: "run_b", routine_slug: "sweep" }),
+    chain({ origin: "run_c", routine_slug: "deploy", waiting_runs: 1 }),
+  ]
+
+  it("applies the search box", () => {
+    expect(narrowChains(rows, "sweep", "all").visible.map((c) => c.origin)).toEqual(["run_b"])
+  })
+
+  it("applies the status segment", () => {
+    expect(narrowChains(rows, "", "failed").visible.map((c) => c.origin)).toEqual(["run_a"])
+  })
+
+  it("applies both together", () => {
+    expect(narrowChains(rows, "triage", "failed").visible.map((c) => c.origin)).toEqual(["run_a"])
+    expect(narrowChains(rows, "sweep", "failed").visible).toEqual([])
+  })
+
+  it("leaves the status segment OUT of the set the segments count over", () => {
+    // The counts must survive their own selection. Counting over the scoped
+    // list would make picking "Failed" read "Failed 1 · Waiting 0 · Running 0"
+    // — three numbers that describe what is left after the pick rather than
+    // what is there to pick, so the reader can never get back out.
+    const n = narrowChains(rows, "", "failed")
+    expect(n.searched).toHaveLength(3)
+    expect(n.visible).toHaveLength(1)
+  })
+
+  it("resolves the routine's human name for the search", () => {
+    // The rail renders "Follow up on close"; a reader searching the words they
+    // can see must match, and the slug is not those words.
+    const named = [chain({ origin: "run_a", routine_slug: "on-close-file-followup" })]
+    const nameOf = (slug: string) => (slug === "on-close-file-followup" ? "Follow up on close" : undefined)
+    expect(narrowChains(named, "follow up", "all", nameOf).visible).toHaveLength(1)
+    expect(narrowChains(named, "follow up", "all").visible).toHaveLength(0)
+  })
+})
+
+describe("isComposed — nothing falls out of every list", () => {
+  it("keeps a finished chain that no routine can list", () => {
+    // routineLens skips a chain with no slug, and that is right: a catalogue of
+    // routines cannot hold a row with no routine. But the Workflows lens was
+    // the only other list, and it dropped this row for composing nothing — so
+    // a chain whose root run was swept by retention was in NEITHER, which is
+    // the one outcome an index must never produce.
+    const orphan = chain({ routine_slug: undefined, runs: 1, max_chain_depth: 0 })
+    expect(routineLens([orphan])).toEqual([])
+    expect(isComposed(orphan)).toBe(true)
+  })
+
+  it("still files a bare run of a known routine under Routines", () => {
+    // The rule is "compose, or need me, or belong to no catalogue" — not
+    // "keep everything". A plain run of a named routine is still a run, and
+    // the Routines lens is where runs live.
+    expect(isComposed(chain({ routine_slug: "triage", runs: 1, max_chain_depth: 0 }))).toBe(false)
+  })
+})
+
+describe("assignmentsOf", () => {
+  it("reads a missing count as one piece of work, not none", () => {
+    // Three files disagreed about this: the lens said 1, the agent drill-down's
+    // strip said 0 and its row said 1 — so one agent read "×1" in the rail and
+    // "0 assignments" on the page the rail led to.
+    expect(assignmentsOf({ id: "a", assignments: 0 })).toBe(1)
+    expect(assignmentsOf({ id: "a", assignments: 3 })).toBe(3)
   })
 })

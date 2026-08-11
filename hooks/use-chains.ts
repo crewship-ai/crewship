@@ -107,6 +107,24 @@ interface UseChainsResult {
    * history. The rail says so instead.
    */
   hasUnrecordedRuns: boolean
+  /**
+   * The workspace holds more chains than this window returned.
+   *
+   * Everything the Activity page counts — the four status segments, the four
+   * lens tabs, every KPI on every lens dashboard — is derived from `chains`,
+   * which is ONE PAGE of the index. Without this flag those numbers read as
+   * facts about the workspace while being facts about the newest 25 rows, and
+   * "Agents 4" over a thousand workflows is not a narrowed claim but a
+   * different one. The server has sent `has_more` since the route was written;
+   * nothing read it until the counts started depending on it.
+   *
+   * Defaults to TRUE, including on an error and on a server that omits the
+   * field. "We cannot say" and "there are more" both want the caveat rendered;
+   * only an explicit `has_more: false` earns dropping it. An unnecessary
+   * caveat costs one line, and a missing one costs the reader's trust in every
+   * number above it.
+   */
+  hasMore: boolean
   refresh: () => Promise<void>
 }
 
@@ -123,6 +141,8 @@ export function useChains(workspaceId: string | null, limit = 25): UseChainsResu
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hasUnrecordedRuns, setHasUnrecordedRuns] = useState(false)
+  // See UseChainsResult.hasMore for why the safe value is `true`.
+  const [hasMore, setHasMore] = useState(true)
   // Guards against an older response landing after a newer one and overwriting
   // it — the same reason use-journal-list keeps a request id.
   const reqIdRef = useRef(0)
@@ -139,14 +159,19 @@ export function useChains(workspaceId: string | null, limit = 25): UseChainsResu
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const body = (await res.json()) as {
         chains?: ChainSummary[]
+        has_more?: boolean
         has_unrecorded_runs?: boolean
       }
       if (reqId !== reqIdRef.current) return
       setChains(body.chains ?? [])
       setHasUnrecordedRuns(body.has_unrecorded_runs === true)
+      // Only an explicit false earns dropping the window caveat; an older
+      // server that omits the field has not said the page is complete.
+      setHasMore(body.has_more !== false)
     } catch (e: unknown) {
       if (reqId !== reqIdRef.current) return
       setError(e instanceof Error ? e.message : "could not load workflows")
+      setHasMore(true)
     } finally {
       if (reqId === reqIdRef.current) setLoading(false)
     }
@@ -156,5 +181,5 @@ export function useChains(workspaceId: string | null, limit = 25): UseChainsResu
     void refresh()
   }, [refresh])
 
-  return { chains, loading, error, hasUnrecordedRuns, refresh }
+  return { chains, loading, error, hasUnrecordedRuns, hasMore, refresh }
 }
