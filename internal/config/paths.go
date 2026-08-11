@@ -171,6 +171,30 @@ func platformDefaultPaths() defaultPaths {
 // the two ends.
 func DefaultSocketPath() string { return platformDefaultPaths().Socket }
 
+// DefaultSocketPathFor is DefaultSocketPath for a data dir that has ALREADY
+// been resolved, rather than one read out of CREWSHIP_DATA_DIR here.
+//
+// The distinction is the whole point. When the env var is unset,
+// database.DefaultDataDir does not fall back to fhsBase — it falls back to
+// $HOME/.crewship. DefaultSocketPath() only ever sees the env var, so for every
+// instance started without one it hands back the shared /tmp/crewship.sock even
+// though that instance owns a private data dir. cmd_start already re-roots the
+// bolt file under database.DefaultDataDir's answer for the same reason; this is
+// what lets it do the same for the socket, from the same directory, so the two
+// lock-bearing files cannot disagree about which instance owns them.
+//
+// The rules are unchanged, because they are literally the same code path: the
+// packaged FHS root (what packaging/crewship.service pins) keeps the historical
+// literals, and the sockaddr_un length fallback still applies. An empty root
+// means the caller resolved nothing, so it defers to DefaultSocketPath and the
+// instance keeps exactly the path it would have had.
+func DefaultSocketPathFor(root string) string {
+	if strings.TrimSpace(root) == "" {
+		return DefaultSocketPath()
+	}
+	return defaultPathsFor(runtime.GOOS, os.Getenv("ProgramData"), os.TempDir(), root).Socket
+}
+
 // DefaultBoltPath is the platform default bbolt state path. cmd_start's
 // "operator left the default alone" sentinel compares against this (plus
 // the legacy unix literal) before rewriting the path under the resolved

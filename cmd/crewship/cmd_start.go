@@ -175,6 +175,14 @@ var startCmd = &cobra.Command{
 			if !cfgBoltPathFromEnv() && defaulted {
 				cfg.State.BoltPath = filepath.Join(dataDir.Root, "state.db")
 			}
+			// The IPC socket is the other lock-bearing file, and it has to
+			// follow the SAME resolved root — otherwise an instance whose
+			// bolt file just moved to ~/.crewship still listens on the
+			// shared /tmp/crewship.sock and fights the next one for it.
+			// See startSocketPath for the collision this closes and for why
+			// a packaged install (CREWSHIP_DATA_DIR=/var/lib/crewship) comes
+			// back on /tmp/crewship.sock unchanged.
+			cfg.IPC.SocketPath = startSocketPath(cfg.IPC.SocketPath, dataDir.Root)
 		}
 
 		db, err := database.Open(databaseURL)
@@ -1167,6 +1175,49 @@ var startCmd = &cobra.Command{
 // it found, so seeing it set here means the override path won.
 func cfgBoltPathFromEnv() bool {
 	return strings.TrimSpace(os.Getenv("CREWSHIP_BOLT_PATH")) != ""
+}
+
+// cfgSocketPathFromEnv reports whether CREWSHIP_SOCKET_PATH supplied the
+// current IPC.SocketPath value. Same mechanism, and same reasoning, as
+// cfgBoltPathFromEnv above: there is no "value came from env" flag on the
+// config, so we ask the env directly after applyEnvOverrides has run.
+func cfgSocketPathFromEnv() bool {
+	return strings.TrimSpace(os.Getenv("CREWSHIP_SOCKET_PATH")) != ""
+}
+
+// startSocketPath returns the IPC socket path `crewship start` should listen
+// on, given the path config.Load produced and the data dir the daemon actually
+// resolved. It is the socket's half of the defaulted-boltpath rewrite above,
+// and deliberately mirrors it predicate for predicate.
+//
+// Why it is needed at all: config.Default() derives the socket from
+// CREWSHIP_DATA_DIR, but database.DefaultDataDir falls back to $HOME/.crewship
+// when that var is unset — not to /var/lib/crewship. So an instance started
+// with no env vars at all got a private bolt file (rewritten above) and the
+// shared /tmp/crewship.sock. Two such instances — two users on one host, each
+// with their own CREWSHIP_PORT — collided on that socket: before #1922's
+// ensureSocketPathFree the second silently unlinked the first's socket and left
+// a healthy daemon nobody could reach; with the guard the second refuses to
+// boot. The relocation was meant to make that impossible by construction, and
+// the operator running two instances is exactly the one who never set
+// CREWSHIP_DATA_DIR.
+//
+// Operator intent is protected by the same two predicates the bolt path uses:
+// an env pin via CREWSHIP_SOCKET_PATH, and a YAML ipc.socket_path holding
+// anything other than the package default (empty, the platform default, or the
+// unix literal — kept as an alias so a config written on one platform does not
+// pin a windows daemon to a path it cannot create).
+func startSocketPath(current, dataDirRoot string) string {
+	if cfgSocketPathFromEnv() {
+		return current
+	}
+	defaulted := current == "" ||
+		current == config.DefaultSocketPath() ||
+		current == "/tmp/crewship.sock"
+	if !defaulted {
+		return current
+	}
+	return config.DefaultSocketPathFor(dataDirRoot)
 }
 
 // pipelineResumeEnabled reads the CREWSHIP_PIPELINE_RESUME gate for
