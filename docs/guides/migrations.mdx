@@ -132,6 +132,246 @@ The `gdpr_actions` audit table is the canonical record. See [GDPR — Article 15
 
 </Accordion>
 
+## 20260810120000 — Drop redundant indexes
+
+Removes eleven indexes whose columns are a leading prefix of a longer index
+on the same table. SQLite uses a multi-column index for any leading prefix of
+its columns, so `(workspace_id)` is dead weight once `(workspace_id,
+created_at)` exists — never chosen for a read, still maintained on every
+write, and on SQLite that maintenance happens while holding the single
+database-wide write lock.
+
+They were on the hottest tables in the system: `missions`, `chats`,
+`assignments`, `credentials`, `journal_entries`, `attachments`,
+`crew_members`, `credentials`, `pipelines`, `workflow_templates`,
+`peer_conversations`.
+
+Nothing reads these names at runtime, and each one's covering index is named
+in the migration file. `idx_journal_trace_id` is a special case: it and
+`idx_journal_trace` were the same index under two names, created by two
+migrations that did not know about each other.
+
+<Note>
+`TestSchemaHasNoRedundantIndexes` re-derives this from the live schema rather
+than from a list, so a new composite index that happens to subsume an older
+narrow one fails the build. If you hit it, drop the narrow index in the same
+migration rather than adding an exception.
+</Note>
+
+No behaviour change and no data change — index definitions only. Reversible
+from the original `CREATE INDEX` statements if a future query genuinely wants
+the narrower index.
+
+## 20260810153104 / 20260810153105 — `credential_audit` carries its own workspace
+
+Adds `credential_audit.workspace_id` (nullable, `REFERENCES workspaces(id) ON
+DELETE CASCADE`) plus `idx_credential_audit_workspace_time(workspace_id,
+occurred_at DESC)`, then backfills existing rows from the credential each one
+points at.
+
+The table had no workspace column, so the admin audit view scoped it by
+joining through `credentials` — a shape no index could serve. SQLite either
+walked the table in time order probing `credentials` per row, or gathered the
+whole matching set and built a temporary B-tree to sort it before `LIMIT`
+discarded almost all of it, and the page's `COUNT(*)` paid for the same join
+again. `audit_logs` and `keeper_request_events` both already carry
+`workspace_id` directly; this brings the third audit source into line.
+
+The column is nullable because SQLite cannot `ADD COLUMN` a `NOT NULL` without
+a non-NULL default, and a `REFERENCES` clause added by `ALTER TABLE` is only
+legal when the column defaults to `NULL`. Every writer populates it: the single
+writer (`RecordCredentialEventTx`) derives it with a sub-`SELECT` against
+`credentials` in the same `INSERT`, so it cannot disagree with the credential
+it describes and no caller has to know the workspace to write an audit row.
+
+<Note>
+Two files rather than one. `ADD COLUMN` cannot be re-applied — SQLite has no
+`ADD COLUMN IF NOT EXISTS` — while a backfill both can and must be: a restore
+whose ledger was rolled back re-runs it, and the second run has to be a no-op.
+Splitting them is what lets the backfill be tested by clearing its ledger row
+and migrating again, the same way `20260802155412_backfill_crew_container_sizes`
+is tested.
+</Note>
+
+No behaviour change. The audit view returns the same rows; it just stops
+sorting the whole table to do it.
+
+## 20260810154153 — Index the hot foreign keys
+
+With `PRAGMA foreign_keys = ON`, deleting a parent row makes SQLite check every
+child table referencing it. When the child's referencing column is not the
+**leading** column of an index, that check is a full table scan — once per
+deleted parent row, while holding the single database-wide write lock.
+
+48 foreign key columns had no leading index. This adds **16**, and the 32 it
+leaves alone are the point: every index is paid for on each `INSERT` and
+`UPDATE` of the child, and the migration immediately before it exists because
+eleven unusable indexes had accumulated.
+
+Two conditions, both derived from the tree rather than assumed:
+
+1. **The parent is actually hard-deleted.** `DELETE FROM <parent>` in non-test
+   Go finds `agents`, `credentials`, `missions`, `crews`, `chats`, `projects`,
+   `milestones`, `checkpoints`, `workspaces` and `assignments`.
+   **`users` is not among them** — nothing hard-deletes a user row — so the
+   nine unindexed columns referencing `users` buy nothing today and are skipped.
+2. **The child table grows.** Scanning a settings table with one row per
+   workspace costs nothing; scanning an append-only audit table costs more
+   every day.
+
+<Warning>
+`DELETE FROM missions WHERE crew_id = ?` removes many missions in one
+statement, and each one re-checks every child table referencing `missions`.
+That is the worst shape in the schema for an unindexed child, and it is why all
+three mission references are indexed even though `eval_runs` is small today.
+</Warning>
+
+`TestUserForeignKeysStayUnindexed` pins the exclusion so it stays a decision,
+and `TestNoRegressionInUnindexedForeignKeyCount` ratchets the total at 32 so a
+future table that adds foreign keys nobody sized shows up as a number moving.
+
+## 20260810160400 — Constrain `workspace_members.role`
+
+`crew_members.role` has carried
+`CHECK(role IN ('OWNER','ADMIN','MANAGER','MEMBER','VIEWER'))` since v99.
+`workspace_members.role` — the column deciding what a member can do across an
+entire workspace — carried nothing, and would accept any string.
+
+Nothing writes a bad one today; the API validates against a whitelist. It is
+worth constraining anyway because of an asymmetry in how the value is read:
+
+| Tier | Behaviour on an unrecognised role |
+| --- | --- |
+| `create` / `update` / `manage` / `delete` | switch over known roles → **denied** |
+| `read` | any non-empty string → **allowed** |
+
+So the write tiers fail closed and the read tier fails open, and the schema is
+the only place that can refuse a garbage value independently of whichever write
+path appears next.
+
+<Note>
+Enforced with `BEFORE INSERT` / `BEFORE UPDATE` triggers, not a `CHECK`.
+SQLite cannot add a `CHECK` to an existing table — that needs the 12-step
+rebuild and the pinned-connection machinery in
+`migrate_consts_v167_journal_append_only_fks.go`, which is a lot of risk to
+take on the table that decides who owns a workspace, for a constraint the
+application already upholds. Triggers enforce the same predicate in plain SQL.
+
+The one difference is deliberate: a trigger constrains **writes** and leaves
+stored rows alone. A rebuilt `CHECK` would refuse to apply at all if a legacy
+row held an unexpected role, turning a defensive tightening into a boot failure
+on the instance that most needs looking at.
+</Note>
+
+## 20260810170000 — Audit retention windows
+
+Adds `workspaces.credential_audit_retention_days` and
+`workspaces.audit_log_retention_days`. `credential_audit` and `audit_logs` were
+the only tables in the schema with no pruning at all — `pipeline_runs` (v158),
+`inbox_items` and `journal_entries` are all swept, these two never were.
+
+**The two defaults differ on purpose.**
+
+| Table | Default | Why |
+| --- | --- | --- |
+| `credential_audit` | **90 days** | Operational telemetry. The answer an operator reads — `last_used_at` and the `last_used_ips` ring — is denormalised onto `credentials` and untouched, so a 90-day window loses detail, not "is this credential in use". |
+| `audit_logs` | **unlimited** | The compliance trail. [GDPR](/security/gdpr) states audit records "have to survive operator's own retention obligations". Crewship is self-hosted: the operator knows their legal duty and we do not. |
+
+<Warning>
+`NULL` and `0` mean different things in these columns, unlike
+`run_retention_days` where both fall back to the default:
+
+- `NULL` — no opinion recorded; use the product default.
+- `0` — the operator's explicit **keep forever**.
+- `n > 0` — keep n days.
+
+Collapsing `0` into the default would make `credential_audit` pruning
+impossible to switch off, and "keep this forever" is a retention decision an
+operator has to be able to express.
+</Warning>
+
+The sweeper (`internal/api/audit_retention.go`) runs daily, deletes in bounded
+batches so one statement cannot stall every writer, and logs the remaining
+backlog if it stops at its cap. Because `audit_logs` is kept forever by
+default, it also warns once per sweep when a workspace has no window set and
+the table has grown past a million rows — the signal should reach an operator
+before the disk does.
+
+## 20260810171000 — Hash the capability tokens
+
+Adds `port_exposures.token_hash` and `pipeline_webhooks.token_hash`, each with
+a partial `UNIQUE` index, and stops both lookups reading the cleartext column.
+
+Neither of those tokens is a credential that accompanies an authenticated
+request — it *is* the request's authorization:
+
+| Endpoint | Authentication |
+| --- | --- |
+| `GET /exposed/{token}/…` | none — reverse-proxies into the crew container |
+| `POST /api/v1/webhooks/{token}` | none — fires the pipeline |
+
+Stored in the clear, that made read access to the database file equivalent to
+holding every live exposure URL and every configured webhook on the instance: a
+leaked backup, a copied `.db`, or any read primitive was enough. `cli_tokens`
+has stored a digest instead of the secret since Patch J and this brings these
+two into line.
+
+**Existing tokens are preserved, not rotated.** The digest is computed from the
+cleartext already in the row, so a URL an agent published last week keeps
+working across the upgrade. Rotating would have been the smaller change and
+would have broken every published exposure URL and every already-configured
+sender on every instance, with no evidence any cleartext leaked.
+
+<Note>
+**The backfill is Go, not SQL, and that is why it is not in the `.sql` file.**
+SQLite has no HMAC and no SHA-256, so the digest cannot be computed in a
+migration. The file adds the column and the index; the hashing runs the first
+time the owning component is constructed, which on the server path is before
+anything serves a request — `PortExposeRegistry.LoadFromDB` for
+`port_exposures`, `NewWebhookStore` for `pipeline_webhooks`. Both select on
+`token_hash IS NULL`, so they are idempotent and normally read zero rows.
+</Note>
+
+**The key comes from `ENCRYPTION_KEY`.** Not from
+`CREWSHIP_ADMIN_TOKEN_HMAC_KEY`, which is deliberately optional —
+`internal/api/cli_token.go` disables the entire ADMIN tier when it is unset —
+and a migration that has to preserve every already-published URL on every
+existing instance cannot depend on a variable an instance is allowed not to
+have. `ENCRYPTION_KEY` cannot be absent on a running server: `crewship start`
+calls `secrets.LoadOrGenerate` before the database is opened, which generates
+and persists it when missing, and then refuses to boot at all if
+`encryption.VerifyCurrentKey` cannot resolve it. The value actually used is a
+subkey derived from it (`HMAC-SHA256(ENCRYPTION_KEY, "crewship/capability-token-hash/v1")`),
+so the AES key is never used directly as an HMAC key.
+
+Every stored digest carries a scheme prefix (`hk1:` keyed, `sh1:` unkeyed
+fallback) and lookups accept either, so an instance that had no key when a row
+was written keeps resolving it once one appears, and a future key rotation adds
+a prefix rather than rewriting one.
+
+<Warning>
+**The cleartext columns stay, holding `redacted:<row id>`.** Neither can be
+dropped: both are `NOT NULL UNIQUE`, and SQLite's `ALTER TABLE DROP COLUMN`
+refuses a column carrying an index — while `port_exposures.token` is still
+named by the `INSERT` that creates an exposure. `SET token = ''` is not
+available either: the second row to be blanked would violate `UNIQUE`. Deriving
+the marker from the primary key keeps it unique, obviously dead, and traceable
+to the row it belonged to.
+
+The consequence for webhooks is that the token is now **shown once**, in the
+create response. `GET`, `PATCH` and the list endpoint return an empty token,
+because there is nothing left to return. A webhook whose token was lost must be
+re-created.
+</Warning>
+
+`pipeline_waitpoints.token` is the same kind of secret and is **not** covered
+here. It is that table's primary key, it is the handle carried by
+`inbox_items.source_id` and by a WAITING run's `waitpoint_token`, and
+`GET …/pipelines/waitpoints` reads it back out of the column to rebuild the
+public `POST /api/v1/waitpoint-tokens/{token}` callback URL on demand. It is a
+*retrievable* shared secret by contract rather than a show-once credential, so
+hashing it means redesigning that contract first.
+
 ## How to read this in operation
 
 When `crewshipd` starts, it logs each migration as it applies:
