@@ -52,6 +52,11 @@ func WriteFileDurable(path string, content []byte, perm os.FileMode) error {
 	return writeFileDurable(path, content, perm)
 }
 
+// WriteFileNoFollow durably writes path while refusing an existing leaf symlink.
+func WriteFileNoFollow(path string, content []byte, perm os.FileMode) error {
+	return writeMemoryFileNoFollow(path, content, perm)
+}
+
 func writeFileDurable(path string, content []byte, perm os.FileMode) (err error) {
 	var randBuf [8]byte
 	if _, rerr := rand.Read(randBuf[:]); rerr != nil {
