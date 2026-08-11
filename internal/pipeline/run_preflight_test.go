@@ -5,18 +5,43 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
 // stubPreflight records what it was asked and answers with a fixed verdict.
+//
+// Guarded, because the scheduler calls this from several goroutines at once:
+// TestPipelineScheduler_Tick_ConcurrentTicksDoNotDoubleFire fires concurrent
+// ticks on purpose, and each lands in Executor.Run → Preflight.Check. The
+// unsynchronised append raced under -race (two goroutines growing one slice),
+// and the failure surfaced intermittently — a real race in the harness, not a
+// flake, and it reads as a production bug in the scheduler until you follow the
+// stack down to this line.
+//
+// Readers take the mutex too: `snapshot` rather than touching `seen` directly,
+// so a test that reads while another tick is still in flight cannot race the
+// writer either.
 type stubPreflight struct {
+	mu   sync.Mutex
 	err  error
 	seen []PreflightRequest
 }
 
 func (s *stubPreflight) Check(_ context.Context, req PreflightRequest) error {
+	s.mu.Lock()
 	s.seen = append(s.seen, req)
-	return s.err
+	err := s.err
+	s.mu.Unlock()
+	return err
+}
+
+// snapshot copies what has been recorded so far. The copy is what makes an
+// assertion on the result safe to hold while the scheduler is still running.
+func (s *stubPreflight) snapshot() []PreflightRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]PreflightRequest(nil), s.seen...)
 }
 
 // The bypass, pinned. A call_pipeline target that the dispatch gates refuse
@@ -65,10 +90,10 @@ func TestExecutor_CallPipeline_RefusedByPreflight(t *testing.T) {
 	// The subject is the TARGET's author crew, not the caller's: a routine
 	// runs in its author's crew, so its author's connected integrations and
 	// installed tools are what decide whether it can work.
-	if len(gate.seen) != 1 {
-		t.Fatalf("preflight consulted %d times, want 1", len(gate.seen))
+	if len(gate.snapshot()) != 1 {
+		t.Fatalf("preflight consulted %d times, want 1", len(gate.snapshot()))
 	}
-	got := gate.seen[0]
+	got := gate.snapshot()[0]
 	if got.AuthorCrewID != "crew_child" {
 		t.Errorf("AuthorCrewID = %q, want crew_child (the target's author, not the invoker)", got.AuthorCrewID)
 	}
@@ -139,8 +164,8 @@ func TestExecutor_CallPipeline_DryRunSkipsPreflight(t *testing.T) {
 	}, RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeDryRun}); err != nil {
 		t.Fatalf("dry-run returned transport error: %v", err)
 	}
-	if len(gate.seen) != 0 {
-		t.Errorf("preflight consulted on a dry run (%d times) — it must be exempt, as on the HTTP path", len(gate.seen))
+	if len(gate.snapshot()) != 0 {
+		t.Errorf("preflight consulted on a dry run (%d times) — it must be exempt, as on the HTTP path", len(gate.snapshot()))
 	}
 }
 
@@ -177,15 +202,15 @@ func TestExecutor_Run_RefusedByPreflight(t *testing.T) {
 		t.Fatalf("err = %v, want it to wrap ErrRunPreflightBlocked — a top-level dispatch that "+
 			"skips the gates lets an automation start a routine nobody can start by hand", err)
 	}
-	if len(gate.seen) != 1 {
-		t.Fatalf("preflight consulted %d times, want 1", len(gate.seen))
+	if len(gate.snapshot()) != 1 {
+		t.Fatalf("preflight consulted %d times, want 1", len(gate.snapshot()))
 	}
 	// The AUTHOR crew is the subject, not the invoker: a routine runs in its
 	// author's crew, so its author's connections decide whether it can work.
-	if got := gate.seen[0].AuthorCrewID; got != "crew_a" {
+	if got := gate.snapshot()[0].AuthorCrewID; got != "crew_a" {
 		t.Errorf("AuthorCrewID = %q, want crew_a", got)
 	}
-	if gate.seen[0].DSL == nil {
+	if gate.snapshot()[0].DSL == nil {
 		t.Error("the gates need the parsed definition to see what the routine declares")
 	}
 }
@@ -214,7 +239,7 @@ func TestExecutor_Run_DryRunIsNotGated(t *testing.T) {
 	}); errors.Is(err, ErrRunPreflightBlocked) {
 		t.Error("dry_run was refused by the dispatch gates; it previews and asserts nothing")
 	}
-	if len(gate.seen) != 0 {
-		t.Errorf("preflight consulted %d times on a dry run, want 0", len(gate.seen))
+	if len(gate.snapshot()) != 0 {
+		t.Errorf("preflight consulted %d times on a dry run, want 0", len(gate.snapshot()))
 	}
 }
