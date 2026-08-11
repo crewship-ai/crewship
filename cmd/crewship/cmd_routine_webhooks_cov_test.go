@@ -254,6 +254,35 @@ func TestRoutineWebhooksUrlRunE_FoundAndNotFound(t *testing.T) {
 	}
 }
 
+// TestRoutineWebhooksUrlRunE_EmptyTokenFailsLoudly covers the show-once
+// consequence of #1888. The list endpoint stopped returning tokens, so this
+// command built its URL from an empty string: it printed
+// "…/api/v1/webhooks/" — a truncated URL with nothing after the slash — and
+// exited 0. The user pastes that into a sender config and every delivery 404s
+// with nothing to explain why.
+func TestRoutineWebhooksUrlRunE_EmptyTokenFailsLoudly(t *testing.T) {
+	stub := covSetupCli4(t)
+	stub.OnGet(covWebhooksPath, clitest.JSONResponse(200, []map[string]any{
+		covWebhookRow("wh-1", "gh-prs", "pr-review", "", true, true),
+	}))
+
+	c := covFreshCmd(routineWebhooksUrlCmd, func(c *cobra.Command) { c.Flags().String("base-url", "", "") })
+	covSetFlagsCli4(t, c, map[string]string{"base-url": "https://pub.example.com"})
+
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{"wh-1"}) })
+	if err == nil {
+		t.Fatalf("exited 0 with output %q — a truncated URL was handed to the user as if it worked", out)
+	}
+	if strings.Contains(out, "https://pub.example.com/api/v1/webhooks/") {
+		t.Errorf("a URL was printed anyway: %q", out)
+	}
+	for _, want := range []string{"not retrievable", "shown only once", "webhooks create --slug pr-review"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error message missing %q: %v", want, err)
+		}
+	}
+}
+
 // ─── delete ──────────────────────────────────────────────────────────
 
 func TestRoutineWebhooksDeleteRunE_YesDeletes(t *testing.T) {

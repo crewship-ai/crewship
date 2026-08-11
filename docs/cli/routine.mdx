@@ -1322,7 +1322,8 @@ crewship routine webhooks create \
 
 ### `webhooks url <id>`
 
-Print the public URL without re-revealing the signing secret.
+Print the public URL without re-revealing the signing secret. Fails if the
+token is no longer retrievable — see below.
 
 ## `crewship routine webhooks url <webhook_id>`
 
@@ -1342,6 +1343,16 @@ crewship routine webhooks url wh_abc123 --base-url https://crewship.example.com
 The default base URL comes from the configured server (or
 `CREWSHIP_SERVER`); the printed value is `<base-url>/api/v1/webhooks/<escaped-token>`.
 If the ID is not found, the command exits with `webhook <id> not found`.
+
+<Warning>
+**Since tokens are hashed at rest (#1888), this command only works for webhooks
+whose token the server still returns.** The token is shown **once**, in the
+`create` response — the list endpoint this command reads returns an empty one.
+When that is the case the command **fails and exits non-zero**, naming the
+delete + create pair that mints a new token, rather than printing
+`…/api/v1/webhooks/` with nothing after the slash. Copy the URL at create time;
+a lost token cannot be recovered, only replaced.
+</Warning>
 
 ### `webhooks delete <id>`
 

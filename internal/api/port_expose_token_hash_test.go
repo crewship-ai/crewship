@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"database/sql"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -181,8 +183,156 @@ VALUES ('pe_new', 'ws', 'crew', 'agent', ?, 'ct1', '10.0.0.8', 9000, 'ACTIVE', ?
 
 	// Revoke drops the in-memory entry using the stored digest, since the
 	// plaintext is no longer readable from the row.
-	r.RemoveByHash(hash.String)
+	if !r.RemoveByHash(hash.String) {
+		t.Errorf("RemoveByHash(stored digest) reported no entry to drop")
+	}
 	if _, ok := r.Lookup(token); ok {
 		t.Errorf("RemoveByHash(stored digest) did not drop the entry")
+	}
+}
+
+// wedgeExposureHash installs a trigger that aborts the token_hash UPDATE for
+// one row — what losing the race with SQLite's single writer looks like from
+// this code's point of view, and the condition every test below is about.
+func wedgeExposureHash(t *testing.T, db *sql.DB, id string) {
+	t.Helper()
+	if _, err := db.Exec(`
+CREATE TRIGGER wedge_` + id + ` BEFORE UPDATE OF token_hash ON port_exposures
+WHEN NEW.id = '` + id + `'
+BEGIN SELECT RAISE(ABORT, 'database is locked'); END;`); err != nil { //nolint:gosec // id is a test constant
+		t.Fatalf("install trigger: %v", err)
+	}
+}
+
+// TestPortExposeLoad_UnhashedActiveRowIsRecoveredNotSkipped covers the
+// un-hashed ACTIVE row on boot. LoadFromDB used to skip it and leave it ACTIVE:
+// GET …/port-expose then reported a live exposure with a future expiry while
+// every request to its URL 404'd, for the whole TTL. The row's cleartext is
+// still in the column in that state, so the honest answer is to hash it now and
+// keep serving the URL the user already holds.
+func TestPortExposeLoad_UnhashedActiveRowIsRecoveredNotSkipped(t *testing.T) {
+	ctx := context.Background()
+	db := newHashedExposureTestDB(t)
+
+	token := "fixture-unhashed-exposure-token-" + t.Name()
+	expires := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	if _, err := db.Exec(`
+INSERT INTO port_exposures (id, workspace_id, crew_id, agent_id, token, container_id, container_ip, container_port, status, expires_at)
+VALUES ('pe_wedged', 'ws', 'crew', 'agent', ?, 'ct1', '10.0.0.7', 8080, 'ACTIVE', ?)`,
+		token, expires); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	wedgeExposureHash(t, db, "pe_wedged")
+
+	r := NewPortExposeRegistry(db, portExposeTestLogger())
+	if err := r.LoadFromDB(ctx); err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+
+	if _, ok := r.Lookup(token); !ok {
+		t.Fatalf("Lookup missed for an ACTIVE row whose hashing failed — the exposure is reported live and 404s on every request")
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM port_exposures WHERE id = 'pe_wedged'`).Scan(&status); err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if status != "ACTIVE" {
+		t.Errorf("status = %q, want ACTIVE — the exposure is serving, so the row must say so", status)
+	}
+}
+
+// TestPortExposeLoad_UnresolvableActiveRowIsExpired is the other half: when the
+// cleartext is gone too (the row was written by the create path, which stores
+// the spent marker, and the digest write then failed) no token can ever resolve
+// it. It must not be left ACTIVE, because the list endpoint would keep
+// promising a URL that cannot work.
+func TestPortExposeLoad_UnresolvableActiveRowIsExpired(t *testing.T) {
+	ctx := context.Background()
+	db := newHashedExposureTestDB(t)
+
+	expires := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	if _, err := db.Exec(`
+INSERT INTO port_exposures (id, workspace_id, crew_id, agent_id, token, container_id, container_ip, container_port, status, expires_at)
+VALUES ('pe_dead', 'ws', 'crew', 'agent', 'redacted:pe_dead', 'ct1', '10.0.0.7', 8080, 'ACTIVE', ?)`,
+		expires); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	r := NewPortExposeRegistry(db, portExposeTestLogger())
+	if err := r.LoadFromDB(ctx); err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	if r.Len() != 0 {
+		t.Errorf("a row with neither a digest nor a cleartext token was loaded into the registry")
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM port_exposures WHERE id = 'pe_dead'`).Scan(&status); err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if status != "EXPIRED" {
+		t.Fatalf("status = %q, want EXPIRED — the user is being told an unreachable exposure is live", status)
+	}
+	// The marker must not be usable as a token either.
+	if _, ok := r.Lookup("redacted:pe_dead"); ok {
+		t.Errorf("the redaction marker resolved as a capability token")
+	}
+}
+
+// TestRevoke_DropsEntryWhenTheRowHasNoDigest is the revoke-path regression.
+// persistTokenHash is best-effort, so an exposure can be live in memory (keyed
+// by a digest that exists nowhere else) while its row carries no token_hash.
+// Revoke's old fallback read the `token` column — which post-#1888 always holds
+// `redacted:<id>` — so it matched nothing, returned 200, and ServeExposed kept
+// reverse-proxying into the crew container until the process restarted.
+func TestRevoke_DropsEntryWhenTheRowHasNoDigest(t *testing.T) {
+	db := newHashedExposureTestDB(t)
+	token := "fixture-revoke-exposure-token-" + t.Name()
+	expires := time.Now().Add(time.Hour)
+	if _, err := db.Exec(`
+INSERT INTO port_exposures (id, workspace_id, crew_id, agent_id, token, container_id, container_ip, container_port, status, expires_at)
+VALUES ('pe_live', 'ws1', 'crew1', 'agent1', 'redacted:pe_live', 'ct1', '10.0.0.9', 9000, 'ACTIVE', ?)`,
+		expires.UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	wedgeExposureHash(t, db, "pe_live")
+
+	reg := NewPortExposeRegistry(db, portExposeTestLogger())
+	h := NewPortExposeHandler(db, reg, nil, AllowAllPolicy{}, nil, DefaultPortExposeConfig(), portExposeTestLogger())
+
+	reg.Add(&ExposeEntry{
+		ID: "pe_live", Token: token,
+		ContainerID: "ct1", ContainerIP: "10.0.0.9", ContainerPort: 9000,
+		ExpiresAt: expires,
+	})
+	var stored sql.NullString
+	if err := db.QueryRow(`SELECT token_hash FROM port_exposures WHERE id = 'pe_live'`).Scan(&stored); err != nil {
+		t.Fatalf("read token_hash: %v", err)
+	}
+	if stored.Valid && stored.String != "" {
+		t.Fatalf("fixture is wrong: the digest write was supposed to fail, got %q", stored.String)
+	}
+	if _, ok := reg.Lookup(token); !ok {
+		t.Fatalf("fixture is wrong: the exposure should be live in memory")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/crews/crew1/port-expose/pe_live/revoke", nil)
+	req = req.WithContext(withWorkspace(req.Context(), "ws1", "MANAGER"))
+	req.SetPathValue("crewId", "crew1")
+	req.SetPathValue("id", "pe_live")
+	rec := httptest.NewRecorder()
+	h.Revoke(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revoke status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	if _, ok := reg.Lookup(token); ok {
+		t.Errorf("revoke returned 200 but left the exposure in the registry — it keeps proxying into the crew container")
+	}
+	serveRec := httptest.NewRecorder()
+	serveReq := httptest.NewRequest(http.MethodGet, "/exposed/"+token+"/", nil)
+	serveReq.SetPathValue("token", token)
+	h.ServeExposed(serveRec, serveReq)
+	if serveRec.Code != http.StatusNotFound {
+		t.Errorf("ServeExposed after revoke = %d, want 404 — the revoked capability URL still works", serveRec.Code)
 	}
 }

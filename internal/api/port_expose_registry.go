@@ -189,7 +189,7 @@ func redactedExposeToken(id string) string { return "redacted:" + id }
 // enforce it without a clock dependency and the proxy already has one anyway).
 //
 // The token is hashed before the map is consulted, so the at-rest digest is
-// not itself a usable capability: pipeline.CapabilityTokenDigests refuses a
+// not itself a usable capability: pipeline.CapabilityLookupDigest refuses a
 // value that already carries a scheme prefix, and hashing it again would land
 // on a key nothing holds.
 func (r *PortExposeRegistry) Lookup(token string) (*ExposeEntry, bool) {
@@ -204,12 +204,12 @@ func (r *PortExposeRegistry) Lookup(token string) (*ExposeEntry, bool) {
 }
 
 // exposeLookupKey maps a presented cleartext token to the registry key, or ""
-// when the value cannot be a capability token at all.
+// when the value cannot be a capability token at all (empty, an at-rest digest,
+// or a spent redaction marker). There is exactly one digest scheme, so the
+// proxy's lookup and the webhook store's lookup ask the same question of the
+// same function — see the note on CapabilityLookupDigest.
 func exposeLookupKey(token string) string {
-	if token == "" || pipeline.IsCapabilityTokenDigest(token) {
-		return ""
-	}
-	return pipeline.HashCapabilityToken(token)
+	return pipeline.CapabilityLookupDigest(token)
 }
 
 // Remove deletes the entry for the presented cleartext token. Called after the
@@ -220,16 +220,48 @@ func (r *PortExposeRegistry) Remove(token string) {
 	}
 }
 
-// RemoveByHash deletes the entry keyed by an at-rest digest. This is what the
-// revoke path uses: the row's cleartext is no longer readable, so the only
-// handle a caller holding an exposure id can get is the digest.
-func (r *PortExposeRegistry) RemoveByHash(tokenHash string) {
+// RemoveByHash deletes the entry keyed by an at-rest digest and reports whether
+// there was one. This is the revoke path's fast case: the row's cleartext is no
+// longer readable, so the only handle a caller holding an exposure id can get
+// is the digest.
+func (r *PortExposeRegistry) RemoveByHash(tokenHash string) bool {
 	if tokenHash == "" {
-		return
+		return false
 	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.entries[tokenHash]; !ok {
+		return false
+	}
 	delete(r.entries, tokenHash)
-	r.mu.Unlock()
+	return true
+}
+
+// RemoveByID deletes the entry for an exposure row id and reports whether there
+// was one. Reports how the revoke path stops an exposure whose row never
+// learned its digest: persistTokenHash is best-effort, so a write that lost the
+// race with SQLite's single writer leaves token_hash empty, and the digest the
+// entry is keyed by then exists ONLY in memory. The row id is the one handle
+// both sides always have.
+//
+// A linear scan rather than a second index: the map holds live exposures only
+// (tens, bounded by TTL), and revoke is a human-triggered operation. The
+// alternative — a no-op — meant a revoked exposure kept reverse-proxying into
+// the crew container until the process restarted, which is not a trade a second
+// map is too expensive to fix.
+func (r *PortExposeRegistry) RemoveByID(id string) bool {
+	if id == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, e := range r.entries {
+		if e.ID == id {
+			delete(r.entries, key)
+			return true
+		}
+	}
+	return false
 }
 
 // UpdateIP swaps the cached container IP for the entry at token. Called by
@@ -295,7 +327,7 @@ func (r *PortExposeRegistry) LoadFromDB(ctx context.Context) error {
 	r.backfillTokenHashes(ctx)
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, COALESCE(token_hash, ''), container_id, container_ip, container_port, expires_at
+		SELECT id, COALESCE(token_hash, ''), COALESCE(token, ''), container_id, container_ip, container_port, expires_at
 		FROM port_exposures
 		WHERE status = 'ACTIVE'
 	`)
@@ -305,11 +337,22 @@ func (r *PortExposeRegistry) LoadFromDB(ctx context.Context) error {
 	defer rows.Close()
 
 	var staleIDs []string
+	// deadIDs are ACTIVE rows that no token can ever resolve. They are
+	// expired below rather than skipped: a row left ACTIVE is reported as
+	// live by GET …/port-expose, with a future expiry, while every request
+	// to its URL 404s — telling the user an exposure works when it cannot is
+	// worse than telling them it is gone.
+	var deadIDs []string
+	// Digest writes are deferred until the cursor above is closed: it holds a
+	// connection, and a pool pinned to one (SQLite commonly is) would
+	// deadlock on a write issued mid-iteration.
+	type recovery struct{ id, digest string }
+	var recovered []recovery
 	loaded := 0
 	for rows.Next() {
-		var id, tokenHash, containerID, ip, expiresStr string
+		var id, tokenHash, token, containerID, ip, expiresStr string
 		var port int
-		if err := rows.Scan(&id, &tokenHash, &containerID, &ip, &port, &expiresStr); err != nil {
+		if err := rows.Scan(&id, &tokenHash, &token, &containerID, &ip, &port, &expiresStr); err != nil {
 			r.logger.Warn("port expose registry: scan row", "error", err)
 			continue
 		}
@@ -323,11 +366,23 @@ func (r *PortExposeRegistry) LoadFromDB(ctx context.Context) error {
 			continue
 		}
 		if tokenHash == "" {
-			// The backfill above could not hash this row (its cleartext
-			// was empty, or the UPDATE failed and was logged). Loading it
-			// under an empty key would make every unknown token match it.
-			r.logger.Warn("port expose registry: active row has no token hash; skipping", "id", id)
-			continue
+			// The backfill above could not hash this row. Loading it under
+			// an empty key would make every unknown token match it, so
+			// either it is recovered here or it is marked dead.
+			if digest := exposeLookupKey(token); digest != "" {
+				// The cleartext is still in the column, which means the
+				// URL the user holds is still valid — hash it (below,
+				// once this cursor is closed) and keep serving. Even if
+				// that write fails again the entry is live in memory for
+				// this process, so the exposure keeps working.
+				tokenHash = digest
+				r.logger.Warn("port expose registry: active row was still cleartext; hashing it now", "id", id)
+				recovered = append(recovered, recovery{id: id, digest: digest})
+			} else {
+				r.logger.Warn("port expose registry: active row has no usable token; expiring it", "id", id)
+				deadIDs = append(deadIDs, id)
+				continue
+			}
 		}
 		r.entries[tokenHash] = &ExposeEntry{
 			ID:        id,
@@ -344,10 +399,18 @@ func (r *PortExposeRegistry) LoadFromDB(ctx context.Context) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	rows.Close()
+
+	for _, rec := range recovered {
+		r.persistTokenHash(rec.id, rec.digest)
+	}
 
 	// Expire by id rather than by token: the token column no longer holds
 	// anything to match on.
-	for _, id := range staleIDs {
+	expire := make([]string, 0, len(staleIDs)+len(deadIDs))
+	expire = append(expire, staleIDs...)
+	expire = append(expire, deadIDs...)
+	for _, id := range expire {
 		if _, err := r.db.ExecContext(ctx, `
 			UPDATE port_exposures SET status = 'EXPIRED'
 			WHERE id = ? AND status = 'ACTIVE'
@@ -356,7 +419,8 @@ func (r *PortExposeRegistry) LoadFromDB(ctx context.Context) error {
 		}
 	}
 
-	r.logger.Info("port expose registry loaded", "active", loaded, "stale_expired", len(staleIDs))
+	r.logger.Info("port expose registry loaded",
+		"active", loaded, "stale_expired", len(staleIDs), "unresolvable_expired", len(deadIDs))
 	return nil
 }
 

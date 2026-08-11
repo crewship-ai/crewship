@@ -18,8 +18,8 @@
 -- working: their digest is computed from the cleartext already in the row, and
 -- the cleartext is then overwritten.
 --
--- WHY THE BACKFILL IS NOT IN THIS FILE. SQLite has no HMAC and no SHA-256, so
--- the digest cannot be computed in SQL. This migration adds the column and the
+-- WHY THE BACKFILL IS NOT IN THIS FILE. SQLite has no SHA-256, so the digest
+-- cannot be computed in SQL. This migration adds the column and the
 -- index; the hashing itself runs in Go the first time the owning component is
 -- constructed, which on the server path is before anything serves a request:
 --
@@ -30,18 +30,27 @@
 -- rows. Splitting it that way is what let this stay a plain .sql file instead
 -- of a Go entry in the legacyMigrations slice.
 --
--- The digest is HMAC-SHA256 under a subkey derived from ENCRYPTION_KEY, not
--- from CREWSHIP_ADMIN_TOKEN_HMAC_KEY. The admin key is deliberately optional —
--- cli_tokens disables its whole ADMIN tier when it is unset — and a migration
--- that has to preserve every already-published URL on every existing instance
--- cannot depend on a variable an instance is allowed not to have. ENCRYPTION_KEY
--- is the one that cannot be absent on a running server: `crewship start` calls
--- secrets.LoadOrGenerate before the database is opened (generating and
--- persisting it when missing) and then refuses to boot if
--- encryption.VerifyCurrentKey cannot resolve it. Every stored digest carries a
--- scheme prefix, so an instance that had no key when a row was written keeps
--- resolving it after one appears, and a future rotation adds a prefix rather
--- than rewriting one.
+-- THE DIGEST IS UNKEYED SHA-256, hex, behind an `sh1:` scheme prefix. Not an
+-- HMAC: a key protects a digest whose input space is small enough to enumerate
+-- offline, and these two tokens are 32 bytes of crypto/rand each
+-- (internal/pipeline.generateWebhookToken, internal/api.generateExposeToken),
+-- so a preimage search is 2^256 wide either way. The key bought no security
+-- here and cost a lifecycle problem that could brick the instance: an earlier
+-- revision of this migration keyed the HMAC off ENCRYPTION_KEY, and the
+-- documented master-key rotation (CREWSHIP_ENCRYPTION_KEY_VERSION +
+-- ENCRYPTION_KEY_V2 + POST /admin/reencrypt) RETIRES that variable as its final
+-- step — after which every presented token hashes under a different scheme than
+-- every stored digest, with the cleartext already overwritten and nothing to
+-- recover. The scheme prefix stays, so a stored digest is recognisable as one
+-- (replaying it at the public endpoint resolves to nothing) and a future
+-- algorithm change can add a prefix rather than rewrite one.
+--
+-- `hk1:` (the keyed scheme) IS NOT SUPPORTED, deliberately. It existed only on
+-- the branch that developed this migration and was never released, so no
+-- deployed instance can hold one. A DEV instance that already ran the earlier
+-- revision has `hk1:` digests that nothing will ever match: re-mint those
+-- webhooks and exposures (`crewship routine webhooks create`, and re-request
+-- the exposure), or delete the rows.
 --
 -- WHAT HAPPENS TO THE CLEARTEXT COLUMN. It stays, holding `redacted:<row id>`.
 -- Neither column can be dropped: both are `NOT NULL UNIQUE`, so SQLite's

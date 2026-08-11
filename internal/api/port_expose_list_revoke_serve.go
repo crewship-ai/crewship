@@ -156,19 +156,25 @@ func (h *PortExposeHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	// cleartext is not in the row to read back, and it does not need to be:
 	// the registry is keyed by the digest.
 	//
-	// The fallback covers a row the backfill has not reached yet — one whose
-	// digest write failed and is waiting for the next boot. Revoking has to
-	// drop the entry either way, or a revoked exposure keeps proxying until
-	// the process restarts.
-	var tokenHash, token sql.NullString
+	// If that misses, fall back to the row id. persistTokenHash is
+	// best-effort (5s deadline, and SQLite has a single writer), so a row
+	// whose digest write failed carries no digest at all — the entry is
+	// keyed by a value that exists only in memory, and the id is the one
+	// handle both sides always have. The previous fallback read the `token`
+	// column, which post-#1888 always holds `redacted:<id>` and therefore
+	// matched nothing: revoke answered 200 while ServeExposed kept
+	// reverse-proxying into the crew container until the process restarted.
+	removed := false
+	var tokenHash sql.NullString
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT token_hash, token FROM port_exposures WHERE id = ?`, exposeID).Scan(&tokenHash, &token); err == nil {
-		switch {
-		case tokenHash.String != "":
-			h.registry.RemoveByHash(tokenHash.String)
-		case token.String != "":
-			h.registry.Remove(token.String)
-		}
+		`SELECT token_hash FROM port_exposures WHERE id = ?`, exposeID).Scan(&tokenHash); err != nil {
+		h.logger.Warn("port_expose: revoke could not read token_hash", "id", exposeID, "error", err)
+	} else if tokenHash.String != "" {
+		removed = h.registry.RemoveByHash(tokenHash.String)
+	}
+	if !removed && h.registry.RemoveByID(exposeID) {
+		h.logger.Warn("port_expose: revoked exposure was dropped by id — its row carries no digest",
+			"id", exposeID)
 	}
 
 	if h.hub != nil {

@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,169 +38,77 @@ import (
 // contract, so hashing it means redesigning that contract first.)
 //
 // cli_tokens has solved this since Patch J and the shape is copied from there:
-// keep a digest, look the digest up, never read the cleartext back. The
-// difference is the key.
+// keep a digest, look the digest up, never read the cleartext back.
 //
-// WHY THE KEY COMES FROM ENCRYPTION_KEY. cli_tokens keys its ADMIN tier off
-// CREWSHIP_ADMIN_TOKEN_HMAC_KEY, and that is deliberately *optional*: the
-// ADMIN tier refuses to issue or validate tokens when it is unset
-// (errAdminHMACKeyMissing, internal/api/cli_token.go), which is a fine answer
-// for a tier nobody has enabled yet and a terrible one for a migration that
-// has to preserve every already-published URL on every existing instance.
-// ENCRYPTION_KEY is the key that cannot be absent on a running server:
-// `crewship start` calls secrets.LoadOrGenerate BEFORE anything opens the
-// database (cmd/crewship/cmd_start.go), which generates and persists it to
-// <dataDir>/secrets.env when missing, and then refuses to boot at all if
-// encryption.VerifyCurrentKey() cannot resolve it. Credentials are encrypted
-// at rest with it, so an instance without one has no working credential
-// storage either.
+// WHY THE DIGEST IS UNKEYED SHA-256, AND NOT AN HMAC. An HMAC key protects a
+// digest whose *input space is small*: passwords, sequential ids, anything an
+// attacker holding the database file could enumerate and hash offline. That is
+// not the shape of these two secrets. Both are 32 bytes straight out of
+// crypto/rand — generateWebhookToken here ("wh_" + 64 hex chars) and
+// generateExposeToken in internal/api/port_expose_handler.go (43 chars of
+// base64url) — so a preimage search is 2^256 wide. Against an input that
+// large, unkeyed SHA-256 is exactly as unbreakable as HMAC-SHA256; the key
+// buys no security it did not already have.
 //
-// ENCRYPTION_KEY is read directly rather than through internal/encryption
-// because that package deliberately never exports key material; the value here
-// is a *derived* subkey, so the AES key is never used as an HMAC key.
+// What the key DID buy was a key-lifecycle problem that could brick the
+// instance. The previous revision derived an HMAC subkey from the raw
+// ENCRYPTION_KEY env var. Crewship documents a master-key rotation
+// (CREWSHIP_ENCRYPTION_KEY_VERSION + ENCRYPTION_KEY_V2 + POST /admin/reencrypt,
+// see internal/api/admin_reencrypt.go and internal/secrets/bootstrap.go) whose
+// final step retires ENCRYPTION_KEY. After that step every presented token
+// would hash under a different scheme than every stored digest — and because
+// the cleartext column has already been overwritten with `redacted:<id>`,
+// nothing could be recovered. Every webhook sender and every published
+// /exposed/ URL would 404, permanently. Trading that failure mode for zero
+// additional security was the wrong trade, so there is now one scheme, keyed
+// by nothing, that no rotation can invalidate.
 //
-// The scheme prefix on every digest is what makes this survivable. A process
-// that genuinely has no key (unit tests, a tools-only build) falls back to an
-// unkeyed SHA-256 digest under a different prefix, and lookups try both — so
-// an instance that gains an ENCRYPTION_KEY after rows were written keeps
-// resolving the old ones instead of bricking them. A future key rotation adds
-// a prefix rather than rewriting one.
+// The scheme prefix stays: it is what makes a stored digest recognisable as a
+// digest (so replaying one read out of the database resolves to nothing) and
+// it leaves room for a future algorithm change to add a prefix rather than
+// rewrite one.
 const (
-	// capabilityDigestHMACScheme prefixes digests keyed by the
-	// ENCRYPTION_KEY-derived subkey. Preferred whenever a key resolves.
-	capabilityDigestHMACScheme = "hk1:"
-
-	// capabilityDigestSHAScheme prefixes the unkeyed SHA-256 fallback used
-	// when no ENCRYPTION_KEY is configured. Still non-invertible — every
-	// token this file hashes is >=128 bits of crypto/rand — it just loses
-	// the "attacker needs the env too" property.
-	capabilityDigestSHAScheme = "sh1:"
-
-	// capabilityHashKeyInfo domain-separates the derived subkey so the value
-	// stored here can never be confused with, or used as, the AES-256-GCM
-	// key it descends from.
-	capabilityHashKeyInfo = "crewship/capability-token-hash/v1"
+	// capabilityDigestScheme prefixes every at-rest capability digest.
+	// SHA-256 over the token, hex-encoded.
+	capabilityDigestScheme = "sh1:"
 )
 
-// capabilityKeyCache memoises the derived subkey against the raw env value it
-// came from, so a rotated ENCRYPTION_KEY re-derives without a restart while
-// the steady state costs one map read.
-var (
-	capabilityKeyMu     sync.RWMutex
-	capabilityKeyRawEnv string
-	capabilityKeyDerive []byte
-)
-
-// capabilityHashKey returns the derived HMAC subkey and whether one is
-// available. Derivation is HMAC-SHA256(ENCRYPTION_KEY, info) — HKDF-Extract in
-// all but name, which is the right amount of machinery for turning one uniform
-// 32-byte secret into another.
-func capabilityHashKey() ([]byte, bool) {
-	raw := strings.TrimSpace(os.Getenv("ENCRYPTION_KEY"))
-	if raw == "" {
-		return nil, false
-	}
-	capabilityKeyMu.RLock()
-	if raw == capabilityKeyRawEnv && capabilityKeyDerive != nil {
-		k := capabilityKeyDerive
-		capabilityKeyMu.RUnlock()
-		return k, true
-	}
-	capabilityKeyMu.RUnlock()
-
-	master, err := hex.DecodeString(raw)
-	if err != nil || len(master) < 32 {
-		// A malformed ENCRYPTION_KEY is already a boot failure on the
-		// server path; here it just means "no key", which degrades to the
-		// unkeyed scheme instead of losing the digest entirely.
-		return nil, false
-	}
-	mac := hmac.New(sha256.New, master)
-	_, _ = mac.Write([]byte(capabilityHashKeyInfo))
-	derived := mac.Sum(nil)
-
-	capabilityKeyMu.Lock()
-	capabilityKeyRawEnv = raw
-	capabilityKeyDerive = derived
-	capabilityKeyMu.Unlock()
-	return derived, true
-}
-
-// HashCapabilityToken returns the digest to STORE for a capability token: the
-// keyed one when an ENCRYPTION_KEY is configured, the unkeyed one otherwise.
+// HashCapabilityToken returns the digest to STORE for a capability token.
 // An empty token has no digest.
 func HashCapabilityToken(token string) string {
 	if token == "" {
 		return ""
 	}
-	if key, ok := capabilityHashKey(); ok {
-		mac := hmac.New(sha256.New, key)
-		_, _ = mac.Write([]byte(token))
-		return capabilityDigestHMACScheme + hex.EncodeToString(mac.Sum(nil))
-	}
 	sum := sha256.Sum256([]byte(token))
-	return capabilityDigestSHAScheme + hex.EncodeToString(sum[:])
+	return capabilityDigestScheme + hex.EncodeToString(sum[:])
 }
 
-// CapabilityTokenDigests returns every digest a presented token may legally
-// match at rest, newest scheme first. Two entries at most, so the SQL stays an
-// indexed `token_hash IN (?, ?)` rather than a scan.
+// CapabilityLookupDigest maps a value presented at a public endpoint to the
+// single digest it may legally match at rest, or "" when the value cannot be a
+// capability token at all. Callers must treat "" as "no match" rather than as
+// an unfiltered query.
 //
-// Presenting a stored digest is NOT presenting the token: values that already
-// carry a scheme prefix resolve to nothing, so a reader of the database file
-// cannot replay what they found straight back at the public endpoint.
-func CapabilityTokenDigests(token string) []string {
-	if token == "" || IsCapabilityTokenDigest(token) {
-		return nil
+// Presenting a stored digest is NOT presenting the token, and neither is
+// presenting a redaction marker (which is derived from a row id, i.e. from a
+// value the caller may well know): both resolve to nothing.
+func CapabilityLookupDigest(token string) string {
+	if token == "" || IsCapabilityTokenDigest(token) || strings.HasPrefix(token, redactedTokenPrefix) {
+		return ""
 	}
-	sum := sha256.Sum256([]byte(token))
-	unkeyed := capabilityDigestSHAScheme + hex.EncodeToString(sum[:])
-	if key, ok := capabilityHashKey(); ok {
-		mac := hmac.New(sha256.New, key)
-		_, _ = mac.Write([]byte(token))
-		return []string{capabilityDigestHMACScheme + hex.EncodeToString(mac.Sum(nil)), unkeyed}
-	}
-	return []string{unkeyed}
+	return HashCapabilityToken(token)
 }
 
 // IsCapabilityTokenDigest reports whether s is an at-rest digest rather than a
 // cleartext capability token. Real tokens are bare hex (`wh_`-prefixed for
-// webhooks), so the scheme prefix is unambiguous.
+// webhooks) or base64url, so the scheme prefix is unambiguous.
 func IsCapabilityTokenDigest(s string) bool {
-	return strings.HasPrefix(s, capabilityDigestHMACScheme) ||
-		strings.HasPrefix(s, capabilityDigestSHAScheme)
+	return strings.HasPrefix(s, capabilityDigestScheme)
 }
 
 // CapabilityDigestEqual compares two digests without leaking, through timing,
 // how many leading bytes matched.
 func CapabilityDigestEqual(a, b string) bool {
 	return hmac.Equal([]byte(a), []byte(b))
-}
-
-// capabilityDigestInSet reports whether stored matches any acceptable digest,
-// comparing in constant time.
-func capabilityDigestInSet(stored string, digests []string) bool {
-	match := false
-	for _, d := range digests {
-		if CapabilityDigestEqual(stored, d) {
-			match = true
-		}
-	}
-	return match
-}
-
-// capabilityDigestPlaceholders renders the `IN (?, …)` fragment and args for a
-// digest set. Returns ok=false for an empty set, which callers must treat as
-// "no match" rather than as an unfiltered query.
-func capabilityDigestPlaceholders(digests []string) (string, []any, bool) {
-	if len(digests) == 0 {
-		return "", nil, false
-	}
-	args := make([]any, len(digests))
-	for i, d := range digests {
-		args[i] = d
-	}
-	return "(?" + strings.Repeat(", ?", len(digests)-1) + ")", args, true
 }
 
 // ensureTokenHashColumn adds the token_hash column when it is missing.
@@ -248,76 +155,106 @@ func ensureTokenHashColumn(ctx context.Context, db *sql.DB, table string) error 
 
 // backfillTokenHashes hashes every row of pipeline_webhooks that still carries
 // a cleartext token and overwrites the cleartext in place. Returns how many
-// rows it converted.
+// rows it converted and how many it could not.
 //
 // This is the half of the 20260810171000 migration that SQL cannot express:
-// SQLite has no HMAC. The .sql file adds the column and the index; the digest
-// has to be computed in Go, and it has to happen before anything serves
+// SQLite has no SHA-256. The .sql file adds the column and the index; the
+// digest has to be computed in Go, and it has to happen before anything serves
 // traffic — hence the store constructor. It is idempotent (the predicate is
 // "token_hash IS NULL") and normally reads zero rows.
+//
+// ONE FAILED ROW MUST NOT ABORT THE REST. This used to `return` on the first
+// failed UPDATE. SQLite has a single writer, so a moment of lock contention
+// part-way through the loop — exactly what a busy daemon produces — left every
+// remaining row un-hashed, and the digest-only lookup path then 404'd webhooks
+// whose tokens were still perfectly valid. So a failure is counted and logged
+// per row and the loop continues; the caller uses the failure count to decide
+// whether the bounded cleartext fallback in GetByToken needs to be armed.
 //
 // Soft-deleted rows are included deliberately: a deleted webhook's token is
 // dead as a capability but is still a live secret sitting in a table, and
 // nothing else would ever come back for it.
-func backfillTokenHashes(ctx context.Context, db *sql.DB) (int, error) {
-	rows, err := db.QueryContext(ctx,
+func backfillTokenHashes(ctx context.Context, db *sql.DB) (hashed, failed int, err error) {
+	rows, qerr := db.QueryContext(ctx,
 		`SELECT id, token FROM pipeline_webhooks WHERE token_hash IS NULL OR token_hash = ''`)
-	if err != nil {
-		return 0, err
+	if qerr != nil {
+		return 0, 0, qerr
 	}
 	type pending struct{ id, token string }
 	var todo []pending
 	for rows.Next() {
 		var p pending
-		if err := rows.Scan(&p.id, &p.token); err != nil {
+		if serr := rows.Scan(&p.id, &p.token); serr != nil {
 			rows.Close()
-			return 0, err
+			return 0, 0, serr
 		}
 		todo = append(todo, p)
 	}
-	if err := rows.Err(); err != nil {
+	if rerr := rows.Err(); rerr != nil {
 		rows.Close()
-		return 0, err
+		return 0, 0, rerr
 	}
 	rows.Close()
 
-	done := 0
-	for _, p := range todo {
+	for i, p := range todo {
 		if p.token == "" || strings.HasPrefix(p.token, redactedTokenPrefix) {
+			// Nothing recoverable in this row's cleartext column. It is
+			// not resolvable by any token, which is a dead row rather than
+			// a hashing failure — but it is also not hashed, so it counts
+			// as such for the caller's arming decision only if it could
+			// still hold a live capability, which it cannot.
 			continue
 		}
-		if _, err := db.ExecContext(ctx,
+		if cerr := ctx.Err(); cerr != nil {
+			// Out of budget: the rest are still cleartext.
+			failed += len(todo) - i
+			slog.Warn("capability tokens: backfill ran out of time",
+				"table", "pipeline_webhooks", "hashed", hashed, "remaining", failed, "error", cerr)
+			return hashed, failed, nil
+		}
+		if _, uerr := db.ExecContext(ctx,
 			`UPDATE pipeline_webhooks SET token_hash = ?, token = ? WHERE id = ?`,
 			HashCapabilityToken(p.token), redactedWebhookToken(p.id), p.id,
-		); err != nil {
-			return done, err
+		); uerr != nil {
+			failed++
+			slog.Error("capability tokens: hashing a row failed — it still holds cleartext",
+				"table", "pipeline_webhooks", "id", p.id, "error", uerr)
+			continue
 		}
-		done++
+		hashed++
 	}
-	return done, nil
+	return hashed, failed, nil
 }
 
 // prepareCapabilityTokens is the constructor-time sequence: make sure the
-// column exists, then hash whatever is still cleartext. Failures are logged
-// rather than fatal — a store that refuses to construct would take the whole
-// daemon down, and the lookup path already fails closed on a row it cannot
-// match.
-func prepareCapabilityTokens(db *sql.DB) {
+// column exists, then hash whatever is still cleartext. Returns the number of
+// rows left holding cleartext. Failures are logged rather than fatal — a store
+// that refuses to construct would take the whole daemon down.
+func prepareCapabilityTokens(db *sql.DB) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := ensureTokenHashColumn(ctx, db, "pipeline_webhooks"); err != nil {
 		slog.Warn("capability tokens: ensure token_hash column", "table", "pipeline_webhooks", "error", err)
-		return
+		// The column may not exist, so no row can be hashed and no row can
+		// be looked up by digest. Arm the cleartext fallback so already
+		// published webhook URLs keep resolving.
+		return 1
 	}
-	n, err := backfillTokenHashes(ctx, db)
+	hashed, failed, err := backfillTokenHashes(ctx, db)
 	if err != nil {
 		slog.Error("capability tokens: backfill failed — rows still hold cleartext",
-			"table", "pipeline_webhooks", "hashed", n, "error", err)
-		return
+			"table", "pipeline_webhooks", "hashed", hashed, "error", err)
+		return 1
 	}
-	if n > 0 {
-		slog.Info("capability tokens hashed at rest", "table", "pipeline_webhooks", "rows", n)
+	if hashed > 0 {
+		slog.Info("capability tokens hashed at rest", "table", "pipeline_webhooks", "rows", hashed)
 	}
+	if failed > 0 {
+		slog.Error("capability tokens: rows still hold cleartext after the backfill",
+			"table", "pipeline_webhooks", "hashed", hashed, "unhashed", failed,
+			"note", "those webhooks resolve by cleartext until a later attempt hashes them")
+	}
+	return failed
 }
 
 // DefaultWebhookTimestampTolerance mirrors webhook.DefaultTimestampTolerance
@@ -394,6 +331,14 @@ type SaveWebhookInput struct {
 // WebhookStore is the persistence + lookup layer for pipeline_webhooks.
 type WebhookStore struct {
 	db *sql.DB
+
+	// unhashed counts the rows the constructor's backfill could not hash,
+	// i.e. the rows that still hold a cleartext token. While it is >0
+	// GetByToken arms a second, bounded lookup against the cleartext column
+	// for tokens the digest index does not resolve; each such lookup that
+	// succeeds re-attempts the hashing and decrements this. At 0 the hot
+	// path is a single indexed equality and nothing ever reads `token`.
+	unhashed atomic.Int64
 }
 
 // NewWebhookStore returns a store backed by a v82+ DB.
@@ -404,8 +349,9 @@ type WebhookStore struct {
 // SQL). Production constructs exactly one of these at boot, before the router
 // is serving.
 func NewWebhookStore(db *sql.DB) *WebhookStore {
-	prepareCapabilityTokens(db)
-	return &WebhookStore{db: db}
+	s := &WebhookStore{db: db}
+	s.unhashed.Store(int64(prepareCapabilityTokens(db)))
+	return s
 }
 
 // redactedTokenPrefix marks a cleartext capability column that has been
@@ -519,20 +465,35 @@ func (s *WebhookStore) GetByID(ctx context.Context, id string) (*Webhook, error)
 // 404 (deliberately not 403; we don't want to leak which tokens
 // exist via timing or status code differences).
 func (s *WebhookStore) GetByToken(ctx context.Context, token string) (*Webhook, error) {
-	if token == "" {
-		return nil, ErrNotFound
-	}
 	// Hash what was presented and look the digest up (#1888). The cleartext
-	// is not in the table to compare against, and CapabilityTokenDigests
-	// refuses a value that is already a digest — so replaying something
-	// read out of the database resolves to nothing.
-	digests := CapabilityTokenDigests(token)
-	in, args, ok := capabilityDigestPlaceholders(digests)
-	if !ok {
+	// is not in the table to compare against for a hashed row, and
+	// CapabilityLookupDigest refuses a value that is already a digest — so
+	// replaying something read out of the database resolves to nothing.
+	digest := CapabilityLookupDigest(token)
+	if digest == "" {
 		return nil, ErrNotFound
 	}
+	w, err := s.getByDigest(ctx, digest)
+	switch {
+	case err == nil:
+		// Echo the presented cleartext back on the in-memory struct: the
+		// dispatch handler keys its per-webhook rate-limit window and its
+		// idempotency hash off it, and both must stay distinct per webhook.
+		w.Token = token
+		return w, nil
+	case !errors.Is(err, ErrNotFound):
+		return nil, err
+	case s.unhashed.Load() <= 0:
+		return nil, ErrNotFound
+	}
+	return s.getByUnhashedCleartext(ctx, token)
+}
+
+// getByDigest is the hot path: one equality against the unique partial index
+// on token_hash.
+func (s *WebhookStore) getByDigest(ctx context.Context, digest string) (*Webhook, error) {
 	rows, err := s.db.QueryContext(ctx,
-		webhookSelect+` WHERE token_hash IN `+in+` AND deleted_at IS NULL`, args...)
+		webhookSelect+` WHERE token_hash = ? AND deleted_at IS NULL`, digest)
 	if err != nil {
 		return nil, err
 	}
@@ -547,13 +508,60 @@ func (s *WebhookStore) GetByToken(ctx context.Context, token string) (*Webhook, 
 	// Constant-time confirmation that the row the index matched really is
 	// the one this token digests to, so the decision never rests on a
 	// short-circuiting byte comparison.
-	if !capabilityDigestInSet(w.TokenHash, digests) {
+	if !CapabilityDigestEqual(w.TokenHash, digest) {
 		return nil, ErrNotFound
 	}
-	// Echo the presented cleartext back on the in-memory struct: the
-	// dispatch handler keys its per-webhook rate-limit window and its
-	// idempotency hash off it, and both must stay distinct per webhook.
+	return w, nil
+}
+
+// getByUnhashedCleartext resolves a token against rows the backfill could not
+// hash. It runs only when the constructor reported such rows and only after
+// the digest lookup missed.
+//
+// WHY A CLEARTEXT FALLBACK IS THE RIGHT ANSWER HERE. The alternative is to
+// keep the lookup digest-only, which means an UPDATE that lost a race with
+// SQLite's single writer silently 404s a webhook whose token is still valid,
+// for every sender, until someone restarts the daemon — a hardening change
+// taking down working integrations by accident. The fallback gives up nothing
+// the hardening was protecting: it matches ONLY rows whose token_hash is still
+// empty, and those rows are precisely the ones whose cleartext is sitting in
+// the table anyway, so a reader of the database file learns nothing new from
+// its existence. It cannot be used to replay a digest (CapabilityLookupDigest
+// rejects a value carrying the scheme prefix) nor a redaction marker (same
+// guard), and it disappears row by row as each match re-attempts the hashing.
+func (s *WebhookStore) getByUnhashedCleartext(ctx context.Context, token string) (*Webhook, error) {
+	rows, err := s.db.QueryContext(ctx,
+		webhookSelect+` WHERE COALESCE(token_hash, '') = '' AND token = ? AND deleted_at IS NULL`, token)
+	if err != nil {
+		return nil, err
+	}
+	if !rows.Next() {
+		rows.Close()
+		return nil, ErrNotFound
+	}
+	w, err := scanWebhook(rows)
+	// The cursor must be closed BEFORE the repair below: it holds a
+	// connection, and a pool capped at one (every test here, and any caller
+	// that pins SQLite to a single connection) would deadlock on the UPDATE
+	// waiting for the connection this row is still reading.
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
 	w.Token = token
+	// Self-heal: retry the write the backfill lost. Best-effort — the fire
+	// this lookup serves must not fail because the retry did.
+	digest := HashCapabilityToken(token)
+	if _, uerr := s.db.ExecContext(ctx,
+		`UPDATE pipeline_webhooks SET token_hash = ?, token = ? WHERE id = ? AND COALESCE(token_hash, '') = ''`,
+		digest, redactedWebhookToken(w.ID), w.ID,
+	); uerr != nil {
+		slog.Warn("capability tokens: re-hashing a cleartext row failed", "id", w.ID, "error", uerr)
+		return w, nil
+	}
+	w.TokenHash = digest
+	s.unhashed.Add(-1)
+	slog.Info("capability tokens: hashed a row the backfill had missed", "id", w.ID)
 	return w, nil
 }
 
