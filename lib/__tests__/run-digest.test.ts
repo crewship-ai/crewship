@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 
-import { groupRunsByHour, medianRunDuration, runHeadline, type DigestRun } from "@/lib/run-digest"
+import {
+  groupRunsByHour,
+  isFailedRunStatus,
+  medianRunDuration,
+  runHeadline,
+  slowestRunDuration,
+  type DigestRun,
+} from "@/lib/run-digest"
 
 const run = (over: Partial<DigestRun> = {}): DigestRun => ({
   id: "run_a",
@@ -17,6 +24,16 @@ const atLocal = (h: number, m: number, base = Date.parse("2026-08-10T12:00:00.00
   d.setHours(h, m, 0, 0)
   return d.toISOString()
 }
+
+/**
+ * The same helper pinned to a calendar day, for the daily-cron case.
+ *
+ * Built from local components rather than parsed from a UTC string so the run
+ * lands on that local DAY on every runner — a "09:00Z" stamp is the previous
+ * day west of Greenwich, which is the very confusion these tests are about.
+ */
+const atLocalOn = (year: number, month: number, day: number, h: number, m = 0) =>
+  new Date(year, month - 1, day, h, m, 0, 0).toISOString()
 
 describe("runHeadline", () => {
   it("is the failure when the run failed — that is what the row is for", () => {
@@ -44,6 +61,26 @@ describe("runHeadline", () => {
 
   it("collapses whitespace so a JSON blob does not become a wall", () => {
     expect(runHeadline(run({ output: "  {\n  \"ok\": true\n}  " })).text).toBe('{ "ok": true }')
+  })
+
+  it("collapses a YAML document that opens on '---' — a row reading '---' says nothing", () => {
+    // The lead is three characters, which the old length rule let through: the
+    // row read "---" while the answer sat on line two. Length was never the
+    // question; whether the line is punctuation or a sentence is.
+    expect(runHeadline(run({ output: "---\ntitle: 3 tickets classified\n---" })).text).toBe(
+      "--- title: 3 tickets classified ---",
+    )
+  })
+
+  it("collapses a markdown list whose first line is the bullet alone", () => {
+    expect(runHeadline(run({ output: "-\nENG-7 reopened" })).text).toBe("- ENG-7 reopened")
+  })
+
+  it("keeps a short first line that is a word — 'ok' is an answer, '{' is not", () => {
+    // Two characters, and the old rule collapsed it: a routine reporting "ok"
+    // and then its detail lines got every line of the detail dragged onto the
+    // row it was deliberately kept off.
+    expect(runHeadline(run({ output: "ok\nchecked 4 queues\nnothing to do" })).text).toBe("ok")
   })
 
   it("names an in-flight run as running rather than as a result", () => {
@@ -141,6 +178,107 @@ describe("groupRunsByHour", () => {
 
   it("returns nothing for nothing", () => {
     expect(groupRunsByHour([])).toEqual([])
+  })
+
+  it("gives a daily 09:00 cron one identity per day, not one label three times", () => {
+    // The bug this pins: the buckets were always right — keyed on the hour
+    // INSTANT — but their labels were bare "09:00", so a page keying its rows
+    // on the label handed React three identical keys and a reader three
+    // identical headers for three different mornings.
+    const buckets = groupRunsByHour([
+      run({ id: "mon", started_at: atLocalOn(2026, 8, 10, 9, 0) }),
+      run({ id: "sun", started_at: atLocalOn(2026, 8, 9, 9, 0) }),
+      run({ id: "sat", started_at: atLocalOn(2026, 8, 8, 9, 0) }),
+    ])
+    expect(buckets).toHaveLength(3)
+    expect(new Set(buckets.map((b) => b.key)).size).toBe(3)
+  })
+
+  it("names the day on each header once the page covers more than one", () => {
+    const buckets = groupRunsByHour([
+      run({ started_at: atLocalOn(2026, 8, 10, 9, 0) }),
+      run({ started_at: atLocalOn(2026, 8, 9, 9, 0) }),
+    ])
+    // Every bucket carries one, and no two read the same — that is the whole
+    // job. The exact rendering is the reader's locale's business, so asserting
+    // its text would be asserting Intl's output rather than this module's rule.
+    expect(buckets.every((b) => (b.day ?? "").length > 0)).toBe(true)
+    expect(new Set(buckets.map((b) => b.day)).size).toBe(2)
+  })
+
+  it("leaves the day off when every run happened on the same one", () => {
+    // A per-minute routine's thirty rows all share today's date; stamping it on
+    // every header is thirty repetitions of a fact the reader had before they
+    // arrived, and it crowds out the times that actually differ.
+    const buckets = groupRunsByHour([
+      run({ started_at: atLocalOn(2026, 8, 10, 14, 51) }),
+      run({ started_at: atLocalOn(2026, 8, 10, 13, 2) }),
+    ])
+    expect(buckets.map((b) => b.day)).toEqual([undefined, undefined])
+  })
+
+  it("counts the undated bucket as its own day, and still keys it", () => {
+    // Two hours of one day plus an unreadable stamp is ONE day of runs: the
+    // undated bucket is not evidence of a second, and letting it stamp a date
+    // on the other headers would be inventing one.
+    const buckets = groupRunsByHour([
+      run({ id: "bad", started_at: "not a date" }),
+      run({ id: "ok", started_at: atLocalOn(2026, 8, 10, 9, 0) }),
+    ])
+    expect(buckets[1].key).toBe("undated")
+    expect(new Set(buckets.map((b) => b.key)).size).toBe(2)
+    expect(buckets.map((b) => b.day)).toEqual([undefined, undefined])
+  })
+})
+
+describe("isFailedRunStatus", () => {
+  // The page and the hour header both count failures, and until this predicate
+  // was exported they counted different ones: a cancelled run showed in
+  // "2 runs · 1 failed" and not in the strip's "Failed 0" directly beneath it.
+  it("folds cancelled and interrupted in — the reader is asking what did not deliver", () => {
+    expect(isFailedRunStatus("failed")).toBe(true)
+    expect(isFailedRunStatus("cancelled")).toBe(true)
+    expect(isFailedRunStatus("interrupted")).toBe(true)
+  })
+
+  it("leaves a finished or in-flight run alone", () => {
+    for (const s of ["completed", "dry_run", "running", "queued", "waiting"]) {
+      expect(isFailedRunStatus(s), s).toBe(false)
+    }
+  })
+})
+
+describe("slowestRunDuration", () => {
+  it("is the longest run that finished", () => {
+    expect(slowestRunDuration([run({ duration_ms: 100 }), run({ duration_ms: 900 })])).toBe(900)
+  })
+
+  it("ignores an in-flight run — a partial duration is not a record", () => {
+    // Same argument medianRunDuration makes: duration_ms on a live run is
+    // rewritten at every step boundary. A routine that normally takes 200ms
+    // showing "Slowest 40s" because one run is still going is a page reporting
+    // a number that will be smaller when it is reloaded.
+    expect(
+      slowestRunDuration([
+        run({ duration_ms: 200 }),
+        run({ duration_ms: 40_000, status: "running" }),
+      ]),
+    ).toBe(200)
+  })
+
+  it("keeps a failed run — a 30s timeout IS the slowest thing that happened", () => {
+    // The median excludes failures because a run that dies at step one is fast
+    // for a reason that says nothing about the work. That reason cannot reach a
+    // MAXIMUM: a fast run never is one. What can reach it is the timeout, and
+    // hiding it is hiding the slowest thing the routine did.
+    expect(
+      slowestRunDuration([run({ duration_ms: 200 }), run({ duration_ms: 30_000, status: "failed" })]),
+    ).toBe(30_000)
+  })
+
+  it("is undefined when nothing has a duration yet", () => {
+    expect(slowestRunDuration([])).toBeUndefined()
+    expect(slowestRunDuration([run({ duration_ms: 0, status: "running" })])).toBeUndefined()
   })
 })
 
