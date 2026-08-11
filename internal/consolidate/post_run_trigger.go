@@ -143,6 +143,7 @@ func (t *PostRunTrigger) OnRunCompleted(ctx context.Context, workspaceID, crewID
 		Since:        t.since,
 		MinEntries:   t.minEntries,
 		OutputDir:    outputDir,
+		OutputRoot:   t.storageBasePath,
 		BlobRoot:     t.blobRoot,
 		ProposalMode: hitlEnabled(),
 	}

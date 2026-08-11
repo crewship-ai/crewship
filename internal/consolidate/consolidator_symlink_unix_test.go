@@ -39,13 +39,14 @@ func TestSnapshotPinsRefusesSymlinkedTarget(t *testing.T) {
 }
 
 func TestSnapshotPinsRefusesSymlinkedOutputDir(t *testing.T) {
+	root := t.TempDir()
 	outside := t.TempDir()
-	outputDir := filepath.Join(t.TempDir(), "topics")
+	outputDir := filepath.Join(root, "topics")
 	if err := os.Symlink(outside, outputDir); err != nil {
 		t.Fatalf("plant output-directory symlink: %v", err)
 	}
 
-	_, err := snapshotPins(Config{OutputDir: outputDir}, []journal.Entry{{
+	_, err := snapshotPins(Config{OutputRoot: root, OutputDir: outputDir}, []journal.Entry{{
 		ID: "pin-1", Type: "test", Priority: journal.PriorityPin, Summary: "must stay confined",
 	}})
 	if err == nil {
