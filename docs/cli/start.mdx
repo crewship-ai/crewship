@@ -43,11 +43,12 @@ crewship start [flags]
    container provider — useful for read-only browse mode without
    running agents.
 8. **HTTP server starts.** Binds `0.0.0.0:8080` by default. WebSocket
-   on the same port at `/ws`. IPC socket at `/tmp/crewship.sock`
-   (or `$CREWSHIP_DATA_DIR/crewship.sock` when the data dir is set to
-   something other than the packaged `/var/lib/crewship`). If another
-   process is already listening on that socket, start fails with an
-   error naming the path instead of taking the socket over.
+   on the same port at `/ws`. IPC socket at `<data dir>/crewship.sock` —
+   the data dir being `CREWSHIP_DATA_DIR` when set and `$HOME/.crewship`
+   when it is not, so `/tmp/crewship.sock` applies to the packaged
+   `/var/lib/crewship` install and nothing else. If another process is
+   already listening on that socket, start fails with an error naming
+   the path instead of taking the socket over.
 9. **First-run welcome.** If post-migration the `users` table is empty
    AND stdout is a TTY, prints a one-screen banner pointing at the
    browser onboarding wizard (PR #441). Suppressed on non-TTY so
@@ -83,7 +84,7 @@ Beyond the flags above, `crewship start` respects:
 | Var | Default | Effect |
 |-----|---------|--------|
 | `CREWSHIP_PORT` | `8080` | HTTP listen port. (There is no `--port` flag — set it here.) |
-| `CREWSHIP_SOCKET_PATH` | `/tmp/crewship.sock`, or `$CREWSHIP_DATA_DIR/crewship.sock` for a relocated data dir | IPC socket for sidecar coordination. See [Environment](/configuration/environment#ipc) for the derivation. |
+| `CREWSHIP_SOCKET_PATH` | `<data dir>/crewship.sock` — `/tmp/crewship.sock` for the packaged install | IPC socket for sidecar coordination. Follows the resolved data dir, which is `$HOME/.crewship` when `CREWSHIP_DATA_DIR` is unset. See [Environment](/configuration/environment#ipc) for the derivation. |
 | `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge name for agent containers. |
 | `CREWSHIP_CONTAINER_PROVIDER` | `docker` | `docker`, `apple`, or `auto`. |
 | `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Where workspace files live. |
@@ -112,12 +113,22 @@ Each instance is fully isolated — separate DB, separate container
 network (`CREWSHIP_CONTAINER_NETWORK=crewship-agents-1`), separate
 IPC socket (`CREWSHIP_SOCKET_PATH=/tmp/crewship-1.sock`).
 
-Giving each instance its own `CREWSHIP_DATA_DIR` (anything other than
-the packaged `/var/lib/crewship`) already derives a distinct IPC socket
-and bbolt file under that directory, so the explicit
+Giving each instance its own `CREWSHIP_DATA_DIR` already derives a
+distinct IPC socket and bbolt file under that directory, so the explicit
 `CREWSHIP_SOCKET_PATH` / `CREWSHIP_BOLT_PATH` overrides above are only
-needed when you want specific paths. Both files are exclusive by nature,
-and sharing either one now fails loudly rather than silently:
+needed when you want specific paths.
+
+<Warning>
+Setting only `CREWSHIP_PORT` is **not** enough to separate two instances.
+Both files derive from the data dir, so two instances that leave
+`CREWSHIP_DATA_DIR` unset under the same account resolve the same
+`$HOME/.crewship` and collide on both. Give each one its own
+`CREWSHIP_DATA_DIR` — or, if you want the paths spelled out, its own
+`CREWSHIP_BOLT_PATH` and `CREWSHIP_SOCKET_PATH`.
+</Warning>
+
+Both files are exclusive by nature, and sharing either one fails loudly
+rather than silently:
 
 - **Sharing the bbolt file**: the second instance logs that it is waiting
   for the lock, naming the file, then gives up after ten seconds with

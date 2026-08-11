@@ -121,7 +121,7 @@ These are not configuration — Crewship sets them on the crew container itself,
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_STATE_PROVIDER` | `bbolt` | State store: `bbolt` (postgres on the v0.2 roadmap) |
-| `CREWSHIP_BOLT_PATH` | `/var/lib/crewship/state.db` — or `$CREWSHIP_DATA_DIR/state.db` for a relocated data dir | BoltDB file path. Same rule as `CREWSHIP_SOCKET_PATH`: the literal stands when `CREWSHIP_DATA_DIR` is unset or is `/var/lib/crewship`, otherwise the file lives under the data dir. The bbolt file is exclusively locked by whichever process opens it, so instances must not share one. |
+| `CREWSHIP_BOLT_PATH` | `<data dir>/state.db` — `/var/lib/crewship/state.db` for the packaged install | BoltDB file path. Same rule as `CREWSHIP_SOCKET_PATH`: it follows the resolved data dir, which is `CREWSHIP_DATA_DIR` when set and `$HOME/.crewship` when it is not, so the `/var/lib/crewship` literal is the default only for the packaged install. The bbolt file is exclusively locked by whichever process opens it, so instances must not share one. |
 
 ## Public-facing URL
 

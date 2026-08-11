@@ -317,9 +317,9 @@ fallback the guard will enforce for you.
 </Warning>
 
 Do it in this order — **restore the snapshot with your CURRENT binary first,
-then reinstall the older one**. `crewship db restore-snapshot` was introduced
-alongside the version-skew guard, so the older binary you're rolling back to
-may not have the command; run it from the newer binary that's still installed,
+then reinstall the older one**. `crewship db restore-snapshot` arrived on
+2026-07-09, a day after the version-skew guard, so a binary older than that
+has neither; run the restore from the newer binary that's still installed,
 before you replace it:
 
 1. **Stop `crewshipd`** (a running server holds the database open).
@@ -338,9 +338,15 @@ reads EOF and aborts with `aborted (pass --yes to skip confirmation)`).
 3. **Reinstall the older binary.** Homebrew: `brew install crewship-ai/tap/crewship@<version>` (or `brew uninstall` + install the pinned tag). Installer: `CREWSHIP_VERSION=vX.Y.Z curl -fsSL …/install.sh | bash`.
 4. **Start the older binary** — it boots against the restored schema.
 
-`restore-snapshot` probes for a local server and refuses if it finds one, but
-that check is best-effort — **stop `crewshipd` yourself first** regardless. It
-only accepts a genuine `*.pre-migrate-*.bak` snapshot of your database, and
+`restore-snapshot` checks whether the database file itself is in use and
+refuses if it is — twice, once up front and once immediately before the swap,
+since the confirmation prompt is unbounded and a supervised `crewshipd` can
+come back while you read it. **Stop `crewshipd` yourself first** regardless.
+If the probe cannot answer at all — a database too corrupt to open, which is
+a state you may well be rolling back *from* — the restore refuses and names
+the error; `--force` overrides that case only, never a database that is
+definitely in use. See [`crewship db`](/cli/db#when-the-in-use-check-cannot-answer).
+It only accepts a genuine `*.pre-migrate-*.bak` snapshot of your database, and
 copies the current database aside to `<db>.before-restore-<ts>` before the
 swap, so the restore is itself reversible.
 

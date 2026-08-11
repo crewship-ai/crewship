@@ -35,10 +35,13 @@ server:
 
 # Inter-process communication
 ipc:
-  socket_path: "/tmp/crewship.sock"  # Unix socket for internal API. Default only
-                                     # when CREWSHIP_DATA_DIR is unset or is the
-                                     # packaged /var/lib/crewship; any other data
-                                     # dir defaults to <dataDir>/crewship.sock.
+  socket_path: "/tmp/crewship.sock"  # Unix socket for internal API. The default
+                                     # follows the resolved data dir —
+                                     # CREWSHIP_DATA_DIR when set, else
+                                     # $HOME/.crewship — so <dataDir>/crewship.sock
+                                     # is the normal case and this /tmp literal is
+                                     # the default only for the packaged
+                                     # /var/lib/crewship install.
 
 # Container provider
 container:
