@@ -465,6 +465,15 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_STORAGE_BASE_PATH"); v != "" {
 		cfg.Storage.BasePath = v
 	}
+	// The escape hatch its two siblings already had. cmd_start wires
+	// MemoryRoot from the data directory only when DATABASE_URL is unset, so
+	// every deployment that brings its own database — containers, systemd —
+	// skips it. BasePath and LogPath survive that on their own env vars;
+	// MemoryRoot had none, and empty silently disables the workspace memory
+	// tier and memory versioning.
+	if v := os.Getenv("CREWSHIP_STORAGE_MEMORY_ROOT"); v != "" {
+		cfg.Storage.MemoryRoot = v
+	}
 	if v := os.Getenv("CREWSHIP_LOG_PATH"); v != "" {
 		cfg.Storage.LogPath = v
 	}
