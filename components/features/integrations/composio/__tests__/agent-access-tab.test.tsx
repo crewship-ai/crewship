@@ -8,6 +8,16 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { AgentAccessTab } from "../agent-access-tab"
 import type { AgentLite, AgentBindingsMap } from "../types"
 
+// The avatar background-backfill is a fire-and-forget PUT that AgentAvatar
+// fires from a useEffect for any agent without a stored render. It is not what
+// this file tests, and unmocked it is a real socket: vitest.setup.ts now fails
+// the test rather than letting an ECONNREFUSED disappear into the noise.
+vi.mock("@/lib/agent-avatar-persist", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agent-avatar-persist")>()),
+  queueAvatarBackfill: vi.fn(),
+}))
+
+
 const agents: AgentLite[] = [
   { id: "a1", name: "Riley", slug: "riley", avatar_seed: "riley", avatar_style: "bottts-neutral", crew: { name: "Ops" } },
   { id: "a2", name: "Morgan", slug: "morgan", crew: { name: "Ops", avatar_style: "micah" } },
