@@ -49,7 +49,6 @@ func (c *cleanupSwapConn) ExecContext(context.Context, string, []driver.NamedVal
 	}
 	return nil, errors.New("injected insert failure")
 }
-
 func symlinkedProposedDir(t *testing.T) (outputDir, outsideDir string) {
 	t.Helper()
 	outputDir = t.TempDir()
@@ -85,19 +84,19 @@ func TestWriteProposalRefusesSymlinkedProposedDir(t *testing.T) {
 	assertDirEmpty(t, outsideDir)
 }
 
-func TestWriteProposalCreatesMissingOutputDir(t *testing.T) {
+func TestWriteProposalRefusesMissingOutputDir(t *testing.T) {
 	outputDir := filepath.Join(t.TempDir(), "topics")
 	c := &Consolidator{Journal: &noopEmitter{}, Logger: quietLogger()}
-	result, err := c.writeProposal(context.Background(), Config{
+	_, err := c.writeProposal(context.Background(), Config{
 		WorkspaceID: "ws_test", CrewID: "crew_test", OutputDir: outputDir,
 	}, time.Date(2026, 8, 10, 16, 0, 0, 0, time.UTC), []LearnedRule{{
 		Pattern: "pattern", Action: "action",
 	}}, 1)
-	if err != nil {
-		t.Fatalf("writeProposal with missing output directory: %v", err)
+	if err == nil {
+		t.Fatal("writeProposal created an unanchored output directory")
 	}
-	if _, err := os.Stat(result.OutputPath); err != nil {
-		t.Fatalf("proposal was not created: %v", err)
+	if _, statErr := os.Lstat(outputDir); !os.IsNotExist(statErr) {
+		t.Fatalf("output directory was created or stat failed unexpectedly: %v", statErr)
 	}
 }
 

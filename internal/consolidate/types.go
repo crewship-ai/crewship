@@ -45,6 +45,10 @@ type Config struct {
 	MinEntries  int           // skip LLM if fewer than this many candidate entries; default 10
 	LLMModel    string        // model identifier passed to the summarizer; informational
 	OutputDir   string        // where learned-YYYY-MM-DD.md is written
+	// OutputRoot is the trusted storage root beneath which OutputDir may be
+	// created. Production wiring sets it to StorageBasePath. Empty means the
+	// caller supplied an already-existing, trusted OutputDir (primarily tests).
+	OutputRoot string
 
 	// ProposalMode flips the consolidator to HITL-staging behaviour.
 	// When true:

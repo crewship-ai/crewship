@@ -56,9 +56,6 @@ func (c *Consolidator) writeProposal(
 	}
 
 	runID := newProposalID(now)
-	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
-		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("mkdir output: %w", err)
-	}
 	proposedDir := filepath.Join(cfg.OutputDir, ".proposed")
 	if err := memory.EnsureDirNoFollow(cfg.OutputDir, proposedDir); err != nil {
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("mkdir proposed: %w", err)

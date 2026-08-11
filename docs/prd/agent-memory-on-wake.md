@@ -77,11 +77,23 @@ recall, memory nudge, cost awareness.
 The consolidator's `.proposed` staging directory is created one component at a time and
 refuses symlinks. Both consolidation proposals and memory-derived skill candidates share
 this boundary, preventing the agent-writable tree from redirecting host-side staging.
+Proposal mode requires the configured topics output directory to exist before staging;
+it does not create an unanchored output path.
+
+The consolidator's dedup scan accepts only regular `learned-*.md` files opened without
+following a final-component symlink. This prevents an agent-writable topics directory
+from redirecting the privileged host scan to unrelated files.
 
 The host consolidator treats `pins.md` and daily `learned-*.md` files as
 agent-writable trust boundaries. Reads and appends are anchored to the resolved topics
 directory and explicitly refuse a final-component symlink, so a link planted in the
 shared bind mount cannot redirect a privileged host write outside that directory.
+Pin snapshots create a missing topics directory segment-by-segment beneath the trusted
+storage root and refuse a symlinked segment rather than following it outside storage.
+
+Canonical memory versioning reads host files without following a final-component
+symlink. A canonical file can live in an agent-writable bind mount, so the version
+recorder must refuse a link rather than snapshot bytes from an unrelated host path.
 
 ---
 
