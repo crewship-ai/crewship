@@ -2,6 +2,7 @@ package consolidate
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -209,7 +210,29 @@ func TestConsolidateAllCrews_SkipsWhenStorageUnconfigured(t *testing.T) {
 	defer db.Close()
 	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
 	defer w.Close()
-	seedPriorityEntry(t, db, "j_pin_nobase", "crew_test", journal.PriorityPin, "nowhere to go")
+	// HOST INDEPENDENCE — the twin of this assertion in
+	// internal/api/consolidate_handler_host_path_test.go was fixed by #1894;
+	// this one was missed, and stayed red on the crewship-dev workstations
+	// while the runner was behaving correctly.
+	//
+	// The original assertion was that os.Stat("/crew/shared/.memory") must
+	// report "not exist". That is a claim about the machine, not about the
+	// runner: the directory is real on those workstations — residue of the
+	// very bug this guards, dated 2026-06-30 — so existence afterwards was
+	// true before the test ever ran.
+	//
+	// The crew slug is generated per run instead. Every path the runner could
+	// derive from it is one this process names for the first time, so "does it
+	// exist afterwards" becomes a fact about what this run created, whatever
+	// else the host keeps under /crew.
+	slug := fmt.Sprintf("nobase-%d", time.Now().UnixNano())
+	crewID := "crew_" + slug
+	if _, err := db.Exec(
+		`INSERT INTO crews (id, workspace_id, slug) VALUES (?, 'ws_test', ?)`,
+		crewID, slug); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+	seedPriorityEntry(t, db, "j_pin_nobase", crewID, journal.PriorityPin, "nowhere to go")
 
 	c := &Consolidator{DB: db, Journal: w, Summarizer: &stubSummarizer{Reply: "[]"}, Logger: quietLogger()}
 	err := consolidateAllCrews(context.Background(), db, c, applyDefaults(RunnerOptions{
@@ -219,11 +242,12 @@ func TestConsolidateAllCrews_SkipsWhenStorageUnconfigured(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when no storage base path is configured — silently writing to a container-absolute path is the bug")
 	}
-	if !strings.Contains(err.Error(), "crew_test") {
+	if !strings.Contains(err.Error(), crewID) {
 		t.Errorf("error should name the crew it skipped, got: %v", err)
 	}
-	// Nothing was created at the host root.
-	if _, statErr := os.Stat("/crew/shared/.memory"); statErr == nil {
-		t.Errorf("/crew/shared/.memory exists on this host — a consolidator run created it")
+	// Nothing was created under the container literal for THIS run's crew.
+	hostSide := memory.ContainerCrewTopicsDir(slug)
+	if _, statErr := os.Stat(hostSide); statErr == nil {
+		t.Errorf("%s exists — the runner fell back to the container literal (#1663)", hostSide)
 	}
 }
