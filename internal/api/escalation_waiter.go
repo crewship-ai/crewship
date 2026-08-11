@@ -15,45 +15,59 @@ type escalationResult struct {
 	RedirectTo string `json:"redirect_to,omitempty"`
 }
 
-// registerEscalationWaiter creates a buffered channel for the given escalation ID
-// and stores it in the waiter map. Returns the channel to receive the result on.
-// Only one waiter per escalation is supported; subsequent registrations overwrite.
+// registerEscalationWaiter adds a buffered channel for the given escalation
+// ID and returns it.
+//
+// The map holds a SLICE of channels, not one. It used to hold one and
+// overwrite — "only one waiter per escalation is supported" — which meant any
+// second request for the same id silently stole the first one's wakeup: the
+// incumbent then blocked until its context expired and returned TIMEOUT for an
+// escalation a human had already answered. A sidecar retrying its long poll is
+// enough to trigger that, and so is a caller the authorization predicate is
+// about to refuse.
 func (h *QueryHandler) registerEscalationWaiter(id string) chan escalationResult {
 	h.escalationMu.Lock()
 	defer h.escalationMu.Unlock()
 	ch := make(chan escalationResult, 1)
-	h.escalationWaiters[id] = ch
+	h.escalationWaiters[id] = append(h.escalationWaiters[id], ch)
 	return ch
 }
 
-// notifyEscalationWaiter sends the result to the waiter channel (if one exists)
-// and removes it from the map. Uses non-blocking send to prevent panic if the
-// waiter has already timed out and the channel buffer is full or removed.
+// notifyEscalationWaiter delivers the result to every waiter registered for
+// the escalation and clears them. Non-blocking sends, so a waiter that has
+// already timed out cannot stall the resolve path.
 func (h *QueryHandler) notifyEscalationWaiter(id string, result escalationResult) {
 	h.escalationMu.Lock()
-	ch, ok := h.escalationWaiters[id]
-	if ok {
-		delete(h.escalationWaiters, id)
-	}
+	chans := h.escalationWaiters[id]
+	delete(h.escalationWaiters, id)
 	h.escalationMu.Unlock()
-	if ok {
+	for _, ch := range chans {
 		select {
 		case ch <- result:
 		default:
-			// Waiter already timed out or channel full — discard safely.
+			// Waiter already timed out or its buffer is full — discard.
 		}
 	}
 }
 
-// removeEscalationWaiter removes a waiter channel from the map only if the
-// stored channel matches the given instance. This prevents a timed-out waiter
-// from accidentally removing a newer waiter registered for the same escalation.
+// removeEscalationWaiter drops one specific channel, leaving any other waiters
+// on the same escalation registered. Identity comparison rather than id alone
+// is what stops a departing waiter from cancelling its siblings.
 func (h *QueryHandler) removeEscalationWaiter(id string, ch chan escalationResult) {
 	h.escalationMu.Lock()
 	defer h.escalationMu.Unlock()
-	if h.escalationWaiters[id] == ch {
-		delete(h.escalationWaiters, id)
+	chans := h.escalationWaiters[id]
+	for i, c := range chans {
+		if c == ch {
+			chans = append(chans[:i], chans[i+1:]...)
+			break
+		}
 	}
+	if len(chans) == 0 {
+		delete(h.escalationWaiters, id)
+		return
+	}
+	h.escalationWaiters[id] = chans
 }
 
 // WaitForEscalationResponse handles GET /api/v1/internal/escalations/{escalationId}/wait.
@@ -79,34 +93,33 @@ func (h *QueryHandler) removeEscalationWaiter(id string, ch chan escalationResul
 func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.Request) {
 	escalationID := r.PathValue("escalationId")
 
-	// Register waiter FIRST to avoid lost-wakeup race: if ResolveEscalation
-	// runs between the DB check and the registration, the notification would
-	// be lost. By registering first, the channel is in place before we check.
+	// Authorize BEFORE registering. Registration used to come first, to close
+	// the lost-wakeup window between the status read and the channel being in
+	// place — but once the lookup can REFUSE, a refused caller was registering
+	// a channel and then tearing it down on its way out, which took a
+	// legitimate waiter's wakeup with it. A cross-tenant probe, or the same
+	// sidecar's own retry, was enough.
 	//
-	// The authorization predicate below therefore rides on the SAME query
-	// rather than gating registration: registering is harmless (the map entry
-	// is torn down by the deferred remove on every exit path, refusals
-	// included) and moving the check earlier would mean a second round-trip.
-	ch := h.registerEscalationWaiter(escalationID)
-	defer h.removeEscalationWaiter(escalationID, ch)
-
-	// Now re-check if the escalation is already resolved — scoped, so a row
-	// outside the caller's binding is simply not found rather than fetched
-	// and then compared.
-	query := `SELECT status, type, resolution, action, redirect_to FROM escalations WHERE id = ?`
-	args := []interface{}{escalationID}
-	if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" {
-		query += ` AND crew_id = ?`
-		args = append(args, boundCrew)
-	} else if boundWS := InternalTokenWorkspaceFromContext(r.Context()); boundWS != "" {
-		query += ` AND workspace_id = ?`
-		args = append(args, boundWS)
+	// The window is closed by re-reading after registration instead: authorize
+	// and check once, register only if the answer is "still pending", then
+	// check again. The second read costs one query on the blocking path only,
+	// which is the path already prepared to wait.
+	scoped := func() (status, escalationType string, resolution, action, redirectTo sql.NullString, err error) {
+		query := `SELECT status, type, resolution, action, redirect_to FROM escalations WHERE id = ?`
+		args := []interface{}{escalationID}
+		if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" {
+			query += ` AND crew_id = ?`
+			args = append(args, boundCrew)
+		} else if boundWS := InternalTokenWorkspaceFromContext(r.Context()); boundWS != "" {
+			query += ` AND workspace_id = ?`
+			args = append(args, boundWS)
+		}
+		err = h.db.QueryRowContext(r.Context(), query, args...).
+			Scan(&status, &escalationType, &resolution, &action, &redirectTo)
+		return
 	}
 
-	var status, escalationType string
-	var resolution, action, redirectTo sql.NullString
-	err := h.db.QueryRowContext(r.Context(), query, args...).
-		Scan(&status, &escalationType, &resolution, &action, &redirectTo)
+	status, escalationType, resolution, action, redirectTo, err := scoped()
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "escalation not found")
@@ -114,6 +127,24 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 		}
 		replyInternalError(w, h.logger, "wait escalation lookup", err)
 		return
+	}
+
+	var ch chan escalationResult
+	if status != "RESOLVED" {
+		ch = h.registerEscalationWaiter(escalationID)
+		defer h.removeEscalationWaiter(escalationID, ch)
+
+		// Re-read: a resolve that landed between the first read and the
+		// registration would otherwise never reach us.
+		status, escalationType, resolution, action, redirectTo, err = scoped()
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				replyError(w, http.StatusNotFound, "escalation not found")
+				return
+			}
+			replyInternalError(w, h.logger, "wait escalation re-check", err)
+			return
+		}
 	}
 
 	if status == "RESOLVED" {
