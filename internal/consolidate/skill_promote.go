@@ -2,11 +2,11 @@ package consolidate
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
 
@@ -81,7 +81,7 @@ func PromoteRuleToSkill(rule LearnedRule, score ScoreResult, opts SkillPromoteOp
 	}
 
 	proposedDir := filepath.Join(opts.OutputDir, ".proposed")
-	if err := os.MkdirAll(proposedDir, 0o755); err != nil {
+	if err := memory.EnsureDirNoFollow(opts.OutputDir, proposedDir); err != nil {
 		return "", fmt.Errorf("promote: mkdir .proposed: %w", err)
 	}
 
