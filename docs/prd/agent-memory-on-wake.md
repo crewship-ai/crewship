@@ -83,6 +83,10 @@ agent-writable trust boundaries. Reads and appends are anchored to the resolved 
 directory and explicitly refuse a final-component symlink, so a link planted in the
 shared bind mount cannot redirect a privileged host write outside that directory.
 
+Canonical memory versioning reads host files without following a final-component
+symlink. A canonical file can live in an agent-writable bind mount, so the version
+recorder must refuse a link rather than snapshot bytes from an unrelated host path.
+
 ---
 
 ## 3. The gaps
