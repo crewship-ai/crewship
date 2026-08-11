@@ -38,6 +38,24 @@ func TestSnapshotPinsRefusesSymlinkedTarget(t *testing.T) {
 	}
 }
 
+func TestSnapshotPinsRefusesSymlinkedOutputDir(t *testing.T) {
+	outside := t.TempDir()
+	outputDir := filepath.Join(t.TempDir(), "topics")
+	if err := os.Symlink(outside, outputDir); err != nil {
+		t.Fatalf("plant output-directory symlink: %v", err)
+	}
+
+	_, err := snapshotPins(Config{OutputDir: outputDir}, []journal.Entry{{
+		ID: "pin-1", Type: "test", Priority: journal.PriorityPin, Summary: "must stay confined",
+	}})
+	if err == nil {
+		t.Fatal("snapshotPins accepted a symlinked output directory")
+	}
+	if _, statErr := os.Lstat(filepath.Join(outside, "pins.md")); !os.IsNotExist(statErr) {
+		t.Fatalf("outside directory received pins.md or stat failed unexpectedly: %v", statErr)
+	}
+}
+
 func TestAppendRulesRefusesSymlinkedTarget(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 8, 10, 15, 0, 0, 0, time.UTC)
