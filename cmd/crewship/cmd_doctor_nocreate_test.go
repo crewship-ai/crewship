@@ -10,11 +10,113 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
 )
+
+// migratedImages is one fully-migrated database, captured in the two on-disk
+// states the tests below stage it in.
+type migratedImages struct {
+	// live/liveWAL are the main file and its "-wal" copied out from under an
+	// OPEN writer: a WAL with the migration frames still in it and no "-shm",
+	// which is what a killed crewshipd leaves behind (and what `cp` of a live
+	// database produces).
+	live, liveWAL []byte
+	// closed is the same database after Close checkpointed the WAL into it and
+	// unlinked both sidecars — a cleanly stopped crewshipd. journal_mode=WAL
+	// persists in the header either way.
+	closed []byte
+	err    error
+}
+
+// migratedFixture runs the migrations ONCE per test binary.
+//
+// Five fixtures in this file used to call database.Migrate themselves. That is
+// ~1 s each without -race and ~30 s each WITH it — ~150 s of the Go Race job's
+// 25-minute budget spent rebuilding the same database, since the migration set
+// is compile-time constant and so are the bytes it produces. Copying the file
+// in reproduces each state exactly: the crash pair is captured the same way
+// crashedDatabase captured it (from under a live writer), and every test that
+// needs a live writer still opens one, it just does not migrate again.
+var migratedFixture = sync.OnceValue(buildMigratedFixture)
+
+func buildMigratedFixture() migratedImages {
+	var m migratedImages
+	failed := func(format string, a ...any) migratedImages {
+		m.err = fmt.Errorf(format, a...)
+		return m
+	}
+
+	dir, err := os.MkdirTemp("", "crewship-doctor-fixture-")
+	if err != nil {
+		return failed("temp dir: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	path := filepath.Join(dir, "crewship.db")
+	seed, err := database.Open("file:" + path)
+	if err != nil {
+		return failed("seed open: %w", err)
+	}
+	if err := database.Migrate(context.Background(), seed.DB, covLogger()); err != nil {
+		seed.Close()
+		return failed("seed migrate: %w", err)
+	}
+	// Read before the close, or the WAL is already gone.
+	if m.live, err = os.ReadFile(path); err != nil {
+		seed.Close()
+		return failed("read live image: %w", err)
+	}
+	if m.liveWAL, err = os.ReadFile(path + "-wal"); err != nil {
+		seed.Close()
+		return failed("read live -wal: %w", err)
+	}
+	if err := seed.Close(); err != nil {
+		return failed("seed close: %w", err)
+	}
+	if m.closed, err = os.ReadFile(path); err != nil {
+		return failed("read closed image: %w", err)
+	}
+	return m
+}
+
+// installMigratedDB writes a fully-migrated database into dd, with no sidecars
+// — the state a cleanly stopped crewshipd leaves.
+func installMigratedDB(t *testing.T, dd *database.DataDir) {
+	t.Helper()
+	m := migratedFixture()
+	if m.err != nil {
+		t.Fatalf("build migrated fixture: %v", m.err)
+	}
+	if err := os.WriteFile(dd.DatabasePath(), m.closed, 0o600); err != nil {
+		t.Fatalf("install database: %v", err)
+	}
+}
+
+// holdDatabaseOpen opens a writer on the installed database and keeps it open
+// for the rest of the test — this is crewshipd, and its connection is what
+// keeps the "-shm" WAL index on disk.
+//
+// The query is not decoration: sql.Open is lazy, so a handle that has executed
+// nothing has not opened a connection and no -shm exists yet.
+func holdDatabaseOpen(t *testing.T, dd *database.DataDir) {
+	t.Helper()
+	db, err := database.Open(dd.DatabaseURL())
+	if err != nil {
+		t.Fatalf("hold database open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM _migrations`).Scan(&n); err != nil {
+		t.Fatalf("holder query: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("_migrations is empty — the installed fixture is not a migrated database")
+	}
+}
 
 // `crewship doctor` must not create the thing it is reporting on.
 //
@@ -156,22 +258,22 @@ func TestDoctorProbes_DoNotProvisionTheDataDirTree(t *testing.T) {
 // does, and it does so for as long as we keep it open. Held briefly and then
 // released, exactly like the real thing — a probe with the busy timeout waits
 // it out and reads the version; one without fails instantly.
+//
+// The hold is 300ms, not a substantial slice of the 5s busy timeout: what is
+// under test is that the probe WAITS rather than answering "never migrated" on
+// the first SQLITE_BUSY, and a probe whose DSN drops busy_timeout(5000) fails
+// on that lock in single-digit milliseconds. Waiting longer proves nothing
+// extra and costs the wall-clock twice over under -race. The `releasing`
+// channel is what keeps the shorter hold honest: if the probe ever returns
+// while the lock is still held, the database was not actually locked and the
+// test would otherwise pass vacuously.
 func TestCheckDBMigrationVersion_WaitsOutABusyDatabase(t *testing.T) {
 	dd := tempDataDir(t)
 	ctx := context.Background()
 
-	seed, err := database.Open(dd.DatabaseURL())
-	if err != nil {
-		t.Fatalf("seed open: %v", err)
-	}
-	if err := database.Migrate(ctx, seed.DB, covLogger()); err != nil {
-		t.Fatalf("seed migrate: %v", err)
-	}
-	// Closed before the lock is taken: locking_mode=EXCLUSIVE cannot be
+	// No writer of our own is left open: locking_mode=EXCLUSIVE cannot be
 	// acquired while another connection still has the WAL index open.
-	if err := seed.Close(); err != nil {
-		t.Fatalf("seed close: %v", err)
-	}
+	installMigratedDB(t, dd)
 
 	locker, err := sql.Open("sqlite", dd.DatabaseURL()+"?_pragma=locking_mode(EXCLUSIVE)&_pragma=busy_timeout(30000)&_txlock=immediate")
 	if err != nil {
@@ -187,12 +289,21 @@ func TestCheckDBMigrationVersion_WaitsOutABusyDatabase(t *testing.T) {
 
 	// Released well inside openLocalDBReadOnly's 5s busy timeout, so the fixed
 	// probe waits and answers; started immediately before the call so the lock
-	// is certainly still held when the probe opens.
+	// is certainly still held when the probe opens. `releasing` closes just
+	// BEFORE the Close, so a probe that returns before it closed can only have
+	// done so against a database that was still locked.
+	releasing := make(chan struct{})
 	go func() {
-		time.Sleep(750 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
+		close(releasing)
 		_ = locker.Close()
 	}()
 	r := checkDBMigrationVersion(ctx)
+	select {
+	case <-releasing:
+	default:
+		t.Fatalf("the probe returned while the database was still locked, so it never waited for anything: %+v", r)
+	}
 
 	if strings.Contains(r.hint, "may not have run") || strings.Contains(r.detail, "could not read _migrations") {
 		t.Errorf("a busy database was reported as never migrated: %+v", r)
@@ -231,24 +342,18 @@ func TestDoctorTelemetryProbes_MissingDatabaseIsHonest(t *testing.T) {
 // would trade a phantom database for three probes that permanently report
 // "could not open".
 //
-// The seed connection is deliberately left OPEN for the duration: that is the
+// A writer connection is deliberately held OPEN for the duration: that is the
 // case operators actually hit, doctor run while crewshipd holds the database,
 // and it is the one where a read-only open can go wrong. WAL needs the -shm
 // segment, and a connection that is read-only by URI still has to be able to
-// join it. Closing the writer first would checkpoint the WAL away and quietly
-// skip the interesting half of the test.
+// join it. With no writer open there would be no -shm to join, which is a
+// different case (and the one two tests below are about).
 func TestOpenLocalDBReadOnly_ReadsAnExistingDatabase(t *testing.T) {
 	dd := tempDataDir(t)
 	ctx := context.Background()
 
-	seed, err := database.Open(dd.DatabaseURL())
-	if err != nil {
-		t.Fatalf("seed open: %v", err)
-	}
-	defer seed.Close()
-	if err := database.Migrate(ctx, seed.DB, covLogger()); err != nil {
-		t.Fatalf("seed migrate: %v", err)
-	}
+	installMigratedDB(t, dd)
+	holdDatabaseOpen(t, dd)
 
 	db, err := openLocalDBReadOnly(ctx)
 	if err != nil {
@@ -275,35 +380,24 @@ func TestOpenLocalDBReadOnly_ReadsAnExistingDatabase(t *testing.T) {
 // database with a stale "-wal" and NO "-shm", and returns the data dir holding
 // it (already installed as CREWSHIP_DATA_DIR).
 //
-// Copying the files out from under a live writer is what produces that pair
-// honestly. Closing the seed first would checkpoint the WAL into the main file
-// and unlink both sidecars, i.e. stage the one state the tests below are not
-// about. It also covers the other route to the same place — a backup taken
-// with `cp` that picked up the -wal and not the -shm.
+// The pair is copied from under a live writer (see migratedFixture), which is
+// what produces it honestly: a database closed first would have checkpointed
+// the WAL into the main file and unlinked both sidecars, i.e. staged the one
+// state the tests below are not about. It also covers the other route to the
+// same place — a backup taken with `cp` that picked up the -wal and not the
+// -shm.
 func crashedDatabase(t *testing.T) *database.DataDir {
 	t.Helper()
-	ctx := context.Background()
+	m := migratedFixture()
+	if m.err != nil {
+		t.Fatalf("build migrated fixture: %v", m.err)
+	}
 
-	src := t.TempDir()
-	seed, err := database.Open("file:" + filepath.Join(src, "crewship.db"))
-	if err != nil {
-		t.Fatalf("seed open: %v", err)
-	}
-	if err := database.Migrate(ctx, seed.DB, covLogger()); err != nil {
-		t.Fatalf("seed migrate: %v", err)
-	}
 	dst := t.TempDir()
-	for _, suffix := range []string{"", "-wal"} {
-		in, err := os.ReadFile(filepath.Join(src, "crewship.db"+suffix))
-		if err != nil {
-			t.Fatalf("read seed crewship.db%s: %v", suffix, err)
-		}
-		if err := os.WriteFile(filepath.Join(dst, "crewship.db"+suffix), in, 0o600); err != nil {
+	for suffix, image := range map[string][]byte{"": m.live, "-wal": m.liveWAL} {
+		if err := os.WriteFile(filepath.Join(dst, "crewship.db"+suffix), image, 0o600); err != nil {
 			t.Fatalf("stage crewship.db%s: %v", suffix, err)
 		}
-	}
-	if err := seed.Close(); err != nil {
-		t.Fatalf("seed close: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dst, "crewship.db-shm")); !os.IsNotExist(err) {
 		t.Fatalf("staged copy has a -shm; the crash state was not reproduced (%v)", err)
@@ -397,19 +491,11 @@ func TestOpenLocalDBReadOnly_UnwritableDirWithoutWALIndex(t *testing.T) {
 		{"stale wal, no shm", crashedDatabase},
 		{"no sidecars at all", func(t *testing.T) *database.DataDir {
 			dd := tempDataDir(t)
-			seed, err := database.Open(dd.DatabaseURL())
-			if err != nil {
-				t.Fatalf("seed open: %v", err)
-			}
-			if err := database.Migrate(ctx, seed.DB, covLogger()); err != nil {
-				t.Fatalf("seed migrate: %v", err)
-			}
-			// Checkpoints the WAL into the main file and unlinks both
-			// sidecars. journal_mode=WAL persists in the header regardless,
-			// which is why the index is still needed to read it.
-			if err := seed.Close(); err != nil {
-				t.Fatalf("seed close: %v", err)
-			}
+			// The image installed here is the post-Close one: the WAL was
+			// checkpointed into the main file and both sidecars unlinked.
+			// journal_mode=WAL persists in the header regardless, which is why
+			// the index is still needed to read it.
+			installMigratedDB(t, dd)
 			return dd
 		}},
 	}
@@ -467,16 +553,10 @@ func TestOpenLocalDBReadOnly_UnwritableDirWithExistingWALIndex(t *testing.T) {
 	dd := tempDataDir(t)
 	ctx := context.Background()
 
-	// Held open for the duration: this is crewshipd, and its connection is
-	// what keeps the -shm on disk.
-	seed, err := database.Open(dd.DatabaseURL())
-	if err != nil {
-		t.Fatalf("seed open: %v", err)
-	}
-	defer seed.Close()
-	if err := database.Migrate(ctx, seed.DB, covLogger()); err != nil {
-		t.Fatalf("seed migrate: %v", err)
-	}
+	// The writer is held open for the duration: this is crewshipd, and its
+	// connection is what keeps the -shm on disk.
+	installMigratedDB(t, dd)
+	holdDatabaseOpen(t, dd)
 	if _, err := os.Stat(dd.DatabasePath() + "-shm"); err != nil {
 		t.Fatalf("stat -shm while the writer is open: %v", err)
 	}

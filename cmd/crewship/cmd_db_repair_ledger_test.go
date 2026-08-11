@@ -5,28 +5,136 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
-// stageRenumberedLedger builds a database in the state that took dev3 down on
-// 2026-07-27: the newest migration recorded under the PREVIOUS migration's
-// version, and that version's real occupant missing. That is what a machine
-// looks like after it ran a feature branch whose migration was renumbered
-// before the branch merged.
-func stageRenumberedLedger(t *testing.T) (dataDir string, from, to int) {
-	t.Helper()
-	// v152 derives the journal chain key from this; without it the chain
-	// seeds from "" and later verification fails for unrelated reasons.
-	t.Setenv("ENCRYPTION_KEY", strings.Repeat("a1b2c3d4", 8))
+// ledgerFixtureKey is the ENCRYPTION_KEY every fixture in this file is built
+// and exercised under. v152 derives the journal chain key from it; without a
+// key the chain seeds from "" and later verification fails for unrelated
+// reasons. It is a fixed constant because the images below are built once and
+// reused, which is only sound while every caller uses the same key.
+var ledgerFixtureKey = strings.Repeat("a1b2c3d4", 8)
 
-	dataDir = t.TempDir()
+// ledgerFixtures is one build of the two database images these tests stage,
+// plus the two versions the collision is between.
+type ledgerFixtures struct {
+	healthy  []byte // migrated to head: ledger and binary agree
+	collided []byte // newest migration recorded under the previous version
+	from, to int
+	err      error
+}
+
+// ledgerFixtureImages builds those images ONCE per test binary.
+//
+// Every fixture used to be migrated from scratch, twice over: a throwaway
+// database taken to head just to learn the last two migrations' NAMES (the
+// registry is unexported), then a second full run to stage the collision. A
+// full migration on a plain rollback-journal connection costs ~3.9 s here and
+// ~33 s under -race — it fsyncs a journal page per statement — and the tests
+// below stage nine fixtures between them. That was ~200 s of -race runtime for
+// each of the two table-driven tests, and it is a large part of what pushed
+// the Go Race job past its 25-minute limit.
+//
+// Nothing about a fixture varies per test: the migration registry is
+// compile-time constant and the key above is fixed, so every call built
+// byte-identical databases. Build them once and copy the file in. Copying also
+// preserves the property TestRepairLedger_DatabaseInUseGuard's holder comment
+// depends on — the staged database is in rollback-journal mode, exactly as the
+// plain sql.Open that wrote it left it, not WAL.
+var ledgerFixtureImages = sync.OnceValue(buildLedgerFixtures)
+
+func buildLedgerFixtures() ledgerFixtures {
+	var f ledgerFixtures
+	failed := func(format string, a ...any) ledgerFixtures {
+		f.err = fmt.Errorf(format, a...)
+		return f
+	}
+
+	dir, err := os.MkdirTemp("", "crewship-ledger-fixture-")
+	if err != nil {
+		return failed("temp dir: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	ctx := context.Background()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// A database at head. It is both the "nothing to repair" fixture and the
+	// only way to learn which migration to leave out of the collided one.
+	headPath := filepath.Join(dir, "head.db")
+	head, err := sql.Open("sqlite", headPath)
+	if err != nil {
+		return failed("open head: %w", err)
+	}
+	if err := database.Migrate(ctx, head, quiet); err != nil {
+		head.Close()
+		return failed("migrate head: %w", err)
+	}
+	led, err := database.ReadLedger(ctx, head)
+	if err != nil {
+		head.Close()
+		return failed("read ledger: %w", err)
+	}
+	if len(led) < 2 {
+		head.Close()
+		return failed("need at least two migrations, got %d", len(led))
+	}
+	f.to = led[len(led)-1].Version   // where the newest migration belongs
+	f.from = led[len(led)-2].Version // …and this one had not merged yet
+	fromName := led[len(led)-2].Name
+	if err := head.Close(); err != nil {
+		return failed("close head: %w", err)
+	}
+	if f.healthy, err = os.ReadFile(headPath); err != nil {
+		return failed("read head image: %w", err)
+	}
+
+	// The state that took dev3 down on 2026-07-27: the newest migration
+	// recorded under the PREVIOUS migration's version, and that version's real
+	// occupant missing — what a machine looks like after it ran a feature
+	// branch whose migration was renumbered before the branch merged.
+	//
+	// MigrateSkipping, not "migrate to head then delete a ledger row": on dev3
+	// the migration that took the branch's number had never run, and deleting
+	// its row while leaving its schema change in place would make the final
+	// Migrate — the one that applies it for real — fail on an already-existing
+	// column, blaming the repair for something the fixture did.
+	collidedPath := filepath.Join(dir, "collided.db")
+	db, err := sql.Open("sqlite", collidedPath)
+	if err != nil {
+		return failed("open collided: %w", err)
+	}
+	if err := database.MigrateSkipping(ctx, db, quiet, fromName); err != nil {
+		db.Close()
+		return failed("migrate (without %s): %w", fromName, err)
+	}
+	if _, err := db.Exec(`UPDATE _migrations SET version = ? WHERE version = ?`, f.from, f.to); err != nil {
+		db.Close()
+		return failed("stage collision: %w", err)
+	}
+	if err := db.Close(); err != nil {
+		return failed("close collided: %w", err)
+	}
+	if f.collided, err = os.ReadFile(collidedPath); err != nil {
+		return failed("read collided image: %w", err)
+	}
+	return f
+}
+
+// installLedgerFixture points CREWSHIP_DATA_DIR at a fresh temp dir and writes
+// image in as the database, returning the data dir.
+func installLedgerFixture(t *testing.T, image []byte) string {
+	t.Helper()
+	dataDir := t.TempDir()
 	t.Setenv("CREWSHIP_DATA_DIR", dataDir)
 	// The guard no longer reads this port — it locks the database file — but
 	// pin it anyway so that if a port probe is ever reintroduced, these tests
@@ -37,51 +145,39 @@ func stageRenumberedLedger(t *testing.T) (dataDir string, from, to int) {
 	if err != nil {
 		t.Fatalf("data dir: %v", err)
 	}
-	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	// Learn the last two migrations from a throwaway database at head. We need
-	// the NAME of the one to leave out before building the real fixture, and
-	// the registry is unexported.
-	var fromName string
-	func() {
-		scratch, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "scratch.db"))
-		if err != nil {
-			t.Fatalf("open scratch: %v", err)
-		}
-		defer scratch.Close()
-		if err := database.Migrate(context.Background(), scratch, quiet); err != nil {
-			t.Fatalf("migrate scratch: %v", err)
-		}
-		led, err := database.ReadLedger(context.Background(), scratch)
-		if err != nil {
-			t.Fatalf("read ledger: %v", err)
-		}
-		if len(led) < 2 {
-			t.Fatalf("need at least two migrations, got %d", len(led))
-		}
-		to = led[len(led)-1].Version // where the newest migration belongs
-		from = led[len(led)-2].Version
-		fromName = led[len(led)-2].Name // …and this one had not merged yet
-	}()
-
-	db, err := sql.Open("sqlite", dd.DatabasePath())
-	if err != nil {
-		t.Fatalf("open: %v", err)
+	// 0600 is what a database crewshipd created would be sitting at, so the
+	// fixture is not quietly more permissive than the file it stands in for.
+	if err := os.WriteFile(dd.DatabasePath(), image, 0o600); err != nil {
+		t.Fatalf("install fixture: %v", err)
 	}
-	defer db.Close()
+	return dataDir
+}
 
-	// MigrateSkipping, not "migrate to head then delete a ledger row": on dev3
-	// the migration that took the branch's number had never run, and deleting
-	// its row while leaving its schema change in place would make the final
-	// Migrate — the one that applies it for real — fail on an already-existing
-	// column, blaming the repair for something the fixture did.
-	if err := database.MigrateSkipping(context.Background(), db, quiet, fromName); err != nil {
-		t.Fatalf("migrate (without %s): %v", fromName, err)
+// stageRenumberedLedger installs the collided database described on
+// buildLedgerFixtures.
+func stageRenumberedLedger(t *testing.T) (dataDir string, from, to int) {
+	t.Helper()
+	// Before the images are built: the first caller's env is what the once
+	// runs under, and the chain key has to match the one the tests migrate
+	// under afterwards.
+	t.Setenv("ENCRYPTION_KEY", ledgerFixtureKey)
+	f := ledgerFixtureImages()
+	if f.err != nil {
+		t.Fatalf("build ledger fixtures: %v", f.err)
 	}
-	if _, err := db.Exec(`UPDATE _migrations SET version = ? WHERE version = ?`, from, to); err != nil {
-		t.Fatalf("stage: %v", err)
+	return installLedgerFixture(t, f.collided), f.from, f.to
+}
+
+// stageHealthyLedger installs a database whose ledger already agrees with this
+// binary — the case repair-ledger must report as "nothing to do".
+func stageHealthyLedger(t *testing.T) {
+	t.Helper()
+	t.Setenv("ENCRYPTION_KEY", ledgerFixtureKey)
+	f := ledgerFixtureImages()
+	if f.err != nil {
+		t.Fatalf("build ledger fixtures: %v", f.err)
 	}
-	return dataDir, from, to
+	installLedgerFixture(t, f.healthy)
 }
 
 // stagedDBPath is the database stageRenumberedLedger built.
@@ -225,25 +321,7 @@ func TestRepairLedger_RepairsAndLetsTheDatabaseBoot(t *testing.T) {
 }
 
 func TestRepairLedger_SaysSoWhenThereIsNothingToDo(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", strings.Repeat("a1b2c3d4", 8))
-	dir := t.TempDir()
-	t.Setenv("CREWSHIP_DATA_DIR", dir)
-	t.Setenv("CREWSHIP_PORT", "59237")
-
-	db, err := sql.Open("sqlite", filepath.Join(dir, "crewship.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	dd, _ := database.DefaultDataDir()
-	_ = db.Close()
-	db, err = sql.Open("sqlite", dd.DatabasePath())
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer db.Close()
-	if err := database.Migrate(context.Background(), db, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	stageHealthyLedger(t)
 
 	repairLedgerDryRun, repairLedgerYes = false, true
 	t.Cleanup(func() { repairLedgerDryRun, repairLedgerYes = false, false })
