@@ -305,7 +305,12 @@ func installHintForOS(goos string) string {
 // checkDataDir verifies the data directory exists. With fixMode, it
 // creates the directory if missing — the only auto-fix doctor performs.
 func checkDataDir(fixMode bool) checkResult {
-	dataDir, err := database.DefaultDataDir()
+	// ResolveDefaultDataDir resolves the path without creating it. With
+	// DefaultDataDir the "does not exist" branch below was unreachable — the
+	// resolve call had already created the root (and output/chats/logs/skills)
+	// at 0755, so doctor reported PASS on a directory it had just made and
+	// --fix, which creates it at 0700, never got to run. See B-02.
+	dataDir, err := database.ResolveDefaultDataDir()
 	if err != nil {
 		return checkResult{
 			name:   "data directory",
@@ -353,7 +358,9 @@ func checkDataDir(fixMode bool) checkResult {
 // creating a temp file. Catches the "directory exists but root mounted
 // it read-only" footgun before crewshipd hits it at runtime.
 func checkDataDirWritable() checkResult {
-	dataDir, err := database.DefaultDataDir()
+	// Path-only resolve: the touch test is meaningless if getting the path
+	// created the directory being tested.
+	dataDir, err := database.ResolveDefaultDataDir()
 	if err != nil {
 		return checkResult{name: "data dir writable", status: "FAIL", detail: err.Error()}
 	}
@@ -402,12 +409,30 @@ func checkDataDirWritable() checkResult {
 // internal/database/migrate_registry.go.
 func checkDBMigrationVersion(ctx context.Context) checkResult {
 	expectedLatest := database.MaxKnownMigrationVersion()
-	dataDir, err := database.DefaultDataDir()
-	if err != nil {
+	// Resolved first, and without creating anything, purely to keep an
+	// unusable data dir (root exists but is a file, unreadable parent, …) a
+	// FAIL: that is an environment fault the operator must fix, not the
+	// transient-lock WARN the open failures below describe.
+	if _, err := database.ResolveDefaultDataDir(); err != nil {
 		return checkResult{name: "db migration version", status: "FAIL", detail: err.Error()}
 	}
-	dbPath := dataDir.DatabasePath()
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	// Through openLocalDBReadOnly rather than a hand-rolled sql.Open, so this
+	// probe behaves like the three telemetry probes under a live server. Its
+	// own DSN omitted _pragma=busy_timeout(5000) and never Pinged, so a
+	// SQLITE_BUSY from a concurrent checkpoint surfaced at row.Scan below and
+	// was rendered "could not read _migrations …" with the hint "crewshipd may
+	// not have run against this DB yet" — telling an operator whose server is
+	// demonstrably running that the database has never been migrated.
+	//
+	// The shared helper also stats before opening and uses a "file:" URI, which
+	// is what makes mode=ro stick: modernc.org/sqlite strips the query string
+	// off a BARE path before handing it to sqlite3_open_v2 and always passes
+	// SQLITE_OPEN_CREATE, so the `dbPath+"?mode=ro"` this used to open with was
+	// silently read-write. Nothing was harmed — we only ever SELECT — but the
+	// comment promised a guarantee the code did not provide, which is how B-02
+	// happened one probe over.
+	db, err := openLocalDBReadOnly(ctx)
+	if errors.Is(err, errNoLocalDB) {
 		return checkResult{
 			name:   "db migration version",
 			status: "WARN",
@@ -415,21 +440,6 @@ func checkDBMigrationVersion(ctx context.Context) checkResult {
 			hint:   "run 'crewship start' to initialise the database",
 		}
 	}
-	// Read-only open keeps doctor diagnostic-only: no WAL pragma (which
-	// would mutate state) and no risk of fighting crewshipd for an
-	// exclusive lock.
-	//
-	// The "file:" prefix is load-bearing. modernc.org/sqlite strips the query
-	// string off a BARE path before handing it to sqlite3_open_v2 and always
-	// passes SQLITE_OPEN_CREATE, so `dbPath+"?mode=ro"` — what this line used
-	// to say — was silently ignored and the connection was read-write.
-	// Verified: a bare path with ?mode=ro creates the file it claims it
-	// cannot write to; the same DSN as a file: URI correctly refuses with
-	// "unable to open database file (14)". Nothing was harmed here because
-	// the os.Stat above means we never reach this on a missing file and we
-	// only ever SELECT — but the comment promised a guarantee the code did
-	// not provide, which is how B-02 happened one probe over.
-	db, err := sql.Open("sqlite", dataDir.DatabaseURL()+"?mode=ro")
 	if err != nil {
 		return checkResult{
 			name:   "db migration version",
@@ -543,7 +553,7 @@ func checkNextAuthSecret() checkResult {
 	// would write. Missing == "crewship start hasn't been run yet on
 	// this data dir", which is fine; the next `crewship start` will
 	// generate the value.
-	dataDir, err := database.DefaultDataDir()
+	dataDir, err := database.ResolveDefaultDataDir()
 	if err != nil {
 		return checkResult{
 			name:   "NEXTAUTH_SECRET",
@@ -1019,7 +1029,10 @@ func checkDsnReachability(ctx context.Context, db *sql.DB, dsn string) checkResu
 // Posix-only semantics: we skip the perm bits entirely on Windows where
 // the SQLite file inherits ACLs we can't usefully assert on with os.FileMode.
 func runCheckDataDirPerms() checkResult {
-	dataDir, err := database.DefaultDataDir()
+	// Path-only resolve, or the "data dir does not exist (skipped)" branch in
+	// checkDataDirPerms could never fire and doctor would be reporting the
+	// permissions of a directory it had just created itself.
+	dataDir, err := database.ResolveDefaultDataDir()
 	if err != nil {
 		return checkResult{name: "data dir perms", status: "FAIL", detail: err.Error()}
 	}

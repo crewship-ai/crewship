@@ -325,7 +325,11 @@ var errNoLocalDB = errors.New("database not found")
 // us read alongside the writer, and the few seconds cover a checkpoint rather
 // than surfacing SQLITE_BUSY as "doctor can't read your database".
 func openLocalDBReadOnly(ctx context.Context) (*sql.DB, error) {
-	dataDir, err := database.DefaultDataDir()
+	// ResolveDefaultDataDir, not DefaultDataDir: the latter creates the root
+	// and output/chats/logs/skills on the way to telling us where they are, so
+	// this helper's refusal to create a database was undermined one call up —
+	// doctor still materialised the tree on a box that had never run crewshipd.
+	dataDir, err := database.ResolveDefaultDataDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve data directory: %w", err)
 	}
