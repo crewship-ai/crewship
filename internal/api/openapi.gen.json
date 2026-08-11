@@ -12100,6 +12100,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -12435,6 +12436,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -12567,6 +12569,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -13523,6 +13526,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -23727,6 +23731,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -23858,6 +23863,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -28995,6 +29001,7 @@
             "name": "code",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -33872,6 +33879,7 @@
             "name": "workspace_id",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -41475,6 +41483,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -41614,6 +41623,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -41745,6 +41755,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -54525,6 +54536,7 @@
             "name": "message_id",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -54533,6 +54545,7 @@
             "name": "signal",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -59523,6 +59536,7 @@
             "name": "toolkit",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -65162,6 +65176,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -65333,6 +65348,7 @@
             "name": "path",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -65671,6 +65687,7 @@
             "name": "metric",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -67234,6 +67251,7 @@
             "name": "provider",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -69368,6 +69386,7 @@
             "name": "category",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -69830,6 +69849,7 @@
             "name": "code",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -69846,6 +69866,7 @@
             "name": "state",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           }
@@ -76782,6 +76803,7 @@
             "name": "crew_id",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -89957,6 +89979,7 @@
             "name": "from",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },
@@ -89965,6 +89988,7 @@
             "name": "to",
             "required": true,
             "schema": {
+              "minLength": 1,
               "type": "string"
             }
           },

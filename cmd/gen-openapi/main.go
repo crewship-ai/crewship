@@ -341,9 +341,21 @@ func buildDocument(routes []route) map[string]any {
 			})
 		}
 		for name, param := range info.query {
+			schema := map[string]any{"type": param.typ}
+			// requiredQueryParams proves something stronger than OpenAPI's
+			// `required`, which only means "present" and is satisfied by the
+			// empty string: it finds a handler that READS the parameter and
+			// then returns 4xx when it is EMPTY. Say so, or a client sends ""
+			// because the document permits it and gets a 400 the document said
+			// could not happen — 10 of the findings behind #1815 are exactly
+			// that. Only string parameters: minLength is meaningless on the
+			// others and the inference only ever fires on a `== ""` guard.
+			if param.required && param.typ == "string" {
+				schema["minLength"] = 1
+			}
 			params = append(params, map[string]any{
 				"name": name, "in": "query", "required": param.required,
-				"schema": map[string]any{"type": param.typ},
+				"schema": schema,
 			})
 		}
 		sort.Slice(params, func(i, j int) bool {
