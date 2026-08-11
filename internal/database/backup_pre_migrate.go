@@ -102,6 +102,18 @@ type sqliteOnlineBackup interface {
 	NewBackup(dstURI string) (*sqlite.Backup, error)
 }
 
+// onlineBackup is the part of *sqlite.Backup that copyAllPages drives. It
+// exists as an interface for one reason: the order in which these four methods
+// are called is load-bearing (Finish destroys the object — see copyAllPages),
+// and an ordering invariant that cannot be observed cannot be regression-
+// tested. *sqlite.Backup satisfies it as-is.
+type onlineBackup interface {
+	Step(n int32) (bool, error)
+	Finish() error
+	Remaining() int
+	PageCount() int
+}
+
 // snapshotDatabase copies the whole database into dstPath using SQLite's
 // online backup API — a page-level copy of the source file, made through a
 // connection that already has the database open.
@@ -155,7 +167,19 @@ func snapshotDatabaseConn(ctx context.Context, conn *sql.Conn, dstPath string) e
 	// on that: a snapshot must never be a merge into someone else's file.
 	// The backup API has no such rule — it would happily copy pages over an
 	// existing database — so keep the guarantee ourselves.
-	if _, err := os.Stat(dstPath); err == nil {
+	//
+	// Lstat, not Stat: Stat resolves symlinks, so a DANGLING link planted at
+	// the destination reports ErrNotExist and passes this refusal, after
+	// which NewBackup opens the link and SQLite writes a page-for-page copy
+	// of the whole database — credentials, tokens, session material — to
+	// wherever the link points. SnapshotBeforeMigrate's chmod 0600 then lands
+	// on the target rather than the link, and removeSnapshotArtifacts only
+	// unlinks the link, so the copy survives the cleanup. The pre-migration
+	// destination is guessable ("<db>.pre-migrate-v<from>-to-v<to>-<UTC>.bak"
+	// beside the database), which means anyone who can create an entry in the
+	// data directory can choose where the snapshot goes. Any existing entry
+	// is refused, symlink included — a snapshot writes a new file or nothing.
+	if _, err := os.Lstat(dstPath); err == nil {
 		return fmt.Errorf("snapshot destination already exists: %s", dstPath)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("stat snapshot destination: %w", err)
@@ -188,52 +212,7 @@ func snapshotDatabaseConn(ctx context.Context, conn *sql.Conn, dstPath string) e
 			return fmt.Errorf("open snapshot destination: %w", err)
 		}
 
-		// Step(-1) copies every remaining page in a single call, holding a
-		// read lock on the source for the whole copy, instead of stepping in
-		// batches and letting writers in between steps.
-		//
-		// That is the right trade for this snapshot. When the source is
-		// written to between steps by a *different* connection, SQLite
-		// silently restarts the backup from page one — so a batched loop on
-		// a busy production database is not "friendlier to writers", it is a
-		// livelock risk that gets worse the bigger the database and the
-		// busier the server, and it is precisely the nightly-rehearsal case
-		// where the copy is largest and the instance is still serving. One
-		// Step(-1) either produces a point-in-time image of the database or
-		// fails; it cannot spin. In WAL mode (Open() sets it) the read lock
-		// does not block writers anyway — they append to the WAL while we
-		// read the pages behind them — so the cost is bounded to holding one
-		// pooled connection and delaying WAL checkpointing for the duration.
-		//
-		// The flip side, stated plainly: a single Step is not interruptible,
-		// so ctx cancellation cannot cut a copy that has already started. The
-		// callers here (boot-time snapshot, nightly rehearsal) want the copy
-		// to finish more than they want to abandon it midway.
-		more, stepErr := backup.Step(-1)
-
-		// Finish releases the sqlite3_backup object AND closes the
-		// destination connection; it must run on every path, including the
-		// error paths, or the destination handle leaks for the life of the
-		// process. Its own return value matters too: sqlite3_backup_finish
-		// is where an I/O error from the last step surfaces, so a copy is
-		// only good if BOTH calls came back clean. Prefer the step error
-		// when both fail — it is the closer cause.
-		finishErr := backup.Finish()
-
-		switch {
-		case stepErr != nil:
-			return fmt.Errorf("copy pages into snapshot: %w", stepErr)
-		case finishErr != nil:
-			return fmt.Errorf("finalize snapshot: %w", finishErr)
-		case more:
-			// Step(-1) returns false ("SQLITE_DONE") when it has copied
-			// everything. A true here means pages remain despite asking for
-			// all of them; treat the file as partial rather than hand the
-			// operator a truncated database that opens fine.
-			return fmt.Errorf("snapshot incomplete: %d of %d pages left after a full step",
-				backup.Remaining(), backup.PageCount())
-		}
-		return nil
+		return copyAllPages(backup)
 	})
 	if err != nil {
 		// A half-written destination must never survive: it is a valid-looking
@@ -245,6 +224,72 @@ func snapshotDatabaseConn(ctx context.Context, conn *sql.Conn, dstPath string) e
 		// separate story worth burying it under.
 		removeSnapshotArtifacts(dstPath)
 		return err
+	}
+	return nil
+}
+
+// copyAllPages runs the copy on an opened backup handle and always finishes
+// it. Split out of snapshotDatabaseConn so the call order can be pinned by a
+// test: the handle's lifetime rules are the subtle part of this function, and
+// getting them wrong is a use-after-free rather than a visible failure.
+func copyAllPages(backup onlineBackup) error {
+	// Step(-1) copies every remaining page in a single call, holding a
+	// read lock on the source for the whole copy, instead of stepping in
+	// batches and letting writers in between steps.
+	//
+	// That is the right trade for this snapshot. When the source is
+	// written to between steps by a *different* connection, SQLite
+	// silently restarts the backup from page one — so a batched loop on
+	// a busy production database is not "friendlier to writers", it is a
+	// livelock risk that gets worse the bigger the database and the
+	// busier the server, and it is precisely the nightly-rehearsal case
+	// where the copy is largest and the instance is still serving. One
+	// Step(-1) either produces a point-in-time image of the database or
+	// fails; it cannot spin. In WAL mode (Open() sets it) the read lock
+	// does not block writers anyway — they append to the WAL while we
+	// read the pages behind them — so the cost is bounded to holding one
+	// pooled connection and delaying WAL checkpointing for the duration.
+	//
+	// The flip side, stated plainly: a single Step is not interruptible,
+	// so ctx cancellation cannot cut a copy that has already started. The
+	// callers here (boot-time snapshot, nightly rehearsal) want the copy
+	// to finish more than they want to abandon it midway.
+	more, stepErr := backup.Step(-1)
+
+	// Read the progress counters HERE, while the handle is still alive. They
+	// are only used by the incomplete-copy branch below, but that branch runs
+	// after Finish, and Finish does not merely release the object — it frees
+	// it. modernc's Backup.Finish calls sqlite3_backup_finish, which ends in
+	// sqlite3_free(p), and Remaining/PageCount dereference that same pointer
+	// with no validity check. Reading them after Finish would therefore build
+	// the "snapshot incomplete" message out of freed memory: nonsense page
+	// counts if the block happens to still be mapped, a segfault if it is
+	// not — and this runs at boot, before the migrations, so the failure mode
+	// is a crash from the very code whose job is to leave a rollback point.
+	// Two cheap reads on the happy path are the price of that not happening.
+	remaining, pageCount := backup.Remaining(), backup.PageCount()
+
+	// Finish releases the sqlite3_backup object AND closes the
+	// destination connection; it must run on every path, including the
+	// error paths, or the destination handle leaks for the life of the
+	// process. Its own return value matters too: sqlite3_backup_finish
+	// is where an I/O error from the last step surfaces, so a copy is
+	// only good if BOTH calls came back clean. Prefer the step error
+	// when both fail — it is the closer cause.
+	finishErr := backup.Finish()
+
+	switch {
+	case stepErr != nil:
+		return fmt.Errorf("copy pages into snapshot: %w", stepErr)
+	case finishErr != nil:
+		return fmt.Errorf("finalize snapshot: %w", finishErr)
+	case more:
+		// Step(-1) returns false ("SQLITE_DONE") when it has copied
+		// everything. A true here means pages remain despite asking for
+		// all of them; treat the file as partial rather than hand the
+		// operator a truncated database that opens fine.
+		return fmt.Errorf("snapshot incomplete: %d of %d pages left after a full step",
+			remaining, pageCount)
 	}
 	return nil
 }
