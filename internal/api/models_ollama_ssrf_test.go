@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -45,17 +47,29 @@ func TestDefaultModelLister_OllamaRefusesHardBlockedEndpoint(t *testing.T) {
 // reason this uses TrustedEndpointClient rather than the strict fence: an
 // operator's own daemon on localhost or the LAN must keep working. Without
 // this, "fix the SSRF" and "break every self-hosted Ollama" look identical.
+//
+// It dials a listener this test opens rather than a port assumed to be closed.
+// The first version pointed at 127.0.0.1:1 and skipped if anything answered —
+// a conditional skip on host state, which is the exact hazard the rest of this
+// change removes, and the t.Skip ratchet was right to reject it.
 func TestDefaultModelLister_OllamaStillReachesLoopback(t *testing.T) {
-	lister, ok := defaultModelLister("OLLAMA", "", "http://127.0.0.1:1")
+	// A real listener, so the dial demonstrably completes. What it serves does
+	// not matter: the assertion is that httpsafe did not refuse the address.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	lister, ok := defaultModelLister("OLLAMA", "", srv.URL)
 	if !ok {
 		t.Fatal("expected an OLLAMA lister for a non-empty URL")
 	}
 
-	// Port 1 has nothing on it: the dial fails with a connection error, NOT
-	// with an httpsafe refusal. That distinction is the assertion.
+	// 404 from the stub, so ListModels errors — but on the response, not on
+	// the dial. Either outcome is fine here; an httpsafe refusal is not.
 	_, err := lister.ListModels(context.Background())
 	if err == nil {
-		t.Skip("something answered on 127.0.0.1:1 — cannot distinguish the two failures here")
+		return
 	}
 	// Match on the "httpsafe:" prefix, not on one refusal's wording. The two
 	// clients word it differently — TrustedEndpointClient says "blocked
