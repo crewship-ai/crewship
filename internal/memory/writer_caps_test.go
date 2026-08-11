@@ -218,16 +218,39 @@ func TestWriter_ScrubberRedact_OnDiskHasRedactedForm(t *testing.T) {
 	}
 }
 
-// TestWriter_TargetFilePerms_MatchesCodeContract pins the actual perm
-// bits the writer creates. Reading writer.go: tempfile is opened with
-// 0o644 and parent dir is MkdirAll(0o755) — NOT the 0o600/0o700 the
-// caller brief assumed. Locking the real contract here so any tightening
-// is a conscious change visible in this test's diff, not a silent drift.
+// TestWriter_TargetFilePerms_MatchesCodeContract pins the actual perm bits
+// the writer creates: the tempfile is opened 0o644, and the parent directory
+// is MkdirAll(0o775).
+//
+// The directory's group-write bit is load-bearing, not incidental. writer.go
+// states why: inside agent containers the memory tree is dual-written by the
+// agent (uid 1001, dir owner) and the sidecar (uid 1002, via group 1002 plus
+// the setgid inherited from the prepped .memory root), and a 0o755 subdir
+// created by one party locks the other out until the next root perms prep.
+// The container entrypoint runs at umask 0002 so the bit survives
+// (internal/orchestrator/exec_sidecar.go).
+//
+// This test used to assert the OPPOSITE: `dp&0o022 != 0` was reported as
+// "parent dir is group/other writable", i.e. the bit the code deliberately
+// sets was treated as a defect. It passed only because MkdirAll honours umask
+// and CI runners use 0022, which strips that bit before the assertion ever
+// sees it. At umask 0002 — what production containers actually use, and what
+// crewship-dev uses — it failed. A test named for the code contract was
+// pinning the ambient umask instead.
+//
+// So the umask is set here rather than inherited, and the assertion is on the
+// mode the writer asks for. syscall.Umask is process-global: this package has
+// no parallel tests and must not acquire any.
+//
 // macOS/linux only — Windows perm bits don't map cleanly.
 func TestWriter_TargetFilePerms_MatchesCodeContract(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("perm bits are unix-only")
 	}
+	// Neutralise the ambient umask so what follows observes what the writer
+	// requested, not what the environment happened to allow.
+	defer syscallUmask(syscallUmask(0))
+
 	dir := t.TempDir()
 	nested := filepath.Join(dir, "subdir")
 	path := filepath.Join(nested, "AGENT.md")
@@ -249,15 +272,16 @@ func TestWriter_TargetFilePerms_MatchesCodeContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat parent dir: %v", err)
 	}
-	// Note: MkdirAll honours umask. On a typical dev box umask=022 →
-	// 0o755; on a hardened box umask=077 → 0o700. Accept either by
-	// asserting owner-rwx is present and group/other write is absent.
 	dp := di.Mode().Perm()
-	if dp&0o700 != 0o700 {
-		t.Errorf("parent dir owner perms missing: got %#o", dp)
+	if dp != 0o775 {
+		t.Errorf("parent dir perms = %#o, want 0o775 (writer.go MkdirAll mode; "+
+			"group-write is how the sidecar at uid 1002 reaches a tree the agent at 1001 owns)", dp)
 	}
-	if dp&0o022 != 0 {
-		t.Errorf("parent dir is group/other writable: got %#o", dp)
+	// Stated separately because it is the security half and holds on every
+	// umask: 0o775 grants other read+execute and never write. A change that
+	// widened this would still satisfy an owner-bits-only assertion.
+	if dp&0o002 != 0 {
+		t.Errorf("parent dir is world-writable: got %#o", dp)
 	}
 }
 

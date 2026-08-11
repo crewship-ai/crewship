@@ -20,7 +20,7 @@ Set the env vars on the Crewship process (`.env.local` for `dev.sh`,
 systemd unit `Environment=` for prod, container `-e` for Docker):
 
 ```sh
-# Base OTLP HTTP endpoint — SDK appends /v1/traces automatically.
+# Base OTLP HTTP endpoint — /v1/traces is appended automatically.
 # Same-host backends should be reached over loopback so traces don't
 # round-trip through the reverse proxy (TLS overhead + extra hops
 # for high-volume telemetry).
@@ -35,9 +35,25 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <token>
 # OTEL_EXPORTER_OTLP_HEADERS=X-API-Key=<value>
 ```
 
-If your backend documents a project-scoped path (e.g.
-`/api/public/otel`), append it to `OTEL_EXPORTER_OTLP_ENDPOINT` —
-the OTel SDK still appends `/v1/traces` to whatever you set here.
+`OTEL_EXPORTER_OTLP_ENDPOINT` is a **base** URL, so `/v1/traces` is appended
+to whatever you set — including a project-scoped path. A backend documenting
+`/api/public/otel` wants spans at `/api/public/otel/v1/traces`, and setting
+the prefix is enough:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.example.com/api/public/otel
+```
+
+If a path already ends in `/v1/traces` it is not doubled, so an endpoint
+written out in full keeps working.
+
+To send traces somewhere the base-URL rule would not reach — a collector
+serving them off a non-standard path — set the signal-specific variable
+instead. It is used exactly as written, and takes precedence:
+
+```sh
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://collector.example.com/ingest/spans
+```
 
 Compute a Basic-auth header once if needed:
 
@@ -47,17 +63,27 @@ echo -n "user:pass" | base64 -w0
 
 Restart `crewship`. The init logs one of:
 
-- `OTel GenAI telemetry enabled  endpoint=http://...` → working
+- `OTel GenAI telemetry enabled  traces_url=http://.../v1/traces` → working.
+  This is the **resolved** URL, signal path included — if it is not where you
+  expected spans to go, the configuration is wrong and this line says so
+  before any span is dropped.
 - `telemetry init failed, falling back to noop tracer` → check
   endpoint reachability and that header values parse (no quotes, no
   newline in base64).
 
 ## Smoke test
 
-Verify endpoint + auth without waiting for an LLM call:
+Verify endpoint + auth without waiting for an LLM call. `curl` needs the
+resolved URL — the one the startup line prints as `traces_url`:
 
 ```sh
-curl -X POST "$OTEL_EXPORTER_OTLP_ENDPOINT/v1/traces" \
+TRACE_URL="$OTEL_EXPORTER_OTLP_ENDPOINT/v1/traces"
+# …or, if you set the signal-specific variable, that value as-is:
+# TRACE_URL="$OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+```
+
+```sh
+curl -X POST "$TRACE_URL" \
   -H "Content-Type: application/json" \
   -H "Authorization: <as above>" \
   --data-binary '{"resourceSpans":[{"resource":{"attributes":[
@@ -126,7 +152,7 @@ per-mission views.
 
 | Symptom | Likely cause | Fix |
 |--------|--------------|-----|
-| `telemetry init failed` | Endpoint unreachable | `curl $OTEL_EXPORTER_OTLP_ENDPOINT/v1/traces` to confirm |
+| `telemetry init failed` | Endpoint unreachable | `curl "$TRACE_URL"` to confirm (`TRACE_URL` as set under [Smoke test](#smoke-test) — a base endpoint needs `/v1/traces`, a project-scoped one does not) |
 | Smoke test 401/403 | Wrong credentials | Re-check the header value your backend expects (Bearer, Basic, API key) |
 | Smoke test 2xx but no traces in UI | UI looking at wrong project / wrong filter | Verify the credentials map to the project shown in your backend |
 | Traces appear with no `gen_ai.*` attrs | LLM call went through code path that bypasses `telemetry.LLMMiddleware` | Add `caller = telemetry.LLMMiddleware(caller)` to the new code path (see `internal/llm/middleware.go` for the pattern) |

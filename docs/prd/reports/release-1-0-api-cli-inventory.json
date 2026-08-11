@@ -1,23 +1,23 @@
 {
   "summary": {
-    "api_operations": 549,
-    "api_exact_docs": 549,
+    "api_operations": 552,
+    "api_exact_docs": 552,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 747,
-    "cli_exact_docs": 747,
-    "cli_root_docs_present": 747,
+    "cli_operations": 751,
+    "cli_exact_docs": 751,
+    "cli_root_docs_present": 751,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 416,
-    "api_with_concrete_response_schemas": 535,
+    "api_with_concrete_response_schemas": 538,
     "api_generic_response_schemas": 0,
-    "api_with_request_bodies": 231,
-    "api_with_concrete_json_requests": 227,
+    "api_with_request_bodies": 232,
+    "api_with_concrete_json_requests": 228,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 732,
-    "cli_with_flags": 352,
-    "cli_with_all_flags_documented": 352,
+    "cli_with_test_signals": 736,
+    "cli_with_flags": 354,
+    "cli_with_all_flags_documented": 354,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 100,
@@ -40,13 +40,16 @@
       "exact_docs": [
         "docs/api-reference/overview.mdx",
         "docs/guides/installation.mdx",
-        "docs/guides/routines.mdx"
+        "docs/guides/routines.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/param_inference_test.go",
         "internal/api/middleware_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/unauth_reachability_test.go",
         "internal/pipeline/crewship_step_test.go"
       ],
@@ -70,6 +73,7 @@
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/param_inference_test.go",
             "internal/api/middleware_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/unauth_reachability_test.go",
             "internal/pipeline/crewship_step_test.go"
           ]
@@ -2011,7 +2015,8 @@
       "exact_docs": [
         "docs/api-reference/admin.mdx",
         "docs/api-reference/agents.mdx",
-        "docs/guides/memory-observability.mdx"
+        "docs/guides/memory-observability.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -2053,7 +2058,8 @@
       "exact_docs": [
         "docs/api-reference/admin.mdx",
         "docs/api-reference/agents.mdx",
-        "docs/guides/memory-observability.mdx"
+        "docs/guides/memory-observability.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md"
       ],
       "resource_docs": [
         "docs/api-reference/admin.mdx"
@@ -2326,7 +2332,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_admin_reencrypt_test.go",
-        "internal/api/admin_reencrypt_test.go"
+        "internal/api/admin_reencrypt_test.go",
+        "internal/pipeline/webhook_token_hash_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -2346,7 +2353,8 @@
           "source_file": "cmd/crewship/cmd_admin_reencrypt.go",
           "test_signals": [
             "cmd/crewship/cmd_admin_reencrypt_test.go",
-            "internal/api/admin_reencrypt_test.go"
+            "internal/api/admin_reencrypt_test.go",
+            "internal/pipeline/webhook_token_hash_test.go"
           ]
         }
       }
@@ -2700,7 +2708,8 @@
         "docs/manifest/agent.md",
         "docs/manifest/project.md",
         "docs/manifest/recurring_issue.md",
-        "docs/manifest/workspace.md"
+        "docs/manifest/workspace.md",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md"
       ],
       "resource_docs": [
         "docs/api-reference/agents.mdx"
@@ -2787,7 +2796,8 @@
         "docs/manifest/agent.md",
         "docs/manifest/project.md",
         "docs/manifest/recurring_issue.md",
-        "docs/manifest/workspace.md"
+        "docs/manifest/workspace.md",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md"
       ],
       "resource_docs": [
         "docs/api-reference/agents.mdx"
@@ -5291,6 +5301,8 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/guides/auth.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md",
         "docs/security/threat-model.mdx"
       ],
       "resource_docs": [
@@ -5301,6 +5313,7 @@
         "internal/api/auth_recovery_cov2_test.go",
         "internal/api/auth_recovery_cov_test.go",
         "internal/api/auth_recovery_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
       "concrete_response_schema": true,
@@ -5322,6 +5335,7 @@
             "internal/api/auth_recovery_cov2_test.go",
             "internal/api/auth_recovery_cov_test.go",
             "internal/api/auth_recovery_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/unauth_reachability_test.go"
           ]
         }
@@ -5336,7 +5350,9 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/cli/login.mdx",
-        "docs/guides/auth.mdx"
+        "docs/guides/auth.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "resource_docs": [
         "docs/api-reference/auth.mdx"
@@ -5348,6 +5364,7 @@
         "cmd/gen-openapi/schemas_final_admin_platform_test.go",
         "internal/api/google_disabled_test.go",
         "internal/api/openapi_google_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
       "concrete_response_schema": true,
@@ -5372,6 +5389,7 @@
             "cmd/gen-openapi/schemas_final_admin_platform_test.go",
             "internal/api/google_disabled_test.go",
             "internal/api/openapi_google_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/route_read_scope_invariant_test.go"
           ]
         }
@@ -5432,7 +5450,9 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/guides/auth.mdx",
-        "docs/guides/cli-pairing.mdx"
+        "docs/guides/cli-pairing.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "resource_docs": [
         "docs/api-reference/auth.mdx"
@@ -5440,7 +5460,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_login_cov_test.go",
-        "internal/api/cli_pair_test.go"
+        "internal/api/cli_pair_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -5460,7 +5481,8 @@
           "source_file": "cmd/crewship/cmd_login.go",
           "test_signals": [
             "cmd/crewship/cmd_login_cov_test.go",
-            "internal/api/cli_pair_test.go"
+            "internal/api/cli_pair_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go"
           ]
         }
       }
@@ -5515,6 +5537,8 @@
       "exact_docs": [
         "docs/api-reference/auth.mdx",
         "docs/guides/auth.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md",
         "docs/security/threat-model.mdx"
       ],
       "resource_docs": [
@@ -5526,6 +5550,7 @@
         "internal/api/auth_recovery_cov_test.go",
         "internal/api/auth_recovery_sec_test.go",
         "internal/api/auth_recovery_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/provision_takeover_test.go"
       ],
       "concrete_response_schema": true,
@@ -5548,6 +5573,7 @@
             "internal/api/auth_recovery_cov_test.go",
             "internal/api/auth_recovery_sec_test.go",
             "internal/api/auth_recovery_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/provision_takeover_test.go"
           ]
         }
@@ -5653,6 +5679,8 @@
         "docs/api-reference/overview.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/guides/auth.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md",
         "docs/security/threat-model.mdx"
       ],
       "resource_docs": [
@@ -5904,6 +5932,8 @@
         "docs/guides/auth.mdx",
         "docs/guides/installation.mdx",
         "docs/guides/onboarding.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md",
         "docs/quickstart.mdx",
         "docs/security/security-headers.mdx"
       ],
@@ -6023,14 +6053,14 @@
       "tag": "chains",
       "exact_docs": [
         "docs/api-reference/automations.mdx",
-        "docs/api-reference/chains.mdx"
+        "docs/api-reference/chains.mdx",
+        "docs/guides/activity.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/chains.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
-        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_chain_test.go",
         "cmd/gen-openapi/schemas_observability_payments_test.go",
         "internal/api/chain_handler_test.go",
@@ -6052,7 +6082,6 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
-            "cmd/crewship/cmd_chain_json_parity_test.go",
             "cmd/crewship/cmd_chain_test.go",
             "cmd/gen-openapi/schemas_observability_payments_test.go",
             "internal/api/chain_handler_test.go",
@@ -6067,7 +6096,8 @@
       "operation_id": "get_api_v1_chains_anchor",
       "tag": "chains",
       "exact_docs": [
-        "docs/api-reference/chains.mdx"
+        "docs/api-reference/chains.mdx",
+        "docs/guides/activity.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/chains.mdx"
@@ -8429,6 +8459,7 @@
         "docs/manifest/issue.md",
         "docs/manifest/recurring_issue.md",
         "docs/manifest/workspace.md",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
         "docs/prd/agent-identity-signing.md",
         "docs/prd/iteration-quickwins.md"
       ],
@@ -8528,6 +8559,7 @@
         "docs/manifest/issue.md",
         "docs/manifest/recurring_issue.md",
         "docs/manifest/workspace.md",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
         "docs/prd/agent-identity-signing.md",
         "docs/prd/iteration-quickwins.md"
       ],
@@ -12258,7 +12290,9 @@
       "source_file": "cmd/crewship/cmd_feedback.go",
       "exact_docs": [
         "docs/api-reference/feedback.mdx",
-        "docs/guides/feedback.mdx"
+        "docs/guides/feedback.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "resource_docs": [
         "docs/api-reference/feedback.mdx"
@@ -12313,7 +12347,9 @@
       "source_file": "cmd/crewship/cmd_feedback.go",
       "exact_docs": [
         "docs/api-reference/feedback.mdx",
-        "docs/guides/feedback.mdx"
+        "docs/guides/feedback.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "resource_docs": [
         "docs/api-reference/feedback.mdx"
@@ -12368,7 +12404,9 @@
       "source_file": "cmd/crewship/cmd_feedback.go",
       "exact_docs": [
         "docs/api-reference/feedback.mdx",
-        "docs/guides/feedback.mdx"
+        "docs/guides/feedback.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "resource_docs": [
         "docs/api-reference/feedback.mdx"
@@ -15440,7 +15478,8 @@
       "operation_id": "get_api_v1_memory_versions",
       "tag": "memory",
       "exact_docs": [
-        "docs/api-reference/memory.mdx"
+        "docs/api-reference/memory.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md"
       ],
       "resource_docs": [
         "docs/api-reference/memory.mdx"
@@ -16611,7 +16650,9 @@
       "operation_id": "get_api_v1_oauth_callback",
       "tag": "oauth",
       "exact_docs": [
-        "docs/api-reference/integrations.mdx"
+        "docs/api-reference/integrations.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -16621,8 +16662,8 @@
         "internal/api/oauth_flow_cov2_test.go",
         "internal/api/oauth_flow_cov_test.go",
         "internal/api/oauth_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/route_read_scope_invariant_test.go",
-        "internal/api/unauth_reachability_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -16647,8 +16688,8 @@
             "internal/api/oauth_flow_cov2_test.go",
             "internal/api/oauth_flow_cov_test.go",
             "internal/api/oauth_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/route_read_scope_invariant_test.go",
-            "internal/api/unauth_reachability_test.go",
             "…"
           ]
         }
@@ -18221,8 +18262,7 @@
       "tag": "runs",
       "source_file": "cmd/gen-openapi/main.go",
       "exact_docs": [
-        "docs/api-reference/runs.mdx",
-        "docs/guides/activity.mdx"
+        "docs/api-reference/runs.mdx"
       ],
       "resource_docs": [
         "docs/api-reference/runs.mdx"
@@ -19029,13 +19069,16 @@
       "tag": "system",
       "source_file": "cmd/crewship/cmd_seed_data_users.go",
       "exact_docs": [
-        "docs/api-reference/admin.mdx"
+        "docs/api-reference/admin.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_seed_with_users_gate_test.go",
         "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
         "internal/api/openapi_conformance_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/setup_status_test.go",
         "internal/api/unauth_reachability_test.go"
@@ -19060,6 +19103,7 @@
             "cmd/crewship/cmd_seed_with_users_gate_test.go",
             "cmd/gen-openapi/schemas_remaining_admin_system_v2_test.go",
             "internal/api/openapi_conformance_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/route_read_scope_invariant_test.go",
             "internal/api/setup_status_test.go",
             "internal/api/unauth_reachability_test.go"
@@ -19074,11 +19118,14 @@
       "tag": "system",
       "source_file": "cmd/crewship/cmd_setup.go",
       "exact_docs": [
-        "docs/api-reference/admin.mdx"
+        "docs/api-reference/admin.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_setup_cov_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/route_read_scope_invariant_test.go",
         "internal/api/system_telemetry_test.go",
         "internal/api/unauth_reachability_test.go"
@@ -19101,6 +19148,7 @@
           "source_file": "cmd/crewship/cmd_setup.go",
           "test_signals": [
             "cmd/crewship/cmd_setup_cov_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/route_read_scope_invariant_test.go",
             "internal/api/system_telemetry_test.go",
             "internal/api/unauth_reachability_test.go"
@@ -20083,11 +20131,15 @@
         "docs/api-reference/pipelines.mdx",
         "docs/api-reference/waitpoints.mdx",
         "docs/api-reference/workspaces.mdx",
-        "docs/manifest/routine.md"
+        "docs/guides/migrations.mdx",
+        "docs/manifest/routine.md",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "status": "documented_exact",
       "test_signals": [
-        "cmd/gen-openapi/schemas_final_21_generic_responses_test.go"
+        "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -20105,7 +20157,8 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
-            "cmd/gen-openapi/schemas_final_21_generic_responses_test.go"
+            "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go"
           ]
         }
       }
@@ -20117,7 +20170,9 @@
       "tag": "webhooks",
       "exact_docs": [
         "docs/api-reference/overview.mdx",
-        "docs/api-reference/webhooks.mdx"
+        "docs/api-reference/webhooks.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "resource_docs": [
         "docs/api-reference/webhooks.mdx"
@@ -20125,7 +20180,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
-        "internal/api/openapi_conformance_test.go"
+        "internal/api/openapi_conformance_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -20144,7 +20200,8 @@
           "openapi_operation": true,
           "test_signals": [
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
-            "internal/api/openapi_conformance_test.go"
+            "internal/api/openapi_conformance_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go"
           ]
         }
       }
@@ -20161,7 +20218,10 @@
         "docs/api-reference/workspaces.mdx",
         "docs/cli/routine.mdx",
         "docs/cli/webhook.mdx",
-        "docs/guides/routines.mdx"
+        "docs/guides/migrations.mdx",
+        "docs/guides/routines.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "resource_docs": [
         "docs/api-reference/webhooks.mdx"
@@ -20169,6 +20229,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_auth_integrations_credentials_notifications_users_webhooks_test.go",
+        "internal/api/openapi_unauthenticated_set_test.go",
         "internal/api/pipeline_webhooks_async_test.go"
       ],
       "concrete_response_schema": true,
@@ -20188,6 +20249,7 @@
           "openapi_operation": true,
           "test_signals": [
             "cmd/gen-openapi/schemas_final_auth_integrations_credentials_notifications_users_webhooks_test.go",
+            "internal/api/openapi_unauthenticated_set_test.go",
             "internal/api/pipeline_webhooks_async_test.go"
           ]
         }
@@ -20459,6 +20521,7 @@
         "docs/guides/skills.mdx",
         "docs/manifest/routine.md",
         "docs/manifest/skill.md",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
         "docs/security/container-isolation.mdx"
       ],
       "resource_docs": [
@@ -20540,6 +20603,7 @@
         "docs/guides/skills.mdx",
         "docs/manifest/routine.md",
         "docs/manifest/skill.md",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
         "docs/security/container-isolation.mdx"
       ],
       "resource_docs": [
@@ -23143,6 +23207,105 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust",
+      "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_trust",
+      "tag": "workspaces",
+      "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
+        "docs/api-reference/routines.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/workspaces.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pipelines.go"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust",
+      "operation_id": "post_api_v1_workspaces_workspaceId_pipelines_slug_trust",
+      "tag": "workspaces",
+      "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
+        "docs/api-reference/routines.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/workspaces.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pipelines.go"
+        }
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust/{grantId}",
+      "operation_id": "delete_api_v1_workspaces_workspaceId_pipelines_slug_trust_grantId",
+      "tag": "workspaces",
+      "source_file": "internal/api/router_pipelines.go",
+      "exact_docs": [
+        "docs/api-reference/pipelines.mdx",
+        "docs/api-reference/routines.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/workspaces.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pipelines.go"
+        }
+      }
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions",
       "operation_id": "get_api_v1_workspaces_workspaceId_pipelines_slug_versions",
       "tag": "workspaces",
@@ -25428,7 +25591,6 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_automation_matcher_loss_test.go",
-        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_routine_records_provenance_test.go"
       ]
@@ -29620,13 +29782,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_agent_introspect_cov_test.go",
-        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_eval_baseline_cov2_test.go",
         "cmd/crewship/cmd_eval_baseline_cov_test.go",
         "cmd/crewship/cmd_eval_baseline_test.go",
         "cmd/crewship/cmd_eval_compare_cov_test.go",
         "cmd/crewship/cmd_eval_cov_test.go",
+        "cmd/crewship/cmd_eval_get_cov_test.go",
         "…"
       ],
       "flags": [
@@ -36462,10 +36624,10 @@
         "cmd/crewship/cmd_admin_gdpr_test.go",
         "cmd/crewship/cmd_admin_stats_test.go",
         "cmd/crewship/cmd_ask_cov_test.go",
-        "cmd/crewship/cmd_chain_json_parity_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_manage_cov_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
+        "cmd/crewship/cmd_journal_cov_test.go",
         "…"
       ]
     },
@@ -40582,6 +40744,122 @@
       ]
     },
     {
+      "path": "routine trust",
+      "use": "trust",
+      "short": "Manage standing approval grants on a routine's gates",
+      "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_routine_backtest_test.go",
+        "cmd/crewship/cmd_routine_bench_cov_test.go",
+        "cmd/crewship/cmd_routine_bench_test.go",
+        "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
+        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_extra_cov2_test.go",
+        "cmd/crewship/cmd_routine_extra_cov_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "routine trust grant",
+      "use": "grant \u003cslug\u003e",
+      "short": "Stop a routine's gate from asking for approval",
+      "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_routine_backtest_test.go",
+        "cmd/crewship/cmd_routine_bench_cov_test.go",
+        "cmd/crewship/cmd_routine_bench_test.go",
+        "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
+        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_extra_cov2_test.go",
+        "cmd/crewship/cmd_routine_extra_cov_test.go",
+        "…"
+      ],
+      "flags": [
+        "expires",
+        "max-uses",
+        "prior-approvals",
+        "reason",
+        "step"
+      ],
+      "documented_flags": [
+        "expires",
+        "max-uses",
+        "prior-approvals",
+        "reason",
+        "step"
+      ]
+    },
+    {
+      "path": "routine trust list",
+      "use": "list \u003cslug\u003e",
+      "short": "List standing approval grants on a routine (revoked ones included)",
+      "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_routine_backtest_test.go",
+        "cmd/crewship/cmd_routine_bench_cov_test.go",
+        "cmd/crewship/cmd_routine_bench_test.go",
+        "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
+        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_extra_cov2_test.go",
+        "cmd/crewship/cmd_routine_extra_cov_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "routine trust revoke",
+      "use": "revoke \u003cslug\u003e \u003cgrant-id\u003e",
+      "short": "Withdraw a standing grant so the gate asks again",
+      "root": "routine",
+      "exact_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/routine.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_routine_backtest_test.go",
+        "cmd/crewship/cmd_routine_bench_cov_test.go",
+        "cmd/crewship/cmd_routine_bench_test.go",
+        "cmd/crewship/cmd_routine_budget_test.go",
+        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
+        "cmd/crewship/cmd_routine_doctor_cov_test.go",
+        "cmd/crewship/cmd_routine_extra_cov2_test.go",
+        "cmd/crewship/cmd_routine_extra_cov_test.go",
+        "…"
+      ],
+      "flags": [
+        "reason"
+      ],
+      "documented_flags": [
+        "reason"
+      ]
+    },
+    {
       "path": "routine validate",
       "use": "validate [file.json|file.yaml]",
       "short": "Validate a routine DSL file offline (no server call)",
@@ -42282,8 +42560,8 @@
         "cmd/crewship/cmd_mission_run_cov_test.go",
         "cmd/crewship/cmd_root_headless_test.go",
         "cmd/crewship/cmd_start_admission_test.go",
+        "cmd/crewship/cmd_start_checkpointer_test.go",
         "cmd/crewship/cmd_start_cov_test.go",
-        "cmd/crewship/cmd_start_provider_order_test.go",
         "…"
       ],
       "flags": [
@@ -43034,6 +43312,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_chain_test.go",
+        "cmd/crewship/cmd_routine_trust_test.go",
         "cmd/crewship/cmd_routine_validate_agents_test.go",
         "cmd/crewship/cmd_routine_validate_test.go"
       ]
@@ -44035,12 +44314,16 @@
       ],
       "flags": [
         "allow-privileged-credentials",
+        "audit-log-retention-days",
+        "credential-audit-retention-days",
         "language",
         "name",
         "slug"
       ],
       "documented_flags": [
         "allow-privileged-credentials",
+        "audit-log-retention-days",
+        "credential-audit-retention-days",
         "language",
         "name",
         "slug"
@@ -44331,6 +44614,7 @@
       "name": "CREWSHIP_ENCRYPTION_KEY_VERSION",
       "docs": [
         "docs/guides/credentials.mdx",
+        "docs/guides/migrations.mdx",
         "docs/security/encryption.mdx"
       ],
       "status": "documented"
@@ -44741,7 +45025,8 @@
         "docs/configuration/environment.mdx",
         "docs/guides/install.mdx",
         "docs/guides/skills-authoring.mdx",
-        "docs/guides/watching-agent-runs.mdx"
+        "docs/guides/watching-agent-runs.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md"
       ],
       "status": "documented"
     },
@@ -44880,7 +45165,9 @@
         "docs/cli/chat.mdx",
         "docs/cli/overview.mdx",
         "docs/configuration/environment.mdx",
-        "docs/guides/watching-agent-runs.mdx"
+        "docs/guides/watching-agent-runs.mdx",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "status": "documented"
     },
@@ -44923,7 +45210,9 @@
         "docs/cli/routine.mdx",
         "docs/configuration/environment.mdx",
         "docs/guides/cartographer.mdx",
-        "docs/manifest/feature_flag.md"
+        "docs/manifest/feature_flag.md",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
       ],
       "status": "documented"
     },
@@ -45029,6 +45318,7 @@
         "docs/manifest/triage_rule.md",
         "docs/manifest/workspace.md",
         "docs/observability/metrics.md",
+        "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
         "docs/prd/agent-identity-signing.md",
         "docs/prd/agent-memory-on-wake.md",
         "docs/prd/model-scoped-credentials.md",
@@ -45047,6 +45337,7 @@
         "docs/api-reference/integrations.mdx",
         "docs/cli/connector.mdx",
         "docs/cli/integration.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -45192,6 +45483,7 @@
     {
       "name": "CrewTemplate",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -45204,6 +45496,7 @@
     {
       "name": "FeatureFlag",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -45216,6 +45509,7 @@
       "docs": [
         "docs/api-reference/hooks.mdx",
         "docs/cli/hooks.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/harbormaster.mdx",
         "docs/guides/hooks.mdx",
@@ -45231,6 +45525,7 @@
     {
       "name": "InstanceSetting",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -45248,6 +45543,7 @@
         "docs/cli/agent.mdx",
         "docs/cli/integration.mdx",
         "docs/cli/mcp.mdx",
+        "docs/concepts.mdx",
         "docs/guides/integrations.mdx",
         "docs/guides/lookout.mdx",
         "docs/guides/manifests.mdx",
@@ -45298,6 +45594,7 @@
         "docs/api-reference/issues.mdx",
         "docs/api-reference/labels.mdx",
         "docs/cli/label.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -45321,6 +45618,7 @@
         "docs/api-reference/websocket.mdx",
         "docs/cli/issue.mdx",
         "docs/cli/recurring.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/guides/manifests.mdx",
@@ -45372,6 +45670,7 @@
       "docs": [
         "docs/api-reference/recipes.mdx",
         "docs/cli/recipe.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/guides/routines-cookbook.mdx",
@@ -45386,6 +45685,7 @@
     {
       "name": "RecurringIssue",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -45433,6 +45733,7 @@
     {
       "name": "SavedView",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -45479,6 +45780,7 @@
     {
       "name": "TriageRule",
       "docs": [
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -45498,6 +45800,7 @@
       "docs": [
         "docs/api-reference/workflow-templates.mdx",
         "docs/cli/workflow.mdx",
+        "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/manifests.mdx",
         "docs/manifest/README.md",
@@ -45580,11 +45883,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4046,
-    "api_path_references": 2034,
-    "environment_references": 401,
+    "command_references": 4073,
+    "api_path_references": 2046,
+    "environment_references": 402,
     "manifest_kind_references": 209,
-    "flag_references": 1878,
+    "flag_references": 1892,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

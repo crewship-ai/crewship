@@ -516,6 +516,14 @@ func (s *Server) mountAPIRouter(
 	if embedder == nil && cfg.Keeper.Enabled && cfg.Keeper.OllamaURL != "" {
 		embedder = episodic.NewOllamaEmbedder(cfg.Keeper.OllamaURL)
 	}
+	// Wrap so the health surfaces can answer from what the embedder
+	// actually did rather than from the fact that we built one. Being
+	// constructible proves only that a URL was set — see episodicMode().
+	// NewObservedEmbedder(nil) is nil, so "no embedder" stays no embedder
+	// and sparse-only recall is unaffected.
+	if obs := episodic.NewObservedEmbedder(embedder); obs != nil {
+		embedder = obs
+	}
 	// Stashed on Server so Start() can launch the indexer sweeper
 	// and /healthz can report vector vs sparse-only recall mode.
 	s.episodicEmbedder = embedder
@@ -528,9 +536,12 @@ func (s *Server) mountAPIRouter(
 	// "crewshipd" for backwards compatibility with existing dashboards;
 	// new deployments should set the env explicitly to differentiate
 	// main API, sidecar, and EE per-tenant traces).
-	otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	// Resolved, not configured: this is the full URL spans are POSTed to,
+	// signal path included. Logging the configured value instead is how a
+	// misrouted exporter reads as healthy (#1868, #1870).
+	otelEndpoint, otelConfigured := telemetry.ResolveTracesEndpoint("")
 	serviceName := telemetry.ServiceNameFromEnv("crewshipd")
-	if otelShutdown, err := telemetry.Init(context.Background(), otelEndpoint, serviceName); err != nil {
+	if otelShutdown, err := telemetry.Init(context.Background(), "", serviceName); err != nil {
 		logger.Warn("telemetry init failed, falling back to noop tracer", "err", err)
 	} else {
 		s.telemetryShutdown = otelShutdown
@@ -538,8 +549,8 @@ func (s *Server) mountAPIRouter(
 		// entry emit. No-op when the tracer is noop, so entries just
 		// get empty trace IDs (backwards compatible).
 		telemetry.RegisterJournalResolver()
-		if otelEndpoint != "" {
-			logger.Info("OTel GenAI telemetry enabled", "endpoint", otelEndpoint)
+		if otelConfigured {
+			logger.Info("OTel GenAI telemetry enabled", "traces_url", otelEndpoint)
 		}
 	}
 

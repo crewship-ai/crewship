@@ -41,6 +41,11 @@ type PipelineHandler struct {
 	// internal token are known; nil → crewship steps fail closed with a
 	// wiring hint (they are pure side effect — silence would be worse).
 	crewshipActions pipeline.CrewshipActions
+	// trustGrantStore backs the standing-approval endpoints. Assigned by
+	// NewPipelineHandler before the handler serves anything; nil only in
+	// tests that build this struct as a literal, where trustGrants()
+	// falls back without writing (see pipeline_trust.go).
+	trustGrantStore *pipeline.TrustGrantStore
 	// runVerdict resolves the post-run outcome verdict's provider+model
 	// (#1403) for routine runs, at the moment a run terminates — same
 	// wiring as internal.InternalHandler's for ad-hoc agent runs, and
@@ -89,12 +94,13 @@ func NewPipelineHandler(db *sql.DB, logger *slog.Logger, runner pipeline.AgentRu
 	store := pipeline.NewStore(db)
 	resolver := pipeline.NewResolver(db)
 	return &PipelineHandler{
-		db:       db,
-		logger:   logger,
-		store:    store,
-		resolver: resolver,
-		runner:   runner,
-		emitter:  emitter,
+		db:              db,
+		logger:          logger,
+		store:           store,
+		resolver:        resolver,
+		runner:          runner,
+		emitter:         emitter,
+		trustGrantStore: pipeline.NewTrustGrantStore(db),
 	}
 }
 

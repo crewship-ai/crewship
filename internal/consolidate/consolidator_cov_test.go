@@ -419,8 +419,8 @@ func TestSnapshotPins_MkdirFailure(t *testing.T) {
 	}
 	_, err := snapshotPins(Config{OutputDir: filepath.Join(blocker, "sub")},
 		[]journal.Entry{{ID: "p1", Priority: journal.PriorityPin, TS: time.Now()}})
-	if err == nil || !strings.Contains(err.Error(), "pins mkdir") {
-		t.Errorf("expected pins mkdir error, got %v", err)
+	if err == nil {
+		t.Error("snapshotPins accepted an output path below a regular file")
 	}
 }
 

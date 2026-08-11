@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -57,10 +56,22 @@ func (c *Consolidator) writeProposal(
 
 	runID := newProposalID(now)
 	proposedDir := filepath.Join(cfg.OutputDir, ".proposed")
-	if err := os.MkdirAll(proposedDir, 0o755); err != nil {
+	if err := memory.EnsureDirNoFollow(cfg.OutputDir, proposedDir); err != nil {
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("mkdir proposed: %w", err)
 	}
-	proposalPath := filepath.Join(proposedDir, "proposal-"+runID+".md")
+	if cfg.afterProposedDirValidated != nil {
+		cfg.afterProposedDirValidated()
+	}
+	proposedRoot, err := openProposedRoot(cfg.OutputRoot, cfg.OutputDir)
+	if err != nil {
+		return ConsolidationResult{EntriesScanned: entriesScanned}, err
+	}
+	defer proposedRoot.Close()
+	if cfg.afterProposedRootOpened != nil {
+		cfg.afterProposedRootOpened()
+	}
+	proposalName := "proposal-" + runID + ".md"
+	proposalPath := filepath.Join(proposedDir, proposalName)
 
 	// Render the rules into the same markdown shape appendRules uses
 	// so an operator approving the proposal can move the body verbatim.
@@ -70,13 +81,13 @@ func (c *Consolidator) writeProposal(
 	// the same staging file because their proposal-{runID}.md will be
 	// distinct, but a future "rewrite the proposal" flow would need
 	// this lock to be honoured.
-	lk := memory.NewFileLock(proposalPath + ".lock")
+	lk := memory.NewRootFileLock(proposedRoot, proposalName+".lock")
 	if err := lk.Lock(); err != nil {
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("lock proposal: %w", err)
 	}
 	defer func() { _ = lk.Unlock() }()
 
-	if err := memory.WriteFileDurable(proposalPath, []byte(body), 0o644); err != nil {
+	if err := memory.WriteFileDurableRoot(proposedRoot, proposalName, []byte(body), 0o644); err != nil {
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("write proposal: %w", err)
 	}
 
@@ -86,7 +97,7 @@ func (c *Consolidator) writeProposal(
 		// downstream explain readers — better to fail the whole
 		// proposal write so the operator sees the bug before it
 		// becomes "why are all my proposals empty in HITL UI".
-		_ = os.Remove(proposalPath)
+		_ = proposedRoot.Remove(proposalName)
 		return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("marshal proposal evidence: %w", err)
 	}
 	// Score every candidate rule with the six-signal model at
@@ -120,7 +131,7 @@ func (c *Consolidator) writeProposal(
 			// Roll back the on-disk file so an operator does not see
 			// a proposal markdown that has no DB row to actually
 			// approve. The lockfile stays — flock is per-fd, harmless.
-			_ = os.Remove(proposalPath)
+			_ = proposedRoot.Remove(proposalName)
 			return ConsolidationResult{EntriesScanned: entriesScanned}, fmt.Errorf("insert memory_proposal: %w", err)
 		}
 
@@ -154,7 +165,7 @@ func (c *Consolidator) writeProposal(
 	// first proposal for a pattern, recall is by definition 0 and no
 	// skill is written; only repeated, recalled-against rules cross
 	// the gate on later runs. See skill_promote.go for the thresholds.
-	if skillPaths := c.promoteProposalSkills(rules, scores, cfg.OutputDir, now); len(skillPaths) > 0 {
+	if skillPaths := c.promoteProposalSkills(rules, scores, cfg.OutputRoot, cfg.OutputDir, now); len(skillPaths) > 0 {
 		logger.Info("memory→skills promotion staged",
 			"proposal_id", proposalID,
 			"skill_count", len(skillPaths),
@@ -376,6 +387,7 @@ func loadRecallMetrics(ctx context.Context, db *sql.DB, workspaceID string, evid
 func (c *Consolidator) promoteProposalSkills(
 	rules []LearnedRule,
 	scores map[string]ScoreResult,
+	outputRoot string,
 	outputDir string,
 	now time.Time,
 ) []string {
@@ -384,8 +396,9 @@ func (c *Consolidator) promoteProposalSkills(
 		logger = slog.Default()
 	}
 	paths, err := PromoteEligibleRules(rules, scores, SkillPromoteOptions{
-		OutputDir: outputDir,
-		Now:       now,
+		OutputDir:  outputDir,
+		OutputRoot: outputRoot,
+		Now:        now,
 	})
 	if err != nil {
 		logger.Warn("memory→skills promotion partial failure",

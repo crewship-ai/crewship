@@ -2,6 +2,8 @@
 title: "Production Agent Checklist"
 description: "Six things a production agent system needs — and how Crewship covers all of them. A neutral framework for evaluating any agent stack against real operational requirements."
 icon: "circle-check"
+stability: experimental
+tag: Experimental
 ---
 
 # What a Production Agent System Actually Needs
@@ -115,6 +117,27 @@ glue code:
   persistent volumes, AGE-encrypted backup
 - **Self-hosted by default** — Apache-2.0, no enterprise tier
   gating, marketplace and federation features on the v0.2 roadmap
+
+## Stability matrix
+
+Every documentation page shows its stability beside its title. The page label
+is the narrowest contract that applies to everything described on that page;
+when a page spans features with different maturity, the least-stable tier wins.
+
+| Tier | Contract | Documentation in this release |
+|---|---|---|
+| **Stable** | Frozen surface; patches remain backwards-compatible. | Crew Journal, Paymaster (including cost and spend commands), Lookout, Harbormaster approvals, and Backup. |
+| **Early** | Available and supported; the contract may change in a minor release. | No pages currently make this claim. |
+| **Experimental** | Research preview; production workflows must not depend on the contract. | Episodic memory, Consolidate, and every surface not explicitly promoted to another tier below. |
+| **Deprecated** | Compatibility surface with a documented replacement and removal path. | No pages currently carry this label. |
+| **Roadmap** | Planned context, not a shipped product contract. | No pages currently carry this label. |
+
+The conservative experimental default is intentional for the 1.0 audit: an
+unsupported stability promise is worse than an under-claim. Promotion requires
+an explicit review of that feature's API, CLI, UI, and manifest surfaces in the
+same change. `scripts/docs-surface-check` enforces that every MDX page has a
+label from this vocabulary and that its rendered tag agrees with the
+frontmatter value.
 
 ## Why this checklist matters
 

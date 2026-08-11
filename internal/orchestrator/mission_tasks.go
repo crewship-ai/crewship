@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/untrusted"
 )
 
@@ -484,25 +485,39 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	// busy lead unmentionable. Pinned by
 	// TestMissionAssignmentRowsCarryDepthZero — do not stamp a depth here
 	// without changing that file too.
+	//
+	// The row and the link that makes it findable are ONE transaction. Split,
+	// a failure (or a crash) between them left an assignment nothing pointed
+	// at while the task sat IN_PROGRESS — and resolveReadyFromTasks only
+	// re-picks PENDING/BLOCKED, so that task was stranded forever with no
+	// operator-visible symptom. A rollback here instead returns an error the
+	// caller turns into a FAILED task, which an operator can see and retry.
+	//
+	// Everything that is not one of these two writes stays OUTSIDE: SQLite
+	// has a single database-wide writer, so the brief build above and the
+	// dispatch below must never be inside this window.
 	assignmentID := generateID()
-	_, err = e.db.ExecContext(ctx, `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?)`,
-		assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, *task.AssignedAgentID,
-		taskBrief,
-		ms.ID, // group_id = mission_id for grouping
-		now,
-	)
-	if err != nil {
-		return fmt.Errorf("create assignment: %w", err)
-	}
-
-	// Link assignment to the mission task
-	_, err = e.db.ExecContext(ctx,
-		`UPDATE mission_tasks SET assignment_id = ?, updated_at = ? WHERE id = ?`,
-		assignmentID, now, task.ID)
-	if err != nil {
-		e.logger.Warn("link assignment to task", "task_id", task.ID, "error", err)
+	if err := database.WithTx(ctx, e.db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, depth, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, 0, ?)`,
+			assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, *task.AssignedAgentID,
+			taskBrief,
+			ms.ID, // group_id = mission_id for grouping
+			now,
+		); err != nil {
+			return fmt.Errorf("create assignment: %w", err)
+		}
+		// Link assignment to the mission task.
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE mission_tasks SET assignment_id = ?, updated_at = ? WHERE id = ?`,
+			assignmentID, now, task.ID); err != nil {
+			return fmt.Errorf("link assignment to task: %w", err)
+		}
+		return nil
+	}); err != nil {
+		e.logger.Error("create assignment", "task_id", task.ID, "error", err)
+		return err
 	}
 
 	// Dispatch the assignment to the correct crew's container.

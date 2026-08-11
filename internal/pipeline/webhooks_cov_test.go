@@ -101,8 +101,16 @@ func TestWebhookStore_Save_UpdatePreservesToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if upd.Token != w.Token {
-		t.Errorf("update must preserve token: %q vs %q", upd.Token, w.Token)
+	// The assertion is on the digest, not the cleartext: post-#1888 the
+	// cleartext is show-once (Save returns it on create and never again),
+	// so "the update did not rotate the token" is only observable through
+	// token_hash. Rotating it would still break every configured sender,
+	// which is what this test exists to catch.
+	if upd.TokenHash == "" || upd.TokenHash != w.TokenHash {
+		t.Errorf("update must preserve token: %q vs %q", upd.TokenHash, w.TokenHash)
+	}
+	if upd.Token != "" {
+		t.Errorf("update must not re-issue the cleartext token, got %q", upd.Token)
 	}
 	if upd.Name != "after" || upd.TargetPipelineID != "pln_2" || upd.Enabled || upd.RateLimitPerMin != 5 {
 		t.Errorf("update fields not applied: %+v", upd)

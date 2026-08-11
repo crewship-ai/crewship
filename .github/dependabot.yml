@@ -1,4 +1,40 @@
 version: 2
+
+# Grouping policy — one rule, applied to every entry below.
+#
+# Minor and patch version updates travel together in one PR per *group*.
+# Majors and security updates stay on their own.
+#
+# "Per group", not "per ecosystem", and the difference is not pedantry:
+# Dependabot opens one PR per group that has updates, npm defines three
+# groups, and an ecosystem spread over several `directory:` entries — the
+# composite actions below, the two Dockerfiles — is several entries, each
+# with its own group and so its own PR. Expect a handful on a busy Monday,
+# not one.
+#
+# Why (#1868): on 2026-08-10 a single Monday produced fourteen open PRs,
+# because only the npm entry had `groups` — gomod, github-actions, docker and
+# docker-compose each opened one PR per package. Eight of those fourteen
+# shared go.mod/go.sum (five) or package.json/pnpm-lock.yaml (three), so
+# within each set no merge order avoided rebasing the rest, and landing them
+# meant hand-building an integration branch. Grouped, that same Monday is
+# seven PRs: one for gomod, one for the workflow actions plus one for the
+# `actions/stale` major, one for the composite action, and npm's three
+# (its group, plus the motion and react-intersection-observer majors).
+#
+# The two carve-outs are deliberate, not laziness:
+#
+#   `applies-to: version-updates` leaves **security** updates ungrouped.
+#   A CVE fix should be reviewable and mergeable on its own, not queued
+#   behind an unrelated minor that happens to be failing CI.
+#
+#   `update-types: [minor, patch]` leaves **majors** ungrouped. A major is
+#   where the breaking change lives — motion 13 dropped a prop filter and
+#   otel 1.45 silently rerouted trace export — and each deserves its own
+#   changelog read and its own revert boundary.
+#
+# Adding an ecosystem? Give it the same `groups` block. A missing one is
+# invisible until the Monday it floods the PR list.
 updates:
   # NPM dependencies (works with pnpm)
   - package-ecosystem: "npm"
@@ -22,6 +58,7 @@ updates:
         exclude-patterns:
           - "@types/*"
       development-dependencies:
+        applies-to: version-updates
         dependency-type: "development"
         update-types:
           - "minor"
@@ -29,6 +66,7 @@ updates:
         exclude-patterns:
           - "@types/*"
       typescript-types:
+        applies-to: version-updates
         patterns:
           - "@types/*"
         update-types:
@@ -49,6 +87,12 @@ updates:
       - "go"
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      go-modules:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
 
   # GitHub Actions
   # Weekly cadence (not monthly): every action in .github/workflows/ and
@@ -76,6 +120,12 @@ updates:
       - "ci/cd"
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      github-actions:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/.github/actions/setup-go-embed"
@@ -90,6 +140,12 @@ updates:
       - "ci/cd"
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      github-actions:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/.github/actions/setup-node-pnpm"
@@ -104,6 +160,12 @@ updates:
       - "ci/cd"
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      github-actions:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
 
   # Docker base images
   # The root Dockerfile (node:24-alpine + golang:1.26-alpine + alpine:3.23
@@ -127,6 +189,12 @@ updates:
       - "docker"
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      docker-images:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "docker"
     directory: "/docker/crewship-sandbox"
@@ -141,6 +209,12 @@ updates:
       - "docker"
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      docker-images:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
 
   # docker/docker-compose.yml pins postgres:18-alpine on a floating tag.
   # Dependabot's docker-compose ecosystem (separate from `docker` for
@@ -159,3 +233,9 @@ updates:
       - "docker"
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      docker-compose-images:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"

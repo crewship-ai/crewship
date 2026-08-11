@@ -3,6 +3,24 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { StepContainer } from "../step-container"
 import { INITIAL_STATE, type WizardState } from "../types"
 
+// This surface fetches on mount and the fetch is not what this file asserts.
+// vitest.setup.ts fails a test that opens a socket, so pin it to an empty
+// payload here rather than let it reach the network — the leak used to be a
+// silent ECONNREFUSED while the suite still reported green.
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    ),
+  )
+})
+
+
 // =============================================================================
 // RuntimeConfig + MCPConfigEditor are heavy components that fetch catalogs
 // and depend on browser APIs. Stub them with thin doubles that expose the

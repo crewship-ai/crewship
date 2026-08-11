@@ -3,9 +3,33 @@ package notifyroute
 import (
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/keeper/health"
 	"github.com/crewship-ai/crewship/internal/notify"
 )
+
+func categoriesProducedByInboxItems(items []inbox.Item) map[string]bool {
+	produced := make(map[string]bool, len(items))
+	for _, item := range items {
+		if category := categoryForItem(item); category != "" {
+			produced[category] = true
+		}
+	}
+	return produced
+}
+
+func TestProducerDiscoveryHonorsItemCategoryOverride(t *testing.T) {
+	const overrideOnly = notify.CategorySystemHealth
+	produced := categoriesProducedByInboxItems([]inbox.Item{{
+		Kind:     inbox.KindEscalation,
+		Category: overrideOnly,
+	}})
+
+	if !produced[overrideOnly] {
+		t.Fatalf("category %q is produced through inbox.Item.Category but discovery reported it unwired", overrideOnly)
+	}
+}
 
 // TestJournalBridgeNeverLoops is the safety property of the whole bridge.
 //
@@ -59,17 +83,17 @@ func TestObservationalCategoriesHaveAProducer(t *testing.T) {
 	for _, cat := range journalCategories {
 		produced[cat] = true
 	}
-	// The actionable half, from internal/notify's categoryByKind. Listed
-	// explicitly rather than reaching into that package's unexported map —
-	// notify's own test guards the inbox side.
-	for _, cat := range []string{
-		notify.CategoryAgentsApproval,
-		notify.CategoryAgentsEscalation,
-		notify.CategoryRoutinesFailed,
-		notify.CategoryChatReplies,
-		notify.CategoryMemory,
-		notify.CategoryRoutinesMissed,
-	} {
+
+	// Exercise the router's real category resolution for every canonical inbox
+	// kind. This discovers categoryByKind without maintaining a second copy of
+	// the map here. Include concrete producers that override their kind: the
+	// keeper alarm is an escalation item routed as system.health.
+	items := make([]inbox.Item, 0, len(inbox.AllKinds)+1)
+	for _, kind := range inbox.AllKinds {
+		items = append(items, inbox.Item{Kind: kind})
+	}
+	items = append(items, health.AlarmItem(health.Alarm{}))
+	for cat := range categoriesProducedByInboxItems(items) {
 		produced[cat] = true
 	}
 

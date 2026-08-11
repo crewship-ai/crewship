@@ -34,7 +34,9 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,10 +72,11 @@ type providerState struct {
 // provider with otel, and returns a shutdown func the caller must invoke
 // on process exit to flush the batch span processor.
 //
-// Endpoint resolution order:
-//  1. the explicit `endpoint` argument (most specific wins)
-//  2. OTEL_EXPORTER_OTLP_ENDPOINT env var
-//  3. empty string  ->  no-op tracer, nothing exported
+// Endpoint resolution is ResolveTracesEndpoint's — explicit argument, then
+// OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, then OTEL_EXPORTER_OTLP_ENDPOINT, then
+// nothing, which yields a no-op tracer. Callers that want to log where spans
+// are actually going should call ResolveTracesEndpoint themselves rather than
+// log what they configured; the two differ by the signal path.
 //
 // serviceName is required; it becomes the resource attribute
 // service.name and is the primary grouping in every collector UI. Passing
@@ -96,9 +99,7 @@ func Init(ctx context.Context, endpoint string, serviceName string) (func(), err
 		initState = nil
 	}
 
-	if endpoint == "" {
-		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	}
+	endpoint, _ = ResolveTracesEndpoint(endpoint)
 	if serviceName == "" {
 		serviceName = "crewship"
 	}
@@ -171,6 +172,73 @@ func Init(ctx context.Context, endpoint string, serviceName string) (func(), err
 	}
 	return shutdown, nil
 }
+
+// ResolveTracesEndpoint returns the exact URL spans will be POSTed to, and
+// whether tracing is configured at all. Exported so the caller can log the
+// resolved destination rather than the configured one — "endpoint=http://…"
+// with no path is precisely the log line that hid #1868 for a release.
+//
+// Precedence, matching the OpenTelemetry protocol-exporter spec:
+//
+//  1. the explicit argument — a Crewship-level override, treated as a base
+//     URL like the generic variable
+//  2. OTEL_EXPORTER_OTLP_TRACES_ENDPOINT — the full trace URL, used verbatim
+//  3. OTEL_EXPORTER_OTLP_ENDPOINT — a base URL shared by every signal, with
+//     the traces path appended
+//  4. nothing configured → ("", false), and Init installs a noop tracer
+func ResolveTracesEndpoint(explicit string) (string, bool) {
+	if v := strings.TrimSpace(explicit); v != "" {
+		return withTracesPath(v), true
+	}
+	// Signal-specific wins, and is the escape hatch for anyone whose
+	// collector serves traces somewhere the base-URL rule would not reach.
+	if v := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")); v != "" {
+		return v, true
+	}
+	if v := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")); v != "" {
+		return withTracesPath(v), true
+	}
+	return "", false
+}
+
+// withTracesPath turns a base collector URL into the traces URL.
+//
+// The spec is unambiguous that a base endpoint gets the signal path appended
+// — including when the base already has a path of its own, which is how a
+// project-scoped backend like Langfuse's `/api/public/otel` is meant to
+// resolve to `/api/public/otel/v1/traces`. We used to leave any path alone
+// and so never reached those backends at all; the collector answers 200 on
+// the prefix and drops the payload, which looks exactly like working.
+//
+// One deliberate deviation: a path that already ends in the traces segment
+// is left as-is rather than doubled. The spec would have us produce
+// `/v1/traces/v1/traces`, and someone who put the full URL in the generic
+// variable has a working deployment today. Silently breaking it is the very
+// failure this function exists to prevent, and
+// OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is the supported way to be explicit.
+//
+// A bare `host:port` is not a URL and is returned untouched — Init sends it
+// down the WithEndpoint branch, where the exporter supplies the path.
+func withTracesPath(raw string) string {
+	if !isURL(raw) {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		// Malformed input is the exporter's to reject, with its own message.
+		return raw
+	}
+	p := strings.TrimSuffix(u.Path, "/")
+	if strings.HasSuffix(p, tracesPath) {
+		u.Path = p
+		return u.String()
+	}
+	u.Path = p + tracesPath
+	return u.String()
+}
+
+// tracesPath is the OTLP/HTTP signal path for traces, fixed by the spec.
+const tracesPath = "/v1/traces"
 
 // isURL is a cheap heuristic — we only need to distinguish host:port from
 // http(s)://… so startswith is sufficient. Parsing is overkill here and

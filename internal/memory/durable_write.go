@@ -52,6 +52,60 @@ func WriteFileDurable(path string, content []byte, perm os.FileMode) error {
 	return writeFileDurable(path, content, perm)
 }
 
+// WriteFileDurableRoot is WriteFileDurable anchored to an already-open root.
+// Renaming the directory after the root is opened cannot redirect the write.
+func WriteFileDurableRoot(root *os.Root, name string, content []byte, perm os.FileMode) (err error) {
+	if root == nil {
+		return fmt.Errorf("durable root is nil")
+	}
+	var randBuf [8]byte
+	if _, rerr := rand.Read(randBuf[:]); rerr != nil {
+		return fmt.Errorf("rand for tempname: %w", rerr)
+	}
+	tmpName := name + ".tmp." + hex.EncodeToString(randBuf[:])
+	f, err := root.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	if err != nil {
+		return fmt.Errorf("open tempfile: %w", err)
+	}
+	cleanup := func() { _ = root.Remove(tmpName) }
+	if _, err = f.Write(content); err != nil {
+		_ = f.Close()
+		cleanup()
+		return fmt.Errorf("write tempfile: %w", err)
+	}
+	if err = f.Sync(); err != nil {
+		_ = f.Close()
+		cleanup()
+		return fmt.Errorf("fsync tempfile: %w", err)
+	}
+	if err = f.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close tempfile: %w", err)
+	}
+	if err = root.Rename(tmpName, name); err != nil {
+		cleanup()
+		return fmt.Errorf("atomic rename: %w", err)
+	}
+	dir, openErr := root.Open(filepath.Dir(name))
+	if openErr != nil {
+		return fmt.Errorf("open parent dir for fsync: %w", openErr)
+	}
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	if syncErr != nil {
+		return fmt.Errorf("fsync parent dir: %w", syncErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close parent dir: %w", closeErr)
+	}
+	return nil
+}
+
+// WriteFileNoFollow durably writes path while refusing an existing leaf symlink.
+func WriteFileNoFollow(path string, content []byte, perm os.FileMode) error {
+	return writeMemoryFileNoFollow(path, content, perm)
+}
+
 func writeFileDurable(path string, content []byte, perm os.FileMode) (err error) {
 	var randBuf [8]byte
 	if _, rerr := rand.Read(randBuf[:]); rerr != nil {

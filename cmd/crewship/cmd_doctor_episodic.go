@@ -71,6 +71,8 @@ func checkEpisodicRecallMode(ctx context.Context, serverURL string) checkResult 
 
 	var body struct {
 		Episodic string `json:"episodic"`
+		// Only present when the server has something wrong to report.
+		EpisodicError string `json:"episodic_error"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return checkResult{
@@ -86,6 +88,22 @@ func checkEpisodicRecallMode(ctx context.Context, serverURL string) checkResult 
 			name:   name,
 			status: "PASS",
 			detail: "vector + sparse recall (embedder configured, indexer running)",
+		}
+	case "vector-degraded":
+		// Worse than sparse-only, and deliberately louder. sparse-only is
+		// a choice that still serves keyword recall; this is an embedder
+		// that LOOKS configured, answers nothing, and grows no index —
+		// which on the stage slot meant 4032 failed index attempts in a
+		// day while this check reported PASS.
+		detail := "vector recall DEGRADED — embedder configured but its calls are failing; the index is not growing and recall is BM25-only"
+		if body.EpisodicError != "" {
+			detail += ": " + body.EpisodicError
+		}
+		return checkResult{
+			name:   name,
+			status: "FAIL",
+			detail: detail,
+			hint:   "check the Ollama host at KEEPER_OLLAMA_URL is reachable AND serving nomic-embed-text (`ollama pull nomic-embed-text`)",
 		}
 	case "sparse-only":
 		return checkResult{

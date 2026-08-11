@@ -25,7 +25,17 @@ type config struct {
 var frontmatter = regexp.MustCompile(`(?ms)^---\s*\n(.*?)\n---`)
 var titleLine = regexp.MustCompile(`(?m)^title:\s*["']?([^"'\n]+)`)
 var descriptionLine = regexp.MustCompile(`(?m)^description:\s*["']?([^"'\n]+)`)
+var stabilityLine = regexp.MustCompile(`(?m)^stability:\s*["']?([^"'\s]+)`)
+var tagLine = regexp.MustCompile(`(?m)^tag:\s*["']?([^"'\n]+)`)
 var llmsLink = regexp.MustCompile(`(?m)^- \[[^]]+\]\([^)]*\)`)
+
+var stabilityVocabulary = map[string]bool{
+	"stable":       true,
+	"early":        true,
+	"experimental": true,
+	"deprecated":   true,
+	"roadmap":      true,
+}
 
 // proseLink matches the two forms a page body uses to point at another page:
 // the Markdown target `](/guides/routines)` and the JSX attribute
@@ -38,6 +48,36 @@ var proseLink = regexp.MustCompile(`\]\((/[^)\s]*)\)|href=["'](/[^"']*)["']`)
 // codeFence matches the opening or closing line of a fenced block, indented or
 // not. Mintlify accepts both fence characters.
 var codeFence = regexp.MustCompile("^\\s*(?:```|~~~)")
+
+type deprecatedTerm struct {
+	spelling    string
+	replacement string
+	pattern     *regexp.Regexp
+}
+
+var deprecatedTerms = []deprecatedTerm{
+	{spelling: "COORDINATOR", replacement: "LEAD", pattern: regexp.MustCompile(`(?i)\bcoordinator\b`)},
+}
+
+var allowedDeprecatedOccurrences = map[string][]string{
+	"docs/concepts.mdx": {
+		"| **`COORDINATOR`** | **`LEAD`** |",
+		"Published prose must not introduce `COORDINATOR` outside this replacement record",
+	},
+	"docs/manifest/agent.md": {
+		"LEAD | AGENT | COORDINATOR (server default: AGENT)",
+		"One of `LEAD` \\| `AGENT` \\| `COORDINATOR`.",
+		"**`COORDINATOR` is effectively unsupported — prefer `AGENT`/`LEAD`**",
+		"**`COORDINATOR` is asymmetric — and effectively unsupported.**",
+		"still admits `COORDINATOR`, but:",
+		"`COORDINATOR` survives in the",
+	},
+	"docs/manifest/workspace.md": {
+		"`COORDINATOR` is rejected in the nested form",
+		"**`COORDINATOR` is not valid in nested bundles.**",
+		"accepts `COORDINATOR` in its own front-end validator",
+	},
+}
 
 func main() {
 	root := flag.String("root", ".", "repository root")
@@ -56,6 +96,14 @@ func main() {
 	}
 	total, good, bad := descriptionQuality(*root)
 	fmt.Printf("docs-surface-check: description quality %d/%d good, %d restate their title\n", good, total, bad)
+	stabilityIssues, stabilityPages, err := documentationStability(*root)
+	if err != nil {
+		fail(err)
+	}
+	if len(stabilityIssues) > 0 {
+		fail(fmt.Errorf("documentation stability labels invalid:\n  %s", strings.Join(stabilityIssues, "\n  ")))
+	}
+	fmt.Printf("docs-surface-check: stability labels %d/%d valid\n", stabilityPages, stabilityPages)
 	if cfg.Contextual == nil || len(cfg.Contextual.Options) == 0 {
 		fail(fmt.Errorf("docs/docs.json must declare contextual.options"))
 	}
@@ -89,6 +137,19 @@ func main() {
 		fail(fmt.Errorf("dead internal links in prose (no such page in the docs tree):\n  %s", strings.Join(offenders, "\n  ")))
 	}
 	fmt.Printf("docs-surface-check: internal prose links %d checked, 0 dead\n", checkedLinks)
+
+	deprecated, err := deprecatedTerminologyInDocs(*root)
+	if err != nil {
+		fail(err)
+	}
+	if len(deprecated) > 0 {
+		offenders := make([]string, 0, len(deprecated))
+		for _, use := range deprecated {
+			offenders = append(offenders, fmt.Sprintf("%s uses %s; use %s", use.page, use.spelling, use.replacement))
+		}
+		fail(fmt.Errorf("deprecated terminology in published docs:\n  %s", strings.Join(offenders, "\n  ")))
+	}
+	fmt.Printf("docs-surface-check: deprecated terminology 0 uses across %d denied spelling(s)\n", len(deprecatedTerms))
 
 	served, err := checkServed(*baseURL, len(declared))
 	if err != nil {
@@ -208,11 +269,116 @@ func fetch(url string) (string, error) {
 	return string(body), err
 }
 
+// documentationStability verifies the release contract carried by every MDX
+// page. Keeping the vocabulary here makes an unknown label a build failure
+// instead of an unrendered typo that silently invents a sixth tier.
+func documentationStability(root string) ([]string, int, error) {
+	docs := filepath.Join(root, "docs")
+	issues := []string{}
+	pages := 0
+	err := filepath.WalkDir(docs, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".mdx" {
+			return nil
+		}
+		pages++
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		match := frontmatter.FindSubmatch(body)
+		if len(match) < 2 {
+			issues = append(issues, filepath.ToSlash(rel)+": missing frontmatter and stability label")
+			return nil
+		}
+		label := stabilityLine.FindSubmatch(match[1])
+		if len(label) < 2 {
+			issues = append(issues, filepath.ToSlash(rel)+": missing stability label")
+			return nil
+		}
+		value := strings.ToLower(string(label[1]))
+		if !stabilityVocabulary[value] {
+			issues = append(issues, fmt.Sprintf("%s: invalid stability label %q", filepath.ToSlash(rel), value))
+			return nil
+		}
+		tag := tagLine.FindSubmatch(match[1])
+		if len(tag) < 2 {
+			issues = append(issues, filepath.ToSlash(rel)+": missing rendered stability tag")
+			return nil
+		}
+		if strings.ToLower(strings.TrimSpace(string(tag[1]))) != value {
+			issues = append(issues, fmt.Sprintf("%s: rendered tag %q does not match stability %q", filepath.ToSlash(rel), strings.TrimSpace(string(tag[1])), value))
+		}
+		return nil
+	})
+	sort.Strings(issues)
+	return issues, pages, err
+}
+
 // deadLink is one internal link whose target is not a page in the docs tree:
 // the page that has to be edited, and the target as it is written there.
 type deadLink struct {
 	page   string
 	target string
+}
+
+type deprecatedTermUse struct {
+	page        string
+	spelling    string
+	replacement string
+}
+
+func deprecatedTerminologyInDocs(root string) ([]deprecatedTermUse, error) {
+	docsRoot := filepath.Join(root, "docs")
+	offenders := []deprecatedTermUse{}
+	err := filepath.Walk(docsRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if path == filepath.Join(docsRoot, "prd") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".mdx") && !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		page := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		text := string(body)
+		for _, allowed := range allowedDeprecatedOccurrences[page] {
+			// Remove only the exact reviewed compatibility wording. Any extra
+			// deprecated term on the same page — even on the same line — stays
+			// in text and is reported below.
+			text = strings.Replace(text, allowed, "", 1)
+		}
+		for _, term := range deprecatedTerms {
+			if term.pattern.MatchString(text) {
+				offenders = append(offenders, deprecatedTermUse{page: page, spelling: term.spelling, replacement: term.replacement})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(offenders, func(i, j int) bool {
+		if offenders[i].page != offenders[j].page {
+			return offenders[i].page < offenders[j].page
+		}
+		return offenders[i].spelling < offenders[j].spelling
+	})
+	return offenders, nil
 }
 
 // brokenProseLinks resolves every internal link written inside a page body

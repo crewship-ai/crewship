@@ -33,7 +33,7 @@ func TestPromoteProposalSkills_PureBridge(t *testing.T) {
 		"high recall but low score": {Composite: 0.60, RecallCount: 30, Promoted: false},
 	}
 
-	paths := c.promoteProposalSkills(rules, scores, tmp, time.Now())
+	paths := c.promoteProposalSkills(rules, scores, "", tmp, time.Now())
 	if len(paths) != 1 {
 		t.Fatalf("want exactly 1 promoted skill, got %d: %v", len(paths), paths)
 	}

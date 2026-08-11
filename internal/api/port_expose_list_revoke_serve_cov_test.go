@@ -198,8 +198,10 @@ func TestCovPERevoke_SuccessWithHubBroadcast(t *testing.T) {
 	covPESeedExposure(t, db, "pe1", "ws1", "crew1", "agent1", "tok-live", "ACTIVE", nil)
 	hub := ws.NewHub(portExposeTestLogger(), nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	h := covPEHandler(t, db, nil, hub)
-	// Plant the token in the registry so the Remove branch executes.
-	h.registry.Add(&ExposeEntry{Token: "tok-live", ContainerIP: "10.0.0.5", ContainerPort: 3000, ExpiresAt: time.Now().Add(time.Hour)})
+	// Plant the token in the registry so the Remove branch executes. ID is
+	// set because every production writer sets it and revoke removes by it
+	// when the row carries no digest (see TestRevoke_DropsEntryWhenTheRowHasNoDigest).
+	h.registry.Add(&ExposeEntry{ID: "pe1", Token: "tok-live", ContainerIP: "10.0.0.5", ContainerPort: 3000, ExpiresAt: time.Now().Add(time.Hour)})
 
 	rec := httptest.NewRecorder()
 	h.Revoke(rec, covPERevokeReq("ws1", "ADMIN", "crew1", "pe1", `{"reason":"done testing"}`))

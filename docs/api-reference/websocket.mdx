@@ -2,6 +2,8 @@
 title: "WebSocket"
 description: "Real-time channels for log streaming, chat, events, and live updates."
 icon: "signal"
+stability: experimental
+tag: Experimental
 ---
 
 Crewship pushes real-time updates — log streaming, chat token streams, and entity-change events — over a single token-authenticated WebSocket. Clients subscribe to typed channels (`workspace:{id}`, `session:{chatId}`, …); the server validates each subscription against database membership and fans state changes out to the subscribers. Most dashboard state arrives on the `workspace` channel, while a few high-fanout streams (chat, mission detail, files) use narrower channels.

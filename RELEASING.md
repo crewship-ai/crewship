@@ -335,16 +335,25 @@ Target cadence in pre-1.0:
 
 ## Stability tiers (per-feature, in addition to the version)
 
-Inside a release, individual features carry one of three labels in
-their docs:
+Inside a release, every documentation page carries one of five labels. The
+label is stored as `stability` frontmatter and rendered beside the page title
+through Mintlify's `tag` metadata:
 
 - **stable** — frozen surface; only backwards-compatible changes in
   patches.
-- **beta** — usable, but the contract may shift in minor bumps.
+- **early** — available and supported, but the contract may shift in minor
+  releases.
 - **experimental** — research preview; do not build production
   workflows on it.
+- **deprecated** — still available for compatibility, with a documented
+  replacement and removal path.
+- **roadmap** — planned or documented for orientation, but not part of the
+  shipped product contract.
 
-The Crew Journal, Paymaster, Lookout, Harbormaster, and Backup ship
-as **stable** in v0.1.0-beta.1. Episodic memory and Consolidate ship as
-**experimental** (packages exist, auto-wiring lands in v0.2). The full
-matrix is in [docs/production-checklist.mdx](docs/production-checklist.mdx).
+`early` replaces the former per-feature label `beta`; `beta` remains a valid
+SemVer release-channel name, but is not a feature-stability label. The Crew
+Journal, Paymaster, Lookout, Harbormaster, and Backup ship as **stable** in
+v0.1.0-beta.1. Episodic memory and Consolidate ship as **experimental**
+(packages exist, auto-wiring lands in v0.2). The full matrix and the policy for
+pages that cover more than one feature are in
+[docs/production-checklist.mdx](docs/production-checklist.mdx#stability-matrix).

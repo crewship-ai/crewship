@@ -2051,6 +2051,13 @@ END;
 	// new number is a timestamp, which is the whole point of the scheme.
 	// See migrate_consts_notify_taxonomy.go.
 	{version: 20260728110100, name: "notify_taxonomy", fn: migrationNotifyTaxonomy},
+
+	// Standing approval grants: a gate the operator has waved through
+	// repeatedly can be trusted to stop asking. Bound to the routine's
+	// definition_hash, so editing the routine revokes the grant by
+	// construction rather than by a watcher.
+	// See migrate_consts_trust_grants.go.
+	{version: 20260809120000, name: "waitpoint_trust_grants", sql: migrationWaitpointTrustGrants},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -295,6 +295,14 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"pipeline_waitpoints": IntentInclude,
 	"pipeline_webhooks":   IntentInclude,
 	"pipelines":           IntentInclude,
+	// waitpoint_trust_grants = standing "stop asking me" decisions an
+	// operator made on a specific gate. Durable governance state, not
+	// runtime: dropping these on restore silently re-arms every gate the
+	// operator deliberately disarmed, and the restored instance starts
+	// blocking runs that used to flow. Restoring them is safe because
+	// each is pinned to a definition_hash — if the routine's definition
+	// did not survive the restore identically, the grant matches nothing.
+	"waitpoint_trust_grants": IntentInclude,
 	// routine_step_overrides = per-step prompt/model overrides (v123);
 	// run_tags = per-run labels (v122). Both durable workspace state.
 	"routine_step_overrides": IntentInclude,

@@ -203,6 +203,48 @@ func TestMemoryImport_RefusesTraversal(t *testing.T) {
 	}
 }
 
+func TestHostPlacerRefusesExistingLeafSymlink(t *testing.T) {
+	root, staging := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(staging, "AGENT.md"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("sentinel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "AGENT.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := (hostPlacer{root: root}).Place(context.Background(), staging, []string{"AGENT.md"}); err == nil {
+		t.Fatal("placer followed an existing leaf symlink")
+	}
+	got, _ := os.ReadFile(outside)
+	if string(got) != "sentinel" {
+		t.Fatalf("outside file changed: %q", got)
+	}
+}
+
+func TestHostPlacerRefusesTraversal(t *testing.T) {
+	stagingParent := t.TempDir()
+	staging := filepath.Join(stagingParent, "staging")
+	if err := os.Mkdir(staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stagingParent, "secret.md"), []byte("outside staging"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	destinationParent := t.TempDir()
+	root := filepath.Join(destinationParent, "memory")
+	err := (hostPlacer{root: root}).Place(context.Background(), staging, []string{"../secret.md"})
+	if _, err := os.Stat(filepath.Join(destinationParent, "secret.md")); !os.IsNotExist(err) {
+		t.Fatalf("traversal created a destination outside root: %v", err)
+	}
+	if err == nil {
+		t.Fatal("hostPlacer accepted a path outside staging and destination roots")
+	}
+}
+
 // Foreign memory is scanned for prompt injection on the way in, like
 // every other memory write. Without it the load-time scan blanks the
 // whole tier at the next run while the payload sits in the FTS index.
@@ -395,6 +437,21 @@ func TestTarStagedDocsShape(t *testing.T) {
 	}
 	if bodies["AGENT.md"] != "knowledge\n" {
 		t.Errorf("body = %q", bodies["AGENT.md"])
+	}
+}
+
+func TestTarStagedDocsRefusesTraversal(t *testing.T) {
+	parent := t.TempDir()
+	staging := filepath.Join(parent, "staging")
+	if err := os.Mkdir(staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "outside.md"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := tarStagedDocs(staging, []string{"../outside.md"}); err == nil {
+		t.Fatal("tarStagedDocs accepted a path outside staging")
 	}
 }
 

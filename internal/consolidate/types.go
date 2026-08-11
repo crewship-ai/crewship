@@ -45,6 +45,17 @@ type Config struct {
 	MinEntries  int           // skip LLM if fewer than this many candidate entries; default 10
 	LLMModel    string        // model identifier passed to the summarizer; informational
 	OutputDir   string        // where learned-YYYY-MM-DD.md is written
+	// OutputRoot is the trusted storage root beneath which OutputDir may be
+	// created. Production wiring sets it to StorageBasePath. Empty means the
+	// caller supplied an already-existing, trusted OutputDir (primarily tests).
+	OutputRoot string
+
+	// afterProposedDirValidated is a test seam for deterministic directory-swap
+	// attacks between validation and the first staged write.
+	afterProposedDirValidated func()
+	// afterProposedRootOpened swaps the pathname after its directory handle is
+	// anchored, proving later operations use the handle rather than the name.
+	afterProposedRootOpened func()
 
 	// ProposalMode flips the consolidator to HITL-staging behaviour.
 	// When true:

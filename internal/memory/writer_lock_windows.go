@@ -40,6 +40,48 @@ func (l *writeLock) Lock() error {
 	return nil
 }
 
+// Lock acquires an exclusive lock beneath the opened root.
+func (l *RootFileLock) Lock() error {
+	if l.root == nil {
+		return fmt.Errorf("open lockfile: root is nil")
+	}
+	f, err := l.root.OpenFile(l.name, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open lockfile: %w", err)
+	}
+	var ol windows.Overlapped
+	if err := windows.LockFileEx(
+		windows.Handle(f.Fd()),
+		windows.LOCKFILE_EXCLUSIVE_LOCK,
+		0, 0xFFFFFFFF, 0xFFFFFFFF, &ol,
+	); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("LockFileEx: %w", err)
+	}
+	l.f = f
+	return nil
+}
+
+// Unlock releases the root-anchored lock and closes its fd.
+func (l *RootFileLock) Unlock() error {
+	if l.f == nil {
+		return nil
+	}
+	var ol windows.Overlapped
+	var firstErr error
+	if err := windows.UnlockFileEx(
+		windows.Handle(l.f.Fd()),
+		0, 0xFFFFFFFF, 0xFFFFFFFF, &ol,
+	); err != nil {
+		firstErr = err
+	}
+	if err := l.f.Close(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	l.f = nil
+	return firstErr
+}
+
 // Unlock releases the lock and closes the underlying fd. Idempotent.
 // Must release the same byte range that Lock acquired.
 func (l *writeLock) Unlock() error {

@@ -57,6 +57,14 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// net/http's matcher, so no ordering hazard.
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve", roleCreate, pipes.Approve)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject", roleCreate, pipes.Reject)
+	// Standing approval grants: a gate the operator keeps waving through
+	// can be told to stop asking. MANAGER+ to grant or revoke — the same
+	// bar as approving the routine itself — while the list is readable by
+	// anyone who can see the routine, because "which gates are disarmed"
+	// is not a secret from the people whose work flows through them.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust", authed(wsCtx(http.HandlerFunc(pipes.ListTrustGrants))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust", roleCreate, pipes.GrantTrust)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust/{grantId}", roleCreate, pipes.RevokeTrust)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable", roleManage, pipes.Disable)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable", roleManage, pipes.Enable)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))

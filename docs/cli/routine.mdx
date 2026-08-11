@@ -2,6 +2,8 @@
 title: "Routine Commands"
 description: "Manage workspace routines — declarative AI workflow recipes with cron + webhook triggers, two-tier execution, HITL waitpoints, and immutable version history."
 icon: "scroll"
+stability: experimental
+tag: Experimental
 ---
 
 # crewship routine
@@ -1379,7 +1381,8 @@ crewship routine webhooks create \
 
 ### `webhooks url <id>`
 
-Print the public URL without re-revealing the signing secret.
+Print the public URL without re-revealing the signing secret. Fails if the
+token is no longer retrievable — see below.
 
 ## `crewship routine webhooks url <webhook_id>`
 
@@ -1399,6 +1402,16 @@ crewship routine webhooks url wh_abc123 --base-url https://crewship.example.com
 The default base URL comes from the configured server (or
 `CREWSHIP_SERVER`); the printed value is `<base-url>/api/v1/webhooks/<escaped-token>`.
 If the ID is not found, the command exits with `webhook <id> not found`.
+
+<Warning>
+**Since tokens are hashed at rest (#1888), this command only works for webhooks
+whose token the server still returns.** The token is shown **once**, in the
+`create` response — the list endpoint this command reads returns an empty one.
+When that is the case the command **fails and exits non-zero**, naming the
+delete + create pair that mints a new token, rather than printing
+`…/api/v1/webhooks/` with nothing after the slash. Copy the URL at create time;
+a lost token cannot be recovered, only replaced.
+</Warning>
 
 ### `webhooks delete <id>`
 
@@ -1437,6 +1450,62 @@ crewship routine waitpoints reject  wpt_abc123 --comment "needs revision"
 ```
 
 The decision comment is forwarded to the parked run as the wait step's output, so downstream steps can read approval rationale via `{{ steps.<wait_step_id>.output }}`.
+
+---
+
+## `crewship routine trust`
+
+Manage standing approval grants — the answer to "I have approved this same gate twenty times".
+
+A grant is scoped to **one gate of one routine** and pinned to that routine's current definition hash. Editing the routine moves the hash, so no grant matches and the gate asks again. A grant never becomes a silent path: when it fires it writes an ordinary approved waitpoint attributed to the operator who granted it.
+
+MANAGER+ is required to grant or revoke. Listing is readable by anyone who can see the routine.
+
+### `trust list <slug>`
+
+```bash
+crewship routine trust list triage-inbound-issue
+crewship routine trust list triage-inbound-issue --format json
+```
+
+**Output columns:** GRANT ID, STEP, STATE, USES, GRANTED, DEFINITION, REASON
+
+`STATE` is `live` (still firing), `revoked` (somebody withdrew it), or `spent` (expired or out of uses). A `DEFINITION` marked `(stale)` belongs to a routine body that has since changed — the grant is already inert.
+
+Revoked grants stay in the list on purpose: the audit question is *who trusted this gate and who took it back*, which a live-only list cannot answer.
+
+### `trust grant <slug> --step <step_id>`
+
+```bash
+crewship routine trust grant triage-inbound-issue \
+  --step review --reason "approved 12x, verdicts identical"
+
+# Bounded variants, when "forever" is too strong
+crewship routine trust grant triage-inbound-issue --step review --max-uses 20
+crewship routine trust grant triage-inbound-issue --step review --expires 2026-12-31T00:00:00Z
+```
+
+| Flag | Description |
+|------|-------------|
+| `--step` | Step id of the `wait:approval` gate (**required** — trust is per gate, not per routine) |
+| `--reason` | Why this gate no longer needs a human. Kept in the audit trail |
+| `--max-uses` | Auto-approve at most N times, then ask again (default: unlimited) |
+| `--expires` | RFC3339 instant after which the grant stops firing. An instant already in the past is rejected — that grant could never fire |
+| `--prior-approvals` | How many manual approvals earned this grant (audit) |
+
+A second grant for the same gate and definition returns `409` rather than resetting the existing grant's use counter.
+
+<Note>
+When the governing crew is at `autonomy_level: strict`, standing grants are ignored entirely — strict means every governable action reaches an operator, regardless of what has been granted. The governing crew is the routine's **author** crew (a routine runs in its author's context), or the invoking crew on a cross-crew invocation.
+</Note>
+
+### `trust revoke <slug> <grant-id>`
+
+```bash
+crewship routine trust revoke triage-inbound-issue wtg_ab12cd34 --reason "policy review"
+```
+
+The gate blocks again on the next run. The grant row is kept and marked, not deleted.
 
 ---
 

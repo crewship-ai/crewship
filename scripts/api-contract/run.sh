@@ -212,6 +212,26 @@ scope_args=(
   --exclude-path-regex "$NON_JSON_PATH_REGEX"
 )
 
+# Do not grade negatives that Schemathesis builds by removing a security
+# parameter. They were 151 of this gate's 267 findings — 57% of the backlog
+# behind #1815 — and every one of them was invented.
+#
+# 525 of 538 operations declare three ALTERNATIVE security requirement
+# objects (`bearerAuth` | `sessionCookie` | `secureSessionCookie`), which is
+# OR and is a correct description of an API accepting either a bearer token
+# or a session cookie. schemathesis.toml supplies our credential as a raw
+# `Authorization` header, though, so Schemathesis cannot connect it to
+# `bearerAuth`; it drops `__Secure-authjs.session-token`, expects a 4xx, and
+# gets 200 from a request that still carries the bearer token it does not
+# know about. That is a gap in what the tool can see, not in what the API
+# does — the spec is right and the server is right.
+#
+# It costs no coverage. Unauthenticated and invalid-token behaviour belongs
+# to the `auth` phase, which returns above without ever invoking
+# Schemathesis. Asserted in scripts/api-contract-gate-test.sh so the flag
+# cannot be dropped without a named failure.
+security_negative_args=(--generation-with-security-parameters false)
+
 # Client-side pacing, at the call site for the same reason the method
 # deny-list is: a live instance must not be out-run by its own contract
 # check. The default matches the server's shipped `http.api_per_min`
@@ -261,6 +281,7 @@ fi
 ${deadline_args[@]+"${deadline_args[@]}"} \
   schemathesis --config-file "$SCRIPT_DIR/schemathesis.toml" run \
   "$SCHEMA_FILE" "${phase_args[@]}" "${safe_method_args[@]}" "${scope_args[@]}" \
+  "${security_negative_args[@]}" \
   ${rate_limit_args[@]+"${rate_limit_args[@]}"} \
   --max-examples 10 \
   --report junit --report-junit-path "$JUNIT_FILE" \

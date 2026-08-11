@@ -24,7 +24,7 @@ func newQueryHandler(t *testing.T) (*QueryHandler, string, string, string, strin
 		logger:            logger,
 		internalToken:     "tok",
 		journal:           noopEmitter{},
-		escalationWaiters: make(map[string]chan escalationResult),
+		escalationWaiters: make(map[string][]chan escalationResult),
 	}
 	return h, userID, wsID, crewID, leadID, workerID
 }
@@ -248,7 +248,7 @@ func TestEscalation_List(t *testing.T) {
 func TestEscalation_Waiter_RegisterNotifyRemove(t *testing.T) {
 	h := &QueryHandler{
 		escalationMu:      sync.Mutex{},
-		escalationWaiters: make(map[string]chan escalationResult),
+		escalationWaiters: make(map[string][]chan escalationResult),
 	}
 	ch := h.registerEscalationWaiter("e1")
 	go h.notifyEscalationWaiter("e1", escalationResult{Resolution: "ok"})
@@ -409,7 +409,7 @@ func newStandupHandler(t *testing.T) (*QueryHandler, string, string, string, str
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	userID, wsID, crewID, leadID, _ := seedIssueFixtures(t, db)
-	h := &QueryHandler{db: db, hub: nil, logger: logger, journal: noopEmitter{}, escalationWaiters: make(map[string]chan escalationResult)}
+	h := &QueryHandler{db: db, hub: nil, logger: logger, journal: noopEmitter{}, escalationWaiters: make(map[string][]chan escalationResult)}
 	return h, userID, wsID, crewID, leadID
 }
 

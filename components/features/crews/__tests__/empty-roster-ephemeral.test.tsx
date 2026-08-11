@@ -2,6 +2,16 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react"
 import { EmptyRoster } from "../empty-roster"
 
+// The avatar background-backfill is a fire-and-forget PUT that AgentAvatar
+// fires from a useEffect for any agent without a stored render. It is not what
+// this file tests, and unmocked it is a real socket: vitest.setup.ts now fails
+// the test rather than letting an ECONNREFUSED disappear into the noise.
+vi.mock("@/lib/agent-avatar-persist", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/agent-avatar-persist")>()),
+  queueAvatarBackfill: vi.fn(),
+}))
+
+
 const crews = [{ id: "crew_ops", slug: "ops", name: "Ops" }]
 
 function agent(over: Record<string, unknown>) {

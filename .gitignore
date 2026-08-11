@@ -71,6 +71,13 @@ crewship.db.pre-migrate-*
 *.sqlite
 *.sqlite3
 
+# Pre-migration snapshots. internal/database/backup_pre_migrate.go writes
+# "<db>.pre-migrate-v<from>-to-v<to>-<ts>.bak" next to the database, which on
+# a dev clone is this directory. The suffix is .bak, not .db, so the rules
+# above never covered it — one snapshot reached main at 7.5 MB before anyone
+# noticed.
+*.bak
+
 # Go
 /crewship
 /crewshipd

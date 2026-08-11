@@ -2,6 +2,8 @@
 title: "Workspaces"
 description: "Manage workspaces -- the top-level tenant boundary that owns crews, members, invitations, skills, pipelines, schedules, and webhooks."
 icon: "building"
+stability: experimental
+tag: Experimental
 ---
 
 {/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
@@ -119,6 +121,8 @@ Returns every workspace the authenticated user belongs to, ordered by `created_a
 | `currentUserCapabilities` | string[] | Resolved capabilities for the caller. |
 | `allow_privileged_credentials` | boolean | Whether privileged crew sidecars may load workspace credentials. |
 | `run_retention_days` | integer? | Workspace pipeline-run retention override; `null` uses the instance default. Present on Update responses. |
+| `credential_audit_retention_days` | integer? | Days of `credential_audit` history to keep. `null` uses the 90-day default; `0` means keep forever. Present on Update responses. |
+| `audit_log_retention_days` | integer? | Days of `audit_logs` history to keep. `null` **and** `0` both mean keep forever — that is the default, because `audit_logs` is the compliance trail. Present on Update responses. |
 | `_count` | object | Canonical nested usage counts: `{ crews, agents, members }`. Always present (zeros included). Prefer this over the flat keys below. |
 | `_count_crews` | integer | Deprecated flat alias for `_count.crews` (omitted when `0`; retained one release for back-compat) |
 | `_count_agents` | integer | Deprecated flat alias for `_count.agents` (omitted when `0`) |
@@ -190,6 +194,16 @@ Partial update -- only provided fields are changed. Setting `preferred_language`
 | `preferred_language` | string | Canonical name or ISO code; empty string clears the field |
 | `allow_privileged_credentials` | boolean | Explicitly allow credentials in privileged crew sidecars. |
 | `run_retention_days` | integer | Positive retention override in days. |
+| `credential_audit_retention_days` | integer | Days to keep `credential_audit`. `0` is legal and means keep forever. Negative is rejected. |
+| `audit_log_retention_days` | integer | Days to keep `audit_logs`. `0` is legal and means keep forever. Negative is rejected. |
+
+<Note>
+`0` behaves differently on the two audit windows than on `run_retention_days`,
+which rejects it. For an audit table, "keep this forever" is a retention
+decision an operator has to be able to express — so `null` means "use the
+product default" and `0` means an explicit never-delete. See
+[Migrations — 20260810170000](/guides/migrations).
+</Note>
 
 **Response:** `200 OK` -- updated workspace object.
 

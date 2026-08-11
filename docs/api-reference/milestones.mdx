@@ -2,6 +2,8 @@
 title: "Milestones"
 description: "Project milestones — named, dated checkpoints with issue rollup counts. List and create are nested under projects; update and delete take the milestone id directly."
 icon: "flag"
+stability: experimental
+tag: Experimental
 ---
 
 A milestone is a named checkpoint inside a project — typically a release target, a deadline, or a logical chunk of work. Each milestone tracks an issue rollup (`issue_count`, `done_count`) so the FE can render burn-down without a separate query. List and create are nested under the owning project; update and delete address the milestone id directly.
