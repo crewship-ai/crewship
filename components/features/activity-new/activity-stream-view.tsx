@@ -791,6 +791,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                   workspaceId={workspaceId}
                   identifier={openIssue.label}
                   chains={chains}
+                  onOpenWorkflow={selectChain}
                 />
               )}
 

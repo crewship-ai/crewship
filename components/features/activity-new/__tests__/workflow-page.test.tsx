@@ -148,7 +148,17 @@ describe("WorkflowPage", () => {
     expect(apiFetch.mock.calls[0][0]).toContain(
       `/api/v1/chains/${encodeURIComponent(CHAIN.origin)}`,
     )
-    expect(screen.getByTestId("topology")).toHaveTextContent(CHAIN.origin)
+    // The graph is opt-in — on a four-node chain the canvas is empty grid over
+    // a list that already places the same four things — so the assertion opens
+    // it. What is being pinned is the ANCHOR, not where the card sits.
+    fireEvent.click(await screen.findByRole("button", { name: /show it as a graph/i }))
+    expect(await screen.findByTestId("topology")).toHaveTextContent(CHAIN.origin)
+  })
+
+  it("does not draw the graph until it is asked for", async () => {
+    renderPage()
+    await screen.findByText("file a follow-up when an issue closes")
+    expect(screen.queryByTestId("topology")).toBeNull()
   })
 
   it("puts what happened on the screen in the order the shaper decided", async () => {

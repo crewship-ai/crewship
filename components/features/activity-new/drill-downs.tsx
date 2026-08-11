@@ -28,7 +28,6 @@ import { Bot, CircleDot, Clock, ListTree, Terminal } from "lucide-react"
 import { Appear, DetailCard, EmptyState, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
 import { Spinner } from "@/components/ui/spinner"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { IssueDetailSurface } from "@/components/features/issues/issue-detail-surface"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
 import { formatDurationMs } from "@/lib/activity-stream"
@@ -51,20 +50,24 @@ export interface IssueDrillDownProps {
   identifier: string
   /** Chains that touched it, for the strip and the "who did this" line. */
   chains: ChainSummary[]
+  onOpenWorkflow: (origin: string) => void
 }
 
 /**
- * One issue, in full.
+ * What HAPPENED to an issue. Not the issue.
  *
- * IssueDetailSurface is the component /issues renders, unchanged and read-only
- * here. Rendering a smaller copy would be a second place for an issue to be
- * drawn, and the two would drift the first time somebody adds a field.
+ * The first version of this embedded IssueDetailSurface — the whole /issues
+ * page: description, comments, relations, sub-issues, pickers. That was an
+ * over-correction from the version before it, which showed nothing at all, and
+ * it is the wrong object. This is the Activity bar. It answers "what happened",
+ * and the detail is one click away by a button that says so.
  *
- * Read-only on purpose: this is an observability surface. A reader who wants to
- * change the issue should be on the page that owns it, and the surface links
- * there. Editing in two places is how two people overwrite each other.
+ * Two people would also then be editing an issue from two places, which is how
+ * they overwrite each other — but that is the second reason, not the first. The
+ * first is that a reader who came here wanting the issue's body would have gone
+ * to /issues.
  */
-export function IssueDrillDown({ workspaceId, identifier, chains }: IssueDrillDownProps) {
+export function IssueDrillDown({ workspaceId, identifier, chains, onOpenWorkflow }: IssueDrillDownProps) {
   // Which chains reached this issue. The strip's numbers come from the same
   // ChainSummary[] the rail lists, so they cannot disagree with the row that
   // led here.
@@ -90,15 +93,76 @@ export function IssueDrillDown({ workspaceId, identifier, chains }: IssueDrillDo
     },
   ]
 
+  void workspaceId
+
   return (
     <Shell>
+      <Appear order={0}>
+        <div className="flex flex-wrap items-center gap-2">
+          <CircleDot className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <h1 className="min-w-0 font-mono text-base font-semibold tracking-tight">{identifier}</h1>
+          {created && <Pill tone="success">created here</Pill>}
+          <a
+            href={`/issues/${encodeURIComponent(identifier)}`}
+            className="ml-auto rounded-md border border-white/[0.08] px-2 py-1 text-[11px] text-primary transition-colors hover:bg-white/[0.04]"
+          >
+            Open issue ↗
+          </a>
+        </div>
+      </Appear>
+
       {/* What Activity knows that /issues does not: which processes reached
           this issue, and which agent did the reaching. */}
-      <Appear order={0}>
+      <Appear order={1}>
         <StatStrip items={stats} />
       </Appear>
-      <Appear order={1}>
-        <IssueDetailSurface workspaceId={workspaceId} identifier={identifier} editable={false} />
+
+      <Appear order={2}>
+        <DetailCard
+          title="What reached it"
+          subtitle={`${touching.length} ${touching.length === 1 ? "workflow" : "workflows"}`}
+        >
+          {touching.length === 0 ? (
+            <EmptyState
+              icon={CircleDot}
+              title="Nothing reached it in this window"
+              description="Widen the range, or open the issue for its own history."
+            />
+          ) : (
+            <div className="flex flex-col">
+              {touching.map((c) => {
+                const mine = (c.issues ?? []).find((i) => i.identifier === identifier || i.id === identifier)
+                const who = (c.agents ?? []).map((a) => a.name || a.slug || a.id)
+                return (
+                  <button
+                    key={c.origin}
+                    type="button"
+                    onClick={() => onOpenWorkflow(c.origin)}
+                    className="grid grid-cols-[8px_1fr_auto_auto] items-center gap-3 rounded-md px-1.5 py-2 text-left text-[11.5px] transition-colors hover:bg-white/[0.03]"
+                  >
+                    <span
+                      aria-hidden
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: `var(${c.failed ? "--destructive" : "--success"})` }}
+                    />
+                    <span className="min-w-0 truncate">
+                      {c.routine_slug || c.started_by}
+                      {who.length > 0 && (
+                        <span className="text-muted-foreground-soft"> → {who.join(", ")}</span>
+                      )}
+                    </span>
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground-soft">
+                      {mine?.created ? "created" : "changed"}
+                    </span>
+                    <span className="w-16 shrink-0 text-right font-mono text-[10px] text-muted-foreground-soft">
+                      {relTime(c.last_activity)}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </DetailCard>
       </Appear>
     </Shell>
   )

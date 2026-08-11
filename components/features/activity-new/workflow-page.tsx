@@ -36,6 +36,7 @@ import {
   Clock,
   Inbox,
   ListTree,
+  Network,
   ScrollText,
   TriangleAlert,
   Zap,
@@ -112,6 +113,8 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [attempt, setAttempt] = React.useState(0)
+  // The picture is opt-in. See the toggle for why.
+  const [showGraph, setShowGraph] = React.useState(false)
 
   const anchor = chain.origin
 
@@ -301,18 +304,8 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
         </DashboardCard>
       </Appear>
 
-      {/* ── 3. How it happened ────────────────────────────────────── */}
+      {/* ── 3. What happened, in sequence ─────────────────────────── */}
       <Appear order={3}>
-        <TopologyCard
-          workspaceId={workspaceId}
-          anchor={anchor}
-          anchorLabel={headline}
-          onOpenNode={onOpenNode}
-        />
-      </Appear>
-
-      {/* ── 4. What happened, in sequence ─────────────────────────── */}
-      <Appear order={4}>
         <DashboardCard
           role="region"
           aria-label="What happened, in sequence"
@@ -458,6 +451,38 @@ export function WorkflowPage({ workspaceId, chain, routineName, onBack, onOpenNo
             </div>
           )}
         </DashboardCard>
+      </Appear>
+
+      {/* ── 4. The same thing as a picture, on request ─────────────
+          The graph and the sequence say the SAME four things. On a chain of
+          four nodes the canvas is three hundred pixels of empty grid to place
+          them in, stacked above a list that places them in four lines and adds
+          the times — so the page carried two answers to one question and gave
+          the worse one the room.
+
+          Not deleted: on a wide chain the shape IS the information, which is
+          why it was built. It is behind a toggle, off by default, because the
+          common chain is small. */}
+      <Appear order={4}>
+        <div className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => setShowGraph((v) => !v)}
+            aria-expanded={showGraph}
+            className="inline-flex w-fit items-center gap-1.5 rounded-md border border-white/[0.08] px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground"
+          >
+            <Network className="h-3.5 w-3.5" />
+            {showGraph ? "Hide the graph" : "Show it as a graph"}
+          </button>
+          {showGraph && (
+            <TopologyCard
+              workspaceId={workspaceId}
+              anchor={anchor}
+              anchorLabel={headline}
+              onOpenNode={onOpenNode}
+            />
+          )}
+        </div>
       </Appear>
 
       <Appear order={5}>
