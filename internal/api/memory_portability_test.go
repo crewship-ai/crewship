@@ -224,6 +224,26 @@ func TestHostPlacerRefusesExistingLeafSymlink(t *testing.T) {
 	}
 }
 
+func TestHostPlacerRefusesTraversal(t *testing.T) {
+	stagingParent := t.TempDir()
+	staging := filepath.Join(stagingParent, "staging")
+	if err := os.Mkdir(staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stagingParent, "secret.md"), []byte("outside staging"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	destinationParent := t.TempDir()
+	root := filepath.Join(destinationParent, "memory")
+	if err := (hostPlacer{root: root}).Place(context.Background(), staging, []string{"../secret.md"}); err == nil {
+		t.Fatal("hostPlacer accepted a path outside staging and destination roots")
+	}
+	if _, err := os.Stat(filepath.Join(destinationParent, "secret.md")); !os.IsNotExist(err) {
+		t.Fatalf("traversal created a destination outside root: %v", err)
+	}
+}
+
 // Foreign memory is scanned for prompt injection on the way in, like
 // every other memory write. Without it the load-time scan blanks the
 // whole tier at the next run while the payload sits in the FTS index.
