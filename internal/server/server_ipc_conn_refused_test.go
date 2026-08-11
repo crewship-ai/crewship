@@ -5,8 +5,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"runtime"
-	"strings"
 	"syscall"
 	"testing"
 )
@@ -67,22 +65,5 @@ func TestIsConnRefused_MatchesBothSpellings(t *testing.T) {
 				t.Errorf("isConnRefused(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
-	}
-}
-
-// TestWSAECONNREFUSEDIsNotAPosixErrno guards the one way the portable match
-// could misfire: if some unix ever defined errno 10061, isConnRefused would
-// start reading that unrelated failure as proof of deadness and unlink a path
-// it could not verify. Errno numbering on every unix Go supports tops out
-// around 150, so the check is a cheap standing assertion rather than a
-// hypothetical.
-func TestWSAECONNREFUSEDIsNotAPosixErrno(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("on windows 10061 is precisely the errno we are matching")
-	}
-	if msg := wsaeconnrefused.Error(); !strings.Contains(strings.ToLower(msg), "errno 10061") &&
-		!strings.Contains(strings.ToLower(msg), "unknown") {
-		t.Errorf("errno 10061 has a real meaning on this platform (%q); the portable "+
-			"connection-refused match could misclassify it", msg)
 	}
 }

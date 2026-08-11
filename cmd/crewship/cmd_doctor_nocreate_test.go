@@ -378,6 +378,13 @@ func TestOpenLocalDBReadOnly_StaleWALWithoutIndex(t *testing.T) {
 // actually at fault. Both states are exercised because they produce different
 // SQLite errors and must produce the same explanation.
 func TestOpenLocalDBReadOnly_UnwritableDirWithoutWALIndex(t *testing.T) {
+	// SKIP-WAIVER(#1929): the condition under test IS a directory SQLite may
+	// not write, and mode 0500 does not deny root. As euid 0 the read-only open
+	// succeeds, no -shm failure ever occurs, and every assertion below inverts.
+	// There is no seam to drive instead: openLocalDBReadOnly takes no
+	// writability answer as input, it discovers one by attempting the open. The
+	// decision walIndexUnbuildable makes on its own IS reachable without mode
+	// bits and is covered as root too — see TestWALIndexUnbuildable below.
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: directory permissions are not enforced")
 	}
@@ -447,6 +454,13 @@ func TestOpenLocalDBReadOnly_UnwritableDirWithoutWALIndex(t *testing.T) {
 // walIndexUnbuildable asks its two questions in: -shm first, so that a failure
 // with an index present is never mis-blamed on directory permissions.
 func TestOpenLocalDBReadOnly_UnwritableDirWithExistingWALIndex(t *testing.T) {
+	// SKIP-WAIVER(#1929): this is the rescue clause, so the unwritable
+	// directory is the entire premise — the open must succeed *because* the
+	// -shm already exists, not because the process could have created one. Root
+	// writes through mode 0500, so as euid 0 the test would still pass while
+	// proving the opposite of what it claims. A green vacuous pass here is
+	// worse than an honest skip, because the row it guards is the advice
+	// operators are given for the failure above.
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: directory permissions are not enforced")
 	}
@@ -480,4 +494,69 @@ func TestOpenLocalDBReadOnly_UnwritableDirWithExistingWALIndex(t *testing.T) {
 	if n == 0 {
 		t.Error("_migrations is empty — the seed did not migrate")
 	}
+}
+
+// walIndexUnbuildable decides the wording the two tests above assert, and both
+// of them are unreachable as root because mode bits are their premise. Its own
+// two questions are not: neither needs a permission the caller might already
+// hold, so this is where that decision stays covered at euid 0.
+//
+// Driven directly rather than through openLocalDBReadOnly because that route
+// requires a read-only open to have failed first, and staging that failure is
+// exactly the part root cannot be made to reproduce.
+func TestWALIndexUnbuildable(t *testing.T) {
+	t.Run("existing -shm is never blamed on the directory", func(t *testing.T) {
+		// The order that matters: with an index present the failure is
+		// something else (corruption, a lock we lost), and answering "true"
+		// here would send the operator to chmod a directory that is fine.
+		dir := t.TempDir()
+		db := filepath.Join(dir, "crewship.db")
+		for _, p := range []string{db, db + "-shm"} {
+			if err := os.WriteFile(p, nil, 0o600); err != nil {
+				t.Fatalf("stage %s: %v", p, err)
+			}
+		}
+		if walIndexUnbuildable(db) {
+			t.Error("an existing -shm was reported as an unbuildable WAL index")
+		}
+	})
+
+	t.Run("writable directory can build one", func(t *testing.T) {
+		dir := t.TempDir()
+		db := filepath.Join(dir, "crewship.db")
+		if err := os.WriteFile(db, nil, 0o600); err != nil {
+			t.Fatalf("stage %s: %v", db, err)
+		}
+		if walIndexUnbuildable(db) {
+			t.Error("a writable data dir was reported as unable to build the WAL index")
+		}
+		// The writability test is a create-and-remove, and this file's whole
+		// subject is diagnostics that leave nothing behind: a probe file that
+		// survived would be the same B-02 defect one filename over.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read data dir: %v", err)
+		}
+		if len(entries) != 1 || entries[0].Name() != "crewship.db" {
+			names := make([]string, 0, len(entries))
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			t.Errorf("the writability probe left %v in the data dir", names)
+		}
+	})
+
+	t.Run("directory that cannot hold a file", func(t *testing.T) {
+		// A regular file standing where the data dir should be: both the -shm
+		// stat and the probe create fail with ENOTDIR. No permission bits are
+		// involved, so this arm — the one that produces the "not writable"
+		// wording — is exercised at every euid, root included.
+		notDir := filepath.Join(t.TempDir(), "root")
+		if err := os.WriteFile(notDir, []byte("x"), 0o600); err != nil {
+			t.Fatalf("stage %s: %v", notDir, err)
+		}
+		if !walIndexUnbuildable(filepath.Join(notDir, "crewship.db")) {
+			t.Error("a data dir that cannot hold any file was reported as able to build the WAL index")
+		}
+	})
 }

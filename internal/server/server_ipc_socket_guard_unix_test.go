@@ -21,10 +21,16 @@ import (
 // mkfifo creates a named pipe at path. Opening a FIFO blocks until the other
 // end shows up, so nothing in these tests opens it — Lstat and connect() do
 // not, which is the whole point of classifying it before the dial.
+//
+// A failure here is fatal, not a skip: the file is already `unix`-tagged, path
+// is inside the test's own TempDir, and mkfifo(2) on a POSIX filesystem needs
+// no privileges. If it fails, the assumption the whole file rests on is wrong
+// and that must be reported, not turned into a green `ok` for a test that
+// never ran.
 func mkfifo(t *testing.T, path string) {
 	t.Helper()
 	if err := syscall.Mkfifo(path, 0o600); err != nil {
-		t.Skipf("mkfifo(%s): %v", path, err)
+		t.Fatalf("mkfifo(%s): %v", path, err)
 	}
 }
 
@@ -53,12 +59,21 @@ func TestEnsureSocketPathFree_UnixInodes(t *testing.T) {
 			// inode, and is removable by root. Not created in TempDir because
 			// mknod needs privileges; the real node is safe to *inspect*,
 			// since ensureSocketPathFree never removes anything itself.
+			//
+			// Its absence is a fatal setup failure rather than a skip: POSIX
+			// requires /dev/null on every system this `unix`-tagged file
+			// compiles for, so "it is not there" means the environment is
+			// broken in a way that should be visible, not a green `ok` for an
+			// assertion that never ran.
 			name: "character device is refused",
 			setup: func(t *testing.T, dir string) string {
 				const p = "/dev/null"
 				info, err := os.Lstat(p)
-				if err != nil || info.Mode()&os.ModeCharDevice == 0 {
-					t.Skipf("no character device at %s (%v)", p, err)
+				if err != nil {
+					t.Fatalf("lstat %s: %v", p, err)
+				}
+				if info.Mode()&os.ModeCharDevice == 0 {
+					t.Fatalf("%s is %s, not a character device", p, info.Mode().Type())
 				}
 				return p
 			},

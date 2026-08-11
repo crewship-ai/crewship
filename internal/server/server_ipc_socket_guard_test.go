@@ -229,38 +229,45 @@ func TestEnsureSocketPathFree_Corners(t *testing.T) {
 		},
 		{
 			// "I am not allowed to look" must never read as "nothing is
-			// there". A socket belonging to a daemon running as another user
-			// lands here.
-			name: "unreadable directory is refused rather than assumed stale",
+			// there". The real-world instance is EACCES from a 0700 parent
+			// directory owned by another user, hiding that user's live daemon
+			// socket — but mode bits cannot be used to stage it, because root
+			// traverses any directory and this suite runs as root often
+			// enough (containers, CI images) that the case would silently
+			// stop running there.
+			//
+			// ENOTDIR reaches the identical branch with no permissions
+			// involved: the guard only asks whether Lstat failed with
+			// something other than ENOENT, never which errno it was. A
+			// regular file standing where a parent directory should be — the
+			// same tab-completion slip that puts the socket path on state.db
+			// — produces exactly that, on every uid.
+			name: "unstattable path is refused rather than assumed stale",
 			setup: func(t *testing.T, dir string) string {
-				if os.Geteuid() == 0 {
-					t.Skip("root bypasses directory permissions")
-				}
-				sub := filepath.Join(dir, "locked")
-				if err := os.Mkdir(sub, 0o700); err != nil {
+				notDir := filepath.Join(dir, "state.db")
+				if err := os.WriteFile(notDir, []byte("junk"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				p := filepath.Join(sub, "i.sock")
-				makeStaleSocket(t, p)
-				if err := os.Chmod(sub, 0o000); err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = os.Chmod(sub, 0o700) }) // let TempDir clean up
-				return p
+				return filepath.Join(notDir, "i.sock")
 			},
 			wantErr: true,
 		},
 		{
-			// Same rule one layer down: the path is visible but connect() is
-			// denied, so liveness is unknown and the file stays.
-			name: "undialable socket is refused rather than assumed stale",
+			// Same rule one layer down: the inode is classifiable but the dial
+			// fails for a reason that is not proof of deadness, so liveness is
+			// unknown and the path stays. Motivating case again a permission
+			// one — connect() denied on another user's live socket — and again
+			// unstageable with mode bits, since root dials it regardless.
+			//
+			// A self-referential symlink lands in the same fallthrough for
+			// every uid: symlinks are dialed rather than resolved here (see
+			// the dangling-symlink case), and connect() answers ELOOP, which
+			// is neither "connection refused" nor "does not exist" and so must
+			// not license the unlink.
+			name: "undialable path is refused rather than assumed stale",
 			setup: func(t *testing.T, dir string) string {
-				if os.Geteuid() == 0 {
-					t.Skip("root bypasses socket permissions")
-				}
 				p := filepath.Join(dir, "i.sock")
-				startEchoListener(t, p)
-				if err := os.Chmod(p, 0o000); err != nil {
+				if err := os.Symlink(p, p); err != nil {
 					t.Fatal(err)
 				}
 				return p
