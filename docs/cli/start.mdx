@@ -116,9 +116,17 @@ Giving each instance its own `CREWSHIP_DATA_DIR` (anything other than
 the packaged `/var/lib/crewship`) already derives a distinct IPC socket
 and bbolt file under that directory, so the explicit
 `CREWSHIP_SOCKET_PATH` / `CREWSHIP_BOLT_PATH` overrides above are only
-needed when you want specific paths. Both files are exclusive by nature:
-sharing the bbolt file makes the second instance block on its lock, and
-sharing the socket is refused at startup.
+needed when you want specific paths. Both files are exclusive by nature,
+and sharing either one now fails loudly rather than silently:
+
+- **Sharing the bbolt file**: the second instance logs that it is waiting
+  for the lock, naming the file, then gives up after ten seconds with
+  `state database is locked by another process: <path> (waited 10s; find
+  the holder with: lsof <path>)`. It does *not* wait indefinitely — if
+  your start exits after about ten seconds, a shared state file is the
+  first thing to check.
+- **Sharing the socket**: refused at startup, without unlinking the
+  socket the running instance is listening on.
 
 ## Graceful shutdown
 
