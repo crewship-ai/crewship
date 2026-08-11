@@ -152,11 +152,23 @@ func (h *PortExposeHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch token to clear the in-memory entry.
-	var token string
+	// Fetch the at-rest digest to clear the in-memory entry. Post-#1888 the
+	// cleartext is not in the row to read back, and it does not need to be:
+	// the registry is keyed by the digest.
+	//
+	// The fallback covers a row the backfill has not reached yet — one whose
+	// digest write failed and is waiting for the next boot. Revoking has to
+	// drop the entry either way, or a revoked exposure keeps proxying until
+	// the process restarts.
+	var tokenHash, token sql.NullString
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT token FROM port_exposures WHERE id = ?`, exposeID).Scan(&token); err == nil && token != "" {
-		h.registry.Remove(token)
+		`SELECT token_hash, token FROM port_exposures WHERE id = ?`, exposeID).Scan(&tokenHash, &token); err == nil {
+		switch {
+		case tokenHash.String != "":
+			h.registry.RemoveByHash(tokenHash.String)
+		case token.String != "":
+			h.registry.Remove(token.String)
+		}
 	}
 
 	if h.hub != nil {
