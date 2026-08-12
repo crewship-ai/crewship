@@ -218,8 +218,16 @@ export function BottomPanel({
         />
       )}
 
-      <div role="tablist" aria-label="Bottom panel" className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs overflow-x-auto">
-        {tabIds.map((id) => {
+      {/* The tablist holds tabs and nothing else. The collapse control used to
+          sit inside it, which axe reports as `aria-required-children`
+          (critical): a `tablist` may only contain `tab` children, so a plain
+          button in there makes the whole group ambiguous to a screen reader —
+          it is announced as a tab set containing something that is not a tab.
+          The strip is now a plain flex row with the tablist and the control as
+          siblings; nothing moves visually. */}
+      <div className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs">
+        <div role="tablist" aria-label="Bottom panel" className="flex items-center gap-1 overflow-x-auto">
+          {tabIds.map((id) => {
           const meta = TAB_META[id]
           const Icon = meta.icon
           const active = tab === id && open
@@ -241,11 +249,14 @@ export function BottomPanel({
             </button>
           )
         })}
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
             onClick={() => setOpen(!open)}
             className="p-1 rounded hover:bg-white/5 text-muted-foreground"
+            aria-label={open ? "Collapse bottom panel" : "Expand bottom panel"}
+            aria-expanded={open}
             title={open ? "Collapse" : "Expand"}
           >
             {open ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}

@@ -63,6 +63,14 @@
   --notice: oklch(0.72 0.14 200);
   --warn: oklch(0.78 0.15 75);
   --purple: oklch(0.66 0.22 300);
+  /* Text on a purple tint. --purple is a fill/stroke token and is not
+     text-safe: measured on the LEAD badge (bg-purple/20 over the card) it
+     gives 2.65:1 in light and 4.48:1 in dark, against a 4.5:1 threshold.
+     Same pattern as --primary-hover, which exists for exactly this reason —
+     see the a11y spec header, "brand-tinted chips use text-primary-hover".
+     Light needs to go darker, dark needs to go lighter; chroma is unchanged
+     so the badge stays the brand purple. Measured: 5.20:1. */
+  --purple-hover: oklch(0.50 0.22 300);
   --gold: oklch(0.84 0.15 85);
 
   --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
@@ -184,6 +192,9 @@
   --notice: oklch(0.72 0.14 200);
   --warn: oklch(0.78 0.15 75);
   --purple: oklch(0.66 0.22 300);
+  /* See the light-theme note. Measured on bg-purple/20 over the dark card:
+     5.11:1, up from 4.48:1. Chroma unchanged at 0.22. */
+  --purple-hover: oklch(0.70 0.22 300);
   --gold: oklch(0.84 0.15 85);
 
   --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
@@ -267,6 +278,7 @@
   --color-notice: var(--notice);
   --color-warn: var(--warn);
   --color-purple: var(--purple);
+  --color-purple-hover: var(--purple-hover);
   --color-gold: var(--gold);
 
   --font-sans: var(--font-sans);

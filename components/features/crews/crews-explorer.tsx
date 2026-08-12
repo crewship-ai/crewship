@@ -185,19 +185,29 @@ export function CrewsExplorer({
                     as="div"
                     selected={isSelected}
                     aria-label={crew.name}
+                    aria-expanded={expanded}
                     className="group/crew"
                     onSelect={() => {
                       onCrewSelect(crew.id)
                       if (!expanded) toggleCrew(crew.id)
                     }}
                   >
+                    {/* Presentational, not a control. It used to carry
+                        role="button" inside a row that is itself role="button",
+                        which axe reports twice: `nested-interactive` (a control
+                        inside a control is not reliably announced) and
+                        `aria-command-name` (the inner one had no accessible
+                        name). It was never reachable by keyboard either —
+                        tabIndex={-1} — so its onKeyDown could not fire, and the
+                        collapse it guards is already on the parent's
+                        ArrowLeft/ArrowRight. The click stays for the mouse; the
+                        expanded state moves to the row, where a screen reader
+                        announces it once instead of finding a nameless button
+                        inside a named one. */}
                     <span
-                      role="button"
-                      tabIndex={-1}
-                      aria-expanded={expanded}
+                      aria-hidden="true"
                       className="shrink-0"
                       onClick={(e) => { e.stopPropagation(); toggleCrew(crew.id) }}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); toggleCrew(crew.id) } }}
                     >
                       {/* Visible on hover, on focus, and while collapsed.
                           It is nearly redundant — clicking the row selects and
