@@ -326,9 +326,6 @@ func generateMsgID() string {
 	return string(out)
 }
 
-// HandleChatMessage processes an incoming chat message by resolving the session,
-// ensuring the container is running, persisting the message, and streaming the
-// agent's response back to the client.
 // terminalRunMeta builds the metadata attached to a run's final UpdateRun.
 //
 // It exists so every terminal path carries session provenance, not just the
@@ -353,6 +350,9 @@ func terminalRunMeta(startedAt time.Time, acc *orchestrator.Accumulator, extra m
 	return meta
 }
 
+// HandleChatMessage processes an incoming chat message by resolving the session,
+// ensuring the container is running, persisting the message, and streaming the
+// agent's response back to the client.
 func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content string, streamFn func(ws.ChatEvent), opts ...ws.ChatMessageOption) error {
 	b.logger.Debug("HandleChatMessage", "chat_id", chatID, "content_len", len(content))
 

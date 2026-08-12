@@ -67,10 +67,18 @@ type runResponse struct {
 	// Omitted, never [], when nothing was skipped: absence is the signal a
 	// gate keys off, so it has to keep meaning "nothing was lost".
 	MCPServerErrors []journal.MCPServerError `json:"mcp_server_errors,omitempty"`
-	CreatedAt       string                   `json:"created_at"`
-	AgentName       *string                  `json:"agent_name,omitempty"`
-	AgentSlug       *string                  `json:"agent_slug,omitempty"`
-	CrewName        *string                  `json:"crew_name,omitempty"`
+	// PermissionDenials names the tools the CLI refused to let the agent use.
+	// Names only — the producer drops the denied input, which is arbitrary
+	// agent text, before it reaches the hash-chained run record.
+	//
+	// Same omitted-never-empty rule: a run blocked by permissions otherwise
+	// reads as a run that chose not to act, and an empty array would make
+	// "nothing was denied" and "we did not look" indistinguishable.
+	PermissionDenials []string `json:"permission_denials,omitempty"`
+	CreatedAt         string   `json:"created_at"`
+	AgentName         *string  `json:"agent_name,omitempty"`
+	AgentSlug         *string  `json:"agent_slug,omitempty"`
+	CrewName          *string  `json:"crew_name,omitempty"`
 }
 
 type runListResponse struct {
@@ -510,12 +518,13 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			Model:        stringPtrOrNil(r.Model),
 			// Provenance rides the same nil-when-empty convention as Model, so
 			// a run that recorded nothing serialises no keys at all.
-			CLIVersion:      stringPtrOrNil(r.CLIVersion),
-			APIKeySource:    stringPtrOrNil(r.APIKeySource),
-			PermissionMode:  stringPtrOrNil(r.PermissionMode),
-			SessionID:       stringPtrOrNil(r.SessionID),
-			MCPServerErrors: r.MCPServerErrors,
-			CreatedAt:       formatRFC3339(r.CreatedAt),
+			CLIVersion:        stringPtrOrNil(r.CLIVersion),
+			APIKeySource:      stringPtrOrNil(r.APIKeySource),
+			PermissionMode:    stringPtrOrNil(r.PermissionMode),
+			SessionID:         stringPtrOrNil(r.SessionID),
+			MCPServerErrors:   r.MCPServerErrors,
+			PermissionDenials: r.PermissionDenials,
+			CreatedAt:         formatRFC3339(r.CreatedAt),
 		}
 		if r.ChatID != "" {
 			c := r.ChatID

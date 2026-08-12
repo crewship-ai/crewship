@@ -42,6 +42,7 @@ Auth source:      ANTHROPIC_API_KEY
 Permission mode:  bypassPermissions
 Session:          sess-9f1c
 MCP skipped:      crewship-memory (invalid_config)
+Tools denied:     Bash, Write
 ```
 
 | Field | Why it is there |
@@ -50,6 +51,7 @@ MCP skipped:      crewship-memory (invalid_config)
 | `Auth source` | Which auth path resolved — i.e. whether the credential Crewship mounted is the one in use. Reported from a closed set; anything unrecognised reads `other` rather than being stored verbatim. |
 | `Permission mode` | Confirms the permission flags took effect. |
 | `MCP skipped` | **A finding, not a label.** A `--mcp-config` entry that fails validation is skipped and the run continues, exiting 0 — an agent that lost its memory server this way looks perfectly healthy. `run list` flags it under the table for the same reason. |
+| `Tools denied` | Tools the CLI refused to let the agent use. Without it, a blocked run reads as one that *chose* not to act, sending you after a prompt problem instead of a permission rule. Tool names only — the denied input is arbitrary agent-generated text and never reaches the run record. |
 
 Fields are omitted entirely when unknown (older runs, and non-Claude adapters, which report none of this) — absence means "never reported", not "empty".
 

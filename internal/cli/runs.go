@@ -40,10 +40,13 @@ type RunDetail struct {
 	PermissionMode  *string          `json:"permission_mode,omitempty"`
 	SessionID       *string          `json:"session_id,omitempty"`
 	MCPServerErrors []MCPServerError `json:"mcp_server_errors,omitempty"`
-	CreatedAt       string           `json:"created_at"`
-	AgentName       *string          `json:"agent_name,omitempty"`
-	AgentSlug       *string          `json:"agent_slug,omitempty"`
-	CrewName        *string          `json:"crew_name,omitempty"`
+	// PermissionDenials names the tools the CLI refused to let the agent use.
+	// Names only — the denied input never reaches the run record.
+	PermissionDenials []string `json:"permission_denials,omitempty"`
+	CreatedAt         string   `json:"created_at"`
+	AgentName         *string  `json:"agent_name,omitempty"`
+	AgentSlug         *string  `json:"agent_slug,omitempty"`
+	CrewName          *string  `json:"crew_name,omitempty"`
 }
 
 // MCPServerError mirrors one entry of the run's mcp_server_errors: an MCP

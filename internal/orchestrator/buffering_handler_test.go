@@ -475,3 +475,92 @@ func TestMergeSessionInitMeta_DropsTheFreeTextMessage(t *testing.T) {
 		})
 	}
 }
+
+// A permission denial names the tool AND carries the full tool input the CLI
+// refused to run — a Bash command line, the body of a Write. That input is
+// arbitrary agent-generated text, it reaches the run record through Metadata
+// (which the scrubber never rewrites), and the run's terminal journal entry is
+// HMAC-chained and append-only.
+//
+// So the denial is worth recording and its argument is not: "Bash was denied"
+// is the diagnosis, `curl -H "Authorization: Bearer …"` is a secret we chose to
+// keep forever. Same projection rule as mcp_server_errors, same reason.
+func TestMergeResultUsageMeta_DropsDeniedToolInput(t *testing.T) {
+	const secretish = `curl -H Authorization:Bearer-sk-live-9f3a https://api.example.com`
+
+	cases := []struct {
+		name string
+		in   any
+	}{
+		{"raw JSON array", json.RawMessage(
+			`[{"tool_name":"Bash","tool_use_id":"tu_1","tool_input":{"command":"` + secretish + `"}}]`)},
+		{"decoded maps", []map[string]any{
+			{"tool_name": "Bash", "tool_input": map[string]any{"command": secretish}},
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := map[string]any{}
+			MergeResultUsageMeta(dst, map[string]any{"permission_denials": tc.in})
+
+			blob, err := json.Marshal(dst)
+			if err != nil {
+				t.Fatalf("marshal run meta: %v", err)
+			}
+			if bytes.Contains(blob, []byte("sk-live-9f3a")) {
+				t.Fatalf("denied tool input reached the run record, which is hash-chained and cannot be redacted: %s", blob)
+			}
+			// The denial itself must survive — dropping the argument must not
+			// turn a blocked run back into one that merely chose not to act.
+			if !bytes.Contains(blob, []byte("Bash")) {
+				t.Errorf("the denied tool is not named: %s", blob)
+			}
+		})
+	}
+}
+
+// Absence has to keep meaning "nothing was denied", or a gate over this key
+// reads a permission-blocked run as a clean one.
+func TestMergeResultUsageMeta_NoDenialsStaysAbsent(t *testing.T) {
+	for _, empty := range []any{json.RawMessage(`[]`), json.RawMessage(`null`), []map[string]any{}, nil} {
+		dst := map[string]any{}
+		MergeResultUsageMeta(dst, map[string]any{"permission_denials": empty})
+		if v, ok := dst["permission_denials"]; ok {
+			t.Errorf("permission_denials = %v for input %v; absent must mean nothing was denied", v, empty)
+		}
+	}
+}
+
+// Mirror of the journal-side guard: a shape we do not recognise must not read
+// as "nothing was skipped" on the run record either, because a gate keys off
+// the absence of this key. The names may be lost; the fact must not be.
+func TestMergeSessionInitMeta_UnrecognisedSkipShapeStillReports(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"object keyed by server name", `{"crewship-memory":{"type":"invalid_config"}}`},
+		{"array of strings", `["crewship-memory"]`},
+		{"objects with renamed keys", `[{"server":"crewship-memory","reason":"invalid_config"}]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := map[string]any{}
+			MergeSessionInitMeta(dst, map[string]any{"mcp_server_errors": json.RawMessage(tc.raw)})
+
+			v, ok := dst["mcp_server_errors"]
+			if !ok {
+				t.Fatalf("mcp_server_errors absent — a gate reads that as 'nothing was skipped', "+
+					"but the CLI reported %s", tc.raw)
+			}
+			blob, err := json.Marshal(v)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if bytes.Contains(blob, []byte(`{}`)) {
+				t.Errorf("stored an empty skip object (%s) — an alarm that names nothing", blob)
+			}
+		})
+	}
+}

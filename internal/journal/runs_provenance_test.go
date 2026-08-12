@@ -210,3 +210,52 @@ func TestGetRunByID_SurfacesProvenance(t *testing.T) {
 		t.Errorf("MCPServerErrors = %+v, want one entry for sentry", got.MCPServerErrors)
 	}
 }
+
+// A permission denial is the difference between "the agent decided not to
+// write the file" and "the agent was not allowed to". Recording it and then
+// reading it back nowhere leaves the operator with the first reading, which is
+// the misdiagnosis the field exists to prevent.
+//
+// The producer projects each denial down to its tool name before storing it —
+// the denied tool INPUT is arbitrary agent text and this record is
+// hash-chained — so the names are all there is to read.
+func TestApplySessionProvenance_ReadsPermissionDenials(t *testing.T) {
+	cases := []struct {
+		name string
+		md   map[string]any
+		want []string
+	}{
+		{
+			name: "decoded maps",
+			md: map[string]any{"permission_denials": []map[string]any{
+				{"tool_name": "Bash"}, {"tool_name": "Write"},
+			}},
+			want: []string{"Bash", "Write"},
+		},
+		{
+			name: "raw JSON as read back from the DB",
+			md:   map[string]any{"permission_denials": json.RawMessage(`[{"tool_name":"Bash"}]`)},
+			want: []string{"Bash"},
+		},
+		{
+			name: "nothing denied",
+			md:   map[string]any{},
+			want: nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var r RunAggregated
+			r.applySessionProvenance(tc.md)
+			if len(r.PermissionDenials) != len(tc.want) {
+				t.Fatalf("PermissionDenials = %v, want %v", r.PermissionDenials, tc.want)
+			}
+			for i, want := range tc.want {
+				if r.PermissionDenials[i] != want {
+					t.Errorf("PermissionDenials[%d] = %q, want %q", i, r.PermissionDenials[i], want)
+				}
+			}
+		})
+	}
+}

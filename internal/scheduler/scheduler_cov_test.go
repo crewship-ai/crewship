@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -451,4 +452,57 @@ func TestUpdateTimestamps_DBErrorsAreLoggedNotFatal(t *testing.T) {
 			t.Errorf("expected warn %q, got %v", want, rec.msgs)
 		}
 	}
+}
+
+// The session-init journal entry is emitted by the orchestrator, which has no
+// TraceID field of its own — it reads the run id off the context. The chat
+// bridge stamps it; the scheduler did not, so `crewship journal --run-id <id>`
+// found nothing for a SCHEDULED run.
+//
+// That is the run the alert exists for. Nobody watches a cron run, which is
+// exactly why its degraded-session entry has to be reachable from the run.
+func TestTriggerAgent_StampsRunIDOnTheJournalContext(t *testing.T) {
+	db := testDB(t)
+	db.SetMaxOpenConns(1)
+	seedCrew(t, db, "crew1", "ws1", "Alpha", "alpha")
+	seedAgent(t, db, "a1", "bob", "Bob", "crew1", "ws1", "0 8 * * MON", "do work", true)
+
+	resolver := &mockResolver{
+		resolveInfo: &chatbridge.ChatInfo{
+			AgentID: "a1", AgentSlug: "bob", AgentRole: "AGENT",
+			CrewID: "crew1", CrewSlug: "alpha",
+			CLIAdapter: "CLAUDE_CODE", WorkspaceID: "ws1",
+		},
+	}
+	container := &streamContainer{streamOutput: claudeProvenanceStreamJSON, exitCode: 0}
+	container.ensureID = "container-trace"
+	orch := orchestrator.New(container, newMemState(), testLogger())
+
+	var seen []string
+	orch.SetJournal(runIDRecordingJournal{fn: func(ctx context.Context) {
+		seen = append(seen, journal.RunIDFromContext(ctx))
+	}})
+
+	s := New(db, orch, container, resolver, nil, nil, Config{}, testLogger())
+	s.triggerAgent(scheduledAgent{
+		ID: "a1", Slug: "bob", Name: "Bob",
+		CrewID: "crew1", CrewSlug: "alpha",
+		Cron: "0 8 * * MON", Prompt: "do work", Workspace: "ws1",
+	})
+
+	if len(seen) == 0 {
+		t.Fatal("the orchestrator emitted no journal entries — nothing to correlate")
+	}
+	for i, runID := range seen {
+		if runID == "" {
+			t.Fatalf("orchestrator journal entry %d carries no run id: `journal --run-id` cannot find a scheduled run's session_init", i)
+		}
+	}
+}
+
+type runIDRecordingJournal struct{ fn func(context.Context) }
+
+func (r runIDRecordingJournal) Emit(ctx context.Context, _ orchestrator.JournalEntry) (string, error) {
+	r.fn(ctx)
+	return "j_test", nil
 }

@@ -228,7 +228,7 @@ var agentSkillsCmd = &cobra.Command{
 			if !s.Enabled {
 				enabled = "no"
 			}
-			rows = append(rows, []string{s.SkillID[:min(12, len(s.SkillID))], s.SkillName, s.Category, enabled})
+			rows = append(rows, []string{f.ShortID(s.SkillID, s.SkillID[:min(12, len(s.SkillID))]), s.SkillName, s.Category, enabled})
 		}
 		return f.Auto(skills, headers, rows)
 	},
@@ -375,7 +375,7 @@ var agentCredentialsCmd = &cobra.Command{
 			// unlinking the credential from the crew. Showing a dash rather than
 			// a blank makes that a stated fact instead of a rendering glitch.
 			grant := c.GrantSource
-			id := c.ID[:min(12, len(c.ID))]
+			id := f.ShortID(c.ID, c.ID[:min(12, len(c.ID))])
 			if c.GrantSource == "crew" {
 				id = "-"
 			}

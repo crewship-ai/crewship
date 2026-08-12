@@ -172,13 +172,17 @@ func ParseResultUsage(meta any) (costUSD float64, tokIn, tokOut int) {
 // event's metadata into a run's completed-meta map. Kept as raw values (not
 // parsed) so num_turns / model_usage survive untouched.
 //
-// permission_denials is not usage, but it belongs to the same envelope and to
-// the same question a run record is read to answer: a run the CLI refused to
-// let act otherwise reads as a run that CHOSE not to act, sending an operator
-// after a prompt problem instead of a permission rule. The adapter stamps it
-// only when something was actually denied, so its absence here keeps meaning
-// "nothing was denied".
-var resultUsageMetaKeys = []string{"total_cost_usd", "num_turns", "usage", "model_usage", "permission_denials"}
+// permission_denials is deliberately NOT in this list even though it belongs
+// to the same envelope: these keys are copied verbatim, and a denial carries
+// the full tool input the CLI refused to run. See the projection in
+// MergeResultUsageMeta.
+var resultUsageMetaKeys = []string{"total_cost_usd", "num_turns", "usage", "model_usage"}
+
+// unrecognisedSkipShape is the category stored when the CLI reported skipped
+// MCP servers in a shape this code could not read. It is deliberately not a
+// server name: the run is degraded, and pretending to know which server would
+// be worse than saying we do not.
+const unrecognisedSkipShape = "unrecognized_shape"
 
 // MergeResultUsageMeta copies the standard run-summary keys from a "result"
 // event's metadata map into dst, leaving any other dst entries (e.g.
@@ -194,6 +198,24 @@ func MergeResultUsageMeta(dst map[string]any, meta any) {
 	for _, k := range resultUsageMetaKeys {
 		if v, ok := m[k]; ok {
 			dst[k] = v
+		}
+	}
+	// permission_denials answers a question a run record is otherwise read
+	// wrongly for: a run the CLI refused to let act reads as a run that CHOSE
+	// not to act, sending an operator after a prompt problem instead of a
+	// permission rule. So the denial is worth recording — and its argument is
+	// not. Each element carries the full tool_input that was refused: a Bash
+	// command line, the body of a Write. That is arbitrary agent-generated
+	// text, it arrives on Metadata (which the scrubber never rewrites, it only
+	// rewrites Content), and this map becomes the payload of a run.completed
+	// journal entry, which is HMAC-chained and append-only.
+	//
+	// Project to the tool name. "Bash was denied" is the diagnosis; the
+	// command line is a secret we would be choosing to keep forever. Same rule
+	// and same reason as mcp_server_errors below.
+	if v, ok := m["permission_denials"]; ok && !emptyJSONValue(v) {
+		if denials, _ := boundInitObjects(initMetaObjects(v), "tool_name"); len(denials) > 0 {
+			dst["permission_denials"] = denials
 		}
 	}
 }
@@ -272,9 +294,18 @@ func MergeSessionInitMeta(dst map[string]any, meta any) {
 		// to store. The server name and the error category are what an
 		// operator acts on; the message stays in the live output chunk. Same
 		// projection the run.session_init entry applies, for the same reason.
-		if errs, _ := boundInitObjects(initMetaObjects(v), "name", "type"); len(errs) > 0 {
-			dst["mcp_server_errors"] = errs
+		errs, _ := boundInitObjects(initMetaObjects(v), "name", "type")
+		errs = dropEmptyObjects(errs)
+		if len(errs) == 0 {
+			// The CLI said it dropped something and we could not read the
+			// details — a shape change, or fields renamed. Recording nothing
+			// would be the worst outcome available: a gate over this key reads
+			// absence as "nothing was skipped", so an unparsed report becomes
+			// a clean run. Keep the alarm, name no server we cannot name, and
+			// label why the details are missing.
+			errs = []map[string]any{{"type": unrecognisedSkipShape}}
 		}
+		dst["mcp_server_errors"] = errs
 	}
 }
 

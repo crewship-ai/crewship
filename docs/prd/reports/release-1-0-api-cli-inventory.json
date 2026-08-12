@@ -5127,13 +5127,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_config_cov_test.go",
+        "cmd/crewship/cmd_list_quiet_ids_test.go",
         "cmd/crewship/cmd_login_cov_test.go",
         "cmd/crewship/cmd_login_password_stdin_test.go",
         "cmd/crewship/cmd_seed_cov2_test.go",
         "cmd/crewship/cmd_seed_cov_test.go",
         "cmd/crewship/cmd_token_cov_test.go",
         "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
-        "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -5154,13 +5154,13 @@
           "source_file": "cmd/crewship/cmd_login.go",
           "test_signals": [
             "cmd/crewship/cmd_config_cov_test.go",
+            "cmd/crewship/cmd_list_quiet_ids_test.go",
             "cmd/crewship/cmd_login_cov_test.go",
             "cmd/crewship/cmd_login_password_stdin_test.go",
             "cmd/crewship/cmd_seed_cov2_test.go",
             "cmd/crewship/cmd_seed_cov_test.go",
             "cmd/crewship/cmd_token_cov_test.go",
             "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
-            "cmd/gen-openapi/schemas_integrations_auth_request_bodies_test.go",
             "…"
           ]
         }
@@ -5236,6 +5236,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_list_quiet_ids_test.go",
         "cmd/crewship/cmd_token_cov_test.go",
         "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
         "internal/api/cli_token_test.go",
@@ -5260,6 +5261,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_token.go",
           "test_signals": [
+            "cmd/crewship/cmd_list_quiet_ids_test.go",
             "cmd/crewship/cmd_token_cov_test.go",
             "cmd/gen-openapi/schemas_credentials_connectors_auth_profile_test.go",
             "internal/api/cli_token_test.go",
@@ -5607,6 +5609,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_list_quiet_ids_test.go",
         "cmd/crewship/cmd_session_cov_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
         "internal/api/agents_avatar_route_test.go",
@@ -5614,7 +5617,6 @@
         "internal/api/auth_extra_test.go",
         "internal/api/auth_google_cov2_test.go",
         "internal/api/auth_google_test.go",
-        "internal/api/auth_recovery_cov2_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -5634,6 +5636,7 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_session.go",
           "test_signals": [
+            "cmd/crewship/cmd_list_quiet_ids_test.go",
             "cmd/crewship/cmd_session_cov_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
             "internal/api/agents_avatar_route_test.go",
@@ -5641,7 +5644,6 @@
             "internal/api/auth_extra_test.go",
             "internal/api/auth_google_cov2_test.go",
             "internal/api/auth_google_test.go",
-            "internal/api/auth_recovery_cov2_test.go",
             "…"
           ]
         }
@@ -14761,11 +14763,11 @@
         "cmd/crewship/cmd_handler_drift_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go",
         "cmd/crewship/cmd_label_cov_test.go",
+        "cmd/crewship/cmd_list_quiet_ids_test.go",
         "cmd/crewship/cmd_seed_cov2_test.go",
         "cmd/crewship/cmd_seed_data_issues_cov_test.go",
         "cmd/crewship/cmd_seed_data_nuke_cov_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -14788,11 +14790,11 @@
             "cmd/crewship/cmd_handler_drift_test.go",
             "cmd/crewship/cmd_issue_workflow_cov_test.go",
             "cmd/crewship/cmd_label_cov_test.go",
+            "cmd/crewship/cmd_list_quiet_ids_test.go",
             "cmd/crewship/cmd_seed_cov2_test.go",
             "cmd/crewship/cmd_seed_data_issues_cov_test.go",
             "cmd/crewship/cmd_seed_data_nuke_cov_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
             "…"
           ]
         }
@@ -14818,11 +14820,11 @@
         "cmd/crewship/cmd_handler_drift_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go",
         "cmd/crewship/cmd_label_cov_test.go",
+        "cmd/crewship/cmd_list_quiet_ids_test.go",
         "cmd/crewship/cmd_seed_cov2_test.go",
         "cmd/crewship/cmd_seed_data_issues_cov_test.go",
         "cmd/crewship/cmd_seed_data_nuke_cov_test.go",
         "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
-        "internal/api/cross_workspace_fence_matrix_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -14845,11 +14847,11 @@
             "cmd/crewship/cmd_handler_drift_test.go",
             "cmd/crewship/cmd_issue_workflow_cov_test.go",
             "cmd/crewship/cmd_label_cov_test.go",
+            "cmd/crewship/cmd_list_quiet_ids_test.go",
             "cmd/crewship/cmd_seed_cov2_test.go",
             "cmd/crewship/cmd_seed_data_issues_cov_test.go",
             "cmd/crewship/cmd_seed_data_nuke_cov_test.go",
             "cmd/gen-openapi/schemas_remaining_auth_integrations_test.go",
-            "internal/api/cross_workspace_fence_matrix_test.go",
             "…"
           ]
         }
@@ -34958,7 +34960,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_label_cov_test.go",
-        "cmd/crewship/cmd_label_test.go"
+        "cmd/crewship/cmd_label_test.go",
+        "cmd/crewship/cmd_list_quiet_ids_test.go"
       ],
       "flags": [
         "yes"
@@ -41975,6 +41978,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_list_quiet_ids_test.go",
         "cmd/crewship/cmd_safety_guards_test.go",
         "cmd/crewship/cmd_session_classify_test.go",
         "cmd/crewship/cmd_session_cov_test.go"
@@ -43286,6 +43290,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_list_quiet_ids_test.go",
         "cmd/crewship/cmd_safety_guards_test.go",
         "cmd/crewship/cmd_token_classify_test.go",
         "cmd/crewship/cmd_token_cov_test.go",

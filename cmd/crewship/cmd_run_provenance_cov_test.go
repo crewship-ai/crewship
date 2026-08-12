@@ -232,3 +232,48 @@ func TestRunListRunE_TableStillTruncatesTheID(t *testing.T) {
 		t.Errorf("table lost the id prefix entirely; got:\n%s", table)
 	}
 }
+
+// A run blocked by permissions reads, in every other surface, as a run that
+// CHOSE not to act — which sends an operator after a prompt problem instead of
+// a permission rule. `run get` is where that distinction has to be visible.
+//
+// Tool names only: the producer drops the denied input before the run record
+// is written, because that input is arbitrary agent text and the record is
+// hash-chained.
+func TestRunGetRunE_RendersPermissionDenials(t *testing.T) {
+	stub := covSetupCli4(t)
+	body := provenanceRunBody()
+	body["permission_denials"] = []string{"Bash", "Write"}
+	stub.OnGet("/api/v1/runs/msg_prov", clitest.JSONResponse(200, body))
+	runGetCmd.SetContext(context.Background())
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runGetCmd.RunE(runGetCmd, []string{"msg_prov"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, want := range []string{"Bash", "Write"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("run get output does not name the denied tool %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// Nothing denied is the normal case, and an empty row would claim the CLI was
+// asked and answered nothing.
+func TestRunGetRunE_OmitsPermissionRowWhenNothingDenied(t *testing.T) {
+	stub := covSetupCli4(t)
+	stub.OnGet("/api/v1/runs/msg_prov", clitest.JSONResponse(200, provenanceRunBody()))
+	runGetCmd.SetContext(context.Background())
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runGetCmd.RunE(runGetCmd, []string{"msg_prov"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if strings.Contains(strings.ToLower(out), "denied") {
+		t.Errorf("run get shows a permission row for a run that had none; got:\n%s", out)
+	}
+}

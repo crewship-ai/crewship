@@ -9889,6 +9889,12 @@
             "nullable": true,
             "type": "string"
           },
+          "permission_denials": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "permission_mode": {
             "nullable": true,
             "type": "string"

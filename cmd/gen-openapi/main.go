@@ -766,6 +766,8 @@ func responseComponents() map[string]any {
 		"cli_version": nullable("string"), "api_key_source": nullable("string"),
 		"permission_mode": nullable("string"), "session_id": nullable("string"),
 		"mcp_server_errors": array(ref("MCPServerError")),
+		// Tool names only — the denied input never reaches the run record.
+		"permission_denials": array(scalar("string")),
 	})
 	schemas := map[string]any{
 		"Workspace": workspace, "WorkspaceList": array(ref("Workspace")), "WorkspaceCounts": object(map[string]any{"crews": scalar("integer"), "agents": scalar("integer"), "members": scalar("integer")}),

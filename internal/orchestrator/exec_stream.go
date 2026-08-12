@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,10 +41,12 @@ type streamJSONMessage struct {
 	Errors       []string        `json:"errors,omitempty"`
 	// Also on "result": why the turn ended, and what the CLI refused. Not
 	// derivable from Subtype — a hard auth failure reports subtype "success"
-	// with IsError true and TerminalReason "api_error".
-	TerminalReason    string          `json:"terminal_reason,omitempty"`
-	APIErrorStatus    int             `json:"api_error_status,omitempty"`
-	StopReason        string          `json:"stop_reason,omitempty"`
+	// with IsError true and TerminalReason "api_error". Tolerant types for the
+	// same reason Skills is RawMessage below, and the result line is the
+	// costlier one to lose: see tolerantString.
+	TerminalReason    tolerantString  `json:"terminal_reason,omitempty"`
+	APIErrorStatus    tolerantInt     `json:"api_error_status,omitempty"`
+	StopReason        tolerantString  `json:"stop_reason,omitempty"`
 	PermissionDenials json.RawMessage `json:"permission_denials,omitempty"`
 	// For "system" type with subtype "init"
 	Model        string          `json:"model,omitempty"`
@@ -57,13 +61,17 @@ type streamJSONMessage struct {
 	// without this field nothing in a run says which of the two answered.
 	// Capabilities is the CLI's own list of protocol behaviours (e.g.
 	// "interrupt_receipt_v1") — feature-detect on it rather than on a version
-	// string. MCPServerErrors (v2.1.219+) reports --mcp-config entries dropped
-	// by validation; the run continues and exits 0 without them.
+	// string. Documented upstream as an array of strings, and carried
+	// tolerantly anyway: "documented" is the assurance that let a pinned
+	// adapter version drift for a hundred releases (#1932), and this field has
+	// no consumer that a dropped entry would break. MCPServerErrors
+	// (v2.1.219+) reports --mcp-config entries dropped by validation; the run
+	// continues and exits 0 without them.
 	ClaudeCodeVersion string          `json:"claude_code_version,omitempty"`
 	SessionID         string          `json:"session_id,omitempty"`
 	APIKeySource      string          `json:"apiKeySource,omitempty"`
 	PermissionMode    string          `json:"permissionMode,omitempty"`
-	Capabilities      []string        `json:"capabilities,omitempty"`
+	Capabilities      tolerantStrings `json:"capabilities,omitempty"`
 	MCPServerErrors   json.RawMessage `json:"mcp_server_errors,omitempty"`
 	// Skills is RawMessage, not []string, deliberately: the field is not in
 	// the published stream reference, so its shape is not a promise. A typed
@@ -87,6 +95,98 @@ type streamJSONMessage struct {
 	// thinking/tool activity under its parent instead of flattening it into the
 	// main stream. Empty on top-level (parent agent) lines.
 	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
+}
+
+// tolerantString, tolerantInt and tolerantStrings defend the same thing Skills
+// defends by being a RawMessage, and they exist because the blast radius — not
+// the shape — is what is worth pinning.
+//
+// A stream line is ONE JSON object. A field whose Go type stops matching
+// upstream therefore does not fail alone: it fails the unmarshal of the whole
+// line, and parseClaudeCodeStreamJSON's fallback emits that line into the chat
+// as a raw-text event. On an init line that costs the provenance. On a RESULT
+// line it costs the result event itself — no cost, no usage, and
+// inBandFailure.observe never sees the is_error it keys on, so a run that
+// failed to authenticate is finalised COMPLETED. api_error_status is the
+// likeliest to bite: a release that emits "401" instead of 401 would take every
+// result line of every run with it.
+//
+// These types never return an error. They accept the documented shape, accept
+// the neighbouring one where it still means something (a quoted number is that
+// number — the status is what inBandFailure.label falls back to when nothing
+// else names the cause), and reduce anything else to a zero value. Call sites
+// keep their typed use and convert back to the plain Go type on the way into
+// event metadata, which crosses into the journal and is type-asserted there.
+type tolerantString string
+
+func (s *tolerantString) UnmarshalJSON(b []byte) error {
+	*s = ""
+	t := strings.TrimSpace(string(b))
+	if t == "" || t == "null" {
+		return nil
+	}
+	if t[0] == '"' {
+		var str string
+		if json.Unmarshal(b, &str) == nil {
+			*s = tolerantString(str)
+		}
+		return nil
+	}
+	// A bare number or bool still reads as a label, so keep it verbatim. An
+	// object or array does not — dropping it beats pushing a JSON blob into a
+	// user-facing "failed run (...)" string.
+	if t[0] != '{' && t[0] != '[' {
+		*s = tolerantString(t)
+	}
+	return nil
+}
+
+type tolerantInt int
+
+func (n *tolerantInt) UnmarshalJSON(b []byte) error {
+	*n = 0
+	t := strings.TrimSpace(string(b))
+	if t == "" || t == "null" {
+		return nil
+	}
+	if t[0] == '"' {
+		var str string
+		if json.Unmarshal(b, &str) != nil {
+			return nil
+		}
+		t = strings.TrimSpace(str)
+	}
+	// ParseFloat rather than Atoi: JSON has one number type, so a status can
+	// legitimately arrive as 401.0 or 4.01e2.
+	if f, err := strconv.ParseFloat(t, 64); err == nil {
+		*n = tolerantInt(f)
+	}
+	return nil
+}
+
+type tolerantStrings []string
+
+func (s *tolerantStrings) UnmarshalJSON(b []byte) error {
+	*s = nil
+	var raw []json.RawMessage
+	if json.Unmarshal(b, &raw) != nil {
+		// Not an array at all — the field is gone, the line survives.
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, el := range raw {
+		var str string
+		// An entry that grew into an object is skipped rather than guessed at:
+		// this is a pass-through list, and inventing a key to read would be a
+		// second guess about a shape we already got wrong once.
+		if json.Unmarshal(el, &str) == nil {
+			out = append(out, str)
+		}
+	}
+	if len(out) > 0 {
+		*s = out
+	}
+	return nil
 }
 
 // nestedMessage extracts content blocks from the "message" field if present.

@@ -97,13 +97,34 @@ func (o *Orchestrator) emitSessionInitSignal(ctx context.Context, req AgentRunRe
 		}
 	}
 
-	skipped := initMetaObjects(meta["mcp_server_errors"])
-	if len(skipped) > 0 {
-		payload["mcp_server_error_count"] = len(skipped)
+	// Degradation is decided by PRESENCE, not by whether we understood the
+	// shape. The adapter forwards this value unparsed, so this is the first
+	// code with an opinion about it — and if a future CLI reports the skips as
+	// an object keyed by server name, or as bare strings, decoding here yields
+	// nothing and the run would be written at info with a healthy summary. "The
+	// CLI told us it dropped a server" is the fact worth keeping; the names are
+	// detail that can be missing.
+	rawSkips, hasSkips := meta["mcp_server_errors"]
+	degraded := hasSkips && !emptyJSONValue(rawSkips)
+	skipped := initMetaObjects(rawSkips)
+	if degraded {
+		// Prefer the decoded count, fall back to counting array elements, and
+		// leave the count out entirely rather than reporting a wrong one.
+		if n := len(skipped); n > 0 {
+			payload["mcp_server_error_count"] = n
+		} else if n, ok := initMetaCount(rawSkips); ok {
+			payload["mcp_server_error_count"] = n
+		}
+		// Drop entries that projected to nothing: an alarm listing {} names no
+		// server, and a count with an empty list reads as a parser bug rather
+		// than as "the CLI phrased this differently".
 		kept, truncated := boundInitObjects(skipped, "name", "type")
-		payload["mcp_server_errors"] = kept
-		if truncated {
-			payload["mcp_server_errors_truncated"] = true
+		kept = dropEmptyObjects(kept)
+		if len(kept) > 0 {
+			payload["mcp_server_errors"] = kept
+			if truncated {
+				payload["mcp_server_errors_truncated"] = true
+			}
 		}
 	}
 
@@ -116,7 +137,7 @@ func (o *Orchestrator) emitSessionInitSignal(ctx context.Context, req AgentRunRe
 
 	severity := journal.SeverityInfo
 	summary := sessionInitSummary(req.AgentSlug, model, payload)
-	if len(skipped) > 0 {
+	if degraded {
 		severity = journal.SeverityError
 		summary = skippedServerSummary(req.AgentSlug, skipped, len(servers))
 	}
@@ -175,6 +196,15 @@ func skippedServerSummary(slug string, skipped []map[string]any, loaded int) str
 			name += ": " + kind
 		}
 		names = append(names, name)
+	}
+	if len(names) == 0 {
+		// Degradation is decided by the presence of the report, not by our
+		// ability to read it, so we can land here knowing the CLI dropped
+		// something and knowing nothing else. Say that. The counted form would
+		// otherwise render "0 of N were SKIPPED ()" — a line that contradicts
+		// its own severity and reads as a broken alert, which is how an alert
+		// stops being read.
+		return fmt.Sprintf("%s session DEGRADED — the CLI reported skipped MCP servers in a shape this build cannot read; the run continues without them", slug)
 	}
 	return fmt.Sprintf("%s session DEGRADED — %d of %d configured MCP servers were SKIPPED at startup (%s); the run continues without them",
 		slug, len(skipped), len(skipped)+loaded, strings.Join(names, ", "))
@@ -293,6 +323,21 @@ func decodeInitObjectArray(raw []byte) []map[string]any {
 	var out []map[string]any
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil
+	}
+	return out
+}
+
+// dropEmptyObjects removes projected objects that kept no field. boundInitObjects
+// keeps a key only when it finds a non-empty string, so an entry whose fields the
+// CLI renamed — or typed as something other than a string — projects to {}. Those
+// are removed rather than stored: the count still says how many servers were
+// skipped, and a list of blanks only makes the report look broken.
+func dropEmptyObjects(objs []map[string]any) []map[string]any {
+	out := objs[:0]
+	for _, o := range objs {
+		if len(o) > 0 {
+			out = append(out, o)
+		}
 	}
 	return out
 }

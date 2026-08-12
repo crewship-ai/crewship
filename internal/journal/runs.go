@@ -84,7 +84,17 @@ type RunAggregated struct {
 	// configured for — exit code 0 does not contradict it, which is exactly
 	// why the loss needs its own field rather than a line in a log.
 	MCPServerErrors []MCPServerError
-	CreatedAt       time.Time // == StartedAt for runs (we don't track a separate creation moment)
+	// PermissionDenials names the tools the CLI refused to let the agent use.
+	// Tool NAMES only: the producer drops the denied input before storing it,
+	// because that input is arbitrary agent-generated text and this record is
+	// hash-chained. "Bash was denied" is the diagnosis; the command line is
+	// not ours to keep forever.
+	//
+	// Empty is the normal case and means nothing was denied — which matters,
+	// because a run blocked by permissions otherwise reads as a run that CHOSE
+	// not to act, sending an operator after a prompt problem.
+	PermissionDenials []string
+	CreatedAt         time.Time // == StartedAt for runs (we don't track a separate creation moment)
 }
 
 // MCPServerError is one MCP server the CLI skipped at startup, as reported on
@@ -485,6 +495,37 @@ func (r *RunAggregated) applySessionProvenance(md map[string]any) {
 	if v, ok := md["mcp_server_errors"]; ok {
 		r.MCPServerErrors = decodeMCPServerErrors(v)
 	}
+	if v, ok := md["permission_denials"]; ok {
+		r.PermissionDenials = decodeDeniedToolNames(v)
+	}
+}
+
+// decodeDeniedToolNames pulls the tool names out of the projected denial list,
+// tolerating both the in-process []map form and the raw JSON a DB read yields.
+// A malformed value degrades to no denials rather than a partial list: this
+// drives an operator's reading of why a run did nothing, and half an answer is
+// worse than none.
+func decodeDeniedToolNames(v any) []string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var entries []struct {
+		ToolName string `json:"tool_name"`
+	}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.ToolName != "" {
+			names = append(names, e.ToolName)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return names
 }
 
 // decodeMCPServerErrors types the array the adapter deliberately passed

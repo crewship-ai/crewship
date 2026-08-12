@@ -378,3 +378,97 @@ func TestRunAgent_SessionInitEntryIgnoresNonInitSystemEvents(t *testing.T) {
 		t.Errorf("session_id = %v, want sess-after-retry — the retry envelope must not take the slot", got)
 	}
 }
+
+// The adapter passes mcp_server_errors through as unparsed JSON, so this code
+// is the first thing that has an opinion about its shape. Two ways a shape it
+// does not recognise turns a degraded session into a quiet one:
+//
+//   - the value does not decode into a list of objects at all, so `skipped` is
+//     empty and the entry is written at info with the ordinary "session on
+//     <model>" summary;
+//   - it decodes, but every element projects to {} because the CLI renamed the
+//     fields, so the alarm fires naming no server.
+//
+// Both are worse than a noisy entry: "the CLI told us something was skipped"
+// is the fact, and it survives not understanding the details.
+func TestEmitSessionInitSignal_UnexpectedSkipShapeStillRaises(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"object keyed by server name", `{"crewship-memory":{"type":"invalid_config"}}`},
+		{"array of strings", `["crewship-memory"]`},
+		{"array of objects with unknown keys", `[{"server":"crewship-memory","reason":"invalid_config"}]`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			j := &covJournal{}
+			o := New(nil, newMemState(), covQuietLogger())
+			o.SetJournal(j)
+
+			o.emitSessionInitSignal(context.Background(), covRunReq(), map[string]any{
+				"subtype":           "init",
+				"model":             "claude-opus-4-8",
+				"mcp_server_errors": json.RawMessage(tc.raw),
+			})
+
+			entries := j.byType("run.session_init")
+			if len(entries) != 1 {
+				t.Fatalf("want 1 entry, got %d", len(entries))
+			}
+			if got := entries[0].Severity; got != "error" {
+				t.Errorf("Severity = %q, want error — the CLI reported a skipped server, "+
+					"and not understanding its shape is not a reason to call the session healthy", got)
+			}
+			sum := entries[0].Summary
+			if !strings.Contains(strings.ToLower(sum), "skip") {
+				t.Errorf("Summary = %q, want it to say something was skipped", sum)
+			}
+			// The summary is what an operator reads in the feed, so it must not
+			// contradict its own severity or trail an empty list. "0 of 2 were
+			// SKIPPED ()" is a line that makes the alert look broken and gets
+			// the alert ignored.
+			if strings.Contains(sum, "0 of") {
+				t.Errorf("Summary = %q claims nothing was skipped while raising a degraded alert", sum)
+			}
+			if strings.Contains(sum, "()") {
+				t.Errorf("Summary = %q trails an empty server list", sum)
+			}
+		})
+	}
+}
+
+// An alarm that names no server is an alarm nobody can act on.
+func TestEmitSessionInitSignal_NeverEmitsNamelessSkipEntries(t *testing.T) {
+	t.Parallel()
+	j := &covJournal{}
+	o := New(nil, newMemState(), covQuietLogger())
+	o.SetJournal(j)
+
+	o.emitSessionInitSignal(context.Background(), covRunReq(), map[string]any{
+		"subtype": "init",
+		"model":   "claude-opus-4-8",
+		// Recognisable as a list of objects, but carrying none of the keys we
+		// project — the projection would otherwise store [{}].
+		"mcp_server_errors": json.RawMessage(`[{"server":"crewship-memory"},{"server":"github"}]`),
+	})
+
+	entries := j.byType("run.session_init")
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	blob, err := json.Marshal(entries[0].Payload["mcp_server_errors"])
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if strings.Contains(string(blob), "{}") {
+		t.Errorf("payload carries empty skip objects (%s) — the count says two servers were "+
+			"skipped and the list names neither", blob)
+	}
+	if entries[0].Payload["mcp_server_error_count"] != 2 {
+		t.Errorf("mcp_server_error_count = %v, want 2 — the count is knowable even when the names are not",
+			entries[0].Payload["mcp_server_error_count"])
+	}
+}

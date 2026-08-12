@@ -90,7 +90,7 @@ var issueAttachmentsCmd = &cobra.Command{
 				by += " (agent)"
 			}
 			rows = append(rows, []string{
-				truncateID(a.ID, 12),
+				f.ShortID(a.ID, truncateID(a.ID, 12)),
 				// A filename is chosen by whoever uploaded the file. Strip
 				// control bytes before printing so it cannot repaint the
 				// terminal — same treatment a pull-request title gets.

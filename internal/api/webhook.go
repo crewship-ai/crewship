@@ -480,9 +480,16 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		logBuf := logcollector.NewOutputBuffer(h.logWriter, info.CrewID, info.AgentSlug)
 		defer logBuf.Close()
 
-		base, _ := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
-			LogBuf:    logBuf,
-			AgentSlug: info.AgentSlug,
+		// CaptureResultMeta: the accumulator is what carries the CLI's usage
+		// numbers, the model it actually resolved to, and the session-init
+		// provenance to the run record below. Discarding it left a
+		// webhook-triggered run recording none of the three — and nobody is
+		// watching a webhook run, so the record is the only place to read them
+		// afterwards (#1934).
+		base, acc := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
+			LogBuf:            logBuf,
+			AgentSlug:         info.AgentSlug,
+			CaptureResultMeta: true,
 		})
 		handler := func(event orchestrator.AgentEvent) {
 			base(event)
@@ -525,8 +532,19 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 			exitCode = 1
 		}
 
+		// One metadata map for both outcomes, so the FAILED run carries the
+		// same answers the COMPLETED one does. The guard-refused case above
+		// never started a CLI, and then the accumulator is simply empty —
+		// nothing is invented for it.
 		completedMeta := map[string]interface{}{
 			"duration_ms": time.Since(startedAt).Milliseconds(),
+		}
+		orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
+		orchestrator.MergeSessionInitMeta(completedMeta, acc.SessionInit())
+		// Session-init ground truth for the served model, so the record can
+		// confirm which tier answered rather than which one was requested.
+		if m := acc.ResolvedModel(); m != "" {
+			completedMeta["model"] = m
 		}
 		if updateErr := h.resolver.UpdateRun(runCtx, runID, status, &exitCode, errMsg, completedMeta); updateErr != nil {
 			h.logger.Warn("failed to update run status", "run_id", runID, "status", status, "error", updateErr)

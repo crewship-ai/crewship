@@ -165,10 +165,11 @@ var privacyCardsListCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
+		f := newFormatter()
 		rows := make([][]string, 0, len(out.Peers))
 		for _, p := range out.Peers {
 			rows = append(rows, []string{
-				truncateID(p.ID, 12),
+				f.ShortID(p.ID, truncateID(p.ID, 12)),
 				p.AgentSlug,
 				fmt.Sprintf("%d", p.Bytes),
 				p.UpdatedAt,
@@ -176,7 +177,7 @@ var privacyCardsListCmd = &cobra.Command{
 		}
 		// Full card content is returned by the API but omitted from the
 		// table to keep it scannable; `-f json` surfaces it for a SAR.
-		return newFormatter().Auto(out, []string{"ID", "AGENT", "BYTES", "UPDATED"}, rows)
+		return f.Auto(out, []string{"ID", "AGENT", "BYTES", "UPDATED"}, rows)
 	},
 }
 

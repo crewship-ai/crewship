@@ -48,8 +48,12 @@ section "Tier A — the surfaces exist and filter"
 # `run get` is the detail view; without it the provenance fields are reachable
 # only by reading JSON off the list endpoint, which is what "no CLI surface"
 # meant in the issue.
+#
+# Asserted on the usage line, not on the word "run": when a subcommand does not
+# exist cobra prints `run`'s OWN help, which says "run" a dozen times — so the
+# obvious needle passes precisely when the command is missing.
 help_out="$(cs run get --help 2>&1 || true)"
-assert_contains "run get is a real command" "$help_out" "run"
+assert_contains "run get is a real command" "$help_out" "run get <run-id>"
 
 # A journal type that no entry uses would still return 200 with an empty list,
 # so this asserts the FILTER is honoured, not that rows exist: an unknown type
@@ -58,14 +62,49 @@ bogus="$(cs journal --type run.no_such_type_$$ --lines 5 2>&1 || true)"
 assert_not_contains "an unknown --type does not fall through to the whole feed" \
   "$bogus" "run.started"
 
+# count_top_level_key <payload> <key> — how many objects in a `--format json`
+# list payload carry <key> at the TOP level. Always prints an integer.
+#
+# The top-level part is the whole assertion. `cli.RunDetail` carries a
+# `metadata` object and both drivers write completedMeta["model"], so the
+# substring `model` is in the payload of every completed run whether or not the
+# list decode still exposes the field — a plain grep passes on exactly the
+# regression the assertion below exists to catch.
+#
+# jq when it is there. Without it, fall back to the indentation the CLI's own
+# encoder produces (SetIndent("", "  "): a key of an array element sits at four
+# spaces, anything nested sits deeper) — less precise, still able to tell the
+# two apart, and lib.sh's preflight already warns that jq is missing rather than
+# making it a hard requirement.
+count_top_level_key() {
+  local payload="$1" key="$2" n
+  if have jq; then
+    n="$(printf '%s' "$payload" | jq --arg k "$key" '[ .[]? | objects | select(has($k)) ] | length' 2>/dev/null)"
+  else
+    n="$(printf '%s' "$payload" | grep -cE "^ {4}\"${key}\":" 2>/dev/null)"
+  fi
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  printf '%s' "$n"
+}
+
 # The list decode used to be a narrower struct than the response, which is how
 # `model` was dropped for the entire life of the field. Machine output must
 # carry whatever the server sends.
 list_json="$(cs run list --format json 2>&1 || true)"
-if printf '%s' "$list_json" | grep -q '"id"'; then
-  assert_contains "run list --format json exposes the run's model field" "$list_json" "model"
-else
+if ! printf '%s' "$list_json" | grep -q '"id"'; then
   skip "run list --format json (no runs on this server yet)"
+elif [[ "$(count_top_level_key "$list_json" model)" != 0 ]]; then
+  _pass "run list --format json exposes the run's model field"
+elif printf '%s' "$list_json" | grep -q '"model"'; then
+  # `model` is in the payload but never at the top level, i.e. only the copy
+  # inside `metadata`. That is the regression, not a pass.
+  _fail "run list --format json exposes the run's model field" \
+    "\"model\" appears only inside metadata — the narrow list decode is back"
+else
+  # Model is a `*string` with omitempty: a server whose runs all predate
+  # session provenance sends no such key anywhere, and that is not a CLI
+  # regression. Say so rather than failing the box.
+  skip "run list --format json model field" "no run on this server recorded a model"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

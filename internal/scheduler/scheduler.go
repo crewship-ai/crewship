@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -526,6 +527,15 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	if err := s.resolver.CreateRun(ctx, runID, ag.ID, chatID, ag.Workspace, "SCHEDULED", runMeta); err != nil {
 		s.logger.Warn("scheduled: create run failed", "error", err)
 	}
+	// Put the run on the context so every journal entry emitted beneath it
+	// inherits trace_id = runID — the orchestrator's JournalEntry has no
+	// TraceID field of its own and reads the id from here. Without this,
+	// `crewship journal --run-id <id>` finds nothing for a SCHEDULED run,
+	// including the run.session_init entry that fires at severity error when
+	// the CLI dropped an MCP server at startup. That alert exists for exactly
+	// this kind of run: nobody is watching a cron job, so it has to be
+	// reachable from the run afterwards.
+	ctx = journal.WithRunID(ctx, runID)
 
 	// 7. Run agent
 	startedAt := time.Now()

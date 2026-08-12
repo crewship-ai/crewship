@@ -616,14 +616,16 @@ var runListCmd = &cobra.Command{
 			if r.FinishedAt != nil {
 				finished = *r.FinishedAt
 			}
-			// Truncate for the TABLE only. `--format quiet` renders the
-			// first cell of each row, and it exists so a script can pipe ids
-			// into the next command — a 16-character prefix is not an id, and
-			// feeding one back into `run get` answers 404. The table has a
-			// column width to respect; quiet has no columns.
+			// Truncate for the TABLE only — ShortID is what enforces that.
+			// `--format quiet` renders the first cell of each row and exists
+			// so a script can pipe ids into the next command; a 16-character
+			// prefix is not an id, and feeding one back into `run get` answers
+			// 404. This used to be an inline `f.Format != "quiet"` check here,
+			// i.e. a rule every other list command had to rediscover — and
+			// none of them had.
 			id := r.ID
-			if len(id) > 16 && f.Format != "quiet" {
-				id = id[:16]
+			if len(id) > 16 {
+				id = f.ShortID(r.ID, id[:16])
 			}
 			rows = append(rows, []string{id, derefStr(r.AgentSlug, ""), r.Status, r.TriggerType, r.CreatedAt, finished})
 		}
@@ -754,6 +756,12 @@ func runDetailPairs(r *cli.RunDetail) [][]string {
 			detail += ": " + e.Message
 		}
 		pairs = append(pairs, []string{"MCP skipped", detail})
+	}
+	// Tools the CLI refused to let the agent use. Without this row the run
+	// reads as one that chose not to act, and the operator goes looking for a
+	// prompt problem instead of a permission rule.
+	if len(r.PermissionDenials) > 0 {
+		pairs = append(pairs, []string{"Tools denied", strings.Join(r.PermissionDenials, ", ")})
 	}
 	return pairs
 }
