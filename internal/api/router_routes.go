@@ -42,6 +42,10 @@ func (r *Router) registerRoutes() {
 	// routes plus the single panel write path.
 	r.registerPageRoutes()
 
+	// Public pages — the /p/{token} surface (§7.3). Its own registrar because
+	// §7.3.1 makes it a separate product rather than a permission level.
+	r.registerPagePublicRoutes()
+
 	// Auth, signup, Google OAuth2, sessions, CLI tokens, NextAuth,
 	// onboarding.
 	r.registerAuthRoutes()

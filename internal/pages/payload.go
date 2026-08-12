@@ -40,10 +40,14 @@ func ValidatePayload(schema PanelSchema, raw []byte) (Payload, error) {
 	switch schema {
 	case SchemaMetric:
 		return ValidateMetric(raw)
+	case SchemaSeries:
+		return ValidateSeries(raw)
 	case SchemaStatus:
 		return ValidateStatus(raw)
 	case SchemaTable:
 		return ValidateTable(raw)
+	case SchemaNarrative:
+		return ValidateNarrative(raw)
 	}
 	if schema.Known() {
 		return nil, newError(CodeUnknownSchema, schema,

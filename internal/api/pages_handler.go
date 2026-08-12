@@ -672,11 +672,11 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "insert page version", err)
 		return
 	}
-	// §10b.3 keeps the last 50 versions; the retention is Go's job for the same
-	// reason the ring's is.
-	if _, err := tx.ExecContext(r.Context(), `
-		DELETE FROM page_versions
-		WHERE page_id = ? AND seq <= ?`, rec.ID, seq-int64(pages.MaxVersionsPerPage)); err != nil {
+	// §10b.3 keeps the last 50 versions. Through trimPageVersions, not an
+	// inline DELETE: rollback appends versions too, and this rule having two
+	// implementations is how the two start disagreeing about what 50 means.
+	// The grants resolver already had to be de-duplicated for the same reason.
+	if err := trimPageVersions(r.Context(), tx, rec.ID, seq); err != nil {
 		replyInternalError(w, h.logger, "trim page versions", err)
 		return
 	}

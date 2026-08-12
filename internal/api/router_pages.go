@@ -59,4 +59,9 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("PUT", "/api/v1/pages/{slug}/panels/{panelId}/data", roleSelf, p.PushData)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/grants", roleSelf, p.PutGrant)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/grants", roleSelf, p.DeleteGrant)
+
+	// Export/import (§10b.2) and the version history behind `page rollback`
+	// (§10b.1) register themselves, next to their handlers — see
+	// router_pages_transfer.go.
+	r.registerPageTransferRoutes()
 }

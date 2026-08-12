@@ -16,12 +16,19 @@
  * freshness verdict the second clause is dropped rather than guessed: `—`
  * means no basis to compute, and claiming "all fresh" without one is the
  * silent-old-numbers failure §4 exists to prevent.
+ *
+ * The shell also owns the two AUTHORING affordances (§10b.1): New page, and
+ * Edit on the page you are looking at. Both open the same YAML editor on the
+ * same document — the third door beside the CLI and an agent — and the Edit
+ * one lives here rather than in `page-view.tsx` because the header is the one
+ * place both routes already share.
  */
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
+import { FilePlus2, Pencil } from "lucide-react"
 
-import { SubBar } from "@/components/layout/sub-bar"
+import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
@@ -39,6 +46,7 @@ import type { PanelState } from "@/components/features/pages/panels/types"
 import { PagesRail } from "@/components/features/pages/pages-rail"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
+import { PageEditor, sealedPanelCount, type PageEditorMode } from "@/components/features/pages/page-editor"
 
 export interface PagesLayoutProps {
   workspaceId: string
@@ -92,6 +100,21 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     </>
   )
 
+  // ── Authoring (§10b.1) ───────────────────────────────────────────────────
+  const [editor, setEditor] = React.useState<PageEditorMode | null>(null)
+  // The panel owner most of this workspace already uses, so the template's
+  // first placeholder is one someone actually has. Only a `crew/` reference —
+  // a panel's permission anchor is always a crew (§7.1).
+  const suggestedOwner = React.useMemo(
+    () => pages.find((p) => p.ownerRef?.startsWith("crew/"))?.ownerRef ?? null,
+    [pages],
+  )
+  // A page carrying a panel this viewer may not see cannot be edited from a
+  // document, because the document has no way to say "and one more I am not
+  // allowed to describe" — saving it would delete that panel (§11b.14).
+  const sealed = sealedPanelCount(detail.raw)
+  const canEdit = Boolean(slug) && detail.page != null && sealed === 0
+
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
       <SubBar
@@ -99,6 +122,27 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         title="Pages"
         description={description}
         ariaLabel="Pages"
+        actions={
+          <>
+            {slug && (
+              <SubBarSecondary
+                icon={Pencil}
+                onClick={() => setEditor("edit")}
+                disabled={!canEdit}
+                title={
+                  sealed > 0
+                    ? "This page has panels you may not see; editing it here would delete them."
+                    : "Edit this page's YAML"
+                }
+              >
+                Edit
+              </SubBarSecondary>
+            )}
+            <SubBarPrimary icon={FilePlus2} onClick={() => setEditor("create")}>
+              New page
+            </SubBarPrimary>
+          </>
+        }
       />
 
       <div className="relative flex flex-1 overflow-hidden">
@@ -130,6 +174,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onFiltersChange={setFilters}
               selectedSlug={slug ?? null}
               onSelectPage={openPage}
+              onCreatePage={() => setEditor("create")}
               onToggleCollapse={() => setCollapsed(true)}
             />
           )}
@@ -161,6 +206,22 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           )}
         </div>
       </div>
+
+      {editor && (
+        <PageEditor
+          workspaceId={workspaceId}
+          mode={editor}
+          page={editor === "edit" ? detail.raw : null}
+          defaultOwner={suggestedOwner}
+          onClose={() => setEditor(null)}
+          // A created page is one you want to look at; an edited one you are
+          // already looking at, and the invalidation the mutation performed
+          // has already refetched it.
+          onSaved={(saved) => {
+            if (editor === "create" && saved && saved !== slug) openPage(saved)
+          }}
+        />
+      )}
     </div>
   )
 }

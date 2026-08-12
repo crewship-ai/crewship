@@ -122,6 +122,7 @@ func TestLoad_AllNewKindArms(t *testing.T) {
 		"kind: Hook\nmetadata: { name: H, slug: h }\nspec: {}",
 		"kind: Skill\nmetadata: { name: Sk, slug: sk }\nspec: { inline: \"---\\nname: sk\\n---\\nbody\" }",
 		"kind: Issue\nmetadata: { name: Is, slug: is }\nspec: { crew_slug: c }",
+		"kind: Page\nmetadata: { name: Pg, slug: pg }\nspec: { panels: [ { id: p, schema: metric.v1, owner: crew/c, producer: script/s.sh, sla: 30s } ] }",
 		"kind: Workspace\nmetadata: { name: Ws, slug: ws }\nspec: { crews: [] }",
 	}
 	var sb strings.Builder
@@ -156,12 +157,41 @@ func TestLoad_AllNewKindArms(t *testing.T) {
 		{"Hooks", len(b.Hooks)},
 		{"Skills", len(b.Skills)},
 		{"Issues", len(b.Issues)},
+		{"Pages", len(b.Pages)},
 		{"Workspaces", len(b.Workspaces)},
 	}
 	for _, c := range checks {
 		if c.got != 1 {
 			t.Errorf("%s = %d, want 1", c.name, c.got)
 		}
+	}
+}
+
+// TestLoad_SingleKindManifestIsNotEmpty is the guard isEmpty's own doc
+// comment asks for. A kind added to Bundle but forgotten in isEmpty
+// fails SILENTLY and only for the manifest that declares nothing else:
+// the document parses, lands in its slice, and Load then refuses the
+// whole file with "no documents in manifest". One document per kind,
+// so the next kind to arrive is covered by the same table.
+func TestLoad_SingleKindManifestIsNotEmpty(t *testing.T) {
+	cases := map[string]string{
+		"Page":  "kind: Page\nmetadata: { name: P, slug: p }\nspec: { panels: [ { id: p, schema: metric.v1, owner: crew/c, producer: script/s.sh, sla: 30s } ] }",
+		"Issue": "kind: Issue\nmetadata: { name: I, slug: i }\nspec: { crew_slug: c }",
+		"Hook":  "kind: Hook\nmetadata: { name: H, slug: h }\nspec: {}",
+		"Skill": "kind: Skill\nmetadata: { name: S, slug: s }\nspec: { inline: \"---\\nname: s\\n---\\nbody\" }",
+	}
+	for name, doc := range cases {
+		name, doc := name, doc
+		t.Run(name, func(t *testing.T) {
+			b, err := Load([]byte("apiVersion: crewship/v1\n" + doc + "\n"))
+			if err != nil {
+				t.Fatalf("a manifest holding only a %s document must load: %v", name, err)
+			}
+			if b.isEmpty() {
+				t.Fatalf("isEmpty() is true for a bundle holding one %s document — "+
+					"the kind is missing from isEmpty's list", name)
+			}
+		})
 	}
 }
 

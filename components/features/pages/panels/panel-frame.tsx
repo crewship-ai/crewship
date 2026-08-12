@@ -30,6 +30,18 @@ import type { PanelProps } from "./types"
 export interface PanelFrameProps extends PanelProps {
   icon: LucideIcon
   children: React.ReactNode
+  /**
+   * Overrides the right-hand word. Only the sealed placeholder uses it: that
+   * panel has no freshness, because the server sent no data to be fresh about
+   * (§11b.14), and "no data yet" would report a permission decision as a
+   * producer that has not run.
+   */
+  statusWord?: string
+  /**
+   * The sealed placeholder carries no provenance either — the producer's name
+   * and run id are exactly the internal vocabulary the seal exists to withhold.
+   */
+  showProvenance?: boolean
 }
 
 export function PanelFrame({
@@ -40,6 +52,8 @@ export function PanelFrame({
   className,
   icon: Icon,
   children,
+  statusWord,
+  showProvenance = true,
 }: PanelFrameProps) {
   const label = panel.title?.trim() || panel.id
   return (
@@ -60,13 +74,13 @@ export function PanelFrame({
       }
       actions={
         <span data-slot="panel-status-word" className="text-[11px] text-muted-foreground">
-          {panelStateWord(data.state)}
+          {statusWord ?? panelStateWord(data.state)}
         </span>
       }
     >
       <div className="flex flex-col gap-3">
         {children}
-        <PanelProvenance data={data} now={now} publicView={publicView} />
+        {showProvenance ? <PanelProvenance data={data} now={now} publicView={publicView} /> : null}
       </div>
     </SectionCard>
   )

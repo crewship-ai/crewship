@@ -18,13 +18,14 @@ var RoutineV1 []byte
 // and both are validated. There is no third DSL.
 //
 // The set of panel kinds is CLOSED (§3): a new one is a server release, never
-// a user-supplied string. Three ship in v0 — metric, status and table — which
-// is the set that needs no chart engine and therefore no new dependency.
-// series.v1, narrative.v1 and embed.v1 are named in the migration's CHECK so
-// admitting them later is additive, and they get their schema when they get
-// their renderer.
+// a user-supplied string. Three shipped in v0 — metric, status and table —
+// which is the set that needed no chart engine and therefore no new
+// dependency; series and narrative followed, and neither added one either
+// (the chart is hand-written inline SVG, the prose is React elements).
+// embed.v1 is still named in the migration's CHECK so admitting it later is
+// additive, and it gets its schema when it gets its sandbox.
 //
-// Two properties are shared by all three and are load-bearing rather than
+// Two properties are shared by all of them and are load-bearing rather than
 // stylistic:
 //
 //   - `additionalProperties: false`, which is what stops a producer supplying
@@ -45,3 +46,23 @@ var PanelStatusV1 []byte
 
 //go:embed panel.table.v1.json
 var PanelTableV1 []byte
+
+// PanelNarrativeV1 is the one an AI agent writes, so §8's ten rules are its
+// specification. The three absences below are the rules, not a summary of
+// them: no image field (rule 2 — CamoLeak came through a trusted first-party
+// image proxy), no URL field (rule 3 — Slack AI's leak was a rendered link),
+// and no markup field (rule 1 — the agent fills a schema, the host owns the
+// look). Each is enforced by `additionalProperties: false` rather than by a
+// sanitiser, because a sanitiser is a thing that can be got past.
+//
+//go:embed panel.narrative.v1.json
+var PanelNarrativeV1 []byte
+
+// PanelSeriesV1 carries §3's three chart rules in its shape: one `unit` for
+// the whole panel and none on a series, so two units cannot be expressed; no
+// `color` on a series, so colour stays a property of the entity that the
+// renderer derives from the name; and a series count the server merges rather
+// than refuses, so the five-colour bound never costs a producer a push.
+//
+//go:embed panel.series.v1.json
+var PanelSeriesV1 []byte

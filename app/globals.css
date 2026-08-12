@@ -660,3 +660,115 @@ body {
     animation: none;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Print (PRD §10b.8) — "send the monthly close to the accountant" via the
+ * browser's own Print-to-PDF. Server-side PDF generation is explicitly out
+ * of scope; this is the whole feature. Every rule below is gated on
+ * `@media print` and changes nothing on screen.
+ *
+ * Four things a printed page must do that the screen view does not:
+ *
+ *   1. Paper is white — force the LIGHT palette even though the app always
+ *      carries `html.dark` (app/layout.tsx:31). `html.dark` (tag+class,
+ *      specificity 0-1-1) outranks the bare `.dark { … }` rule above
+ *      (0-1-0) regardless of where either is declared in this file, so this
+ *      wins without relying on source order.
+ *      NOTE: --chart-1..5 are deliberately NOT listed here. They are
+ *      currently identical between `:root` and `.dark` (a known bug fixed on
+ *      a different branch, #1940) — touching them here would conflict with
+ *      that PR for zero visual effect today.
+ *   2. The app chrome (icon rail, top toolbar, operational banners) is not
+ *      part of the document being printed.
+ *   3. Pages' 12-column grid (`components/features/pages/page-view.tsx`)
+ *      collapses to one column, and a panel breaks BETWEEN panels, never
+ *      through one. The panel components already carry `print:grid-cols-1` /
+ *      `print:break-inside-avoid` Tailwind utilities for this; the rules
+ *      below key off the same elements' stable `data-slot` attributes as a
+ *      second, independent path to the same result — including the specific
+ *      failure mode the grid's own comment already documents (a
+ *      `md:col-span-8` cell does not clamp inside a 1-column grid, it
+ *      creates seven implicit columns) — because a print preview is
+ *      typically rendered at a desktop-width viewport where `md:` utilities
+ *      are still active.
+ *   4. Every panel's provenance footer and age print, even where the screen
+ *      view only shows the age once a panel goes stale. A printed number
+ *      with no date next to it is the exact dishonesty §4 exists to
+ *      prevent.
+ * ───────────────────────────────────────────────────────────────────────── */
+@media print {
+  /* 1. Light palette, unconditionally — values copied verbatim from the
+     light block at the top of this file. Only the tokens print actually
+     uses (backgrounds, text, borders); --chart-1..5 excluded (see above). */
+  :root,
+  html.dark {
+    color-scheme: light;
+    --background: oklch(0.9911 0 0);
+    --foreground: oklch(0.1994 0.0470 270.6494);
+    --card: oklch(0.9851 0 0);
+    --card-foreground: oklch(0.1994 0.0470 270.6494);
+    --popover: oklch(1.0000 0 0);
+    --popover-foreground: oklch(0.1994 0.0470 270.6494);
+    --primary: #0E6BE8;
+    --primary-foreground: oklch(1.0000 0 0);
+    --primary-hover: #1E7BFE;
+    --secondary: oklch(0.1994 0.0470 270.6494);
+    --secondary-foreground: oklch(1.0000 0 0);
+    --muted: oklch(1.0000 0 0);
+    --muted-foreground: oklch(0.1994 0.0470 270.6494);
+    --muted-foreground-soft: oklch(0.50 0.03 270);
+    --accent: oklch(1.0000 0 0);
+    --accent-foreground: #0E6BE8;
+    --border: oklch(0.9212 0.0033 17.2170);
+    --input: oklch(0.8452 0 0);
+    --ring: #0E6BE8;
+    --surface-subtle: oklch(0.975 0 0);
+    --surface-raised: oklch(1 0 0);
+  }
+
+  /* Chrome strips background colours from print by default; the freshness
+     dots and status tints (§3: "glyph + text, never colour alone" — colour
+     is a bonus, not the only signal, so losing it is not a correctness bug,
+     but keeping it is strictly better on a monthly close a human is about to
+     read) survive when told to. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* 2. App chrome. The icon rail is `[data-slot="sidebar"]`
+     (components/ui/sidebar.tsx). The top toolbar and every operational
+     banner (Runtime/Update/RealtimeStatus) are siblings rendered before the
+     routed page content inside `<main data-slot="sidebar-inset">`
+     (app/(dashboard)/layout.tsx) — the content div is always last, so this
+     holds regardless of which banners happen to be mounted. */
+  [data-slot="sidebar"] {
+    display: none !important;
+  }
+  [data-slot="sidebar-inset"] > *:not(:last-child) {
+    display: none !important;
+  }
+
+  /* 3. Single-column grid, and no cell allowed to span past it. */
+  [data-slot="panel-grid"] {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+  [data-slot="panel-cell"] {
+    grid-column: 1 / -1 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  [data-slot="panel"] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* 4. Provenance and age are the honesty, not decoration — never let them
+     print dimmer than the body text around them. */
+  [data-slot="panel-provenance"],
+  [data-slot="panel-age"] {
+    opacity: 1 !important;
+    color: var(--foreground) !important;
+  }
+}

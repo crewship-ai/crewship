@@ -28,12 +28,21 @@ export const PANEL_SCHEMAS = [
 export type PanelSchema = (typeof PANEL_SCHEMAS)[number]
 
 /**
- * The subset this build actually renders. `series.v1`, `narrative.v1` and
- * `embed.v1` are staged later (§12) but are part of the closed enum from the
- * first migration, so the registry carries an entry for them rather than
- * pretending they are unknown strings.
+ * The subset this build actually renders — five of the six. `embed.v1` is
+ * staged later (§3.1: it needs a second origin and a sandbox proxy, not a
+ * payload type) but is part of the closed enum from the first migration, so
+ * the registry carries an entry for it rather than pretending it is an unknown
+ * string. Kept in step with `producibleSchemas` in internal/pages/schema.go:
+ * a schema the server accepts pushes for and the client draws nothing for is
+ * a panel that silently stops telling the truth.
  */
-export const IMPLEMENTED_PANEL_SCHEMAS = ["metric.v1", "status.v1", "table.v1"] as const
+export const IMPLEMENTED_PANEL_SCHEMAS = [
+  "metric.v1",
+  "series.v1",
+  "status.v1",
+  "table.v1",
+  "narrative.v1",
+] as const
 
 /**
  * Narrows an untrusted string to the closed enum.
@@ -86,6 +95,28 @@ export interface PanelSpec {
   span?: number
   /** §11b.3: `sla_seconds` (integer) on the wire; `sla: 30s` is YAML sugar. */
   sla_seconds?: number
+  /**
+   * §7.1 rule 2 / §11b.14: this panel exists on the page but this viewer may
+   * not see it, so the server sent `{panel_id, span, sealed: true,
+   * owner_crew_name}` and NOTHING else — no schema, no payload, no producer,
+   * no SLA.
+   *
+   * The renderer keys on this flag and never on a missing field: *"a
+   * serialisation bug can never be mistaken for a permission decision."* A
+   * panel with no schema that is not sealed is a bug and renders as one.
+   */
+  sealed?: boolean
+  /**
+   * The crew that owns the sealed panel, so the placeholder can say *"Hidden ·
+   * crew Účetní"* rather than leaving a blank rectangle. The server takes
+   * trouble to send it precisely so the reader knows who to ask.
+   *
+   * Spelled camelCase because `hooks/use-pages.ts` normalises it — the wire
+   * name pinned in §11b.14 is `owner_crew_name`, and this field carries it
+   * verbatim: `PanelSpec` already spells `sla_seconds` the wire way, and a
+   * type that mixes both conventions is a type nobody can guess.
+   */
+  owner_crew_name?: string | null
 }
 
 /** The panel payload as produced by a machine (§6 layer 2), plus its state. */
@@ -162,4 +193,66 @@ export type TableRow = Record<string, TableCell> | TableCell[]
 export interface TablePayload {
   columns?: TableColumn[] | null
   rows?: TableRow[] | null
+}
+
+// ── narrative.v1 (§3, §8) ─────────────────────────────────────────────────
+
+/**
+ * The block kinds. Two, both prose. There is no `html`, no `code` and no
+ * `image` — §8 rule 1 says the agent fills a schema and never emits markup,
+ * and rule 2 says images are absent from the schema rather than sanitised.
+ */
+export const NARRATIVE_BLOCK_KINDS = ["paragraph", "list"] as const
+export type NarrativeBlockKind = (typeof NARRATIVE_BLOCK_KINDS)[number]
+
+/**
+ * The nouns a block may point at. §8 rule 3: a block references an internal
+ * entity BY ID and the renderer builds the URL — it may never carry one.
+ * Slack AI's private-channel exfiltration was a rendered link, so this type
+ * has no field a destination could travel in, and the route table lives in
+ * the panel component.
+ */
+export const ENTITY_REF_KINDS = ["issue", "run", "page", "agent", "crew"] as const
+export type EntityRefKind = (typeof ENTITY_REF_KINDS)[number]
+
+export interface EntityRef {
+  /** Untrusted: an unrecognised kind renders as plain text, never as a link. */
+  kind?: string | null
+  id?: string | null
+}
+
+export interface NarrativeBlock {
+  /** Untrusted: an unrecognised kind renders as a paragraph, never as markup. */
+  kind?: string | null
+  text?: string | null
+  ref?: EntityRef | null
+}
+
+export interface NarrativePayload {
+  blocks?: NarrativeBlock[] | null
+  /**
+   * The one-line conclusion. Optional and never null — the em dash means "no
+   * basis to compute a value" (§9b.4), and a missing sentence is not a missing
+   * measurement, so the glyph is not borrowed here.
+   */
+  verdict?: string | null
+}
+
+// ── series.v1 (§3) ────────────────────────────────────────────────────────
+
+export interface SeriesEntry {
+  name?: string | null
+  /**
+   * One point per label. `null` is no basis to compute for that point alone
+   * and draws no bar; `0` is a measured zero and draws a bar of zero height.
+   * §9b.4, applied per data point rather than per panel.
+   */
+  values?: (number | null)[] | null
+}
+
+export interface SeriesPayload {
+  /** One unit for the whole panel (§3). A series carries none of its own. */
+  unit?: string | null
+  labels?: string[] | null
+  series?: SeriesEntry[] | null
 }

@@ -60,6 +60,16 @@ export interface WirePanel {
   sla?: string | number | null
   /** 1..12, consumed by the grid (§9). */
   span?: number | null
+  /** §7.3.2 rule 2: opts this panel into a published page. Read so an edit
+   *  round-trips it — a field the editor drops is a field a save deletes. */
+  public?: boolean | null
+  /** §11b.14: a panel the viewer may not see arrives as EXACTLY
+   *  `{panel_id, span, sealed, owner_crew_name}`. Present-and-true rather than
+   *  inferred from missing fields, so a serialisation bug can never be
+   *  mistaken for a permission decision. */
+  sealed?: boolean | null
+  panel_id?: string | null
+  owner_crew_name?: string | null
   /** §11b.8: four states, and the SERVER sends `never_produced`. */
   state?: string | null
   /** The payload. §11 does not fix the key; `data` is what the CLI's
@@ -164,10 +174,23 @@ export interface PanelView {
   producer: string | null
   /** Server-computed, or null when this build could not read one. */
   state: PanelState | null
+  /**
+   * A panel the viewer may not see (§7.1 rule 2, §11b.14). The server has
+   * already removed everything but the id, the grid slot and the owning crew's
+   * name, so this is not a hint — it is the whole panel.
+   *
+   * The renderer keys on `sealed` being TRUE, never on a field being absent.
+   * §11b.14 requires it that way so a serialisation bug can never be mistaken
+   * for a permission decision, and the inverse matters just as much: before
+   * this existed, a sealed panel fell through to the unknown-schema fallback
+   * and told the reader "this version of Crewship does not render `` panels",
+   * which is the Grafana failure mode §2.3 exists to prevent.
+   */
 }
 
 export function toPanelView(raw: WirePanel, index = 0): PanelView {
-  const id = trimmed(raw.id) ?? `panel-${index + 1}`
+  const sealed = raw.sealed === true
+  const id = trimmed(raw.id) ?? trimmed(raw.panel_id) ?? `panel-${index + 1}`
   const state = toPanelState(raw.state)
   const payload = raw.data !== undefined ? raw.data : raw.payload
   const prov = raw.provenance ?? null
@@ -181,6 +204,11 @@ export function toPanelView(raw: WirePanel, index = 0): PanelView {
       owner: trimmed(raw.owner),
       span: spanOf(raw),
       sla_seconds: slaSecondsOf(raw),
+      // Carried on the SPEC, not beside it: page-view.tsx passes
+      // `panel={panel.spec}` to the registry, so a flag anywhere else
+      // never reaches the component that has to key on it (§11b.14).
+      sealed,
+      owner_crew_name: trimmed(raw.owner_crew_name),
     },
     snapshot: {
       // A state this build cannot read is NOT reported as fresh. `never_produced`
@@ -579,6 +607,17 @@ export function usePages(workspaceId: string | null | undefined): UsePagesResult
 
 export interface UsePageResult {
   page: PageView | null
+  /**
+   * The record exactly as it came off the wire.
+   *
+   * `PageView` is the shape the RENDERER wants — states counted, provenance
+   * flattened, spans defaulted — and it is lossy on purpose. The editor needs
+   * the other thing: the document as stored, including the fields nothing
+   * draws (`public`) and the placeholders it must not silently drop
+   * (`sealed`). Deriving an edit from the rendered view is how a save deletes
+   * a field nobody touched.
+   */
+  raw: WirePage | null
   loading: boolean
   error: string | null
   /** True for a 404 — a slug that names nothing gets its own empty state. */
@@ -611,6 +650,7 @@ export function usePage(
   const err = query.error as Error | null
   return {
     page,
+    raw: query.data ?? null,
     loading: query.isPending && Boolean(workspaceId) && Boolean(slug),
     error: err ? err.message : null,
     notFound: err instanceof PagesRequestError && err.status === 404,

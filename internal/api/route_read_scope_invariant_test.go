@@ -109,6 +109,20 @@ var readRoutesWithoutWorkspace = map[string]string{
 		"on an empty database",
 	"GET /api/v1/system/telemetry": "pre-auth read-only consent state; consent is flipped via the CLI, not HTTP",
 
+	// Token-scoped: the credential IS the scope.
+	//
+	// A public page link is served from its own URL space to somebody with no
+	// account, no session and no workspace (docs/prd/pages.md §7.3.1), so there
+	// is no wsCtx to wrap it in — the workspace is resolved FROM the token, and
+	// the token is the only thing that resolves it. Wrapping it would require a
+	// session that by construction does not exist.
+	//
+	// What keeps it honest is that the token names exactly one page: the handler
+	// reads that page's workspace, serves only the panels a HUMAN marked public,
+	// and strips provenance. The scope is narrower than a workspace, not wider.
+	"GET /api/v1/public/pages/{token}": "public link: the token names one page and resolves its own workspace; " +
+		"there is no session to scope from (§7.3.1)",
+
 	// Caller-scoped: the row set is the caller's own, keyed on user id.
 	"GET /api/v1/workspaces":               "caller's own memberships — this is what RESOLVES a workspace, so it cannot be scoped by one",
 	"GET /api/v1/auth/sessions":            "caller's own sessions",

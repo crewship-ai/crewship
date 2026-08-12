@@ -285,6 +285,9 @@ func (h *PageHandler) PushData(w http.ResponseWriter, r *http.Request) {
 	broadcastWorkspaceEvent(h.hub, wsID, "page.panel.updated",
 		map[string]any{"page_id": rec.ID, "slug": rec.Slug, "panel_id": panel.PanelID})
 
+	h.recordPanelPush(r.Context(), wsID, rec, panel, seq, push, journal.ActorUser, user.ID,
+		fmt.Sprintf("%s pushed %s/%s", user.Email, rec.Slug, panel.PanelID))
+
 	panel.HasData = true
 	panel.Seq = seq
 	panel.Payload = string(body)
@@ -415,6 +418,54 @@ func evictPanelRing(ctx context.Context, tx *sql.Tx, panelRowID string, now time
 // journal entry and the notification to the page owner.
 //
 // Both are best-effort with respect to the HTTP response — the caller is
+// recordPanelPush writes the journal entry for an accepted push.
+//
+// §5 is the section that answers §2.1 — the documented reason the push-to-panel
+// genre lost to query-based dashboards — and its answer for history is
+// "internal/journal: every push emits an entry; the journal is the queryable
+// record". Without this the ring is the only history Pages has, which is the
+// thing §5 explicitly says is NOT the answer, and §5's alerting row has no
+// event for an automation matcher to fire on.
+//
+// It is deliberately not fatal. The payload is already committed; refusing the
+// response now would tell a producer its push failed when the number is stored
+// and rendering. A failure to write the entry is logged instead, the same
+// bargain reportUnauthorisedPush makes in the other direction.
+func (h *PageHandler) recordPanelPush(ctx context.Context, wsID string, rec *pageRecord,
+	panel *panelRecord, seq int64, push string, actorType journal.ActorType, actorID, summary string) {
+	if h.journal == nil {
+		return
+	}
+	severity := journal.SeverityInfo
+	if push == "failed" {
+		severity = journal.SeverityWarn
+	}
+	if _, err := h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: wsID,
+		CrewID:      panel.OwnerCrewID,
+		Type:        journal.EntryPagePanelUpdated,
+		Severity:    severity,
+		ActorType:   actorType,
+		ActorID:     actorID,
+		Summary:     summary,
+		Payload: map[string]any{
+			"page":     rec.Slug,
+			"page_id":  rec.ID,
+			"panel":    panel.PanelID,
+			"schema":   panel.Schema,
+			"producer": panel.producerRef(),
+			"seq":      seq,
+			// The producer's own verdict, not the freshness state: fresh and
+			// stale are functions of the clock and are never stored (§4), so
+			// an entry claiming one would be wrong the moment it was read.
+			"state": push,
+		},
+	}); err != nil && h.logger != nil {
+		h.logger.Warn("pages: journal entry for an accepted push was not written",
+			"page", rec.Slug, "panel", panel.PanelID, "error", err)
+	}
+}
+
 // refused whether or not the audit trail could be written — but a failure to
 // write either is logged loudly, because an ACL nobody can audit is not a
 // security control.

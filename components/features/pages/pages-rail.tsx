@@ -57,6 +57,9 @@ export interface PagesRailProps {
   onFiltersChange: (next: PageFilters) => void
   selectedSlug: string | null
   onSelectPage: (slug: string) => void
+  /** Opens the YAML editor on a new document (§10b.1). Optional so the rail
+   *  still renders in a context that has no authoring affordance. */
+  onCreatePage?: () => void
   onToggleCollapse?: () => void
 }
 
@@ -81,6 +84,7 @@ export function PagesRail({
   onFiltersChange,
   selectedSlug,
   onSelectPage,
+  onCreatePage,
   onToggleCollapse,
 }: PagesRailProps) {
   // Facet counts are computed against the WHOLE list, never the filtered view.
@@ -233,11 +237,31 @@ export function PagesRail({
             )
           })}
           {displayed.length === 0 && (
-            <p className="px-3 py-6 text-center text-[11px] text-muted-foreground-soft">
-              {pages.length === 0
-                ? "No pages yet. Create one with crewship page create --file page.yaml, then push a payload to a panel."
-                : "No page matches. Clear a facet above, or search for another name."}
-            </p>
+            <div className="px-3 py-6 text-center text-[11px] text-muted-foreground-soft">
+              {pages.length === 0 ? (
+                <>
+                  {/* Authoring is three doors onto one document (§10b.1). The
+                      empty state used to name only the CLI, which is the door
+                      you cannot open from here. */}
+                  <p>No pages yet.</p>
+                  {onCreatePage && (
+                    <button
+                      type="button"
+                      onClick={onCreatePage}
+                      className="mt-2 rounded-md border border-border/60 px-2.5 py-1 text-[11px] text-foreground/80 transition-colors hover:border-primary/40 hover:text-primary"
+                    >
+                      New page
+                    </button>
+                  )}
+                  <p className="mt-2">
+                    Or author one as YAML: crewship page create --file page.yaml, then push a
+                    payload to a panel.
+                  </p>
+                </>
+              ) : (
+                <p>No page matches. Clear a facet above, or search for another name.</p>
+              )}
+            </div>
           )}
         </div>
       </div>

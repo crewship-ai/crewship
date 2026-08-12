@@ -55,6 +55,7 @@ DELETE /api/v1/notification-channels/{id}/agents/{agentId} roleInline
 DELETE /api/v1/notification-templates roleManage
 DELETE /api/v1/pages/{slug} roleSelf
 DELETE /api/v1/pages/{slug}/grants roleSelf
+DELETE /api/v1/pages/{slug}/public/{tokenId} roleSelf
 DELETE /api/v1/projects/{projectId} roleManage
 DELETE /api/v1/recurring-issues/{recurringId} roleManage
 DELETE /api/v1/relations/{relationId} roleCreate
@@ -234,6 +235,9 @@ POST /api/v1/oauth/loopback roleInline
 POST /api/v1/onboarding/complete roleSelf
 POST /api/v1/onboarding/setup roleSelf
 POST /api/v1/pages roleInline
+POST /api/v1/pages/import roleInline
+POST /api/v1/pages/{slug}/public roleSelf
+POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/projects roleCreate
 POST /api/v1/projects/{projectId}/milestones roleCreate
 POST /api/v1/recipes/{slug}/install roleManage

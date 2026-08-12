@@ -17,8 +17,8 @@ const (
 	// SchemaMetric renders one number with an optional delta, target and
 	// sparkline.
 	SchemaMetric PanelSchema = "metric.v1"
-	// SchemaSeries renders a bar chart. Reserved: it needs a chart engine and
-	// the --chart-1..5 palette fix, so it ships in v1.2.
+	// SchemaSeries renders a grouped bar chart: one unit, shared labels, up to
+	// five coloured series with a sixth merged into "other".
 	SchemaSeries PanelSchema = "series.v1"
 	// SchemaStatus renders a status grid; state carries a glyph and text, never
 	// colour alone.
@@ -26,9 +26,9 @@ const (
 	// SchemaTable renders a table that collapses to a card list in a narrow
 	// container.
 	SchemaTable PanelSchema = "table.v1"
-	// SchemaNarrative renders typed prose blocks plus declared action buttons.
-	// Reserved: the text half is v1 and the action half is v1.1, and both need
-	// the §8 rule set implemented at the API boundary first.
+	// SchemaNarrative renders typed prose blocks and an optional verdict. Text
+	// only: the action half is v1.1 (§12) and arrives with the PageAction
+	// vocabulary and its server-verified click token, not with this payload.
 	SchemaNarrative PanelSchema = "narrative.v1"
 	// SchemaEmbed renders a cross-origin sandboxed iframe. Reserved for v1.2 —
 	// the name exists from the first migration so admitting it later is
@@ -37,12 +37,20 @@ const (
 )
 
 // producibleSchemas are the ones with a published payload schema and a
-// renderer. v0 ships three: no charts, therefore no chart engine, no
-// static-export hydration gap, and the palette bug off the critical path.
+// renderer. Five of the six: everything except embed.v1, which needs a second
+// origin and a sandbox proxy rather than a payload type (§3.1).
+//
+// series.v1 arrived without a chart engine. §9 proposed recharts, but under
+// `output: "export"` its ResponsiveContainer measures with a client-side
+// ResizeObserver and paints nothing until hydration, so the panel is
+// hand-written inline SVG exactly as metric.v1's sparkline is — no new
+// dependency, and the bars are in the exported HTML.
 var producibleSchemas = map[PanelSchema]bool{
-	SchemaMetric: true,
-	SchemaStatus: true,
-	SchemaTable:  true,
+	SchemaMetric:    true,
+	SchemaSeries:    true,
+	SchemaStatus:    true,
+	SchemaTable:     true,
+	SchemaNarrative: true,
 }
 
 // knownSchemas is every name the schema column will accept, including the three

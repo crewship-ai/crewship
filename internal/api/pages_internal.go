@@ -339,6 +339,19 @@ func (h *PageHandler) PushDataInternal(w http.ResponseWriter, r *http.Request) {
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "page.panel.updated",
 		map[string]any{"page_id": rec.ID, "slug": rec.Slug, "panel_id": panel.PanelID})
 
+	// The same entry the human path writes (§5). The actor is the AGENT here,
+	// which is the point: "several agents may rewrite one page, and the one who
+	// breaks it is rarely the one who notices" — the journal is where that
+	// question gets answered.
+	actorID := strings.TrimSpace(req.AgentID)
+	actorType := journal.ActorAgent
+	if actorID == "" {
+		actorID = strings.TrimSpace(req.AuthorRunID)
+		actorType = journal.ActorOrchestrator
+	}
+	h.recordPanelPush(r.Context(), req.WorkspaceID, rec, panel, seq, push, actorType, actorID,
+		fmt.Sprintf("routine run %s pushed %s/%s", req.AuthorRunID, rec.Slug, panel.PanelID))
+
 	panel.HasData = true
 	panel.Seq = seq
 	panel.Payload = string(req.Data)

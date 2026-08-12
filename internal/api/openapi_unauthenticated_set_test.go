@@ -24,6 +24,8 @@ var expectedUnauthenticatedOperations = []unauthenticatedOperation{
 	{"POST", "/api/v1/auth/signup", "creates the first authenticated session during signup"},
 	{"POST", "/api/v1/bootstrap", "initializes an instance before any account can authenticate"},
 	{"GET", "/api/v1/oauth/callback", "authenticates the provider callback with OAuth state instead of a session"},
+	{"GET", "/api/v1/public/pages/{token}", "serves a published page to a reader with no account, authenticated by the 256-bit token in the path (docs/prd/pages.md §7.3.1)"},
+	{"POST", "/api/v1/public/pages/{token}/unlock", "verifies a public page's optional password, which §7.3.3 keeps out of the URL and therefore out of the GET"},
 	{"GET", "/api/v1/system/setup-status", "lets the pre-login UI determine whether setup is required"},
 	{"GET", "/api/v1/system/telemetry", "lets the pre-login UI display telemetry consent state"},
 	{"POST", "/api/v1/waitpoint-tokens/{token}", "authenticates a waitpoint action with the credential in the path"},
