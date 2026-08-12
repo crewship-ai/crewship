@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -161,6 +162,21 @@ func (h *PageHandler) PushData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The server's clock, always (§4 rule 2, and the migration's "there is
+	// deliberately no column in which a producer could supply its own
+	// timestamp"). Read once: the rate decision, the stored produced_at and
+	// the ring's age cut all have to be the same instant, or a push can be
+	// admitted against one clock and evicted against another.
+	now := h.evaluator().Now().UTC()
+
+	// §10b.3 layer 1, and like the ACL check it happens before the body is
+	// read. A producer in a hot loop is the case this exists for, and making
+	// it upload 64 KiB per refusal would be paying for the flood twice.
+	if ok, scope, wait := h.pushLimits.Allow(now, wsID, panel.RowID); !ok {
+		writePushLimited(w, scope, wait, rec.Slug, panel.PanelID)
+		return
+	}
+
 	body, ok := readCapped(w, r, pages.MaxPayloadBytes, "panel payload")
 	if !ok {
 		return
@@ -200,10 +216,6 @@ func (h *PageHandler) PushData(w http.ResponseWriter, r *http.Request) {
 		push = q
 	}
 
-	// The server's clock, always (§4 rule 2, and the migration's "there is
-	// deliberately no column in which a producer could supply its own
-	// timestamp").
-	now := h.evaluator().Now().UTC()
 	producedAt := now.Format(time.RFC3339)
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
@@ -219,14 +231,44 @@ func (h *PageHandler) PushData(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "next payload seq", err)
 		return
 	}
-	if _, err := tx.ExecContext(r.Context(), `
+	// §10b.3 layer 2 — the floor, expressed as part of the INSERT itself.
+	//
+	// The WHERE NOT EXISTS is the whole point: read-then-write would be two
+	// statements with a window between them, and the failure this defends
+	// against is precisely two processes deciding at the same instant. As one
+	// statement the database arbitrates, so the floor holds with any number of
+	// replicas — which the per-process buckets above cannot claim.
+	//
+	// The comparison is textual, which is exact here because produced_at is
+	// written in exactly one place (the line above) in exactly one format:
+	// RFC3339, UTC, second resolution — lexicographically ordered.
+	limits := h.pushLimits.Limits()
+	floorCutoff := limits.FloorCutoff(now).Format(time.RFC3339)
+	res, err := tx.ExecContext(r.Context(), `
 		INSERT INTO page_panel_data (panel_id, seq, payload_json, produced_at, producer_run_id, state)
-		VALUES (?, ?, ?, ?, NULL, ?)`,
-		panel.RowID, seq, string(body), producedAt, push); err != nil {
+		SELECT ?, ?, ?, ?, NULL, ?
+		WHERE NOT EXISTS (
+			SELECT 1 FROM page_panel_data WHERE panel_id = ? AND produced_at > ?
+		)`,
+		panel.RowID, seq, string(body), producedAt, push, panel.RowID, floorCutoff)
+	if err != nil {
 		replyInternalError(w, h.logger, "insert panel payload", err)
 		return
 	}
-	if err := evictPanelRing(r.Context(), tx, panel.RowID, now); err != nil {
+	stored, err := res.RowsAffected()
+	if err != nil {
+		replyInternalError(w, h.logger, "insert panel payload", err)
+		return
+	}
+	if stored == 0 {
+		// Nothing was written, and the transaction is rolled back by the
+		// deferred call. Retry-After is computed from the row that blocked it
+		// rather than quoted as the whole interval, so a producer that waits
+		// the stated time is admitted rather than refused a second time.
+		writePushLimited(w, pages.ScopePanel, h.floorWait(r.Context(), tx, panel.RowID, limits, now), rec.Slug, panel.PanelID)
+		return
+	}
+	if err := h.evictPanelRingForWorkspace(r.Context(), tx, wsID, panel.RowID, now); err != nil {
 		replyInternalError(w, h.logger, "evict panel ring", err)
 		return
 	}
@@ -264,21 +306,84 @@ func (h *PageHandler) PushData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// evictPanelRing applies §10b.3's bound — newest 200 payloads, hard age cut at
-// 7 days, whichever comes first — in the SAME transaction as the push, so a
-// panel's storage is bounded by the write that grows it rather than by a sweep
-// that might not run. A panel pushed every 5 s would otherwise produce ~120 000
-// rows a week, per panel.
+// writePushLimited is §10b.3's "over the limit: 429 + Retry-After", in the
+// shape pipelines_exec.go:211-218 already uses for a concurrency rejection:
+// the header, then a JSON body carrying an error and the reason it happened.
+// A rate rejection is a normal outcome, not an internal error.
+//
+// The scope is named because "you are pushing this panel too fast" and "this
+// workspace is pushing too fast" ask the producer for different fixes, and a
+// bare 429 leaves it to guess which one it is.
+func writePushLimited(w http.ResponseWriter, scope pages.LimitScope, wait time.Duration, slug, panelID string) {
+	retry := pages.RetryAfterSeconds(wait)
+	w.Header().Set("Retry-After", strconv.Itoa(retry))
+	reason := fmt.Sprintf("panel %s/%s is being pushed faster than its rate limit allows", slug, panelID)
+	if scope == pages.ScopeWorkspace {
+		reason = "this workspace is pushing panel data faster than its rate limit allows; " +
+			"per-panel limits do not compose, so the workspace cap is the backstop"
+	}
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":            "push rate limit exceeded",
+		"reason":           reason,
+		"scope":            string(scope),
+		"retry_after_secs": retry,
+		"page":             slug,
+		"panel":            panelID,
+	})
+}
+
+// floorWait computes how long the caller must wait for the panel's minimum
+// interval to open, from the payload that blocked the push. Best effort: if the
+// row cannot be read, the full interval is the honest fallback — it is never
+// shorter than the true wait, so a producer obeying it is never refused twice
+// for the same reason.
+func (h *PageHandler) floorWait(ctx context.Context, tx *sql.Tx, panelRowID string, limits pages.PushLimits, now time.Time) time.Duration {
+	var newest sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		`SELECT MAX(produced_at) FROM page_panel_data WHERE panel_id = ?`, panelRowID).Scan(&newest); err != nil || !newest.Valid {
+		return limits.MinInterval()
+	}
+	last := parsePageTime(newest.String)
+	if last.IsZero() {
+		return limits.MinInterval()
+	}
+	ok, wait := limits.AdmitPush(last, true, now)
+	if ok {
+		// The row moved between the INSERT and this read (another push landed
+		// and was itself evicted, say). Ask for one interval rather than zero:
+		// "retry immediately" is what the floor exists to refuse.
+		return limits.MinInterval()
+	}
+	return wait
+}
+
+// evictPanelRingForWorkspace applies §10b.3's bound — newest 200 payloads, age
+// cut at the workspace's page_retention_days — in the SAME transaction as the
+// push, so a panel's storage is bounded by the write that grows it rather than
+// by a sweep that might not run. A panel pushed at the floor rate would
+// otherwise produce ~300 000 rows a week, per panel.
+//
+// The age cut is read per push rather than hard-coded: NULL (every existing
+// row) means pages.DefaultPageRetentionDays, following the run_retention_days
+// convention. It is one indexed lookup by primary key, in a transaction that is
+// already writing.
 //
 // The eviction rule itself lives in internal/pages: it is two rules with an
 // ordering between them (count first, age second, and the NEWEST payload
 // survives both, so a producer dead for eight days keeps saying when it died),
 // and it has to be tested against a clock rather than by waiting.
-//
-// NOT enforced here: §10b.3's push RATE floor (12/min sustained, burst 30).
-// Those numbers live in config/rate-limits.yml by design, and wiring
-// internal/ratelimitcfg into this handler is its own change.
-func evictPanelRing(ctx context.Context, tx *sql.Tx, panelRowID string, now time.Time) error {
+func (h *PageHandler) evictPanelRingForWorkspace(ctx context.Context, tx *sql.Tx, wsID, panelRowID string, now time.Time) error {
+	var days sql.NullInt64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT page_retention_days FROM workspaces WHERE id = ?`, wsID).Scan(&days); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return evictPanelRing(ctx, tx, panelRowID, now, pages.RetentionAge(int(days.Int64)))
+}
+
+// evictPanelRing is the effect half: read the ring, ask internal/pages what to
+// drop, delete exactly that.
+func evictPanelRing(ctx context.Context, tx *sql.Tx, panelRowID string, now time.Time, maxAge time.Duration) error {
 	rows, err := tx.QueryContext(ctx, `SELECT seq, produced_at FROM page_panel_data WHERE panel_id = ?`, panelRowID)
 	if err != nil {
 		return err
@@ -297,7 +402,7 @@ func evictPanelRing(ctx context.Context, tx *sql.Tx, panelRowID string, now time
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for _, e := range pages.EvictRing(entries, now) {
+	for _, e := range pages.EvictRingWithin(entries, now, maxAge) {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM page_panel_data WHERE panel_id = ? AND seq = ?`, panelRowID, e.Seq); err != nil {
 			return err

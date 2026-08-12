@@ -717,6 +717,12 @@ func TestPagesPush_RingIsBoundedByTheWriteThatGrowsIt(t *testing.T) {
 		}
 	}
 
+	// The seeded ring's newest payload is stamped at exactly `now`, and §10b.3's
+	// floor refuses a second payload inside the panel's minimum interval — so
+	// move past it. This test is about the COUNT bound; the floor has its own
+	// (pages_limits_test.go).
+	clock.advance(pages.ConfiguredPushLimits().MinInterval())
+
 	if rr := pagesPush(t, h, wsID, userID, "OWNER", "fleet-201", "sluzby", pagesStatusPayload); rr.Code != http.StatusOK {
 		t.Fatalf("push: status = %d, body: %s", rr.Code, rr.Body.String())
 	}

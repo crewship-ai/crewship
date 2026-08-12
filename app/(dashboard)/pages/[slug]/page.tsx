@@ -1,33 +1,18 @@
-"use client"
+import { PageDetailClient } from "./page-client"
 
-import { useParams } from "next/navigation"
-
-import { Skeleton } from "@/components/ui/skeleton"
-import { useWorkspace } from "@/hooks/use-workspace"
-import { PagesLayout } from "@/components/features/pages/pages-layout"
-
-// /pages/<slug> — one page's panel grid (docs/prd/pages.md §9).
+// A dynamic route under `output: "export"` must declare its params at build
+// time, so the shell is a server component and the client half lives next
+// door — the same split `issues/[identifier]` and `skills/[skillId]` use.
 //
-// Same shell as /pages: the slug is what turns the main pane from the
-// overview into the page. A page is slug-addressable because the slug goes
-// in a URL — internal/pages/spec.go says so in the validator.
-export default function PageDetailPage() {
-  const { workspaceId, loading: wsLoading } = useWorkspace()
-  const params = useParams<{ slug: string | string[] }>()
-  const raw = params?.slug
-  const slug = Array.isArray(raw) ? raw[0] : raw
+// The single `_` param is the placeholder Next.js exports as
+// `/pages/_/index.html`; the Go binary serves it for every real slug and the
+// client reads the actual one from `useParams`. Without this the whole
+// production build fails, which is how it was caught: dev3 refused to come
+// back up.
+export function generateStaticParams() {
+  return [{ slug: "_" }]
+}
 
-  if (wsLoading || !workspaceId || !slug) {
-    return (
-      <div className="flex h-[calc(100vh-48px)] flex-col gap-3 p-4">
-        <Skeleton className="h-9 w-full" />
-        <div className="flex flex-1 gap-3">
-          <Skeleton className="h-full w-60" />
-          <Skeleton className="h-full flex-1" />
-        </div>
-      </div>
-    )
-  }
-
-  return <PagesLayout workspaceId={workspaceId} slug={slug} />
+export default function PageDetailRoute() {
+  return <PageDetailClient />
 }

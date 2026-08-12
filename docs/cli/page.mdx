@@ -277,11 +277,19 @@ crewship page revoke fleet-201 --agent devops-bot
 
 Removes a grant, journalled as `page.grant_removed`.
 
-<Warning>
-  The PRD's only worked example targets `--agent`. Whether `revoke` also
-  takes `--user`/`--crew` the way `grant` does is not spelled out — see this
-  doc's closing report.
-</Warning>
+`revoke` takes the same three subject flags as `grant` — `--user`, `--crew`,
+`--agent` — plus an optional `--level`. Omit the level and every level that
+subject holds is withdrawn at once.
+
+<Note>
+  A grant can also stop working without being revoked. It is live only while
+  the human who issued it still has the reach they granted from: leave the
+  workspace, lose ADMIN, or be removed from the page's owning crew, and every
+  grant you issued narrows with you. The row stays — `page grants` shows it as
+  inert, with the reason — so you can see what would come back if that person's
+  access were restored. Revoking is how you remove a grant; this is how one
+  stops being borrowed authority nobody is accountable for any more.
+</Note>
 
 ---
 

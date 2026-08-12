@@ -1,0 +1,42 @@
+-- Per-workspace retention window for the payload ring (docs/prd/pages.md
+-- §10b.3: "Configurable per workspace as `page_retention_days`, following
+-- `run_retention_days`").
+--
+-- Same shape as workspaces.run_retention_days
+-- (migrate_consts_v158_run_retention_days.go:13): a nullable INTEGER, with the
+-- default applied in Go when the column is NULL or <= 0. Nullable rather than
+-- NOT NULL DEFAULT 7 for the reason that convention exists — NULL records "no
+-- opinion", so the product default can move later without rewriting every row,
+-- and an operator who HAS an opinion is distinguishable from one who never
+-- looked.
+--
+-- pages.DefaultPageRetentionDays (7, derived from pages.RingMaxAge) is what a
+-- NULL means today, and internal/api/pages_data.go reads this column on every
+-- push so the age cut is applied by the write that grows the ring rather than
+-- by a sweep that might not run.
+--
+-- WHAT THIS COLUMN CANNOT DO, and why that is not an oversight:
+--
+--   * It cannot switch retention OFF. <= 0 falls back to the default rather
+--     than meaning "keep forever", which is the run_retention_days reading and
+--     deliberately NOT the audit_log_retention_days one. Those are compliance
+--     tables an operator may have a legal duty to keep; this is a bounded ring
+--     of dashboard payloads, and "keep every payload forever" is the failure
+--     mode §10b.3 exists to prevent (~120 000 rows a week, per panel).
+--
+--   * It cannot raise the COUNT bound. The ring is bounded count first, age
+--     second: the newest 200 payloads survive regardless, and this column only
+--     moves the second cut. A workspace can shorten or lengthen its window; it
+--     cannot turn a panel into a time-series database.
+--
+--   * It cannot delete a panel's LAST payload. The newest row survives the age
+--     cut whatever this is set to, so a producer dead for eight days still
+--     renders as "stale, last value 12:40" instead of silently becoming "never
+--     produced" — two different sentences, only one of them true.
+--
+-- Separate file from the Pages schema migration because ADD COLUMN cannot be
+-- re-applied (SQLite has no ADD COLUMN IF NOT EXISTS) and 20260812155322_pages
+-- is already applied on dev.
+
+ALTER TABLE workspaces
+    ADD COLUMN page_retention_days INTEGER;

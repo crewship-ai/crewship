@@ -132,6 +132,12 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		// rule 5, §7.1b). A payload over 64 KiB is refused with the rejection
 		// envelope, 422 and never a 500 (§10, §10b.3); the producer's own
 		// verdict rides on `?state=failed`.
+		//
+		// A push over the RATE limit answers 429 with a Retry-After header and
+		// {error, reason, scope, retry_after_secs, page, panel} (§10b.3, the
+		// pattern pipelines_exec.go already uses). `scope` is "panel" or
+		// "workspace": one says this producer is too fast, the other says the
+		// workspace is, and they need different fixes.
 		"PUT /api/v1/pages/{slug}/panels/{panelId}/data": {
 			Request: anyObject(),
 			Response: obj(map[string]any{

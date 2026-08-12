@@ -31,11 +31,7 @@ package api
 // exist for the subjects that follow later (a public token, §7.3), not to keep
 // colleagues out of a board they can already see the shape of.
 
-import (
-	"context"
-	"encoding/json"
-	"strings"
-)
+import "context"
 
 // pageViewer is one caller's standing in the workspace, loaded once per
 // request: their workspace role and the crews they belong to.
@@ -102,53 +98,12 @@ type pageGrant struct {
 	PanelIDs []string // nil = every panel; only meaningful for level = produce
 }
 
-// grantsFor loads the grants that apply to this caller: their own user grants
-// plus any grant to a crew they belong to.
-//
-// Agent grants are deliberately not consulted here. A grant to an agent is
-// evaluated against the granting human's own rights AT USE TIME (§7.1b), and
-// the public HTTP surface is never an agent — agents reach the platform
-// through the sidecar's internal routes, which carry a token-derived agent
-// identity. Reading agent grants for a human caller would let a human borrow
-// an agent's authority, which is the escalation the rule closes.
-func (h *PageHandler) grantsFor(ctx context.Context, pageID string, viewer *pageViewer) ([]pageGrant, error) {
-	args := []any{pageID, viewer.UserID}
-	crewClause := ""
-	if len(viewer.Crews) > 0 {
-		ids := make([]string, 0, len(viewer.Crews))
-		for id := range viewer.Crews {
-			ids = append(ids, id)
-		}
-		crewClause = ` OR (subject_type = 'crew' AND subject_id IN (` + sqlPlaceholders(len(ids)) + `))`
-		for _, id := range ids {
-			args = append(args, id)
-		}
-	}
-	rows, err := h.db.QueryContext(ctx, `
-		SELECT level, COALESCE(panel_ids, '')
-		FROM page_grants
-		WHERE page_id = ? AND ((subject_type = 'user' AND subject_id = ?)`+crewClause+`)`, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []pageGrant
-	for rows.Next() {
-		var level, panelIDs string
-		if err := rows.Scan(&level, &panelIDs); err != nil {
-			return nil, err
-		}
-		g := pageGrant{Level: level}
-		if strings.TrimSpace(panelIDs) != "" {
-			var ids []string
-			if err := json.Unmarshal([]byte(panelIDs), &ids); err == nil {
-				g.PanelIDs = ids
-			}
-		}
-		out = append(out, g)
-	}
-	return out, rows.Err()
-}
+// grantsFor — which grants apply to this caller — lives in
+// pages_grants_authz.go, together with the use-time evaluation of the
+// authorising human that every grant read is subject to (§7.1b). It is one
+// function rather than a query in each consumer for one reason: a grant read
+// that skipped the issuer check would be a privilege-escalation primitive, and
+// the way to make that impossible is to leave nowhere to skip it from.
 
 // covers reports whether a produce grant reaches this panel. A NULL panel_ids
 // covers every panel; a list covers exactly what it names, so an agent granted
@@ -194,12 +149,12 @@ func (h *PageHandler) mayEditSpec(ctx context.Context, wsID, userID, role string
 	if err != nil {
 		return false
 	}
-	grants, err := h.grantsFor(ctx, rec.ID, viewer)
+	grants, err := h.grantsFor(ctx, wsID, rec, viewer)
 	if err != nil {
 		return false
 	}
 	for _, g := range grants {
-		if g.Level == "write" {
+		if g.Level == pageGrantWrite {
 			return true
 		}
 	}
@@ -234,12 +189,12 @@ func (h *PageHandler) mayProduce(ctx context.Context, wsID, userID, role string,
 	if err != nil {
 		return false, "the caller's crew membership could not be read"
 	}
-	grants, err := h.grantsFor(ctx, rec.ID, viewer)
+	grants, err := h.grantsFor(ctx, wsID, rec, viewer)
 	if err != nil {
 		return false, "the page's grants could not be read"
 	}
 	for _, g := range grants {
-		if g.Level == "produce" && g.covers(panel.PanelID) {
+		if g.Level == pageGrantProduce && g.covers(panel.PanelID) {
 			return true, ""
 		}
 	}

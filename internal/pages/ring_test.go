@@ -135,6 +135,75 @@ func TestEvictRing_TheLastKnownValueOutlivesTheAgeCut(t *testing.T) {
 	}
 }
 
+// The age cut is a DEFAULT, not a property of the storage: §10b.3 makes it
+// configurable per workspace as page_retention_days, following
+// run_retention_days. NULL — which is what every existing workspace has — means
+// the instance default, and so does any non-positive value.
+func TestRetentionAge_NullAndNonsenseMeanTheInstanceDefault(t *testing.T) {
+	t.Parallel()
+
+	if got := RetentionAge(0); got != RingMaxAge {
+		t.Errorf("RetentionAge(0) = %s, want the default %s — a NULL column reads as zero", got, RingMaxAge)
+	}
+	if got := RetentionAge(-3); got != RingMaxAge {
+		t.Errorf("RetentionAge(-3) = %s, want the default %s", got, RingMaxAge)
+	}
+	if got, want := RetentionAge(3), 3*24*time.Hour; got != want {
+		t.Errorf("RetentionAge(3) = %s, want %s", got, want)
+	}
+	if DefaultPageRetentionDays != 7 {
+		t.Errorf("DefaultPageRetentionDays = %d, want 7 (§10b.3's hard age cut)", DefaultPageRetentionDays)
+	}
+	if RetentionAge(DefaultPageRetentionDays) != RingMaxAge {
+		t.Error("the default in days and RingMaxAge disagree; they are the same bound written twice")
+	}
+}
+
+// A workspace with a shorter window gets a shorter window, and the ring's other
+// rules do not change with it: the count bound still applies, and the newest
+// payload still survives. That last one is what stops a three-day window from
+// turning a producer that died last week into "never produced".
+func TestEvictRingWithin_HonoursAPerWorkspaceWindow(t *testing.T) {
+	t.Parallel()
+
+	now := epoch
+	entries := []RingEntry{
+		{Seq: 1, ProducedAt: now.Add(-6 * 24 * time.Hour)},
+		{Seq: 2, ProducedAt: now.Add(-2 * 24 * time.Hour)},
+		{Seq: 3, ProducedAt: now.Add(-time.Hour)},
+	}
+
+	// The instance default keeps all three: six days is inside seven.
+	if got := seqs(EvictRingWithin(entries, now, RetentionAge(0))); len(got) != 0 {
+		t.Fatalf("evicted %v under the default window; all three payloads are inside 7 days", got)
+	}
+
+	// Three days evicts the six-day-old one and nothing else.
+	got := seqs(EvictRingWithin(entries, now, RetentionAge(3)))
+	if len(got) != 1 || got[0] != 1 {
+		t.Fatalf("evicted %v under a 3-day window, want [1]", got)
+	}
+
+	// A window of one day, with every payload outside it: the newest still
+	// survives (§9b.4 row 2 vs row 4).
+	got = seqs(EvictRingWithin(entries, now, RetentionAge(1)))
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("evicted %v under a 1-day window, want [1 2] — the last known value outlives every age cut", got)
+	}
+
+	// A longer window than the default is equally a workspace's business.
+	if got := seqs(EvictRingWithin(entries, now, RetentionAge(30))); len(got) != 0 {
+		t.Fatalf("evicted %v under a 30-day window", got)
+	}
+
+	// And the count bound is NOT configurable: it still fires inside any window.
+	dense := ring(1, now, RingMaxPayloads+1, time.Second)
+	if got := seqs(EvictRingWithin(dense, now, RetentionAge(30))); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("evicted %v with 201 payloads inside a 30-day window, want [1]: "+
+			"a longer window must not turn the ring into a time-series database", got)
+	}
+}
+
 // The eviction is a plan, not an effect: it returns the rows to delete and
 // touches nothing. That is what lets the caller run it inside the same
 // transaction as the push, which is where §10b.3 wants the floor enforced —

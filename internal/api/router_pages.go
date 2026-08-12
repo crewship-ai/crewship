@@ -32,6 +32,13 @@ package api
 //	                       a workspace role at all: the declared producer, or a
 //	                       `produce` grant, is what decides, and a MEMBER
 //	                       holding one must pass.
+//	PUT    …/grants        roleSelf   — a page is a per-object ACL (§7.2) and
+//	DELETE …/grants          its owner may be a MEMBER. §7.1 rule 3 gives the
+//	                       verb to "the page owner or a workspace ADMIN/OWNER",
+//	                       and only the handler can answer the first half.
+//	                       §7.1b rule 1 — only a human issues a grant — is
+//	                       likewise the handler's: the middleware knows roles,
+//	                       not whether a container is holding the pen.
 
 import "net/http"
 
@@ -45,8 +52,11 @@ func (r *Router) registerPageRoutes() {
 
 	r.mux.Handle("GET /api/v1/pages", authed(wsCtx(http.HandlerFunc(p.List))))
 	r.mux.Handle("GET /api/v1/pages/{slug}", authed(wsCtx(http.HandlerFunc(p.Get))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/grants", authed(wsCtx(http.HandlerFunc(p.ListGrants))))
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/panels/{panelId}/data", roleSelf, p.PushData)
+	r.authedMut("PUT", "/api/v1/pages/{slug}/grants", roleSelf, p.PutGrant)
+	r.authedMut("DELETE", "/api/v1/pages/{slug}/grants", roleSelf, p.DeleteGrant)
 }

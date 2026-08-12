@@ -484,6 +484,27 @@ const (
 	EntryNotificationDelivered EntryType = "notification.delivered"
 	EntryNotificationFailed    EntryType = "notification.failed"
 	EntryNotificationDropped   EntryType = "notification.dropped"
+
+	// Pages — docs/prd/pages.md §5 and §7.1b. Unknown journal types are
+	// forwarded by design (feed_filter.go:33-35), so these reach the
+	// activity feed with no filter change.
+	//
+	// EntryPageProduceDenied records a push to a panel the caller does
+	// not hold; it was previously declared locally in
+	// internal/api/pages_data.go and should move to use this constant
+	// instead of redeclaring the string.
+	EntryPageProduceDenied EntryType = "page.produce_denied"
+
+	// EntryPagePanelUpdated is emitted on every successful panel push
+	// (§5) and doubles as the realtime broadcast type consumed by
+	// hooks/use-realtime.tsx's VALID_REALTIME_TYPES allowlist.
+	EntryPagePanelUpdated EntryType = "page.panel.updated"
+
+	// EntryPageGrantAdded and EntryPageGrantRemoved record every change
+	// to a page's ACL (§7.1b) — actor and subject are carried in the
+	// payload. "An ACL nobody can audit is not a security control."
+	EntryPageGrantAdded   EntryType = "page.grant_added"
+	EntryPageGrantRemoved EntryType = "page.grant_removed"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI

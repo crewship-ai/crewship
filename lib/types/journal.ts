@@ -155,6 +155,12 @@ export const JOURNAL_ENTRY_TYPES = [
   // rather than in System where they would be filed and forgotten.
   "automation.throttled",
   "automation.depth_exceeded",
+  // Pages — docs/prd/pages.md §5, §7.1b. Unknown types are forwarded to the
+  // activity feed by design (internal/journal/feed_filter.go:33-35).
+  "page.produce_denied",
+  "page.panel.updated",
+  "page.grant_added",
+  "page.grant_removed",
 ] as const
 
 export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number]

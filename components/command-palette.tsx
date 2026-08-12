@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Network, Zap, Key, Activity, Settings, LayoutDashboard, Plus, ShieldCheck,
-  CircleDot, Inbox, ClipboardCheck, CalendarClock, Plug, History,
+  CircleDot, Inbox, ClipboardCheck, CalendarClock, Plug, History, LayoutTemplate,
 } from "lucide-react"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
@@ -133,6 +133,7 @@ const NAV_ITEMS: Array<{ title: string; href: string; icon: typeof Network; keyw
   { title: "Approvals", href: "/approvals", icon: ClipboardCheck, keywords: [] },
   { title: "Activity", href: "/activity", icon: Activity, keywords: ["runs", "traces"] },
   { title: "Routines", href: "/routines", icon: CalendarClock, keywords: ["pipelines"] },
+  { title: "Pages", href: "/pages", icon: LayoutTemplate, keywords: ["dashboards", "panels"] },
   { title: "Integrations", href: "/integrations", icon: Plug, keywords: ["mcp", "notifications", "channels"] },
   { title: "Skills", href: "/skills", icon: Zap, keywords: [] },
   { title: "Credentials", href: "/credentials", icon: Key, keywords: ["secrets", "tokens"] },

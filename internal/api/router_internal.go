@@ -328,6 +328,13 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("POST /api/v1/internal/keeper/memory-health", internalAuth(internalWsCtx(http.HandlerFunc(kp2.HandleMemoryHealth))))
 	r.mux.Handle("POST /api/v1/internal/keeper/negative-learning", internalAuth(internalWsCtx(http.HandlerFunc(kp2.HandleNegativeLearning))))
 
+	// Pages — the routine write path (#1945). The far side of the `page.write`
+	// crewship verb: a routine writes one panel's payload, bounded by the author
+	// crew's autonomy level on the way out (policy.ActionPageWrite) and by the
+	// panel's declared producer or an explicit produce grant on the way in.
+	// Registered in pages_internal.go, which owns the handler and the fences.
+	r.registerInternalPageRoutes(internalAuth)
+
 	// Sidecar IPC — the agent-initiated port-expose request flow.
 	// PortExposeHandler instance comes from registerOrchestrationRoutes
 	// so the public capability + revoke endpoints share its registry

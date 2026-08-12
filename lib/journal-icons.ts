@@ -38,6 +38,7 @@ import {
   Globe,
   Hammer,
   Hash,
+  LayoutTemplate,
   Megaphone,
   MessageSquare,
   MessageSquareWarning,
@@ -241,6 +242,15 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // ── Agent ─────────────────────────────────────────────────────────
   "run.agent_span": Activity,
   "agent.error": AlertTriangle,
+
+  // ── Pages ─────────────────────────────────────────────────────────
+  // Same glyph CONCEPT_ICON.pages uses (lib/concept-icons.ts) for a panel
+  // successfully pushed to; denial and grant changes get their own faces
+  // so a scan of the feed can tell "data arrived" from "access changed".
+  "page.panel.updated": LayoutTemplate,
+  "page.produce_denied": ShieldOff,
+  "page.grant_added": UserPlus,
+  "page.grant_removed": UserMinus,
 }
 
 /**

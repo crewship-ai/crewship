@@ -59,11 +59,24 @@ type PageHandler struct {
 	logger  *slog.Logger
 	journal journal.Emitter
 	clock   pages.Clock
+	// pushLimits is §10b.3's push rate, layer 1: per-panel and per-workspace
+	// token buckets over the values in internal/ratelimitcfg. Held on the
+	// handler rather than in a package global so a test owns its own buckets,
+	// and so the numbers are read once per process instead of per request.
+	// Layer 2 — the floor that survives more than one replica — is in the push
+	// transaction itself (pages_data.go).
+	pushLimits *pages.PushLimiter
 }
 
 // NewPageHandler builds the handler with the production clock.
 func NewPageHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *PageHandler {
-	return &PageHandler{db: db, hub: hub, logger: logger, clock: pages.SystemClock{}}
+	return &PageHandler{
+		db:         db,
+		hub:        hub,
+		logger:     logger,
+		clock:      pages.SystemClock{},
+		pushLimits: pages.NewConfiguredPushLimiter(),
+	}
 }
 
 // SetJournal wires the journal emitter. An unauthorised push is a signal, not
