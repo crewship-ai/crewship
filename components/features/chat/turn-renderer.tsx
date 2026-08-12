@@ -51,6 +51,19 @@ function describeMetaValue(value: unknown): string | undefined {
   return JSON.stringify(value)
 }
 
+/** Label one MCP server entry the way `crewship run get` does: name (type) →
+ *  name → type → unnamed. The backend stores a category-only sentinel when the
+ *  CLI reports skips in a shape it cannot read, so keying on name alone renders
+ *  an alarm with nothing to act on. */
+function mcpEntryLabel(e: McpServerInfo | undefined, withType = true): string {
+  const name = e?.name?.trim()
+  const type = e?.type?.trim()
+  if (name && type && withType) return `${name} (${type})`
+  if (name) return name
+  if (type) return type
+  return "unnamed"
+}
+
 interface TurnRendererProps {
   turn: ChatTurn
   onCopy: (s: string) => void
@@ -166,7 +179,9 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
       const version = meta.claude_code_version as string | undefined
       const mcpServers = Array.isArray(meta.mcp_servers) ? (meta.mcp_servers as McpServerInfo[]) : []
       const mcpErrors = Array.isArray(meta.mcp_server_errors) ? (meta.mcp_server_errors as McpServerInfo[]) : []
-      const skippedNames = mcpErrors.map((e) => e?.name || "unnamed").join(", ")
+      // Names only in the pill's summary — the category is a fallback for an
+      // entry that has no name, not an annotation on every one.
+      const skippedNames = mcpErrors.map((e) => mcpEntryLabel(e, false)).join(", ")
       const plural = mcpErrors.length === 1 ? "" : "s"
 
       const details: Array<[string, string]> = []
@@ -251,7 +266,7 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
                     <div className="text-muted-foreground">MCP servers</div>
                     {mcpServers.map((server, i) => (
                       <div key={`${server?.name ?? "server"}-${i}`} className="flex items-center justify-between gap-2">
-                        <span className="truncate font-mono">{server?.name || "unnamed"}</span>
+                        <span className="truncate font-mono">{mcpEntryLabel(server, false)}</span>
                         <span className={server?.status === "connected" ? "text-success" : "text-muted-foreground"}>
                           {server?.status || "unknown"}
                         </span>
@@ -272,8 +287,8 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
                     <div className="text-warn">Skipped: {skippedNames}</div>
                     {mcpErrors.map((err, i) => (
                       <div key={`${err?.name ?? "error"}-${i}`} className="text-muted-foreground">
-                        <span className="font-mono">{err?.name || "unnamed"}</span>
-                        {err?.type ? ` · ${err.type}` : ""}
+                        <span className="font-mono">{mcpEntryLabel(err, false)}</span>
+                        {err?.name && err?.type ? ` · ${err.type}` : ""}
                         {err?.message ? <div className="break-words">{err.message}</div> : null}
                       </div>
                     ))}

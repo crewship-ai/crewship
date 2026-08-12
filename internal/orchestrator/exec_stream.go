@@ -29,13 +29,16 @@ type streamJSONMessage struct {
 	Message json.RawMessage `json:"message,omitempty"`
 	// For "assistant" type messages with content blocks at top level (legacy)
 	Content []contentBlock `json:"content,omitempty"`
-	// For "result" type
+	// For "result" type. IsError, TotalCostUSD and NumTurns are tolerant for a
+	// reason the isolation in parseClaudeCodeStreamJSON does not cover: keeping
+	// the LINE is not the same as keeping the FIELD, and a zeroed is_error is
+	// the same silent COMPLETED by a shorter route. See tolerantString.
 	Result       string          `json:"result,omitempty"`
 	DurationMs   float64         `json:"duration_ms,omitempty"`
 	DurationAPI  float64         `json:"duration_api_ms,omitempty"`
-	TotalCostUSD float64         `json:"total_cost_usd,omitempty"`
-	NumTurns     int             `json:"num_turns,omitempty"`
-	IsError      bool            `json:"is_error,omitempty"`
+	TotalCostUSD tolerantFloat   `json:"total_cost_usd,omitempty"`
+	NumTurns     tolerantInt     `json:"num_turns,omitempty"`
+	IsError      tolerantBool    `json:"is_error,omitempty"`
 	Usage        json.RawMessage `json:"usage,omitempty"`
 	ModelUsage   json.RawMessage `json:"modelUsage,omitempty"`
 	Errors       []string        `json:"errors,omitempty"`
@@ -97,26 +100,27 @@ type streamJSONMessage struct {
 	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
 }
 
-// tolerantString, tolerantInt and tolerantStrings defend the same thing Skills
-// defends by being a RawMessage, and they exist because the blast radius — not
-// the shape — is what is worth pinning.
+// The tolerant scalar types below defend the same thing Skills defends by being
+// a RawMessage — but they defend the field's MEANING, which is a different job
+// from the one parseClaudeCodeStreamJSON's per-field isolation does.
 //
-// A stream line is ONE JSON object. A field whose Go type stops matching
-// upstream therefore does not fail alone: it fails the unmarshal of the whole
-// line, and parseClaudeCodeStreamJSON's fallback emits that line into the chat
-// as a raw-text event. On an init line that costs the provenance. On a RESULT
-// line it costs the result event itself — no cost, no usage, and
-// inBandFailure.observe never sees the is_error it keys on, so a run that
-// failed to authenticate is finalised COMPLETED. api_error_status is the
-// likeliest to bite: a release that emits "401" instead of 401 would take every
-// result line of every run with it.
+// Isolation keeps the line: a field whose Go type stopped matching upstream is
+// skipped and everything else on the envelope still arrives. That is the whole
+// answer for a field we only pass through. It is NOT the answer for a field
+// somebody acts on, because "skipped" means "zero", and the zero of is_error is
+// false — inBandFailure.observe keys on meta["is_error"], so a run that failed
+// to authenticate is finalised COMPLETED just as surely as if the whole line
+// had been lost. Same for total_cost_usd (a run finalised at $0.00) and
+// api_error_status (401 vs 529 is the difference between "fix the credential"
+// and "retry"). Where the neighbouring shape still says the same thing —
+// "true" is true, "0.42" is 0.42, "401" is 401 — read it rather than drop it.
 //
-// These types never return an error. They accept the documented shape, accept
-// the neighbouring one where it still means something (a quoted number is that
-// number — the status is what inBandFailure.label falls back to when nothing
-// else names the cause), and reduce anything else to a zero value. Call sites
-// keep their typed use and convert back to the plain Go type on the way into
-// event metadata, which crosses into the journal and is type-asserted there.
+// These types never return an error, because an error from a custom
+// UnmarshalJSON aborts the whole decode and would put us back where we started.
+// They accept the documented shape, accept the neighbouring one where it still
+// means something, and reduce anything else to a zero value. Call sites keep
+// their typed use and convert back to the plain Go type on the way into event
+// metadata, which crosses into the journal and is type-asserted there.
 type tolerantString string
 
 func (s *tolerantString) UnmarshalJSON(b []byte) error {
@@ -141,25 +145,77 @@ func (s *tolerantString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type tolerantInt int
-
-func (n *tolerantInt) UnmarshalJSON(b []byte) error {
-	*n = 0
+// tolerantNumber reads a number that may have arrived quoted. ParseFloat rather
+// than Atoi: JSON has one number type, so a status can legitimately arrive as
+// 401.0 or 4.01e2.
+func tolerantNumber(b []byte) (float64, bool) {
 	t := strings.TrimSpace(string(b))
 	if t == "" || t == "null" {
-		return nil
+		return 0, false
 	}
 	if t[0] == '"' {
 		var str string
 		if json.Unmarshal(b, &str) != nil {
-			return nil
+			return 0, false
 		}
 		t = strings.TrimSpace(str)
 	}
-	// ParseFloat rather than Atoi: JSON has one number type, so a status can
-	// legitimately arrive as 401.0 or 4.01e2.
-	if f, err := strconv.ParseFloat(t, 64); err == nil {
+	f, err := strconv.ParseFloat(t, 64)
+	if err != nil {
+		return 0, false
+	}
+	return f, true
+}
+
+type tolerantInt int
+
+func (n *tolerantInt) UnmarshalJSON(b []byte) error {
+	*n = 0
+	if f, ok := tolerantNumber(b); ok {
 		*n = tolerantInt(f)
+	}
+	return nil
+}
+
+// tolerantFloat carries total_cost_usd. A quoted amount is still the amount,
+// and this is the only field the run's cost is recorded from.
+type tolerantFloat float64
+
+func (n *tolerantFloat) UnmarshalJSON(b []byte) error {
+	*n = 0
+	if f, ok := tolerantNumber(b); ok {
+		*n = tolerantFloat(f)
+	}
+	return nil
+}
+
+// tolerantBool carries is_error — the one field on the result envelope that
+// decides whether a run is recorded as a failure at all.
+type tolerantBool bool
+
+func (v *tolerantBool) UnmarshalJSON(b []byte) error {
+	*v = false
+	t := strings.TrimSpace(string(b))
+	if t == "true" {
+		*v = true
+		return nil
+	}
+	if t != "" && t[0] == '"' {
+		// ParseBool so "true"/"True"/"1" all land where they obviously mean to.
+		var str string
+		if json.Unmarshal(b, &str) == nil {
+			if parsed, err := strconv.ParseBool(strings.TrimSpace(str)); err == nil {
+				*v = tolerantBool(parsed)
+			}
+		}
+		return nil
+	}
+	// A number reads the way C reads one: nonzero is the failure. Everything
+	// else — null, an object, a word we do not recognise — stays false, and
+	// that direction is deliberate: an ABSENT is_error is the normal success
+	// case, so defaulting the unknown to true would fail every healthy run.
+	if f, ok := tolerantNumber(b); ok {
+		*v = f != 0
 	}
 	return nil
 }

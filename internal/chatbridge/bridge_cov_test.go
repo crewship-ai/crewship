@@ -1073,3 +1073,35 @@ func (r recordingRunIDJournal) Emit(ctx context.Context, _ orchestrator.JournalE
 	r.fn(ctx)
 	return "j_test", nil
 }
+
+// The no-output failure is the canonical symptom of a permission-blocked run:
+// the CLI denied every tool, so the agent produced nothing. That is precisely
+// the terminal path that recorded no permission_denials, because only the
+// COMPLETED branch merged result usage — so the read-back chain never fired on
+// the case it was built for.
+func TestHandleChatMessage_FailedRunRecordsPermissionDenials(t *testing.T) {
+	const denied = `{"type":"system","subtype":"init","model":"claude-test","session_id":"sess-d","claude_code_version":"2.1.219","apiKeySource":"none"}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"num_turns":1,"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"curl http://x"}}]}
+`
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentOutput: denied, exitCode: 0}
+	b := testBridgeWithContainer(t, resolver, ctr)
+
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-denied", "hello", func(ws.ChatEvent) {})
+
+	if len(resolver.runUpdates) == 0 {
+		t.Fatal("no UpdateRun call recorded")
+	}
+	last := resolver.runUpdates[len(resolver.runUpdates)-1]
+	if last.status != "FAILED" {
+		t.Fatalf("run status = %q, want FAILED — the fixture produces no answer", last.status)
+	}
+	if last.metadata["permission_denials"] == nil {
+		t.Errorf("FAILED metadata carries no permission_denials: %+v — the run reads as one that CHOSE not to act", last.metadata)
+	}
+	// Result usage belongs on the failing record for the same reason: a run
+	// that burned tokens and then failed still cost money.
+	if last.metadata["total_cost_usd"] == nil {
+		t.Errorf("FAILED metadata carries no cost: %+v", last.metadata)
+	}
+}

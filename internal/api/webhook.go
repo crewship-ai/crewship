@@ -539,13 +539,10 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		completedMeta := map[string]interface{}{
 			"duration_ms": time.Since(startedAt).Milliseconds(),
 		}
-		orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
-		orchestrator.MergeSessionInitMeta(completedMeta, acc.SessionInit())
-		// Session-init ground truth for the served model, so the record can
-		// confirm which tier answered rather than which one was requested.
-		if m := acc.ResolvedModel(); m != "" {
-			completedMeta["model"] = m
-		}
+		// One call decides what a terminal record carries, so a key added
+		// later applies to every dispatch path rather than to whichever
+		// copies someone remembered to edit (#1949).
+		orchestrator.MergeRunAccumulator(completedMeta, acc, "")
 		if updateErr := h.resolver.UpdateRun(runCtx, runID, status, &exitCode, errMsg, completedMeta); updateErr != nil {
 			h.logger.Warn("failed to update run status", "run_id", runID, "status", status, "error", updateErr)
 		}

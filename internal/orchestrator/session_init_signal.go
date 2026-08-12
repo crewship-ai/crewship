@@ -182,20 +182,25 @@ func sessionInitSummary(slug, model string, payload map[string]any) string {
 // about to proceed and exit 0 without a server it was configured with, and the
 // feed is where anyone finds out.
 func skippedServerSummary(slug string, skipped []map[string]any, loaded int) string {
-	names := make([]string, 0, sessionInitSummaryNames)
+	names := make([]string, 0, sessionInitSummaryNames+1)
 	for _, s := range skipped {
+		label := skippedServerLabel(s)
+		if label == "" {
+			// Nothing readable in this entry, so it contributes nothing to a
+			// line whose whole job is naming what was lost. It used to become
+			// "(unnamed)", which meant len(names) was never 0 once the value
+			// decoded into objects — and the honest branch below could never
+			// run. A report whose keys the CLI renamed rendered as "1 of 1
+			// configured MCP servers were SKIPPED ((unnamed))": a sentence that
+			// promises a name, delivers a placeholder, and is worse than
+			// admitting we could not read the report.
+			continue
+		}
 		if len(names) == sessionInitSummaryNames {
 			names = append(names, "…")
 			break
 		}
-		name := boundedInitField(s, "name")
-		if name == "" {
-			name = "(unnamed)"
-		}
-		if kind := boundedInitField(s, "type"); kind != "" {
-			name += ": " + kind
-		}
-		names = append(names, name)
+		names = append(names, label)
 	}
 	if len(names) == 0 {
 		// Degradation is decided by the presence of the report, not by our
@@ -208,6 +213,25 @@ func skippedServerSummary(slug string, skipped []map[string]any, loaded int) str
 	}
 	return fmt.Sprintf("%s session DEGRADED — %d of %d configured MCP servers were SKIPPED at startup (%s); the run continues without them",
 		slug, len(skipped), len(skipped)+loaded, strings.Join(names, ", "))
+}
+
+// skippedServerLabel names one skipped server for the summary line: the name
+// the CLI gave, qualified by the failure category when it gave one — and the
+// category alone when it named no server, which at least says what KIND of
+// failure took a capability away. Empty when the entry carried neither, which
+// is the caller's signal to leave it out rather than pad it: the same fallback
+// order the `run get` / `run list` renderers use for these entries.
+func skippedServerLabel(s map[string]any) string {
+	name := boundedInitField(s, "name")
+	kind := boundedInitField(s, "type")
+	switch {
+	case name == "":
+		return kind
+	case kind == "":
+		return name
+	default:
+		return name + ": " + kind
+	}
 }
 
 // boundInitObjects projects each object down to the named keys ONLY — an allowlist,

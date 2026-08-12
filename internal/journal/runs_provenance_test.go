@@ -259,3 +259,54 @@ func TestApplySessionProvenance_ReadsPermissionDenials(t *testing.T) {
 		})
 	}
 }
+
+// The producer stores a sentinel when the CLI reported a refusal in a shape it
+// could not read: the fact is knowable, the tool name is not. That sentinel is
+// a CATEGORY, so it lands under "type" rather than claiming a tool is called
+// unrecognized_shape — and a decoder that reads tool_name only would drop it,
+// putting the run back to reading as one that CHOSE not to act, which is the
+// whole reason the sentinel is written.
+//
+// The same fallback covers a future CLI that names the refusal by category.
+func TestApplySessionProvenance_DenialSentinelSurvivesDecoding(t *testing.T) {
+	cases := []struct {
+		name string
+		md   map[string]any
+		want []string
+	}{
+		{
+			name: "unreadable shape sentinel",
+			md:   map[string]any{"permission_denials": []map[string]any{{"type": "unrecognized_shape"}}},
+			want: []string{"unrecognized_shape"},
+		},
+		{
+			name: "raw JSON sentinel as read back from the DB",
+			md:   map[string]any{"permission_denials": json.RawMessage(`[{"type":"unrecognized_shape"}]`)},
+			want: []string{"unrecognized_shape"},
+		},
+		{
+			// The producer collapses repeats of one tool into a single entry
+			// carrying how many times it was refused. The name is what this
+			// surface shows; the count must not disturb the decode.
+			name: "deduped entry with a retry count",
+			md: map[string]any{"permission_denials": json.RawMessage(
+				`[{"tool_name":"Bash","count":39},{"tool_name":"WebFetch","count":1}]`)},
+			want: []string{"Bash", "WebFetch"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var r RunAggregated
+			r.applySessionProvenance(tc.md)
+			if len(r.PermissionDenials) != len(tc.want) {
+				t.Fatalf("PermissionDenials = %v, want %v", r.PermissionDenials, tc.want)
+			}
+			for i, want := range tc.want {
+				if r.PermissionDenials[i] != want {
+					t.Errorf("PermissionDenials[%d] = %q, want %q", i, r.PermissionDenials[i], want)
+				}
+			}
+		})
+	}
+}

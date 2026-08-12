@@ -670,11 +670,39 @@ func printMCPSkipNotice(runs []cli.RunDetail) {
 	for _, r := range affected {
 		names := make([]string, 0, len(r.MCPServerErrors))
 		for _, e := range r.MCPServerErrors {
-			names = append(names, e.Name)
+			names = append(names, mcpSkipLabel(e))
 		}
 		fmt.Printf("  %s  %sskipped: %s%s\n", r.ID, cli.Dim, strings.Join(names, ", "), cli.Reset)
 	}
 	fmt.Printf("  %screwship run get <id> — shows why each one was skipped%s\n", cli.Dim, cli.Reset)
+}
+
+// mcpSkipLabel identifies one skipped server for a human: the name, qualified
+// by the failure category when there is one.
+//
+// The fallback to the category alone is what makes the producer's
+// "unrecognized_shape" sentinel usable. That entry is stored deliberately
+// nameless — the CLI reported a skip in a shape the producer could not read,
+// and it will not invent a server name — and both renderers here formatted
+// these entries by NAME, so the alarm arrived empty: a banner counting runs
+// with servers skipped, followed by nothing, and a bare "MCP skipped:" row.
+// The alarm survived and the ability to act on it did not. The same fallback
+// covers any real entry the CLI sends without a name.
+func mcpSkipLabel(e cli.MCPServerError) string {
+	switch {
+	case e.Name == "" && e.Type == "":
+		// Nothing to identify it by at all (a pre-projection run, or another
+		// producer). The row still prints: that a server was skipped is the
+		// alarm, and dropping it would be the one outcome worse than a vague
+		// one.
+		return "(unnamed)"
+	case e.Name == "":
+		return e.Type
+	case e.Type == "":
+		return e.Name
+	default:
+		return e.Name + " (" + e.Type + ")"
+	}
 }
 
 var runGetCmd = &cobra.Command{
@@ -748,10 +776,7 @@ func runDetailPairs(r *cli.RunDetail) [][]string {
 	// them into a count would hide which capability was lost, and that is the
 	// only actionable part.
 	for _, e := range r.MCPServerErrors {
-		detail := e.Name
-		if e.Type != "" {
-			detail += " (" + e.Type + ")"
-		}
+		detail := mcpSkipLabel(e)
 		if e.Message != "" {
 			detail += ": " + e.Message
 		}

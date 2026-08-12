@@ -472,3 +472,130 @@ func TestEmitSessionInitSignal_NeverEmitsNamelessSkipEntries(t *testing.T) {
 			entries[0].Payload["mcp_server_error_count"])
 	}
 }
+
+// The honest summary — "reported skipped MCP servers in a shape this build
+// cannot read" — was added for exactly the shape below and could never run:
+// every unreadable entry was padded to "(unnamed)", so the name list was never
+// empty and the counted sentence always won. What an operator got was
+// "1 of 1 configured MCP servers were SKIPPED ((unnamed))": a line that claims
+// to name the lost server, names nothing, and reads as a broken alert.
+func TestEmitSessionInitSignal_UnnameableSkipSaysSoInsteadOfPadding(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"renamed keys", `[{"server":"crewship-memory","reason":"invalid_config"}]`},
+		{"name typed as something else", `[{"name":{"id":"crewship-memory"},"type":7}]`},
+		{"empty objects", `[{},{}]`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			j := &covJournal{}
+			o := New(nil, newMemState(), covQuietLogger())
+			o.SetJournal(j)
+
+			o.emitSessionInitSignal(context.Background(), covRunReq(), map[string]any{
+				"subtype":           "init",
+				"model":             "claude-opus-4-8",
+				"mcp_server_errors": json.RawMessage(tc.raw),
+			})
+
+			entries := j.byType("run.session_init")
+			if len(entries) != 1 {
+				t.Fatalf("want 1 entry, got %d", len(entries))
+			}
+			sum := entries[0].Summary
+			if strings.Contains(sum, "(unnamed)") {
+				t.Errorf("Summary = %q — a placeholder standing in for a server nobody can name, "+
+					"in the line that is supposed to tell an operator WHICH capability was lost", sum)
+			}
+			if !strings.Contains(sum, "cannot read") {
+				t.Errorf("Summary = %q, want the honest 'shape this build cannot read' line", sum)
+			}
+			if entries[0].Severity != "error" {
+				t.Errorf("Severity = %q, want error — the CLI still reported a skip", entries[0].Severity)
+			}
+		})
+	}
+}
+
+// A summary that CAN name something still names it: the honest branch replaces
+// padding, not reporting.
+func TestEmitSessionInitSignal_PartiallyReadableSkipStillNames(t *testing.T) {
+	t.Parallel()
+	j := &covJournal{}
+	o := New(nil, newMemState(), covQuietLogger())
+	o.SetJournal(j)
+
+	o.emitSessionInitSignal(context.Background(), covRunReq(), map[string]any{
+		"subtype": "init",
+		"model":   "claude-opus-4-8",
+		// One entry we can read, one whose keys were renamed, and one carrying
+		// only the failure category.
+		"mcp_server_errors": json.RawMessage(
+			`[{"name":"crewship-memory","type":"invalid_config"},{"server":"github"},{"type":"url_missing_type"}]`),
+	})
+
+	entries := j.byType("run.session_init")
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+	sum := entries[0].Summary
+	for _, want := range []string{"crewship-memory", "invalid_config", "url_missing_type"} {
+		if !strings.Contains(sum, want) {
+			t.Errorf("Summary = %q, missing %q — everything readable belongs in the line", sum, want)
+		}
+	}
+	if strings.Contains(sum, "(unnamed)") {
+		t.Errorf("Summary = %q pads the entry it could not read", sum)
+	}
+	if strings.Contains(sum, "cannot read") {
+		t.Errorf("Summary = %q claims it read nothing while naming two servers", sum)
+	}
+}
+
+// A session where nothing was skipped must not be reported as degraded just
+// because the adapter handed the (empty) list over already decoded. Severity
+// error plus a DEGRADED summary for a healthy session is how an alert stops
+// being read.
+func TestEmitSessionInitSignal_DecodedEmptySkipListIsHealthy(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   any
+	}{
+		{"decoded objects", []map[string]any{}},
+		{"raw JSON elements", []json.RawMessage{}},
+		{"strings", []string{}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			j := &covJournal{}
+			o := New(nil, newMemState(), covQuietLogger())
+			o.SetJournal(j)
+
+			o.emitSessionInitSignal(context.Background(), covRunReq(), map[string]any{
+				"subtype":           "init",
+				"model":             "claude-opus-4-8",
+				"mcp_server_errors": tc.in,
+			})
+
+			entries := j.byType("run.session_init")
+			if len(entries) != 1 {
+				t.Fatalf("want 1 entry, got %d", len(entries))
+			}
+			if got := entries[0].Severity; got != "info" {
+				t.Errorf("Severity = %q, want info — the CLI skipped nothing", got)
+			}
+			if strings.Contains(entries[0].Summary, "DEGRADED") {
+				t.Errorf("Summary = %q calls a healthy session degraded", entries[0].Summary)
+			}
+			if v, ok := entries[0].Payload["mcp_server_error_count"]; ok {
+				t.Errorf("mcp_server_error_count = %v for an empty list", v)
+			}
+		})
+	}
+}

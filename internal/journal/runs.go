@@ -93,6 +93,12 @@ type RunAggregated struct {
 	// Empty is the normal case and means nothing was denied — which matters,
 	// because a run blocked by permissions otherwise reads as a run that CHOSE
 	// not to act, sending an operator after a prompt problem.
+	//
+	// One entry per denied TOOL, not per refusal: the producer collapses an
+	// agent's forty retries of the same blocked Bash into one name (the retry
+	// count stays on the stored record). A single "unrecognized_shape" entry
+	// means the CLI reported a refusal in a shape the producer could not read —
+	// the run WAS blocked and the tool is not knowable.
 	PermissionDenials []string
 	CreatedAt         time.Time // == StartedAt for runs (we don't track a separate creation moment)
 }
@@ -505,6 +511,14 @@ func (r *RunAggregated) applySessionProvenance(md map[string]any) {
 // A malformed value degrades to no denials rather than a partial list: this
 // drives an operator's reading of why a run did nothing, and half an answer is
 // worse than none.
+//
+// Type is read as a fallback because the producer records a CATEGORY there,
+// with no tool_name, when the CLI reported a refusal in a shape it could not
+// read (orchestrator's unrecognized_shape sentinel) — it will not invent a tool
+// name, and reading tool_name only would drop that entry and put the run back
+// to reading as one that CHOSE not to act, which is the reason the sentinel is
+// written at all. The same fallback carries any future entry the CLI describes
+// by category rather than by name.
 func decodeDeniedToolNames(v any) []string {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -512,14 +526,19 @@ func decodeDeniedToolNames(v any) []string {
 	}
 	var entries []struct {
 		ToolName string `json:"tool_name"`
+		Type     string `json:"type"`
 	}
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return nil
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if e.ToolName != "" {
-			names = append(names, e.ToolName)
+		name := e.ToolName
+		if name == "" {
+			name = e.Type
+		}
+		if name != "" {
+			names = append(names, name)
 		}
 	}
 	if len(names) == 0 {

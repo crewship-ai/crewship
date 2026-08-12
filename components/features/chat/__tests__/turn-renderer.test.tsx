@@ -290,3 +290,34 @@ describe("TurnRenderer", () => {
     })
   })
 })
+
+// When the CLI reports skipped MCP servers in a shape the backend cannot read,
+// it stores a sentinel carrying only a category — no server name. The CLI
+// renders that category; the card used to print "unnamed", which is an alarm
+// with nothing to act on. Same fallback order as `crewship run get`:
+// name (type) → name → type → unnamed.
+describe("system_init — MCP skips without a server name", () => {
+  const sentinel = { mcp_server_errors: [{ type: "unrecognized_shape" }] }
+
+  it("labels a nameless skip by its category, not 'unnamed'", () => {
+    render(
+      <TurnRenderer turn={systemTurn("system_init", "", sentinel)} onCopy={noop} onFileClick={noop} />,
+    )
+    const chip = screen.getByLabelText(/MCP server.*skipped/i)
+    expect(chip.getAttribute("aria-label")).toContain("unrecognized_shape")
+    expect(chip.getAttribute("aria-label")).not.toContain("unnamed")
+  })
+
+  it("still names the server when the CLI gave one", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", {
+          mcp_server_errors: [{ name: "crewship-memory", type: "invalid_config" }],
+        })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.getByLabelText(/crewship-memory/)).toBeTruthy()
+  })
+})

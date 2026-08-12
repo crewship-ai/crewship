@@ -178,11 +178,17 @@ func ParseResultUsage(meta any) (costUSD float64, tokIn, tokOut int) {
 // MergeResultUsageMeta.
 var resultUsageMetaKeys = []string{"total_cost_usd", "num_turns", "usage", "model_usage"}
 
-// unrecognisedSkipShape is the category stored when the CLI reported skipped
-// MCP servers in a shape this code could not read. It is deliberately not a
-// server name: the run is degraded, and pretending to know which server would
-// be worse than saying we do not.
-const unrecognisedSkipShape = "unrecognized_shape"
+// unrecognisedShape is the category stored when the CLI reported something —
+// a skipped MCP server, a refused tool — in a shape this code could not read.
+// It is deliberately not a name: the run is degraded, and pretending to know
+// which server or which tool would be worse than saying we do not.
+//
+// It is stored under a "type"/category key rather than a name key for the same
+// reason, and every reader falls back to it when the name is empty (see
+// journal.decodeDeniedToolNames and the `run get`/`run list` renderers) — a
+// sentinel nobody can display keeps the alarm and destroys the ability to act
+// on it.
+const unrecognisedShape = "unrecognized_shape"
 
 // MergeResultUsageMeta copies the standard run-summary keys from a "result"
 // event's metadata map into dst, leaving any other dst entries (e.g.
@@ -214,10 +220,74 @@ func MergeResultUsageMeta(dst map[string]any, meta any) {
 	// command line is a secret we would be choosing to keep forever. Same rule
 	// and same reason as mcp_server_errors below.
 	if v, ok := m["permission_denials"]; ok && !emptyJSONValue(v) {
-		if denials, _ := boundInitObjects(initMetaObjects(v), "tool_name"); len(denials) > 0 {
-			dst["permission_denials"] = denials
+		denials, truncated := projectDenials(initMetaObjects(v))
+		if len(denials) == 0 {
+			// The CLI said it refused something and we could not read which
+			// tool — a release that reports denials as an object keyed by tool,
+			// or one that renamed the element key. Storing nothing is the worst
+			// outcome available: the key's absence is what every reader takes
+			// as "nothing was denied", so an unparsed refusal becomes a run
+			// that CHOSE not to act, the exact misdiagnosis this field exists
+			// to prevent. Keep the alarm, name no tool we cannot name, and
+			// label why the name is missing. Same rule as mcp_server_errors.
+			denials = []map[string]any{{"type": unrecognisedShape}}
+		}
+		dst["permission_denials"] = denials
+		if truncated {
+			// The list is capped, so without this an operator reads the kept
+			// tools as the whole story. Mirrors mcp_server_errors_truncated.
+			dst["permission_denials_truncated"] = true
 		}
 	}
+}
+
+// projectDenials turns the CLI's per-refusal list into the per-TOOL list a run
+// record keeps: the tool name, and how many times that tool was refused.
+// Anything else on the element — above all tool_input — is dropped by the
+// projection, per the comment in MergeResultUsageMeta.
+//
+// WHY DEDUPE, AND WHY KEEP THE COUNT. The question this row answers is "which
+// tools was the run blocked from using" — a set: forty refusals of Bash are one
+// permission rule, not forty findings, and a row rendering `Bash, Bash, Bash…`
+// is a row an operator stops reading. But the repetition is a real signal too:
+// one denial is an agent that tried something once, forty is an agent hammering
+// a wall it cannot see, and those call for different fixes. So the names
+// collapse and the count rides along on the entry. The count is always written,
+// including 1 — a consumer should not have to know that an absent count means
+// "once".
+//
+// WHY DEDUPE BEFORE THE CAP. This is the reason the work is not left to
+// boundInitObjects, which caps first. An agent that retried a denied Bash forty
+// times would fill every one of the sessionInitListMax slots with Bash and push
+// the ONE other tool it was denied — the one nobody knows about yet — off the
+// list entirely, leaving the row saying, wrongly and permanently, that only
+// Bash was blocked.
+func projectDenials(objs []map[string]any) (out []map[string]any, truncated bool) {
+	seen := make(map[string]map[string]any)
+	for _, o := range objs {
+		name := boundedInitField(o, "tool_name")
+		if name == "" {
+			// Projected to nothing: a renamed key, or a tool name that is no
+			// longer a string. Recording {} would put a blank denial into a
+			// hash-chained record while the CLI's own output names the tool;
+			// the caller's sentinel says that honestly instead.
+			continue
+		}
+		if e, ok := seen[name]; ok {
+			// Counting a repeat costs no slot, so it stays honest even for
+			// tools that arrived after the cap was reached.
+			e["count"] = e["count"].(int) + 1
+			continue
+		}
+		if len(out) >= sessionInitListMax {
+			truncated = true
+			continue
+		}
+		e := map[string]any{"tool_name": name, "count": 1}
+		seen[name] = e
+		out = append(out, e)
+	}
+	return out, truncated
 }
 
 // apiKeySourceMetaKey is the CLI's own (camelCase) name for the auth-path
@@ -303,7 +373,7 @@ func MergeSessionInitMeta(dst map[string]any, meta any) {
 			// absence as "nothing was skipped", so an unparsed report becomes
 			// a clean run. Keep the alarm, name no server we cannot name, and
 			// label why the details are missing.
-			errs = []map[string]any{{"type": unrecognisedSkipShape}}
+			errs = []map[string]any{{"type": unrecognisedShape}}
 		}
 		dst["mcp_server_errors"] = errs
 	}
@@ -314,6 +384,15 @@ func MergeSessionInitMeta(dst map[string]any, meta any) {
 // array has to be recognised here rather than trusted to have been filtered
 // upstream. Anything of an unexpected shape counts as content — better a noisy
 // run record than a silently dropped report.
+//
+// The DECODED empty lists are listed for the same reason the raw ones are, and
+// they are not hypothetical: the Claude adapter is the only producer that hands
+// these fields over unparsed. A non-Claude adapter — or a future change that
+// decodes before stamping the event — arrives with []map[string]any{} or
+// []string{}, and "unexpected shape counts as content" then reads an empty
+// report as a report: a degraded alarm, a sentinel naming a problem that does
+// not exist, and a session-init entry written at error for a session where
+// nothing was skipped and nothing was denied.
 func emptyJSONValue(v any) bool {
 	switch t := v.(type) {
 	case nil:
@@ -325,6 +404,12 @@ func emptyJSONValue(v any) bool {
 	case string:
 		return emptyJSONBytes([]byte(t))
 	case []any:
+		return len(t) == 0
+	case []map[string]any:
+		return len(t) == 0
+	case []json.RawMessage:
+		return len(t) == 0
+	case []string:
 		return len(t) == 0
 	case map[string]any:
 		return len(t) == 0

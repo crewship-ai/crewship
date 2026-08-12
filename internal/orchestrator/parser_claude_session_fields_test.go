@@ -223,6 +223,135 @@ func TestParseClaudeStream_ResultCoercesAQuotedAPIErrorStatus(t *testing.T) {
 	}
 }
 
+// The tolerant-type round stopped one field short of the failure it describes.
+// terminal_reason, stop_reason, api_error_status and capabilities were made
+// tolerant; is_error, total_cost_usd and num_turns were left strict — and
+// is_error is the single most consequential field on this envelope. Losing the
+// result line costs the cost and the usage, but losing is_error costs the
+// VERDICT: inBandFailure.observe keys on meta["is_error"].(bool), so a run that
+// failed to authenticate is finalised COMPLETED and nobody is told.
+//
+// Two things have to hold for each row, and they are different things. The
+// envelope must survive (no raw-text fallback, cost and usage still there) —
+// that is blast radius. And the field's MEANING must survive: "true" is true,
+// "0.42" is 0.42. A mechanism that only isolates the bad field would zero
+// is_error, which is the same silent COMPLETED by a shorter route.
+//
+// Every value below is asserted against a plain Go type, not a wrapper: this
+// metadata crosses into the journal and is type-asserted there.
+func TestParseClaudeStream_ResultSurvivesAQuotedScalar(t *testing.T) {
+	cases := []struct {
+		name   string
+		fields string
+		key    string
+		want   interface{}
+		why    string
+	}{
+		{
+			"is_error as a quoted bool", `"is_error":"true","total_cost_usd":0.42`,
+			"is_error", true,
+			"the only in-band signal that the run failed — dropped, the run is finalised COMPLETED",
+		},
+		{
+			"is_error as 1", `"is_error":1,"total_cost_usd":0.42`,
+			"is_error", true,
+			"a truthy number still means the run failed",
+		},
+		{
+			"total_cost_usd as a quoted number", `"is_error":true,"total_cost_usd":"0.42"`,
+			"total_cost_usd", 0.42,
+			"cost is recorded from this field and nowhere else",
+		},
+		{
+			"num_turns as a quoted number", `"is_error":true,"total_cost_usd":0.42,"num_turns":"3"`,
+			"num_turns", 3,
+			"inBandFailure reports the turn count back to the operator",
+		},
+		{
+			"a field nobody made tolerant", `"is_error":true,"total_cost_usd":0.42,"duration_ms":"12"`,
+			"is_error", true,
+			"the next shape change will be on a field this list does not name — it must still cost only that field",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			line := `{"type":"result","subtype":"success",` + tc.fields + `,"usage":{"input_tokens":11}}`
+
+			events := collectEvents(t, line)
+			for _, e := range events {
+				if e.Type == "text" {
+					t.Fatalf("result line fell back to raw text (%.60q…) — one unexpected field took the whole envelope with it: %s", e.Content, tc.why)
+				}
+			}
+			meta := metaOf(t, events, "result")
+			if got := meta[tc.key]; got != tc.want {
+				t.Errorf("meta[%q] = %v (%T), want %v (%T) — %s", tc.key, got, got, tc.want, tc.want, tc.why)
+			}
+			// Whatever the row was about, the verdict and the money must be
+			// intact: these are what finalization spends.
+			if got, ok := meta["is_error"].(bool); !ok || !got {
+				t.Errorf("is_error = %v (%T), want bool true — inBandFailure.observe type-asserts bool, so anything else records a failed run COMPLETED", meta["is_error"], meta["is_error"])
+			}
+			if got := meta["total_cost_usd"]; got != 0.42 {
+				t.Errorf("total_cost_usd = %v (%T), want float64 0.42 — the run would be finalised with no cost", got, got)
+			}
+			if _, ok := meta["usage"]; !ok {
+				t.Error("usage dropped — the run would be finalised with no token accounting")
+			}
+		})
+	}
+}
+
+// The nested `message` object is decoded in a second pass, so it needs the same
+// rule or the fix has a hole exactly where the tool calls live: one block that
+// grew a field of an unexpected shape must not take the blocks either side of
+// it. An assistant line carries every tool_use of a turn, so insisting the
+// nested decode be error-free costs the whole turn's tool activity — the UI
+// shows an agent that thought and did nothing.
+func TestParseClaudeStream_AssistantKeepsTheBlocksAroundABadOne(t *testing.T) {
+	const line = `{"type":"assistant","message":{"content":[
+		{"type":"tool_use","id":123,"name":"Bash","input":{"command":"ls"}},
+		{"type":"tool_use","id":"tu-2","name":"Grep","input":{"pattern":"x"}}]}}`
+
+	var names []string
+	for _, e := range collectEvents(t, line) {
+		if e.Type == "text" {
+			t.Fatalf("assistant line fell back to raw text (%.60q…)", e.Content)
+		}
+		if e.Type == "tool_call" {
+			names = append(names, e.Content)
+		}
+	}
+	if len(names) != 2 || names[0] != "Bash" || names[1] != "Grep" {
+		t.Errorf("tool_call events = %v, want [Bash Grep] — a numeric id on one block cost the whole turn's tool activity", names)
+	}
+}
+
+// The other half of the contract: a line that genuinely carries nothing must
+// still reach the transcript as text. Tolerating a bad FIELD must not turn into
+// swallowing a bad LINE — a CLI that starts writing plain-text diagnostics to
+// stdout would otherwise go silent instead of visibly wrong.
+func TestParseClaudeStream_FallsBackToTextWhenNothingSurvives(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+	}{
+		{"not JSON at all", "not json line"},
+		{"a truncated object", `{"type":"result","is_error":`},
+		{"a JSON array", `["result"]`},
+		{"a bare JSON string", `"result"`},
+		{"an object whose type is not a string", `{"type":["result"],"is_error":true}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events := collectEvents(t, tc.line)
+			if len(events) != 1 || events[0].Type != "text" {
+				t.Fatalf("got %+v, want a single text event — a line with no routable type must stay visible", events)
+			}
+		})
+	}
+}
+
 // The init line's capabilities is documented upstream as an array of strings —
 // which is exactly the kind of assurance that let a pinned CLI version drift
 // for a hundred releases (#1932). It is a pass-through field with no typed

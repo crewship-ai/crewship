@@ -341,9 +341,12 @@ func terminalRunMeta(startedAt time.Time, acc *orchestrator.Accumulator, extra m
 	meta := map[string]interface{}{
 		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
-	// Session provenance off the init event — queryable per run (#1934)
-	// instead of only greppable in the logs.
-	orchestrator.MergeSessionInitMeta(meta, acc.SessionInit())
+	// Everything the accumulator captured, in one call — provenance AND result
+	// usage. Merging only the provenance half here is what left a FAILED chat
+	// run without permission_denials while a COMPLETED one had them, and the
+	// no-output failure is exactly the run that gets read for "why did it do
+	// nothing" (#1949).
+	orchestrator.MergeRunAccumulator(meta, acc, "")
 	for k, v := range extra {
 		meta[k] = v
 	}
@@ -928,15 +931,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	exitCode := 0
-	completedMeta := terminalRunMeta(startedAt, acc, nil)
-	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
-	// Persist the model the run actually resolved to (session-init ground
-	// truth) so `crewship inspect`/the run JSON can confirm Opus-vs-Sonnet.
-	resolvedModel := info.LLMModel
-	if m := acc.ResolvedModel(); m != "" {
-		completedMeta["model"] = m
-		resolvedModel = m
+	completedMeta := map[string]interface{}{
+		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
+	// resolvedModel is session-init ground truth for what the API served, and
+	// what the cost ledger below has to bill against — a subscription can
+	// serve a lower tier than the one that was asked for.
+	resolvedModel := orchestrator.MergeRunAccumulator(completedMeta, acc, info.LLMModel)
 	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}

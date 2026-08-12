@@ -559,19 +559,13 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	completedMeta := map[string]interface{}{
 		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
-	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
-	// Session provenance from the same init event: which CLI binary answered,
-	// which credential path it used, and whether an MCP server was dropped on
-	// the way in. Nobody watches a scheduled run, so the run record is the only
-	// place those answers can come from afterwards (#1934).
-	orchestrator.MergeSessionInitMeta(completedMeta, acc.SessionInit())
-	// Record the actually-resolved model (session-init ground truth) on the
-	// run so the run record can confirm which tier the subscription served.
-	resolvedModel := info.LLMModel
-	if m := acc.ResolvedModel(); m != "" {
-		completedMeta["model"] = m
-		resolvedModel = m
-	}
+	// Everything the accumulator captured: usage, denials, and the session
+	// provenance that says which CLI binary answered, which credential path it
+	// used, and whether an MCP server was dropped on the way in. Nobody
+	// watches a scheduled run, so the run record is the only place those
+	// answers can come from afterwards (#1934). resolvedModel is session-init
+	// ground truth for what the API served — what the ledger below bills.
+	resolvedModel := orchestrator.MergeRunAccumulator(completedMeta, acc, info.LLMModel)
 
 	// Forward the CLI-reported token usage to the paymaster ledger (#1205).
 	// See chatbridge.resultUsageForLedger's doc for why this adapter-side
