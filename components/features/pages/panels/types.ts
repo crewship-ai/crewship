@@ -7,22 +7,31 @@
  * before it is allowed to select a component.
  */
 
-/** The five schemas, in the order §3 lists them. */
+/**
+ * The five schemas of §3, in the order it lists them, plus `embed.v1` — the
+ * sandboxed escape hatch of §3.1, which ships in v1.2 but whose *name* is
+ * reserved from the first migration "so the closed enum does not need a
+ * breaking change to admit it". It is reserved in Go (`internal/pages/schema.go`
+ * `SchemaEmbed`) and in the migration's `CHECK`, so a page carrying one is a
+ * valid page; leaving it out here would render it as an unknown schema — "this
+ * version does not render embed.v1" — when the truth is "not yet".
+ */
 export const PANEL_SCHEMAS = [
   "metric.v1",
   "series.v1",
   "status.v1",
   "table.v1",
   "narrative.v1",
+  "embed.v1",
 ] as const
 
 export type PanelSchema = (typeof PANEL_SCHEMAS)[number]
 
 /**
- * The subset this build actually renders. `series.v1` and `narrative.v1` are
- * staged later (§12) but are part of the closed enum from the first migration,
- * so the registry carries an entry for them rather than pretending they are
- * unknown strings.
+ * The subset this build actually renders. `series.v1`, `narrative.v1` and
+ * `embed.v1` are staged later (§12) but are part of the closed enum from the
+ * first migration, so the registry carries an entry for them rather than
+ * pretending they are unknown strings.
  */
 export const IMPLEMENTED_PANEL_SCHEMAS = ["metric.v1", "status.v1", "table.v1"] as const
 
@@ -46,13 +55,23 @@ export function isPanelSchema(value: unknown): value is PanelSchema {
 export const PANEL_STATES = ["fresh", "stale", "failed", "never_produced"] as const
 export type PanelState = (typeof PANEL_STATES)[number]
 
-/** Server-attached, never producer-claimed (§4.5). */
+/**
+ * Server-attached, never producer-claimed (§4.5).
+ *
+ * The field names are the WIRE names. §11b.4 pins provenance as a nested
+ * `{producer, run_id, produced_at}` and the repo's API convention is
+ * snake_case throughout (`internal/api/saved_view_handler.go`), so a panel
+ * type spelling these `runId` / `producedAt` is a client that quietly reads a
+ * field the server never sends — the exact "client and server that both pass
+ * their own tests" §11b exists to prevent. `scripts/test-harness/test-pages.sh`
+ * probes for `provenance.run_id` and `provenance.produced_at`.
+ */
 export interface PanelProvenance {
   /** `routine/nightly-close`, `script/watch-services.sh`, … */
   producer?: string | null
-  runId?: string | null
+  run_id?: string | null
   /** ISO-8601, or anything `new Date()` parses. */
-  producedAt?: string | Date | null
+  produced_at?: string | Date | null
 }
 
 /** The panel as declared in the page spec (§6 layer 1, §10 `page_panels`). */
@@ -65,7 +84,8 @@ export interface PanelSpec {
   owner?: string | null
   /** 1..12, consumed by the page grid — not by the panel itself. */
   span?: number
-  slaSeconds?: number
+  /** §11b.3: `sla_seconds` (integer) on the wire; `sla: 30s` is YAML sugar. */
+  sla_seconds?: number
 }
 
 /** The panel payload as produced by a machine (§6 layer 2), plus its state. */
@@ -92,15 +112,22 @@ export interface PanelProps {
 // ── Payload cores (§3) ────────────────────────────────────────────────────
 
 export interface MetricPayload {
+  /**
+   * `null` — and only `null` — is "no basis to compute" (§9b.4). A measured
+   * `0` is a `0`, and so is an empty string: `internal/pages/payload.go`
+   * `IsNoData()` treats JSON null alone as no data, and a client that also
+   * swallowed `""` would draw an em dash over something the server counted.
+   */
   value?: number | string | null
   unit?: string | null
   delta?: number | null
   /**
-   * Which direction is an improvement. Absent by default: §3 does not say
-   * whether a rising number is good, and colouring a delta green because it
-   * went up is a guess the panel is not entitled to make.
+   * Which direction is an improvement (§11b.9). Absent by default: §3 does not
+   * say whether a rising number is good, and green-up on an error rate would be
+   * a lie. The wire name is `delta_good` — there has never been a `deltaGood`
+   * on the wire, and reading one is how this opt-in never fires.
    */
-  deltaGood?: "up" | "down" | null
+  delta_good?: "up" | "down" | null
   target?: number | null
   sparkline?: number[] | null
 }

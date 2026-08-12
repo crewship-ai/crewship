@@ -4,7 +4,7 @@ import * as React from "react"
 import { Table2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { EM_DASH, defaultEmptyHint, panelGate } from "./freshness"
+import { EM_DASH, defaultEmptyHint, panelGate, provenanceProducedAt } from "./freshness"
 import {
   FailedValue,
   NeverProducedValue,
@@ -32,7 +32,14 @@ export function TablePanel({ panel, data, now, publicView = false, className }: 
 
   let body: React.ReactNode
   if (gate.kind === "failed") {
-    body = <FailedValue failure={data.failure} publicView={publicView} />
+    body = (
+      <FailedValue
+        failure={data.failure}
+        publicView={publicView}
+        producedAt={provenanceProducedAt(data.provenance)}
+        now={clock}
+      />
+    )
   } else if (gate.kind === "never") {
     body = <NeverProducedValue hint={data.emptyHint?.trim() || defaultEmptyHint(panel)} />
   } else if (columns.length === 0) {
@@ -46,7 +53,9 @@ export function TablePanel({ panel, data, now, publicView = false, className }: 
   } else {
     body = (
       <div className="flex flex-col gap-2">
-        {gate.dimmed ? <PanelAge producedAt={data.provenance?.producedAt} now={clock} /> : null}
+        {gate.dimmed ? (
+          <PanelAge producedAt={provenanceProducedAt(data.provenance)} now={clock} />
+        ) : null}
         <PanelValue basis="measured" dimmed={gate.dimmed}>
           {rows.length === 0 ? (
             <p className="text-body text-muted-foreground">
@@ -133,9 +142,17 @@ export function TablePanel({ panel, data, now, publicView = false, className }: 
 }
 
 /**
- * One cell. A missing cell is "no basis" and renders the em dash; a `0` is a
+ * One cell. A `null` cell is "no basis" and renders the em dash; a `0` is a
  * measured zero and renders `0` (§9b.4) — the same rule the panel value obeys,
  * applied per cell.
+ *
+ * An empty string is DATA, not an em dash. `panel.table.v1.json` says so —
+ * *"`null` is no data and renders as an em dash, which is a different claim
+ * from `0` or an empty string"* — and Go agrees: `Cell.IsNoData()` in
+ * internal/pages/payload.go is true for JSON null alone. A client that drew a
+ * dash over `""` would be reporting "we have nothing to look at" about a cell
+ * the producer deliberately emptied, which is the one glyph in this product
+ * that must mean the same thing on both sides of the wire.
  */
 function Cell({
   as: As,
@@ -146,7 +163,7 @@ function Cell({
   column: TableColumn
   value: TableCell
 }) {
-  const missing = value === null || value === undefined || value === ""
+  const missing = value === null || value === undefined
   return (
     <As
       data-slot="table-cell"

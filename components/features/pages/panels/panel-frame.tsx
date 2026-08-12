@@ -10,6 +10,8 @@ import {
   formatAbsoluteAge,
   formatInstant,
   panelStateWord,
+  provenanceProducedAt,
+  provenanceRunId,
   toDate,
   type ValueBasis,
 } from "./freshness"
@@ -110,13 +112,31 @@ export function PanelValue({
  * `—` in the destructive tone, plus the failure — but the reason is internal
  * vocabulary (container names, routine slugs, OOM traces), so a public view
  * gets the glyph and the age and nothing else (§7.3.2b).
+ *
+ * The age rides here rather than only on a stale panel: §7.3.2b is "show the
+ * age, hide the reason", and *"a public panel always carries when its data was
+ * produced"*. A failed panel is exactly the one an outsider must not read as
+ * current, and the provenance footer's bare timestamp does not say how old.
  */
-export function FailedValue({ failure, publicView }: { failure?: string | null; publicView: boolean }) {
+export function FailedValue({
+  failure,
+  publicView,
+  producedAt,
+  now,
+}: {
+  failure?: string | null
+  publicView: boolean
+  producedAt?: string | Date | null
+  now?: Date
+}) {
   return (
     <div className="flex flex-col gap-1">
-      <PanelValue basis="none" tone="destructive" className="text-display font-semibold leading-none">
-        {EM_DASH}
-      </PanelValue>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <PanelValue basis="none" tone="destructive" className="text-display font-semibold leading-none">
+          {EM_DASH}
+        </PanelValue>
+        {now ? <PanelAge producedAt={producedAt} now={now} /> : null}
+      </div>
       {publicView ? (
         <p className="text-body text-muted-foreground">Data are not current.</p>
       ) : (
@@ -128,11 +148,23 @@ export function FailedValue({ failure, publicView }: { failure?: string | null; 
   )
 }
 
-/** `—` plus the sentence that names the next action (§9b.3). */
+/**
+ * `—` plus the sentence that names the next action (§9b.3), dimmed.
+ *
+ * The dimming is §10b.1: a panel restored by a rollback *"renders dimmed, in a
+ * 'waiting for first data' state"*, and this is that state. A rollback is
+ * exactly when someone is most likely to believe what they see, so the
+ * waiting-for-data panel must not sit at the same contrast as a measured one.
+ */
 export function NeverProducedValue({ hint }: { hint: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <PanelValue basis="none" tone="muted" className="text-display font-semibold leading-none">
+      <PanelValue
+        basis="none"
+        tone="muted"
+        dimmed
+        className="text-display font-semibold leading-none"
+      >
         {EM_DASH}
       </PanelValue>
       <p className="text-body text-muted-foreground">{hint}</p>
@@ -174,9 +206,9 @@ export function PanelProvenance({
   now?: Date
   publicView: boolean
 }) {
-  const at = toDate(data.provenance?.producedAt)
+  const at = toDate(provenanceProducedAt(data.provenance))
   const producer = data.provenance?.producer?.trim()
-  const runId = data.provenance?.runId?.trim()
+  const runId = provenanceRunId(data.provenance)?.trim()
   if (!at && !producer && !runId) return null
   return (
     <div

@@ -70894,6 +70894,1450 @@
         ]
       }
     },
+    "/api/v1/pages": {
+      "get": {
+        "operationId": "get_api_v1_pages",
+        "parameters": [
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "created_at": {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "last_produced_at": {
+                        "description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\".",
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "owner": {
+                        "type": "string"
+                      },
+                      "owner_crew_slug": {
+                        "type": "string"
+                      },
+                      "panel_count": {
+                        "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
+                        "type": "integer"
+                      },
+                      "panel_states": {
+                        "properties": {
+                          "failed": {
+                            "type": "integer"
+                          },
+                          "fresh": {
+                            "type": "integer"
+                          },
+                          "never_produced": {
+                            "type": "integer"
+                          },
+                          "stale": {
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "slug": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "description": "The page's worst panel.",
+                        "enum": [
+                          "fresh",
+                          "stale",
+                          "failed",
+                          "never_produced"
+                        ],
+                        "type": "string"
+                      },
+                      "updated_at": {
+                        "format": "date-time",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_pages",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "panels": {
+                    "description": "The parsed spec (§11b.2). The CLI parses the YAML document and sends this; the server validates it and checks that every declared owner crew and producer routine or agent resolves (§10b.1).",
+                    "items": {
+                      "properties": {
+                        "id": {
+                          "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
+                          "type": "string"
+                        },
+                        "owner": {
+                          "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
+                          "type": "string"
+                        },
+                        "producer": {
+                          "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                          "type": "string"
+                        },
+                        "public": {
+                          "type": "boolean"
+                        },
+                        "schema": {
+                          "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                          "enum": [
+                            "metric.v1",
+                            "series.v1",
+                            "status.v1",
+                            "table.v1",
+                            "narrative.v1",
+                            "embed.v1"
+                          ],
+                          "type": "string"
+                        },
+                        "sla_seconds": {
+                          "description": "Required and greater than zero: a panel without an SLA does not validate, and there is no default that means \"never mind\" (§4 rule 1).",
+                          "type": "integer"
+                        },
+                        "span": {
+                          "description": "1–12 columns of the grid. Absent means 12.",
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "slug": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
+                      "type": "string"
+                    },
+                    "panels": {
+                      "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
+                              },
+                              "id": {
+                                "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
+                                "type": "string"
+                              },
+                              "owner": {
+                                "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
+                                "type": "string"
+                              },
+                              "producer": {
+                                "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                                "type": "string"
+                              },
+                              "provenance": {
+                                "properties": {
+                                  "produced_at": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "producer": {
+                                    "description": "The panel's declared producer, `\u003ckind\u003e/\u003cref\u003e`. Server-attached (§4 rule 5): a producer never claims it.",
+                                    "type": "string"
+                                  },
+                                  "run_id": {
+                                    "description": "The pipeline run that produced the payload. A script or webhook producer has no run, and carries the push's own server-side reference (`push:\u003cpanel\u003e:\u003cseq\u003e`) instead.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "public": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "description": "Why a failed panel failed. Internal vocabulary — never rendered on a public page (§7.3.2b).",
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "enum": [
+                                  "metric.v1",
+                                  "series.v1",
+                                  "status.v1",
+                                  "table.v1",
+                                  "narrative.v1",
+                                  "embed.v1"
+                                ],
+                                "type": "string"
+                              },
+                              "sla_seconds": {
+                                "description": "Required and greater than zero: a panel without an SLA does not validate, and there is no default that means \"never mind\" (§4 rule 1).",
+                                "type": "integer"
+                              },
+                              "span": {
+                                "description": "1–12 columns of the grid. Absent means 12.",
+                                "type": "integer"
+                              },
+                              "state": {
+                                "description": "Computed SERVER-side on every read (§4 rule 2, §11b.8). fresh and stale are functions of the clock and are never stored.",
+                                "enum": [
+                                  "fresh",
+                                  "stale",
+                                  "failed",
+                                  "never_produced"
+                                ],
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "owner_crew_name": {
+                                "type": "string"
+                              },
+                              "panel_id": {
+                                "type": "string"
+                              },
+                              "sealed": {
+                                "enum": [
+                                  true
+                                ],
+                                "type": "boolean"
+                              },
+                              "span": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
+                      "type": "string"
+                    },
+                    "panels": {
+                      "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
+                              },
+                              "id": {
+                                "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
+                                "type": "string"
+                              },
+                              "owner": {
+                                "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
+                                "type": "string"
+                              },
+                              "producer": {
+                                "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                                "type": "string"
+                              },
+                              "provenance": {
+                                "properties": {
+                                  "produced_at": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "producer": {
+                                    "description": "The panel's declared producer, `\u003ckind\u003e/\u003cref\u003e`. Server-attached (§4 rule 5): a producer never claims it.",
+                                    "type": "string"
+                                  },
+                                  "run_id": {
+                                    "description": "The pipeline run that produced the payload. A script or webhook producer has no run, and carries the push's own server-side reference (`push:\u003cpanel\u003e:\u003cseq\u003e`) instead.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "public": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "description": "Why a failed panel failed. Internal vocabulary — never rendered on a public page (§7.3.2b).",
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "enum": [
+                                  "metric.v1",
+                                  "series.v1",
+                                  "status.v1",
+                                  "table.v1",
+                                  "narrative.v1",
+                                  "embed.v1"
+                                ],
+                                "type": "string"
+                              },
+                              "sla_seconds": {
+                                "description": "Required and greater than zero: a panel without an SLA does not validate, and there is no default that means \"never mind\" (§4 rule 1).",
+                                "type": "integer"
+                              },
+                              "span": {
+                                "description": "1–12 columns of the grid. Absent means 12.",
+                                "type": "integer"
+                              },
+                              "state": {
+                                "description": "Computed SERVER-side on every read (§4 rule 2, §11b.8). fresh and stale are functions of the clock and are never stored.",
+                                "enum": [
+                                  "fresh",
+                                  "stale",
+                                  "failed",
+                                  "never_produced"
+                                ],
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "owner_crew_name": {
+                                "type": "string"
+                              },
+                              "panel_id": {
+                                "type": "string"
+                              },
+                              "sealed": {
+                                "enum": [
+                                  true
+                                ],
+                                "type": "boolean"
+                              },
+                              "span": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}": {
+      "delete": {
+        "operationId": "delete_api_v1_pages_slug",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      },
+      "get": {
+        "operationId": "get_api_v1_pages_slug",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
+                      "type": "string"
+                    },
+                    "panels": {
+                      "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
+                              },
+                              "id": {
+                                "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
+                                "type": "string"
+                              },
+                              "owner": {
+                                "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
+                                "type": "string"
+                              },
+                              "producer": {
+                                "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                                "type": "string"
+                              },
+                              "provenance": {
+                                "properties": {
+                                  "produced_at": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "producer": {
+                                    "description": "The panel's declared producer, `\u003ckind\u003e/\u003cref\u003e`. Server-attached (§4 rule 5): a producer never claims it.",
+                                    "type": "string"
+                                  },
+                                  "run_id": {
+                                    "description": "The pipeline run that produced the payload. A script or webhook producer has no run, and carries the push's own server-side reference (`push:\u003cpanel\u003e:\u003cseq\u003e`) instead.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "public": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "description": "Why a failed panel failed. Internal vocabulary — never rendered on a public page (§7.3.2b).",
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "enum": [
+                                  "metric.v1",
+                                  "series.v1",
+                                  "status.v1",
+                                  "table.v1",
+                                  "narrative.v1",
+                                  "embed.v1"
+                                ],
+                                "type": "string"
+                              },
+                              "sla_seconds": {
+                                "description": "Required and greater than zero: a panel without an SLA does not validate, and there is no default that means \"never mind\" (§4 rule 1).",
+                                "type": "integer"
+                              },
+                              "span": {
+                                "description": "1–12 columns of the grid. Absent means 12.",
+                                "type": "integer"
+                              },
+                              "state": {
+                                "description": "Computed SERVER-side on every read (§4 rule 2, §11b.8). fresh and stale are functions of the clock and are never stored.",
+                                "enum": [
+                                  "fresh",
+                                  "stale",
+                                  "failed",
+                                  "never_produced"
+                                ],
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "owner_crew_name": {
+                                "type": "string"
+                              },
+                              "panel_id": {
+                                "type": "string"
+                              },
+                              "sealed": {
+                                "enum": [
+                                  true
+                                ],
+                                "type": "boolean"
+                              },
+                              "span": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_api_v1_pages_slug",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "panels": {
+                    "description": "The parsed spec (§11b.2). The CLI parses the YAML document and sends this; the server validates it and checks that every declared owner crew and producer routine or agent resolves (§10b.1).",
+                    "items": {
+                      "properties": {
+                        "id": {
+                          "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
+                          "type": "string"
+                        },
+                        "owner": {
+                          "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
+                          "type": "string"
+                        },
+                        "producer": {
+                          "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                          "type": "string"
+                        },
+                        "public": {
+                          "type": "boolean"
+                        },
+                        "schema": {
+                          "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                          "enum": [
+                            "metric.v1",
+                            "series.v1",
+                            "status.v1",
+                            "table.v1",
+                            "narrative.v1",
+                            "embed.v1"
+                          ],
+                          "type": "string"
+                        },
+                        "sla_seconds": {
+                          "description": "Required and greater than zero: a panel without an SLA does not validate, and there is no default that means \"never mind\" (§4 rule 1).",
+                          "type": "integer"
+                        },
+                        "span": {
+                          "description": "1–12 columns of the grid. Absent means 12.",
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "slug": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
+                      "type": "string"
+                    },
+                    "panels": {
+                      "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
+                              },
+                              "id": {
+                                "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
+                                "type": "string"
+                              },
+                              "owner": {
+                                "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
+                                "type": "string"
+                              },
+                              "producer": {
+                                "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                                "type": "string"
+                              },
+                              "provenance": {
+                                "properties": {
+                                  "produced_at": {
+                                    "format": "date-time",
+                                    "type": "string"
+                                  },
+                                  "producer": {
+                                    "description": "The panel's declared producer, `\u003ckind\u003e/\u003cref\u003e`. Server-attached (§4 rule 5): a producer never claims it.",
+                                    "type": "string"
+                                  },
+                                  "run_id": {
+                                    "description": "The pipeline run that produced the payload. A script or webhook producer has no run, and carries the push's own server-side reference (`push:\u003cpanel\u003e:\u003cseq\u003e`) instead.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "public": {
+                                "type": "boolean"
+                              },
+                              "reason": {
+                                "description": "Why a failed panel failed. Internal vocabulary — never rendered on a public page (§7.3.2b).",
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "enum": [
+                                  "metric.v1",
+                                  "series.v1",
+                                  "status.v1",
+                                  "table.v1",
+                                  "narrative.v1",
+                                  "embed.v1"
+                                ],
+                                "type": "string"
+                              },
+                              "sla_seconds": {
+                                "description": "Required and greater than zero: a panel without an SLA does not validate, and there is no default that means \"never mind\" (§4 rule 1).",
+                                "type": "integer"
+                              },
+                              "span": {
+                                "description": "1–12 columns of the grid. Absent means 12.",
+                                "type": "integer"
+                              },
+                              "state": {
+                                "description": "Computed SERVER-side on every read (§4 rule 2, §11b.8). fresh and stale are functions of the clock and are never stored.",
+                                "enum": [
+                                  "fresh",
+                                  "stale",
+                                  "failed",
+                                  "never_produced"
+                                ],
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "owner_crew_name": {
+                                "type": "string"
+                              },
+                              "panel_id": {
+                                "type": "string"
+                              },
+                              "sealed": {
+                                "enum": [
+                                  true
+                                ],
+                                "type": "boolean"
+                              },
+                              "span": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/panels/{panelId}/data": {
+      "put": {
+        "operationId": "put_api_v1_pages_slug_panels_panelId_data",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "panelId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "page": {
+                      "type": "string"
+                    },
+                    "panel": {
+                      "type": "string"
+                    },
+                    "provenance": {
+                      "properties": {
+                        "produced_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "producer": {
+                          "description": "The panel's declared producer, `\u003ckind\u003e/\u003cref\u003e`. Server-attached (§4 rule 5): a producer never claims it.",
+                          "type": "string"
+                        },
+                        "run_id": {
+                          "description": "The pipeline run that produced the payload. A script or webhook producer has no run, and carries the push's own server-side reference (`push:\u003cpanel\u003e:\u003cseq\u003e`) instead.",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "rejected": {
+                      "description": "Never present on success. A refused push answers 422 with the rejection envelope instead: {rejected, kind, message, detail{bytes_attempted, bytes_limit}}.",
+                      "type": "boolean"
+                    },
+                    "seq": {
+                      "type": "integer"
+                    },
+                    "state": {
+                      "enum": [
+                        "fresh",
+                        "stale",
+                        "failed",
+                        "never_produced"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
     "/api/v1/paymaster/spend/by-agent/{crewId}": {
       "get": {
         "operationId": "get_api_v1_paymaster_spend_by-agent_crewId",

@@ -16,10 +16,11 @@ import { isPanelSchema, type PanelProps, type PanelSchema } from "./types"
  * react-jsonschema-form use.
  *
  * No `eval`. No dynamic `import()` of a user-supplied path. No
- * `dangerouslySetInnerHTML`. The only thing a page spec can do with its
- * `schema` field is select one of these five components — and it cannot even
- * reach `Object.prototype`, because the narrowing goes through a Set, not an
- * `in` check.
+ * `dangerouslySetInnerHTML` — §8 rule 10, pinned by a test that reads this
+ * directory's source. The only thing a page spec can do with its `schema`
+ * field is select one of these components — and it cannot even reach
+ * `Object.prototype`, because the narrowing goes through a Set, not an `in`
+ * check.
  */
 export const PANEL_REGISTRY: Record<PanelSchema, ComponentType<PanelProps>> = {
   "metric.v1": MetricPanel,
@@ -27,6 +28,10 @@ export const PANEL_REGISTRY: Record<PanelSchema, ComponentType<PanelProps>> = {
   "status.v1": StatusPanel,
   "table.v1": TablePanel,
   "narrative.v1": PendingSchemaPanel,
+  // Reserved from the first migration (§3.1) — a page may legitimately carry
+  // one, so it gets the "arrives in a later release" copy, not "this version
+  // does not render embed.v1".
+  "embed.v1": PendingSchemaPanel,
 }
 
 /** Untrusted string in, component out. Never throws, never returns undefined. */

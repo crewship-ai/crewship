@@ -1,0 +1,330 @@
+---
+title: "Pages"
+description: "Panel dashboards a routine or script pushes data into — permissioned per panel, never queried, and honest about when a number goes stale."
+icon: "layout-template"
+stability: experimental
+tag: Experimental
+---
+
+# Pages
+
+A **Page** is a workspace-scoped, slug-addressable record holding an ordered
+list of **panels**. Each panel declares:
+
+- a **schema** — one of a closed set of five (below),
+- an **owner** — a crew, which is the panel's permission anchor,
+- a **producer** — the routine, script, or agent allowed to write its data,
+- a **freshness contract** — how often data is expected, and what happens when it stops.
+
+A page holds no query, no datasource, no connection string, and no
+credentials. It cannot reach a database. It renders the last payload a
+producer pushed, plus the metadata Crewship attached to that push. Everything
+a page might show — a Postgres row count, a queue depth, a calendar, an
+uptime check — is reachable because the producer already runs next to that
+data, inside a crew container, with credentials the page itself never sees.
+Adding a data source to Pages is a scripting job, not a connector-engineering
+one.
+
+Two layers, two formats, both validated:
+
+- **Layer 1 — the page definition.** Human-authored YAML, `apiVersion:
+  crewship/v1`, `kind: Page`. Declares which panels exist, who owns them, and
+  who may produce their data.
+- **Layer 2 — the panel payload.** Machine-produced JSON, one push per
+  update, validated against the panel's declared schema. See [`crewship page
+  set`](/cli/page#crewship-page-set-slug-panel) for how a producer pushes it.
+
+```yaml
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Flotila .201
+  slug: fleet-201
+spec:
+  panels:
+    - id: sluzby
+      schema: status.v1
+      title: Jede to?
+      owner: crew/lookout            # permission anchor, not a label
+      producer: script/watch-services.sh
+      sla: 30s
+      span: 8
+    - id: incident
+      schema: narrative.v1
+      owner: crew/devops
+      producer: routine/incident-rozbor
+      sla: 1h
+      span: 12
+```
+
+## The five panel schemas
+
+The set is **closed** — a new panel kind is a server release, never a
+user-supplied string.
+
+| Schema | Payload core | Renders |
+|---|---|---|
+| `metric.v1` | `{value, unit?, delta?, target?, sparkline?[]}` | one number, delta, optional target and sparkline |
+| `series.v1` | `{unit, labels[], series[{name, values[]}]}` | bar / line chart; one unit per panel |
+| `status.v1` | `{items[{name, state: ok\|warning\|critical, label}]}` | status grid; state carries glyph and text, never colour alone |
+| `table.v1` | `{columns[{key,label,align?}], rows[]}` | table; rows are **keyed objects** matching `columns`, not positional arrays |
+| `narrative.v1` | `{blocks[{kind: paragraph\|list, text}], verdict?, actions?[]}` | prose plus the page's declared action buttons |
+
+A `metric.v1` `delta` is directionless by default — it renders with a sign and
+an arrow in a neutral tone, because green-up on a rising error rate would be a
+lie. An optional `delta_good: "up" | "down"` opts into success/destructive
+colour. `target` is a ceiling, rendered as a ratio meter. `sparkline` points
+are evenly spaced by contract — a producer that pushes irregularly should use
+`series.v1` instead, not stretch `metric.v1`'s sparkline to fit.
+
+## What a Page is not
+
+This is the part worth reading before you build on top of one.
+
+**There is no ad-hoc time-range selection.** You cannot re-query a panel for
+"what did this look like last March." A page answers *what is happening now,
+and what did the system do about it* — it does not answer *show me last
+March*. When someone needs that, the honest answer is a routine that queries
+and pushes a `series.v1` panel on its own schedule, which is more reviewable
+than a dashboard's query string ever was.
+
+**There is no query language, no datasource plugin, and no credential of any
+kind in the page layer.** A page cannot be pointed at a database. Every
+number on it arrived because something with real access pushed it.
+
+**The panel vocabulary is closed at five schemas**, and there is no plugin
+system for adding your own. A single sandboxed `embed` panel (an iframe,
+cross-origin, CSP-scoped) is reserved as the escape hatch for everything that
+does not fit — maps, calendars, custom HTML — but it ships in a later stage
+than the five schemas above and is not available from day one.
+
+**History, alerting, and correlation do not live in the panel.** They live
+where Crewship already keeps them:
+
+| Concern | Lives in |
+|---|---|
+| History | [the journal](/guides/crew-journal) — every push emits an entry |
+| Alerting | [automations](/guides/automations) — a panel's `wake` gate compiles to an automation rule |
+| Correlation | [chains](/cli/chain) — the causal walk across runs |
+| Ad-hoc time range | **not supported, by design** |
+
+A bounded ring of previous payloads (newest 200, hard age cut at 7 days) is
+kept per panel — enough for a sparkline and for "what did this look like
+right before it broke," not enough to be a time-series database.
+
+**The wake gate is the payoff for living with those limits.** A panel can
+declare a threshold that wakes an agent:
+
+```yaml
+wake:
+  - when: any(state == "critical") for: 5m
+    agent: crew/devops
+    writes: incident
+```
+
+This compiles to an ordinary [automation](/guides/automations) rule under the
+covers — Pages does not add a second eventing path, it emits `page.panel.*`
+journal entries and lets the existing matcher → debounced run pipeline do the
+rest.
+
+## The freshness contract
+
+A dashboard that silently shows old numbers is worse than no dashboard. Pages
+takes its behavior from push-based uptime monitors (Uptime Kuma,
+Healthchecks.io, Gatus), not from a metrics pushgateway that keeps a value
+forever until something remembers to delete it.
+
+**Every panel declares `sla`.** There is no default that means "never mind" —
+a panel without one does not validate.
+
+**Four states, computed server-side, never by the producer:**
+
+| State | Meaning |
+|---|---|
+| `fresh` | within `sla` |
+| `stale` | past `sla` — the age is shown in absolute terms, never "a while ago," and the value renders dimmed, never as if it were current |
+| `failed` | the producer's last run failed, or it explicitly pushed a failure |
+| `never_produced` | no payload has ever landed for this panel — the server sends this state explicitly rather than leaving a client to infer it from an absent field |
+
+The boundary is `age >= sla` → stale, tested at exactly that instant. Freshness
+is never stored — there is no column a producer could write a timestamp into
+— it is computed from the server's own `produced_at` on every read, so a
+producer cannot claim to be fresher than it is.
+
+**The newest payload always survives the retention cut.** Without this rule,
+a producer dead for eight days would have nothing left inside a seven-day
+retention window, and the panel would flip from *"stale, last value 12:40"* to
+*"never produced"* — the system forgetting a failure instead of reporting it,
+which is the one thing this contract exists to prevent.
+
+**`on_failure: {issue: crew/<slug>}`** opens an issue on the owning crew. A
+page that quietly stops updating must generate work for a human, not just a
+dimmed tile nobody happens to look at.
+
+**Every panel footer carries provenance** — producer, run id, timestamp — and
+it is server-attached, never producer-claimed.
+
+## Permission model
+
+Permissions are per **panel**, not per page — this is the property most
+dashboard products (Grafana, Looker, Tableau, Power BI, Metabase, Superset)
+deliberately stop short of, and it is why one page can render differently for
+different viewers.
+
+### Panel visibility is crew membership
+
+**A panel's visibility is its owning crew's visibility.** `owner` on a panel
+is not decoration; it is the access-control list. If you are not a member of
+that crew, and hold no explicit grant, the panel is **omitted from the
+response** — filtered server-side, before serialisation. It never renders as
+an error, and it is never delivered to a client that then hides it — a
+hidden-but-delivered panel would be a data leak, so the omission happens on
+the server.
+
+A page therefore has the same *shape* for everyone (the grid reflows around
+what is missing), even when its *content* differs by viewer.
+
+### The three verbs
+
+A grant is not a single "can touch this page" bit. It is one of three
+independent verbs:
+
+| Verb | Means | Typical holder |
+|---|---|---|
+| `read` | May see the page and the panels their own access already permits | humans, crews, an agent that summarises the page |
+| `produce` | May push payloads into named panels | the routine or script that owns those panels |
+| `write` | May edit the page spec — add, remove, and rearrange panels | the agent or human in charge of the page |
+
+`produce` can be scoped to specific panel ids, so an agent granted `produce`
+on one panel cannot overwrite another agent's panel on the same page.
+
+### A grant widens reach to the page, never to a crew's data
+
+Grants live in one table (`page_grants`), not scattered across panel
+properties, and they compose with — never override — crew-based visibility.
+**A grantee still only sees the panels their own crew membership and
+workspace role already permit.** A page owner cannot use a grant to leak
+their crew's panel to somebody outside it. (A workspace ADMIN sees the crew's
+panels anyway, since an admin's effective role is already the max of their
+workspace and crew role — so this rule costs an admin nothing, and it closes
+the escalation path for everyone else.)
+
+### Producer authority is separate from viewer authority
+
+Being able to *see* a panel does not mean you can *write* it. Only the
+declared producer for a panel may push its payload — see
+[`crewship page set`](/cli/page#crewship-page-set-slug-panel).
+
+### Only a human issues a grant
+
+An agent holding `write` may rebuild a page's layout freely, but it can never
+widen who reaches the page — not even to another agent in its own crew. When
+an agent needs another agent's help on a page, it asks a human, and that
+request shows up as a normal inbox item.
+
+Two consequences worth knowing:
+
+- **Layout and data are separate authorities.** An agent with `write` may
+  place a panel owned by a crew it cannot see — that is what lets one agent
+  assemble a cross-crew page for a team whose numbers it is not entitled to
+  read. It does not receive that panel's data: the server filters it exactly
+  as it would for any other viewer, and the agent sees the same sealed
+  placeholder a human without access would see.
+- **An unauthorised `produce` attempt is treated as a signal, not noise.** It
+  returns `403`, writes a journal entry, and notifies the page owner — it is
+  equally likely to be a misconfiguration or an injection, and either way it
+  deserves attention on the first occurrence, not the hundredth.
+
+An agent's authority is always a **subset** of the authorising human's, never
+a superset, and it is evaluated at use time — if that human later loses
+access to a crew, every grant they issued to an agent narrows with them
+automatically.
+
+### Ownership
+
+A page has exactly one owner: a user or a crew, never both. An agent-created
+page records the authorising human as owner and the agent as its creator —
+an agent never owns permissions, it only ever acts under someone's. If the
+owning user leaves the workspace, the page transfers to a crew rather than
+being deleted or orphaned, and a workspace ADMIN/OWNER is notified so a role
+that does not leave can reassign it.
+
+### Managing grants
+
+```bash
+crewship page grant  fleet-201 --agent devops-bot --level produce --panels sluzby,zatizeni
+crewship page grant  fleet-201 --crew  finance     --level read
+crewship page grant  fleet-201 --user  ops@example.com --level write
+crewship page revoke fleet-201 --agent devops-bot
+crewship page grants fleet-201
+```
+
+See the [Page commands](/cli/page) reference for the full flag surface.
+
+## Public pages
+
+A page can be published for someone with no Crewship account at all — an
+accountant, a client, an external auditor — optionally behind a password.
+This is the highest-risk surface in the feature, and it is a **different
+product, not a looser permission level**: a public page is served from a
+separate URL space (`/p/{token}`) that shares no session, no cookie, and no
+workspace context with the app. Nothing about it is "the same page with a
+wider grant" — it is a distinct rendering path, which is what makes it
+auditable.
+
+Six rules govern it:
+
+1. **Read-only. No actions, ever.** A public page renders no buttons. A
+   button behind a public link would be remote code execution with a URL for
+   a credential, so action definitions are stripped server-side before the
+   response is built — not merely hidden in CSS.
+2. **Opt-in per panel, not per page.** Publishing a page only publishes the
+   panels an author explicitly marked `public: true`. The default is deny;
+   publishing is never a bulk action over panels nobody has looked at.
+3. **Only a human publishes.** An agent can build the page, but it cannot
+   make it public, and it cannot add a panel to an already-public page
+   without a human separately marking that panel public too. "Public" is the
+   widest reach a page can have, and only a human may grant the widest reach.
+4. **Every public link expires.** A required expiry, default 30 days,
+   maximum 1 year. Tokens are high-entropy and individually revocable, and a
+   page may have several — revoking the accountant's link never breaks the
+   client's.
+5. **Provenance is stripped by default.** Run ids, agent slugs, crew slugs,
+   and producer names are internal vocabulary; a public panel shows the
+   value, the unit, and the age, nothing that maps your org chart for an
+   outside reader. An author can opt provenance back in per page.
+6. **Not indexable, rate limited, and logged.** `noindex`, no referrer
+   leakage, a per-token request cap, and a journal entry on each token's
+   first view of the day, so the owner can tell the link is being used and
+   roughly by whom.
+
+### Staleness on a public page: show the age, never the reason
+
+A public panel always carries when its data was produced — an outsider
+acting on a stale number is the worst version of the failure the whole
+freshness contract exists to prevent; internally someone would catch it,
+externally they will invoice on it. But the *reason* a panel is stale or
+failed stays internal: container names, routine slugs, and crew names are not
+for an outside reader. A public failed panel reads as "data not current, last
+value at 12:40" and nothing more; the detail stays on the internal page for
+the people who can act on it.
+
+### Password
+
+Optional, per token. Stored hashed, never reversible, never carried in the
+URL. A wrong password is rate limited per token, and the failure response
+does not distinguish "wrong password" from "unknown token."
+
+### What stays out of a public page
+
+No public actions, no public writes, no public streaming, and no embedding a
+public page inside a third-party site.
+
+## Related
+
+- [Page commands](/cli/page) — the full CLI reference, including the producer
+  script pattern for `page set`.
+- [Automations](/guides/automations) — what a panel's `wake` gate becomes.
+- [Crew Journal](/guides/crew-journal) — where a page's history actually lives.
+- [Roles & Permissions](/security/rbac) — the workspace-role layer a page's
+  grants sit on top of.

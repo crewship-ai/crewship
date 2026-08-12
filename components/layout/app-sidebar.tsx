@@ -40,6 +40,9 @@ const navSections = [
       { title: "Inbox", href: "/inbox", icon: CONCEPT_ICON.inbox },
       { title: "Issues", href: "/issues", icon: CONCEPT_ICON.issues },
       { title: "Routines", href: "/routines", icon: CONCEPT_ICON.routines },
+      // Plan, after Routines: a page is where a person goes to see the state
+      // of their work, not a thing they build once (docs/prd/pages.md §9b.5).
+      { title: "Pages", href: "/pages", icon: CONCEPT_ICON.pages },
     ],
   },
   {

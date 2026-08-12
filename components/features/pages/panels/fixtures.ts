@@ -28,16 +28,22 @@ export const PRODUCED_FRESH = new Date(2026, 7, 12, 14, 54)
 /** 2 h 15 min before FIXTURE_NOW. */
 export const PRODUCED_STALE = new Date(2026, 7, 12, 12, 40)
 
+/**
+ * Wire names, not camelCase (§11b.4): `provenance: {producer, run_id,
+ * produced_at}`. The fixtures are the shapes the API serves, so spelling them
+ * any other way here would let a client that reads a field the server never
+ * sends go on passing its own tests.
+ */
 const PROVENANCE_FRESH = {
   producer: "routine/nightly-close",
-  runId: "run_8812",
-  producedAt: PRODUCED_FRESH,
+  run_id: "run_8812",
+  produced_at: PRODUCED_FRESH,
 }
 
 const PROVENANCE_STALE = {
   producer: "routine/nightly-close",
-  runId: "run_8790",
-  producedAt: PRODUCED_STALE,
+  run_id: "run_8790",
+  produced_at: PRODUCED_STALE,
 }
 
 // ── metric.v1 ─────────────────────────────────────────────────────────────
@@ -48,7 +54,7 @@ const metricPanel: PanelSpec = {
   title: "Invoices closed",
   owner: "crew/finance",
   span: 4,
-  slaSeconds: 3600,
+  sla_seconds: 3600,
 }
 
 const metricPayload: MetricPayload = {
@@ -99,6 +105,37 @@ export const metricFixtures = {
       provenance: PROVENANCE_FRESH,
     },
   },
+  /**
+   * An empty string is a value the producer measured (§9b.4, and
+   * `Cell.IsNoData()` in internal/pages/payload.go, which is true for JSON
+   * null and nothing else). It is not the em dash.
+   */
+  emptyStringValue: {
+    panel: metricPanel,
+    data: {
+      state: "fresh",
+      payload: { value: "", unit: "invoices" },
+      provenance: PROVENANCE_FRESH,
+    },
+  },
+  /** §11b.9: the producer says which way is good, so a rise may go green. */
+  deltaGoodUp: {
+    panel: metricPanel,
+    data: {
+      state: "fresh",
+      payload: { value: 128, delta: 12, delta_good: "up" },
+      provenance: PROVENANCE_FRESH,
+    },
+  },
+  /** The same rise on an error rate. Green here would be the lie §11b.9 names. */
+  deltaGoodDown: {
+    panel: metricPanel,
+    data: {
+      state: "fresh",
+      payload: { value: 128, delta: 12, delta_good: "down" },
+      provenance: PROVENANCE_FRESH,
+    },
+  },
   brokenSparkline: {
     panel: metricPanel,
     data: {
@@ -120,7 +157,7 @@ const statusPanel: PanelSpec = {
   title: "Services",
   owner: "crew/lookout",
   span: 8,
-  slaSeconds: 30,
+  sla_seconds: 30,
 }
 
 const statusPayload: StatusPayload = {
@@ -176,7 +213,7 @@ const tablePanel: PanelSpec = {
   title: "Crews",
   owner: "crew/devops",
   span: 12,
-  slaSeconds: 900,
+  sla_seconds: 900,
 }
 
 const tablePayload: TablePayload = {
@@ -236,6 +273,25 @@ export const tableFixtures = {
     data: {
       state: "fresh",
       payload: { columns: tablePayload.columns, rows: [] },
+      provenance: PROVENANCE_FRESH,
+    },
+  },
+  /**
+   * One cell holds `""` and one holds `null`. The schema calls those two
+   * different claims, and Go's `IsNoData()` agrees: only the null is an em
+   * dash, and the empty string renders as an empty cell.
+   */
+  emptyStringCell: {
+    panel: tablePanel,
+    data: {
+      state: "fresh",
+      payload: {
+        columns: tablePayload.columns,
+        rows: [
+          { crew: "", open: 0, closed: 4 },
+          { crew: "devops", open: null, closed: 7 },
+        ],
+      },
       provenance: PROVENANCE_FRESH,
     },
   },

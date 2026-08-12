@@ -358,9 +358,11 @@ Pages answers *"what is happening now, and what did the system do about it"*. It
 queries and pushes a `series.v1` panel — and that routine is manifest-managed, journaled and
 reviewable, which is more than a Grafana panel's query string ever is.
 
-A bounded ring of previous payloads (default 24, configurable) is retained per panel — enough for
-a sparkline and for "what did this look like before it broke", not enough to be a time-series
-database. Retention follows the `run_retention_days` convention
+A bounded ring of previous payloads is retained per panel — **200 payloads with a hard age cut at
+7 days, whichever comes first** (§10b.3; an earlier draft of this paragraph said 24 and was never
+corrected when §10b.3 settled on 200). Enough for a sparkline and for "what did this look like
+before it broke", not enough to be a time-series database. Retention follows the
+`run_retention_days` convention
 (`internal/database/migrate_consts_v158_run_retention_days.go:13`): nullable INTEGER on
 `workspaces`, NULL = instance default.
 
@@ -387,7 +389,12 @@ change to the filter.
 
 ## 6. Format — two layers, both already in the repo
 
-**Layer 1 — the page definition, authored by a human, YAML:**
+**Layer 1 — the page definition, authored by a human, YAML.**
+
+⚠ The example below is written **at the v1.1 feature level** — it shows `wake:` and `actions:`,
+which land in v1.1 (§12). The v1 parser sets `KnownFields(true)` and therefore rejects them today,
+by design: a spec that names a field the server does not implement must fail loudly rather than
+be silently ignored. Read the example as where the format is going; read §12 for what parses now.
 
 ```yaml
 apiVersion: crewship/v1
@@ -459,8 +466,17 @@ read and write to others.
    as its own item.
 2. **A panel's visibility is its owning crew's visibility.** `panel.owner_crew_id` is not
    decoration; it is the ACL. If the viewer is not a member of that crew (and holds no explicit
-   grant), the panel is **omitted from the response** — filtered server-side, before serialisation.
-   The grid reflows. It is never rendered as an error (§2.3).
+   grant), **the panel's payload is omitted server-side, before serialisation, and what is
+   serialised in its place is a sealed placeholder** — the panel id, its grid slot and its owning
+   crew's display name, and nothing else. It is never rendered as an error.
+
+   ⚠ **An earlier draft of this rule said "the grid reflows", which contradicts §2.3.** Corrected
+   2026-08-12 after a conformance audit caught it. §2.3 argues the case at length and wins: a page
+   that silently changes shape per viewer cannot be talked about, and "look at the panel top right"
+   stops meaning anything. Reflow is wrong; the placeholder holds the slot. Leaking the existence
+   of a panel and its owning crew is a far smaller disclosure than the confusion of a silently
+   different page — and where even existence is sensitive, the author moves the panel to its own
+   page.
 3. **Explicit grants layer on top**, in one table, not in panel properties:
    `page_grants(page_id, subject_type ∈ {user, crew}, subject_id, level ∈ {read, write})`.
    `write` means editing the page definition. Grants are issued by the page owner or by a
@@ -1016,7 +1032,13 @@ amount of index tuning survives.
 | Payload ring | **200 payloads, hard age cut at 7 days**, whichever comes first | see below |
 | Versions per page | 50 | |
 
-**The numbers live in `config/rate-limits.yml`, not in Go constants.** That file is the existing
+**The *rate* rows live in `config/rate-limits.yml`; the *size and count* rows are Go constants.**
+That split is deliberate and was left implicit in an earlier draft, which read as though every
+number belonged in the YAML and contradicted §10 ("size caps are enforced in Go at the handler").
+Rates are operational and get tuned by whoever runs the instance; sizes and counts are contract —
+a payload cap that varies per deployment is a payload cap no producer can code against.
+
+For the rate rows, that file is the existing
 declarative surface — `{name, requests, window, scope, applies_to[]}` per limit, with `window`
 in `1s|10s|1m|1h|1d` and `scope` in `ip|user|agent` — parsed by `internal/ratelimitcfg`. Pages
 adds its entries there so the limits are visible, reviewable and adjustable in Settings rather
@@ -1205,7 +1227,28 @@ an ambiguity here becomes a client and a server that both pass their own tests.
     writes something unrelated in `label`.
 12. **`table.v1` carries a row cap of 200.** §10b.3 caps bytes only, and 64 KiB is roughly a
     thousand rows — more than anyone reads and more than we will virtualise.
-13. **`metric.v1` `sparkline` points are evenly spaced by contract.** A producer that pushes
+13. **CLI flags, pinned after the documentation pass found them unspecified.** A command whose
+    flags are undefined cannot be implemented to the line, so:
+    - `page update <slug> --file <yaml>` — symmetric with `create --file`; same parse-and-validate
+      path, and the update is what creates a new row in `page_versions`.
+    - `page revoke <slug> --user|--crew|--agent <ref>` — fully symmetric with `grant`. An
+      asymmetric revoke is how a grant becomes impossible to remove.
+    - `--bind old=new` is **repeatable**, not comma-separated. Slugs may contain a comma far more
+      plausibly than they may contain a repeated flag, and a bundle with six references needs six.
+    - `page list --status <fresh|stale|failed|never_produced> --owner <crew>`, both repeatable,
+      mirroring the rail facets in §9b.1 so the CLI and the UI filter by the same vocabulary.
+    - `page export <slug>` takes no history flag. Export carries the spec only (§10b.5); a flag
+      that offered to include data would contradict that section.
+14. **The sealed placeholder has a wire shape** (§7.1 rule 2). A panel the viewer may not see is
+    serialised as `{panel_id, span, sealed: true, owner_crew_name}` and nothing else — no schema,
+    no payload, no producer, no SLA. The renderer keys on `sealed`, not on a missing field, so a
+    serialisation bug can never be mistaken for a permission decision.
+15. **The page index carries a freshness rollup**, or every derived number on the overview is an
+    em dash. Each row in `GET /api/v1/pages` carries `panel_states: {fresh, stale, failed,
+    never_produced}` as counts, plus `last_produced_at` — which is deliberately **not**
+    `updated_at`, because §10 defines that as the spec's modification time. A page whose spec was
+    edited an hour ago and whose data last arrived a week ago must not read as "updated today".
+16. **`metric.v1` `sparkline` points are evenly spaced by contract.** A producer that pushes
     irregularly must send a `series.v1` panel instead. Even spacing is only honest if the producer
     guarantees it, so the schema states it rather than implying it.
 

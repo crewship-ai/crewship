@@ -1,0 +1,375 @@
+---
+title: "Page Commands"
+description: "Create, permission, and feed data into Pages — panel dashboards a routine or script pushes to, never queries."
+icon: "layout-template"
+stability: experimental
+tag: Experimental
+---
+
+# crewship page
+
+Manage Pages — workspace-scoped dashboards built from panels. A page holds no
+datasource and no credentials; a panel renders the last payload its declared
+producer pushed. See the [Pages guide](/guides/pages) for what a page is (and
+is not), the freshness contract, and the permission model these commands
+enforce.
+
+```bash
+crewship page <subcommand> [flags]
+```
+
+Routes are workspace-unscoped (`/api/v1/pages/...`); the CLI supplies the
+workspace from your current context the same way it does for
+[`crewship saved-view`](/cli/saved-view) and [`crewship routine`](/cli/routine).
+
+## Subcommands
+
+| Command | Purpose |
+|---|---|
+| `list` | List pages in the workspace |
+| `get <slug>` | Show one page's definition and panels |
+| `create --file <file>` | Create a page from a YAML definition |
+| `update <slug>` | Change an existing page's definition |
+| `delete <slug> --yes` | Delete a page |
+| `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
+| `grant <slug> --user\|--crew\|--agent <subject> --level <level>` | Grant read, produce, or write on a page |
+| `revoke <slug> --agent <agent-slug>` | Remove a grant |
+| `grants <slug>` | List a page's grants |
+| `export <slug>` | Export a page's spec as a portable bundle |
+| `import <bundle> --slug <slug> --bind <crew>=<crew>` | Import a bundle, binding its declared references |
+| `rollback <slug> --to <seq>` | Roll back to a previous version |
+
+---
+
+## `crewship page list`
+
+```bash
+crewship page list
+```
+
+Backed by `GET /api/v1/pages`. Returns the pages you may see — a page you
+have no `read` grant for and no crew membership on any of its panels for is
+not in the list.
+
+<Note>
+  The PRD does not name any flags for `list` (no `--status`, `--owner`, or
+  similar filter). Run `crewship page list --help` for the current flag
+  surface, and see this doc's report for how that compares to the read-side
+  filters the web UI exposes.
+</Note>
+
+---
+
+## `crewship page get <slug>`
+
+```bash
+crewship page get fleet-201
+```
+
+Backed by `GET /api/v1/pages/{slug}`. Prints the page definition and every
+panel you may see — a panel whose owning crew you are not a member of, and
+for which you hold no explicit grant, is omitted from the response entirely
+rather than shown as an error or a placeholder in the CLI output (§7.1 rule 5:
+everything is decided server-side).
+
+---
+
+## `crewship page create --file <file>`
+
+```bash
+crewship page create --file fleet-201.page.yaml
+```
+
+`--file` is a Layer-1 page definition — human-authored YAML, `apiVersion:
+crewship/v1`, `kind: Page`:
+
+```yaml
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Flotila .201
+  slug: fleet-201
+spec:
+  panels:
+    - id: sluzby
+      schema: status.v1
+      title: Jede to?
+      owner: crew/lookout            # permission anchor, not a label
+      producer: script/watch-services.sh
+      sla: 30s
+      span: 8
+```
+
+The CLI parses this file and sends the **parsed spec as JSON**, not the YAML
+text — the server validates a structured spec, not an opaque string. `sla:
+30s` is YAML sugar; on the wire it travels as `sla_seconds` (an integer).
+
+Every panel needs `sla`; a panel without one does not validate — there is no
+default that means "never mind" (§4). `owner` names the crew whose membership
+gates who can see the panel; it is the permission anchor, not decoration.
+`producer` names the routine, script, or agent allowed to push data into it —
+see [`page set`](#crewship-page-set-slug-panel) below.
+
+Backed by `POST /api/v1/pages`.
+
+---
+
+## `crewship page update <slug>`
+
+```bash
+crewship page update fleet-201
+```
+
+Backed by `PATCH /api/v1/pages/{slug}`.
+
+<Warning>
+  The PRD pins this command's endpoint mapping but not its flags or input
+  shape — unlike `create`, no `--file` (or any other flag) for `update` is
+  named anywhere in §11 or §11b. Treat `crewship page update <slug> --help`
+  as authoritative until that gap closes. See this doc's closing report.
+</Warning>
+
+Every save — through this command, the in-app editor, or an agent with a
+`write` grant — becomes a new row in the page's version history. See
+[`page rollback`](#crewship-page-rollback-slug) to undo one.
+
+---
+
+## `crewship page delete <slug>`
+
+```bash
+crewship page delete fleet-201 --yes
+```
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--yes` | ✓ | Confirms the delete. Consistent with every other destructive Crewship CLI command — a delete an agent cannot script non-interactively is unusable. |
+
+Backed by `DELETE /api/v1/pages/{slug}`.
+
+---
+
+## `crewship page set <slug>/<panel>`
+
+The single write path for panel data. Everything that produces a number,
+status, or table on a page — a cron job, a script inside a crew container, a
+routine step — ends here.
+
+```bash
+echo '{"value": 42, "unit": "jobs"}' | crewship page set fleet-201/queue-depth --data -
+```
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--data` | ✓ | The panel payload, JSON. `-` reads it from stdin — the form every producer script uses. |
+
+Backed by `PUT /api/v1/pages/{slug}/panels/{id}/data`. `page set` authenticates
+with your session or CLI token the way any other `crewship` command does, and a
+producer script always calls the same command wherever it runs.
+
+<Note>
+  A producer running **inside a crew container** currently reaches that same
+  public route. The sidecar path
+  (`POST /api/v1/internal/pages/{slug}/panels/{id}/data`), which would let the
+  sidecar hold the workspace-bound token so the agent process never sees a
+  credential at all, is not built yet. Until it lands, a container producer needs
+  a CLI token like any other client.
+</Note>
+
+The server, not the script, attaches provenance (`producer`, `run_id`,
+`produced_at`) and the freshness clock. A payload the caller cannot prove they
+own — the caller is not the panel's declared `producer` — is refused with
+**403**, and the refusal itself writes a journal entry and notifies the page
+owner (§7.1b rule 3): treat a 403 here as a signal to investigate, not noise
+to retry past.
+
+### A working producer script
+
+The panel above is `metric.v1`
+(`{value, unit?, delta?, target?, sparkline?[]}`). A cron job or a step inside
+a routine can push it with nothing more than `jq` and the CLI:
+
+```bash
+#!/usr/bin/env bash
+# watch-queue-depth.sh — runs identically from a workstation, a cron job, or
+# inside a crew container as a routine's `script` step.
+set -euo pipefail
+
+depth=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" llen jobs:pending)
+
+jq -n --argjson value "$depth" '{value: $value, unit: "jobs"}' \
+  | crewship page set fleet-201/queue-depth --data -
+```
+
+A `status.v1` panel (`{items[{name, state: ok|warning|critical, label}]}`)
+pushes a list rather than a number:
+
+```bash
+jq -n '{items: [
+  {name: "api",     state: "ok",       label: "200 OK"},
+  {name: "worker",  state: "critical", label: "3 restarts in 5m"}
+]}' | crewship page set fleet-201/sluzby --data -
+```
+
+A `table.v1` panel takes **keyed row objects** matching its declared
+`columns`, not positional arrays — this is the canonical shape the schema
+validates against:
+
+```bash
+jq -n '{
+  columns: [{key: "sku", label: "SKU"}, {key: "qty", label: "Qty"}],
+  rows: [
+    {sku: "A-100", qty: 12},
+    {sku: "B-220", qty: 3}
+  ]
+}' | crewship page set fleet-201/inventory --data -
+```
+
+### Limits that turn into responses, not silent drops
+
+| Limit | Response |
+|---|---|
+| Payload over 64 KiB | `422`, rejected at the handler |
+| More than 12 pushes/min sustained (burst 30) to one panel | `429` with `Retry-After` |
+| More than 600 pushes/min across the workspace | `429` with `Retry-After` |
+| Caller is not the panel's declared producer | `403`, journalled, page owner notified |
+
+---
+
+## `crewship page grant <slug>`
+
+Grants layer on top of a panel's crew-based visibility — they widen who may
+reach the page, never who may reach a crew's data (§7.1 rule 3, §7.1b).
+
+```bash
+crewship page grant fleet-201 --agent devops-bot --level produce --panels sluzby,zatizeni
+crewship page grant fleet-201 --crew  finance     --level read
+crewship page grant fleet-201 --user  ops@example.com --level write
+```
+
+| Flag | Description |
+|---|---|
+| `--user <email>` | Grant to a human user |
+| `--crew <slug>` | Grant to a crew |
+| `--agent <slug>` | Grant to an agent |
+| `--level <read\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
+| `--panels <id,id,...>` | Restricts a `produce` grant to these panel ids. Omitted = every panel the subject is otherwise eligible to write. Only meaningful for `--level produce`. |
+
+<Note>
+  Only a human can run this command successfully. An agent holding `write` on
+  the page can rebuild its layout freely but cannot issue a grant — not even
+  to another agent in its own crew — by any route, including this one (§7.1b
+  rule 1).
+</Note>
+
+Every grant change is journalled (`page.grant_added`), so who granted what to
+whom is always answerable later.
+
+Backed by the page's grants endpoint (`GET`/`PUT`/`DELETE …/grants`).
+
+---
+
+## `crewship page revoke <slug>`
+
+```bash
+crewship page revoke fleet-201 --agent devops-bot
+```
+
+Removes a grant, journalled as `page.grant_removed`.
+
+<Warning>
+  The PRD's only worked example targets `--agent`. Whether `revoke` also
+  takes `--user`/`--crew` the way `grant` does is not spelled out — see this
+  doc's closing report.
+</Warning>
+
+---
+
+## `crewship page grants <slug>`
+
+```bash
+crewship page grants fleet-201
+```
+
+Lists every grant on the page: subject type, subject, level, and (for
+`produce`) which panels it covers.
+
+---
+
+## `crewship page export <slug>`
+
+```bash
+crewship page export fleet-201 > fleet-201.page.yaml
+```
+
+Produces a portable bundle: workspace-specific ids are stripped, and every
+external reference the page needs (crews, producers) is declared so an
+importer can see what it must bind before installing. This is the same
+export/import mechanism [`crewship routine export`](/cli/routine#crewship-routine-export-slug)
+uses for the marketplace — a "page template" is not a separate object, it is
+an exported page spec.
+
+<Note>
+  Export carries the page **spec** only, not panel data. Data is state that
+  belongs to the install it came from; moving it between workspaces would
+  mean shipping numbers with no producer behind them.
+</Note>
+
+---
+
+## `crewship page import [bundle.yaml]`
+
+```bash
+crewship page import weekly-close.page.yaml --slug uzaverka --bind crew/ucetni=crew/finance
+```
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--slug` | | Slug to give the imported page in this workspace |
+| `--bind <ref>=<crew>` | | Binds a declared external reference in the bundle to a local crew. Repeat for each reference the bundle needs bound. |
+
+Import either binds every declared reference and creates the page, or refuses
+and names which reference it could not resolve — it does not create a page
+full of dead panels pointing at a producer that does not exist locally.
+
+<Note>
+  The PRD's example shows one `--bind crew/x=crew/y` pair. A page with several
+  external references presumably needs `--bind` passed once per reference;
+  the PRD does not state whether the flag is repeatable or takes a
+  comma-joined list. See this doc's closing report.
+</Note>
+
+---
+
+## `crewship page rollback <slug>`
+
+```bash
+crewship page rollback fleet-201 --to 3
+```
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--to` | ✓ | Target version number to roll back to |
+
+Rolls back the page **structure** — which panels exist, their layout, their
+owners and producers. It never resurrects old panel data: a panel a rollback
+brings back renders dimmed, in a "waiting for first data" state, even if rows
+for it survive in the payload ring. Showing an old payload as current after a
+rollback is exactly the dishonesty the [freshness
+contract](/guides/pages#the-freshness-contract) exists to prevent. Up to the
+last 50 versions are kept.
+
+---
+
+## Exit codes
+
+Standard [CLI exit codes](/cli/overview#exit-codes). A slug that does not
+resolve, a malformed `--data` payload, or a `--level` outside
+`read`/`produce`/`write` are client errors, reported before anything is sent.
+
+## Related
+
+- [Pages guide](/guides/pages) — what a page is, the freshness contract, and the full permission model.
+- [`crewship routine`](/cli/routine) — the usual producer behind a panel.
+- [`crewship automation`](/cli/automation) — what a panel's `wake` gate compiles to.
+- [Internal IPC API](/api-reference/internal) — the sidecar trust boundary `page set` uses inside a container.

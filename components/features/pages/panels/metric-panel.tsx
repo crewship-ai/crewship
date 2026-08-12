@@ -4,7 +4,7 @@ import * as React from "react"
 import { Gauge } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { EM_DASH, defaultEmptyHint, panelGate } from "./freshness"
+import { EM_DASH, defaultEmptyHint, panelGate, provenanceProducedAt } from "./freshness"
 import {
   FailedValue,
   NeverProducedValue,
@@ -29,11 +29,22 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
 
   let body: React.ReactNode
   if (gate.kind === "failed") {
-    body = <FailedValue failure={data.failure} publicView={publicView} />
+    body = (
+      <FailedValue
+        failure={data.failure}
+        publicView={publicView}
+        producedAt={provenanceProducedAt(data.provenance)}
+        now={clock}
+      />
+    )
   } else if (gate.kind === "never") {
     body = <NeverProducedValue hint={data.emptyHint?.trim() || defaultEmptyHint(panel)} />
   } else {
-    const hasValue = payload.value !== null && payload.value !== undefined && payload.value !== ""
+    // `null`/absent alone is "no basis to compute". An empty string is a value
+    // the producer measured: `IsNoData()` in internal/pages/payload.go treats
+    // JSON null and nothing else as no data, and the em dash is the one glyph
+    // both sides have to agree on (§9b.4).
+    const hasValue = payload.value !== null && payload.value !== undefined
     const numeric = typeof payload.value === "number" && Number.isFinite(payload.value)
       ? payload.value
       : null
@@ -53,7 +64,7 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
               {payload.unit ? (
                 <span className="text-body text-muted-foreground">{payload.unit}</span>
               ) : null}
-              <MetricDelta delta={payload.delta} deltaGood={payload.deltaGood} />
+              <MetricDelta delta={payload.delta} deltaGood={payload.delta_good} />
             </PanelValue>
           ) : (
             <PanelValue
@@ -66,7 +77,7 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
             </PanelValue>
           )}
           {gate.dimmed ? (
-            <PanelAge producedAt={data.provenance?.producedAt} now={clock} />
+            <PanelAge producedAt={provenanceProducedAt(data.provenance)} now={clock} />
           ) : null}
         </div>
         <TargetMeter value={numeric} target={payload.target} dimmed={gate.dimmed} />
@@ -91,9 +102,11 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
 
 /**
  * The delta carries an explicit sign and an arrow glyph, so direction never
- * depends on colour alone. Tone stays muted unless the spec declared which
- * way is an improvement — §3 does not say whether a rising number is good,
- * and a green "up" on an error rate is a lie the panel is not entitled to.
+ * depends on colour alone. Tone stays muted unless the payload's `delta_good`
+ * (§11b.9) declared which way is an improvement — §3 does not say whether a
+ * rising number is good, and a green "up" on an error rate is a lie the panel
+ * is not entitled to. The value arrives under the wire name; this parameter is
+ * local and may be spelled however React reads best.
  */
 function MetricDelta({
   delta,

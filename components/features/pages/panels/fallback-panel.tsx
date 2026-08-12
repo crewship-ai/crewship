@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ChartLine, CircleHelp, FileText, TriangleAlert } from "lucide-react"
+import { ChartLine, CircleHelp, FileText, Frame, TriangleAlert } from "lucide-react"
 
 import { PanelFrame } from "./panel-frame"
 import type { PanelProps } from "./types"
@@ -35,11 +35,14 @@ export function UnknownSchemaPanel({ panel, data, now, publicView, className }: 
 
 /**
  * A schema that is in the closed vocabulary but is not implemented in this
- * slice — `series.v1` and `narrative.v1` are staged later (§12). Distinct from
- * an unknown schema on purpose: the page is valid, the renderer is behind.
+ * slice — `series.v1`, `narrative.v1` and `embed.v1` are staged later (§12).
+ * Distinct from an unknown schema on purpose: the page is valid, the renderer
+ * is behind. `embed.v1` in particular is reserved from the first migration
+ * (§3.1) precisely so it never has to read as unknown.
  */
 export function PendingSchemaPanel({ panel, data, now, publicView, className }: PanelProps) {
-  const icon = panel.schema === "narrative.v1" ? FileText : ChartLine
+  const icon =
+    panel.schema === "narrative.v1" ? FileText : panel.schema === "embed.v1" ? Frame : ChartLine
   return (
     <PanelFrame
       panel={panel}

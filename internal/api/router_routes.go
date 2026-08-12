@@ -38,6 +38,10 @@ func (r *Router) registerRoutes() {
 		r.assignmentHandler.SetProvisioner(r.provisioning)
 	}
 
+	// Pages — the panel surface (docs/prd/pages.md §11). Workspace-unscoped
+	// routes plus the single panel write path.
+	r.registerPageRoutes()
+
 	// Auth, signup, Google OAuth2, sessions, CLI tokens, NextAuth,
 	// onboarding.
 	r.registerAuthRoutes()

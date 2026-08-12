@@ -5,7 +5,7 @@ import { Activity } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/components/ui/status-badge"
-import { defaultEmptyHint, panelGate } from "./freshness"
+import { defaultEmptyHint, panelGate, provenanceProducedAt } from "./freshness"
 import {
   FailedValue,
   NeverProducedValue,
@@ -31,13 +31,22 @@ export function StatusPanel({ panel, data, now, publicView = false, className }:
 
   let body: React.ReactNode
   if (gate.kind === "failed") {
-    body = <FailedValue failure={data.failure} publicView={publicView} />
+    body = (
+      <FailedValue
+        failure={data.failure}
+        publicView={publicView}
+        producedAt={provenanceProducedAt(data.provenance)}
+        now={clock}
+      />
+    )
   } else if (gate.kind === "never") {
     body = <NeverProducedValue hint={data.emptyHint?.trim() || defaultEmptyHint(panel)} />
   } else {
     body = (
       <div className="flex flex-col gap-2">
-        {gate.dimmed ? <PanelAge producedAt={data.provenance?.producedAt} now={clock} /> : null}
+        {gate.dimmed ? (
+          <PanelAge producedAt={provenanceProducedAt(data.provenance)} now={clock} />
+        ) : null}
         <PanelValue basis="measured" dimmed={gate.dimmed}>
           {items.length === 0 ? (
             <p className="text-body text-muted-foreground">

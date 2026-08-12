@@ -8,12 +8,16 @@
  * measure. These tests pin that distinction so a later refactor cannot
  * quietly collapse the two.
  */
+import { readFileSync, readdirSync } from "node:fs"
+import path from "node:path"
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, within } from "@testing-library/react"
 
 import {
   PANEL_SCHEMAS,
   isPanelSchema,
+  type MetricPayload,
   type PanelSchema,
 } from "@/components/features/pages/panels/types"
 import {
@@ -24,8 +28,15 @@ import {
 import { MetricPanel } from "@/components/features/pages/panels/metric-panel"
 import { StatusPanel } from "@/components/features/pages/panels/status-panel"
 import { TablePanel } from "@/components/features/pages/panels/table-panel"
-import { UnknownSchemaPanel } from "@/components/features/pages/panels/fallback-panel"
-import { EM_DASH } from "@/components/features/pages/panels/freshness"
+import {
+  PendingSchemaPanel,
+  UnknownSchemaPanel,
+} from "@/components/features/pages/panels/fallback-panel"
+import {
+  EM_DASH,
+  provenanceProducedAt,
+  provenanceRunId,
+} from "@/components/features/pages/panels/freshness"
 import {
   FIXTURE_NOW,
   PANEL_FIXTURES,
@@ -33,6 +44,10 @@ import {
   statusFixtures,
   tableFixtures,
 } from "@/components/features/pages/panels/fixtures"
+import metricSchema from "@/schemas/panel.metric.v1.json"
+import tableSchema from "@/schemas/panel.table.v1.json"
+
+const PANELS_DIR = path.resolve(__dirname, "../panels")
 
 function valueNode(container: HTMLElement) {
   const node = container.querySelector('[data-slot="panel-value"]')
@@ -46,7 +61,29 @@ describe("panel registry", () => {
       expect(typeof PANEL_REGISTRY[schema]).toBe("function")
       expect(resolvePanelComponent(schema)).toBe(PANEL_REGISTRY[schema])
     }
-    expect(PANEL_SCHEMAS).toHaveLength(5)
+    // Five from §3 plus `embed.v1`, reserved from the first migration (§3.1).
+    expect(PANEL_SCHEMAS).toHaveLength(6)
+  })
+
+  it("carries embed.v1, reserved in Go and in the migration's CHECK (§3.1)", () => {
+    // internal/pages/schema.go declares SchemaEmbed and the pages migration's
+    // CHECK accepts 'embed.v1', so a page carrying one is valid and stored.
+    // Leaving it out of the TS vocabulary rendered it as an UNKNOWN schema —
+    // "this version of Crewship does not render embed.v1" — when the true
+    // answer is "reserved, arrives in a later release".
+    expect(isPanelSchema("embed.v1")).toBe(true)
+    expect(PANEL_REGISTRY["embed.v1"]).toBe(PendingSchemaPanel)
+    expect(resolvePanelComponent("embed.v1")).not.toBe(UnknownSchemaPanel)
+
+    render(
+      <PanelRenderer
+        panel={{ id: "grafana", schema: "embed.v1", title: "Embed" }}
+        data={{ state: "never_produced" }}
+        now={FIXTURE_NOW}
+      />,
+    )
+    expect(screen.getByText(/later release/i)).toBeInTheDocument()
+    expect(screen.queryByText(/does not render/i)).toBeNull()
   })
 
   it("maps the three v0 schemas to their own components", () => {
@@ -189,7 +226,58 @@ describe("freshness — the em-dash rule (PRD §4, §9b.4)", () => {
   it("hides the failure reason on a public view but keeps the age", () => {
     render(<PanelRenderer {...metricFixtures.failed} now={FIXTURE_NOW} publicView />)
     expect(screen.queryByText(/producer exited 1/)).toBeNull()
-    expect(screen.getByText(/12 Aug 12:40/)).toBeInTheDocument()
+    expect(screen.getAllByText(/12 Aug 12:40/).length).toBeGreaterThan(0)
+  })
+
+  /**
+   * §7.3.2b: *"A public panel always carries when its data was produced."* The
+   * age was rendered only when `gate.dimmed`, i.e. only for `stale`, so a
+   * FAILED panel showed the em dash and a bare footer timestamp — an outsider
+   * could read a dead panel without ever seeing how long it had been dead,
+   * which is the one thing that section exists to prevent.
+   */
+  describe("a failed panel carries its age (§7.3.2b)", () => {
+    const failed = [
+      ["metric.v1", metricFixtures.failed],
+      ["status.v1", statusFixtures.failed],
+      ["table.v1", tableFixtures.failed],
+    ] as const
+
+    it.each(failed)("%s shows an absolute age next to the em dash", (_name, fixture) => {
+      const { container } = render(<PanelRenderer {...fixture} now={FIXTURE_NOW} />)
+      const age = container.querySelector('[data-slot="panel-age"]')
+      expect(age).toBeTruthy()
+      expect(age!.textContent).toContain("2 h 15 min old")
+      expect(age!.textContent).not.toMatch(/ago|a while|recently|moments/i)
+    })
+
+    it("keeps the age on a public view, where the reason is withheld", () => {
+      const { container } = render(
+        <PanelRenderer {...metricFixtures.failed} now={FIXTURE_NOW} publicView />,
+      )
+      expect(container.querySelector('[data-slot="panel-age"]')!.textContent).toContain(
+        "2 h 15 min old",
+      )
+      expect(container.textContent).not.toContain("producer exited 1")
+    })
+  })
+
+  /**
+   * §10b.1: a panel restored by a rollback *"renders dimmed, in a 'waiting for
+   * first data' state"*. `never_produced` IS that state — a rollback never
+   * resurrects old payloads — so it must not sit at the contrast of a measured
+   * value. A rollback is exactly when someone believes what they see.
+   */
+  it("a never-produced panel renders dimmed, not at full contrast", () => {
+    for (const fixture of [
+      metricFixtures.neverProduced,
+      statusFixtures.neverProduced,
+      tableFixtures.neverProduced,
+    ]) {
+      const { container, unmount } = render(<PanelRenderer {...fixture} now={FIXTURE_NOW} />)
+      expect(valueNode(container).className).toMatch(/opacity-/)
+      unmount()
+    }
   })
 
   it("uses exactly one no-data glyph across all three schemas and all four states", () => {
@@ -395,6 +483,244 @@ describe("the card-header idiom (PRD §9b.2)", () => {
       )
       expect(container.querySelector('[data-slot="panel-label"]')).toBeTruthy()
       expect(container.querySelector('[data-slot="panel-status-word"]')).toBeTruthy()
+    },
+  )
+})
+
+/**
+ * The em dash is the product's load-bearing glyph, and the client, the schema
+ * and the server have to mean the same thing by it.
+ *
+ * `schemas/panel.table.v1.json` says *"`null` is no data and renders as an em
+ * dash, which is a different claim from `0` or an empty string"*, and Go agrees
+ * — `Cell.IsNoData()` (internal/pages/payload.go) is true for JSON null and
+ * nothing else. The client used to add `value === ""` to that test, so a cell
+ * the producer deliberately emptied was reported as "we have nothing to look
+ * at". §9b.4: *"`0` is a measured zero, `—` is no basis to compute."*
+ */
+describe("an empty string is measured data, not an em dash (§9b.4)", () => {
+  it("renders an empty table cell as empty, and only the null cell as an em dash", () => {
+    const { container } = render(
+      <PanelRenderer {...tableFixtures.emptyStringCell} now={FIXTURE_NOW} />,
+    )
+    const cells = Array.from(
+      container.querySelectorAll('table tbody [data-slot="table-cell"]'),
+    ) as HTMLElement[]
+
+    const empty = cells.find((c) => c.getAttribute("data-key") === "crew")
+    expect(empty).toBeTruthy()
+    expect(empty!.textContent).toBe("")
+    expect(empty!.textContent).not.toContain(EM_DASH)
+    expect(empty!.getAttribute("data-basis")).toBe("measured")
+
+    // The null cell in the same payload still IS an em dash — the two claims
+    // stay distinguishable.
+    const dashes = cells.filter((c) => c.textContent === EM_DASH)
+    expect(dashes).toHaveLength(1)
+    expect(dashes[0].getAttribute("data-basis")).toBe("none")
+    expect(dashes[0].getAttribute("data-key")).toBe("open")
+  })
+
+  it("renders an empty metric value as measured, not as an em dash", () => {
+    const { container } = render(
+      <PanelRenderer {...metricFixtures.emptyStringValue} now={FIXTURE_NOW} />,
+    )
+    const value = valueNode(container)
+    expect(value.getAttribute("data-basis")).toBe("measured")
+    expect(value.textContent).not.toContain(EM_DASH)
+  })
+
+  it("still calls null and undefined no data, on both panels", () => {
+    const metric = render(<PanelRenderer {...metricFixtures.noValue} now={FIXTURE_NOW} />)
+    expect(valueNode(metric.container).getAttribute("data-basis")).toBe("none")
+
+    const table = render(<PanelRenderer {...tableFixtures.fresh} now={FIXTURE_NOW} />)
+    const missing = Array.from(
+      table.container.querySelectorAll('table tbody [data-slot="table-cell"]'),
+    ).filter((c) => c.getAttribute("data-basis") === "none")
+    expect(missing).toHaveLength(1)
+    expect(missing[0].textContent).toBe(EM_DASH)
+  })
+})
+
+/**
+ * §11b.9: *"An optional `delta_good: "up" | "down"` opts into
+ * success/destructive colour… Green-up on an error rate would be a lie, so the
+ * payload has to say which way is good."*
+ *
+ * Two halves had to hold for that mechanism to exist at all: the schema has to
+ * admit the property (it is `additionalProperties: false`, so an undeclared
+ * `delta_good` is a schema violation and the producer's push is rejected), and
+ * the client has to read the WIRE name. It read `deltaGood`, a spelling the
+ * PRD never uses, so the one control that stops a lie could never fire.
+ */
+describe("delta_good (§11b.9)", () => {
+  const properties = metricSchema.properties as Record<string, unknown>
+
+  it("is a declared property of metric.v1, so a producer can send it", () => {
+    expect(metricSchema.additionalProperties).toBe(false)
+    expect(Object.keys(properties)).toContain("delta_good")
+    expect((properties.delta_good as { enum: string[] }).enum).toEqual(["up", "down"])
+
+    // Every key of a real producer payload is declared — which is exactly what
+    // `additionalProperties: false` checks.
+    const payload = { value: 4.2, unit: "%", delta: 0.3, delta_good: "down" }
+    for (const key of Object.keys(payload)) {
+      expect(Object.keys(properties), `${key} is not a declared property`).toContain(key)
+    }
+  })
+
+  it("never names the camelCase spelling anywhere in the schema", () => {
+    expect(JSON.stringify(metricSchema)).not.toContain("deltaGood")
+  })
+
+  it("colours a rise green when the producer said up is good", () => {
+    const { container } = render(<PanelRenderer {...metricFixtures.deltaGoodUp} now={FIXTURE_NOW} />)
+    const delta = container.querySelector('[data-slot="panel-delta"]')!
+    expect(delta.className).toMatch(/text-success/)
+    expect(delta.textContent).toContain("+12")
+  })
+
+  it("colours the same rise destructive when down is good — an error rate", () => {
+    const { container } = render(
+      <PanelRenderer {...metricFixtures.deltaGoodDown} now={FIXTURE_NOW} />,
+    )
+    const delta = container.querySelector('[data-slot="panel-delta"]')!
+    expect(delta.className).toMatch(/text-destructive/)
+  })
+
+  it("stays muted when the payload does not say which way is good", () => {
+    const { container } = render(<PanelRenderer {...metricFixtures.fresh} now={FIXTURE_NOW} />)
+    const delta = container.querySelector('[data-slot="panel-delta"]')!
+    expect(delta.className).toMatch(/text-muted-foreground/)
+    expect(delta.className).not.toMatch(/text-success|text-destructive/)
+  })
+
+  it("ignores a camelCase deltaGood, which is not a name on the wire", () => {
+    const payload = { value: 128, delta: 12, deltaGood: "up" } as unknown as MetricPayload
+    const { container } = render(
+      <PanelRenderer
+        panel={metricFixtures.fresh.panel}
+        data={{ state: "fresh", payload }}
+        now={FIXTURE_NOW}
+      />,
+    )
+    const delta = container.querySelector('[data-slot="panel-delta"]')!
+    expect(delta.className).toMatch(/text-muted-foreground/)
+  })
+})
+
+/**
+ * §11b exists verbatim to stop this: *"an ambiguity here becomes a client and a
+ * server that both pass their own tests."* SLA is `sla_seconds` (decision 3),
+ * provenance is `{producer, run_id, produced_at}` (decision 4), and
+ * `scripts/test-harness/test-pages.sh` probes for those two keys.
+ */
+describe("wire names are snake_case (§11b.3, §11b.4)", () => {
+  it("keeps the fixtures — the shapes the API serves — in the wire spelling", () => {
+    const prov = metricFixtures.fresh.data.provenance as Record<string, unknown>
+    expect(Object.keys(prov)).toContain("run_id")
+    expect(Object.keys(prov)).toContain("produced_at")
+    expect(Object.keys(prov)).not.toContain("runId")
+    expect(Object.keys(prov)).not.toContain("producedAt")
+
+    const spec = metricFixtures.fresh.panel as Record<string, unknown>
+    expect(Object.keys(spec)).toContain("sla_seconds")
+    expect(Object.keys(spec)).not.toContain("slaSeconds")
+  })
+
+  it("renders the run id and the age from the wire names alone", () => {
+    const { container } = render(
+      <PanelRenderer
+        panel={{ id: "p", schema: "metric.v1", title: "P", sla_seconds: 60 }}
+        data={{
+          state: "stale",
+          payload: { value: 7 },
+          provenance: {
+            producer: "routine/rollup",
+            run_id: "run_4242",
+            produced_at: new Date(2026, 7, 12, 12, 40),
+          },
+        }}
+        now={FIXTURE_NOW}
+      />,
+    )
+    const footer = container.querySelector('[data-slot="panel-provenance"]')!
+    expect(footer.textContent).toContain("run_4242")
+    expect(container.querySelector('[data-slot="panel-age"]')!.textContent).toContain(
+      "2 h 15 min old",
+    )
+  })
+
+  it("reads only the wire name — the camelCase spelling is not a fallback", () => {
+    // There was briefly a shim reading `runId`/`producedAt` too, because
+    // `hooks/use-pages.ts` emitted camelCase. Both sides now speak the wire
+    // names, and the shim is gone: a payload carrying only the camelCase
+    // spelling must read as absent, not as data. A tolerant reader here is how
+    // a server that stops sending `run_id` goes unnoticed.
+    expect(provenanceRunId({ run_id: "wire" })).toBe("wire")
+    expect(provenanceProducedAt({ produced_at: "2026-08-12" })).toBe("2026-08-12")
+    expect(provenanceRunId({ runId: "legacy" } as never)).toBeNull()
+    expect(provenanceProducedAt({ producedAt: "1999-01-01" } as never)).toBeNull()
+    expect(provenanceRunId(null)).toBeNull()
+  })
+})
+
+/**
+ * §11b.12: *"`table.v1` carries a row cap of 200. §10b.3 caps bytes only, and
+ * 64 KiB is roughly a thousand rows — more than anyone reads and more than we
+ * will virtualise."* The schema shipped 500, with prose defending 500.
+ */
+describe("table.v1 row cap (§11b.12)", () => {
+  it("caps rows at 200, and says 200 in its prose", () => {
+    const rows = tableSchema.properties.rows
+    expect(rows.maxItems).toBe(200)
+    expect(rows.description).toContain("200")
+    expect(rows.description).not.toContain("500")
+  })
+})
+
+/**
+ * §8 rule 10: *"Text renders through a React element renderer, never
+ * `innerHTML`. No `dangerouslySetInnerHTML` anywhere in the panel registry."*
+ * It is true today; nothing made it stay true. §9 repeats it for the dispatch
+ * table — no `eval`, no dynamic `import()` of a user-supplied path.
+ *
+ * The scan is over the source of `panels/`, because the rule is about what may
+ * be WRITTEN there, and a behavioural test can only catch the payloads someone
+ * thought to write a fixture for. Comments are stripped first so the rule can
+ * go on being quoted in a doc comment.
+ */
+describe("the panel registry never reaches innerHTML (§8 rule 10)", () => {
+  function sourcesOf(dir: string): { file: string; code: string }[] {
+    return readdirSync(dir)
+      .filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"))
+      .map((f) => {
+        const raw = readFileSync(path.join(dir, f), "utf8")
+        const code = raw
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .split("\n")
+          .filter((line) => {
+            const t = line.trim()
+            return !t.startsWith("//") && !t.startsWith("*")
+          })
+          .join("\n")
+        return { file: f, code }
+      })
+  }
+
+  const sources = sourcesOf(PANELS_DIR)
+
+  it("scans every source file in panels/", () => {
+    expect(sources.length).toBeGreaterThanOrEqual(9)
+    expect(sources.map((s) => s.file)).toContain("registry.tsx")
+  })
+
+  it.each(["dangerouslySetInnerHTML", "innerHTML", "eval("])(
+    "no panel source uses %s",
+    (forbidden) => {
+      const offenders = sources.filter((s) => s.code.includes(forbidden)).map((s) => s.file)
+      expect(offenders, `${forbidden} in ${offenders.join(", ")}`).toEqual([])
     },
   )
 })
