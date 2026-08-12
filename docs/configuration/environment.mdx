@@ -114,6 +114,7 @@ These are not configuration — Crewship sets them on the crew container itself,
 | `DATABASE_URL` | (unset) | Direct DSN override for `crewship admin` only. Bypasses `CREWSHIP_DATA_DIR` resolution. Use when running admin commands against a SQLite file outside the standard data-dir tree. |
 | `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Storage backend. `localfs` is the only implemented provider; any other value is refused at startup rather than accepted and ignored. |
 | `CREWSHIP_STORAGE_BASE_PATH` | `/var/lib/crewship` | Base path for local file storage |
+| `CREWSHIP_STORAGE_MEMORY_ROOT` | *(unset)* | Parent directory for the workspace memory tier. Unset disables that tier and memory versioning. `crewship start` derives it from the data directory, but **only when `DATABASE_URL` is unset** — set this explicitly in any deployment that brings its own database |
 | `CREWSHIP_LOG_PATH` | `/var/log/crewship` | Path for log files |
 
 ## State
