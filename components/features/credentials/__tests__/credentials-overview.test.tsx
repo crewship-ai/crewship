@@ -126,10 +126,13 @@ describe("the KPI strip", () => {
     expect(screen.getByText("every secret is self-service")).toBeInTheDocument()
   })
 
-  it("narrows the rail to the guarded tiers when the tile is clicked", () => {
+  // "L3+" has to select L3 AND L4. Pointing the tile at tier "3" made it
+  // report five credentials and filter to four, dropping the one that stops
+  // for a human — the whole reason the number is worth reading.
+  it("narrows the rail to every mediated tier, not just L3", () => {
     const { onSelectTier } = renderOverview({ credentials: [cred({ id: "a" })] })
     fireEvent.click(screen.getByText(/Guarded/))
-    expect(onSelectTier).toHaveBeenCalledWith("3")
+    expect(onSelectTier).toHaveBeenCalledWith("guarded")
   })
 
   it("distinguishes 'no gap' from 'nobody reported' on the tools tile", () => {

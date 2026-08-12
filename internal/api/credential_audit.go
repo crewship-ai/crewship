@@ -438,8 +438,15 @@ func resolveAuditActor(agentID *string, metadata map[string]any) (kind, id strin
 	// A sidecar fetch has no agent — it serves a whole container — but it does
 	// have the crew that owns it, and "the platform crew's container read this"
 	// is an answer where "system" is only an admission.
-	if v, ok := metadata["crew_id"].(string); ok && v != "" {
-		return "crew", v
+	//
+	// Gated on the marker, not on crew_id alone: plenty of events could carry a
+	// crew id as SCOPE rather than as actor, and attributing one of those to a
+	// crew would be a confident wrong answer where "system" was merely a dull
+	// right one.
+	if src, _ := metadata["source"].(string); src == "sidecar_fetch" {
+		if v, ok := metadata["crew_id"].(string); ok && v != "" {
+			return "crew", v
+		}
 	}
 	return "system", ""
 }

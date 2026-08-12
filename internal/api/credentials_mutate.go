@@ -539,6 +539,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:             now,
 		UpdatedAt:             now,
 		AgentNames:            []string{},
+		AgentIDs:              []string{},
 		CreatedByActorType:    actorTypeResp,
 		CreatedByActorID:      actorID,
 		ProvisionedForService: provisionedForService,

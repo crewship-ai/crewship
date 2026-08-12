@@ -51,7 +51,7 @@ import {
   vaultTotals,
   type OverviewCredential,
 } from "@/lib/credentials/overview"
-import { guardedCount, tierBuckets, tierOf } from "@/lib/credentials/tiers"
+import { GUARDED_TIER, guardedCount, tierBuckets, tierOf } from "@/lib/credentials/tiers"
 import { EXPIRY_WARNING_DAYS } from "@/lib/credentials/facets"
 import { cn } from "@/lib/utils"
 
@@ -143,7 +143,7 @@ export function CredentialsOverview({
                 ? "every secret is self-service"
                 : `mediated per read · ${totals.total - guarded} self-service`
             }
-            onClick={() => onSelectTier("3")}
+            onClick={() => onSelectTier(GUARDED_TIER)}
           />
           <KpiCard
             label="Tools missing"

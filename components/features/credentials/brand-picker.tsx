@@ -186,6 +186,10 @@ export function BrandPicker({ value, onChange, className }: BrandPickerProps) {
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return
                 e.preventDefault()
+                // Only when the list is a RESULT. With an empty box `visible[0]`
+                // is just the first row of the registry, and a stray Enter would
+                // pick a brand the user never looked at.
+                if (!query.trim()) return
                 if (visible[0]) pick(visible[0].key)
               }}
               // No type-size override: the ui kit's own text-base/md:text-sm is

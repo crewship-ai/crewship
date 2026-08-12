@@ -80,7 +80,7 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
             still in state is a leak waiting for a screenshot. */}
         {open && (
           <AddCredentialWizard
-            key={open ? "open" : "closed"}
+            key="open"
             workspaceId={workspaceId}
             knownTags={knownTags}
             onCancel={() => onOpenChange(false)}

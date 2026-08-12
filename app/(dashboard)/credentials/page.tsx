@@ -278,7 +278,12 @@ export default function CredentialsPage() {
   async function bulkDelete() {
     if (!workspaceId) return
     setBulkDeleting(true)
-    const ids = Array.from(selectedIds)
+    // Only what the rail is currently showing. `selectedIds` survives a filter
+    // or search change, so a tick made under one filter would otherwise delete
+    // a secret the user can no longer see — and the dialog would have counted
+    // it without naming it.
+    const visible = new Set(sorted.map((c) => c.id))
+    const ids = Array.from(selectedIds).filter((id) => visible.has(id))
     try {
       const results = await Promise.allSettled(
         ids.map((id) =>

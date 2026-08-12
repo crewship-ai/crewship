@@ -491,6 +491,48 @@ describe("bulk delete partial failure (C6)", () => {
 
 // #1085 item 2: a refresh failure after data is on screen must not replace the
 // loaded list with the full-page error card — it toasts and keeps the list.
+// The selection survives a filter change, and the rail only draws what the
+// filters leave. Ticking rows, then narrowing, then confirming used to DELETE
+// secrets that were no longer on screen — counted in the dialog, named nowhere.
+describe("bulk delete respects the filters (CodeRabbit #1948)", () => {
+  it("deletes only what the rail is still showing", async () => {
+    const creds = [
+      makeCredential({ id: "cred_a", name: "KEY_A", provider: "GITHUB" }),
+      makeCredential({ id: "cred_b", name: "KEY_B", provider: "ANTHROPIC" }),
+    ]
+    const deleted: string[] = []
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
+      if (url.startsWith("/api/v1/credentials?")) return ok(creds)
+      if (init?.method === "DELETE") {
+        deleted.push(String(url).split("/")[4].split("?")[0])
+        return ok({})
+      }
+      return ok([])
+    })
+    render(<CredentialsPage />)
+
+    expect(await inList("KEY_A")).toBeInTheDocument()
+    await enterSelectMode()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select KEY_A" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select KEY_B" }))
+    expect(await screen.findByText("2 selected")).toBeInTheDocument()
+
+    // Narrow so KEY_A is no longer on screen.
+    fireEvent.change(screen.getByPlaceholderText(/search a secret or tool/i), {
+      target: { value: "KEY_B" },
+    })
+    await waitFor(() => expect(list().queryByText("KEY_A")).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Delete/ }))
+
+    await waitFor(() => expect(deleted.length).toBeGreaterThan(0))
+    expect(deleted).toEqual(["cred_b"])
+  })
+})
+
 describe("transient refresh failure (C-refresh)", () => {
   it("toasts and keeps the list instead of showing the error card", async () => {
     const creds = [makeCredential({ id: "cred_a", name: "KEY_A" })]

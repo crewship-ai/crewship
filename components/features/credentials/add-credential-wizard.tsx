@@ -1003,13 +1003,23 @@ function CustomFields({
             <div className="flex items-center gap-2 sm:mb-0.5">
               <Badge
                 variant="outline"
-                role="button"
-                tabIndex={0}
-                aria-label={`Custom field ${i + 1} is ${f.secret ? "secret" : "plain text"}`}
-                onClick={() => onChange(fields.map((x, j) => (j === i ? { ...x, secret: !x.secret } : x)))}
-                className="cursor-pointer type-meta"
+                // A real button, not a span wearing role="button". A span does
+                // not activate on Enter or Space, so a keyboard user could focus
+                // this toggle and never change it — and whether a field is
+                // secret decides whether its value is encrypted.
+                asChild
               >
-                {f.secret ? "secret" : "text"}
+                <button
+                  type="button"
+                  aria-pressed={f.secret}
+                  aria-label={`Custom field ${i + 1} is ${f.secret ? "secret" : "plain text"}`}
+                  onClick={() =>
+                    onChange(fields.map((x, j) => (j === i ? { ...x, secret: !x.secret } : x)))
+                  }
+                  className="cursor-pointer type-meta"
+                >
+                  {f.secret ? "secret" : "text"}
+                </button>
               </Badge>
               <Button
                 type="button"

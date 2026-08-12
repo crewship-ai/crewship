@@ -210,11 +210,24 @@ func TestDemoCredentials_ProductionRowsAreGuarded(t *testing.T) {
 		"deploy-ssh-key": 3,
 		"aws-sandbox":    3,
 	}
+	seen := map[string]bool{}
 	for _, dc := range DemoCredentials() {
-		if lvl, ok := want[dc.Def.Name]; ok && dc.SecurityLevel != lvl {
+		lvl, ok := want[dc.Def.Name]
+		if !ok {
+			continue
+		}
+		seen[dc.Def.Name] = true
+		if dc.SecurityLevel != lvl {
 			t.Errorf("%s: security level %d, want L%d — %s",
 				dc.Def.Name, dc.SecurityLevel, lvl,
 				"this row is the demo's example of that tier")
+		}
+	}
+	// Otherwise deleting a pinned row turns this test green by making it check
+	// nothing, which is the failure mode a pinned-name assertion exists to avoid.
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("%s is gone from the demo set — it was the worked example of its tier", name)
 		}
 	}
 }

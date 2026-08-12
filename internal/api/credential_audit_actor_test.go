@@ -155,3 +155,14 @@ func auditTestCtx(ctx context.Context, wsID, userID string) context.Context {
 	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: userID})
 	return context.WithValue(ctx, ctxRole, "OWNER")
 }
+
+// crew_id in metadata is not automatically an actor. Plenty of events could
+// carry one as SCOPE — the crew a rotation applied to, say — and attributing
+// those to a crew would be a confident wrong answer where "system" was merely a
+// dull right one. Only the sidecar marker means "this crew's container read it".
+func TestResolveAuditActor_CrewIDAloneIsNotAnActor(t *testing.T) {
+	kind, id := resolveAuditActor(nil, map[string]any{"crew_id": "crew_1"})
+	if kind != "system" || id != "" {
+		t.Errorf("got (%s, %s), want (system, ) — a crew id without the sidecar marker names a scope, not an actor", kind, id)
+	}
+}

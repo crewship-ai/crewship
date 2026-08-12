@@ -350,36 +350,47 @@ export function CredentialDetailSheet({
     if (!open || !credential) return
     const cid = credential.id
     const ws = encodeURIComponent(workspaceId)
+    // Switching credentials in the rail fires five requests deep, so a response
+    // for the secret you have already left arriving after the one you are
+    // looking at is the ordinary case, not an exotic one. Without this you read
+    // one credential's audit under another's name.
+    let cancelled = false
 
     if (canUpdate) {
       setAuditLoading(true)
       apiFetch(`/api/v1/credentials/${cid}/audit?workspace_id=${ws}&limit=${AUDIT_FETCH_LIMIT}`)
         .then((r) => (r.ok ? r.json() : []))
-        .then((data: AuditEvent[]) => setAudit(Array.isArray(data) ? data : []))
-        .catch(() => setAudit([]))
-        .finally(() => setAuditLoading(false))
+        .then((data: AuditEvent[]) => !cancelled && setAudit(Array.isArray(data) ? data : []))
+        .catch(() => !cancelled && setAudit([]))
+        .finally(() => !cancelled && setAuditLoading(false))
     }
 
     setFieldsLoading(true)
     apiFetch(`/api/v1/credentials/${cid}/fields?workspace_id=${ws}`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((data: CredentialFieldRow[]) => setFields(Array.isArray(data) ? data : []))
-      .catch(() => setFields([]))
-      .finally(() => setFieldsLoading(false))
+      .then((data: CredentialFieldRow[]) => !cancelled && setFields(Array.isArray(data) ? data : []))
+      .catch(() => !cancelled && setFields([]))
+      .finally(() => !cancelled && setFieldsLoading(false))
 
     apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&credential_id=${cid}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((body: { bindings?: BindingRow[] } | null) =>
-        setBindings(Array.isArray(body?.bindings) ? body.bindings : []))
-      .catch(() => setBindings([]))
+        !cancelled && setBindings(Array.isArray(body?.bindings) ? body.bindings : []))
+      .catch(() => !cancelled && setBindings([]))
 
-    void loadAssignments(workspaceId, credential).then(setAssignments).catch(() => setAssignments([]))
+    void loadAssignments(workspaceId, credential)
+      .then((rows) => !cancelled && setAssignments(rows))
+      .catch(() => !cancelled && setAssignments([]))
 
     if (canRotate) {
       apiFetch(`/api/v1/credentials/${cid}/rotations?workspace_id=${ws}`)
         .then((r) => (r.ok ? r.json() : []))
-        .then((data: RotationRow[]) => setRotations(Array.isArray(data) ? data : []))
-        .catch(() => setRotations([]))
+        .then((data: RotationRow[]) => !cancelled && setRotations(Array.isArray(data) ? data : []))
+        .catch(() => !cancelled && setRotations([]))
+    }
+
+    return () => {
+      cancelled = true
     }
   }, [open, credential, workspaceId, canRotate, canUpdate])
 
@@ -1369,11 +1380,17 @@ export function CredentialDetailSheet({
                   <Appear order={12}>
                     <DetailCard title="Permissions">
                       <p className="text-[11px] text-muted-foreground">
+                        {/* Three gates, three different sentences. Saying
+                            "rotation requires an admin" to someone holding
+                            credential.rotate is worse than saying nothing: the
+                            button is right there. */}
                         {!canUpdate && !canRotate
                           ? "You don't have permission to modify this credential."
-                          : !canUpdate && canRotate
+                          : !canUpdate
                             ? "You can rotate this credential. Replacing its value outright requires a workspace manager."
-                            : "Rotation with grace overlap and deletion require a workspace admin."}
+                            : canRotate
+                              ? "Deleting this credential requires a workspace admin."
+                              : "Rotation with grace overlap and deletion require a workspace admin."}
                       </p>
                     </DetailCard>
                   </Appear>

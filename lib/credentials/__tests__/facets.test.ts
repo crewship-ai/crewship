@@ -115,10 +115,17 @@ describe("buildBrandFacet", () => {
 
   // A provider the registry has never heard of must still get a row: a
   // credential you cannot reach by filtering is a credential you cannot find.
-  it("keeps a provider the registry cannot name", () => {
-    const facet = buildBrandFacet([cred({ id: "a", provider: "SOME_NEW_THING" })])
-    expect(facet).toHaveLength(1)
-    expect(facet[0].value).toBe("SOME_NEW_THING")
+  // And two unknown providers must not collapse into two rows both reading
+  // "Generic secret" — getBrand answers the generic for anything it does not
+  // hold, so the label has to fall back to the key.
+  it("keeps providers the registry cannot name, and keeps them apart", () => {
+    const facet = buildBrandFacet([
+      cred({ id: "a", provider: "SOME_NEW_THING" }),
+      cred({ id: "b", provider: "ANOTHER_NEW_THING" }),
+    ])
+    expect(facet).toHaveLength(2)
+    const labels = facet.map((f) => f.label).sort()
+    expect(labels).toEqual(["ANOTHER_NEW_THING", "SOME_NEW_THING"])
   })
 
   it("returns nothing for an empty list rather than a row of zeroes", () => {
@@ -137,6 +144,17 @@ describe("buildShapeFacet", () => {
       { value: "API_KEY", label: "api key", count: 2 },
       { value: "CERTIFICATE", label: "cert", count: 1 },
     ])
+  })
+
+  // A row with no label and an empty value is a control that appears to filter
+  // and does not — applyCredentialFilters reads "" as no filter at all.
+  it("skips a credential with no shape rather than inventing a blank row", () => {
+    const facet = buildShapeFacet([
+      cred({ id: "a", type: "API_KEY" }),
+      cred({ id: "b", type: undefined }),
+    ])
+    expect(facet).toHaveLength(1)
+    expect(facet[0].value).toBe("API_KEY")
   })
 
   // SECRET and GENERIC_SECRET are both "secret". Two rows with the same name
@@ -299,6 +317,23 @@ describe("applyCredentialFilters", () => {
         new Set(),
       )
       expect(out.map((c) => c.id)).toEqual(["weird"])
+    })
+
+    // The "Guarded · L3+" tile counts L3 and L4 and has to be able to select
+    // both. Pointing it at tier "3" made the tile report five and filter to
+    // four, dropping the L4 that is the whole reason anyone reads the number.
+    it("selects every mediated tier under the guarded value, not just L3", () => {
+      const out = applyCredentialFilters(
+        [
+          cred({ id: "l2", security_level: 2 }),
+          cred({ id: "l3", security_level: 3 }),
+          cred({ id: "l4", security_level: 4 }),
+          cred({ id: "none" }),
+        ],
+        { ...EMPTY_CREDENTIAL_FILTERS, tier: "guarded" },
+        new Set(),
+      )
+      expect(out.map((c) => c.id)).toEqual(["l3", "l4"])
     })
 
     it("does nothing when no tier is selected", () => {

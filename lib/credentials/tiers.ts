@@ -24,6 +24,16 @@ export type CredentialTierLevel = (typeof CREDENTIAL_TIER_LEVELS)[number]
 /** The bucket for a row whose server did not send a tier at all — see `tierOf`. */
 export const UNCLASSIFIED_TIER = "unclassified"
 
+/**
+ * The facet value meaning "every tier Keeper mediates per read" — L3 and L4.
+ *
+ * It exists because the "Guarded · L3+" tile has to be able to select what it
+ * counts. Pointing it at tier "3" made the tile a small lie: it reported five
+ * credentials and filtered to four, silently dropping the L4 that is the whole
+ * reason anyone looks at the number.
+ */
+export const GUARDED_TIER = "guarded"
+
 export interface CredentialTier {
   level: CredentialTierLevel
   /** Bare tier, for a chip with no room: "L3". */

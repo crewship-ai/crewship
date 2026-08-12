@@ -14,7 +14,7 @@
 
 import { getBrand } from "@/lib/credential-providers/registry"
 import { credentialTypeLabel } from "./item-types"
-import { UNCLASSIFIED_TIER, tierOf } from "./tiers"
+import { GUARDED_TIER, UNCLASSIFIED_TIER, tierOf } from "./tiers"
 
 /** The subset of the credential payload the facets reason about. */
 export interface CredentialLike {
@@ -182,13 +182,19 @@ export function buildBrandFacet(credentials: CredentialLike[]): CredentialFacetO
     counts.set(c.provider, (counts.get(c.provider) ?? 0) + 1)
   }
   return Array.from(counts.entries())
-    .map(([provider, count]) => ({
+    .map(([provider, count]) => {
+      const brand = getBrand(provider)
+      return {
       value: provider,
-      label: getBrand(provider).label,
+      // getBrand answers GENERIC_BRAND for anything the registry does not hold,
+      // so two different unknown providers would otherwise render two rows
+      // reading "Generic secret". The key is ugly and it is at least distinct.
+      label: brand.key === "NONE" && provider !== "NONE" ? provider : brand.label,
       count,
       // The row draws itself with its own mark; one provider, so one icon.
       providers: [provider],
-    }))
+      }
+    })
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
 }
 
@@ -202,7 +208,11 @@ export function buildBrandFacet(credentials: CredentialLike[]): CredentialFacetO
 export function buildShapeFacet(credentials: CredentialLike[]): CredentialFacetOption[] {
   const counts = new Map<string, { type: string; count: number }>()
   for (const c of credentials) {
-    const label = credentialTypeLabel(c.type ?? "")
+    // No type, no row. An empty value produced a label-less row that
+    // `applyCredentialFilters` then read as "no filter", so clicking it
+    // appeared to do nothing.
+    if (!c.type) continue
+    const label = credentialTypeLabel(c.type)
     const cur = counts.get(label)
     if (cur) cur.count++
     else counts.set(label, { type: c.type ?? "", count: 1 })
@@ -323,8 +333,12 @@ export function applyCredentialFilters<T extends CredentialLike>(
     if (filters.tag && !(c.tags ?? []).includes(filters.tag)) return false
     if (filters.tier) {
       const level = tierOf(c)
-      const key = level === null ? UNCLASSIFIED_TIER : String(level)
-      if (key !== filters.tier) return false
+      if (filters.tier === GUARDED_TIER) {
+        if (level === null || level < 3) return false
+      } else {
+        const key = level === null ? UNCLASSIFIED_TIER : String(level)
+        if (key !== filters.tier) return false
+      }
     }
     if (filters.agentId && !(c.agent_ids ?? []).includes(filters.agentId)) return false
     if (q) {

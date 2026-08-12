@@ -10,7 +10,7 @@
 // here hard-codes a brand count; the assertions are written against
 // BRAND_REGISTRY.length so they stay true as it moves.
 
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, afterEach, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 
 import { BRAND_REGISTRY } from "@/lib/credential-providers/registry"
@@ -30,6 +30,17 @@ function rows() {
 }
 
 const searchBox = () => screen.getByPlaceholderText("Search brands…")
+
+// innerWidth is global and jsdom does not reset it between files. A test that
+// leaves it at 390 silently puts every later suite on a phone.
+const REAL_INNER_WIDTH = window.innerWidth
+afterEach(() => {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: REAL_INNER_WIDTH,
+  })
+})
 
 describe("the trigger", () => {
   it("names the current brand, so it reads as something you can change", () => {

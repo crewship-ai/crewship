@@ -520,6 +520,9 @@ export function CredentialsSidebar({
                     checked={selectedIds?.has(c.id) ?? false}
                     onChange={() => onToggleSelected(c.id)}
                     onClick={(e) => e.stopPropagation()}
+                    // Space is the checkbox's own activation key AND the row's,
+                    // so without this a tick also opened the credential.
+                    onKeyDown={(e) => e.stopPropagation()}
                     className="h-3 w-3 shrink-0 cursor-pointer accent-primary"
                     aria-label={`Select ${c.name}`}
                   />

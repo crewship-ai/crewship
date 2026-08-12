@@ -928,6 +928,13 @@ describe("readiness", () => {
 // wanted, so it is a success with a note — and every OTHER failure has to be
 // said out loud rather than closing the dialog over an untouched credential.
 describe("deleting the credential", () => {
+  // Explicit, not inherited: `h.role` is module-global and the delete button
+  // only renders for a role that can delete, so a test that relied on an
+  // earlier one leaving OWNER behind would pass or fail on file ordering.
+  beforeEach(() => {
+    h.role = "OWNER"
+  })
+
   async function clickDelete() {
     openSettingsTab()
     fireEvent.click(screen.getByRole("button", { name: /delete credential/i }))
