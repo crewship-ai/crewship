@@ -40,6 +40,38 @@ func modelFamily(model string) string {
 //
 // Best-effort: a blank actual model (no init event, or a non-Claude adapter
 // that doesn't report one) logs nothing and never errors a run.
+// knownAPIKeySources is the closed set of apiKeySource values that may be
+// logged verbatim. The field names WHERE the credential came from, not the
+// credential itself — but it is an upstream field we do not control, the log
+// line goes to disk on every run, and the reason we log it at all is that we
+// cannot predict what it will say. Report anything else as having changed
+// without quoting it.
+//
+// Returning the element from THIS slice rather than the argument is deliberate:
+// it means no value read off the stream can reach the writer, which is also
+// what makes the flow provably clean rather than merely unlikely.
+var knownAPIKeySources = []string{
+	"none",
+	"ANTHROPIC_API_KEY",
+	"ANTHROPIC_AUTH_TOKEN",
+	"apiKeyHelper",
+	"temporary",
+	"bedrock",
+	"vertex",
+}
+
+func safeAPIKeySource(v string) string {
+	if v == "" {
+		return ""
+	}
+	for _, known := range knownAPIKeySources {
+		if v == known {
+			return known
+		}
+	}
+	return "other"
+}
+
 // cliVersion and apiKeySource come off the same init event and answer the
 // sibling question: which BINARY served the run. The adapter is validated
 // against a pinned npm version while agent containers install the
@@ -59,8 +91,8 @@ func logResolvedModel(logger *slog.Logger, agentID, requested, actual, cliVersio
 	if cliVersion != "" {
 		attrs = append(attrs, "cli_version", cliVersion)
 	}
-	if apiKeySource != "" {
-		attrs = append(attrs, "api_key_source", apiKeySource)
+	if src := safeAPIKeySource(apiKeySource); src != "" {
+		attrs = append(attrs, "api_key_source", src)
 	}
 	logger.Info("agent model resolved", attrs...)
 	// Only flag a fallback when we asked for a specific family AND both
