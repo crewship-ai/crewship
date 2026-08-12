@@ -217,6 +217,14 @@ jobs:
           # its fixture is absent. They belonged to no nightly tier at all, which
           # is what suite-coverage-guard was red about: per-PR coverage is not
           # nightly coverage, and nothing was watching them against a full seed.
+          # The composition depth cap (#1839). It asserts a SAFETY property
+          # rather than a feature: routine -> crewship step -> issue event ->
+          # automation -> routine can close a cycle, and nothing else bounds
+          # it. It was proven broken on a live instance — 59 hops past a cap
+          # of 8 — and the unit test that models that run is a hypothesis
+          # about it, not the same claim. Needs no provider credential: the
+          # cycle runs through crewship's own nouns, not an agent reply.
+          - suite: test-automation-loop.sh
           - suite: test-inbox.sh
           - suite: test-keeper-aux.sh
           - suite: test-keeper-config.sh
