@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -69,45 +68,50 @@ func (claudeCodeAdapter) PromptViaStdin(req AgentRunRequest) bool {
 }
 
 func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
-	// --bare: skips auto-discovery of hooks/skills/plugins/MCP/CLAUDE.md.
-	// Anthropic docs recommend it for scripted/SDK calls. BUT — Claude
-	// Code 2.x changed --bare's auth contract: it now strictly requires
-	// ANTHROPIC_API_KEY (or apiKeyHelper via --settings) and IGNORES
-	// CLAUDE_CODE_OAUTH_TOKEN. Workspaces seeded with OAuth (Claude
-	// Code login flow → AI_CLI_TOKEN) would otherwise fail with
-	// "Not logged in · Please run /login" the moment the binary starts.
+	// No --bare, on any auth path. It reads like the isolation flag for
+	// scripted calls, and Anthropic's docs recommend it as such, but on the
+	// real CLI it also REPLACES the built-in tool catalogue with
+	// {Bash, Edit, Read} — and --tools can only subtract from that set, never
+	// add back. Measured against 2.1.226, same --tools value in every row:
 	//
-	// Detect OAuth credentials on the run request and drop --bare in
-	// that case — let Claude's normal auth flow pick up
-	// CLAUDE_CODE_OAUTH_TOKEN (set by BuildEnvVarsSidecar). API_KEY
-	// runs keep --bare for the isolation win.
-	hasOAuth := false
-	for _, cred := range req.Credentials {
-		if cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat") {
-			hasOAuth = true
-			break
-		}
-	}
-
+	//	--bare --tools "default"                    -> [Bash Edit Read]
+	//	--bare --tools "<the CODING allowlist>"     -> [Bash Edit Read]
+	//	--bare --tools "Read,Glob,Grep,ToolSearch"  -> [Read]
+	//	          --tools "<the CODING allowlist>"  -> [Bash Edit Glob Grep Read
+	//	                                               ToolSearch WebFetch WebSearch Write]
+	//
+	// So every API-key run — --bare was already dropped for OAuth, whose auth
+	// contract it breaks — silently lost Write, Glob, Grep, WebFetch and
+	// WebSearch whatever its tool_profile said. A CODING agent that cannot
+	// create a file; a MINIMAL reviewer that cannot grep. Nothing errored.
+	//
+	// What --bare was buying is bought explicitly below instead, and verified
+	// on 2.1.226 against a project carrying both a CLAUDE.md and a
+	// .claude/settings.json with a SessionStart hook:
+	//
+	//	--setting-sources ""  the hook did not fire, and the model answered NO
+	//	                      when asked whether the repo's CLAUDE.md marker was
+	//	                      in its context (with and without --system-prompt)
+	//	--strict-mcp-config   only the servers we wrote in .mcp.json load
+	//	--tools <allowlist>   keeps the harness catalogue (Task, Workflow, Cron*,
+	//	                      TaskCreate, Skill, …) out of the model's context —
+	//	                      that catalogue IS present without --bare, so this
+	//	                      flag is the one doing that work now
+	//
+	// --setting-sources "" is therefore load-bearing rather than
+	// belt-and-braces: it is what stands between an agent and a cloned
+	// repository's hooks. Do not drop it to re-enable project skill discovery
+	// without solving hooks separately (#1932).
 	cmd := []string{
 		"claude", "--print",
 		"--output-format", "stream-json",
 		"--include-partial-messages",
 		"--dangerously-skip-permissions",
 		"--verbose",
-	}
-	if !hasOAuth {
-		cmd = append(cmd, "--bare")
-	}
-	cmd = append(cmd,
-		// --setting-sources "" disables user/global settings discovery.
-		// Independent of --bare — Anthropic's CLI reference is explicit
-		// that user-level ~/.claude/settings.json still loads without
-		// this flag, so we keep it on both auth paths.
 		"--setting-sources", "",
 		"--strict-mcp-config",
 		"--no-session-persistence",
-	)
+	}
 	if req.LLMModel != "" {
 		cmd = append(cmd, "--model", req.LLMModel)
 	}
@@ -155,13 +159,13 @@ func (claudeCodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 }
 
 // SetupSystemPrompt drops canonical memory files even though Claude Code
-// receives its prompt via --system-prompt. Reasoning: --bare suppresses
-// CLAUDE.md auto-discovery for *us*, but a future change disabling --bare
-// (per-agent toggle, or upstream default change — Anthropic has signalled
-// it'll go default for -p) would silently drop our memory. Writing the
-// canonical files unconditionally also means a customer SSH-ing into the
-// container sees the same context the agent operates under — useful for
-// debugging.
+// receives its prompt via --system-prompt, which replaces the default prompt
+// outright. Reasoning: --setting-sources "" suppresses CLAUDE.md
+// auto-discovery, so nothing reads these files today — but a per-agent toggle
+// or an upstream default change would silently drop our memory if they were
+// not there. Writing the canonical files unconditionally also means a customer
+// SSH-ing into the container sees the same context the agent operates under —
+// useful for debugging.
 func (claudeCodeAdapter) SetupSystemPrompt(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -318,6 +322,28 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		if len(msg.Errors) > 0 {
 			meta["errors"] = msg.Errors
 		}
+		// terminal_reason names WHY the turn ended, and it is not derivable
+		// from subtype: a hard auth failure arrives as subtype "success" with
+		// is_error true and terminal_reason "api_error". api_error_status
+		// separates a bad credential (401) from a busy API (529), which is the
+		// difference between "fix the credential" and "retry".
+		if msg.TerminalReason != "" {
+			meta["terminal_reason"] = msg.TerminalReason
+		}
+		if msg.APIErrorStatus > 0 {
+			meta["api_error_status"] = msg.APIErrorStatus
+		}
+		if msg.StopReason != "" {
+			meta["stop_reason"] = msg.StopReason
+		}
+		if msg.SessionID != "" {
+			meta["session_id"] = msg.SessionID
+		}
+		// A run blocked by permissions otherwise looks like a run that chose
+		// not to act — the model simply reports it could not do the thing.
+		if len(msg.PermissionDenials) > 0 {
+			meta["permission_denials"] = json.RawMessage(append([]byte{}, msg.PermissionDenials...))
+		}
 		handler(AgentEvent{
 			Type:      "result",
 			Content:   msg.Result,
@@ -346,11 +372,52 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 					meta["mcp_servers"] = servers
 				}
 			}
+			// Session provenance. claude_code_version is the one that pays for
+			// the rest: the adapter is validated against a pinned npm version
+			// while agent containers install the `claude-code:2` devcontainer
+			// feature — latest — so the two drift apart silently, and a
+			// capability can go missing for a hundred releases before anyone
+			// notices (#1932). Record what actually answered.
+			//
+			// apiKeySource says which auth path resolved, i.e. whether the
+			// credential we mounted is the one in use. permissionMode is proof
+			// --dangerously-skip-permissions took. capabilities is the CLI's
+			// own list of protocol behaviours it implements — feature-detect on
+			// it instead of comparing version strings.
+			if msg.ClaudeCodeVersion != "" {
+				meta["claude_code_version"] = msg.ClaudeCodeVersion
+			}
+			if msg.SessionID != "" {
+				meta["session_id"] = msg.SessionID
+			}
+			if msg.APIKeySource != "" {
+				meta["apiKeySource"] = msg.APIKeySource
+			}
+			if msg.PermissionMode != "" {
+				meta["permissionMode"] = msg.PermissionMode
+			}
+			if len(msg.Capabilities) > 0 {
+				meta["capabilities"] = msg.Capabilities
+			}
+			// Whether the SKILL.md files we materialise were actually
+			// discovered. Today they are not — project-level skill discovery
+			// is off under --setting-sources "" — and this field is the
+			// per-run evidence of it.
+			if len(msg.Skills) > 0 {
+				meta["skills"] = json.RawMessage(append([]byte{}, msg.Skills...))
+			}
+			// A --mcp-config entry that fails validation is skipped and the run
+			// continues, exiting 0. An agent that lost crewship-memory that way
+			// looks healthy; this array is the only place it is reported.
+			// v2.1.219+ — absent when nothing was skipped, so a gate can fail
+			// on a non-empty array.
+			if len(msg.MCPServerErrors) > 0 {
+				meta["mcp_server_errors"] = json.RawMessage(append([]byte{}, msg.MCPServerErrors...))
+			}
 			// v2.1.111+ ships plugins + plugin_errors so operators can see
-			// when a plugin fails to load at session start. Crewship runs
-			// --bare which suppresses plugin discovery, but customers who
-			// later opt out of --bare on a per-agent basis benefit from
-			// this visibility.
+			// when a plugin fails to load at session start. Plugin discovery
+			// stays off under --setting-sources "", but a per-agent opt-out
+			// would benefit from this visibility.
 			if len(msg.Plugins) > 0 {
 				var plugins json.RawMessage
 				meta["plugins"] = json.RawMessage(append([]byte{}, msg.Plugins...))
