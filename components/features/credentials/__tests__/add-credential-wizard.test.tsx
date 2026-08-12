@@ -13,7 +13,7 @@
 //     was saved" — the secret is in the vault by then.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { AddCredentialWizard } from "../add-credential-wizard"
 
 const h = vi.hoisted(() => ({
@@ -105,6 +105,116 @@ describe("step 1 — the shape decides the form, not the brand", () => {
     renderWizard()
     pickShape(/^file/i)
     expect(screen.getByText(/written to tmpfs for the run and removed afterwards/i)).toBeInTheDocument()
+  })
+})
+
+// The step bar used to be three static pills. It is the only thing on screen
+// that says where you are in a flow you cannot see the end of, so it now
+// carries the state in the accessibility tree rather than in a border colour,
+// and it is the way back to a step you already finished.
+describe("the step bar", () => {
+  it("announces the step you are on rather than only tinting it", () => {
+    renderWizard()
+    expect(screen.getByRole("button", { name: /shape/i })).toHaveAttribute("aria-current", "step")
+  })
+
+  it("walks back to a finished step but will not skip ahead to an unfinished one", () => {
+    renderWizard()
+    pickShape(/^login/i)
+    expect(screen.getByRole("button", { name: /values/i })).toHaveAttribute("aria-current", "step")
+    // Step 3 needs a password and a name first; offering it would be a link
+    // to a form that cannot be submitted.
+    expect(screen.getByRole("button", { name: /delivery/i })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole("button", { name: /shape/i }))
+    expect(screen.getByRole("button", { name: /^login/i })).toBeInTheDocument()
+  })
+
+  it("keeps three steps on one line at 390px by muting the labels you are not on", () => {
+    renderWizard()
+    // Visible to a screen reader either way — the accessible name of each step
+    // button is unchanged — but only the current label takes horizontal space.
+    expect(screen.getByText("Values").className).toContain("max-sm:sr-only")
+    expect(screen.getByText("Shape").className).not.toContain("max-sm:sr-only")
+  })
+})
+
+// 390×844. The dialog is the whole screen there, so the three things that
+// decide whether it is usable are: the tiles reflow, the body scrolls without
+// taking the actions with it, and the actions are big enough to hit.
+describe("layout on a phone", () => {
+  it("reflows the six shapes two-up, and three-up once there is room", () => {
+    renderWizard()
+    const grid = screen.getByTestId("shape-grid")
+    expect(grid.className).toContain("grid-cols-2")
+    expect(grid.className).toContain("sm:grid-cols-3")
+  })
+
+  it("docks the actions in a footer the scrolling body cannot carry off-screen", () => {
+    renderWizard()
+    const body = screen.getByTestId("wizard-body")
+    const footer = screen.getByTestId("wizard-footer")
+    expect(body.className).toContain("overflow-y-auto")
+    expect(body.contains(footer)).toBe(false)
+    expect(within(footer).getByRole("button", { name: /^continue$/i })).toBeInTheDocument()
+    expect(within(footer).getByRole("button", { name: /^cancel$/i })).toBeInTheDocument()
+  })
+
+  it("gives the footer buttons a thumb-sized target and the width to share", () => {
+    renderWizard()
+    const cont = screen.getByRole("button", { name: /^continue$/i })
+    expect(cont.className).toContain("max-sm:h-11")
+    expect(cont.className).toContain("max-sm:flex-1")
+  })
+
+  it("keeps every field at 16px, so the first tap does not zoom the dialog", () => {
+    renderWizard()
+    pickShape(/^ssh key/i)
+    // iOS Safari zooms whenever a focused field is under 16px. A plain field
+    // inherits the ui kit's text-base and is fine; one that opts down to 12px
+    // mono has to opt back up below sm, and both were 12–14px flat before.
+    expect(screen.getByLabelText(/private key/i).className).toContain("max-sm:text-base")
+    expect(screen.getByLabelText(/^passphrase/i).className).not.toMatch(/(^|\s)text-(xs|sm)(\s|$)/)
+  })
+
+  it("keeps the shape tiles tall enough to hit and readable enough to tell apart", () => {
+    renderWizard()
+    const tile = screen.getByRole("button", { name: /^certificate/i })
+    expect(tile.className).toContain("min-h-20")
+    // The blurb is the thing that distinguishes "Key pair" from "Token" for
+    // anyone who has not read the PRD; it is not decoration to be dropped.
+    expect(within(tile).getByText("PEM chain for mTLS")).toBeInTheDocument()
+  })
+})
+
+// The user's own words about step 1: "I don't want to pick any group at the
+// start — I just want to give an icon, which brand it is, and that's it." The
+// icon lives on the first step now, next to the shape, and it is still a hint:
+// nothing about it gates the flow.
+describe("the brand icon is offered up front", () => {
+  it("sits on the first step without becoming a required choice", () => {
+    renderWizard()
+    expect(screen.getByRole("button", { name: /provider: generic secret/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^continue$/i })).not.toBeDisabled()
+  })
+
+  it("carries an icon picked on the first step through to the saved credential", async () => {
+    const { onSuccess } = renderWizard()
+    fireEvent.click(screen.getByRole("button", { name: /provider: generic secret/i }))
+    fireEvent.change(screen.getByPlaceholderText("Search brands…"), { target: { value: "notion" } })
+    fireEvent.click(screen.getByTitle("Notion"))
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+
+    // Deliberately unrecognisable, so the provider on the wire can only have
+    // come from the choice made on step 1.
+    fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "opaque-value-1" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "INTERNAL" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).toMatchObject({ provider: "NOTION" })
   })
 })
 

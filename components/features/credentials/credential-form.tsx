@@ -29,6 +29,7 @@ import {
 import { detectProvider, detectType, detectFromValue } from "@/lib/credential-provider"
 import { isValidEnvVarName, suggestEnvVarName } from "@/lib/env-var-name"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import { CREDENTIAL_TIERS } from "@/lib/credentials/tiers"
 import { BrandPicker } from "./brand-picker"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
@@ -51,44 +52,12 @@ export interface CredentialFormValues {
 }
 
 /**
- * The Keeper tiers, mirroring internal/keeper/tier.go.
- *
- * This control did not exist. The column has been on the credentials table since
- * v2 and the CLI could set it, but the console could not — so the tier of every
- * credential created through the UI was 1, including the production ones, and the
- * operator had no way to see or change that.
- *
- * The consequence text is not decoration: L4 turns every read into a human
- * approval and forces the four-eyes rule, which is a real operational cost. An
- * operator choosing a tier is choosing that, so the picker says so before they
- * pick rather than after.
+ * The Keeper tiers now live in lib/credentials/tiers.ts, beside the colours the
+ * rail and the overview donut draw them with. The table was here first, when the
+ * picker was the only surface that knew a tier existed; re-exported so the
+ * wizard's import keeps working, and so there is exactly one table.
  */
-export const CREDENTIAL_TIERS = [
-  {
-    level: 1,
-    label: "L1 · low",
-    blast: "Read-only or low-value (npm read token, public API key)",
-    consequence: "Auto-approved when the agent states an intent — no model call, no cost.",
-  },
-  {
-    level: 2,
-    label: "L2 · medium",
-    blast: "Write access to a non-production system (GitHub write, staging DB)",
-    consequence: "Every read is judged by the Keeper model.",
-  },
-  {
-    level: 3,
-    label: "L3 · high",
-    blast: "Admin access to real infrastructure (SSH, database admin, cloud account)",
-    consequence: "Judged with extra checks, needs a substantive intent, and auto-leases rather than granting standing access.",
-  },
-  {
-    level: 4,
-    label: "L4 · critical",
-    blast: "Production administration, payments, or customer data at scale",
-    consequence: "A human approves every read — the model can recommend but never grant — and whoever's agent asked cannot be the one who approves.",
-  },
-] as const
+export { CREDENTIAL_TIERS }
 
 export const EMPTY_FORM: CredentialFormValues = {
   name: "",
@@ -337,13 +306,20 @@ export function CredentialForm({
       <div className="space-y-1.5">
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor="cred-name" className="text-xs">Name</Label>
-          <BrandPicker
-            value={values.provider}
-            onChange={(key) => {
-              providerTouched.current = true
-              setField("provider", key)
-            }}
-          />
+          {/* The brand IS the icon — it is what the rail, the list and the
+              credential's own page draw. It sat here unlabelled, which made
+              the one control that changes a credential's face read as a
+              read-only badge. */}
+          <span className="flex items-center gap-1.5">
+            <Label className="text-[11px] text-muted-foreground">Icon</Label>
+            <BrandPicker
+              value={values.provider}
+              onChange={(key) => {
+                providerTouched.current = true
+                setField("provider", key)
+              }}
+            />
+          </span>
         </div>
         <div className="relative">
           <Input
