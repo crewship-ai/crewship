@@ -341,6 +341,143 @@ func TestRunListRunE_NoticeNamesTheUnreadableSkipSentinel(t *testing.T) {
 	}
 }
 
+// The producer collapses an agent's repeated refusals of one tool into a single
+// entry carrying the tally, deliberately: one denial is an agent that tried
+// something once, forty is an agent hammering a wall it cannot see, and those
+// send an operator to different fixes. `run get` is where that is read, and the
+// row showed bare names — so the two runs looked identical.
+func TestRunGetRunE_ShowsHowOftenEachToolWasDenied(t *testing.T) {
+	stub := covSetupCli4(t)
+	body := provenanceRunBody()
+	body["permission_denials"] = []map[string]any{
+		{"tool_name": "Bash", "count": 39},
+		{"tool_name": "Write", "count": 1},
+	}
+	stub.OnGet("/api/v1/runs/msg_prov", clitest.JSONResponse(200, body))
+	runGetCmd.SetContext(context.Background())
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runGetCmd.RunE(runGetCmd, []string{"msg_prov"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "Bash ×39") {
+		t.Errorf("run get does not show how hard the agent hammered the blocked tool; got:\n%s", out)
+	}
+	if !strings.Contains(out, "Write") {
+		t.Errorf("run get lost the second denied tool; got:\n%s", out)
+	}
+	// A single refusal reads as the tool, not as "Write ×1" — a count nobody
+	// needs is noise in the row that has to stay scannable.
+	if strings.Contains(out, "Write ×1") {
+		t.Errorf("run get decorates a single refusal with a count; got:\n%s", out)
+	}
+}
+
+// A server sent a bare list of names — an older server this CLI is talking to.
+// The count is a newer field, and a CLI that could no longer read the old shape
+// would report NO denials at all for a blocked run, which is the misdiagnosis
+// the row exists to prevent.
+func TestRunGetRunE_ReadsTheOlderDenialShape(t *testing.T) {
+	stub := covSetupCli4(t)
+	body := provenanceRunBody()
+	body["permission_denials"] = []string{"Bash", "Write"}
+	stub.OnGet("/api/v1/runs/msg_prov", clitest.JSONResponse(200, body))
+	runGetCmd.SetContext(context.Background())
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runGetCmd.RunE(runGetCmd, []string{"msg_prov"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, want := range []string{"Tools denied", "Bash", "Write"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("run get lost %q from a server sending the older shape; got:\n%s", want, out)
+		}
+	}
+}
+
+// Both lists on a run record are lossy: the skip list drops entries this build
+// could not identify, and both are capped. The producer records the true count
+// and a truncation marker for exactly that reason, and `run get` printed the
+// stored list alone — so a partial list read as the complete one.
+func TestRunGetRunE_SaysWhenTheProvenanceListsArePartial(t *testing.T) {
+	stub := covSetupCli4(t)
+	body := provenanceRunBody()
+	body["mcp_server_error_count"] = 3
+	body["permission_denials"] = []map[string]any{{"tool_name": "Bash", "count": 2}}
+	body["permission_denials_truncated"] = true
+	stub.OnGet("/api/v1/runs/msg_prov", clitest.JSONResponse(200, body))
+	runGetCmd.SetContext(context.Background())
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runGetCmd.RunE(runGetCmd, []string{"msg_prov"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	// One server is named, three were skipped: the row must not read as one.
+	if !strings.Contains(out, "2 more") {
+		t.Errorf("run get names 1 skipped server for a run that skipped 3, and says nothing about the "+
+			"other 2; got:\n%s", out)
+	}
+	if !strings.Contains(strings.ToLower(out), "capped") {
+		t.Errorf("run get shows a capped denial list as the whole story — the truncation marker the "+
+			"producer wrote reaches nobody; got:\n%s", out)
+	}
+}
+
+// A complete record must stay quiet: a caveat printed unconditionally is one
+// operators learn to skip, and then the real one is invisible too.
+func TestRunGetRunE_NoPartialNoteWhenTheRecordIsComplete(t *testing.T) {
+	stub := covSetupCli4(t)
+	body := provenanceRunBody()
+	body["mcp_server_error_count"] = 1 // exactly what the list names
+	body["permission_denials"] = []map[string]any{{"tool_name": "Bash", "count": 2}}
+	stub.OnGet("/api/v1/runs/msg_prov", clitest.JSONResponse(200, body))
+	runGetCmd.SetContext(context.Background())
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runGetCmd.RunE(runGetCmd, []string{"msg_prov"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	for _, unwanted := range []string{"more", "capped"} {
+		if strings.Contains(strings.ToLower(out), unwanted) {
+			t.Errorf("run get hedges a complete record with %q; got:\n%s", unwanted, out)
+		}
+	}
+}
+
+// The listing's notice is the surface an operator scans before opening any run,
+// and it names the skipped servers from the stored list — which is not all of
+// them when entries dropped or the list was capped.
+func TestRunListRunE_NoticeSaysWhenItNamesFewerThanWereSkipped(t *testing.T) {
+	stub := covSetupCli4(t)
+	setFormatCov(t, "table")
+	body := provenanceRunBody()
+	body["mcp_server_error_count"] = 4
+	stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{
+		"data": []map[string]any{body},
+	}))
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runListCmd.RunE(runListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "crewship-memory") {
+		t.Fatalf("notice lost the server it could name; got:\n%s", out)
+	}
+	if !strings.Contains(out, "3 more") {
+		t.Errorf("notice names 1 of 4 skipped servers and reads as complete; got:\n%s", out)
+	}
+}
+
 // The producer records the same sentinel for a permission denial it could not
 // read, and it must reach the operator for the same reason: a blocked run that
 // names nothing still has to be visible as blocked.

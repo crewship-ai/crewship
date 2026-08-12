@@ -42,3 +42,19 @@ func MergeRunAccumulator(dst map[string]any, acc *Accumulator, requestedModel st
 	}
 	return requestedModel
 }
+
+// EffectiveModel returns the model that actually served the run — the one the
+// CLI reported on its session-init event, or the requested one when it
+// reported none.
+//
+// It is the same answer MergeRunAccumulator returns, split out for callers
+// that need the model BEFORE the terminal record is built. The paymaster
+// ledger is the one that matters: billing has to happen on every terminal
+// path, including the ones that never reach the completed-metadata code, and
+// billing a run against a model it did not use is its own kind of wrong.
+func EffectiveModel(acc *Accumulator, requestedModel string) string {
+	if m := acc.ResolvedModel(); m != "" {
+		return m
+	}
+	return requestedModel
+}

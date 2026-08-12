@@ -668,9 +668,14 @@ func printMCPSkipNotice(runs []cli.RunDetail) {
 	fmt.Printf("\n%s⚠ %d %s started with MCP servers skipped — the agent ran without them and still exited normally%s\n",
 		cli.Yellow, len(affected), noun, cli.Reset)
 	for _, r := range affected {
-		names := make([]string, 0, len(r.MCPServerErrors))
+		names := make([]string, 0, len(r.MCPServerErrors)+1)
 		for _, e := range r.MCPServerErrors {
 			names = append(names, mcpSkipLabel(e))
+		}
+		// Same reason as in `run get`: this line is what an operator scans, and
+		// naming three of five servers without saying so reads as five of five.
+		if note := mcpSkipShortfall(len(r.MCPServerErrors), r.MCPServerErrorCount, r.MCPServerErrorsTruncated); note != "" {
+			names = append(names, note)
 		}
 		fmt.Printf("  %s  %sskipped: %s%s\n", r.ID, cli.Dim, strings.Join(names, ", "), cli.Reset)
 	}
@@ -782,13 +787,62 @@ func runDetailPairs(r *cli.RunDetail) [][]string {
 		}
 		pairs = append(pairs, []string{"MCP skipped", detail})
 	}
+	// The rows above are what the record could name, which is not always what
+	// the CLI reported: entries whose fields the producer could not read are
+	// dropped, and the list is capped. Saying so is the difference between a
+	// partial list and a partial list that reads as complete.
+	if note := mcpSkipShortfall(len(r.MCPServerErrors), r.MCPServerErrorCount, r.MCPServerErrorsTruncated); note != "" {
+		pairs = append(pairs, []string{"MCP skipped", note})
+	}
 	// Tools the CLI refused to let the agent use. Without this row the run
 	// reads as one that chose not to act, and the operator goes looking for a
 	// prompt problem instead of a permission rule.
 	if len(r.PermissionDenials) > 0 {
-		pairs = append(pairs, []string{"Tools denied", strings.Join(r.PermissionDenials, ", ")})
+		names := make([]string, 0, len(r.PermissionDenials))
+		for _, d := range r.PermissionDenials {
+			names = append(names, deniedToolLabel(d))
+		}
+		pairs = append(pairs, []string{"Tools denied", strings.Join(names, ", ")})
+		if r.PermissionDenialsTruncated {
+			pairs = append(pairs, []string{"Tools denied",
+				"… more tools were denied than this record kept (list capped)"})
+		}
 	}
 	return pairs
+}
+
+// deniedToolLabel names one denied tool and, when the agent was refused more
+// than once, how often. One refusal is an agent that tried something and moved
+// on; forty is an agent hammering a wall it cannot see, and the two want
+// different fixes. A "×1" on every other row would bury that difference in
+// noise, so the count shows only when it carries the signal.
+func deniedToolLabel(d cli.DeniedTool) string {
+	if d.Count > 1 {
+		return fmt.Sprintf("%s ×%d", d.ToolName, d.Count)
+	}
+	return d.ToolName
+}
+
+// mcpSkipShortfall describes what a skip list does NOT show: servers the record
+// could not identify, or ones a cap cut. Empty when the list is everything the
+// CLI reported — a caveat printed unconditionally is one operators learn to
+// skip, and then the real one is invisible too.
+//
+// total is 0 on runs recorded before the count existed, which is why the
+// shortfall is computed rather than assumed: reporting "-1 more" on every old
+// run would be exactly that kind of noise.
+func mcpSkipShortfall(shown, total int, truncated bool) string {
+	switch {
+	case total > shown && truncated:
+		return fmt.Sprintf("… and %d more this record did not keep (list capped)", total-shown)
+	case total > shown:
+		// The CLI reported them; the producer could not read their fields, so
+		// naming them is not possible — saying how many is.
+		return fmt.Sprintf("… and %d more the CLI reported in a shape this record could not identify", total-shown)
+	case truncated:
+		return "… more servers were skipped than this record kept (list capped)"
+	}
+	return ""
 }
 
 // runInsightsResp mirrors the /api/v1/runs/insights response.

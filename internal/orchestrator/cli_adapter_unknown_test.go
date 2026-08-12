@@ -32,15 +32,20 @@ func TestUnknownAdapter_NameIsEmptyString(t *testing.T) {
 }
 
 func TestUnknownAdapter_BuildCommand_EmitsBareClaudePrint(t *testing.T) {
-	// Source comment: "produces a minimal `claude --print <msg>` command"
-	// — enough to be runnable for debugging, not enough to be useful in
-	// production. Pin that exact shape; a regression that emits a
-	// different binary name (or no name) would break the failover
-	// debug path.
+	// This used to pin an exact 3-element argv on the strength of the source
+	// comment ("a minimal `claude --print <msg>` command"). That assertion was
+	// pinning the vulnerability: the missing elements were the isolation
+	// flags, and a test that fails when they are added is a test defending the
+	// hole. See TestUnknownAdapter_CarriesTheIsolationFlags for what replaced
+	// the length check, and #1954 for why.
+	//
+	// What is still worth pinning is the invocation itself — a regression that
+	// emits a different binary name, or drops --print, breaks the failover
+	// debug path this adapter exists to keep alive.
 	req := AgentRunRequest{UserMessage: "diagnostic ping"}
 	got := (unknownAdapter{}).BuildCommand(req)
-	if len(got) != 3 {
-		t.Fatalf("argv len = %d, want 3 (binary + flag + msg)", len(got))
+	if len(got) < 3 {
+		t.Fatalf("argv = %v, want at least binary + flag + msg", got)
 	}
 	if got[0] != "claude" {
 		t.Errorf("argv[0] = %q, want \"claude\"", got[0])
@@ -48,20 +53,21 @@ func TestUnknownAdapter_BuildCommand_EmitsBareClaudePrint(t *testing.T) {
 	if got[1] != "--print" {
 		t.Errorf("argv[1] = %q, want \"--print\"", got[1])
 	}
-	if got[2] != "diagnostic ping" {
-		t.Errorf("argv[2] = %q, want \"diagnostic ping\"", got[2])
+	if last := got[len(got)-1]; last != "diagnostic ping" {
+		t.Errorf("last argv element = %q, want the user message", last)
 	}
 }
 
 func TestUnknownAdapter_BuildCommand_EmptyMessage(t *testing.T) {
-	// An empty UserMessage must still produce a valid 3-element argv —
-	// callers exec on it directly, a short slice would index-out-of-bounds.
+	// An empty UserMessage must still produce a runnable argv whose last
+	// element is the (empty) message — callers exec on it directly and index
+	// it, so a short slice would panic.
 	got := (unknownAdapter{}).BuildCommand(AgentRunRequest{})
-	if len(got) != 3 {
-		t.Fatalf("argv len with empty message = %d, want 3", len(got))
+	if len(got) < 3 {
+		t.Fatalf("argv with empty message = %v, want at least binary + flag + msg", got)
 	}
-	if got[2] != "" {
-		t.Errorf("argv[2] = %q, want \"\" for empty UserMessage", got[2])
+	if last := got[len(got)-1]; last != "" {
+		t.Errorf("last argv element = %q, want \"\" for an empty UserMessage", last)
 	}
 }
 

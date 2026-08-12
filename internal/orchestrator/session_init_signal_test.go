@@ -556,6 +556,91 @@ func TestEmitSessionInitSignal_PartiallyReadableSkipStillNames(t *testing.T) {
 	}
 }
 
+// "N of M configured MCP servers were SKIPPED" is the number an operator judges
+// how degraded the session is by, and M was len(skipped)+len(mcp_servers). The
+// CLI lists a server it failed to load in BOTH arrays — once under mcp_servers
+// with a failed status, once under mcp_server_errors with the reason — so every
+// such server was counted twice and the denominator grew by exactly the failures
+// it was supposed to put in perspective: "1 of 4" for a session with three
+// servers configured, or the absurd "2 of 2" reading as total loss when one of
+// two servers loaded fine.
+func TestEmitSessionInitSignal_DegradedDenominatorCountsEachServerOnce(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		servers any
+		skips   any
+		want    string
+	}{
+		{
+			// The CLI's actual shape: the failed server appears in both lists.
+			name: "skipped server also listed under mcp_servers",
+			servers: []json.RawMessage{
+				json.RawMessage(`{"name":"crewship-memory","status":"failed"}`),
+				json.RawMessage(`{"name":"linear","status":"connected"}`),
+				json.RawMessage(`{"name":"sentry","status":"connected"}`),
+			},
+			skips: json.RawMessage(`[{"name":"crewship-memory","type":"invalid_config"}]`),
+			want:  "1 of 3 configured",
+		},
+		{
+			// Two of two configured, one skipped: the inflated denominator made
+			// this "1 of 3" and understated the loss.
+			name: "half the inventory lost",
+			servers: []json.RawMessage{
+				json.RawMessage(`{"name":"crewship-memory","status":"failed"}`),
+				json.RawMessage(`{"name":"linear","status":"connected"}`),
+			},
+			skips: json.RawMessage(`[{"name":"crewship-memory","type":"invalid_config"}]`),
+			want:  "1 of 2 configured",
+		},
+		{
+			// A CLI that reports the skip ONLY in mcp_server_errors: the server
+			// is genuinely absent from the inventory, so it still has to be added.
+			name: "skipped server absent from mcp_servers",
+			servers: []json.RawMessage{
+				json.RawMessage(`{"name":"linear","status":"connected"}`),
+			},
+			skips: json.RawMessage(`[{"name":"crewship-memory","type":"invalid_config"}]`),
+			want:  "1 of 2 configured",
+		},
+		{
+			// No inventory reported at all — the skips are all we know about.
+			name:    "no mcp_servers reported",
+			servers: nil,
+			skips:   json.RawMessage(`[{"name":"crewship-memory","type":"invalid_config"}]`),
+			want:    "1 of 1 configured",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			j := &covJournal{}
+			o := New(nil, newMemState(), covQuietLogger())
+			o.SetJournal(j)
+
+			meta := map[string]any{
+				"subtype":           "init",
+				"model":             "claude-opus-4-8",
+				"mcp_server_errors": tc.skips,
+			}
+			if tc.servers != nil {
+				meta["mcp_servers"] = tc.servers
+			}
+			o.emitSessionInitSignal(context.Background(), covRunReq(), meta)
+
+			entries := j.byType("run.session_init")
+			if len(entries) != 1 {
+				t.Fatalf("want 1 entry, got %d", len(entries))
+			}
+			if !strings.Contains(entries[0].Summary, tc.want) {
+				t.Errorf("Summary = %q, want %q — the denominator is what an operator judges how "+
+					"degraded the session is by", entries[0].Summary, tc.want)
+			}
+		})
+	}
+}
+
 // A session where nothing was skipped must not be reported as degraded just
 // because the adapter handed the (empty) list over already decoded. Severity
 // error plus a DEGRADED summary for a healthy session is how an alert stops

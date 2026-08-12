@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -450,6 +451,18 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		defer finish()
 		runCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
+		// Put the run on the context so every journal entry the orchestrator
+		// emits beneath it inherits trace_id = runID. Its JournalEntry has no
+		// TraceID field and prepareEntry fills trace_id only from
+		// RunIDFromContext, so without this the run.session_init alarm — the
+		// severity=error entry that says the CLI dropped an MCP server —
+		// lands unlinked and `crewship journal --run-id <id>` cannot find it.
+		//
+		// Every other driver stamps this (chatbridge, scheduler, assignments,
+		// query_handler); #1950 fixed the scheduler and missed the neighbour
+		// (#1954). A webhook run is unattended by definition, which is the
+		// same argument that made it matter for cron.
+		runCtx = journal.WithRunID(runCtx, runID)
 
 		// The in-flight concurrency slot was acquired up front (before any
 		// container/run work); release it when this run finishes.

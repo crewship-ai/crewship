@@ -161,16 +161,34 @@ func getAdapter(name string) CLIAdapter {
 }
 
 // unknownAdapter is the fallback returned by getAdapter for any CLIAdapter
-// string we do not recognise. It produces a minimal `claude --print <msg>`
-// command (no system prompt, no flags) — enough to be runnable for
-// debugging, not enough to be useful in production. Acts as a safety net
-// so a malformed agent record cannot crash the orchestrator.
+// string we do not recognise — a typo, a value written by an older or newer
+// schema, a hand-edited agent row. It produces a minimal `claude --print`
+// command: no system prompt, no tool allowlist, no MCP config. Enough to be
+// runnable for debugging, not enough to be useful in production, and a safety
+// net so a malformed agent record cannot crash the orchestrator.
+//
+// "Minimal" covers the prompt and the tool surface. It does NOT cover
+// isolation. This path runs the real `claude` binary inside the crew
+// container, so dropping --setting-sources "" would let a cloned repository's
+// .claude/settings.json SessionStart hook execute and its CLAUDE.md be
+// injected — see adapter_claude.go, where that flag is the control that
+// replaced --bare. A record we already know is malformed is the last place to
+// relax a security control (#1954).
 type unknownAdapter struct{}
 
 func (unknownAdapter) Name() string { return "" }
 
 func (unknownAdapter) BuildCommand(req AgentRunRequest) []string {
-	return []string{"claude", "--print", req.UserMessage}
+	return []string{
+		"claude", "--print",
+		// The isolation the Claude adapter documents, on the path least
+		// likely to be watched.
+		"--setting-sources", "",
+		"--strict-mcp-config",
+		// `--` so a message beginning with a dash is a message and not a
+		// flag. Same guard, same reason as the Claude adapter.
+		"--", req.UserMessage,
+	}
 }
 
 // PromptViaStdin is false for the unknown adapter: it preserves the historic

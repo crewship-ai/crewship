@@ -139,7 +139,7 @@ func (o *Orchestrator) emitSessionInitSignal(ctx context.Context, req AgentRunRe
 	summary := sessionInitSummary(req.AgentSlug, model, payload)
 	if degraded {
 		severity = journal.SeverityError
-		summary = skippedServerSummary(req.AgentSlug, skipped, len(servers))
+		summary = skippedServerSummary(req.AgentSlug, skipped, servers)
 	}
 
 	_, _ = o.getJournal().Emit(ctx, JournalEntry{
@@ -181,7 +181,7 @@ func sessionInitSummary(slug, model string, payload map[string]any) string {
 // skippedServerSummary is the line that has to be unmistakable: the run is
 // about to proceed and exit 0 without a server it was configured with, and the
 // feed is where anyone finds out.
-func skippedServerSummary(slug string, skipped []map[string]any, loaded int) string {
+func skippedServerSummary(slug string, skipped, inventory []map[string]any) string {
 	names := make([]string, 0, sessionInitSummaryNames+1)
 	for _, s := range skipped {
 		label := skippedServerLabel(s)
@@ -212,7 +212,45 @@ func skippedServerSummary(slug string, skipped []map[string]any, loaded int) str
 		return fmt.Sprintf("%s session DEGRADED — the CLI reported skipped MCP servers in a shape this build cannot read; the run continues without them", slug)
 	}
 	return fmt.Sprintf("%s session DEGRADED — %d of %d configured MCP servers were SKIPPED at startup (%s); the run continues without them",
-		slug, len(skipped), len(skipped)+loaded, strings.Join(names, ", "))
+		slug, len(skipped), configuredServerCount(skipped, inventory), strings.Join(names, ", "))
+}
+
+// configuredServerCount is the denominator of "N of M configured MCP servers
+// were SKIPPED" — how many servers this session was set up with, counting each
+// one once.
+//
+// It cannot be len(inventory)+len(skipped). The CLI lists a server it failed to
+// load in BOTH arrays: once under mcp_servers carrying a failed status, once
+// under mcp_server_errors carrying the reason. Adding the lists inflated the
+// total by exactly the failures the number exists to put in perspective — a
+// session with two servers, one of them dead, read as "1 of 3", understating
+// the loss on the one line an operator uses to judge how degraded the session
+// is. So a skip is added only when the inventory does not already contain it.
+//
+// An unnamed skip is counted as its own server: we cannot match it against the
+// inventory, and over-counting the denominator by one understates the damage,
+// which is the safer direction to be wrong in for a line that has to be trusted.
+func configuredServerCount(skipped, inventory []map[string]any) int {
+	known := make(map[string]struct{}, len(inventory))
+	for _, s := range inventory {
+		if name := boundedInitField(s, "name"); name != "" {
+			known[name] = struct{}{}
+		}
+	}
+	total := len(inventory)
+	for _, s := range skipped {
+		name := boundedInitField(s, "name")
+		if name == "" {
+			total++
+			continue
+		}
+		if _, ok := known[name]; !ok {
+			total++
+			// A CLI that repeats the same skipped server must not add it twice.
+			known[name] = struct{}{}
+		}
+	}
+	return total
 }
 
 // skippedServerLabel names one skipped server for the summary line: the name

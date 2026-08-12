@@ -834,6 +834,25 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// /chats/{id}/steer) is detected and QUEUED instead of racing a second
 	// Exec into the same container. Released via the defer registered there.
 	runErr := b.orch.RunAgent(ctx, req, handler)
+
+	// Bill the ledger before branching on runErr, the way the scheduler does.
+	// A run that spent money and then failed spent the money: #1950 taught
+	// every terminal branch to record the cost on the run record, but billing
+	// stayed on the COMPLETED branch, so `crewship run get` showed the spend
+	// while the paymaster ledger showed nothing — budget enforcement
+	// under-counting on exactly the runs that burn tokens without producing an
+	// answer (#1954). Best-effort by contract: never fails the turn.
+	//
+	// The model is session-init ground truth when the CLI reported one,
+	// otherwise the requested one; ResultUsageForLedger returns ok=false when
+	// there is no usage to bill, so a run that never reached the API bills
+	// nothing.
+	if usage, ok := ResultUsageForLedger(info.WorkspaceID, info.CrewID, info.AgentID,
+		orchestrator.EffectiveModel(acc, info.LLMModel), acc.ResultMeta()); ok {
+		if err := b.resolver.RecordCost(ctx, usage); err != nil {
+			b.logger.Warn("failed to record run cost usage", "run_id", runID, "error", err)
+		}
+	}
 	if runErr != nil {
 		// If context was cancelled (user pressed stop), don't emit error -- the hub
 		// sends a clean "done" event. Emitting error here would cause an error flash.
@@ -934,22 +953,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	completedMeta := map[string]interface{}{
 		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
-	// resolvedModel is session-init ground truth for what the API served, and
-	// what the cost ledger below has to bill against — a subscription can
-	// serve a lower tier than the one that was asked for.
-	resolvedModel := orchestrator.MergeRunAccumulator(completedMeta, acc, info.LLMModel)
+	// The ledger was billed right after the run (see above), so this only has
+	// to stamp the record.
+	orchestrator.MergeRunAccumulator(completedMeta, acc, info.LLMModel)
 	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
-	}
-
-	// Forward the CLI-reported token usage to the paymaster ledger (#1205).
-	// See cost.go's resultUsageForLedger doc for why this adapter-side write
-	// is needed in addition to (not instead of) the sidecar's own HTTP-level
-	// cost observation. Best-effort: never fails the chat turn.
-	if usage, ok := ResultUsageForLedger(info.WorkspaceID, info.CrewID, info.AgentID, resolvedModel, acc.ResultMeta()); ok {
-		if err := b.resolver.RecordCost(ctx, usage); err != nil {
-			b.logger.Warn("failed to record run cost usage", "run_id", runID, "error", err)
-		}
 	}
 
 	// Build compact tool summary for conversation context (cap at 10 entries

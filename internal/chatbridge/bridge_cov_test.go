@@ -1105,3 +1105,39 @@ func TestHandleChatMessage_FailedRunRecordsPermissionDenials(t *testing.T) {
 		t.Errorf("FAILED metadata carries no cost: %+v", last.metadata)
 	}
 }
+
+// A run that spent money and then failed spent the money. The chat path
+// recorded the spend on the run record — #1950 made every terminal branch
+// carry the accumulator — but kept billing the paymaster ledger only on the
+// COMPLETED branch, while the scheduler bills before its runErr branch.
+//
+// So `crewship run get` shows the cost and the ledger shows nothing: budget
+// enforcement under-counts and the cap does not trip on exactly the runs that
+// burn tokens without producing an answer.
+func TestHandleChatMessage_FailedRunStillBillsTheLedger(t *testing.T) {
+	// No output, so the run is FAILED (#545) — and a real cost on the result.
+	const spentThenFailed = `{"type":"system","subtype":"init","model":"claude-test","session_id":"sess-b","claude_code_version":"2.1.219"}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":4,"num_turns":9,"usage":{"input_tokens":1000,"output_tokens":500}}
+`
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentOutput: spentThenFailed, exitCode: 0}
+	b := testBridgeWithContainer(t, resolver, ctr)
+
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-bill", "hello", func(ws.ChatEvent) {})
+
+	if len(resolver.runUpdates) == 0 {
+		t.Fatal("no UpdateRun call recorded")
+	}
+	last := resolver.runUpdates[len(resolver.runUpdates)-1]
+	if last.status != "FAILED" {
+		t.Fatalf("run status = %q, want FAILED", last.status)
+	}
+	if last.metadata["total_cost_usd"] == nil {
+		t.Fatalf("the run record does not report the spend: %+v", last.metadata)
+	}
+	if len(resolver.costCalls) == 0 {
+		t.Fatalf("run record reports total_cost_usd=%v but the ledger recorded nothing — "+
+			"the budget cap cannot trip on a run that spends and then fails",
+			last.metadata["total_cost_usd"])
+	}
+}
