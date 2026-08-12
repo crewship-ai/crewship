@@ -1,8 +1,15 @@
 # AGENTS.md
 
 Concise entrypoint for AI agents and new contributors working in this repo.
-For deep specs see [`.claude/context/prd/`](.claude/context/prd/); for contributor
-process see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+For contributor process see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+**Design context lives in two places, and they are not copies.**
+[`docs/prd/`](docs/prd/) is tracked, ships with the repo, and holds the
+release-1.0 audit, the readiness report and the session handoffs — start there.
+[`.claude/context/prd/`](.claude/context/prd/) holds longer-lived briefs
+(memory roadmap, credentials vault, colour tokens). This file used to point
+only at the second, which is how the entire release-1.0 body of work became
+invisible to anyone following it.
 
 ## What Crewship is
 
@@ -107,8 +114,18 @@ Frontend: `app/` (Next.js App Router), `components/` (`ui/` = shadcn), `hooks/`,
 ## Conventions
 
 - **Go**: no ORM — raw `database/sql` with `QueryRowContext`/`ExecContext`. Provider
-  interfaces for all infra. RFC 7807 Problem Details for errors. Imports stdlib →
-  external → internal. Table-driven tests; `t.Skip()` for optional deps (Docker).
+  interfaces for all infra. Imports stdlib → external → internal. Table-driven
+  tests; `t.Skip()` for optional deps (Docker).
+- **Errors**: two envelopes, and the split is real rather than aspirational.
+  `replyError` writes `{"error": "…"}` and is the overwhelming majority (~2200
+  call sites); `writeProblem` writes RFC 7807 (~450). Both send
+  `Content-Type: application/json` — `writeProblem` routes through `writeJSON`,
+  which hard-sets it, so an RFC 7807 body does **not** arrive as
+  `application/problem+json` unless a handler sets that header itself.
+  Match the surrounding file rather than converting one; `cmd/gen-openapi`
+  documents whichever the handler uses, so a mismatch shows up as a contract
+  finding rather than a surprise. (This line used to read "RFC 7807 Problem
+  Details for errors", which described about 17% of the code — #1919.)
 - **DB**: `snake_case`, plural tables; CUID ids (`internal/api/cuid.go`); soft delete
   via `deleted_at`; timestamps TEXT (RFC 3339).
 - **Frontend**: Next.js 16 App Router (static export), Tailwind 4 + Radix/shadcn,
@@ -151,18 +168,30 @@ and [`docs/guides/migrations.mdx`](docs/guides/migrations.mdx).
 
 ## NEVER DO
 
-- Never skip the verification loop (`go test` + `go vet`) — or ship without tests.
+Four of these are checked, not promised — `go run ./scripts/agents-invariants`,
+which the `Shell` CI job runs. They are marked. The rest are about what a person
+does and cannot be, so they are prose and say so.
+
+**Checked:**
+
 - Never add API routes under `app/` — static export silently drops them.
 - Never use `"sqlite3"` as the driver name — `modernc.org/sqlite` registers `"sqlite"`.
-- Never use `npm`/`yarn` — `pnpm` only.
-- Never change the GCM byte layout in `internal/encryption/` — breaks all stored creds.
+- Never use `npm`/`yarn` — `pnpm` only (a stray lockfile is the evidence).
 - Never change sidecar UID (1002) or agent UID (1001) — it's a security boundary.
+
+**Prose — nothing enforces these but you:**
+
+- Never skip the verification loop (`go test` + `go vet`) — or ship without tests.
+- Never change the GCM byte layout in `internal/encryption/` — breaks all stored creds.
 - Never discard WIP — `git stash` before switching branches, never `git checkout .`.
 - Never start an issue without checking it for a live claim — the assignee is not
   a lock when every session is the same account.
-- Never commit secrets (`.env.local`, real keys).
+- Never commit secrets (`.env.local`, real keys) — gitleaks runs on every PR, so
+  this one has a net, just not a preventative one.
 
 ## When unsure
 
-Check `.claude/context/prd/` before assuming design or requirements. Keep these docs
-current after significant changes.
+Check `docs/prd/` first, then `.claude/context/prd/`, before assuming design or
+requirements. Keep them current after significant changes — and prefer pointing
+at the gate that enforces a fact over restating the fact, because prose with no
+check behind it is the thing that rots.
