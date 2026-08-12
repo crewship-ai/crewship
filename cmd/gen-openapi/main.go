@@ -76,6 +76,14 @@ type queryParam struct {
 type handlerInfo struct {
 	query    map[string]queryParam
 	statuses map[string]bool
+	// Which error envelope this operation's handler writes. Both helpers go
+	// through writeJSON, so the MEDIA TYPE is application/json either way —
+	// these decide the body schema only. Neither set means the statuses came
+	// from middleware (auth, role and workspace gates), which replies
+	// {"error": …}; that is the default and is verified live in
+	// error_contract_test.go.
+	repliesError   bool
+	repliesProblem bool
 }
 
 func main() {
@@ -352,11 +360,15 @@ func buildDocument(routes []route) map[string]any {
 		if len(responses) == 0 {
 			responses["200"] = map[string]any{"description": "OK"}
 		}
-		// Error responses use the shared RFC 7807 envelope. Success responses
-		// retain the generic schema until endpoint-specific schemas are added.
+		// Error responses describe what the server sends, which is not what
+		// this generator used to claim (#1919). Both error helpers route
+		// through writeJSON, so the media type is application/json for every
+		// one of them; only the body differs, and only by which helper the
+		// handler reached for. Success responses retain the generic schema
+		// until endpoint-specific schemas are added.
 		for status, response := range responses {
 			if status[0] != '2' {
-				response.(map[string]any)["content"] = map[string]any{"application/problem+json": map[string]any{"schema": problemSchema()}}
+				response.(map[string]any)["content"] = map[string]any{"application/json": map[string]any{"schema": errorBodySchema(info)}}
 			}
 			if status[0] == '2' {
 				if status != "204" {
@@ -751,6 +763,32 @@ func responseComponents() map[string]any {
 	}
 	return map[string]any{"schemas": schemas}
 }
+
+// errorBodySchema picks the envelope an operation's error responses actually
+// carry. A handler that reaches for both gets a oneOf rather than a guess:
+// over-narrowing the contract is worse than admitting the ambiguity, because a
+// client generated from it would reject a response the server is entitled to
+// send.
+func errorBodySchema(info handlerInfo) map[string]any {
+	switch {
+	case info.repliesProblem && info.repliesError:
+		return map[string]any{"oneOf": []any{errorSchema(), problemSchema()}}
+	case info.repliesProblem:
+		return problemSchema()
+	default:
+		return errorSchema()
+	}
+}
+
+// errorSchema is the {"error": "…"} envelope replyError writes, and what the
+// auth, role and workspace middleware write for the 401/403/400 they add to
+// every wrapped operation.
+func errorSchema() map[string]any {
+	return map[string]any{"type": "object", "required": []string{"error"}, "properties": map[string]any{
+		"error": map[string]any{"type": "string"},
+	}}
+}
+
 func problemSchema() map[string]any {
 	return map[string]any{"type": "object", "required": []string{"type", "title", "status", "detail"}, "properties": map[string]any{
 		"type": map[string]any{"type": "string"}, "title": map[string]any{"type": "string"},
@@ -1386,6 +1424,12 @@ func absorbHandlerBody(info *handlerInfo, signature, body string) {
 			param.required = true
 		}
 		info.query[name] = param
+	}
+	if strings.Contains(body, "replyError(") {
+		info.repliesError = true
+	}
+	if strings.Contains(body, "writeProblem(") || strings.Contains(body, "internalError(") {
+		info.repliesProblem = true
 	}
 	for name, code := range statusNames {
 		if strings.Contains(body, "http."+name) {
