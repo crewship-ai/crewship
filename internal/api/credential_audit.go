@@ -386,6 +386,62 @@ type auditEventResponse struct {
 	IPAddress  *string        `json:"ip_address"`
 	Metadata   map[string]any `json:"metadata"`
 	OccurredAt string         `json:"occurred_at"`
+
+	// Who did it, resolved once here rather than guessed per surface.
+	//
+	// The actor was recorded in two different shapes and, within metadata,
+	// under five different keys — `agent_id` for a sidecar read, then
+	// `revealed_by` / `rotated_by` / `created_by` / `approved_by` /
+	// `rejected_by` for the human paths. A console reading the timeline could
+	// therefore say WHAT happened and not WHO, which is the first question
+	// asked of an audit log and the whole point of keeping one.
+	//
+	// ActorKind is "agent", "user", "crew" or "system". "crew" is a sidecar
+	// fetch, which serves a container rather than one agent; "system" is the
+	// honest answer for a row nobody signed, not a placeholder for a lookup we
+	// skipped.
+	ActorKind string `json:"actor_kind"`
+	// ActorID is the agent id or the user id. Empty for "system", and it is
+	// what an avatar is keyed by.
+	ActorID string `json:"actor_id"`
+	// ActorName is the agent's name or the user's full name (falling back to
+	// their email). Empty when the actor is known by id but no longer exists —
+	// a deleted agent still did the thing, so the row keeps its id.
+	ActorName string `json:"actor_name"`
+}
+
+// auditActorMetadataKeys are the metadata keys that have been used to record
+// the human behind an event, newest convention first.
+//
+// One list, in one place, because the alternative is every reader inventing
+// its own — and a reader that has not heard of `rejected_by` silently reports
+// a rejection as unattributed.
+var auditActorMetadataKeys = []string{
+	"revealed_by", "rotated_by", "created_by", "approved_by",
+	"rejected_by", "updated_by", "deleted_by", "actor_id",
+}
+
+// resolveAuditActor decides who an event belongs to.
+//
+// Agent wins over metadata: the column is a foreign key the database enforces,
+// while the metadata keys are free-form and, on an agent-driven path, may
+// carry the operator who set the automation up rather than the actor.
+func resolveAuditActor(agentID *string, metadata map[string]any) (kind, id string) {
+	if agentID != nil && *agentID != "" {
+		return "agent", *agentID
+	}
+	for _, key := range auditActorMetadataKeys {
+		if v, ok := metadata[key].(string); ok && v != "" {
+			return "user", v
+		}
+	}
+	// A sidecar fetch has no agent — it serves a whole container — but it does
+	// have the crew that owns it, and "the platform crew's container read this"
+	// is an answer where "system" is only an admission.
+	if v, ok := metadata["crew_id"].(string); ok && v != "" {
+		return "crew", v
+	}
+	return "system", ""
 }
 
 // AuditTimeline returns the most recent N audit events for a single
@@ -452,12 +508,86 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 		if rawMeta.Valid && rawMeta.String != "" {
 			_ = json.Unmarshal([]byte(rawMeta.String), &e.Metadata)
 		}
+		e.ActorKind, e.ActorID = resolveAuditActor(e.AgentID, e.Metadata)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
 		replyInternalError(w, h.logger, "rows iteration (credential audit)", err)
 		return
 	}
+	h.nameAuditActors(r.Context(), out)
 
 	writeJSON(w, http.StatusOK, out)
+}
+
+// nameAuditActors fills ActorName in place, one query per actor kind for the
+// whole page rather than one per row.
+//
+// A name that cannot be resolved is left empty rather than replaced with the
+// id: the id is already on the row, and printing it twice under a heading that
+// says "name" is how a console starts asserting that somebody is called
+// "cmslzgmw9000eaf679312". The caller decides what to show instead.
+func (h *CredentialHandler) nameAuditActors(ctx context.Context, events []auditEventResponse) {
+	agentIDs := map[string]struct{}{}
+	userIDs := map[string]struct{}{}
+	crewIDs := map[string]struct{}{}
+	for _, e := range events {
+		switch e.ActorKind {
+		case "agent":
+			agentIDs[e.ActorID] = struct{}{}
+		case "user":
+			userIDs[e.ActorID] = struct{}{}
+		case "crew":
+			crewIDs[e.ActorID] = struct{}{}
+		}
+	}
+
+	names := map[string]string{}
+	h.collectNames(ctx, names, agentIDs,
+		"SELECT id, name FROM agents WHERE id IN (%s)")
+	h.collectNames(ctx, names, userIDs,
+		"SELECT id, COALESCE(NULLIF(full_name, ''), email) FROM users WHERE id IN (%s)")
+	h.collectNames(ctx, names, crewIDs,
+		"SELECT id, name FROM crews WHERE id IN (%s)")
+
+	for i := range events {
+		if n, ok := names[events[i].ActorID]; ok {
+			events[i].ActorName = n
+		}
+	}
+}
+
+// collectNames runs one id → name lookup and merges it into `into`. A failed
+// query leaves the names unresolved, which the timeline renders as an
+// unattributed row — never as a wrong attribution.
+func (h *CredentialHandler) collectNames(
+	ctx context.Context, into map[string]string, ids map[string]struct{}, queryFmt string,
+) {
+	if len(ids) == 0 {
+		return
+	}
+	args := make([]any, 0, len(ids))
+	for id := range ids {
+		args = append(args, id)
+	}
+	rows, err := h.db.QueryContext(ctx, fmt.Sprintf(queryFmt, sqlPlaceholders(len(args))), args...)
+	if err != nil {
+		h.logger.Error("audit: resolve actor names", "error", err, "n", len(args))
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var name sql.NullString
+		if err := rows.Scan(&id, &name); err != nil {
+			h.logger.Error("audit: scan actor name", "error", err)
+			continue
+		}
+		if name.Valid && name.String != "" {
+			into[id] = name.String
+		}
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("audit: iterate actor names", "error", err)
+	}
 }

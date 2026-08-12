@@ -44,7 +44,7 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 		"is_default": boolean(), "shared": boolean(), "created_at": str(),
 	})
 	session := object(map[string]any{"id": str(), "created_at": str(), "last_used_at": str(), "user_agent": str(), "ip": str(), "is_current": boolean()})
-	credentialAudit := object(map[string]any{"id": str(), "event_type": str(), "agent_id": nullable(str()), "ip_address": nullable(str()), "metadata": anyObject(), "occurred_at": str()})
+	credentialAudit := object(map[string]any{"id": str(), "event_type": str(), "agent_id": nullable(str()), "ip_address": nullable(str()), "metadata": anyObject(), "occurred_at": str(), "actor_kind": str(), "actor_id": str(), "actor_name": str()})
 	credentialBinding := object(map[string]any{"id": str(), "credential_id": str(), "credential_name": str(), "scope": str(), "crew_id": nullable(str()), "agent_id": nullable(str()), "slot": str(), "created_at": str()})
 	field := object(map[string]any{"key": str(), "is_secret": boolean(), "ordinal": integer(), "value": nullable(str()), "created_at": str(), "updated_at": str()})
 	pair := object(map[string]any{"code": str(), "expires_at": str()})

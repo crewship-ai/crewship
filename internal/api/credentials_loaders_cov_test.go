@@ -25,14 +25,14 @@ func covCLSeed(t *testing.T) (*CredentialHandler, *sql.DB, string, string) {
 	return h, db, wsID, userID
 }
 
-func TestCovCL_LoadAgentNamesBatch(t *testing.T) {
+func TestCovCL_LoadAgentRefsBatch(t *testing.T) {
 	h, db, _, _ := covCLSeed(t)
 	execOrFatal(t, db, `INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
 		VALUES ('covcl-ac', 'covcl-ag', 'covcl-cred', 'X', 0, datetime('now'))`)
 
-	got := h.loadAgentNamesBatch(context.Background(), []string{"covcl-cred", "covcl-other"})
-	if !reflect.DeepEqual(got["covcl-cred"], []string{"Agent CL"}) {
-		t.Errorf("names = %v, want [Agent CL]", got["covcl-cred"])
+	got := h.loadAgentRefsBatch(context.Background(), []string{"covcl-cred", "covcl-other"})
+	if !reflect.DeepEqual(got["covcl-cred"], []agentRef{{ID: "covcl-ag", Name: "Agent CL"}}) {
+		t.Errorf("refs = %v, want [{covcl-ag Agent CL}]", got["covcl-cred"])
 	}
 	if _, ok := got["covcl-other"]; ok {
 		t.Errorf("unexpected entry for unbound credential")
@@ -40,7 +40,7 @@ func TestCovCL_LoadAgentNamesBatch(t *testing.T) {
 
 	// Query error -> empty map, no panic.
 	db.Close()
-	got = h.loadAgentNamesBatch(context.Background(), []string{"covcl-cred"})
+	got = h.loadAgentRefsBatch(context.Background(), []string{"covcl-cred"})
 	if len(got) != 0 {
 		t.Errorf("after close: %v, want empty", got)
 	}

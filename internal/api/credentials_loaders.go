@@ -56,9 +56,21 @@ func credentialVisibilityFilter(role string, user *AuthUser) (string, []any) {
 // observable in ops. If you change the contract to return errors,
 // callers in credentials.go must be updated to surface the failure.
 
-// loadAgentNamesBatch fetches agent names for multiple credentials in one query.
-func (h *CredentialHandler) loadAgentNamesBatch(ctx context.Context, credentialIDs []string) map[string][]string {
-	result := make(map[string][]string, len(credentialIDs))
+// agentRef is one agent holding a credential — the id and the name together.
+//
+// The name alone could say WHICH agents hold a credential but never point at
+// one: an avatar, a link and a filter facet are all keyed by id, and a console
+// with only names would have to derive an avatar from the name, rendering a
+// different face for the same agent than every other page shows.
+type agentRef struct {
+	ID   string
+	Name string
+}
+
+// loadAgentRefsBatch fetches the agents holding each credential in one query.
+// Ordered by name, so the ids and names a caller splits out stay aligned.
+func (h *CredentialHandler) loadAgentRefsBatch(ctx context.Context, credentialIDs []string) map[string][]agentRef {
+	result := make(map[string][]agentRef, len(credentialIDs))
 	if len(credentialIDs) == 0 {
 		return result
 	}
@@ -68,23 +80,24 @@ func (h *CredentialHandler) loadAgentNamesBatch(ctx context.Context, credentialI
 		args[i] = id
 	}
 	rows, err := h.db.QueryContext(ctx,
-		"SELECT ac.credential_id, a.name FROM agent_credentials ac JOIN agents a ON a.id = ac.agent_id AND a.deleted_at IS NULL WHERE ac.credential_id IN ("+ph+") ORDER BY a.name",
+		"SELECT ac.credential_id, a.id, a.name FROM agent_credentials ac JOIN agents a ON a.id = ac.agent_id AND a.deleted_at IS NULL WHERE ac.credential_id IN ("+ph+") ORDER BY a.name",
 		args...)
 	if err != nil {
-		h.logger.Error("loadAgentNamesBatch: query failed", "error", err, "n", len(credentialIDs))
+		h.logger.Error("loadAgentRefsBatch: query failed", "error", err, "n", len(credentialIDs))
 		return result
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var credID, agentName string
-		if err := rows.Scan(&credID, &agentName); err != nil {
-			h.logger.Error("loadAgentNamesBatch: scan failed", "error", err)
+		var credID string
+		var ref agentRef
+		if err := rows.Scan(&credID, &ref.ID, &ref.Name); err != nil {
+			h.logger.Error("loadAgentRefsBatch: scan failed", "error", err)
 			continue
 		}
-		result[credID] = append(result[credID], agentName)
+		result[credID] = append(result[credID], ref)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("loadAgentNamesBatch: iterate", "error", err)
+		h.logger.Error("loadAgentRefsBatch: iterate", "error", err)
 	}
 	return result
 }

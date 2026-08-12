@@ -91,9 +91,9 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"username": nullable("string"), "endpoint_url": nullable("string"), "testable": boolean(), "sensitivity": str(),
 		"security_level": integer(), "security_level_label": str(), "token_expires_at": nullable("string"), "last_checked_at": nullable("string"),
 		"last_error": nullable("string"), "last_used_at": nullable("string"), "last_used_ips": stringArray(), "tags": stringArray(),
-		"created_at": str(), "updated_at": str(), "_count_agent_credentials": integer(), "agent_names": stringArray(), "mcp_used": boolean(),
+		"created_at": str(), "updated_at": str(), "_count_agent_credentials": integer(), "agent_names": stringArray(), "agent_ids": stringArray(), "mcp_used": boolean(),
 		"created_by_actor_type": nullable("string"), "created_by_actor_id": nullable("string"), "provisioned_for_service": nullable("string"),
-	}, "id", "name", "type", "provider", "status", "scope", "crew_ids", "testable", "sensitivity", "security_level", "security_level_label", "last_used_ips", "tags", "created_at", "updated_at", "_count_agent_credentials", "agent_names", "mcp_used")
+	}, "id", "name", "type", "provider", "status", "scope", "crew_ids", "testable", "sensitivity", "security_level", "security_level_label", "last_used_ips", "tags", "created_at", "updated_at", "_count_agent_credentials", "agent_names", "agent_ids", "mcp_used")
 
 	credentialField := obj(map[string]any{
 		"key": str(), "is_secret": boolean(), "ordinal": integer(), "value": nullable("string"), "created_at": str(), "updated_at": str(),
