@@ -550,6 +550,11 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
 	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
+	// Session provenance from the same init event: which CLI binary answered,
+	// which credential path it used, and whether an MCP server was dropped on
+	// the way in. Nobody watches a scheduled run, so the run record is the only
+	// place those answers can come from afterwards (#1934).
+	orchestrator.MergeSessionInitMeta(completedMeta, acc.SessionInit())
 	// Record the actually-resolved model (session-init ground truth) on the
 	// run so the run record can confirm which tier the subscription served.
 	resolvedModel := info.LLMModel

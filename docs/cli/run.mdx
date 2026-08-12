@@ -24,7 +24,36 @@ Each invocation creates a new chat by default (origin=`CLI`, so the web UI sideb
 | --- | --- |
 | `run <agent-slug> [prompt]` | Start (or continue) a streamed run. |
 | `run list` | List recent runs across every agent in the workspace (`GET /api/v1/runs`). |
+| `run get <run-id>` | One run in detail, including session provenance (`GET /api/v1/runs/{id}`). |
 | `run insights` | Fleet-ops snapshot over a window — outcome split, duration percentiles, and breakdowns by trigger/crew/model across **all** runs (`GET /api/v1/runs/insights`). |
+
+### Session provenance
+
+`run get` answers the questions a run record could not answer before: **which CLI binary served this run, on which credential, and did everything it was configured with actually load.** The values are ground truth from the CLI's own session-init event, not from what Crewship asked for.
+
+```
+$ crewship run get msg_1786552750441963636_4bd885e80dc9485e
+ID:               msg_1786552750441963636_4bd885e80dc9485e
+Status:           COMPLETED
+Agent:            riley
+Model:            claude-haiku-4-5
+CLI version:      2.1.204
+Auth source:      ANTHROPIC_API_KEY
+Permission mode:  bypassPermissions
+Session:          sess-9f1c
+MCP skipped:      crewship-memory (invalid_config)
+```
+
+| Field | Why it is there |
+| --- | --- |
+| `CLI version` | Agent containers install the CLI from a devcontainer feature, i.e. **latest**, while the adapter is validated against a pinned version. Without this, the two drift with nothing to point at. |
+| `Auth source` | Which auth path resolved — i.e. whether the credential Crewship mounted is the one in use. Reported from a closed set; anything unrecognised reads `other` rather than being stored verbatim. |
+| `Permission mode` | Confirms the permission flags took effect. |
+| `MCP skipped` | **A finding, not a label.** A `--mcp-config` entry that fails validation is skipped and the run continues, exiting 0 — an agent that lost its memory server this way looks perfectly healthy. `run list` flags it under the table for the same reason. |
+
+Fields are omitted entirely when unknown (older runs, and non-Claude adapters, which report none of this) — absence means "never reported", not "empty".
+
+The same provenance is recorded twice more: as a `run.session_init` journal entry at session start (`crewship journal --type run.session_init`, severity `error` when a server was skipped), and on the chat's "Session started" card while the run is live. The journal entry and the run record are the durable copies — the chat card is live-stream only.
 
 ## Flags
 

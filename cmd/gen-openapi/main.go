@@ -760,6 +760,12 @@ func responseComponents() map[string]any {
 		"trigger_type": scalar("string"), "status": scalar("string"), "started_at": nullable("string"), "finished_at": nullable("string"), "error_message": nullable("string"),
 		"exit_code": nullable("integer"), "metadata": map[string]any{"type": "object", "additionalProperties": true}, "model": nullable("string"), "created_at": scalar("string"),
 		"agent_name": nullable("string"), "agent_slug": nullable("string"), "crew_name": nullable("string"),
+		// Session provenance: omitted entirely for runs that recorded none
+		// (older runs, adapters with no session-init), which is why every one
+		// of these is nullable rather than a guaranteed scalar.
+		"cli_version": nullable("string"), "api_key_source": nullable("string"),
+		"permission_mode": nullable("string"), "session_id": nullable("string"),
+		"mcp_server_errors": array(ref("MCPServerError")),
 	})
 	schemas := map[string]any{
 		"Workspace": workspace, "WorkspaceList": array(ref("Workspace")), "WorkspaceCounts": object(map[string]any{"crews": scalar("integer"), "agents": scalar("integer"), "members": scalar("integer")}),
@@ -770,8 +776,9 @@ func responseComponents() map[string]any {
 		"IssueCreator": object(map[string]any{"type": scalar("string"), "id": scalar("string"), "name": scalar("string")}),
 		"Skill":        skill, "SkillList": array(ref("Skill")), "InstalledSkillAgent": object(stringProps("agent_id", "agent_slug", "agent_name", "avatar_url", "crew_id", "crew_slug", "crew_name", "crew_color", "crew_icon", "crew_avatar_style")),
 		"Run": run, "RunList": object(map[string]any{"data": array(ref("Run")), "stats": ref("RunStats"), "pagination": ref("Pagination")}),
-		"RunStats":   object(map[string]any{"running": scalar("integer"), "today": scalar("integer"), "failed": scalar("integer")}),
-		"Pagination": object(map[string]any{"page": scalar("integer"), "limit": scalar("integer"), "total": scalar("integer"), "total_pages": scalar("integer")}),
+		"MCPServerError": object(stringProps("name", "type", "message")),
+		"RunStats":       object(map[string]any{"running": scalar("integer"), "today": scalar("integer"), "failed": scalar("integer")}),
+		"Pagination":     object(map[string]any{"page": scalar("integer"), "limit": scalar("integer"), "total": scalar("integer"), "total_pages": scalar("integer")}),
 	}
 	return map[string]any{"schemas": schemas}
 }

@@ -118,6 +118,103 @@ describe("TurnRenderer", () => {
       )
       expect(screen.queryByText(/tools/)).toBeNull()
     })
+
+    it("carries data-turn-id like every other turn branch", () => {
+      const { container } = render(
+        <TurnRenderer turn={systemTurn("system_init")} onCopy={noop} onFileClick={noop} />,
+      )
+      expect(container.querySelector('[data-turn-id="s1"]')).toBeTruthy()
+    })
+
+    it("shows the CLI version chip when claude_code_version is present", () => {
+      render(
+        <TurnRenderer
+          turn={systemTurn("system_init", "", { claude_code_version: "2.1.204" })}
+          onCopy={noop}
+          onFileClick={noop}
+        />,
+      )
+      expect(screen.getByText("v2.1.204")).toBeTruthy()
+    })
+
+    it("omits the version chip when claude_code_version is absent", () => {
+      render(
+        <TurnRenderer
+          turn={systemTurn("system_init", "", { model: "claude-opus-4-7" })}
+          onCopy={noop}
+          onFileClick={noop}
+        />,
+      )
+      expect(screen.queryByText(/^v\d/)).toBeNull()
+    })
+
+    it("warns on the pill when MCP servers were skipped", () => {
+      render(
+        <TurnRenderer
+          turn={systemTurn("system_init", "", {
+            mcp_server_errors: [
+              { name: "memory", type: "config", message: "missing command" },
+              { name: "github", type: "spawn", message: "ENOENT" },
+            ],
+          })}
+          onCopy={noop}
+          onFileClick={noop}
+        />,
+      )
+      expect(screen.getByText(/2 MCP servers skipped/)).toBeTruthy()
+      // The names must be reachable without hovering — a skipped server is a
+      // silently lost capability, so it can't depend on a pointer.
+      expect(screen.getByLabelText(/memory, github/)).toBeTruthy()
+    })
+
+    it("uses singular wording for a single skipped MCP server", () => {
+      render(
+        <TurnRenderer
+          turn={systemTurn("system_init", "", {
+            mcp_server_errors: [{ name: "memory", type: "config", message: "boom" }],
+          })}
+          onCopy={noop}
+          onFileClick={noop}
+        />,
+      )
+      expect(screen.getByText(/1 MCP server skipped/)).toBeTruthy()
+    })
+
+    it("shows no MCP warning when mcp_server_errors is absent", () => {
+      render(
+        <TurnRenderer
+          turn={systemTurn("system_init", "", { model: "claude-opus-4-7" })}
+          onCopy={noop}
+          onFileClick={noop}
+        />,
+      )
+      expect(screen.queryByText(/skipped/)).toBeNull()
+    })
+
+    it("shows no MCP warning when mcp_server_errors is an empty array", () => {
+      render(
+        <TurnRenderer
+          turn={systemTurn("system_init", "", { mcp_server_errors: [] })}
+          onCopy={noop}
+          onFileClick={noop}
+        />,
+      )
+      expect(screen.queryByText(/skipped/)).toBeNull()
+    })
+
+    it("renders the pill for adapters that emit only model and tools", () => {
+      render(
+        <TurnRenderer
+          turn={systemTurn("system_init", "", { model: "gpt-o5", tools: ["a", "b"] })}
+          onCopy={noop}
+          onFileClick={noop}
+        />,
+      )
+      expect(screen.getByText(/Session started/)).toBeTruthy()
+      expect(screen.getByText("gpt-o5")).toBeTruthy()
+      expect(screen.getByText(/2 tools/)).toBeTruthy()
+      expect(screen.queryByText(/skipped/)).toBeNull()
+    })
   })
 
   describe("system role — error/info", () => {
