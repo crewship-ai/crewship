@@ -235,6 +235,18 @@ var BackupTables = []string{
 	"composio_settings",          // workspace_id PK
 	"keeper_governance_settings", // workspace_id PK
 	"user_models",                // has workspace_id
+
+	// Pages. Order is FK-safe and load-bearing: `pages` owns everything
+	// below it, `page_panels` must precede `page_panel_data`, and both
+	// depend on `crews` and `pipeline_runs` already being restored —
+	// page_panels.owner_crew_id and page_panel_data.producer_run_id are
+	// real foreign keys, and pages.owner_user_id is ON DELETE RESTRICT.
+	"pages",
+	"page_panels",        // FK page_id → pages; FK owner_crew_id → crews
+	"page_panel_data",    // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
+	"page_versions",      // FK page_id → pages
+	"page_grants",        // FK page_id → pages; FK granted_by_user_id → users
+	"page_public_tokens", // FK page_id → pages
 }
 
 // DBDump captures the exported rows from one or more tables. Keys are
