@@ -148,6 +148,9 @@ export const JOURNAL_ENTRY_TYPES = [
   // Runs (extended)
   "run.agent_span",
   "agent.error",
+  // The CLI session a run happened inside — model, binary version, and the
+  // MCP servers it started WITHOUT. Severity carries the difference.
+  "run.session_init",
   // Automations — the composition substrate. Both mean work did NOT
   // happen: throttled is a rule over its hourly cap, depth_exceeded is a
   // composed chain refused at the shared ceiling. Someone asking "why did

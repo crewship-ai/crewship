@@ -161,3 +161,102 @@ func TestParseClaudeStream_ResultCarriesTerminalReason(t *testing.T) {
 		t.Error("permission_denials dropped — a run blocked by permissions otherwise looks like a run that chose not to act")
 	}
 }
+
+// Same argument as the skills test above, applied to the four fields added
+// alongside it — and the result line is the costlier one to lose. When the
+// unmarshal fails the parser's fallback dumps the envelope into the chat as
+// text, so the run emits no result event at all: no cost, no usage, and
+// inBandFailure.observe never sees the is_error it keys on, which is how a run
+// that failed gets recorded COMPLETED. api_error_status is the likeliest to
+// bite — a release that emits "401" as a string would take every result line
+// with it.
+func TestParseClaudeStream_ResultSurvivesAnUnexpectedFieldShape(t *testing.T) {
+	cases := []struct {
+		name  string
+		field string
+		why   string
+	}{
+		{"api_error_status as a string", `"api_error_status":"401"`, "the shape most likely to change, and the one that names the difference between a bad credential and a busy API"},
+		{"api_error_status as an object", `"api_error_status":{"code":401}`, "a status that grew a body must not cost the envelope"},
+		{"terminal_reason as an object", `"terminal_reason":{"kind":"api_error"}`, "a reason that grew structure is still only a label"},
+		{"stop_reason as an array", `"stop_reason":["stop_sequence"]`, "same"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			line := `{"type":"result","subtype":"success","is_error":true,` + tc.field +
+				`,"num_turns":2,"total_cost_usd":0.42,"usage":{"input_tokens":11}}`
+
+			events := collectEvents(t, line)
+			for _, e := range events {
+				if e.Type == "text" {
+					t.Fatalf("result line fell back to raw text (%.60q…) — one unexpected field took the whole envelope with it: %s", e.Content, tc.why)
+				}
+			}
+			meta := metaOf(t, events, "result")
+			// The rest of the envelope is what finalization actually spends:
+			// cost and usage are recorded from here, and is_error is the only
+			// in-band signal that the run failed.
+			if got := meta["total_cost_usd"]; got != 0.42 {
+				t.Errorf("total_cost_usd = %v, want 0.42 — the run would be finalised with no cost", got)
+			}
+			if got := meta["is_error"]; got != true {
+				t.Errorf("is_error = %v, want true — a failed run would be recorded COMPLETED", got)
+			}
+			if _, ok := meta["usage"]; !ok {
+				t.Error("usage dropped — the run would be finalised with no token accounting")
+			}
+		})
+	}
+}
+
+// A quoted number is the one shape change worth absorbing rather than
+// discarding: "401" means 401, and the status is the field inBandFailure.label
+// falls back to when nothing else names the cause ("HTTP 401" vs a bare
+// "failed run"). It must arrive as an int, not a tolerant wrapper — metaInt
+// type-switches on int and meta["api_error_status"] crosses into the journal.
+func TestParseClaudeStream_ResultCoercesAQuotedAPIErrorStatus(t *testing.T) {
+	meta := metaOf(t, collectEvents(t,
+		`{"type":"result","subtype":"success","is_error":true,"api_error_status":"401"}`), "result")
+
+	if got := meta["api_error_status"]; got != 401 {
+		t.Errorf("api_error_status = %v (%T), want int 401 — a quoted status still names the credential failure", got, got)
+	}
+}
+
+// The init line's capabilities is documented upstream as an array of strings —
+// which is exactly the kind of assurance that let a pinned CLI version drift
+// for a hundred releases (#1932). It is a pass-through field with no typed
+// consumer, so nothing is lost by refusing to bet the whole init line on the
+// documentation staying true.
+func TestParseClaudeStream_InitSurvivesAnUnexpectedCapabilitiesShape(t *testing.T) {
+	const line = `{"type":"system","subtype":"init","model":"claude-opus-5",
+		"claude_code_version":"2.1.300",
+		"capabilities":{"interrupt_receipt_v1":true}}`
+
+	events := collectEvents(t, line)
+	for _, e := range events {
+		if e.Type == "text" {
+			t.Fatalf("init line fell back to raw text (%.60q…) — one unexpected field took the whole event with it", e.Content)
+		}
+	}
+	meta := metaOf(t, events, "system")
+	if got := meta["claude_code_version"]; got != "2.1.300" {
+		t.Errorf("claude_code_version = %v, want 2.1.300 — the rest of the line must still parse", got)
+	}
+}
+
+// …and the documented shape must still arrive as a plain []string: the value
+// goes into event metadata that crosses into the journal, and a wrapper type
+// there would break any consumer that type-asserts it.
+func TestParseClaudeStream_InitKeepsCapabilitiesTyped(t *testing.T) {
+	meta := metaOf(t, collectEvents(t,
+		`{"type":"system","subtype":"init","capabilities":["interrupt_receipt_v1","msg_lifecycle_v1"]}`), "system")
+
+	got, ok := meta["capabilities"].([]string)
+	if !ok {
+		t.Fatalf("capabilities = %T, want []string", meta["capabilities"])
+	}
+	if len(got) != 2 || got[0] != "interrupt_receipt_v1" {
+		t.Errorf("capabilities = %v, want the two entries the line carried", got)
+	}
+}

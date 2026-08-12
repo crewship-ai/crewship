@@ -30,10 +30,32 @@ type RunDetail struct {
 	ErrorMessage *string         `json:"error_message"`
 	ExitCode     *int            `json:"exit_code"`
 	Metadata     json.RawMessage `json:"metadata"`
-	CreatedAt    string          `json:"created_at"`
-	AgentName    *string         `json:"agent_name,omitempty"`
-	AgentSlug    *string         `json:"agent_slug,omitempty"`
-	CrewName     *string         `json:"crew_name,omitempty"`
+	// Model and the session-provenance fields below are absent on older runs
+	// and on adapters that report no session-init, so every one of them is a
+	// pointer: a renderer has to be able to skip the row rather than print an
+	// empty one that reads as "recorded, and empty".
+	Model           *string          `json:"model,omitempty"`
+	CLIVersion      *string          `json:"cli_version,omitempty"`
+	APIKeySource    *string          `json:"api_key_source,omitempty"`
+	PermissionMode  *string          `json:"permission_mode,omitempty"`
+	SessionID       *string          `json:"session_id,omitempty"`
+	MCPServerErrors []MCPServerError `json:"mcp_server_errors,omitempty"`
+	// PermissionDenials names the tools the CLI refused to let the agent use.
+	// Names only — the denied input never reaches the run record.
+	PermissionDenials []string `json:"permission_denials,omitempty"`
+	CreatedAt         string   `json:"created_at"`
+	AgentName         *string  `json:"agent_name,omitempty"`
+	AgentSlug         *string  `json:"agent_slug,omitempty"`
+	CrewName          *string  `json:"crew_name,omitempty"`
+}
+
+// MCPServerError mirrors one entry of the run's mcp_server_errors: an MCP
+// server the CLI skipped at startup, so the run finished without a capability
+// it was configured for.
+type MCPServerError struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Message string `json:"message"`
 }
 
 // IsTerminal reports whether the run has reached a terminal status that

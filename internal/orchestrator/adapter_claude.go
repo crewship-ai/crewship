@@ -328,13 +328,13 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		// separates a bad credential (401) from a busy API (529), which is the
 		// difference between "fix the credential" and "retry".
 		if msg.TerminalReason != "" {
-			meta["terminal_reason"] = msg.TerminalReason
+			meta["terminal_reason"] = string(msg.TerminalReason)
 		}
 		if msg.APIErrorStatus > 0 {
-			meta["api_error_status"] = msg.APIErrorStatus
+			meta["api_error_status"] = int(msg.APIErrorStatus)
 		}
 		if msg.StopReason != "" {
-			meta["stop_reason"] = msg.StopReason
+			meta["stop_reason"] = string(msg.StopReason)
 		}
 		if msg.SessionID != "" {
 			meta["session_id"] = msg.SessionID
@@ -397,7 +397,7 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 				meta["permissionMode"] = msg.PermissionMode
 			}
 			if len(msg.Capabilities) > 0 {
-				meta["capabilities"] = msg.Capabilities
+				meta["capabilities"] = []string(msg.Capabilities)
 			}
 			// Whether the SKILL.md files we materialise were actually
 			// discovered. Today they are not — project-level skill discovery

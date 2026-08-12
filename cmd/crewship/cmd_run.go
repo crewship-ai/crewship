@@ -592,21 +592,23 @@ var runListCmd = &cobra.Command{
 			return err
 		}
 
+		// Decoded into the shared cli.RunDetail rather than a local struct.
+		// `--format json` re-serialises whatever this decode produced, so a
+		// field the local struct omitted was dropped from the CLI's own output
+		// while the server had been sending it all along — `model` was missing
+		// that way from the day it shipped. One type for the run shape means
+		// the next field added server-side cannot repeat it.
 		var result struct {
-			Data []struct {
-				ID          string  `json:"id"`
-				AgentSlug   string  `json:"agent_slug"`
-				Status      string  `json:"status"`
-				TriggerType string  `json:"trigger_type"`
-				CreatedAt   string  `json:"created_at"`
-				FinishedAt  *string `json:"finished_at"`
-			} `json:"data"`
+			Data []cli.RunDetail `json:"data"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
 		}
 
 		f := newFormatter()
+		// Six columns is what fits: they answer "which run, whose, how did it
+		// end". Model and the session-provenance fields are per-run detail —
+		// `crewship run get <id>` shows them without squeezing the listing.
 		headers := []string{"ID", "AGENT", "STATUS", "TRIGGER", "CREATED", "FINISHED"}
 		var rows [][]string
 		for _, r := range result.Data {
@@ -614,14 +616,154 @@ var runListCmd = &cobra.Command{
 			if r.FinishedAt != nil {
 				finished = *r.FinishedAt
 			}
+			// Truncate for the TABLE only — ShortID is what enforces that.
+			// `--format quiet` renders the first cell of each row and exists
+			// so a script can pipe ids into the next command; a 16-character
+			// prefix is not an id, and feeding one back into `run get` answers
+			// 404. This used to be an inline `f.Format != "quiet"` check here,
+			// i.e. a rule every other list command had to rediscover — and
+			// none of them had.
 			id := r.ID
 			if len(id) > 16 {
-				id = id[:16]
+				id = f.ShortID(r.ID, id[:16])
 			}
-			rows = append(rows, []string{id, r.AgentSlug, r.Status, r.TriggerType, r.CreatedAt, finished})
+			rows = append(rows, []string{id, derefStr(r.AgentSlug, ""), r.Status, r.TriggerType, r.CreatedAt, finished})
 		}
-		return f.Auto(result.Data, headers, rows)
+		if err := f.Auto(result.Data, headers, rows); err != nil {
+			return err
+		}
+		// A skipped MCP server is the one piece of provenance that is a
+		// finding rather than a label, and it is invisible in every column:
+		// the run exited 0 and looks clean. Flag it under the table so a
+		// listing cannot hide it. Machine formats already carry the field
+		// verbatim and quiet is id-only for scripts, so the switch mirrors
+		// Formatter.Auto's own.
+		switch f.Format {
+		case "json", "yaml", "ndjson", "quiet":
+		default:
+			printMCPSkipNotice(result.Data)
+		}
+		return nil
 	},
+}
+
+// printMCPSkipNotice names the listed runs that started with an MCP server
+// missing, and which servers those were. Prints nothing when every run got
+// what it was configured with — a notice that appears unconditionally is one
+// operators learn to skip.
+func printMCPSkipNotice(runs []cli.RunDetail) {
+	var affected []cli.RunDetail
+	for _, r := range runs {
+		if len(r.MCPServerErrors) > 0 {
+			affected = append(affected, r)
+		}
+	}
+	if len(affected) == 0 {
+		return
+	}
+	noun := "run"
+	if len(affected) > 1 {
+		noun = "runs"
+	}
+	fmt.Printf("\n%s⚠ %d %s started with MCP servers skipped — the agent ran without them and still exited normally%s\n",
+		cli.Yellow, len(affected), noun, cli.Reset)
+	for _, r := range affected {
+		names := make([]string, 0, len(r.MCPServerErrors))
+		for _, e := range r.MCPServerErrors {
+			names = append(names, e.Name)
+		}
+		fmt.Printf("  %s  %sskipped: %s%s\n", r.ID, cli.Dim, strings.Join(names, ", "), cli.Reset)
+	}
+	fmt.Printf("  %screwship run get <id> — shows why each one was skipped%s\n", cli.Dim, cli.Reset)
+}
+
+var runGetCmd = &cobra.Command{
+	Use:   "get <run-id>",
+	Short: "Show one run in full, including how it was served",
+	Long: `Print everything recorded about a single run.
+
+Beyond status and timing this is where the session provenance lives: the CLI
+version that served the run, which credential path resolved, the permission
+mode in force, the CLI's own session id — and any MCP server that was skipped
+at startup, which a run reports while still exiting 0.
+
+Fields the run never recorded (older runs, non-Claude adapters) are omitted
+rather than shown blank.
+
+Examples:
+  crewship run get msg_abc
+  crewship run get msg_abc -o json`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		run, err := client.GetRun(cmd.Context(), args[0])
+		if err != nil {
+			return err
+		}
+		f := newFormatter()
+		// Detail, not Table: this is one entity with a dozen optional fields,
+		// several of them long (a session id, an MCP error message). A
+		// key/value dump can skip the rows that have no answer; a table row
+		// would have to render a placeholder for each.
+		return f.AutoDetail(run, runDetailPairs(run))
+	},
+}
+
+// runDetailPairs builds the key/value rows for `run get`. Optional fields are
+// appended only when the server sent them: an empty "CLI version:" row would
+// claim the run was asked and answered nothing, which is a different fact from
+// a run that predates the field.
+func runDetailPairs(r *cli.RunDetail) [][]string {
+	pairs := [][]string{
+		{"ID", r.ID},
+		{"Status", r.Status},
+	}
+	add := func(label string, v *string) {
+		if v != nil && *v != "" {
+			pairs = append(pairs, []string{label, *v})
+		}
+	}
+	add("Agent", r.AgentSlug)
+	add("Crew", r.CrewName)
+	if r.TriggerType != "" {
+		pairs = append(pairs, []string{"Trigger", r.TriggerType})
+	}
+	add("Triggered by", r.TriggeredBy)
+	add("Chat", r.ChatID)
+	add("Started", r.StartedAt)
+	add("Finished", r.FinishedAt)
+	if r.ExitCode != nil {
+		pairs = append(pairs, []string{"Exit code", fmt.Sprintf("%d", *r.ExitCode)})
+	}
+	add("Error", r.ErrorMessage)
+	add("Model", r.Model)
+	add("CLI version", r.CLIVersion)
+	add("Auth source", r.APIKeySource)
+	add("Permission mode", r.PermissionMode)
+	add("Session", r.SessionID)
+	// One row per skipped server, each carrying its own reason — collapsing
+	// them into a count would hide which capability was lost, and that is the
+	// only actionable part.
+	for _, e := range r.MCPServerErrors {
+		detail := e.Name
+		if e.Type != "" {
+			detail += " (" + e.Type + ")"
+		}
+		if e.Message != "" {
+			detail += ": " + e.Message
+		}
+		pairs = append(pairs, []string{"MCP skipped", detail})
+	}
+	// Tools the CLI refused to let the agent use. Without this row the run
+	// reads as one that chose not to act, and the operator goes looking for a
+	// prompt problem instead of a permission rule.
+	if len(r.PermissionDenials) > 0 {
+		pairs = append(pairs, []string{"Tools denied", strings.Join(r.PermissionDenials, ", ")})
+	}
+	return pairs
 }
 
 // runInsightsResp mirrors the /api/v1/runs/insights response.
@@ -807,5 +949,6 @@ func init() {
 
 	runInsightsCmd.Flags().String("window", "24h", "Aggregation window: 24h, 7d, or 30d")
 	runCmd.AddCommand(runListCmd)
+	runCmd.AddCommand(runGetCmd)
 	runCmd.AddCommand(runInsightsCmd)
 }

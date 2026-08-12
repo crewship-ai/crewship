@@ -68,8 +68,50 @@ type RunAggregated struct {
 	// Model is the model the run ACTUALLY resolved to (session-init ground
 	// truth), recorded on the terminal run.* entry's metadata by the run
 	// driver. Empty for runs predating the field or non-Claude adapters.
-	Model     string
-	CreatedAt time.Time // == StartedAt for runs (we don't track a separate creation moment)
+	Model string
+	// Session provenance the run driver merges into the terminal entry's
+	// metadata from the CLI's session-init event: which binary answered
+	// (the adapter is pinned while containers install latest), which
+	// credential path resolved, whether the permission bypass took, and the
+	// CLI's own correlation key for the transcript. All empty for runs
+	// predating the fields and for adapters that emit no session-init.
+	CLIVersion     string
+	APIKeySource   string
+	PermissionMode string
+	SessionID      string
+	// MCPServerErrors are the --mcp-config entries the CLI refused to load at
+	// startup. Non-empty means the agent ran with less capability than it was
+	// configured for — exit code 0 does not contradict it, which is exactly
+	// why the loss needs its own field rather than a line in a log.
+	MCPServerErrors []MCPServerError
+	// PermissionDenials names the tools the CLI refused to let the agent use.
+	// Tool NAMES only: the producer drops the denied input before storing it,
+	// because that input is arbitrary agent-generated text and this record is
+	// hash-chained. "Bash was denied" is the diagnosis; the command line is
+	// not ours to keep forever.
+	//
+	// Empty is the normal case and means nothing was denied — which matters,
+	// because a run blocked by permissions otherwise reads as a run that CHOSE
+	// not to act, sending an operator after a prompt problem.
+	PermissionDenials []string
+	CreatedAt         time.Time // == StartedAt for runs (we don't track a separate creation moment)
+}
+
+// MCPServerError is one MCP server the CLI skipped at startup, as reported on
+// its session-init event. Field names match the CLI's own, and this struct is
+// what the API serialises, so renaming a field here changes the wire.
+type MCPServerError struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Message is normally EMPTY, and that is not a bug. The producer
+	// (orchestrator.MergeSessionInitMeta) projects each entry down to name +
+	// category before it reaches a run record, because the message is
+	// CLI-supplied free text describing a config file and the run's terminal
+	// journal entry is hash-chained — what lands there cannot be redacted.
+	// The field stays so a run recorded before that projection still renders,
+	// and so a consumer that has the full text from elsewhere can fill it.
+	// The live chat card is where an operator reads the message.
+	Message string `json:"message,omitempty"`
 }
 
 // RunsQuery filters ListRuns. WorkspaceID is required; rest are
@@ -421,10 +463,90 @@ func scanRunAggregated(rows *sql.Rows, workspaceID string) (RunAggregated, error
 				if m, ok := v["model"].(string); ok && m != "" {
 					r.Model = m
 				}
+				r.applySessionProvenance(v)
 			}
 		}
 	}
 	return r, nil
+}
+
+// applySessionProvenance reads the session-init provenance out of a terminal
+// entry's metadata (written by orchestrator.MergeSessionInitMeta).
+//
+// Terminal-only, unlike model, which also honours run.started as a fallback:
+// these fields describe how the CLI was invoked and only the run driver can
+// know them, while run.started's metadata is caller-supplied on API-triggered
+// runs. Reading them there too would let a caller stamp its own answer to
+// "which key served this run".
+func (r *RunAggregated) applySessionProvenance(md map[string]any) {
+	for _, f := range []struct {
+		key string
+		dst *string
+	}{
+		{"cli_version", &r.CLIVersion},
+		{"api_key_source", &r.APIKeySource},
+		{"permission_mode", &r.PermissionMode},
+		{"session_id", &r.SessionID},
+	} {
+		if v, ok := md[f.key].(string); ok && v != "" {
+			*f.dst = v
+		}
+	}
+	if v, ok := md["mcp_server_errors"]; ok {
+		r.MCPServerErrors = decodeMCPServerErrors(v)
+	}
+	if v, ok := md["permission_denials"]; ok {
+		r.PermissionDenials = decodeDeniedToolNames(v)
+	}
+}
+
+// decodeDeniedToolNames pulls the tool names out of the projected denial list,
+// tolerating both the in-process []map form and the raw JSON a DB read yields.
+// A malformed value degrades to no denials rather than a partial list: this
+// drives an operator's reading of why a run did nothing, and half an answer is
+// worse than none.
+func decodeDeniedToolNames(v any) []string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var entries []struct {
+		ToolName string `json:"tool_name"`
+	}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.ToolName != "" {
+			names = append(names, e.ToolName)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return names
+}
+
+// decodeMCPServerErrors types the array the adapter deliberately passed
+// through unparsed. Re-encoding and decoding beats asserting element by
+// element: the value arrives as []any after a DB round-trip but as a
+// json.RawMessage from an in-process caller, and one path should not read
+// differently from the other.
+//
+// A value that does not fit the shape yields nil. The field's contract is
+// "these servers were skipped" — a half-decoded entry would misreport which,
+// and that is worse than reporting none.
+func decodeMCPServerErrors(v any) []MCPServerError {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var out []MCPServerError
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // countRuns mirrors the ListRuns CTE but selects COUNT(*). Kept as a

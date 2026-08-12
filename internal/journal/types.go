@@ -322,6 +322,28 @@ const (
 	// pipeline.GuardChainDepth, and emits the same type.
 	EntryAutomationDepthExceeded EntryType = "automation.depth_exceeded"
 
+	// EntryRunSessionInit is the provenance of the agent CLI session a run
+	// happens inside, taken from the CLI's own session-init event and written
+	// once per run: which binary answered (cli_version), which model it
+	// resolved to, which credential path took (api_key_source, constrained to
+	// a known set), the permission mode, the cwd, and COUNTS of the tool /
+	// skill / capability inventory it started with. trace_id == run.id.
+	//
+	// It exists for one field in particular. mcp_server_errors lists
+	// --mcp-config entries the CLI SKIPPED at startup after failing
+	// validation; the run then continues and exits 0, so an agent that lost
+	// crewship-memory that way looks perfectly healthy while being quietly
+	// less capable. Severity is info normally and error when that list is
+	// non-empty — the same call EntrySidecarStale makes, for the same reason.
+	//
+	// The payload carries each skipped server's `name` and closed-category
+	// `type` (unknown_type / url_missing_type / invalid_config / …) but NEVER
+	// its free-text `message`: the emit site sits upstream of the credential
+	// scrubber and journal rows are hash-chained, so anything copied in is
+	// both unscrubbed and unredactable. The verbatim line stays available in
+	// the run's exec.output_chunk entry.
+	EntryRunSessionInit EntryType = "run.session_init"
+
 	// EntryRunAgentSpan is one INTERNAL action of an agent_run step — a single
 	// tool the agent invoked (Bash/Write/Edit/Read/MCP/HTTP). It is the leaf of
 	// the drillable run-trace tree (run → step → tool). trace_id == run.id (so

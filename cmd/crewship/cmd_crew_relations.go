@@ -237,8 +237,23 @@ var crewPeerConvsCmd = &cobra.Command{
 			if item.Escalated {
 				esc = "YES"
 			}
-			rows[i] = []string{item.ID[:8], item.FromName, item.ToName, q, item.Status, esc, item.CreatedAt}
+			rows[i] = []string{f.ShortID(item.ID, shortPeerConvID(item.ID)), item.FromName, item.ToName, q, item.Status, esc, item.CreatedAt}
 		}
 		return f.Auto(items, headers, rows)
 	},
+}
+
+// shortPeerConvID cuts a peer-conversation id down to the width the QUESTION
+// column needs to stay readable. Eight characters is what the table has always
+// shown; the length check is new — the bare `item.ID[:8]` panicked on any id
+// the server ever returns shorter than that, which is a crash in a list
+// command rather than a truncated cell.
+//
+// Column 0 goes through Formatter.ShortID, so `--format quiet` still emits the
+// whole id for the next command in the pipe.
+func shortPeerConvID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -266,6 +267,76 @@ func TestTriggerAgent_StreamsEventsAndPersistsConversation(t *testing.T) {
 	}
 }
 
+// claudeProvenanceStreamJSON adds the session-init provenance envelope and a
+// permission denial to the canned transcript above. The apiKeySource is one the
+// sanitiser does not know.
+const claudeProvenanceStreamJSON = `{"type":"system","subtype":"init","model":"claude-test","session_id":"sess-abc","claude_code_version":"2.1.219","apiKeySource":"mystery-helper","permissionMode":"bypassPermissions","capabilities":["interrupt_receipt_v1"]}
+{"type":"stream_event","event":{"delta":{"type":"text_delta","text":"hello from bob"}}}
+{"type":"result","subtype":"success","total_cost_usd":0.42,"num_turns":3,"usage":{"input_tokens":11,"output_tokens":7},"permission_denials":[{"tool_name":"Bash"}]}
+`
+
+// A scheduled run is the surface with no human watching it, so its run record
+// has to carry the provenance on its own: which CLI answered, on which
+// credential, and what it was refused (#1934).
+func TestTriggerAgent_PersistsSessionProvenance(t *testing.T) {
+	db := testDB(t)
+	db.SetMaxOpenConns(1)
+	seedCrew(t, db, "crew1", "ws1", "Alpha", "alpha")
+	seedAgent(t, db, "a1", "bob", "Bob", "crew1", "ws1", "0 8 * * MON", "do work", true)
+
+	resolver := &mockResolver{
+		resolveInfo: &chatbridge.ChatInfo{
+			AgentID:     "a1",
+			AgentSlug:   "bob",
+			AgentRole:   "AGENT",
+			CrewID:      "crew1",
+			CrewSlug:    "alpha",
+			CLIAdapter:  "CLAUDE_CODE",
+			WorkspaceID: "ws1",
+		},
+	}
+	container := &streamContainer{streamOutput: claudeProvenanceStreamJSON, exitCode: 0}
+	container.ensureID = "container-provenance"
+	orch := orchestrator.New(container, newMemState(), testLogger())
+	s := New(db, orch, container, resolver, nil, nil, Config{}, testLogger())
+
+	s.triggerAgent(scheduledAgent{
+		ID: "a1", Slug: "bob", Name: "Bob",
+		CrewID: "crew1", CrewSlug: "alpha",
+		Cron: "0 8 * * MON", Prompt: "do work", Workspace: "ws1",
+	})
+
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	if len(resolver.updatedRuns) != 1 {
+		t.Fatalf("expected 1 run update, got %d", len(resolver.updatedRuns))
+	}
+	meta := resolver.updatedRuns[0].Metadata
+	for k, want := range map[string]any{
+		"cli_version":     "2.1.219",
+		"permission_mode": "bypassPermissions",
+		"session_id":      "sess-abc",
+		"api_key_source":  "other", // never the upstream string verbatim
+		"model":           "claude-test",
+	} {
+		if meta[k] != want {
+			t.Errorf("completed metadata[%q] = %v, want %v", k, meta[k], want)
+		}
+	}
+	if meta["permission_denials"] == nil {
+		t.Errorf("completed metadata missing permission_denials: %+v", meta)
+	}
+	// Nothing was skipped and nothing session-scoped belongs on a run row.
+	for _, k := range []string{"mcp_server_errors", "capabilities", "skills", "tools", "mcp_servers"} {
+		if _, ok := meta[k]; ok {
+			t.Errorf("metadata[%q] should be absent, got %v", k, meta[k])
+		}
+	}
+	if meta["total_cost_usd"] == nil || meta["duration_ms"] == nil {
+		t.Errorf("existing completed metadata clobbered: %+v", meta)
+	}
+}
+
 func TestTriggerAgent_RunFailureMarksRunFailed(t *testing.T) {
 	db := testDB(t)
 	db.SetMaxOpenConns(1)
@@ -381,4 +452,57 @@ func TestUpdateTimestamps_DBErrorsAreLoggedNotFatal(t *testing.T) {
 			t.Errorf("expected warn %q, got %v", want, rec.msgs)
 		}
 	}
+}
+
+// The session-init journal entry is emitted by the orchestrator, which has no
+// TraceID field of its own — it reads the run id off the context. The chat
+// bridge stamps it; the scheduler did not, so `crewship journal --run-id <id>`
+// found nothing for a SCHEDULED run.
+//
+// That is the run the alert exists for. Nobody watches a cron run, which is
+// exactly why its degraded-session entry has to be reachable from the run.
+func TestTriggerAgent_StampsRunIDOnTheJournalContext(t *testing.T) {
+	db := testDB(t)
+	db.SetMaxOpenConns(1)
+	seedCrew(t, db, "crew1", "ws1", "Alpha", "alpha")
+	seedAgent(t, db, "a1", "bob", "Bob", "crew1", "ws1", "0 8 * * MON", "do work", true)
+
+	resolver := &mockResolver{
+		resolveInfo: &chatbridge.ChatInfo{
+			AgentID: "a1", AgentSlug: "bob", AgentRole: "AGENT",
+			CrewID: "crew1", CrewSlug: "alpha",
+			CLIAdapter: "CLAUDE_CODE", WorkspaceID: "ws1",
+		},
+	}
+	container := &streamContainer{streamOutput: claudeProvenanceStreamJSON, exitCode: 0}
+	container.ensureID = "container-trace"
+	orch := orchestrator.New(container, newMemState(), testLogger())
+
+	var seen []string
+	orch.SetJournal(runIDRecordingJournal{fn: func(ctx context.Context) {
+		seen = append(seen, journal.RunIDFromContext(ctx))
+	}})
+
+	s := New(db, orch, container, resolver, nil, nil, Config{}, testLogger())
+	s.triggerAgent(scheduledAgent{
+		ID: "a1", Slug: "bob", Name: "Bob",
+		CrewID: "crew1", CrewSlug: "alpha",
+		Cron: "0 8 * * MON", Prompt: "do work", Workspace: "ws1",
+	})
+
+	if len(seen) == 0 {
+		t.Fatal("the orchestrator emitted no journal entries — nothing to correlate")
+	}
+	for i, runID := range seen {
+		if runID == "" {
+			t.Fatalf("orchestrator journal entry %d carries no run id: `journal --run-id` cannot find a scheduled run's session_init", i)
+		}
+	}
+}
+
+type runIDRecordingJournal struct{ fn func(context.Context) }
+
+func (r runIDRecordingJournal) Emit(ctx context.Context, _ orchestrator.JournalEntry) (string, error) {
+	r.fn(ctx)
+	return "j_test", nil
 }

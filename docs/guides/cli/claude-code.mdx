@@ -135,6 +135,22 @@ JSONL events documented at [code.claude.com/docs/en/cli-reference](https://code.
 
 The `result` envelope adds `terminal_reason`, `api_error_status`, `stop_reason`, `session_id` and `permission_denials`. `terminal_reason` is not derivable from `subtype`: a hard authentication failure arrives as `subtype: "success"` with `is_error: true` and `terminal_reason: "api_error"`, so in-band failures are labelled from `terminal_reason` when the subtype names nothing.
 
+### Where the provenance lands
+
+Parsing a field is not the same as being able to reach it, so each of these has a surface:
+
+| Surface | Carries | Durability |
+| --- | --- | --- |
+| **Run record** — `crewship run get <id>` | `cli_version`, `api_key_source`, `permission_mode`, `session_id`, `mcp_server_errors`, `permission_denials` | Durable. Written on **every** terminal status, not just `COMPLETED` — a failed run is the one you need it for. |
+| **Journal** — `crewship journal --type run.session_init` | The full session inventory as counts, plus MCP server names and statuses. Severity escalates to `error` when a server was skipped. | Durable, hash-chained. Emitted at session start, so a degraded session is visible while the run is still going. |
+| **Chat** — the "Session started" card | Everything, including each skipped server's error message | Live stream only. Session events are never persisted as conversation parts, so this card is gone on a refresh. |
+| **Log** — `agent model resolved` | `cli_version`, `api_key_source` | One greppable line per run. |
+
+Two deliberate asymmetries in what gets stored:
+
+- **`api_key_source` is never stored verbatim.** It is an upstream field we do not control, and everything above is persisted, so only a member of a known set is kept; anything else is recorded as `other`.
+- **`mcp_server_errors[].message` reaches the chat card but not the run record or the journal.** It is CLI-supplied free text describing a config file, and the credential scrubber only rewrites an event's `Content` — it never touches `Metadata`. The journal is hash-chained and cannot be redacted after the fact, so the durable copies carry the server name and the error category only. The message stays where it is bounded and ephemeral.
+
 ## Troubleshooting
 
 **`claude: not found`** — devcontainer feature didn't install; check crew `devcontainer_config` for `ghcr.io/devcontainers-extra/features/claude-code:2`.
