@@ -102,6 +102,33 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"triage_rules":        IntentInclude,
 	"workflow_templates":  IntentInclude,
 	"saved_views":         IntentInclude,
+
+	// === Pages (round-trip) ===================================
+	// PRD docs/prd/pages.md §10b.5 draws the line here: `crewship
+	// export` carries the page SPEC only, because export moves
+	// configuration between installs. A BACKUP is a whole-instance
+	// snapshot, so it carries spec, grants, versions AND panel data —
+	// "a page whose numbers vanish on restore would be a page nobody
+	// trusts afterwards".
+	"pages":         IntentInclude,
+	"page_panels":   IntentInclude,
+	"page_versions": IntentInclude,
+	// page_grants is the ACL. Dropping it on restore would silently
+	// widen or narrow who can read a page, and `granted_by_user_id` is
+	// NOT NULL precisely so a grant always names the human accountable
+	// for it (§7.1b rule 1). A restore that loses that is a restore
+	// that loses the audit trail.
+	"page_grants": IntentInclude,
+	// page_panel_data is the payload ring — the numbers themselves.
+	// Bounded to 200 rows / 7 days per panel by internal/pages, so it
+	// cannot make a bundle unbounded.
+	"page_panel_data": IntentInclude,
+	// page_public_tokens carries HASHES, never a usable secret, plus
+	// each link's expiry and revocation. Carrying it keeps a published
+	// link working across a restore; dropping it would silently break
+	// every external reader an accountant or client was given, with no
+	// error anyone would see until they clicked.
+	"page_public_tokens": IntentInclude,
 	"hooks":               IntentInclude,
 	"labels":              IntentInclude,
 	"milestones":          IntentInclude,
