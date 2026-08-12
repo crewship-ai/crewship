@@ -27,19 +27,6 @@ func modelFamily(model string) string {
 	}
 }
 
-// logResolvedModel records the model an agent run ACTUALLY resolved to versus
-// the one Crewship requested (--model). The actual model is ground truth from
-// the CLI's session-init event; the requested model is the AgentRunRequest
-// override.
-//
-// We auth Claude via a subscription token ($0 cost), and a subscription only
-// honours --model if its tier includes that model — a Pro plan asked for Opus
-// silently serves Sonnet. So when the requested family is known and differs
-// from the served family (asked opus, got sonnet/haiku) we escalate to WARN,
-// turning a silent tier fallback into a loud, greppable signal.
-//
-// Best-effort: a blank actual model (no init event, or a non-Claude adapter
-// that doesn't report one) logs nothing and never errors a run.
 // knownAPIKeySources is the closed set of apiKeySource values that may be
 // logged verbatim. The field names WHERE the credential came from, not the
 // credential itself — but it is an upstream field we do not control, the log
@@ -72,6 +59,20 @@ func safeAPIKeySource(v string) string {
 	return "other"
 }
 
+// logResolvedModel records the model an agent run ACTUALLY resolved to versus
+// the one Crewship requested (--model). The actual model is ground truth from
+// the CLI's session-init event; the requested model is the AgentRunRequest
+// override.
+//
+// We auth Claude via a subscription token ($0 cost), and a subscription only
+// honours --model if its tier includes that model — a Pro plan asked for Opus
+// silently serves Sonnet. So when the requested family is known and differs
+// from the served family (asked opus, got sonnet/haiku) we escalate to WARN,
+// turning a silent tier fallback into a loud, greppable signal.
+//
+// Best-effort: a blank actual model (no init event, or a non-Claude adapter
+// that doesn't report one) logs nothing and never errors a run.
+//
 // cliVersion and apiKeySource come off the same init event and answer the
 // sibling question: which BINARY served the run. The adapter is validated
 // against a pinned npm version while agent containers install the
