@@ -117,14 +117,28 @@ func NewBufferingHandler(opts BufferingHandlerOpts) (EventHandler, *Accumulator)
 		// that want it.
 		if opts.CaptureResultMeta && event.Type == "system" {
 			if m, ok := event.Metadata.(map[string]any); ok {
-				if model, ok := m["model"].(string); ok && model != "" && acc.resolvedModel == "" {
-					acc.resolvedModel = model
-				}
 				// Only "init" carries provenance — a mid-run "api_retry"
 				// system event would otherwise take the one-shot slot and
-				// lock out the init event we actually want.
-				if sub, _ := m["subtype"].(string); sub == "init" && acc.sessionInit == nil {
-					acc.sessionInit = m
+				// lock out the init event we actually want. BOTH captures
+				// need that gate, not just the session one: parser_droid.go
+				// and parser_cursor.go handle `case "system":`
+				// subtype-agnostically and stamp whatever model the line
+				// carried, so any later system envelope from those CLIs used
+				// to claim the model slot and the run record then named a
+				// model the run did not start on. Every adapter that reports a
+				// model reports it under subtype "init" (codex, gemini and
+				// opencode hardcode the value; droid and cursor pass the CLI's
+				// own, which is "init" on their bootstrap line), so the gate
+				// costs nothing today — but an adapter that starts reporting
+				// an init-shaped event under another name must be added here
+				// rather than have this loosened back.
+				if sub, _ := m["subtype"].(string); sub == "init" {
+					if model, ok := m["model"].(string); ok && model != "" && acc.resolvedModel == "" {
+						acc.resolvedModel = model
+					}
+					if acc.sessionInit == nil {
+						acc.sessionInit = m
+					}
 				}
 			}
 		}
@@ -220,7 +234,19 @@ func MergeResultUsageMeta(dst map[string]any, meta any) {
 	// command line is a secret we would be choosing to keep forever. Same rule
 	// and same reason as mcp_server_errors below.
 	if v, ok := m["permission_denials"]; ok && !emptyJSONValue(v) {
-		denials, truncated := projectDenials(initMetaObjects(v))
+		denials, unreadable, truncated := projectDenials(initMetaObjects(v))
+		if unreadable > 0 {
+			// Some entries projected to nothing while others read fine — a
+			// release that renamed the key on some refusals, or typed a tool
+			// name as something other than a string. A list that names SOME of
+			// the blocked tools and says nothing about the rest is worse than
+			// one that names none, because it reads as complete: `run get`
+			// prints a "Tools denied" row and an operator stops there. The same
+			// sentinel that stands in for a wholly unreadable list stands in for
+			// the part that was unreadable, carrying how many refusals it
+			// covers.
+			denials = append(denials, map[string]any{"type": unrecognisedShape, "count": unreadable})
+		}
 		if len(denials) == 0 {
 			// The CLI said it refused something and we could not read which
 			// tool — a release that reports denials as an object keyed by tool,
@@ -262,7 +288,11 @@ func MergeResultUsageMeta(dst map[string]any, meta any) {
 // the ONE other tool it was denied — the one nobody knows about yet — off the
 // list entirely, leaving the row saying, wrongly and permanently, that only
 // Bash was blocked.
-func projectDenials(objs []map[string]any) (out []map[string]any, truncated bool) {
+//
+// unreadable counts the refusals that projected to nothing. It is returned
+// rather than swallowed because the caller has to say so: dropping them
+// silently is what let a PARTLY readable list be stored as a complete one.
+func projectDenials(objs []map[string]any) (out []map[string]any, unreadable int, truncated bool) {
 	seen := make(map[string]map[string]any)
 	for _, o := range objs {
 		name := boundedInitField(o, "tool_name")
@@ -271,6 +301,7 @@ func projectDenials(objs []map[string]any) (out []map[string]any, truncated bool
 			// longer a string. Recording {} would put a blank denial into a
 			// hash-chained record while the CLI's own output names the tool;
 			// the caller's sentinel says that honestly instead.
+			unreadable++
 			continue
 		}
 		if e, ok := seen[name]; ok {
@@ -287,7 +318,7 @@ func projectDenials(objs []map[string]any) (out []map[string]any, truncated bool
 		seen[name] = e
 		out = append(out, e)
 	}
-	return out, truncated
+	return out, unreadable, truncated
 }
 
 // apiKeySourceMetaKey is the CLI's own (camelCase) name for the auth-path
@@ -338,17 +369,19 @@ func MergeSessionInitMeta(dst map[string]any, meta any) {
 		return
 	}
 	for _, k := range sessionInitMetaKeys {
-		v, ok := m[k.src]
-		if !ok {
-			continue
-		}
+		// boundedInitField, not a verbatim copy: these values are CLI-supplied
+		// and this map becomes a journal payload, which nothing downstream caps
+		// — not the emitter, not the writer, not the column. The session_init
+		// entry bounds the same four fields for the same reason; a run record
+		// that copied them whole was the other durable copy, unbounded. It also
+		// drops non-strings, which the verbatim copy stored as whatever the CLI
+		// typed them.
+		v := boundedInitField(m, k.src)
 		if k.src == apiKeySourceMetaKey {
-			s, _ := v.(string) // a non-string is unrecognisable, so drop it
-			src := safeAPIKeySource(s)
-			if src == "" {
-				continue
-			}
-			v = src
+			v = safeAPIKeySource(v)
+		}
+		if v == "" {
+			continue
 		}
 		dst[k.dst] = v
 	}
@@ -364,8 +397,29 @@ func MergeSessionInitMeta(dst map[string]any, meta any) {
 		// to store. The server name and the error category are what an
 		// operator acts on; the message stays in the live output chunk. Same
 		// projection the run.session_init entry applies, for the same reason.
-		errs, _ := boundInitObjects(initMetaObjects(v), "name", "type")
+		skipped := initMetaObjects(v)
+		// The count travels with the list, exactly as it does on the
+		// session_init entry. dropEmptyObjects below shrinks the list to what
+		// projected, and without the count a reader cannot tell three skipped
+		// servers from the one of them whose keys this build understood — every
+		// surface would report the smaller number as the whole truth. Prefer the
+		// decoded count, fall back to counting array elements, and record no
+		// count at all rather than a wrong one.
+		if n := len(skipped); n > 0 {
+			dst["mcp_server_error_count"] = n
+		} else if n, ok := initMetaCount(v); ok {
+			dst["mcp_server_error_count"] = n
+		}
+		errs, truncated := boundInitObjects(skipped, "name", "type")
 		errs = dropEmptyObjects(errs)
+		if truncated {
+			// The list is capped at sessionInitListMax, so without this an
+			// operator reads the kept servers as all of them. The session_init
+			// entry writes this marker for the SAME run — two durable records
+			// that disagree about whether the list is complete are worse than
+			// either one being short.
+			dst["mcp_server_errors_truncated"] = true
+		}
 		if len(errs) == 0 {
 			// The CLI said it dropped something and we could not read the
 			// details — a shape change, or fields renamed. Recording nothing

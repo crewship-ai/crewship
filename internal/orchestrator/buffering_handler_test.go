@@ -341,8 +341,9 @@ func TestMergeSessionInitMeta(t *testing.T) {
 			meta: map[string]any{"mcp_server_errors": json.RawMessage(
 				`[{"name":"memory","type":"invalid_config","message":"connect failed"}]`)},
 			want: map[string]any{
-				"duration_ms":       int64(7),
-				"mcp_server_errors": []map[string]any{{"name": "memory", "type": "invalid_config"}},
+				"duration_ms":            int64(7),
+				"mcp_server_errors":      []map[string]any{{"name": "memory", "type": "invalid_config"}},
+				"mcp_server_error_count": 1,
 			},
 		},
 		{
@@ -721,6 +722,226 @@ func TestMergeResultUsageMeta_DenialGuards(t *testing.T) {
 			dst := map[string]any{}
 			MergeResultUsageMeta(dst, map[string]any{"permission_denials": tc.in})
 			tc.check(t, dst)
+		})
+	}
+}
+
+// The journal entry bounds every CLI-supplied scalar it stores and says why:
+// nothing downstream caps a journal payload's size — not the emitter, not the
+// writer, not the column. The run record is the OTHER durable copy of the same
+// fields and it copied them verbatim, so a CLI that reports a megabyte-long
+// session id writes a megabyte into a hash-chained row that can never be
+// rewritten.
+func TestMergeSessionInitMeta_BoundsWhatItCopies(t *testing.T) {
+	// Longer than the cap by three orders of magnitude, so a bounded value is
+	// unmistakably bounded and not merely "shorter than the input".
+	huge := strings.Repeat("A", 64*1024)
+
+	cases := []struct {
+		name   string
+		src    string
+		dst    string
+		expect string // the value that must be stored, when it is knowable
+	}{
+		{name: "cli version", src: "claude_code_version", dst: "cli_version"},
+		{name: "permission mode", src: "permissionMode", dst: "permission_mode"},
+		{name: "session id", src: "session_id", dst: "session_id"},
+		{name: "api key source", src: "apiKeySource", dst: "api_key_source", expect: "other"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := map[string]any{}
+			MergeSessionInitMeta(dst, map[string]any{tc.src: huge})
+
+			got, ok := dst[tc.dst].(string)
+			if !ok {
+				t.Fatalf("%s = %v, want a bounded string", tc.dst, dst[tc.dst])
+			}
+			if tc.expect != "" {
+				if got != tc.expect {
+					t.Fatalf("%s = %q, want %q", tc.dst, got, tc.expect)
+				}
+				return
+			}
+			if len(got) > sessionInitFieldMax+len("...(truncated)") {
+				t.Errorf("%s stored %d bytes from a %d-byte CLI value; the journal path caps the same "+
+					"field at %d and nothing downstream caps a payload at all",
+					tc.dst, len(got), len(huge), sessionInitFieldMax)
+			}
+		})
+	}
+}
+
+// A denial list the producer could only PARTLY read is the worst shape to store
+// confidently: `run get` prints a "Tools denied" row naming some of the blocked
+// tools and reads as complete. The sentinel exists for exactly this — it just
+// never fired unless EVERY entry was unreadable.
+func TestMergeResultUsageMeta_PartlyReadableDenialsSayTheListIsPartial(t *testing.T) {
+	cases := []struct {
+		name           string
+		in             any
+		wantTools      []string // tool names that must survive
+		wantUnreadable int      // how many entries the sentinel must account for
+	}{
+		{
+			// A release that renames the key on SOME entries: the readable ones
+			// project fine, the rest vanish, and because one survived neither the
+			// sentinel nor any marker was written.
+			name:           "one entry renamed",
+			in:             json.RawMessage(`[{"tool_name":"Bash"},{"tool":"Write"}]`),
+			wantTools:      []string{"Bash"},
+			wantUnreadable: 1,
+		},
+		{
+			// A tool name that is no longer a string projects to nothing the same
+			// way.
+			name:           "non-string tool name",
+			in:             json.RawMessage(`[{"tool_name":"Bash"},{"tool_name":{"id":"Write"}},{"tool_name":42}]`),
+			wantTools:      []string{"Bash"},
+			wantUnreadable: 2,
+		},
+		{
+			// Every entry unreadable already produced a sentinel; it must keep
+			// doing so, and now say how many refusals it stands for.
+			name:           "every entry renamed",
+			in:             json.RawMessage(`[{"tool":"Bash"},{"tool":"Write"}]`),
+			wantTools:      nil,
+			wantUnreadable: 2,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := map[string]any{}
+			MergeResultUsageMeta(dst, map[string]any{"permission_denials": tc.in})
+
+			got := decodeStoredDenials(t, dst["permission_denials"])
+			named := map[string]bool{}
+			var sentinel *storedDenial
+			for i, d := range got {
+				if d.Type == unrecognisedShape {
+					sentinel = &got[i]
+					continue
+				}
+				named[d.ToolName] = true
+			}
+			for _, want := range tc.wantTools {
+				if !named[want] {
+					t.Errorf("permission_denials = %+v, lost the readable denial of %q", got, want)
+				}
+			}
+			if sentinel == nil {
+				t.Fatalf("permission_denials = %+v: %d entries were unreadable and the row says so nowhere — "+
+					"an operator reads the tools it DID name as the whole list", got, tc.wantUnreadable)
+			}
+			if sentinel.Count != tc.wantUnreadable {
+				t.Errorf("sentinel count = %d, want %d — how many refusals went unnamed is the only way "+
+					"to tell a nearly-complete list from a nearly-empty one", sentinel.Count, tc.wantUnreadable)
+			}
+			if sentinel.ToolName != "" {
+				t.Errorf("sentinel names a tool (%q) we never read", sentinel.ToolName)
+			}
+		})
+	}
+}
+
+// dropEmptyObjects shrinks the stored list; the journal entry carries
+// mcp_server_error_count alongside it so a reader can tell three skipped
+// servers from the one that happened to project. The run record stored the list
+// alone, so `run get` and `run list` reported fewer skipped servers than the CLI
+// did, with no field to contradict them.
+func TestMergeSessionInitMeta_KeepsTheSkipCountWhenEntriesDrop(t *testing.T) {
+	cases := []struct {
+		name      string
+		in        any
+		wantCount int
+		wantKept  int
+	}{
+		{
+			name:      "one readable, two renamed",
+			in:        json.RawMessage(`[{"name":"memory","type":"invalid_config"},{"server":"sentry"},{"server":"linear"}]`),
+			wantCount: 3,
+			wantKept:  1,
+		},
+		{
+			name:      "all readable",
+			in:        json.RawMessage(`[{"name":"memory","type":"invalid_config"},{"name":"sentry","type":"url_missing_type"}]`),
+			wantCount: 2,
+			wantKept:  2,
+		},
+		{
+			// Nothing readable: the sentinel already stood in for the list, but
+			// the count says how much it stands for.
+			name:      "all renamed",
+			in:        json.RawMessage(`[{"server":"memory"},{"server":"sentry"}]`),
+			wantCount: 2,
+			wantKept:  1, // the sentinel
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := map[string]any{}
+			MergeSessionInitMeta(dst, map[string]any{"mcp_server_errors": tc.in})
+
+			errs, _ := dst["mcp_server_errors"].([]map[string]any)
+			if len(errs) != tc.wantKept {
+				t.Fatalf("mcp_server_errors = %+v, want %d stored entries", dst["mcp_server_errors"], tc.wantKept)
+			}
+			if got := dst["mcp_server_error_count"]; got != tc.wantCount {
+				t.Errorf("mcp_server_error_count = %v, want %d — the run record otherwise reports %d skipped "+
+					"servers where the CLI reported %d", got, tc.wantCount, len(errs), tc.wantCount)
+			}
+		})
+	}
+}
+
+// boundInitObjects returns whether it cut the list and the run record threw the
+// flag away, so a run with more than sessionInitListMax skipped servers recorded
+// the cap with no marker — while the journal entry for the SAME run wrote
+// mcp_server_errors_truncated. Two durable records that disagree about whether
+// the list is complete, with no way to tell which one to believe.
+func TestMergeSessionInitMeta_MarksTheSkipListTruncated(t *testing.T) {
+	entries := make([]string, 0, sessionInitListMax+8)
+	for i := 0; i < sessionInitListMax+8; i++ {
+		entries = append(entries, fmt.Sprintf(`{"name":"server%02d","type":"invalid_config"}`, i))
+	}
+
+	cases := []struct {
+		name          string
+		in            json.RawMessage
+		wantTruncated bool
+		wantCount     int
+	}{
+		{
+			name:          "more skipped servers than the cap keeps",
+			in:            json.RawMessage("[" + strings.Join(entries, ",") + "]"),
+			wantTruncated: true,
+			wantCount:     sessionInitListMax + 8,
+		},
+		{
+			name:          "a list that fits is not marked",
+			in:            json.RawMessage("[" + strings.Join(entries[:2], ",") + "]"),
+			wantTruncated: false,
+			wantCount:     2,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := map[string]any{}
+			MergeSessionInitMeta(dst, map[string]any{"mcp_server_errors": tc.in})
+
+			if got := dst["mcp_server_error_count"]; got != tc.wantCount {
+				t.Errorf("mcp_server_error_count = %v, want %d", got, tc.wantCount)
+			}
+			_, marked := dst["mcp_server_errors_truncated"]
+			if marked != tc.wantTruncated {
+				t.Errorf("mcp_server_errors_truncated present = %v, want %v — permission_denials got this "+
+					"marker in the same commit, and the session_init entry writes it for this same run",
+					marked, tc.wantTruncated)
+			}
 		})
 	}
 }

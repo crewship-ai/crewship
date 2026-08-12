@@ -3958,6 +3958,17 @@
         },
         "type": "object"
       },
+      "DeniedTool": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "tool_name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DryRunStep": {
         "properties": {
           "agent_slug": {
@@ -9875,11 +9886,17 @@
           "id": {
             "type": "string"
           },
+          "mcp_server_error_count": {
+            "type": "integer"
+          },
           "mcp_server_errors": {
             "items": {
               "$ref": "#/components/schemas/MCPServerError"
             },
             "type": "array"
+          },
+          "mcp_server_errors_truncated": {
+            "type": "boolean"
           },
           "metadata": {
             "additionalProperties": true,
@@ -9891,9 +9908,12 @@
           },
           "permission_denials": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/DeniedTool"
             },
             "type": "array"
+          },
+          "permission_denials_truncated": {
+            "type": "boolean"
           },
           "permission_mode": {
             "nullable": true,

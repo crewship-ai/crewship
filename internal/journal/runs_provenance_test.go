@@ -252,9 +252,129 @@ func TestApplySessionProvenance_ReadsPermissionDenials(t *testing.T) {
 				t.Fatalf("PermissionDenials = %v, want %v", r.PermissionDenials, tc.want)
 			}
 			for i, want := range tc.want {
-				if r.PermissionDenials[i] != want {
-					t.Errorf("PermissionDenials[%d] = %q, want %q", i, r.PermissionDenials[i], want)
+				if r.PermissionDenials[i].ToolName != want {
+					t.Errorf("PermissionDenials[%d] = %q, want %q", i, r.PermissionDenials[i].ToolName, want)
 				}
+			}
+		})
+	}
+}
+
+// The producer collapses an agent's repeated refusals of one tool into a single
+// entry and attaches how many times it was refused, deliberately: one denial is
+// an agent that tried something once, forty is an agent hammering a wall it
+// cannot see, and those call for different fixes. The read model dropped the
+// count on the floor, so the signal died one hop after it was created.
+func TestApplySessionProvenance_KeepsTheDenialCount(t *testing.T) {
+	cases := []struct {
+		name string
+		md   map[string]any
+		want []DeniedTool
+	}{
+		{
+			name: "raw JSON as read back from the DB",
+			md: map[string]any{"permission_denials": json.RawMessage(
+				`[{"tool_name":"Bash","count":39},{"tool_name":"WebFetch","count":1}]`)},
+			want: []DeniedTool{{ToolName: "Bash", Count: 39}, {ToolName: "WebFetch", Count: 1}},
+		},
+		{
+			name: "decoded maps",
+			md: map[string]any{"permission_denials": []map[string]any{
+				{"tool_name": "Bash", "count": 3},
+			}},
+			want: []DeniedTool{{ToolName: "Bash", Count: 3}},
+		},
+		{
+			// Rows written before the producer attached a count: the name is
+			// still the diagnosis, and a fabricated 1 would be a claim we cannot
+			// make.
+			name: "a row that predates the count",
+			md:   map[string]any{"permission_denials": json.RawMessage(`[{"tool_name":"Bash"}]`)},
+			want: []DeniedTool{{ToolName: "Bash", Count: 0}},
+		},
+		{
+			// The sentinel now counts the refusals it stands in for.
+			name: "unreadable-shape sentinel with a count",
+			md: map[string]any{"permission_denials": json.RawMessage(
+				`[{"tool_name":"Bash","count":2},{"type":"unrecognized_shape","count":4}]`)},
+			want: []DeniedTool{{ToolName: "Bash", Count: 2}, {ToolName: "unrecognized_shape", Count: 4}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var r RunAggregated
+			r.applySessionProvenance(tc.md)
+			if len(r.PermissionDenials) != len(tc.want) {
+				t.Fatalf("PermissionDenials = %+v, want %+v", r.PermissionDenials, tc.want)
+			}
+			for i, want := range tc.want {
+				if r.PermissionDenials[i] != want {
+					t.Errorf("PermissionDenials[%d] = %+v, want %+v — how hard the agent hammered the "+
+						"blocked tool is the difference between one fix and another",
+						i, r.PermissionDenials[i], want)
+				}
+			}
+		})
+	}
+}
+
+// Three alarms the producer writes and nothing read: how many servers the CLI
+// actually skipped (the stored list is shrunk by entries this build could not
+// project), and whether either capped list was cut. A truncation marker that
+// reaches no reader is an alarm that does not exist.
+func TestApplySessionProvenance_ReadsCountsAndTruncationMarkers(t *testing.T) {
+	cases := []struct {
+		name          string
+		md            map[string]any
+		wantSkipCount int
+		wantSkipTrunc bool
+		wantDenyTrunc bool
+	}{
+		{
+			// float64 is what a JSON round-trip through the DB yields.
+			name: "as read back from the DB",
+			md: map[string]any{
+				"mcp_server_error_count":       float64(3),
+				"mcp_server_errors_truncated":  true,
+				"permission_denials_truncated": true,
+			},
+			wantSkipCount: 3, wantSkipTrunc: true, wantDenyTrunc: true,
+		},
+		{
+			name:          "in-process ints",
+			md:            map[string]any{"mcp_server_error_count": 7},
+			wantSkipCount: 7,
+		},
+		{
+			name: "nothing recorded",
+			md:   map[string]any{},
+		},
+		{
+			name: "values of the wrong shape are ignored, not coerced",
+			md: map[string]any{
+				"mcp_server_error_count":       "three",
+				"mcp_server_errors_truncated":  "yes",
+				"permission_denials_truncated": float64(1),
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var r RunAggregated
+			r.applySessionProvenance(tc.md)
+			if r.MCPServerErrorCount != tc.wantSkipCount {
+				t.Errorf("MCPServerErrorCount = %d, want %d — the stored list is only what this build "+
+					"could project, so the count is the only honest total", r.MCPServerErrorCount, tc.wantSkipCount)
+			}
+			if r.MCPServerErrorsTruncated != tc.wantSkipTrunc {
+				t.Errorf("MCPServerErrorsTruncated = %v, want %v", r.MCPServerErrorsTruncated, tc.wantSkipTrunc)
+			}
+			if r.PermissionDenialsTruncated != tc.wantDenyTrunc {
+				t.Errorf("PermissionDenialsTruncated = %v, want %v — the truncation alarm is written and "+
+					"decoded nowhere, so an operator reads a capped list as the whole story",
+					r.PermissionDenialsTruncated, tc.wantDenyTrunc)
 			}
 		})
 	}
@@ -303,8 +423,8 @@ func TestApplySessionProvenance_DenialSentinelSurvivesDecoding(t *testing.T) {
 				t.Fatalf("PermissionDenials = %v, want %v", r.PermissionDenials, tc.want)
 			}
 			for i, want := range tc.want {
-				if r.PermissionDenials[i] != want {
-					t.Errorf("PermissionDenials[%d] = %q, want %q", i, r.PermissionDenials[i], want)
+				if r.PermissionDenials[i].ToolName != want {
+					t.Errorf("PermissionDenials[%d] = %q, want %q", i, r.PermissionDenials[i].ToolName, want)
 				}
 			}
 		})

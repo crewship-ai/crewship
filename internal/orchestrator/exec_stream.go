@@ -24,8 +24,15 @@ const endOfStreamEmitTimeout = 5 * time.Second
 // The format varies: top-level messages have "type" like "assistant", "result", "system";
 // stream events have type "stream_event" with nested "event" containing deltas.
 type streamJSONMessage struct {
-	Type    string          `json:"type"`
-	Subtype string          `json:"subtype,omitempty"`
+	// Type is deliberately the one field that is NOT tolerant, and it has to
+	// stay that way: parseClaudeCodeStreamJSON uses a decoded Type as its test
+	// of whether anything survived, so a tolerant Type would swallow the error
+	// that keeps a structurally broken line visible as raw text. See the
+	// comment on the unmarshal there.
+	Type string `json:"type"`
+	// Subtype is the second discriminator — the whole init branch and the
+	// error_max_turns classification hang off it. See tolerantSubtype.
+	Subtype tolerantSubtype `json:"subtype,omitempty"`
 	Message json.RawMessage `json:"message,omitempty"`
 	// For "assistant" type messages with content blocks at top level (legacy)
 	Content []contentBlock `json:"content,omitempty"`
@@ -76,6 +83,18 @@ type streamJSONMessage struct {
 	PermissionMode    string          `json:"permissionMode,omitempty"`
 	Capabilities      tolerantStrings `json:"capabilities,omitempty"`
 	MCPServerErrors   json.RawMessage `json:"mcp_server_errors,omitempty"`
+	// The plain `string` provenance fields above — SessionID, APIKeySource,
+	// PermissionMode, ClaudeCodeVersion, and Model / Result / CWD elsewhere on
+	// this struct — stay strict on purpose, and the decode marker is what makes
+	// that safe. Every one of them is written into metadata behind an `if != ""`
+	// guard, so a field we could not read becomes an ABSENCE, not a false
+	// statement; that is the opposite of is_error, whose zero value actively
+	// asserts the run was fine. And there is no shape-preserving reading of
+	// {"id":"claude-opus-5"} as a model string — recovering one means guessing a
+	// key, which is how the wrong provenance gets recorded as fact. What was
+	// missing was any record that we could not read them, and that is what
+	// parseClaudeCodeStreamJSON's decode marker now supplies.
+	//
 	// Skills is RawMessage, not []string, deliberately: the field is not in
 	// the published stream reference, so its shape is not a promise. A typed
 	// field that stopped matching would fail the unmarshal of the ENTIRE init
@@ -144,6 +163,80 @@ func (s *tolerantString) UnmarshalJSON(b []byte) error {
 	}
 	return nil
 }
+
+// tolerantSubtype carries `subtype`, and it is a type of its own rather than
+// another tolerantString because subtype is not payload — it is the second
+// DISCRIMINATOR. Every field above costs one field when it cannot be read;
+// subtype costs a whole branch. Measured against the shipped parser:
+//
+//	{"type":"system","subtype":["init"],"model":"claude-opus-5",
+//	 "claude_code_version":"2.1.226",
+//	 "mcp_server_errors":[{"name":"crewship-memory","type":"invalid_config"}]}
+//	  -> the emitted event's entire metadata was  map[subtype:]
+//
+// Type decoded, so the line-level isolation correctly kept the line; Subtype
+// zeroed, so `switch msg.Subtype` matched nothing, the init branch never ran and
+// none of the provenance was copied — no session_init journal entry, and every
+// surface showing a healthy run while the CLI was reporting it had dropped an
+// MCP server. With no raw line in the transcript either, that is worse than the
+// pre-tolerance behaviour it replaced. On `result` the same field carries the
+// error_max_turns classification and the label inBandFailure.Err() shows a user.
+//
+// Two things follow from being a discriminator, and they are why tolerantString
+// is not enough:
+//
+//   - a one-element array is unwrapped. tolerantString drops arrays because a
+//     JSON blob rendered into "failed run (…)" reads worse than nothing; a
+//     discriminator has no such problem — ["init"] names exactly one branch, and
+//     the alternative is losing everything the branch would have copied. Two
+//     elements is not unwrapped: picking one would be a guess about which branch
+//     the CLI meant, and guessing a branch is how the wrong provenance gets
+//     recorded as fact.
+//   - anything still unreadable sets `unreadable`, which the parser turns into
+//     the decode marker. A tolerant type that quietly returns "" would just move
+//     the bug: "" is also what a CLI that sent no subtype produces, so silence
+//     here is indistinguishable from absence — the exact failure this whole
+//     round is about.
+type tolerantSubtype struct {
+	value      string
+	unreadable bool
+}
+
+func (s *tolerantSubtype) UnmarshalJSON(b []byte) error {
+	*s = tolerantSubtype{}
+	t := strings.TrimSpace(string(b))
+	// Absent and null are not failures: plenty of envelopes carry no subtype.
+	if t == "" || t == "null" {
+		return nil
+	}
+	if t[0] == '[' {
+		var elems []string
+		if json.Unmarshal(b, &elems) == nil && len(elems) == 1 {
+			s.value = elems[0]
+			return nil
+		}
+		s.unreadable = true
+		return nil
+	}
+	// A string, number or bool: tolerantString already keeps whichever of those
+	// arrives, verbatim, and it never errors. An explicit "" is a value the CLI
+	// sent, not a value we failed to read, so it is not flagged.
+	var label tolerantString
+	_ = label.UnmarshalJSON(b)
+	if label == "" && t != `""` {
+		s.unreadable = true
+		return nil
+	}
+	s.value = string(label)
+	return nil
+}
+
+// String is what every call site uses. The value lands in event metadata, which
+// crosses into the journal and is type-asserted as a plain string there —
+// inBandFailure.observe keys the failure classification off it and
+// NewBufferingHandler gates the session-init capture on it — so the wrapper must
+// never escape this package's decode step.
+func (s tolerantSubtype) String() string { return s.value }
 
 // tolerantNumber reads a number that may have arrived quoted. ParseFloat rather
 // than Atoi: JSON has one number type, so a status can legitimately arrive as

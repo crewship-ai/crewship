@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+import type { ReactNode } from "react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 
 // AssistantTurn is a 493-line component with its own deep tree; the renderer
@@ -9,6 +10,16 @@ vi.mock("../assistant-turn", () => ({
   AssistantTurn: vi.fn(({ turn }: { turn: ChatTurn }) => (
     <div data-testid="assistant-turn-mock" data-turn-id={turn.id} />
   )),
+}))
+
+// Radix mounts HoverCardContent only while the card is open, and no pointer in
+// this environment opens it. Render both halves inline: the provenance table
+// and the per-server lists are the part of this card most likely to meet a
+// shape the CLI changed, so they have to be assertable.
+vi.mock("@/components/ui/hover-card", () => ({
+  HoverCard: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  HoverCardTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  HoverCardContent: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
 }))
 
 import { TurnRenderer } from "../turn-renderer"
@@ -319,5 +330,153 @@ describe("system_init — MCP skips without a server name", () => {
       />,
     )
     expect(screen.getByLabelText(/crewship-memory/)).toBeTruthy()
+  })
+})
+
+// The adapter forwards this report unparsed, so its shape belongs to whichever
+// CLI release answered. Degradation is therefore decided by the PRESENCE of a
+// report, exactly as every backend path decides it — a shape we cannot read
+// must still raise the alarm, or a CLI release turns a degraded session into a
+// silent one.
+describe("system_init — MCP skip reports in shapes the card did not expect", () => {
+  it("warns when the skips arrive as an object keyed by server name", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", {
+          mcp_server_errors: {
+            "crewship-memory": { type: "invalid_config", message: "missing command" },
+            github: { type: "spawn" },
+          },
+        })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.getByText(/2 MCP servers skipped/)).toBeTruthy()
+    expect(screen.getByLabelText(/crewship-memory, github/)).toBeTruthy()
+    expect(screen.getByText(/Skipped: crewship-memory, github/)).toBeTruthy()
+  })
+
+  it("keeps the reason when an object-keyed entry maps the name to a string", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", {
+          mcp_server_errors: { "crewship-memory": "spawn ENOENT" },
+        })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.getByLabelText(/crewship-memory/)).toBeTruthy()
+    expect(screen.getByText("spawn ENOENT")).toBeTruthy()
+  })
+
+  it("warns when the skips arrive as bare name strings", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", {
+          mcp_server_errors: ["crewship-memory", "github"],
+        })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.getByText(/2 MCP servers skipped/)).toBeTruthy()
+    expect(screen.getByLabelText(/crewship-memory, github/)).toBeTruthy()
+  })
+
+  it("raises the alarm and admits it for a shape it cannot enumerate", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", {
+          mcp_server_errors: "crewship-memory failed to start",
+        })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    const chip = screen.getByLabelText(/MCP servers skipped/)
+    expect(chip.getAttribute("aria-label")).toContain("unrecognized_shape")
+    // No count is invented: this shape says nothing about how many servers went.
+    expect(screen.queryByText(/1 MCP server skipped/)).toBeNull()
+    expect(screen.getByText(/could not be read/)).toBeTruthy()
+  })
+
+  it("shows no MCP warning for an empty object report", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", { mcp_server_errors: {} })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.queryByText(/skipped/)).toBeNull()
+  })
+
+  it("shows no MCP warning for a null report", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", { mcp_server_errors: null })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.queryByText(/skipped/)).toBeNull()
+  })
+})
+
+// Every field below is a compile-time assertion over JSON the CLI wrote. A
+// render that throws here does not cost a row: nothing in the chat tree is an
+// error boundary, so the nearest one is the dashboard route segment's, and the
+// degraded session's whole page is replaced by "Something went wrong".
+describe("system_init — fields that are not the strings they were typed as", () => {
+  it("labels a skip whose name is not a string by its category", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", {
+          mcp_server_errors: [{ name: { server: "crewship-memory" }, type: "invalid_config" }],
+        })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.getByText(/1 MCP server skipped/)).toBeTruthy()
+    expect(screen.getByLabelText(/invalid_config/)).toBeTruthy()
+  })
+
+  it("renders the MCP server list when a server's name and status are not strings", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", {
+          mcp_servers: [{ name: { id: "crewship-memory" }, status: { state: "connected" } }],
+        })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.getByText(/Session started/)).toBeTruthy()
+    expect(screen.getByText("unknown")).toBeTruthy()
+  })
+
+  it("omits the model chip when the model is not a string", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", { model: { id: "claude-opus-4-7" } })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.getByText(/Session started/)).toBeTruthy()
+  })
+
+  it("ignores a tool inventory that is not a list", () => {
+    render(
+      <TurnRenderer
+        turn={systemTurn("system_init", "", { tools: "Bash" })}
+        onCopy={noop}
+        onFileClick={noop}
+      />,
+    )
+    expect(screen.queryByText(/tools/)).toBeNull()
   })
 })

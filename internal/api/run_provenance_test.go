@@ -64,7 +64,7 @@ func assertProvenance(t *testing.T, run *journal.RunAggregated) {
 	if run.Model != "claude-opus-5" {
 		t.Errorf("model = %q, want claude-opus-5 — the driver captured the resolved model and dropped it", run.Model)
 	}
-	if len(run.PermissionDenials) != 1 || run.PermissionDenials[0] != "Bash" {
+	if len(run.PermissionDenials) != 1 || run.PermissionDenials[0].ToolName != "Bash" {
 		t.Errorf("permission_denials = %v, want [Bash] — a delegated run that was permission-blocked reads as one that chose not to act",
 			run.PermissionDenials)
 	}

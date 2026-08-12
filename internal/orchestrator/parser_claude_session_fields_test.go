@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -387,5 +388,197 @@ func TestParseClaudeStream_InitKeepsCapabilitiesTyped(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "interrupt_receipt_v1" {
 		t.Errorf("capabilities = %v, want the two entries the line carried", got)
+	}
+}
+
+// subtype is the SECOND discriminator, and the tolerant-type round left it
+// strict — which made it the one field on this envelope whose loss is not the
+// loss of one field. Observed against the shipped parser:
+//
+//	{"type":"system","subtype":["init"],"model":"claude-opus-5", …}
+//	  -> the emitted event's whole metadata was  map[subtype:]
+//
+// msg.Type decoded, so the line-level isolation (err != nil && msg.Type == "")
+// correctly kept the line — and msg.Subtype zeroed, so `switch msg.Subtype`
+// matched nothing and the init branch that copies every provenance field never
+// ran. No version, no session id, no mcp_server_errors, no raw line either:
+// strictly worse than the pre-tolerance behaviour, which at least dumped the
+// envelope into the transcript. The same field on `result` carries the
+// error_max_turns classification and the label inBandFailure.Err() shows a user.
+func TestParseClaudeStream_SubtypeSurvivesAnUnexpectedShape(t *testing.T) {
+	cases := []struct {
+		name      string
+		line      string
+		eventType string
+		subtype   string
+		key       string
+		want      interface{}
+		why       string
+	}{
+		{
+			name: "init subtype wrapped in an array",
+			line: `{"type":"system","subtype":["init"],"model":"claude-opus-5",
+				"claude_code_version":"2.1.226","session_id":"s-1"}`,
+			eventType: "system", subtype: "init",
+			key: "claude_code_version", want: "2.1.226",
+			why: "the init branch is the only thing that copies session provenance — a subtype that routes nowhere drops all of it",
+		},
+		{
+			name:      "result subtype wrapped in an array",
+			line:      `{"type":"result","subtype":["error_max_turns"],"is_error":true,"num_turns":50}`,
+			eventType: "result", subtype: "error_max_turns",
+			key: "is_error", want: true,
+			why: "error_max_turns is the classification that turns a failed run into a message naming a limit the operator can raise",
+		},
+		{
+			name:      "subtype as a bare number still names a branch",
+			line:      `{"type":"system","subtype":0,"model":"claude-opus-5"}`,
+			eventType: "system", subtype: "0",
+			key: "subtype", want: "0",
+			why: "a scalar still reads as a label; keeping it verbatim beats erasing the discriminator",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events := collectEvents(t, tc.line)
+			for _, e := range events {
+				if e.Type == "text" {
+					t.Fatalf("line fell back to raw text (%.60q…) — the envelope must survive", e.Content)
+				}
+			}
+			meta := metaOf(t, events, tc.eventType)
+			// A plain string, not a wrapper: inBandFailure.observe and the
+			// buffering handler's init gate both type-assert meta["subtype"].
+			got, ok := meta["subtype"].(string)
+			if !ok {
+				t.Fatalf("meta[\"subtype\"] = %T, want string — every consumer type-asserts it", meta["subtype"])
+			}
+			if got != tc.subtype {
+				t.Errorf("meta[\"subtype\"] = %q, want %q — %s", got, tc.subtype, tc.why)
+			}
+			if v := meta[tc.key]; v != tc.want {
+				t.Errorf("meta[%q] = %v (%T), want %v — %s", tc.key, v, v, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+// The end of the same story: the recovered subtype has to reach the code that
+// acts on it, not just the metadata map. error_max_turns is the in-band failure
+// operators meet most often (the cap is stamped on every run), and its message
+// is the only one that names a limit they can raise.
+func TestInBandFailure_ClassifiesAWrappedMaxTurnsSubtype(t *testing.T) {
+	var f inBandFailure
+	parseClaudeCodeStreamJSON(
+		[]byte(`{"type":"result","subtype":["error_max_turns"],"is_error":true,"num_turns":50}`),
+		f.observe)
+
+	err := f.Err()
+	if err == nil {
+		t.Fatal("no in-band failure recorded from a result envelope with is_error true")
+	}
+	if !strings.Contains(err.Error(), "turn cap") {
+		t.Errorf("Err() = %q, want the turn-cap message — an unreadable subtype demotes it to the generic "+
+			"\"check the journal\" text, which tells the operator nothing about a limit they can raise", err)
+	}
+}
+
+// A subtype we genuinely cannot reduce to a label must not be silent either.
+// This is the same bar finding 2 sets for strict fields, applied to the
+// tolerance itself: a tolerant type that quietly returns "" would put the bug
+// above back in a new place, because "" is also what a CLI that sent no subtype
+// produces.
+func TestParseClaudeStream_UnreadableSubtypeIsReported(t *testing.T) {
+	meta := metaOf(t, collectEvents(t,
+		`{"type":"system","subtype":{"name":"init"},"model":"claude-opus-5"}`), "system")
+
+	if got, _ := meta["subtype"].(string); got != "" {
+		t.Errorf("meta[\"subtype\"] = %q, want empty — an object names no branch and must not be guessed at", got)
+	}
+	note, _ := meta["decode_error"].(string)
+	if note == "" {
+		t.Fatal("no decode_error on an event whose discriminator could not be read — indistinguishable from a CLI that sent no subtype")
+	}
+	if !strings.Contains(note, "subtype") {
+		t.Errorf("decode_error = %q, want it to name subtype", note)
+	}
+}
+
+// Finding 2. The line-level isolation was narrowed to `err != nil && msg.Type
+// == ""` — right, because a line that routed is not a line that failed — but it
+// means a field json SKIPPED is now gone with nothing said about it. `result`
+// is the sharp case: it is the CLI's final user-facing message, inBandFailure
+// quotes it, and a release that emits it as content blocks (the shape Anthropic
+// uses for message content everywhere else) would show an operator "agent
+// reported a failed run (api_error 401):" and nothing at all — identical, from
+// the outside, to a CLI that sent no message.
+//
+// The bar: a field we could not read must not be indistinguishable from a field
+// the CLI did not send.
+func TestParseClaudeStream_PartialDecodeIsNotSilent(t *testing.T) {
+	cases := []struct {
+		name      string
+		line      string
+		eventType string
+		field     string
+		why       string
+	}{
+		{
+			name: "result as content blocks",
+			line: `{"type":"result","subtype":"success","is_error":true,
+				"result":[{"type":"text","text":"Not logged in · Please run /login"}]}`,
+			eventType: "result", field: "result",
+			why: "the CLI's final message, and the detail inBandFailure quotes back to the user",
+		},
+		{
+			name:      "model as an object on init",
+			line:      `{"type":"system","subtype":"init","model":{"id":"claude-opus-5"},"claude_code_version":"2.1.226"}`,
+			eventType: "system", field: "model",
+			why: "resolved-vs-requested model is recorded from this field and nowhere else",
+		},
+		{
+			name:      "session_id as a number",
+			line:      `{"type":"result","subtype":"success","session_id":1234,"is_error":false}`,
+			eventType: "result", field: "session_id",
+			why: "the CLI's own correlation key for the run",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events := collectEvents(t, tc.line)
+			for _, e := range events {
+				if e.Type == "text" {
+					t.Fatalf("line fell back to raw text (%.60q…) — the isolation must stay", e.Content)
+				}
+			}
+			meta := metaOf(t, events, tc.eventType)
+			note, _ := meta["decode_error"].(string)
+			if note == "" {
+				t.Fatalf("no decode_error on a line that lost %s — %s", tc.field, tc.why)
+			}
+			if !strings.Contains(note, tc.field) {
+				t.Errorf("decode_error = %q, want it to name the field it lost (%s)", note, tc.field)
+			}
+		})
+	}
+}
+
+// …and the marker must mean something, which it only does if a healthy line
+// never carries it. Every event a clean line produces has to come out exactly as
+// it did before, or "this run lost a field" becomes noise nobody reads.
+func TestParseClaudeStream_CleanLinesCarryNoDecodeMarker(t *testing.T) {
+	lines := []string{
+		`{"type":"system","subtype":"init","model":"claude-opus-5","claude_code_version":"2.1.226","capabilities":["interrupt_receipt_v1"]}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu-1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.42,"result":"done","usage":{"input_tokens":11}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}`,
+	}
+	for _, line := range lines {
+		for _, e := range collectEvents(t, line) {
+			meta, _ := e.Metadata.(map[string]interface{})
+			if _, ok := meta["decode_error"]; ok {
+				t.Errorf("clean line %.40q… produced a %s event carrying decode_error", line, e.Type)
+			}
+		}
 	}
 }

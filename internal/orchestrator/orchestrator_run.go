@@ -466,6 +466,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// loggedModel guards the one-shot resolved-model log so a multi-init
 	// stream (sub-agents, restarts) doesn't re-log on every system event.
 	var loggedModel bool
+	// loggedDecodeError keeps the partial-decode warning to one per run. A
+	// mistyped field repeats on every line of a stream, and a warning that
+	// repeats stops being read.
+	var loggedDecodeError bool
 	// emittedSessionInit is the session-init entry's own one-shot guard. Kept
 	// separate from loggedModel: a run can see an init without a model, and a
 	// model without an init.
@@ -483,6 +487,23 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	var inBand inBandFailure
 	tappedHandler := EventHandler(func(event AgentEvent) {
 		inBand.observe(event)
+		// A line that decoded partially kept whatever matched and dropped the
+		// rest; the parser records which field it could not read. Say so once
+		// per run: the dropped field is data the CLI sent us and nothing else
+		// reports its loss, which is how a shape change stays invisible until
+		// somebody notices a surface has gone quiet (#1954).
+		if !loggedDecodeError {
+			if m, ok := event.Metadata.(map[string]interface{}); ok {
+				if note, _ := m["decode_error"].(string); note != "" {
+					loggedDecodeError = true
+					o.logger.Warn("stream line only partly decoded — a field the CLI sent was dropped",
+						"agent_id", req.AgentID,
+						"adapter", req.CLIAdapter,
+						"decode_error", note,
+					)
+				}
+			}
+		}
 		// Surface the model the run ACTUALLY resolved to. adapter_claude.go
 		// stamps meta["model"] on the session-init system event — that's
 		// ground truth for what the API served (the subscription may serve

@@ -67,18 +67,35 @@ type runResponse struct {
 	// Omitted, never [], when nothing was skipped: absence is the signal a
 	// gate keys off, so it has to keep meaning "nothing was lost".
 	MCPServerErrors []journal.MCPServerError `json:"mcp_server_errors,omitempty"`
-	// PermissionDenials names the tools the CLI refused to let the agent use.
-	// Names only — the producer drops the denied input, which is arbitrary
-	// agent text, before it reaches the hash-chained run record.
+	// MCPServerErrorCount is how many servers the CLI reported skipping, which
+	// can exceed len(MCPServerErrors): the producer stores only the entries it
+	// could project. Without it a client renders the shorter list as the whole
+	// truth, with no field to contradict it. Omitted for runs that recorded no
+	// count, so a client compares and reports a gap only when this is larger.
+	MCPServerErrorCount int `json:"mcp_server_error_count,omitempty"`
+	// MCPServerErrorsTruncated / PermissionDenialsTruncated say the list above
+	// was capped. Both lists are capped at the producer; a marker that reaches
+	// no client is an alarm that does not exist.
+	MCPServerErrorsTruncated bool `json:"mcp_server_errors_truncated,omitempty"`
+	// PermissionDenials names the tools the CLI refused to let the agent use,
+	// with how many times each was refused. Names and counts only — the
+	// producer drops the denied input, which is arbitrary agent text, before it
+	// reaches the hash-chained run record.
+	//
+	// The count is part of the answer, not decoration: one refusal is an agent
+	// that tried something once, forty is an agent hammering a wall it cannot
+	// see, and those send an operator to different fixes. It is absent (0) on
+	// runs recorded before the producer attached it.
 	//
 	// Same omitted-never-empty rule: a run blocked by permissions otherwise
 	// reads as a run that chose not to act, and an empty array would make
 	// "nothing was denied" and "we did not look" indistinguishable.
-	PermissionDenials []string `json:"permission_denials,omitempty"`
-	CreatedAt         string   `json:"created_at"`
-	AgentName         *string  `json:"agent_name,omitempty"`
-	AgentSlug         *string  `json:"agent_slug,omitempty"`
-	CrewName          *string  `json:"crew_name,omitempty"`
+	PermissionDenials          []journal.DeniedTool `json:"permission_denials,omitempty"`
+	PermissionDenialsTruncated bool                 `json:"permission_denials_truncated,omitempty"`
+	CreatedAt                  string               `json:"created_at"`
+	AgentName                  *string              `json:"agent_name,omitempty"`
+	AgentSlug                  *string              `json:"agent_slug,omitempty"`
+	CrewName                   *string              `json:"crew_name,omitempty"`
 }
 
 type runListResponse struct {
@@ -524,7 +541,13 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			SessionID:         stringPtrOrNil(r.SessionID),
 			MCPServerErrors:   r.MCPServerErrors,
 			PermissionDenials: r.PermissionDenials,
-			CreatedAt:         formatRFC3339(r.CreatedAt),
+			// The counts and markers travel with the lists they qualify —
+			// separating them is how a capped or shrunken list came to read as
+			// complete.
+			MCPServerErrorCount:        r.MCPServerErrorCount,
+			MCPServerErrorsTruncated:   r.MCPServerErrorsTruncated,
+			PermissionDenialsTruncated: r.PermissionDenialsTruncated,
+			CreatedAt:                  formatRFC3339(r.CreatedAt),
 		}
 		if r.ChatID != "" {
 			c := r.ChatID

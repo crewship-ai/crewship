@@ -40,13 +40,52 @@ type RunDetail struct {
 	PermissionMode  *string          `json:"permission_mode,omitempty"`
 	SessionID       *string          `json:"session_id,omitempty"`
 	MCPServerErrors []MCPServerError `json:"mcp_server_errors,omitempty"`
-	// PermissionDenials names the tools the CLI refused to let the agent use.
-	// Names only — the denied input never reaches the run record.
-	PermissionDenials []string `json:"permission_denials,omitempty"`
-	CreatedAt         string   `json:"created_at"`
-	AgentName         *string  `json:"agent_name,omitempty"`
-	AgentSlug         *string  `json:"agent_slug,omitempty"`
-	CrewName          *string  `json:"crew_name,omitempty"`
+	// MCPServerErrorCount is how many servers the CLI reported skipping. It can
+	// exceed len(MCPServerErrors): the producer stores only the entries it could
+	// project, and the list is capped. Absent (0) on runs that recorded no
+	// count, so a renderer reports a shortfall only when this is the larger.
+	MCPServerErrorCount int `json:"mcp_server_error_count,omitempty"`
+	// MCPServerErrorsTruncated / PermissionDenialsTruncated say the list above
+	// was capped, so what it names is not all of it.
+	MCPServerErrorsTruncated bool `json:"mcp_server_errors_truncated,omitempty"`
+	// PermissionDenials names the tools the CLI refused to let the agent use and
+	// how many times each was refused. Names and counts only — the denied input
+	// never reaches the run record.
+	PermissionDenials          []DeniedTool `json:"permission_denials,omitempty"`
+	PermissionDenialsTruncated bool         `json:"permission_denials_truncated,omitempty"`
+	CreatedAt                  string       `json:"created_at"`
+	AgentName                  *string      `json:"agent_name,omitempty"`
+	AgentSlug                  *string      `json:"agent_slug,omitempty"`
+	CrewName                   *string      `json:"crew_name,omitempty"`
+}
+
+// DeniedTool is one tool the CLI refused to let the agent use, with the number
+// of refusals the producer collapsed into it. Count is 0 when the record
+// predates the tally — not "denied zero times", which a run record never says.
+type DeniedTool struct {
+	ToolName string `json:"tool_name"`
+	Count    int    `json:"count,omitempty"`
+}
+
+// UnmarshalJSON accepts a bare tool name as well as the object form, because
+// this CLI talks to servers it did not ship with: `permission_denials` was an
+// array of strings before the count was added, and a CLI that rejected the old
+// shape would fail the whole decode — reporting NO denials for a run the CLI
+// blocked, which is the exact misdiagnosis this field exists to prevent.
+func (d *DeniedTool) UnmarshalJSON(b []byte) error {
+	var name string
+	if err := json.Unmarshal(b, &name); err == nil {
+		d.ToolName, d.Count = name, 0
+		return nil
+	}
+	// Alias breaks the recursion into this method.
+	type deniedTool DeniedTool
+	var v deniedTool
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	*d = DeniedTool(v)
+	return nil
 }
 
 // MCPServerError mirrors one entry of the run's mcp_server_errors: an MCP

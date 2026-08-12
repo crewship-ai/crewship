@@ -766,8 +766,16 @@ func responseComponents() map[string]any {
 		"cli_version": nullable("string"), "api_key_source": nullable("string"),
 		"permission_mode": nullable("string"), "session_id": nullable("string"),
 		"mcp_server_errors": array(ref("MCPServerError")),
-		// Tool names only — the denied input never reaches the run record.
-		"permission_denials": array(scalar("string")),
+		// The list above is what the record could identify and is capped; these
+		// two say what it leaves out, and a client that renders the list without
+		// them shows a partial answer as a complete one.
+		"mcp_server_error_count":      scalar("integer"),
+		"mcp_server_errors_truncated": scalar("boolean"),
+		// Tool names and refusal counts only — the denied input never reaches
+		// the run record. The count separates an agent that tried once from one
+		// hammering a wall it cannot see.
+		"permission_denials":           array(ref("DeniedTool")),
+		"permission_denials_truncated": scalar("boolean"),
 	})
 	schemas := map[string]any{
 		"Workspace": workspace, "WorkspaceList": array(ref("Workspace")), "WorkspaceCounts": object(map[string]any{"crews": scalar("integer"), "agents": scalar("integer"), "members": scalar("integer")}),
@@ -779,8 +787,12 @@ func responseComponents() map[string]any {
 		"Skill":        skill, "SkillList": array(ref("Skill")), "InstalledSkillAgent": object(stringProps("agent_id", "agent_slug", "agent_name", "avatar_url", "crew_id", "crew_slug", "crew_name", "crew_color", "crew_icon", "crew_avatar_style")),
 		"Run": run, "RunList": object(map[string]any{"data": array(ref("Run")), "stats": ref("RunStats"), "pagination": ref("Pagination")}),
 		"MCPServerError": object(stringProps("name", "type", "message")),
-		"RunStats":       object(map[string]any{"running": scalar("integer"), "today": scalar("integer"), "failed": scalar("integer")}),
-		"Pagination":     object(map[string]any{"page": scalar("integer"), "limit": scalar("integer"), "total": scalar("integer"), "total_pages": scalar("integer")}),
+		// tool_name carries the failure CATEGORY when the CLI named no tool, so
+		// a refusal nobody could name still renders. count is absent on records
+		// written before the tally existed — it is never a "denied zero times".
+		"DeniedTool": object(map[string]any{"tool_name": scalar("string"), "count": scalar("integer")}),
+		"RunStats":   object(map[string]any{"running": scalar("integer"), "today": scalar("integer"), "failed": scalar("integer")}),
+		"Pagination": object(map[string]any{"page": scalar("integer"), "limit": scalar("integer"), "total": scalar("integer"), "total_pages": scalar("integer")}),
 	}
 	return map[string]any{"schemas": schemas}
 }

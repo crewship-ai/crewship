@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -235,9 +236,43 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 	// a CLI that started writing plain-text diagnostics to stdout must show up
 	// as visibly wrong rather than as silence.
 	var msg streamJSONMessage
-	if err := json.Unmarshal(line, &msg); err != nil && msg.Type == "" {
+	err := json.Unmarshal(line, &msg)
+	if err != nil && msg.Type == "" {
 		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 		return
+	}
+
+	// The isolation above has a second edge, and it is the price of narrowing
+	// it: a line that ROUTED is no longer dumped as raw text, so the fields json
+	// skipped on the way through are gone with nothing said about them. `result`
+	// is the sharp case — it is the CLI's final user-facing message and
+	// inBandFailure quotes it, so a release that emitted it as content blocks
+	// (the shape Anthropic uses for message content everywhere else) would show
+	// an operator "agent reported a failed run (api_error 401):" and nothing
+	// else, indistinguishable from a CLI that sent no message at all.
+	//
+	// So the line says what it lost. json's own error already names the field
+	// and the type it choked on, which is the whole diagnostic; the verbatim
+	// line remains recoverable from the run's exec.output_chunk entry, which
+	// captures raw stdout. Stamped on the events rather than logged because this
+	// is a pure function with no logger, and because a log line is not attached
+	// to the run someone is triaging — event metadata rides into the journal
+	// next to the envelope it belongs to.
+	//
+	// Deliberately NOT a raw-text event as well: an assistant line carries every
+	// tool_use of a turn, so re-emitting the line on any partial decode would
+	// dump JSON into the chat for a mistyped tool id.
+	if note := decodeNote(err, msg); note != "" {
+		inner := handler
+		handler = func(e AgentEvent) {
+			meta, _ := e.Metadata.(map[string]interface{})
+			if meta == nil {
+				meta = map[string]interface{}{}
+			}
+			meta["decode_error"] = note
+			e.Metadata = meta
+			inner(e)
+		}
 	}
 
 	// Claude Code wraps content in message.content; promote it when top-level is
@@ -330,7 +365,7 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 
 	case "result":
 		meta := map[string]interface{}{
-			"subtype":         msg.Subtype,
+			"subtype":         msg.Subtype.String(),
 			"duration_ms":     msg.DurationMs,
 			"duration_api_ms": msg.DurationAPI,
 			"total_cost_usd":  float64(msg.TotalCostUSD),
@@ -382,10 +417,11 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		})
 
 	case "system":
+		subtype := msg.Subtype.String()
 		meta := map[string]interface{}{
-			"subtype": msg.Subtype,
+			"subtype": subtype,
 		}
-		switch msg.Subtype {
+		switch subtype {
 		case "init":
 			if msg.Model != "" {
 				meta["model"] = msg.Model
@@ -478,7 +514,7 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		}
 		handler(AgentEvent{
 			Type:      "system",
-			Content:   msg.Subtype,
+			Content:   subtype,
 			Metadata:  meta,
 			Timestamp: time.Now(),
 		})
@@ -490,4 +526,29 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 			}
 		}
 	}
+}
+
+// decodeNote summarises, in one string, what this line lost while decoding —
+// nothing more than a description, and empty for every healthy line so the
+// marker keeps meaning something.
+//
+// It has two sources, and the second is the reason it is a function rather than
+// err.Error(). json reports a type error for a STRICT field, so a strict field
+// we could not read names itself. The tolerant types never error — that is the
+// point of them — so they can only report through their own state, and the only
+// one that does is tolerantSubtype, because it is the only one whose zero value
+// costs more than its own field. The remaining tolerant fields reduce a known
+// value ("401" is 401, "true" is true) or drop a pass-through list, which is a
+// loss the run can absorb.
+func decodeNote(err error, msg streamJSONMessage) string {
+	notes := make([]string, 0, 2)
+	if err != nil {
+		notes = append(notes, err.Error())
+	}
+	if msg.Subtype.unreadable {
+		// Named explicitly: json never saw a type error here, so nothing else
+		// in the note would mention the field that routed the whole envelope.
+		notes = append(notes, "subtype was not a readable label, so this envelope routed on an empty discriminator")
+	}
+	return strings.Join(notes, "; ")
 }

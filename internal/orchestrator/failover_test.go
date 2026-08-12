@@ -281,9 +281,15 @@ func TestBuildCLICommand(t *testing.T) {
 			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--model", "claude-sonnet-4-6", "--", codexDroidPrompt("review")},
 		},
 		{
-			"unknown defaults to claude",
+			// The fallback for an unrecognised cli_adapter still runs the real
+			// `claude` binary in the crew container, so it carries the same
+			// isolation as the Claude adapter — dropping it on the path least
+			// likely to be watched is how a cloned repo's hooks would run
+			// (#1954). The `--` guard keeps a message starting with a dash a
+			// message.
+			"unknown defaults to claude, isolated",
 			AgentRunRequest{CLIAdapter: "UNKNOWN", UserMessage: "hello"},
-			[]string{"claude", "--print", "hello"},
+			[]string{"claude", "--print", "--setting-sources", "", "--strict-mcp-config", "--", "hello"},
 		},
 	}
 

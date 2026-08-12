@@ -42,7 +42,7 @@ Auth source:      ANTHROPIC_API_KEY
 Permission mode:  bypassPermissions
 Session:          sess-9f1c
 MCP skipped:      crewship-memory (invalid_config)
-Tools denied:     Bash, Write
+Tools denied:     Bash ×39, Write
 ```
 
 | Field | Why it is there |
@@ -51,7 +51,15 @@ Tools denied:     Bash, Write
 | `Auth source` | Which auth path resolved — i.e. whether the credential Crewship mounted is the one in use. Reported from a closed set; anything unrecognised reads `other` rather than being stored verbatim. |
 | `Permission mode` | Confirms the permission flags took effect. |
 | `MCP skipped` | **A finding, not a label.** A `--mcp-config` entry that fails validation is skipped and the run continues, exiting 0 — an agent that lost its memory server this way looks perfectly healthy. `run list` flags it under the table for the same reason. |
-| `Tools denied` | Tools the CLI refused to let the agent use. Without it, a blocked run reads as one that *chose* not to act, sending you after a prompt problem instead of a permission rule. Tool names only — the denied input is arbitrary agent-generated text and never reaches the run record. |
+| `Tools denied` | Tools the CLI refused to let the agent use. Without it, a blocked run reads as one that *chose* not to act, sending you after a prompt problem instead of a permission rule. Tool names only — the denied input is arbitrary agent-generated text and never reaches the run record. A `×N` suffix is how many times that tool was refused: one refusal is an agent that tried, forty is an agent hammering a wall. |
+
+Both lists are deduplicated, bounded, and honest about what they could not read:
+
+- **A shortfall line.** `… and 2 more the CLI reported in a shape this record could not identify` means the CLI named more than the record can show. The alarm is never dropped for want of a readable name — a partial list that reads as complete is worse than one that admits it is partial.
+- **`(list capped)`** means the run hit the per-list bound. Only a run in real trouble reaches it — an agent retrying a denied tool in a loop, or an `--mcp-config` where most entries fail validation.
+- **`unrecognized_shape`** as a name means the CLI reported the field in a shape this build does not enumerate. The report is still surfaced, because whether a session was degraded is decided by the CLI having reported it, never by our being able to parse it.
+
+The same rule holds on every surface: the chat card, the `run.session_init` journal entry and this view all treat presence as the signal.
 
 Fields are omitted entirely when unknown (older runs, and non-Claude adapters, which report none of this) — absence means "never reported", not "empty".
 

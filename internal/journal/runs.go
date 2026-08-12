@@ -84,6 +84,15 @@ type RunAggregated struct {
 	// configured for — exit code 0 does not contradict it, which is exactly
 	// why the loss needs its own field rather than a line in a log.
 	MCPServerErrors []MCPServerError
+	// MCPServerErrorCount is how many servers the CLI said it skipped, which is
+	// not always len(MCPServerErrors): the producer drops entries whose fields
+	// it could not read, so the list is what this build understood and the count
+	// is what happened. Zero for runs predating the field — a reader compares
+	// the two and only reports a gap when the count is the larger.
+	MCPServerErrorCount int
+	// MCPServerErrorsTruncated reports that the stored list was capped, so the
+	// servers it names are not all of them.
+	MCPServerErrorsTruncated bool
 	// PermissionDenials names the tools the CLI refused to let the agent use.
 	// Tool NAMES only: the producer drops the denied input before storing it,
 	// because that input is arbitrary agent-generated text and this record is
@@ -95,12 +104,37 @@ type RunAggregated struct {
 	// not to act, sending an operator after a prompt problem.
 	//
 	// One entry per denied TOOL, not per refusal: the producer collapses an
-	// agent's forty retries of the same blocked Bash into one name (the retry
-	// count stays on the stored record). A single "unrecognized_shape" entry
-	// means the CLI reported a refusal in a shape the producer could not read —
-	// the run WAS blocked and the tool is not knowable.
-	PermissionDenials []string
-	CreatedAt         time.Time // == StartedAt for runs (we don't track a separate creation moment)
+	// agent's forty retries of the same blocked Bash into one entry carrying
+	// the count. A single "unrecognized_shape" entry means the CLI reported a
+	// refusal in a shape the producer could not read — the run WAS blocked and
+	// the tool is not knowable.
+	PermissionDenials []DeniedTool
+	// PermissionDenialsTruncated reports that the stored denial list was capped,
+	// so the tools it names are not all of them.
+	PermissionDenialsTruncated bool
+	CreatedAt                  time.Time // == StartedAt for runs (we don't track a separate creation moment)
+}
+
+// DeniedTool is one tool the CLI refused to let the agent use, with how many
+// times it refused it.
+//
+// The count is the reason this is a struct and not a name. The producer
+// deliberately collapses repeats and attaches the tally, because one refusal is
+// an agent that tried something once and forty is an agent hammering a wall it
+// cannot see — different diagnoses, different fixes. It was a []string here, so
+// the tally died one hop after it was created.
+//
+// Zero means the record predates the count, NOT "denied zero times": a run
+// record only carries a tool it was denied at least once, and inventing a 1
+// would be a claim the row does not make.
+type DeniedTool struct {
+	// ToolName is the tool the CLI named — or, when it named none, the CATEGORY
+	// the producer recorded instead (its unrecognized_shape sentinel). The
+	// fallback is applied at decode so every renderer shows the alarm; a
+	// sentinel nobody can display keeps the alarm and destroys the ability to
+	// act on it.
+	ToolName string `json:"tool_name"`
+	Count    int    `json:"count,omitempty"`
 }
 
 // MCPServerError is one MCP server the CLI skipped at startup, as reported on
@@ -502,24 +536,59 @@ func (r *RunAggregated) applySessionProvenance(md map[string]any) {
 		r.MCPServerErrors = decodeMCPServerErrors(v)
 	}
 	if v, ok := md["permission_denials"]; ok {
-		r.PermissionDenials = decodeDeniedToolNames(v)
+		r.PermissionDenials = decodeDeniedTools(v)
 	}
+	// The counts and the truncation markers the producer writes alongside those
+	// two lists. Both lists are lossy by design — one drops entries it cannot
+	// project, both are capped — and these are the only fields that say so.
+	// Reading them nowhere is what made the alarms unreachable.
+	r.MCPServerErrorCount = provenanceInt(md["mcp_server_error_count"])
+	r.MCPServerErrorsTruncated, _ = md["mcp_server_errors_truncated"].(bool)
+	r.PermissionDenialsTruncated, _ = md["permission_denials_truncated"].(bool)
 }
 
-// decodeDeniedToolNames pulls the tool names out of the projected denial list,
+// provenanceInt reads a count that may have been stored in-process (int) or read
+// back through JSON (float64). Anything else yields 0: a count we cannot read is
+// a count we do not report, and a coerced one would be a number an operator
+// trusts.
+func provenanceInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0
+		}
+		return int(i)
+	}
+	return 0
+}
+
+// decodeDeniedTools pulls the denied tools out of the projected denial list,
 // tolerating both the in-process []map form and the raw JSON a DB read yields.
 // A malformed value degrades to no denials rather than a partial list: this
 // drives an operator's reading of why a run did nothing, and half an answer is
 // worse than none.
 //
-// Type is read as a fallback because the producer records a CATEGORY there,
-// with no tool_name, when the CLI reported a refusal in a shape it could not
-// read (orchestrator's unrecognized_shape sentinel) — it will not invent a tool
-// name, and reading tool_name only would drop that entry and put the run back
-// to reading as one that CHOSE not to act, which is the reason the sentinel is
-// written at all. The same fallback carries any future entry the CLI describes
-// by category rather than by name.
-func decodeDeniedToolNames(v any) []string {
+// The count is carried through. The producer attaches it deliberately so that
+// one refusal reads differently from forty; a decoder that kept only the name
+// threw that away at the first hop and no surface downstream could get it back.
+// Absent on rows written before the producer attached it, and 0 there means
+// "not recorded" rather than a tally.
+//
+// Type is read as a fallback for the name because the producer records a
+// CATEGORY there, with no tool_name, when the CLI reported a refusal in a shape
+// it could not read (orchestrator's unrecognized_shape sentinel) — it will not
+// invent a tool name, and reading tool_name only would drop that entry and put
+// the run back to reading as one that CHOSE not to act, which is the reason the
+// sentinel is written at all. The same fallback carries any future entry the CLI
+// describes by category rather than by name.
+func decodeDeniedTools(v any) []DeniedTool {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return nil
@@ -527,24 +596,26 @@ func decodeDeniedToolNames(v any) []string {
 	var entries []struct {
 		ToolName string `json:"tool_name"`
 		Type     string `json:"type"`
+		Count    int    `json:"count"`
 	}
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return nil
 	}
-	names := make([]string, 0, len(entries))
+	out := make([]DeniedTool, 0, len(entries))
 	for _, e := range entries {
 		name := e.ToolName
 		if name == "" {
 			name = e.Type
 		}
-		if name != "" {
-			names = append(names, name)
+		if name == "" {
+			continue
 		}
+		out = append(out, DeniedTool{ToolName: name, Count: e.Count})
 	}
-	if len(names) == 0 {
+	if len(out) == 0 {
 		return nil
 	}
-	return names
+	return out
 }
 
 // decodeMCPServerErrors types the array the adapter deliberately passed

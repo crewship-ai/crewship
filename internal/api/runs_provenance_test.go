@@ -121,6 +121,78 @@ func TestRunHandler_List_SurfacesSessionProvenance(t *testing.T) {
 	}
 }
 
+// Both provenance lists on a run record are lossy by design: the skip list
+// drops entries whose fields the producer could not project, and both lists are
+// capped. The producer records a count and a truncation marker for exactly that
+// reason, and neither reached the wire — so a client rendered a shrunken list as
+// the whole story, which is what these fields exist to prevent.
+//
+// The per-tool denial count travels with them: one refusal is an agent that
+// tried something once, forty is an agent hammering a wall it cannot see.
+func TestRunHandler_Get_SurfacesDenialCountsAndTruncation(t *testing.T) {
+	f := newRunsTestFixture(t)
+	f.emitRunRowWithMeta(t, "run_partial", `{
+		"cli_version":"2.1.219",
+		"mcp_server_errors":[{"name":"sentry","type":"connection_error"}],
+		"mcp_server_error_count":3,
+		"mcp_server_errors_truncated":true,
+		"permission_denials":[{"tool_name":"Bash","count":39},{"tool_name":"Write","count":1}],
+		"permission_denials_truncated":true
+	}`, time.Now().UTC().Add(-time.Minute))
+
+	req := httptest.NewRequest("GET", "/api/v1/runs/run_partial", nil)
+	req.SetPathValue("id", "run_partial")
+	req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	f.h.Get(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got runResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if got.MCPServerErrorCount != 3 {
+		t.Errorf("mcp_server_error_count = %d, want 3 — one entry is stored and three servers were "+
+			"skipped, and the client has no other way to know", got.MCPServerErrorCount)
+	}
+	if !got.MCPServerErrorsTruncated {
+		t.Errorf("mcp_server_errors_truncated = false, want true")
+	}
+	if !got.PermissionDenialsTruncated {
+		t.Errorf("permission_denials_truncated = false, want true — written by the producer, decoded by " +
+			"nobody, so the truncation alarm is unreachable")
+	}
+	if len(got.PermissionDenials) != 2 {
+		t.Fatalf("permission_denials = %+v, want two tools", got.PermissionDenials)
+	}
+	if got.PermissionDenials[0].ToolName != "Bash" || got.PermissionDenials[0].Count != 39 {
+		t.Errorf("permission_denials[0] = %+v, want Bash denied 39 times", got.PermissionDenials[0])
+	}
+
+	// Nothing recorded means no key at all: a client keys off absence, and a
+	// zero count would be indistinguishable from "no servers were skipped".
+	f.emitRunRowWithMeta(t, "run_clean", `{"cli_version":"2.1.219"}`, time.Now().UTC().Add(-time.Minute))
+	req = httptest.NewRequest("GET", "/api/v1/runs/run_clean", nil)
+	req.SetPathValue("id", "run_clean")
+	req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
+	rr = httptest.NewRecorder()
+	f.h.Get(rr, req)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	for _, key := range []string{
+		"mcp_server_error_count", "mcp_server_errors_truncated",
+		"permission_denials", "permission_denials_truncated",
+	} {
+		if _, present := raw[key]; present {
+			t.Errorf("clean run serialised %q, want the key omitted", key)
+		}
+	}
+}
+
 // TestRunHandler_Get_SurfacesSessionProvenance covers the per-run endpoint
 // `crewship run get` reads — the detail surface for these fields.
 func TestRunHandler_Get_SurfacesSessionProvenance(t *testing.T) {
