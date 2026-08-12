@@ -222,8 +222,8 @@ func (unknownAdapter) WriteMCPConfig(
 //
 // Discovery paths covered:
 //   - AGENTS.md           — OpenCode, Cursor, Codex, Droid auto-discover this
-//   - CLAUDE.md           — Cursor; Claude Code skips it under --bare (we still
-//     emit so a user disabling --bare gets parity)
+//   - CLAUDE.md           — Cursor; Claude Code skips it under
+//     --setting-sources "" (we still emit so a per-agent opt-out gets parity)
 //   - GEMINI.md           — Gemini CLI auto-discovers
 //   - .cursor/rules/crewship.md — Cursor priority path, takes precedence
 //     over AGENTS.md for that CLI
