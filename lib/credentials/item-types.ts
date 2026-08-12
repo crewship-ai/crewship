@@ -38,6 +38,38 @@ export const SERVER_CREDENTIAL_TYPES = [
 
 export type ServerCredentialType = (typeof SERVER_CREDENTIAL_TYPES)[number]
 
+/**
+ * Short, lowercase names for the server's type enum — what the list badge, the
+ * rail chip and the overview breakdown all call a type.
+ *
+ * Lowercase on purpose: these sit next to a monospace credential name, and
+ * SCREAMING_SNAKE beside it reads as part of the identifier rather than as a
+ * label about it. Two server types collapse to "secret" because that is what
+ * they are; the distinction between SECRET and GENERIC_SECRET is a storage
+ * detail nobody scanning a table is asking about.
+ */
+const CREDENTIAL_TYPE_LABELS: Record<string, string> = {
+  AI_CLI_TOKEN: "ai cli",
+  API_KEY: "api key",
+  CLI_TOKEN: "token",
+  SECRET: "secret",
+  OAUTH2: "oauth",
+  USERPASS: "userpass",
+  SSH_KEY: "ssh key",
+  CERTIFICATE: "cert",
+  GENERIC_SECRET: "secret",
+  ENDPOINT_URL: "endpoint",
+}
+
+/**
+ * The label for a server type. An unrecognised value is lowercased rather than
+ * dropped or renamed: a type the console has not heard of is still a real type
+ * on the row, and showing it verbatim is the only honest answer.
+ */
+export function credentialTypeLabel(type: string): string {
+  return CREDENTIAL_TYPE_LABELS[type] ?? type.toLowerCase().replace(/_/g, " ")
+}
+
 export type ItemTypeKey = "TOKEN" | "LOGIN" | "KEYPAIR" | "SSH_KEY" | "FILE" | "CERTIFICATE"
 
 export interface CredentialItemField {

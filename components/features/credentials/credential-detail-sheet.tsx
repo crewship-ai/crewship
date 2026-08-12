@@ -5,7 +5,6 @@ import { motion } from "motion/react"
 import {
   Activity,
   ChevronLeft,
-  Settings as SettingsIcon,
   Users,
   FlaskConical,
   RefreshCw,
@@ -17,20 +16,45 @@ import {
   Pencil,
   Eye,
   EyeOff,
+  Boxes,
+  Cpu,
+  Hash,
+  Info,
+  KeyRound,
+  Layers,
   ListTree,
+  PackageX,
+  Plug,
+  ShieldCheck,
+  TerminalSquare,
+  UserCircle2,
 } from "lucide-react"
+import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { formatDate, formatRelativeTime } from "@/lib/time"
-import { getBrand } from "@/lib/credential-providers/registry"
+import {
+  Appear,
+  DetailCard,
+  FieldLabel,
+  Pill,
+  StatStrip,
+  type DetailTone,
+  type StatItem,
+} from "@/components/ui/detail"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import { credentialTypeLabel } from "@/lib/credentials/item-types"
+import { EXPIRY_WARNING_DAYS, daysUntilExpiry } from "@/lib/credentials/facets"
+import { tierMeta, tierOf, type CredentialTierLevel } from "@/lib/credentials/tiers"
+import type { CredentialCrewRef, CredentialToolGap } from "@/hooks/use-credential-readiness"
+import { CrewIcon } from "@/components/ui/crew-icon"
 import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
@@ -61,6 +85,10 @@ interface CredentialSummary {
   created_at: string
   updated_at: string
   agent_names: string[]
+  /** Same agents as `agent_names`, in the same order — the server builds both
+   *  in one pass (splitAgentRefs). Optional so an older payload still decodes;
+   *  absent falls the avatar back to seeding from the name. */
+  agent_ids?: string[]
   _count_agent_credentials: number
   mcp_used: boolean
   /** Server-declared: does Crewship maintain a real upstream probe for this
@@ -82,6 +110,10 @@ interface CredentialSummary {
    * payload, the gating here starts working with no other change.
    */
   sensitivity?: string | null
+  /** Keeper tier, 1–4 — see lib/credentials/tiers.ts. Absent on an older
+   *  server, which the badge renders as unclassified rather than as L1. */
+  security_level?: number
+  security_level_label?: string
 }
 
 interface AuditEvent {
@@ -91,6 +123,13 @@ interface AuditEvent {
   ip_address: string | null
   metadata: Record<string, unknown> | null
   occurred_at: string
+  /** Who did it — "agent", "user" or "system". Resolved server-side (see
+   *  resolveAuditActor) because the actor was recorded in two shapes and, in
+   *  metadata, under five different keys. Optional so an older server's
+   *  timeline still renders, unattributed. */
+  actor_kind?: "agent" | "user" | "crew" | "system"
+  actor_id?: string
+  actor_name?: string
 }
 
 interface RotationRow {
@@ -137,6 +176,25 @@ interface AssignmentRow {
   expired: boolean
 }
 
+/** Reveal classifications, weakest first — the order is the rank comparison
+ *  that decides whether a change is a raise (MANAGER+) or a lower (admin). */
+const SENSITIVITY_LEVELS = ["STANDARD", "RESTRICTED", "SEALED"] as const
+
+/**
+ * How much of the timeline is on screen before you ask for more.
+ *
+ * A busy credential is read every couple of minutes, so fifty events is fifty
+ * rows of "USE · 3m ago" — a card three screens tall that pushes everything
+ * below it out of reach and answers nothing the first row did not. Ten is the
+ * shape of the question people actually ask ("what happened recently?"), and
+ * the header says how many there are so the ten never reads as all of them.
+ */
+const AUDIT_PREVIEW = 10
+
+/** What we ask the server for. The header appends "+" at exactly this number,
+ *  because a full page means the timeline is longer than we fetched. */
+const AUDIT_FETCH_LIMIT = 50
+
 /** How many agents we will interrogate for grant provenance. See loadAssignments. */
 const MAX_ASSIGNMENT_LOOKUPS = 12
 
@@ -152,14 +210,25 @@ export interface CredentialDetailSheetProps {
   onEdit?: (cred: CredentialSummary) => void
   /** Returns to the list. Renders the back breadcrumb when supplied. */
   onBack?: () => void
+  /** Crews that can use this credential but lack the CLI that reads it.
+   *  Comes from the page's readiness hook — see ReadinessCard. */
+  toolGaps?: CredentialToolGap[]
+  /** False when no crew answered the readiness endpoint. "No gap" and "nobody
+   *  looked" must never render the same. */
+  readinessKnown?: boolean
+  /** crew id → name + icon + colour. A slot bound to a crew printed the raw
+   *  cuid before this: an identifier nobody recognises, in the one place the
+   *  page is meant to say WHO can read the secret. */
+  crewsById?: Record<string, CredentialCrewRef>
 }
 
 export function CredentialDetailSheet({
   workspaceId, credential, open, onOpenChange, onRefresh, onRotate, onEdit, onBack,
+  toolGaps = [], readinessKnown = false, crewsById = {},
 }: CredentialDetailSheetProps) {
-  const [tab, setTab] = React.useState<"overview" | "fields" | "used-by" | "audit" | "settings">("overview")
   const [audit, setAudit] = React.useState<AuditEvent[]>([])
   const [auditLoading, setAuditLoading] = React.useState(false)
+  const [auditExpanded, setAuditExpanded] = React.useState(false)
   const [rotations, setRotations] = React.useState<RotationRow[]>([])
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [testing, setTesting] = React.useState(false)
@@ -176,13 +245,6 @@ export function CredentialDetailSheet({
   const [sensitivity, setSensitivity] = React.useState<string | null>(null)
   const [sensitivitySaving, setSensitivitySaving] = React.useState(false)
   const [sensitivityError, setSensitivityError] = React.useState<string | null>(null)
-  // Inline value rewrite — Vercel-parity manual rotation. Lives in the
-  // Settings tab next to the full grace-overlap rotation flow.
-  const [valueDraft, setValueDraft] = React.useState("")
-  const [showValueDraft, setShowValueDraft] = React.useState(false)
-  const [savingValue, setSavingValue] = React.useState(false)
-  const [valueSaved, setValueSaved] = React.useState(false)
-  const [valueError, setValueError] = React.useState<string | null>(null)
 
   // Hide affordances users can't perform rather than letting them
   // click through to a 403. Mirrors the backend gating exactly:
@@ -225,10 +287,25 @@ export function CredentialDetailSheet({
     revealEnabled &&
     effectiveSensitivity !== "SEALED"
 
+  /**
+   * Which of the four gates is shut, in the order they bind.
+   *
+   * Only meaningful for a reader who is otherwise allowed to act — below the
+   * MANAGER floor there is nothing to explain, because reveal is not a thing
+   * that tier does. SEALED is checked first because it is the one no
+   * configuration can open: the answer there is rotation, not a setting.
+   */
+  const revealBlockedReason =
+    effectiveSensitivity === "SEALED"
+      ? "SEALED can never be revealed, by any role. The break-glass is rotation, not disclosure."
+      : !revealEnabled
+        ? "Reveal is switched off for this workspace. An owner can turn it on under Settings → Access & secrets."
+        : "Revealing a value needs the credentials:reveal capability, which no role grants on its own."
+
   React.useEffect(() => {
     if (!open || !credential) {
-      setTab("overview")
       setAudit([])
+      setAuditExpanded(false)
       setRotations([])
       setTestResult(null)
       setFields([])
@@ -238,10 +315,6 @@ export function CredentialDetailSheet({
       setSensitivityError(null)
       setRevealEnabled(false)
       setRevealOpen(false)
-      setValueDraft("")
-      setShowValueDraft(false)
-      setValueSaved(false)
-      setValueError(null)
     }
   }, [open, credential])
 
@@ -264,43 +337,112 @@ export function CredentialDetailSheet({
     return () => { cancelled = true }
   }, [open, credential, canUpdate, workspaceId])
 
+  // Every sub-resource, on open.
+  //
+  // These used to be gated on which tab was showing, which is what tabs are
+  // for: five panes, five fetches, one at a time. The page has no tabs any
+  // more — audit, fields, slots, agents and rotations are all on it at once —
+  // so they all load at once. Two are still gated, on PERMISSION rather than
+  // on layout: the audit log is MANAGER+ and rotation history is only rendered
+  // for someone who can rotate, and asking for either without the role is a
+  // 403 in the console for a section that will not appear.
   React.useEffect(() => {
     if (!open || !credential) return
-    if (tab === "audit" && canUpdate) {
+    const cid = credential.id
+    const ws = encodeURIComponent(workspaceId)
+
+    if (canUpdate) {
       setAuditLoading(true)
-      apiFetch(`/api/v1/credentials/${credential.id}/audit?workspace_id=${workspaceId}&limit=50`)
-        .then((r) => r.ok ? r.json() : [])
+      apiFetch(`/api/v1/credentials/${cid}/audit?workspace_id=${ws}&limit=${AUDIT_FETCH_LIMIT}`)
+        .then((r) => (r.ok ? r.json() : []))
         .then((data: AuditEvent[]) => setAudit(Array.isArray(data) ? data : []))
         .catch(() => setAudit([]))
         .finally(() => setAuditLoading(false))
     }
-    if (tab === "fields") {
-      setFieldsLoading(true)
-      apiFetch(`/api/v1/credentials/${credential.id}/fields?workspace_id=${workspaceId}`)
-        .then((r) => r.ok ? r.json() : [])
-        .then((data: CredentialFieldRow[]) => setFields(Array.isArray(data) ? data : []))
-        .catch(() => setFields([]))
-        .finally(() => setFieldsLoading(false))
-    }
-    if (tab === "used-by") {
-      apiFetch(`/api/v1/credentials/bindings?workspace_id=${workspaceId}&credential_id=${credential.id}`)
-        .then((r) => r.ok ? r.json() : null)
-        .then((body: { bindings?: BindingRow[] } | null) =>
-          setBindings(Array.isArray(body?.bindings) ? body.bindings : []))
-        .catch(() => setBindings([]))
-      void loadAssignments(workspaceId, credential).then(setAssignments).catch(() => setAssignments([]))
-    }
-    if (tab === "settings" && canRotate) {
-      // Rotation history is only rendered for users who can rotate —
-      // skip the fetch entirely for everyone else.
-      apiFetch(`/api/v1/credentials/${credential.id}/rotations?workspace_id=${workspaceId}`)
-        .then((r) => r.ok ? r.json() : [])
+
+    setFieldsLoading(true)
+    apiFetch(`/api/v1/credentials/${cid}/fields?workspace_id=${ws}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: CredentialFieldRow[]) => setFields(Array.isArray(data) ? data : []))
+      .catch(() => setFields([]))
+      .finally(() => setFieldsLoading(false))
+
+    apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&credential_id=${cid}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: { bindings?: BindingRow[] } | null) =>
+        setBindings(Array.isArray(body?.bindings) ? body.bindings : []))
+      .catch(() => setBindings([]))
+
+    void loadAssignments(workspaceId, credential).then(setAssignments).catch(() => setAssignments([]))
+
+    if (canRotate) {
+      apiFetch(`/api/v1/credentials/${cid}/rotations?workspace_id=${ws}`)
+        .then((r) => (r.ok ? r.json() : []))
         .then((data: RotationRow[]) => setRotations(Array.isArray(data) ? data : []))
         .catch(() => setRotations([]))
     }
-  }, [tab, open, credential, workspaceId, canRotate, canUpdate])
+  }, [open, credential, workspaceId, canRotate, canUpdate])
 
   if (!credential) return null
+
+  const brand = getBrand(credential.provider)
+  const BrandIcon = brand.Icon
+  const tierLevel: CredentialTierLevel | null = tierOf(credential)
+  // The card's border colour IS the tier. A page that says "critical" in grey
+  // has said it in a way nobody scanning will register.
+  const tierTone: DetailTone =
+    tierLevel === 4 ? "destructive" : tierLevel === 3 ? "warn" : tierLevel === 2 ? "blue" : "default"
+
+  // The server ships agent ids and names as two parallel arrays (splitAgentRefs),
+  // so a binding that names an agent by id can still be shown by name.
+  const agentNameById = new Map<string, string>(
+    (credential.agent_ids ?? []).map((id, i) => [id, credential.agent_names[i] ?? id]),
+  )
+
+  const shownAudit = auditExpanded ? audit : audit.slice(0, AUDIT_PREVIEW)
+
+  const missingTools = Array.from(new Set(toolGaps.map((g) => g.tool).filter(Boolean)))
+  const readinessTone: DetailTone =
+    toolGaps.length > 0 ? "warn" : readinessKnown ? "success" : "default"
+  const readinessLabel =
+    toolGaps.length > 0
+      ? missingTools.length > 0
+        ? `Needs ${missingTools.join(", ")}`
+        : "Tool missing"
+      : readinessKnown
+        ? "Ready"
+        : "Readiness unknown"
+
+  // The figures band. Same six-slot shape as the issue's, answering the
+  // questions a vault gets asked instead of the ones a tracker does.
+  const expiryDays = daysUntilExpiry(credential)
+  const facts: StatItem[] = [
+    { label: "Created", value: formatRelativeTime(credential.created_at) },
+    {
+      label: "Last used",
+      value: credential.last_used_at ? formatRelativeTime(credential.last_used_at) : "never",
+    },
+    {
+      label: "Expires",
+      value:
+        expiryDays === null ? "—" : expiryDays < 0 ? "expired" : expiryDays === 0 ? "today" : `${expiryDays}d`,
+      tone:
+        expiryDays === null
+          ? "default"
+          : expiryDays < 0
+            ? "destructive"
+            : expiryDays < EXPIRY_WARNING_DAYS
+              ? "warn"
+              : "default",
+    },
+    { label: "Used by", value: credential._count_agent_credentials || "—" },
+    { label: "Fields", value: fields.length || "—" },
+    {
+      label: "Readiness",
+      value: readinessLabel,
+      tone: toolGaps.length > 0 ? "warn" : readinessKnown ? "success" : "default",
+    },
+  ]
 
   const handleTest = async () => {
     setTesting(true)
@@ -322,15 +464,40 @@ export function CredentialDetailSheet({
     }
   }
 
+  /**
+   * Delete this credential.
+   *
+   * The three outcomes are deliberately distinct, and this is the only place
+   * they are handled now that the list's own delete went with the table:
+   *
+   *   · ok      — refresh and close.
+   *   · 404     — another admin deleted it between the dialog opening and this
+   *               request landing (#1162). That is the outcome the user wanted,
+   *               so it is a success with a note, not a failure. Silently
+   *               closing would be worse: the row is already gone and nothing
+   *               would explain why.
+   *   · anything else — say so and STAY OPEN. The previous version dropped
+   *     every failure on the floor: a 403 closed the dialog and left the
+   *     credential in place, which reads exactly like a successful delete.
+   */
   const handleDelete = async () => {
-    const res = await apiFetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
-      method: "DELETE",
-    })
-    if (res.ok) {
-      onRefresh()
-      onOpenChange(false)
+    const name = credential.name
+    try {
+      const res = await apiFetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
+        method: "DELETE",
+      })
+      if (res.ok || res.status === 404) {
+        if (res.status === 404) toast.success(`${name} was already deleted`)
+        onRefresh()
+        onOpenChange(false)
+      } else {
+        toast.error(`Couldn't delete ${name}.`)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Couldn't delete ${name}.`)
+    } finally {
+      setConfirmDelete(false)
     }
-    setConfirmDelete(false)
   }
 
   const setClassification = async (next: string) => {
@@ -387,133 +554,164 @@ export function CredentialDetailSheet({
             </span>
           </div>
         )}
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="px-5 pt-4 pb-3 border-b border-white/10">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-mono truncate">{credential.name}</h2>
-                  {getBrand(credential.provider).cli && (
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] px-1 font-mono shrink-0 border-info/50 text-info"
-                      title="Crewship uses this credential to authenticate the agent's CLI inside the container"
-                    >
-                      CLI
-                    </Badge>
+        {/* One page, no tabs.
+         *
+         * It had five: Overview, Fields, Used by, Audit, Settings. Tabs are a
+         * way of admitting a screen holds more than fits, and this one does
+         * not — a credential is a value, its parts, who can read it, how hard
+         * it is guarded, and what has happened to it. Five of those five are
+         * things you want to see AT ONCE when you are deciding whether to
+         * rotate something, and behind a tab each of them costs a click plus
+         * the memory of what the other tab said.
+         *
+         * The shape is the issue detail's, deliberately and to the pixel where
+         * the content allows: identity card, figures band, then a wide column
+         * of the substance beside a narrow column of properties. Two screens in
+         * one product that both mean "here is one thing in full" should not
+         * look like two products. Everything is built from the same
+         * components/ui/detail kit, so they cannot drift apart by accident.
+         */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-4 p-4">
+            {/* ── Identity ─────────────────────────────────────────────── */}
+            <Appear order={0}>
+              <DetailCard>
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-surface-raised">
+                        <BrandIcon
+                          className="h-5 w-5"
+                          style={{ color: brandColor(brand) }}
+                          aria-label={brand.label}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <h1 className="truncate font-mono text-lg font-semibold tracking-tight">
+                          {credential.name}
+                        </h1>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                          <span className="font-mono">{credentialTypeLabel(credential.type)}</span>
+                          <span aria-hidden>·</span>
+                          <span>{brand.label}</span>
+                          <span aria-hidden>·</span>
+                          <span>{credential.scope === "CREW" ? "Crew-scoped" : "Workspace"}</span>
+                          {credential.account_label && (
+                            <>
+                              <span aria-hidden>·</span>
+                              <span className="font-medium">{credential.account_label}</span>
+                            </>
+                          )}
+                          {credential.username && (
+                            <>
+                              <span aria-hidden>·</span>
+                              <span className="font-mono">{credential.username}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    {onEdit && canUpdate && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onEdit(credential)}
+                        className="shrink-0"
+                      >
+                        <Pencil className="mr-1.5 h-3 w-3" />
+                        Edit
+                      </Button>
+                    )}
+                  </div>
+
+                  {credential.description && (
+                    <p className="max-w-[80ch] text-[13px] leading-relaxed text-foreground/85">
+                      {credential.description}
+                    </p>
                   )}
-                  {effectiveSensitivity && (
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-[9px] px-1 font-mono shrink-0",
-                        effectiveSensitivity === "SEALED" && "border-destructive/50 text-destructive",
-                        effectiveSensitivity === "RESTRICTED" && "border-warn/50 text-warn",
+
+                  {/* The chips answer, in one line, the three questions asked
+                      about a secret before any other: how hard is it guarded,
+                      who may see the value, and does it work. */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {tierLevel !== null ? (
+                      <Pill tone={tierTone}>
+                        <ShieldCheck className="h-3 w-3" />
+                        {credential.security_level_label || tierMeta(tierLevel).label}
+                      </Pill>
+                    ) : (
+                      <Pill tone="default">
+                        <ShieldCheck className="h-3 w-3" />
+                        Tier not reported
+                      </Pill>
+                    )}
+                    {effectiveSensitivity && (
+                      <Pill
+                        tone={
+                          effectiveSensitivity === "SEALED"
+                            ? "destructive"
+                            : effectiveSensitivity === "RESTRICTED"
+                              ? "warn"
+                              : "default"
+                        }
+                      >
+                        {effectiveSensitivity === "SEALED" ? (
+                          <EyeOff className="h-3 w-3" />
+                        ) : (
+                          <Eye className="h-3 w-3" />
+                        )}
+                        {effectiveSensitivity}
+                      </Pill>
+                    )}
+                    <Pill tone={readinessTone}>
+                      {toolGaps.length > 0 ? (
+                        <PackageX className="h-3 w-3" />
+                      ) : readinessKnown ? (
+                        <CheckCircle2 className="h-3 w-3" />
+                      ) : (
+                        <PackageX className="h-3 w-3" />
                       )}
-                    >
-                      {effectiveSensitivity}
-                    </Badge>
-                  )}
+                      {readinessLabel}
+                    </Pill>
+                    {brand.cli && (
+                      <Pill tone="blue">
+                        <TerminalSquare className="h-3 w-3" />
+                        CLI
+                      </Pill>
+                    )}
+                    {credential.mcp_used && (
+                      <Pill tone="blue">
+                        <Plug className="h-3 w-3" />
+                        MCP
+                      </Pill>
+                    )}
+                    {(credential.tags ?? []).map((t) => (
+                      <Pill key={t} tone="default">
+                        <Hash className="h-3 w-3" />
+                        {t}
+                      </Pill>
+                    ))}
+                  </div>
                 </div>
-                <p className="text-xs truncate">
-                  {credential.account_label || credential.description || credential.provider}
-                </p>
-              </div>
-              {onEdit && canUpdate && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onEdit(credential)}
-                  className="shrink-0"
-                >
-                  <Pencil className="h-3 w-3 mr-1.5" />
-                  Edit
-                </Button>
-              )}
-            </div>
-            {credential.tags && credential.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1 pt-1">
-                {credential.tags.map((t) => (
-                  <Badge key={t} variant="outline" className="text-[10px] px-1 font-mono">{t}</Badge>
-                ))}
-              </div>
-            )}
-          </div>
+              </DetailCard>
+            </Appear>
 
-          <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex-1 flex flex-col">
-            <TabsList className="px-3 mt-2 justify-start bg-transparent border-b border-white/10 rounded-none h-9">
-              <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
-              <TabsTrigger value="fields" className="text-xs">
-                <ListTree className="h-3 w-3 mr-1" />Fields
-              </TabsTrigger>
-              <TabsTrigger value="used-by" className="text-xs">
-                Used by{credential._count_agent_credentials > 0 && (
-                  <Badge variant="secondary" className="ml-1.5 h-4 text-[10px] px-1.5">{credential._count_agent_credentials}</Badge>
-                )}
-              </TabsTrigger>
-              {/* GET /audit is MANAGER+ — it exposes the IPs behind admin
-                  actions. Rendering the tab for MEMBER/VIEWER meant a 403
-                  degrading to the empty state, i.e. telling them the credential
-                  has no history when they are merely not allowed to read it. */}
-              {canUpdate && (
-                <TabsTrigger value="audit" className="text-xs"><Activity className="h-3 w-3 mr-1" />Audit</TabsTrigger>
-              )}
-              <TabsTrigger value="settings" className="text-xs"><SettingsIcon className="h-3 w-3 mr-1" />Settings</TabsTrigger>
-            </TabsList>
+            {/* ── The figures band ─────────────────────────────────────── */}
+            <Appear order={1}>
+              <StatStrip items={facts} />
+            </Appear>
 
-            <div className="flex-1 overflow-y-auto p-4">
-              <TabsContent value="overview" className="m-0 space-y-3">
-                <Field label="Type">{credential.type.replace(/_/g, " ")}</Field>
-                <Field label="Provider">{credential.provider}</Field>
-                {credential.username && (
-                  // USERPASS only — username is cleartext (it's an
-                  // identifier, not a secret). The password lives in
-                  // encrypted_value and is never returned by any
-                  // read endpoint, so we don't even need to mask
-                  // anything on this tab.
-                  <Field label="Username">
-                    <span className="font-mono">{credential.username}</span>
-                  </Field>
-                )}
-                <Field label="Scope">{credential.scope}</Field>
-                <Field label="Created">{formatDate(credential.created_at)}</Field>
-                {credential.token_expires_at && (
-                  <Field label="Expires">{formatDate(credential.token_expires_at)}</Field>
-                )}
-                <Field label="Last used">
-                  {credential.last_used_at ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <Clock className="h-3 w-3 opacity-60" />
-                      {formatRelativeTime(credential.last_used_at)}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">never</span>
-                  )}
-                </Field>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
+              {/* ── The substance ─────────────────────────────────────── */}
+              <div className="flex flex-col gap-4 xl:col-span-2 2xl:col-span-3">
                 {credential.last_error && (
-                  <div className="rounded-md border border-destructive/30 bg-destructive/[0.05] p-3">
-                    <div className="flex items-center gap-1.5 text-xs text-destructive font-medium">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      Last error
-                    </div>
-                    <p className="text-xs text-foreground/80 mt-1 font-mono">{credential.last_error}</p>
-                  </div>
-                )}
-
-                {credential.last_used_ips.length > 0 && (
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Last 5 IPs
-                    </div>
-                    <ul className="space-y-1">
-                      {credential.last_used_ips.map((ip) => (
-                        <li key={ip} className="text-xs font-mono text-foreground/80 flex items-center gap-2">
-                          <span className="h-1 w-1 rounded-full bg-success/60" />
-                          {ip}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  <Appear order={2}>
+                    <DetailCard title="Last error" icon={AlertTriangle} tone="destructive">
+                      <p className="font-mono text-[12px] leading-relaxed text-foreground/85">
+                        {credential.last_error}
+                      </p>
+                    </DetailCard>
+                  </Appear>
                 )}
 
                 {/*
@@ -526,470 +724,684 @@ export function CredentialDetailSheet({
                   is what keeps the reveal count low enough that each one is
                   worth investigating.
                 */}
-                {(canRotate || canReveal) && (
-                  <div className="pt-3 border-t border-white/10 space-y-2">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Value
-                    </div>
+                <Appear order={3}>
+                  <DetailCard
+                    title="Value"
+                    icon={KeyRound}
+                    subtitle="encrypted at rest"
+                    action={
+                      // Test now is only meaningful where the server maintains
+                      // an upstream probe (credential.testable — see
+                      // probeSupportedProviders) and requires update
+                      // permission. Mirrors the BE gating in TestStored, so
+                      // nobody clicks into a 403. Deliberately NOT gated on
+                      // brand .cli like the badge above: that flag marks the
+                      // CLIs Crewship drives in the container, which excluded
+                      // GitHub/GitLab/Vercel despite real probes.
+                      credential.testable && canUpdate ? (
+                        <span className="inline-flex items-center gap-2">
+                          {testResult && (
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1 text-[11px]",
+                                testResult.valid ? "text-success" : "text-destructive",
+                              )}
+                            >
+                              {testResult.valid ? (
+                                <CheckCircle2 className="h-3 w-3" />
+                              ) : (
+                                <XCircle className="h-3 w-3" />
+                              )}
+                              {testResult.valid ? "Valid" : testResult.error || "Invalid"}
+                            </span>
+                          )}
+                          <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
+                            {testing ? (
+                              <Spinner className="mr-1.5 h-3 w-3" />
+                            ) : (
+                              <FlaskConical className="mr-1.5 h-3 w-3" />
+                            )}
+                            Test now
+                          </Button>
+                        </span>
+                      ) : undefined
+                    }
+                  >
                     <div className="rounded-md border border-white/10 bg-background px-3 py-2 font-mono text-xs text-muted-foreground">
                       ••••••••••••••••
                     </div>
+
                     {canRotate && (
-                      <>
+                      <div className="mt-2.5 space-y-1.5">
                         <Button size="sm" className="w-full justify-start" onClick={() => onRotate(credential)}>
-                          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                           Rotate and show the new value
                         </Button>
                         <p className="text-[10px] text-muted-foreground">
                           Mints a new value, shows it once, and lets the old one drain through the
                           grace window. Nothing existing is disclosed.
                         </p>
-                      </>
+                      </div>
                     )}
-                    {canReveal && (
-                      <>
+
+                    {/* Reveal, or why not.
+                     *
+                     * It used to render nothing at all when any of the four
+                     * gates was shut, which teaches the reader that this
+                     * product cannot show a secret — and then a colleague on
+                     * the same screen has the button. Each gate is a different
+                     * fix (a workspace switch, a capability grant, a
+                     * classification), so each one says which. */}
+                    {canReveal ? (
+                      <div className="mt-2 space-y-1">
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="w-full justify-start text-[11px] text-muted-foreground hover:text-foreground -ml-2"
+                          className="-ml-2 w-full justify-start text-[11px] text-muted-foreground hover:text-foreground"
                           onClick={() => setRevealOpen(true)}
                         >
-                          <Eye className="h-3 w-3 mr-1.5" />
+                          <Eye className="mr-1.5 h-3 w-3" />
                           Reveal the existing value…
                         </Button>
                         <p className="text-[10px] text-muted-foreground">
                           Requires a written reason and is recorded in the tamper-evident journal
                           before the value is returned.
                         </p>
-                      </>
+                      </div>
+                    ) : (
+                      canUpdate && (
+                        <p className="mt-2 flex items-start gap-1.5 text-[10px] text-muted-foreground">
+                          <EyeOff className="mt-px h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span>{revealBlockedReason}</span>
+                        </p>
+                      )
                     )}
-                  </div>
-                )}
 
-                {/* Test now is only meaningful where the server maintains an
-                    upstream probe (credential.testable — see
-                    probeSupportedProviders) and requires update permission.
-                    Mirrors the BE gating in TestStored — hiding the button
-                    avoids a click → 403 dead-end for read-only members.
-                    Deliberately NOT gated on brand .cli like the badge above:
-                    that flag marks the CLIs Crewship drives in the container,
-                    which excluded GitHub/GitLab/Vercel despite real probes. */}
-                {credential.testable && canUpdate && (
-                <div className="pt-3 border-t border-white/10 flex gap-2">
-                  <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
-                    {testing ? <Spinner className="h-3.5 w-3.5 mr-1.5" /> : <FlaskConical className="h-3.5 w-3.5 mr-1.5" />}
-                    Test now
-                  </Button>
-                  {testResult && (
-                    <span className={cn("text-xs inline-flex items-center gap-1.5", testResult.valid ? "text-success" : "text-destructive")}>
-                      {testResult.valid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-                      {testResult.valid ? "Valid" : (testResult.error || "Invalid")}
-                    </span>
-                  )}
-                </div>
-                )}
-              </TabsContent>
-
-              {/*
-                Fields. A secret part is listed by KEY and marked "secret" —
-                there is no masked placeholder standing in for a value, because
-                the server does not return one: credential_fields.go omits
-                `encrypted_value` from the SELECT entirely, so there are no
-                bytes here to render even by accident. Non-secret parts (region,
-                account id) ARE shown, which is the entire reason they are
-                stored in the clear.
-              */}
-              <TabsContent value="fields" className="m-0">
-                {fieldsLoading ? (
-                  <div className="text-center py-8"><Spinner className="inline h-4 w-4 text-muted-foreground" /></div>
-                ) : fields.length === 0 ? (
-                  <p className="text-xs text-muted-foreground py-6 text-center">
-                    This credential is a single value — no extra fields.
-                  </p>
-                ) : (
-                  <ul className="space-y-1.5">
-                    {fields.map((f) => (
-                      <li
-                        key={f.key}
-                        className="rounded-md border border-white/10 bg-background px-3 py-2 text-xs flex items-center gap-2"
-                      >
-                        <span className="font-mono text-foreground/90">{f.key}</span>
-                        {f.is_secret ? (
-                          <Badge variant="outline" className="ml-auto text-[9px] px-1 border-warn/40 text-warn">
-                            secret
-                          </Badge>
-                        ) : (
-                          <span className="ml-auto font-mono text-[11px] text-muted-foreground truncate max-w-[220px]">
-                            {f.value}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </TabsContent>
-
-              <TabsContent value="used-by" className="m-0 space-y-4">
-                {/* Bindings — (scope, slot) → this credential. This is the
-                    answer to "which env var will the container actually see",
-                    which before P3 had no answer short of booting the agent. */}
-                {bindings.length > 0 && (
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Slots
-                    </div>
-                    <ul className="space-y-1">
-                      {bindings.map((b) => (
-                        <li
-                          key={b.id}
-                          className="rounded-md border border-white/10 bg-background px-3 py-2 text-xs flex items-center gap-2"
+                    {/* Replacing the value lives in Edit, not here.
+                     *
+                     * There were three ways to change one secret on one screen:
+                     * rotate, an inline "replace the value" input, and the Value
+                     * field in the Edit dialog. Two of those did the same PATCH.
+                     * Rotate is a different operation — it keeps the old value
+                     * alive through a grace window — so it stays; the plain swap
+                     * belongs where every other property of this credential is
+                     * changed. */}
+                    {canUpdate && onEdit && (
+                      <p className="mt-3 border-t border-hairline pt-3 text-[10px] text-muted-foreground">
+                        To paste a new value without a grace window, use{" "}
+                        <button
+                          type="button"
+                          onClick={() => onEdit(credential)}
+                          className="font-medium text-primary hover:underline"
                         >
-                          <Badge variant="outline" className="text-[9px] px-1">{b.scope}</Badge>
-                          <span className="font-mono">{b.slot}</span>
-                          {(b.crew_id || b.agent_id) && (
-                            <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                              {b.crew_id ?? b.agent_id}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                          Edit
+                        </button>
+                        {" "}— leave the field empty there to keep the existing one.
+                      </p>
+                    )}
+                  </DetailCard>
+                </Appear>
 
-                {assignments.length > 0 ? (
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Agents
-                    </div>
-                    <ul className="space-y-1.5">
-                      {assignments.map((a) => (
-                        <li
-                          key={`${a.agentName}:${a.envVarName}:${a.grantSource}`}
-                          className="rounded-md border border-white/10 bg-background px-3 py-2 text-sm flex items-center gap-2"
-                        >
-                          <Users className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="truncate">{a.agentName}</span>
-                          {/* grant_source decides where the revoke lives: an
-                              explicit grant has an assignment id and its own
-                              DELETE; a crew-derived one has no row at all and
-                              can only be taken away by unlinking the crew. */}
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "ml-auto text-[9px] px-1",
-                              a.grantSource === "crew" ? "border-info/40 text-info" : "opacity-70",
-                            )}
-                            title={
-                              a.grantSource === "crew"
-                                ? "Inherited from the crew — unlink the crew to take it away"
-                                : "Granted to this agent directly"
-                            }
+                {/*
+                  Fields. A secret part is listed by KEY and marked "secret" —
+                  there is no masked placeholder standing in for a value,
+                  because the server does not return one: credential_fields.go
+                  omits `encrypted_value` from the SELECT entirely, so there are
+                  no bytes here to render even by accident. Non-secret parts
+                  (region, account id) ARE shown, which is the entire reason
+                  they are stored in the clear.
+                */}
+                <Appear order={4}>
+                  <DetailCard
+                    title="Fields"
+                    icon={ListTree}
+                    subtitle={fields.length > 0 ? String(fields.length) : undefined}
+                  >
+                    {fieldsLoading ? (
+                      <div className="py-6 text-center">
+                        <Spinner className="inline h-4 w-4 text-muted-foreground" />
+                      </div>
+                    ) : fields.length === 0 ? (
+                      <p className="text-[12px] text-muted-foreground">
+                        This credential is a single value — no extra parts.
+                      </p>
+                    ) : (
+                      <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                        {fields.map((f) => (
+                          <div
+                            key={f.key}
+                            className="flex items-baseline gap-2 text-[12px]"
                           >
-                            {a.grantSource === "crew" ? "crew grant" : "explicit"}
-                          </Badge>
-                          {a.expiresAt && (
+                            <dt className="min-w-0 shrink-0 font-mono text-foreground/90">{f.key}</dt>
+                            <dd className="min-w-0 flex-1 truncate text-right">
+                              {f.is_secret ? (
+                                <Badge
+                                  variant="outline"
+                                  className="border-warn/40 px-1 text-[9px] text-warn"
+                                >
+                                  secret
+                                </Badge>
+                              ) : (
+                                <span className="font-mono text-[11px] text-muted-foreground">
+                                  {f.value}
+                                </span>
+                              )}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
+                  </DetailCard>
+                </Appear>
+
+                <Appear order={5}>
+                  <DetailCard
+                    title="Used by"
+                    icon={Users}
+                    subtitle={
+                      credential._count_agent_credentials > 0
+                        ? `${credential._count_agent_credentials}`
+                        : undefined
+                    }
+                  >
+                    {/* Bindings — (scope, slot) → this credential. This is the
+                        answer to "which env var will the container actually
+                        see", which before P3 had no answer short of booting
+                        the agent. */}
+                    {bindings.length > 0 && (
+                      <div className="mb-3 space-y-1.5">
+                        <FieldLabel>Slots</FieldLabel>
+                        <ul className="space-y-1">
+                          {bindings.map((b) => {
+                            const crew = b.crew_id ? crewsById[b.crew_id] : undefined
+                            const agentName = b.agent_id ? agentNameById.get(b.agent_id) : undefined
+                            return (
+                              <li
+                                key={b.id}
+                                className="flex items-center gap-2 rounded-md border border-white/10 bg-background px-3 py-2 text-xs"
+                              >
+                                <Badge variant="outline" className="px-1 text-[9px]">
+                                  {b.scope}
+                                </Badge>
+                                <span className="font-mono">{b.slot}</span>
+                                {/* Who the slot reaches, drawn as itself. A raw
+                                    cuid in this column made the one row that
+                                    answers "who can read this?" unreadable. */}
+                                {b.crew_id && (
+                                  <span className="ml-auto inline-flex min-w-0 items-center gap-1.5">
+                                    <CrewIcon
+                                      icon={crew?.icon ?? ""}
+                                      color={crew?.color ?? undefined}
+                                      size="sm"
+                                      className="!h-4 !w-4 !rounded shrink-0"
+                                    />
+                                    <span className="truncate">
+                                      {crew?.name ?? b.crew_id}
+                                    </span>
+                                  </span>
+                                )}
+                                {!b.crew_id && b.agent_id && (
+                                  <span className="ml-auto inline-flex min-w-0 items-center gap-1.5">
+                                    <AgentAvatar seed={b.agent_id} className="h-4 w-4 shrink-0" alt="" />
+                                    <span className="truncate">{agentName ?? b.agent_id}</span>
+                                  </span>
+                                )}
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
+                    )}
+
+                    {assignments.length > 0 ? (
+                      <ul className="space-y-1.5">
+                        {assignments.map((a) => (
+                          <li
+                            key={`${a.agentName}:${a.envVarName}:${a.grantSource}`}
+                            className="flex items-center gap-2 rounded-md border border-white/10 bg-background px-3 py-2 text-[13px]"
+                          >
+                            <AgentAvatar seed={a.agentName} className="h-4 w-4 shrink-0" alt="" />
+                            <span className="truncate">{a.agentName}</span>
+                            <span className="truncate font-mono text-[10px] text-muted-foreground">
+                              {a.envVarName}
+                            </span>
+                            {/* grant_source decides where the revoke lives: an
+                                explicit grant has an assignment id and its own
+                                DELETE; a crew-derived one has no row at all and
+                                can only be taken away by unlinking the crew. */}
                             <Badge
                               variant="outline"
-                              className={cn("text-[9px] px-1", a.expired ? "border-destructive/40 text-destructive" : "border-warn/40 text-warn")}
+                              className={cn(
+                                "ml-auto shrink-0 px-1 text-[9px]",
+                                a.grantSource === "crew" ? "border-info/40 text-info" : "opacity-70",
+                              )}
+                              title={
+                                a.grantSource === "crew"
+                                  ? "Inherited from the crew — unlink the crew to take it away"
+                                  : "Granted to this agent directly"
+                              }
                             >
-                              {a.expired ? "lease expired" : "leased"}
+                              {a.grantSource === "crew" ? "crew grant" : "explicit"}
                             </Badge>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : credential.agent_names.length > 0 ? (
-                  <ul className="space-y-1.5">
-                    {credential.agent_names.map((name) => (
-                      <li key={name} className="rounded-md border border-white/10 bg-background px-3 py-2 text-sm flex items-center gap-2">
-                        <Users className="h-3.5 w-3.5 text-muted-foreground" />
-                        {name}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-xs text-muted-foreground py-6 text-center">
-                    Not yet used by any agent.
-                  </p>
-                )}
-                {credential.mcp_used && (
-                  <div className="mt-3 rounded-md border border-info/25 bg-info/[0.05] px-3 py-2 text-xs">
-                    Also referenced by one or more MCP server integrations.
-                  </div>
-                )}
-              </TabsContent>
+                            {a.expiresAt && (
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "shrink-0 px-1 text-[9px]",
+                                  a.expired
+                                    ? "border-destructive/40 text-destructive"
+                                    : "border-warn/40 text-warn",
+                                )}
+                              >
+                                {a.expired ? "lease expired" : "leased"}
+                              </Badge>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : credential.agent_names.length > 0 ? (
+                      <ul className="space-y-1.5">
+                        {credential.agent_names.map((name, i) => (
+                          <li
+                            key={name}
+                            className="flex items-center gap-2 rounded-md border border-white/10 bg-background px-3 py-2 text-[13px]"
+                          >
+                            <AgentAvatar
+                              seed={credential.agent_ids?.[i] ?? name}
+                              className="h-4 w-4 shrink-0"
+                              alt=""
+                            />
+                            {name}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-[12px] text-muted-foreground">
+                        No agent holds this credential yet.
+                      </p>
+                    )}
 
-              <TabsContent value="audit" className="m-0">
-                {auditLoading ? (
-                  <div className="text-center py-8"><Spinner className="inline h-4 w-4 text-muted-foreground" /></div>
-                ) : audit.length === 0 ? (
-                  <p className="text-xs text-muted-foreground py-6 text-center">No audit events yet.</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {audit.map((e, idx) => (
-                      <motion.li
-                        key={e.id}
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.12, delay: idx * 0.015 }}
-                        className="rounded-md border border-white/10 bg-background px-3 py-2 text-xs"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <Badge variant="outline" className="text-[10px] px-1.5 font-mono">{e.event_type}</Badge>
-                          <span className="text-muted-foreground">{formatRelativeTime(e.occurred_at)}</span>
+                    {credential.mcp_used && (
+                      <p className="mt-3 rounded-md border border-info/25 bg-info/[0.05] px-3 py-2 text-[11px]">
+                        Also referenced by one or more MCP server integrations.
+                      </p>
+                    )}
+                  </DetailCard>
+                </Appear>
+
+                {/* Audit last, and only for a reader allowed to read it. GET
+                    /audit is MANAGER+ because it exposes the IPs behind admin
+                    actions; rendering the section for a MEMBER would turn a 403
+                    into "this credential has no history", which is a different
+                    and false statement. */}
+                {canUpdate && (
+                  <Appear order={6}>
+                    <DetailCard
+                      title="Audit"
+                      icon={Activity}
+                      subtitle={
+                        audit.length === 0
+                          ? undefined
+                          : auditExpanded || audit.length <= AUDIT_PREVIEW
+                            ? `${audit.length}${audit.length === AUDIT_FETCH_LIMIT ? "+" : ""}`
+                            : `${AUDIT_PREVIEW} of ${audit.length}${audit.length === AUDIT_FETCH_LIMIT ? "+" : ""}`
+                      }
+                      action={
+                        audit.length > AUDIT_PREVIEW ? (
+                          <button
+                            type="button"
+                            onClick={() => setAuditExpanded((v) => !v)}
+                            className="text-primary hover:underline"
+                          >
+                            {auditExpanded ? "Show less" : `Show all ${audit.length}`}
+                          </button>
+                        ) : undefined
+                      }
+                    >
+                      {auditLoading ? (
+                        <div className="py-6 text-center">
+                          <Spinner className="inline h-4 w-4 text-muted-foreground" />
                         </div>
-                        {e.ip_address && (
-                          <div className="text-[10px] text-muted-foreground font-mono mt-1">
-                            from {e.ip_address}
-                          </div>
-                        )}
-                      </motion.li>
-                    ))}
-                  </ul>
+                      ) : audit.length === 0 ? (
+                        <p className="text-[12px] text-muted-foreground">
+                          Nothing has happened to this credential yet.
+                        </p>
+                      ) : (
+                        <ul className="space-y-0.5">
+                          {shownAudit.map((e, idx) => (
+                            <motion.li
+                              key={e.id}
+                              initial={{ opacity: 0, y: 4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.12, delay: Math.min(idx, 12) * 0.015 }}
+                              className="flex flex-wrap items-center gap-2 rounded-md px-1.5 py-1.5 text-xs transition-colors hover:bg-white/[0.03]"
+                            >
+                              <AuditActor event={e} crewsById={crewsById} />
+                              <Badge variant="outline" className="px-1.5 font-mono text-[10px]">
+                                {e.event_type}
+                              </Badge>
+                              {e.ip_address && (
+                                <span className="font-mono text-[10px] text-muted-foreground-soft">
+                                  {e.ip_address}
+                                </span>
+                              )}
+                              <span className="ml-auto text-[10px] text-muted-foreground-soft">
+                                {formatRelativeTime(e.occurred_at)}
+                              </span>
+                            </motion.li>
+                          ))}
+                        </ul>
+                      )}
+                    </DetailCard>
+                  </Appear>
                 )}
-              </TabsContent>
+              </div>
 
-              <TabsContent value="settings" className="m-0 space-y-4">
-                {/* Only claim "no permission" when there is genuinely nothing
-                    here — a MEMBER holding credential.rotate can act on this
-                    credential, just not rewrite its value. */}
-                {!canUpdate && !canRotate && (
-                  <p className="text-xs text-muted-foreground">
-                    You don&apos;t have permission to modify this credential.
-                  </p>
-                )}
-                {!canUpdate && canRotate && (
-                  <p className="text-xs text-muted-foreground">
-                    You can rotate this credential. Replacing its value outright requires
-                    a workspace manager.
-                  </p>
-                )}
-                {canUpdate && !canRotate && (
-                  <p className="text-xs text-muted-foreground">
-                    Rotation with grace overlap and deletion require a workspace admin.
-                  </p>
-                )}
+              {/* ── Properties ────────────────────────────────────────── */}
+              <div className="flex flex-col gap-4">
+                <Appear order={7}>
+                  <DetailCard title="Properties">
+                    <dl className="space-y-0.5">
+                      <Row icon={Info} label="Type">
+                        {credentialTypeLabel(credential.type)}
+                      </Row>
+                      <Row icon={Boxes} label="Provider">
+                        <span className="inline-flex items-center gap-1.5">
+                          <BrandIcon className="h-3.5 w-3.5" style={{ color: brandColor(brand) }} />
+                          {brand.label}
+                        </span>
+                      </Row>
+                      <Row icon={Layers} label="Scope">
+                        {credential.scope === "CREW" ? "Crew-scoped" : "Workspace"}
+                      </Row>
+                      {credential.username && (
+                        <Row icon={UserCircle2} label="Username">
+                          <span className="font-mono">{credential.username}</span>
+                        </Row>
+                      )}
+                      <Row icon={Clock} label="Created">
+                        {formatDate(credential.created_at)}
+                      </Row>
+                      <Row icon={Clock} label="Last used">
+                        {credential.last_used_at ? (
+                          formatRelativeTime(credential.last_used_at)
+                        ) : (
+                          <span className="text-muted-foreground-soft">never</span>
+                        )}
+                      </Row>
+                      {credential.token_expires_at && (
+                        <Row icon={Clock} label="Expires">
+                          {formatDate(credential.token_expires_at)}
+                        </Row>
+                      )}
+                    </dl>
+
+                    {credential.last_used_ips.length > 0 && (
+                      <div className="mt-3 border-t border-hairline pt-3">
+                        <FieldLabel>Last {credential.last_used_ips.length} IPs</FieldLabel>
+                        <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                          {credential.last_used_ips.map((ip) => (
+                            <li
+                              key={ip}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.08] px-2 py-0.5 font-mono text-[10px] text-foreground/80"
+                            >
+                              <span className="h-1 w-1 rounded-full bg-success/60" />
+                              {ip}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </DetailCard>
+                </Appear>
+
+                {/* The tier gets a card of its own, toned by how much it costs
+                    to be wrong about. "L4" is an identifier; the blast radius
+                    and the consequence are what an operator can act on. */}
+                <Appear order={8}>
+                  <DetailCard title="Keeper tier" icon={ShieldCheck} tone={tierTone}>
+                    {tierLevel === null ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        This server did not report a tier, so the console cannot say how Keeper
+                        guards this credential. Set one with{" "}
+                        <code className="font-mono text-foreground/80">
+                          crewship credential update --security-level
+                        </code>
+                        .
+                      </p>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className={cn("h-2 w-2 shrink-0 rounded-full", tierMeta(tierLevel).dotClass)}
+                          />
+                          <span className="font-mono text-[13px] text-foreground/90">
+                            {credential.security_level_label || tierMeta(tierLevel).label}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          {tierMeta(tierLevel).blast}
+                        </p>
+                        <p className="mt-1.5 text-[11px] text-foreground/70">
+                          {tierMeta(tierLevel).consequence}
+                        </p>
+                      </>
+                    )}
+                  </DetailCard>
+                </Appear>
+
+                {/* Readiness has THREE states, not two. "No gap reported" and
+                    "nobody reported" look identical in the data and mean
+                    opposite things — a green tick we did not earn is exactly
+                    the false reassurance the readiness endpoint exists to
+                    remove. */}
+                <Appear order={9}>
+                  <DetailCard
+                    title="Readiness"
+                    icon={toolGaps.length > 0 ? PackageX : CheckCircle2}
+                    tone={readinessTone}
+                  >
+                    {toolGaps.length > 0 ? (
+                      <>
+                        <div className="flex items-center gap-2 text-warn">
+                          <PackageX className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          <span className="text-[13px]">
+                            {missingTools.length > 0
+                              ? `Needs ${missingTools.join(", ")}`
+                              : "A tool is missing"}
+                          </span>
+                        </div>
+                        <ul className="mt-2 space-y-1">
+                          {toolGaps.map((gap) => (
+                            <li key={`${gap.crewId}-${gap.tool}`} className="text-[11px] text-muted-foreground">
+                              <span className="text-foreground/80">{gap.crewName}</span>
+                              {gap.featureId && (
+                                <>
+                                  {" — add "}
+                                  <code className="font-mono text-foreground/70">{gap.featureId}</code>
+                                  {" and rebuild"}
+                                </>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : readinessKnown ? (
+                      <>
+                        <div className="flex items-center gap-2 text-success">
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          <span className="text-[13px]">Ready</span>
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          Every crew that can use this credential also has the CLI that reads it.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">
+                        No crew has reported its tool inventory yet, so we cannot say whether the CLI
+                        that reads this credential is present. This is not the same as
+                        &ldquo;nothing is missing&rdquo;.
+                      </p>
+                    )}
+                  </DetailCard>
+                </Appear>
 
                 {/* Classification. Raising is MANAGER+ and unaudited (it only
                     ever removes reach); lowering is OWNER/ADMIN and journaled
                     as a precondition, because it hands out a key that did not
                     exist a second earlier. */}
                 {canUpdate && (
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Classification
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {["STANDARD", "RESTRICTED", "SEALED"].map((level) => {
-                        const current = effectiveSensitivity
-                        const rank = ["STANDARD", "RESTRICTED", "SEALED"]
-                        const lowering = current !== null && rank.indexOf(level) < rank.indexOf(current)
-                        const blocked = lowering && !canLowerSensitivity
-                        return (
-                          <button
-                            key={level}
-                            type="button"
-                            disabled={sensitivitySaving || blocked || level === current}
-                            aria-pressed={level === current}
-                            onClick={() => setClassification(level)}
-                            title={blocked ? "Lowering a classification is a workspace-admin action" : undefined}
-                            className={cn(
-                              "rounded-full border px-2.5 py-0.5 text-[11px] transition-colors disabled:opacity-40",
-                              level === current
-                                ? "border-primary/50 bg-primary/10 text-primary-hover"
-                                : "border-white/10 text-muted-foreground hover:text-foreground",
-                            )}
-                          >
-                            {level}
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      {effectiveSensitivity === null
-                        ? "The current classification is not reported by the credentials API — picking one below sets it."
-                        : effectiveSensitivity === "SEALED"
-                          ? "SEALED can never be revealed, by any role. Break-glass is rotation, not disclosure."
-                          : "Raise it at any time; lowering it is an audited, admin-only action."}
-                    </p>
-                    {sensitivityError && (
-                      <span className="text-[11px] text-destructive inline-flex items-center gap-1">
-                        <XCircle className="h-3 w-3" />
-                        {sensitivityError}
-                      </span>
-                    )}
-                  </div>
+                  <Appear order={10}>
+                    <DetailCard
+                      title="Classification"
+                      icon={Eye}
+                      footer={
+                        effectiveSensitivity === null
+                          ? "The current classification is not reported by the credentials API — picking one sets it."
+                          : effectiveSensitivity === "SEALED"
+                            ? "SEALED can never be revealed, by any role. Break-glass is rotation, not disclosure."
+                            : "Raise it at any time; lowering it is an audited, admin-only action."
+                      }
+                    >
+                      <div className="flex flex-wrap gap-1.5">
+                        {SENSITIVITY_LEVELS.map((level) => {
+                          const current = effectiveSensitivity
+                          const lowering =
+                            current !== null &&
+                            SENSITIVITY_LEVELS.indexOf(level) <
+                              SENSITIVITY_LEVELS.indexOf(current as (typeof SENSITIVITY_LEVELS)[number])
+                          const blocked = lowering && !canLowerSensitivity
+                          return (
+                            <button
+                              key={level}
+                              type="button"
+                              disabled={sensitivitySaving || blocked || level === current}
+                              aria-pressed={level === current}
+                              onClick={() => setClassification(level)}
+                              title={
+                                blocked
+                                  ? "Lowering a classification is a workspace-admin action"
+                                  : undefined
+                              }
+                              className={cn(
+                                "rounded-full border px-2.5 py-0.5 text-[11px] transition-colors disabled:opacity-40",
+                                level === current
+                                  ? "border-primary/50 bg-primary/10 text-primary-hover"
+                                  : "border-white/10 text-muted-foreground hover:text-foreground",
+                              )}
+                            >
+                              {level}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {sensitivityError && (
+                        <span className="mt-2 inline-flex items-center gap-1 text-[11px] text-destructive">
+                          <XCircle className="h-3 w-3" />
+                          {sensitivityError}
+                        </span>
+                      )}
+                    </DetailCard>
+                  </Appear>
                 )}
 
-                {/* Inline value rewrite — quick manual rotation without
-                    grace overlap. For users who just need to paste a
-                    new key and move on (Vercel pattern). The real
-                    rotation flow with overlap lives in onRotate. */}
-                {canUpdate && (
-                <div className="space-y-1.5">
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                    Update value
-                  </div>
-                  <div className="relative">
-                    <Input
-                      type={showValueDraft ? "text" : "password"}
-                      placeholder="Paste new secret value"
-                      value={valueDraft}
-                      onChange={(e) => {
-                        setValueDraft(e.target.value)
-                        setValueSaved(false)
-                        // Clear stale error as soon as the user retries —
-                        // a red message stuck under a freshly-typed input
-                        // reads like "your current input is rejected".
-                        setValueError(null)
-                      }}
-                      className="pr-10 font-mono text-xs"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2"
-                      onClick={() => setShowValueDraft((s) => !s)}
-                      aria-label={showValueDraft ? "Hide value" : "Show value"}
-                    >
-                      {showValueDraft ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                    </Button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!valueDraft.trim() || savingValue}
-                      onClick={async () => {
-                        setSavingValue(true)
-                        setValueSaved(false)
-                        setValueError(null)
-                        try {
-                          const res = await apiFetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
-                            method: "PATCH",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ value: valueDraft }),
-                          })
-                          if (res.ok) {
-                            // Success — clear draft so plaintext doesn't
-                            // linger in DOM/state.
-                            setValueDraft("")
-                            setShowValueDraft(false)
-                            setValueSaved(true)
-                            onRefresh()
-                          } else {
-                            const data = await res.json().catch(() => ({}))
-                            setValueError(typeof data.error === "string" ? data.error : `Request failed (${res.status})`)
-                          }
-                        } catch {
-                          setValueError("Network error")
-                        } finally {
-                          setSavingValue(false)
-                          // Defence-in-depth: even on failure, keep
-                          // plaintext only as long as the input shows
-                          // it. Drafts are gone once the user dismisses
-                          // the error or closes the sheet (handled by
-                          // the open-effect reset).
-                        }
-                      }}
-                    >
-                      {savingValue && <Spinner className="h-3 w-3 mr-1.5" />}
-                      Save value
-                    </Button>
-                    {valueSaved && (
-                      <span className="text-[11px] text-success inline-flex items-center gap-1">
-                        <CheckCircle2 className="h-3 w-3" />
-                        Saved
-                      </span>
-                    )}
-                    {valueError && (
-                      <span className="text-[11px] text-destructive inline-flex items-center gap-1">
-                        <XCircle className="h-3 w-3" />
-                        {valueError}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">
-                    Save replaces the value immediately. Use rotate-with-grace if agents are
-                    currently running and need a 24h overlap.
-                  </p>
-                </div>
-                )}
-
-                {/* Rotation is gated on canRotate ALONE, deliberately outside
-                    the canUpdate block above. The two permissions are not
-                    nested: PATCH is MANAGER+, while rotate additionally accepts
-                    any member holding credential.rotate
+                {/* Rotation is gated on canRotate ALONE, deliberately not
+                    nested under canUpdate: PATCH is MANAGER+, while rotate
+                    additionally accepts any member holding credential.rotate
                     (requireRoleOrCapabilityOrForbid, #1028) — the grant that
                     lets an oncall MEMBER replace a leaked token without blanket
-                    vault reach. Nesting this inside canUpdate hid the action
-                    from precisely that tier. */}
+                    vault reach. Nesting it hid the action from precisely that
+                    tier. */}
                 {canRotate && (
-                  <div className="space-y-1.5">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onRotate(credential)}
-                      className="text-[11px] text-muted-foreground hover:text-foreground -ml-2"
+                  <Appear order={11}>
+                    <DetailCard
+                      title="Rotation"
+                      icon={RefreshCw}
+                      subtitle={rotations.length > 0 ? String(rotations.length) : undefined}
+                      footer="Issues a new value and keeps the old one working for the grace window, so agents mid-run don't break."
                     >
-                      <RefreshCw className="h-3 w-3 mr-1.5" />
-                      Rotate with grace overlap…
-                    </Button>
-                    <p className="text-[10px] text-muted-foreground">
-                      Issues a new value and keeps the old one working for the grace window,
-                      so agents mid-run don&apos;t break.
-                    </p>
-                  </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onRotate(credential)}
+                        className="w-full justify-start"
+                      >
+                        <RefreshCw className="mr-1.5 h-3 w-3" />
+                        Rotate with grace overlap…
+                      </Button>
+                      {rotations.length > 0 && (
+                        <ul className="mt-2.5 space-y-1">
+                          {rotations.slice(0, 5).map((r) => (
+                            <li key={r.id} className="flex items-center gap-2 text-xs">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "px-1.5 text-[10px]",
+                                  r.status === "ACTIVE" && "border-primary/40 text-primary",
+                                  r.status === "EXPIRED" && "border-success/30 text-success",
+                                  r.status === "CANCELLED" && "border-warn/30 text-warn",
+                                )}
+                              >
+                                {r.status}
+                              </Badge>
+                              <span className="text-muted-foreground">
+                                {formatRelativeTime(r.rotated_at)}
+                              </span>
+                              <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                                {Math.round(r.grace_seconds / 3600)}h grace
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </DetailCard>
+                  </Appear>
                 )}
 
-                {canRotate && rotations.length > 0 && (
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                      Rotation history
-                    </div>
-                    <ul className="space-y-1">
-                      {rotations.slice(0, 5).map((r) => (
-                        <li key={r.id} className="text-xs flex items-center gap-2 px-2 py-1 rounded border border-white/10 bg-background">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "text-[10px] px-1.5",
-                              r.status === "ACTIVE" && "border-primary/40 text-primary",
-                              r.status === "EXPIRED" && "border-success/30 text-success",
-                              r.status === "CANCELLED" && "border-warn/30 text-warn",
-                            )}
-                          >
-                            {r.status}
-                          </Badge>
-                          <span className="text-muted-foreground">{formatRelativeTime(r.rotated_at)}</span>
-                          <span className="ml-auto text-[10px] text-muted-foreground font-mono">
-                            {Math.round(r.grace_seconds / 3600)}h grace
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                {/* Say which of the three write gates the reader is behind,
+                    rather than one blanket refusal. They are genuinely
+                    different: a MEMBER holding credential.rotate can replace a
+                    leaked token, a MANAGER can rewrite a value but not rotate
+                    with overlap or delete, and only a role with none of the
+                    three has nothing to do here. */}
+                {!(canUpdate && canRotate && canDelete) && (
+                  <Appear order={12}>
+                    <DetailCard title="Permissions">
+                      <p className="text-[11px] text-muted-foreground">
+                        {!canUpdate && !canRotate
+                          ? "You don't have permission to modify this credential."
+                          : !canUpdate && canRotate
+                            ? "You can rotate this credential. Replacing its value outright requires a workspace manager."
+                            : "Rotation with grace overlap and deletion require a workspace admin."}
+                      </p>
+                    </DetailCard>
+                  </Appear>
                 )}
 
                 {canDelete && (
-                <div className="pt-3 border-t border-white/10">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full justify-start text-destructive border-destructive/30 hover:bg-destructive/[0.05]"
-                    onClick={() => setConfirmDelete(true)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                    Delete credential
-                  </Button>
-                </div>
+                  <Appear order={13}>
+                    <DetailCard
+                      title="Danger zone"
+                      icon={Trash2}
+                      tone="destructive"
+                      footer="Agents that use this credential start failing immediately. This cannot be undone."
+                    >
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full justify-start border-destructive/30 text-destructive hover:bg-destructive/[0.05]"
+                        onClick={() => setConfirmDelete(true)}
+                      >
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                        Delete credential
+                      </Button>
+                    </DetailCard>
+                  </Appear>
                 )}
-              </TabsContent>
+              </div>
             </div>
-          </Tabs>
+          </div>
         </div>
       </div>
 
@@ -1094,14 +1506,100 @@ async function loadAssignments(
   return rows.sort((a, b) => a.agentName.localeCompare(b.agentName))
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * One property row in the right-hand column.
+ *
+ * Deliberately identical to the issue detail's Row — icon, fixed-width label,
+ * truncating value. Two screens that both mean "here is one thing in full"
+ * should not spell the same row two ways.
+ */
+/**
+ * Who an audit event belongs to.
+ *
+ * An agent gets the same avatar it has on every other page — the row that says
+ * a secret was read is the row where recognising the reader matters most. A
+ * human gets a person glyph rather than a generated face, because a synthesised
+ * avatar for a colleague is a picture of someone who does not exist. An
+ * unattributed row says "system" instead of leaving a gap, so "nobody signed
+ * this" and "we forgot to render it" cannot be confused.
+ */
+function AuditActor({
+  event,
+  crewsById,
+}: {
+  event: AuditEvent
+  crewsById: Record<string, CredentialCrewRef>
+}) {
+  // An older server sends no actor block at all; the agent_id column is the one
+  // attribution that predates it, so it stands in for both the kind and the id.
+  const actorId = event.actor_id || event.agent_id || ""
+  const kind = event.actor_kind ?? (event.agent_id ? "agent" : "system")
+  const label = event.actor_name || actorId || "unknown"
+
+
+  if (kind === "agent") {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5" title={`Agent · ${label}`}>
+        <AgentAvatar seed={actorId || label} className="h-4 w-4 shrink-0" alt="" />
+        <span className="max-w-[140px] truncate text-foreground/85">{label}</span>
+      </span>
+    )
+  }
+  if (kind === "crew") {
+    // A sidecar read. There is no agent to name — the sidecar serves a whole
+    // container — so the crew that owns it is the truthful attribution.
+    const crew = crewsById[actorId]
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5" title={`Sidecar · ${crew?.name ?? label}`}>
+        <CrewIcon
+          icon={crew?.icon ?? ""}
+          color={crew?.color ?? undefined}
+          size="sm"
+          className="!h-4 !w-4 !rounded shrink-0"
+        />
+        <span className="max-w-[140px] truncate text-foreground/85">{crew?.name ?? label}</span>
+      </span>
+    )
+  }
+  if (kind === "user") {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5" title={`Person · ${label}`}>
+        <span
+          aria-hidden="true"
+          className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/15"
+        >
+          <UserCircle2 className="h-3 w-3 text-primary" />
+        </span>
+        <span className="max-w-[140px] truncate text-foreground/85">{label}</span>
+      </span>
+    )
+  }
   return (
-    <div className="grid grid-cols-[100px_1fr] gap-2 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-foreground/90 font-mono">{children}</span>
+    <span className="inline-flex min-w-0 items-center gap-1.5" title="Recorded without an actor">
+      <Cpu className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden="true" />
+      <span className="text-muted-foreground-soft">system</span>
+    </span>
+  )
+}
+
+function Row({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-center gap-2 py-1 text-[12px]">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+      <dt className="w-[70px] shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 flex-1 truncate text-foreground/85">{children}</dd>
     </div>
   )
 }
+
 
 // Inline alias so we don't have to import AlertDialogCancel everywhere — saves a line.
 function Cancel({ children }: { children: React.ReactNode }) {

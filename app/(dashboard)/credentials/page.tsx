@@ -1,66 +1,46 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { motion } from "motion/react"
 import { toast } from "sonner"
-import {
-  Key, Plus, Pencil, Trash2, Clock, AlertTriangle,
-  ArrowUpDown, RefreshCw, Link2, PackageX, CheckCircle2,
-} from "lucide-react"
+import { AlertTriangle, Key, Link2, Plus, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AppearStack } from "@/components/ui/detail"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
-import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
-import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Card } from "@/components/ui/card"
+import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
 import { ConnectOAuthDialog } from "@/components/features/credentials/connect-oauth-dialog"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { CredentialsSidebar } from "@/components/features/credentials/credentials-sidebar"
+import {
+  CredentialsOverview,
+  CredentialsOverviewSkeleton,
+} from "@/components/features/credentials/credentials-overview"
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
 import { EditCredentialDialog, type CredentialData } from "@/components/features/credentials/edit-credential-dialog"
-import { formatRelativeTime } from "@/lib/time"
 import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useCredentialReadiness, type CredentialToolGap } from "@/hooks/use-credential-readiness"
-import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 import {
   EMPTY_CREDENTIAL_FILTERS,
-  EXPIRY_WARNING_DAYS,
   applyCredentialFilters,
-  buildCategoryFacet,
+  buildAgentFacet,
+  buildBrandFacet,
+  buildShapeFacet,
   buildScopeFacet,
-  daysUntilExpiry,
+  buildTagFacet,
   deriveCredentialStatus,
   needsAttention,
   type CredentialFilters,
-  type CredentialListStatus,
 } from "@/lib/credentials/facets"
+import { buildTierFacet, tierOf } from "@/lib/credentials/tiers"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -96,62 +76,10 @@ interface Credential {
   mcp_used: boolean
   /** Server-declared probe support — see credentials.go `testable`. */
   testable?: boolean
-  /** Keeper tier, 1–4. See TIER_BADGE. Optional so an older server response
-   *  renders the row without a badge rather than crashing the page. */
+  /** Keeper tier, 1–4 — see lib/credentials/tiers.ts. Optional so an older
+   *  server response renders as unclassified rather than crashing the page. */
   security_level?: number
   security_level_label?: string
-}
-
-/**
- * The Keeper tier, as a badge on the row.
- *
- * It was invisible in every listing. That is the property that decides what
- * happens when an agent asks for the credential — at L4 every read becomes a
- * human approval — so an operator scanning this table could not see which of
- * their credentials were guarded and which were wide open. Worse, until the
- * create path was fixed, anything marked "critical" was silently filed as L1,
- * and there was no surface on which to notice.
- *
- * Only L2+ gets a badge. L1 is the default and the majority; badging it would
- * put a chip on every row and make the two that matter harder to spot, which is
- * the opposite of the point.
- */
-const TIER_BADGE: Record<number, { short: string; cls: string; title: string }> = {
-  2: {
-    short: "L2",
-    cls: "border-info/40 text-info",
-    title: "L2 · medium — every read is judged by the Keeper model",
-  },
-  3: {
-    short: "L3",
-    cls: "border-warn/50 text-warn",
-    title: "L3 · high — judged with extra checks, needs a substantive intent, auto-leased rather than granted standing",
-  },
-  4: {
-    short: "L4",
-    cls: "border-destructive/50 text-destructive",
-    title: "L4 · critical — a human approves every read; the model can recommend but never grant",
-  },
-}
-
-const STATUS_DOT_COLOR: Record<CredentialListStatus, string> = {
-  // #1162: the #749 semantic palette (bg-info/bg-success/bg-warn).
-  Connected: "bg-success",
-  Error: "bg-destructive",
-  Stale: "bg-warn",
-  Pending: "bg-warn",
-}
-
-const TYPE_LABEL: Record<Credential["type"], string> = {
-  AI_CLI_TOKEN: "ai cli",
-  API_KEY: "api key",
-  CLI_TOKEN: "token",
-  SECRET: "secret",
-  OAUTH2: "oauth",
-  USERPASS: "userpass",
-  SSH_KEY: "ssh key",
-  CERTIFICATE: "cert",
-  GENERIC_SECRET: "secret",
 }
 
 type SortKey = "last_used" | "name" | "created"
@@ -174,16 +102,31 @@ export default function CredentialsPage() {
   // (#1034). Gates both the raw Add-secret sheet and the OAuth connect
   // flow — the OAuth routes are aligned to the same tier server-side.
   const canManage = abilities.can("create", "Credential") || hasCapability(Capability.CredentialCreate)
-  // Row-action gating mirrors the backend: PATCH allows MANAGER
-  // ("update"), DELETE is OWNER/ADMIN only ("manage" → CASL "delete").
-  // Hiding what would 403 beats letting users click into dead-ends.
-  const canUpdate = abilities.can("update", "Credential")
+  // Bulk delete mirrors the backend: DELETE is OWNER/ADMIN only ("manage" →
+  // CASL "delete"). Hiding the checkbox beats letting a MEMBER tick rows and
+  // discover the 403 at the confirmation dialog.
   const canDelete = abilities.can("delete", "Credential")
   const [filters, setFilters] = React.useState<CredentialFilters>(EMPTY_CREDENTIAL_FILTERS)
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
+  // On a phone the rail is 280px of a 390px screen — it does not sit BESIDE the
+  // content, it replaces it, and the detail beside it renders one word per line.
+  // Collapse it when the viewport narrows and let it open as an overlay instead
+  // of a column, so the page keeps the full width it was designed for. Same
+  // treatment /routines gives its explorer.
+  const isMobile = useIsMobile()
+  React.useEffect(() => {
+    if (isMobile) setSidebarCollapsed(true)
+  }, [isMobile])
   const [sortKey, setSortKey] = React.useState<SortKey>("last_used")
   const [detailCredential, setDetailCredential] = React.useState<Credential | null>(null)
   const [detailOpen, setDetailOpen] = React.useState(false)
+  // Selection is a mode you enter, not the resting state of the list — see the
+  // rail's `selectMode` prop. Leaving it drops the selection with it, so a
+  // forgotten tick cannot be deleted by a later click on the floating bar.
+  const [selectMode, setSelectMode] = React.useState(false)
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
+  const [bulkDeleting, setBulkDeleting] = React.useState(false)
 
   // /credentials?id=<id> — the ⌘K palette's Credentials rows, and any
   // bookmark. Landing on the list and leaving the caller to find the secret
@@ -210,10 +153,6 @@ export default function CredentialsPage() {
   }, [linkedCredentialId, credentials])
   const [rotateCredential, setRotateCredential] = React.useState<Credential | null>(null)
   const [rotateOpen, setRotateOpen] = React.useState(false)
-  const [deleteCredential, setDeleteCredential] = React.useState<Credential | null>(null)
-  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
-  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
-  const [bulkDeleting, setBulkDeleting] = React.useState(false)
 
   // Tool readiness (§2.3, blocker #3): "the secret is valid" and "the CLI that
   // reads it exists in the container" are different questions, and only the
@@ -296,6 +235,7 @@ export default function CredentialsPage() {
   // previous workspace's credential ids. The facets reset for the same
   // reason — a crew id from the old workspace filters the new one to nothing.
   React.useEffect(() => {
+    setSelectMode(false)
     setSelectedIds(new Set())
     setFilters(EMPTY_CREDENTIAL_FILTERS)
   }, [workspaceId])
@@ -325,32 +265,6 @@ export default function CredentialsPage() {
       token_expires_at: credential.token_expires_at,
     })
     setEditOpen(true)
-  }
-
-  function handleDelete(credential: Credential) { setDeleteCredential(credential) }
-
-  async function confirmDeleteCredential() {
-    if (!deleteCredential || !workspaceId) return
-    const name = deleteCredential.name
-    try {
-      const res = await apiFetch(`/api/v1/credentials/${deleteCredential.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
-      if (res.ok) {
-        handleRefresh()
-      } else if (res.status === 404) {
-        // #1162: another admin already deleted this credential between the
-        // dialog opening and this DELETE landing. Mirrors bulkDelete's
-        // #1085 404-as-already-gone rule — treat it as success rather than
-        // silently leaving the now-stale row on screen with no feedback.
-        toast.success(`${name} was already deleted`)
-        handleRefresh()
-      } else {
-        toast.error(`Couldn't delete ${name}.`)
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Couldn't delete ${name}.`)
-    } finally {
-      setDeleteCredential(null)
-    }
   }
 
   function toggleSelected(id: string) {
@@ -398,27 +312,10 @@ export default function CredentialsPage() {
     } finally { setBulkDeleting(false) }
   }
 
-  // KPI counts
-  const kpis = React.useMemo(() => {
-    let active = 0, expiring = 0, linked = 0
-    for (const c of credentials) {
-      if (deriveCredentialStatus(c) === "Connected") active++
-      const days = daysUntilExpiry(c)
-      if (days !== null && days >= 0 && days < EXPIRY_WARNING_DAYS) expiring++
-      if ((c._count_agent_credentials ?? 0) > 0) linked++
-    }
-    return { active, expiring, linked }
-  }, [credentials])
-
+  // The rail's "Needs attention" count. The overview's own tiles derive their
+  // numbers from lib/credentials/overview.ts over the same predicate, so the
+  // rail and the dashboard cannot report a different total.
   const attentionList = React.useMemo(() => credentials.filter(needsAttention), [credentials])
-
-  // How many of the needs-attention items are agent-proposed pending approvals
-  // (vs true problem states) — drives the banner copy so we don't tell an
-  // operator to "rotate/revoke" a credential that just needs approve/reject.
-  const pendingCount = React.useMemo(
-    () => credentials.filter((c) => deriveCredentialStatus(c) === "Pending").length,
-    [credentials],
-  )
 
   // Distinct tags from data — drives the sidebar's Tag facet so we never
   // show tags the workspace doesn't have.
@@ -435,11 +332,18 @@ export default function CredentialsPage() {
     [credentials, readiness.missingToolIds],
   )
 
-  const categories = React.useMemo(() => buildCategoryFacet(credentials), [credentials])
+  const brands = React.useMemo(() => buildBrandFacet(credentials), [credentials])
+  const shapes = React.useMemo(() => buildShapeFacet(credentials), [credentials])
   const scopes = React.useMemo(
     () => buildScopeFacet(credentials, readiness.crewNames),
     [credentials, readiness.crewNames],
   )
+  // Counted over the whole vault, not the filtered view: a tier row that
+  // recounted itself after every click would report 0 for every tier but the
+  // selected one, which is the opposite of what the section is for.
+  const tiers = React.useMemo(() => buildTierFacet(credentials), [credentials])
+  const tagFacet = React.useMemo(() => buildTagFacet(credentials), [credentials])
+  const agentsInUse = React.useMemo(() => buildAgentFacet(credentials), [credentials])
 
   const filtered = React.useMemo(
     () => applyCredentialFilters(credentials, filters, readiness.missingToolIds),
@@ -498,10 +402,12 @@ export default function CredentialsPage() {
       <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
         {subBar}
         <div className="flex-1 overflow-y-auto">
-          <div className="p-4 md:p-6 space-y-3">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+          {/* The skeleton is the OVERVIEW's geometry, not three grey bars where
+              a table used to be — a placeholder that does not match what
+              replaces it makes the page reflow on load, which reads as a
+              second, unexplained render. */}
+          <div className="p-4 md:p-6">
+            <CredentialsOverviewSkeleton />
           </div>
         </div>
       </div>
@@ -516,12 +422,26 @@ export default function CredentialsPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {subBar}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* Tapping away closes the overlay. Without it the only way back to the
+            content on a phone is the collapse button, which the rail is
+            covering. */}
+        {showSidebar && isMobile && !sidebarCollapsed && (
+          <button
+            type="button"
+            aria-label="Close credential list"
+            onClick={() => setSidebarCollapsed(true)}
+            className="absolute inset-0 z-20 bg-black/50"
+          />
+        )}
         {showSidebar && (
           <aside
             className={cn(
               "shrink-0 border-r border-white/[0.06] bg-card transition-all",
               sidebarCollapsed ? "w-9 overflow-hidden" : "w-[280px]",
+              // The collapsed rail stays in flow at both sizes, so the expand
+              // button never moves.
+              isMobile && !sidebarCollapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
             )}
           >
             {sidebarCollapsed ? (
@@ -537,18 +457,38 @@ export default function CredentialsPage() {
                   attention: attentionList.length,
                   missingTool: missingToolCount,
                 }}
-                categories={categories}
+                brands={brands}
+                shapes={shapes}
                 scopes={scopes}
-                tags={tagsInUse}
+                tiers={tiers}
+                agents={agentsInUse}
+                tags={tagFacet}
+                crewsById={readiness.crewsById}
+                sort={sortKey}
+                onSortChange={setSortKey}
+                selectMode={selectMode}
+                onSelectModeChange={
+                  canDelete
+                    ? (next) => {
+                        setSelectMode(next)
+                        if (!next) setSelectedIds(new Set())
+                      }
+                    : undefined
+                }
+                selectedIds={selectedIds}
+                onToggleSelected={canDelete ? toggleSelected : undefined}
                 onToggleCollapse={() => setSidebarCollapsed(true)}
-                // The rail lists what the filters leave, in the order the
-                // table shows — so the two panes never disagree about which
-                // credential is "the third one".
+                // The rail IS the list now — the table under the dashboard was
+                // the same names a second time. Which is why the sort control
+                // moved here with it: the order belongs to the list, and the
+                // list is here.
                 credentials={sorted.map((c) => ({
                   id: c.id,
                   name: c.name,
                   provider: c.provider,
                   type: c.type,
+                  tier: tierOf(c),
+                  tierLabel: c.security_level_label,
                 }))}
                 selectedCredentialId={detailOpen ? detailCredential?.id ?? null : null}
                 onSelectCredential={(id) => {
@@ -556,14 +496,20 @@ export default function CredentialsPage() {
                   if (!cred) return
                   setDetailCredential(cred)
                   setDetailOpen(true)
+                  // Picking a credential on a phone means "show me that", and
+                  // the overlay covering it would be the opposite.
+                  if (isMobile) setSidebarCollapsed(true)
                 }}
               />
             )}
           </aside>
         )}
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-4 md:p-6">
+        {/* The detail owns its own scroll and padding — it is a full page in
+            the /issues shape, not a panel dropped into a padded box. Everything
+            else keeps the page's padding. */}
+        <div className={cn("flex-1", detailOpen && detailCredential && workspaceId ? "min-h-0 overflow-hidden" : "overflow-y-auto")}>
+          <div className={cn(!(detailOpen && detailCredential && workspaceId) && "p-4 md:p-6", "h-full")}>
       {/* Master-detail, the /integrations shape: selecting a credential
           REPLACES the list rather than covering it. A modal would keep the
           table behind a scrim and make the reader dismiss one secret before
@@ -580,6 +526,9 @@ export default function CredentialsPage() {
           onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailCredential(null) }}
           onBack={() => { setDetailOpen(false); setDetailCredential(null) }}
           onRefresh={handleRefresh}
+          toolGaps={readiness.gapsByCredential.get(detailCredential.id) ?? []}
+          readinessKnown={readiness.crewsChecked > 0}
+          crewsById={readiness.crewsById}
           onEdit={(c) => handleEdit(c as Credential)}
           onRotate={(c) => {
             setRotateCredential(c as unknown as Credential)
@@ -619,122 +568,32 @@ export default function CredentialsPage() {
           )}
         </EmptyState>
       ) : (
-        <div className="space-y-4">
-          {/* KPI strip */}
-          <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
-            <AppearStack>
-            <KpiCard label="Active" value={kpis.active}
-              valueColor={kpis.active > 0 ? "rgb(52, 211, 153)" : undefined}
-              subtitle={`of ${credentials.length} total`} />
-            <KpiCard label="Tools missing" value={missingToolCount}
-              valueColor={missingToolCount > 0 ? "rgb(248, 113, 113)" : undefined}
-              subtitle={
-                readiness.loading
-                  ? "checking crews…"
-                  : readiness.crewsChecked === 0
-                    ? "no crew reported"
-                    : `across ${readiness.crewsChecked} crew${readiness.crewsChecked === 1 ? "" : "s"}`
-              } />
-            <KpiCard label="Expiring" value={kpis.expiring}
-              valueColor={kpis.expiring > 0 ? "rgb(251, 191, 36)" : undefined}
-              subtitle="next 30 days" />
-            <KpiCard label="Linked agents" value={kpis.linked}
-              subtitle={`across ${credentials.length} credential${credentials.length === 1 ? "" : "s"}`} />
-            </AppearStack>
-          </div>
-
-          {/* Banner */}
-          {attentionList.length > 0 && filters.status === "all" && (
-            <motion.div
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="rounded-md border border-warn/30 bg-warn/[0.05] px-3 py-2.5 text-xs flex items-center gap-2"
-            >
-              <AlertTriangle className="h-3.5 w-3.5 text-warn shrink-0" />
-              <span className="text-foreground/90">
-                <strong>{attentionList.length}</strong> credential{attentionList.length === 1 ? "" : "s"}
-                {" "}need attention &mdash;{" "}
-                {pendingCount === attentionList.length
-                  ? "approve or reject the agent-proposed ones."
-                  : pendingCount > 0
-                    ? "approve the pending ones; rotate, refresh, or revoke the rest before they break agent runs."
-                    : "rotate, refresh, or revoke them before they break agent runs."}
-              </span>
-              <button
-                onClick={() => setFilters((f) => ({ ...f, status: "attention" }))}
-                className="ml-auto text-warn hover:text-warn font-medium"
-              >
-                Review →
-              </button>
-            </motion.div>
-          )}
-
-          {/* Sort row. Search, category, scope and tag all live in the rail —
-              two places to narrow one list is how the old filter row and the
-              tab strip ended up disagreeing. */}
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
-              <SelectTrigger className="h-8 w-[150px] text-xs">
-                <ArrowUpDown className="h-3 w-3 mr-1.5 opacity-60" />
-                <SelectValue placeholder="Sort" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="last_used">Last used</SelectItem>
-                <SelectItem value="name">Name</SelectItem>
-                <SelectItem value="created">Recently added</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Flat table — single sticky header, no grouping. */}
-          {sorted.length === 0 ? (
-            <Card className="p-12 text-center text-sm text-muted-foreground">
-              No credentials match the current filters.
-            </Card>
-          ) : (
-            // A labelled region so the credential list is addressable on its
-            // own. The rail lists the same names, so "the row for GH_TOKEN"
-            // is ambiguous without it — for a screen reader as much as for a
-            // test.
-            <Card className="overflow-hidden p-0" role="region" aria-label="Credential list">
-              {/* min-w keeps the fixed-width columns intact on narrow
-                  screens; the Table's built-in overflow-x-auto container
-                  (see components/ui/table.tsx) turns that into horizontal
-                  scroll instead of column crush. */}
-              <Table className="min-w-[800px]">
-                <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur">
-                  <TableRow>
-                    <TableHead className="w-[28px]"></TableHead>
-                    <TableHead className="w-[36px]"></TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="w-[170px]">Readiness</TableHead>
-                    <TableHead className="w-[150px]">Tags</TableHead>
-                    <TableHead className="w-[120px]">Used by</TableHead>
-                    <TableHead className="w-[130px]">Last used</TableHead>
-                    <TableHead className="w-[80px] text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sorted.map((cred) => (
-                    <CredentialRow
-                      key={cred.id}
-                      cred={cred}
-                      selected={selectedIds.has(cred.id)}
-                      canUpdate={canUpdate}
-                      canDelete={canDelete}
-                      gaps={readiness.gapsByCredential.get(cred.id) ?? []}
-                      readinessKnown={readiness.crewsChecked > 0}
-                      onToggleSelect={() => toggleSelected(cred.id)}
-                      onOpen={() => { setDetailCredential(cred); setDetailOpen(true) }}
-                      onEdit={() => handleEdit(cred)}
-                      onDelete={() => handleDelete(cred)}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
-          )}
-        </div>
+        // The landing pane is the vault's dashboard, and the table is the last
+        // card on it rather than the first thing you meet. See
+        // credentials-overview.tsx for why — in short, the rail to the left was
+        // already this list, and the copy in the main pane was the one you could
+        // not search.
+        // The landing pane is the vault's dashboard. The table that used to
+        // sit under it is gone: the rail on the left is the same list, iconed,
+        // searchable and filtered, and the copy in the main pane was the one
+        // that could not be searched. Everything the columns carried has a home
+        // — readiness and last use on the credential's own Overview, tags in
+        // its header, agents on its Used by tab, and the whole vault's shape in
+        // the cards above.
+        <CredentialsOverview
+          credentials={credentials}
+          missingToolIds={readiness.missingToolIds}
+          crewsChecked={readiness.crewsChecked}
+          readinessLoading={readiness.loading}
+          onSelect={(id) => {
+            const cred = credentials.find((c) => c.id === id)
+            if (!cred) return
+            setDetailCredential(cred)
+            setDetailOpen(true)
+          }}
+          onSelectTier={(tier) => setFilters((f) => ({ ...f, tier }))}
+          onSelectStatus={(status) => setFilters((f) => ({ ...f, status }))}
+        />
       )}
 
       {workspaceId && (
@@ -771,24 +630,6 @@ export default function CredentialsPage() {
         />
       )}
 
-      <AlertDialog open={!!deleteCredential} onOpenChange={(o) => !o && setDeleteCredential(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete credential?</AlertDialogTitle>
-            <AlertDialogDescription>
-              <span className="font-mono">{deleteCredential?.name}</span> will be permanently deleted.
-              Agents that use this credential will start failing immediately. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={confirmDeleteCredential}>
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -811,13 +652,20 @@ export default function CredentialsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {canDelete && selectedIds.size > 0 && (
+      {canDelete && selectMode && selectedIds.size > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-border bg-popover/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
           <span className="font-medium">{selectedIds.size} selected</span>
           <button type="button" onClick={() => setBulkDeleteOpen(true)} className="text-destructive hover:text-destructive/80">
             Delete
           </button>
-          <button type="button" onClick={() => setSelectedIds(new Set())} className="text-muted-foreground hover:text-foreground">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedIds(new Set())
+              setSelectMode(false)
+            }}
+            className="text-muted-foreground hover:text-foreground"
+          >
             Cancel
           </button>
         </div>
@@ -837,218 +685,5 @@ export default function CredentialsPage() {
         </div>
       </div>
     </div>
-  )
-}
-
-interface CredentialRowProps {
-  cred: Credential
-  selected: boolean
-  /** CASL "update" on Credential — shows the Edit row action. */
-  canUpdate: boolean
-  /** CASL "delete" on Credential — shows Delete + the bulk-select checkbox. */
-  canDelete: boolean
-  /** Crews that can use this credential but lack the CLI that reads it. */
-  gaps: CredentialToolGap[]
-  /** False when no crew answered the readiness endpoint — see below. */
-  readinessKnown: boolean
-  onToggleSelect: () => void
-  onOpen: () => void
-  onEdit: () => void
-  onDelete: () => void
-}
-
-// Single row, single style. Provider is an icon prefix on the name —
-// not a column, not a group header. Type is a tiny inline badge.
-function CredentialRow({
-  cred, selected, canUpdate, canDelete, gaps, readinessKnown,
-  onToggleSelect, onOpen, onEdit, onDelete,
-}: CredentialRowProps) {
-  const derived = deriveCredentialStatus(cred)
-  const brand = getBrand(cred.provider)
-  const BrandIcon = brand.Icon
-  const expiresIn = daysUntilExpiry(cred)
-  const lastUsed = cred.last_used_at ? formatRelativeTime(cred.last_used_at) : null
-
-  return (
-    <TableRow
-      className={cn("cursor-pointer row-hover transition-colors", selected && "row-selected")}
-      onClick={onOpen}
-    >
-      <TableCell onClick={(e) => e.stopPropagation()}>
-        {/* Bulk-select only exists to feed bulk delete — hide it from
-            roles that can't delete so it doesn't promise an action
-            that would 403. */}
-        {canDelete && (
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggleSelect}
-            className="h-3.5 w-3.5 cursor-pointer accent-primary"
-            aria-label={`Select ${cred.name}`}
-          />
-        )}
-      </TableCell>
-      <TableCell>
-        <span
-          className={cn(
-            "inline-block h-2 w-2 rounded-full",
-            STATUS_DOT_COLOR[derived],
-            derived === "Connected" && "shadow-[0_0_0_2px_rgba(52,211,153,0.18)]",
-          )}
-          title={derived}
-        />
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-2 min-w-0">
-          <BrandIcon
-            className="h-4 w-4 shrink-0"
-            style={{ color: brandColor(brand) }}
-            aria-label={brand.label}
-          />
-          <span className="font-mono text-sm truncate">{cred.name}</span>
-          {brand.cli && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1 font-mono shrink-0 border-info/50 text-info"
-              title="Crewship uses this credential to authenticate the agent's CLI inside the container"
-            >
-              CLI
-            </Badge>
-          )}
-          <Badge variant="outline" className="text-[9px] px-1 font-mono shrink-0 opacity-70">
-            {TYPE_LABEL[cred.type]}
-          </Badge>
-          {/* How closely Keeper guards it. Sits next to the type because they
-              answer the same shape of question about the row, and because the
-              tier is the one an operator is more likely to have got wrong. */}
-          {cred.security_level !== undefined && TIER_BADGE[cred.security_level] && (
-            <Badge
-              variant="outline"
-              className={`text-[9px] h-4 px-1 font-mono shrink-0 ${TIER_BADGE[cred.security_level].cls}`}
-              title={cred.security_level_label
-                ? `${cred.security_level_label} — ${TIER_BADGE[cred.security_level].title.split("— ")[1] ?? ""}`
-                : TIER_BADGE[cred.security_level].title}
-            >
-              {TIER_BADGE[cred.security_level].short}
-            </Badge>
-          )}
-          {derived === "Pending" && (
-            // Deep-link straight to the inbox — the approve/reject
-            // action lives there, so "go approve it" must be one
-            // click, not a copy-the-hint-and-navigate scavenger hunt.
-            <Link
-              href="/inbox"
-              onClick={(e) => e.stopPropagation()}
-              className="shrink-0"
-              title="Proposed by an agent — approve or reject it in the inbox"
-            >
-              <Badge
-                variant="outline"
-                className="text-[9px] h-4 px-1 border-warn/40 text-warn font-mono hover:border-warn/70 hover:text-warn transition-colors"
-              >
-                Pending approval →
-              </Badge>
-            </Link>
-          )}
-          {expiresIn !== null && expiresIn >= 0 && expiresIn <= 30 && (
-            <Badge
-              variant="outline"
-              className="text-[9px] h-4 px-1 border-warn/40 text-warn font-mono shrink-0"
-              title={`Expires in ${expiresIn}d`}
-            >
-              {expiresIn}d
-            </Badge>
-          )}
-        </div>
-      </TableCell>
-      <TableCell>
-        <ReadinessCell gaps={gaps} known={readinessKnown} />
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-1 flex-wrap">
-          {cred.tags.length === 0 ? (
-            <span className="text-[10px] text-muted-foreground-soft">—</span>
-          ) : (
-            cred.tags.slice(0, 3).map((t) => (
-              <Badge key={t} variant="outline" className="text-[10px] px-1 font-mono">{t}</Badge>
-            ))
-          )}
-          {cred.tags.length > 3 && (
-            <span className="text-[10px] text-muted-foreground" title={cred.tags.slice(3).join(", ")}>
-              +{cred.tags.length - 3}
-            </span>
-          )}
-        </div>
-      </TableCell>
-      <TableCell>
-        <span className="text-xs text-muted-foreground">
-          {cred._count_agent_credentials > 0
-            ? `${cred._count_agent_credentials} ${cred._count_agent_credentials === 1 ? "agent" : "agents"}`
-            : <span className="text-muted-foreground-soft">—</span>}
-          {cred.mcp_used && <span className="ml-1.5 text-[9px] text-info">MCP</span>}
-        </span>
-      </TableCell>
-      <TableCell>
-        {lastUsed ? (
-          <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
-            <Clock className="h-3 w-3 opacity-60" />
-            {lastUsed}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground-soft">never</span>
-        )}
-      </TableCell>
-      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-end gap-0.5">
-          {canUpdate && (
-            <Button variant="ghost" size="icon-xs" onClick={onEdit} title="Edit">
-              <Pencil className="h-3.5 w-3.5" />
-              <span className="sr-only">Edit</span>
-            </Button>
-          )}
-          {canDelete && (
-            <Button variant="ghost" size="icon-xs" onClick={onDelete} title="Delete">
-              <Trash2 className="h-3.5 w-3.5 text-destructive" />
-              <span className="sr-only">Delete</span>
-            </Button>
-          )}
-        </div>
-      </TableCell>
-    </TableRow>
-  )
-}
-
-/**
- * The readiness cell has THREE states, not two. "No gap reported" and "nobody
- * reported" look identical in the data and mean opposite things — a green
- * "ready" we did not earn is exactly the false reassurance §2.3 exists to
- * remove, so an unchecked workspace gets an em dash and a tooltip.
- */
-function ReadinessCell({ gaps, known }: { gaps: CredentialToolGap[]; known: boolean }) {
-  if (gaps.length > 0) {
-    const tools = Array.from(new Set(gaps.map((g) => g.tool).filter(Boolean)))
-    const crews = Array.from(new Set(gaps.map((g) => g.crewName)))
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 rounded-full border border-warn/35 bg-warn/[0.08] px-2 py-0.5 text-[10px] text-warn"
-        title={`Missing in ${crews.join(", ")} — add the devcontainer feature and rebuild`}
-      >
-        <PackageX className="h-3 w-3" />
-        {tools.length > 0 ? `needs ${tools.join(", ")}` : "tool missing"}
-      </span>
-    )
-  }
-  if (!known) {
-    return (
-      <span className="text-[10px] text-muted-foreground-soft" title="No crew reported its tool inventory yet.">
-        —
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-success/30 bg-success/[0.08] px-2 py-0.5 text-[10px] text-success">
-      <CheckCircle2 className="h-3 w-3" />
-      ready
-    </span>
   )
 }

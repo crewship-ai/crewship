@@ -21,6 +21,19 @@ function list() {
 /** Async twin of list(): waits for the region itself, so it can be used in a
  *  state the list has not rendered into yet (a retry, a workspace switch).
  *  list() resolves the region synchronously and would throw first. */
+/**
+ * Enter selection mode.
+ *
+ * Ticking rows is a MODE now, not the resting state of the rail: a checkbox on
+ * every row all the time reads as "this list is a thing you tick", when it is
+ * overwhelmingly a thing you click — and it leaves a bulk-delete one mis-click
+ * from every secret in the vault. Every bulk test opens the mode first,
+ * because that is what a user now does.
+ */
+async function enterSelectMode() {
+  fireEvent.click(await screen.findByRole("button", { name: /select several credentials/i }))
+}
+
 async function inList(name: string) {
   const region = await screen.findByRole("region", { name: /credential list/i })
   return within(region).findByText(name)
@@ -271,17 +284,26 @@ describe("selection cleared on workspace switch (#1156)", () => {
     renderWithSwitcher()
 
     expect(await inList("ALPHA_KEY")).toBeInTheDocument()
+    await enterSelectMode()
     fireEvent.click(screen.getByLabelText("Select ALPHA_KEY"))
     expect(await screen.findByText("1 selected")).toBeInTheDocument()
 
     fireEvent.click(screen.getByText("switch to B"))
 
     expect(await inList("BETA_KEY")).toBeInTheDocument()
+    // Both the ids AND the mode reset: a tick left over from another
+    // workspace would target credential ids this one does not have.
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
   })
 })
 
-describe("RBAC-gated row actions (C2)", () => {
+// Per-row Edit and Delete buttons went with the table. Edit now lives on the
+// credential's own detail (one Edit, on the thing being edited), and delete is
+// either the detail's Settings tab or the rail's bulk selection. What the LIST
+// still gates is the bulk-select checkbox, and it gates it exactly where the
+// backend does: DELETE is OWNER/ADMIN.
+describe("RBAC-gated list actions (C2)", () => {
   it.each(["VIEWER", "MEMBER"] as const)(
     "%s sees neither Edit/Delete actions nor bulk-select checkboxes",
     async (role) => {
@@ -292,28 +314,34 @@ describe("RBAC-gated row actions (C2)", () => {
       expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
       expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument()
       expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument()
+      // Neither the checkboxes nor the toggle that would produce them.
       expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: /select several credentials/i }),
+      ).not.toBeInTheDocument()
     },
   )
 
-  it("MANAGER sees Edit but not Delete (backend delete is OWNER/ADMIN)", async () => {
+  it("MANAGER gets no bulk-select checkbox (backend delete is OWNER/ADMIN)", async () => {
     h.role = "MANAGER"
     routeApi([makeCredential()])
     render(<CredentialsPage />)
 
     expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument()
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /select several credentials/i }),
+    ).not.toBeInTheDocument()
   })
 
-  it("OWNER sees Edit, Delete and the bulk-select checkbox", async () => {
+  it("OWNER can turn selection on, and it is off until they do", async () => {
     routeApi([makeCredential()])
     render(<CredentialsPage />)
 
     expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
+    // Not until asked: the rail offers the toggle, and the checkboxes follow.
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    await enterSelectMode()
     expect(screen.getByRole("checkbox", { name: "Select STRIPE_API_KEY" })).toBeInTheDocument()
   })
 
@@ -361,12 +389,16 @@ describe("OAuth connect entry point (#1034)", () => {
   })
 })
 
+// Approving an agent-proposed credential is an inbox action, so the row that
+// reports one has to LINK there. The badge used to carry the link from the
+// table; the attention queue on the overview carries it now, and the reason
+// text is the label.
 describe("pending-approval deep-link (C4)", () => {
-  it("renders the Pending approval badge as a link to /inbox", async () => {
+  it("links a pending credential straight to /inbox", async () => {
     routeApi([makeCredential({ status: "PENDING_APPROVAL" })])
     render(<CredentialsPage />)
 
-    const link = await screen.findByRole("link", { name: /pending approval/i })
+    const link = await screen.findByRole("link", { name: /approve or reject it/i })
     expect(link).toHaveAttribute("href", "/inbox")
   })
 })
@@ -387,6 +419,7 @@ describe("bulk delete partial failure (C6)", () => {
     })
     render(<CredentialsPage />)
 
+    await enterSelectMode()
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Select KEY_B" }))
     expect(screen.getByText("2 selected")).toBeInTheDocument()
@@ -409,6 +442,7 @@ describe("bulk delete partial failure (C6)", () => {
     routeApi([makeCredential({ id: "cred_a", name: "KEY_A" })])
     render(<CredentialsPage />)
 
+    await enterSelectMode()
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
     const bulkBar = screen.getByText("1 selected").parentElement!
     fireEvent.click(within(bulkBar).getByRole("button", { name: "Delete" }))
@@ -432,6 +466,7 @@ describe("bulk delete partial failure (C6)", () => {
     })
     render(<CredentialsPage />)
 
+    await enterSelectMode()
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
     const bulkBar = screen.getByText("1 selected").parentElement!
     fireEvent.click(within(bulkBar).getByRole("button", { name: "Delete" }))
@@ -449,38 +484,10 @@ describe("bulk delete partial failure (C6)", () => {
 // `if (res.ok) refresh` — a 404 (already deleted by another admin) was
 // silently swallowed: no toast, no refresh, stale row lingers. Apply the
 // same 404-as-already-gone semantics bulkDelete got in #1085.
-describe("single delete 404 (#1162)", () => {
-  it("treats a 404 DELETE as already-gone: toasts and refreshes instead of leaving a stale row", async () => {
-    const creds = [makeCredential({ id: "cred_a", name: "KEY_A" })]
-    let deletedHappened = false
-    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.startsWith("/api/v1/workspaces")) return ok([{ id: "ws1", name: "Test" }])
-      if (url.startsWith("/api/v1/credentials?")) return ok(deletedHappened ? [] : creds)
-      if (init?.method === "DELETE") {
-        deletedHappened = true
-        return fail(404) // already gone
-      }
-      return ok([])
-    })
-    render(<CredentialsPage />)
-
-    expect(await inList("KEY_A")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
-
-    const dialog = await screen.findByRole("alertdialog")
-    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
-
-    await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("already deleted"))
-    })
-    expect(toast.error).not.toHaveBeenCalled()
-    // The refresh this triggers must actually run — proving the 404 wasn't
-    // a silent no-op that leaves the now-nonexistent row on screen.
-    await waitFor(() => {
-      expect(screen.queryByText("KEY_A")).not.toBeInTheDocument()
-    })
-  })
-})
+// The single-credential delete moved to the detail sheet's Settings tab when
+// the table's row actions went. Its #1162 404-as-already-gone handling is
+// tested against the real component in
+// components/features/credentials/__tests__/credential-detail-sheet.test.tsx.
 
 // #1085 item 2: a refresh failure after data is on screen must not replace the
 // loaded list with the full-page error card — it toasts and keeps the list.
@@ -505,6 +512,7 @@ describe("transient refresh failure (C-refresh)", () => {
     render(<CredentialsPage />)
 
     // Delete the only credential — success path fires handleRefresh, which fails.
+    await enterSelectMode()
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select KEY_A" }))
     const bulkBar = screen.getByText("1 selected").parentElement!
     fireEvent.click(within(bulkBar).getByRole("button", { name: "Delete" }))

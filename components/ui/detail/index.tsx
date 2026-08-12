@@ -127,11 +127,18 @@ export function AppearStack({
 
 export type DetailTone = "default" | "success" | "destructive" | "warn" | "blue" | "purple"
 
-const TONE_BORDER: Record<"default" | "purple" | "success" | "warn", string> = {
+// Every DetailTone, so a card can be bordered in the same vocabulary its pills
+// and icons already use. `destructive` and `blue` were missing, which meant a
+// section whose whole point is "this one is dangerous" — a danger zone, an L4
+// credential, a last error — had to render in the same neutral grey as the
+// metadata beside it, or reach outside the kit for a one-off className.
+const TONE_BORDER: Record<DetailTone, string> = {
   default: "border-border/60",
   purple: "border-purple/30",
   success: "border-success/30",
   warn: "border-warn/30",
+  destructive: "border-destructive/30",
+  blue: "border-primary/30",
 }
 
 const TONE_FILL: Record<DetailTone, string> = {
