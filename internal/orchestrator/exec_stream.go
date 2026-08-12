@@ -37,6 +37,13 @@ type streamJSONMessage struct {
 	Usage        json.RawMessage `json:"usage,omitempty"`
 	ModelUsage   json.RawMessage `json:"modelUsage,omitempty"`
 	Errors       []string        `json:"errors,omitempty"`
+	// Also on "result": why the turn ended, and what the CLI refused. Not
+	// derivable from Subtype — a hard auth failure reports subtype "success"
+	// with IsError true and TerminalReason "api_error".
+	TerminalReason    string          `json:"terminal_reason,omitempty"`
+	APIErrorStatus    int             `json:"api_error_status,omitempty"`
+	StopReason        string          `json:"stop_reason,omitempty"`
+	PermissionDenials json.RawMessage `json:"permission_denials,omitempty"`
 	// For "system" type with subtype "init"
 	Model        string          `json:"model,omitempty"`
 	Tools        []string        `json:"tools,omitempty"`
@@ -44,6 +51,21 @@ type streamJSONMessage struct {
 	MCPSrvrs     json.RawMessage `json:"mcp_servers,omitempty"`
 	Plugins      json.RawMessage `json:"plugins,omitempty"`
 	PluginErrors json.RawMessage `json:"plugin_errors,omitempty"`
+	// Session provenance, all on system/init. ClaudeCodeVersion is the one
+	// that matters most: the adapter is pinned to an npm version in
+	// cli_adapter_versions_test.go while containers install latest, and
+	// without this field nothing in a run says which of the two answered.
+	// Capabilities is the CLI's own list of protocol behaviours (e.g.
+	// "interrupt_receipt_v1") — feature-detect on it rather than on a version
+	// string. MCPServerErrors (v2.1.219+) reports --mcp-config entries dropped
+	// by validation; the run continues and exits 0 without them.
+	ClaudeCodeVersion string          `json:"claude_code_version,omitempty"`
+	SessionID         string          `json:"session_id,omitempty"`
+	APIKeySource      string          `json:"apiKeySource,omitempty"`
+	PermissionMode    string          `json:"permissionMode,omitempty"`
+	Capabilities      []string        `json:"capabilities,omitempty"`
+	Skills            []string        `json:"skills,omitempty"`
+	MCPServerErrors   json.RawMessage `json:"mcp_server_errors,omitempty"`
 	// For "system" type with subtype "api_retry" (Anthropic 2.1.x ships this
 	// as a separate event when auth/rate/billing/server retries kick in).
 	// Surface to journal so backoff investigations have data; pre-fix parser

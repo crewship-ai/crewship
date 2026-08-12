@@ -488,7 +488,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
 				if actual, ok := m["model"].(string); ok && actual != "" {
 					loggedModel = true
-					logResolvedModel(o.logger, req.AgentID, req.LLMModel, actual)
+					version, _ := m["claude_code_version"].(string)
+					keySource, _ := m["apiKeySource"].(string)
+					logResolvedModel(o.logger, req.AgentID, req.LLMModel, actual, version, keySource)
 				}
 			}
 		}
