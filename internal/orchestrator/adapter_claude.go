@@ -211,16 +211,46 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		return
 	}
 
+	// A stream line is ONE JSON object, so treating any decode error as a
+	// line-level failure is what made a single mistyped field cost the whole
+	// envelope — on a result line that is no cost, no usage, and no is_error for
+	// inBandFailure to key on, i.e. a run that failed to authenticate recorded
+	// COMPLETED. Making one more field tolerant each time it happens is
+	// whack-a-mole against a shape we do not control; this is the fix in one
+	// place, and it covers the fields nobody has thought of yet.
+	//
+	// encoding/json already does the work: "If the JSON value is not appropriate
+	// for a given target type … Unmarshal skips that field and completes the
+	// unmarshaling as best it can", returning the earliest such error at the end.
+	// So on a type error `msg` is ALREADY populated with every field that did
+	// match — the error is a report about one field, not a verdict on the line,
+	// and the old code threw the decoded envelope away on the strength of it.
+	// Nothing is added to the happy path: a clean line never reaches this branch.
+	//
+	// msg.Type is the discriminator for everything below, so it is also the
+	// honest test of whether anything survived. Empty means the failure was
+	// structural rather than per-field — invalid JSON (checkValid rejects the
+	// line before any decoding), a JSON array or scalar, or a `type` that is not
+	// a string — and then the raw line still belongs in the transcript, because
+	// a CLI that started writing plain-text diagnostics to stdout must show up
+	// as visibly wrong rather than as silence.
 	var msg streamJSONMessage
-	if err := json.Unmarshal(line, &msg); err != nil {
+	if err := json.Unmarshal(line, &msg); err != nil && msg.Type == "" {
 		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 		return
 	}
 
-	// Claude Code wraps content in message.content; promote it when top-level is empty.
+	// Claude Code wraps content in message.content; promote it when top-level is
+	// empty. Same rule as the line-level decode above, and for the same reason:
+	// encoding/json skips the block whose shape moved and decodes the ones either
+	// side of it, so requiring err == nil here would put the hole back exactly
+	// where the tool calls live — an assistant line carries every tool_use of a
+	// turn, and one numeric id would cost all of them. What survived is what
+	// counts, so the error is discarded and the length is the test.
 	if len(msg.Content) == 0 && len(msg.Message) > 0 {
 		var nested nestedMessage
-		if json.Unmarshal(msg.Message, &nested) == nil && len(nested.Content) > 0 {
+		_ = json.Unmarshal(msg.Message, &nested)
+		if len(nested.Content) > 0 {
 			msg.Content = nested.Content
 		}
 	}
@@ -303,9 +333,9 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 			"subtype":         msg.Subtype,
 			"duration_ms":     msg.DurationMs,
 			"duration_api_ms": msg.DurationAPI,
-			"total_cost_usd":  msg.TotalCostUSD,
-			"num_turns":       msg.NumTurns,
-			"is_error":        msg.IsError,
+			"total_cost_usd":  float64(msg.TotalCostUSD),
+			"num_turns":       int(msg.NumTurns),
+			"is_error":        bool(msg.IsError),
 		}
 		if len(msg.Usage) > 0 {
 			var usage map[string]interface{}

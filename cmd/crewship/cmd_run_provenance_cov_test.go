@@ -277,3 +277,93 @@ func TestRunGetRunE_OmitsPermissionRowWhenNothingDenied(t *testing.T) {
 		t.Errorf("run get shows a permission row for a run that had none; got:\n%s", out)
 	}
 }
+
+// When the CLI reports skipped MCP servers in a shape the producer cannot read,
+// it stores a sentinel — a category and no name — so the alarm survives the
+// unreadable details. Every renderer here formats these entries BY NAME, so the
+// alarm arrived naming nothing: `run list` printed "1 run started with MCP
+// servers skipped" followed by an empty list, and `run get` a bare
+// "MCP skipped:" row. The alarm was preserved and the ability to act on it was
+// not.
+//
+// Falling back to the category also covers a real entry the CLI sends without a
+// name.
+func TestRunGetRunE_NamesTheUnreadableSkipSentinel(t *testing.T) {
+	stub := covSetupCli4(t)
+	body := provenanceRunBody()
+	body["mcp_server_errors"] = []map[string]any{{"type": "unrecognized_shape"}}
+	stub.OnGet("/api/v1/runs/msg_prov", clitest.JSONResponse(200, body))
+	runGetCmd.SetContext(context.Background())
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runGetCmd.RunE(runGetCmd, []string{"msg_prov"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "MCP skipped") {
+		t.Fatalf("run get dropped the skip row entirely; got:\n%s", out)
+	}
+	// The row must READ as the thing that was recorded, not as a parenthesised
+	// afterthought hanging off a name that is not there.
+	if strings.Contains(out, "(unrecognized_shape)") {
+		t.Errorf("skip row renders as a qualifier with nothing to qualify — "+
+			"the name slot is empty; got:\n%s", out)
+	}
+	if !strings.Contains(out, "unrecognized_shape") {
+		t.Errorf("run get shows a skipped server it does not identify at all; got:\n%s", out)
+	}
+}
+
+func TestRunListRunE_NoticeNamesTheUnreadableSkipSentinel(t *testing.T) {
+	stub := covSetupCli4(t)
+	setFormatCov(t, "table")
+	body := provenanceRunBody()
+	body["mcp_server_errors"] = []map[string]any{{"type": "unrecognized_shape"}}
+	stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{
+		"data": []map[string]any{body},
+	}))
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runListCmd.RunE(runListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "started with MCP servers skipped") {
+		t.Fatalf("listing lost the notice entirely; got:\n%s", out)
+	}
+	// The notice line is the one an operator copies into `run get`; a banner
+	// counting runs it cannot name tells them a capability was lost and nothing
+	// they can act on.
+	if !strings.Contains(out, "skipped: unrecognized_shape") {
+		t.Errorf("notice names no server for the run it flagged; got:\n%s", out)
+	}
+}
+
+// The producer records the same sentinel for a permission denial it could not
+// read, and it must reach the operator for the same reason: a blocked run that
+// names nothing still has to be visible as blocked.
+//
+// This pins the LAST hop only — the row this command renders once
+// journal.decodeDeniedToolNames has carried the sentinel through (the hop that
+// was broken, covered in internal/journal). It was already green: kept because
+// the sentinel's whole point is arriving here, and the previous round proved
+// that a sentinel nobody rendered is a sentinel that did not exist.
+func TestRunGetRunE_RendersTheDenialSentinel(t *testing.T) {
+	stub := covSetupCli4(t)
+	body := provenanceRunBody()
+	body["permission_denials"] = []string{"unrecognized_shape"}
+	stub.OnGet("/api/v1/runs/msg_prov", clitest.JSONResponse(200, body))
+	runGetCmd.SetContext(context.Background())
+
+	out, err := covCaptureStdoutCli4(t, func() error {
+		return runGetCmd.RunE(runGetCmd, []string{"msg_prov"})
+	})
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "Tools denied") || !strings.Contains(out, "unrecognized_shape") {
+		t.Errorf("run get hides a run the CLI blocked; got:\n%s", out)
+	}
+}

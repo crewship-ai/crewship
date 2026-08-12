@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -560,6 +562,199 @@ func TestMergeSessionInitMeta_UnrecognisedSkipShapeStillReports(t *testing.T) {
 			}
 			if bytes.Contains(blob, []byte(`{}`)) {
 				t.Errorf("stored an empty skip object (%s) — an alarm that names nothing", blob)
+			}
+		})
+	}
+}
+
+// storedDenial is the shape a projected permission_denials entry takes on the
+// run record. Tests decode through JSON rather than asserting on the
+// map[string]any directly, because JSON is what actually lands in the
+// hash-chained journal payload.
+type storedDenial struct {
+	ToolName string `json:"tool_name"`
+	Type     string `json:"type"`
+	Count    int    `json:"count"`
+}
+
+func decodeStoredDenials(t *testing.T, v any) []storedDenial {
+	t.Helper()
+	blob, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal permission_denials: %v", err)
+	}
+	var out []storedDenial
+	if err := json.Unmarshal(blob, &out); err != nil {
+		t.Fatalf("decode permission_denials %s: %v", blob, err)
+	}
+	return out
+}
+
+// denialsJSON builds a CLI-shaped permission_denials array from tool names, one
+// element per name — the CLI reports one entry per refusal, not per tool.
+func denialsJSON(names ...string) json.RawMessage {
+	elems := make([]string, 0, len(names))
+	for _, n := range names {
+		elems = append(elems, `{"tool_name":"`+n+`","tool_input":{"command":"x"}}`)
+	}
+	return json.RawMessage("[" + strings.Join(elems, ",") + "]")
+}
+
+// permission_denials got the projection its sibling mcp_server_errors got, and
+// none of the guards. Each gap below turns a run the CLI BLOCKED into a run
+// that reads as one that chose not to act — the single misdiagnosis this field
+// exists to prevent — or writes something untrue into a record that is
+// hash-chained and cannot be corrected afterwards.
+func TestMergeResultUsageMeta_DenialGuards(t *testing.T) {
+	// One retry storm: the same tool refused over and over, with a second,
+	// rarer tool denied late enough that a cap applied before deduping would
+	// drop it.
+	stormNames := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		if i == 34 {
+			stormNames = append(stormNames, "WebFetch")
+			continue
+		}
+		stormNames = append(stormNames, "Bash")
+	}
+	// Forty genuinely distinct tools: more than the list may keep, so the row
+	// has to say it is partial.
+	manyNames := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		manyNames = append(manyNames, fmt.Sprintf("Tool%02d", i))
+	}
+
+	cases := []struct {
+		name  string
+		in    any
+		check func(t *testing.T, dst map[string]any)
+	}{
+		{
+			// A release that reports denials as an object keyed by tool decodes
+			// into no objects at all. Storing nothing lets the key's absence —
+			// which every reader takes as "nothing was denied" — describe a run
+			// that was blocked.
+			name: "shape we cannot read keeps the alarm",
+			in:   json.RawMessage(`{"Bash":{"tool_input":{"command":"rm -rf /"}}}`),
+			check: func(t *testing.T, dst map[string]any) {
+				v, ok := dst["permission_denials"]
+				if !ok {
+					t.Fatalf("permission_denials absent — a reader takes that as 'nothing was denied' "+
+						"while the CLI reported a refusal: %+v", dst)
+				}
+				got := decodeStoredDenials(t, v)
+				if len(got) != 1 || got[0].Type != "unrecognized_shape" {
+					t.Fatalf("permission_denials = %+v, want the unrecognized_shape sentinel", got)
+				}
+				if got[0].ToolName != "" {
+					t.Errorf("sentinel names a tool (%q) we never read", got[0].ToolName)
+				}
+				if blob, _ := json.Marshal(v); bytes.Contains(blob, []byte("rm -rf")) {
+					t.Errorf("the refused tool input reached the run record: %s", blob)
+				}
+			},
+		},
+		{
+			// Decodes as objects, but the element key was renamed: every entry
+			// projects to {} and the length guard happily writes [{},{}] into a
+			// permanent record while the CLI shows two named denials.
+			name: "renamed element key never stores blanks",
+			in:   json.RawMessage(`[{"tool":"Bash"},{"tool":"Write"}]`),
+			check: func(t *testing.T, dst map[string]any) {
+				v, ok := dst["permission_denials"]
+				if !ok {
+					t.Fatalf("permission_denials absent for a reported refusal: %+v", dst)
+				}
+				blob, _ := json.Marshal(v)
+				if bytes.Contains(blob, []byte("{}")) {
+					t.Fatalf("stored a blank denial (%s) — an alarm naming no tool, kept forever", blob)
+				}
+				got := decodeStoredDenials(t, v)
+				if len(got) != 1 || got[0].Type != "unrecognized_shape" {
+					t.Errorf("permission_denials = %+v, want the unrecognized_shape sentinel", got)
+				}
+			},
+		},
+		{
+			name: "repeats collapse to the tool and keep the count",
+			in:   denialsJSON(stormNames...),
+			check: func(t *testing.T, dst map[string]any) {
+				got := decodeStoredDenials(t, dst["permission_denials"])
+				if len(got) != 2 {
+					t.Fatalf("permission_denials = %+v, want one entry per denied TOOL (2)", got)
+				}
+				byTool := map[string]int{}
+				for _, d := range got {
+					byTool[d.ToolName] = d.Count
+				}
+				if byTool["Bash"] != 39 {
+					t.Errorf("Bash count = %d, want 39 — deduping the name must not lose how hard it retried",
+						byTool["Bash"])
+				}
+				if _, ok := byTool["WebFetch"]; !ok {
+					t.Errorf("permission_denials = %+v: the tool denied on the 35th attempt is missing, "+
+						"so the row says only Bash was blocked", got)
+				}
+				if _, ok := dst["permission_denials_truncated"]; ok {
+					t.Errorf("marked truncated for two distinct tools: %+v", dst)
+				}
+			},
+		},
+		{
+			name: "more distinct tools than the cap says so",
+			in:   denialsJSON(manyNames...),
+			check: func(t *testing.T, dst map[string]any) {
+				got := decodeStoredDenials(t, dst["permission_denials"])
+				if len(got) != sessionInitListMax {
+					t.Fatalf("kept %d denials, want the %d-element cap", len(got), sessionInitListMax)
+				}
+				if dst["permission_denials_truncated"] != true {
+					t.Errorf("no truncation marker: an operator reads %d tools as the whole story, "+
+						"the way mcp_server_errors_truncated stops them doing", len(got))
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := map[string]any{}
+			MergeResultUsageMeta(dst, map[string]any{"permission_denials": tc.in})
+			tc.check(t, dst)
+		})
+	}
+}
+
+// emptyJSONValue is the gate in front of both projections, and it only
+// recognised emptiness in the shapes the CLAUDE adapter happens to produce —
+// raw JSON. An already-decoded empty list ([]map[string]any{}, []string{},
+// []json.RawMessage{}) fell through as "content", so a session where NOTHING
+// was skipped and NOTHING was denied got a degraded alarm and a sentinel that
+// names a problem that does not exist. Any adapter that decodes before stamping
+// the event lands here.
+func TestEmptyDecodedListsAreNotAReport(t *testing.T) {
+	cases := []struct {
+		name string
+		in   any
+	}{
+		{"decoded objects", []map[string]any{}},
+		{"raw JSON elements", []json.RawMessage{}},
+		{"strings", []string{}},
+		{"decoded any", []any{}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := map[string]any{}
+			MergeSessionInitMeta(dst, map[string]any{"mcp_server_errors": tc.in})
+			if v, ok := dst["mcp_server_errors"]; ok {
+				t.Errorf("mcp_server_errors = %v for an EMPTY report — the run record now claims a "+
+					"server was skipped when none was", v)
+			}
+			MergeResultUsageMeta(dst, map[string]any{"permission_denials": tc.in})
+			if v, ok := dst["permission_denials"]; ok {
+				t.Errorf("permission_denials = %v for an EMPTY report — the run record now claims a "+
+					"tool was refused when none was", v)
 			}
 		})
 	}

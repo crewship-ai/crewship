@@ -41,14 +41,33 @@ const provenanceTextLine = `{"type":"stream_event","event":{"type":"content_bloc
 // The CLI exits 0 and reports its own turn failed — the in-band failure shape.
 // It is the interesting one: a failed run is when someone asks which binary and
 // which credential answered.
-const provenanceFailLine = `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"refused"}` + "\n"
+const provenanceFailLine = `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"refused",` +
+	`"total_cost_usd":0.03,"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"curl http://x"}}]}` + "\n"
 
-const provenanceOKLine = `{"type":"result","subtype":"success","is_error":false,"result":"done"}` + "\n"
+const provenanceOKLine = `{"type":"result","subtype":"success","is_error":false,"result":"done",` +
+	`"total_cost_usd":0.03,"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"curl http://x"}}]}` + "\n"
+
+// The same terminal envelope with nothing on it. Used by the no-init cases so
+// "records nothing" stays literally true: a run that reports usage SHOULD
+// record usage even without an init event, and that is pinned separately.
+const provenanceBareOKLine = `{"type":"result","subtype":"success","is_error":false,"result":"done"}` + "\n"
 
 // assertProvenance checks the four run-scoped fields plus the dropped-server
 // list, i.e. everything MergeSessionInitMeta is supposed to have persisted.
+//
+// It also checks the half that these drivers used to throw away: they set
+// CaptureResultMeta and then merged only the session-init keys, so a delegated
+// run recorded no denials, no cost and no resolved model while the same work
+// through chat or the scheduler recorded all three (#1949).
 func assertProvenance(t *testing.T, run *journal.RunAggregated) {
 	t.Helper()
+	if run.Model != "claude-opus-5" {
+		t.Errorf("model = %q, want claude-opus-5 — the driver captured the resolved model and dropped it", run.Model)
+	}
+	if len(run.PermissionDenials) != 1 || run.PermissionDenials[0] != "Bash" {
+		t.Errorf("permission_denials = %v, want [Bash] — a delegated run that was permission-blocked reads as one that chose not to act",
+			run.PermissionDenials)
+	}
 	if run.CLIVersion != "2.1.226" {
 		t.Errorf("cli_version = %q, want 2.1.226 — the run record cannot say which binary answered", run.CLIVersion)
 	}
@@ -68,9 +87,16 @@ func assertProvenance(t *testing.T, run *journal.RunAggregated) {
 }
 
 // assertNoTerminalMetadata reads the raw terminal run.* payload and fails if it
-// carries a metadata map at all. Going through the SQL rather than the derived
+// carries any PROVENANCE key. Going through the SQL rather than the derived
 // record is the point: the derived record cannot tell an absent key from an
-// empty one, and absence is the contract.
+// empty one, and absence is the contract — the mcp-skip gate can only read a
+// missing mcp_server_errors as "nothing was skipped" if absence keeps meaning
+// that.
+//
+// It does not require the metadata map itself to be absent. The Claude adapter
+// stamps total_cost_usd and num_turns on every result envelope, so a run whose
+// CLI reported usage but no init event legitimately records usage — recording
+// it is correct, and inventing provenance to sit beside it is not.
 func assertNoTerminalMetadata(t *testing.T, db *sql.DB, traceID string) {
 	t.Helper()
 	var raw string
@@ -83,8 +109,11 @@ func assertNoTerminalMetadata(t *testing.T, db *sql.DB, traceID string) {
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
 		t.Fatalf("decode terminal payload %q: %v", raw, err)
 	}
-	if md, ok := p["metadata"]; ok {
-		t.Errorf("terminal payload carries metadata %v with no init event; want the key absent", md)
+	md, _ := p["metadata"].(map[string]any)
+	for _, k := range []string{"cli_version", "api_key_source", "permission_mode", "session_id", "mcp_server_errors", "model"} {
+		if v, ok := md[k]; ok {
+			t.Errorf("terminal payload carries %s=%v with no init event; want the key absent", k, v)
+		}
 	}
 }
 
@@ -144,7 +173,7 @@ func TestAssignmentRun_FailedCarriesSessionProvenance(t *testing.T) {
 // nothing", and the mcp-skip gate keys off exactly that absence.
 func TestAssignmentRun_NoInitEventRecordsNothing(t *testing.T) {
 	db, run := runProvenanceAssignment(t, "asg-prov-none",
-		provenanceTextLine+provenanceOKLine)
+		provenanceTextLine+provenanceBareOKLine)
 	if run.CLIVersion != "" || run.APIKeySource != "" || run.SessionID != "" {
 		t.Errorf("provenance invented from a stream with no init event: %+v", run)
 	}
@@ -198,7 +227,7 @@ func TestPeerQueryRun_FailedCarriesSessionProvenance(t *testing.T) {
 }
 
 func TestPeerQueryRun_NoInitEventRecordsNothing(t *testing.T) {
-	db, run := runProvenanceQuery(t, provenanceTextLine+provenanceOKLine)
+	db, run := runProvenanceQuery(t, provenanceTextLine+provenanceBareOKLine)
 	if run.CLIVersion != "" || run.APIKeySource != "" || run.SessionID != "" {
 		t.Errorf("provenance invented from a stream with no init event: %+v", run)
 	}
@@ -282,7 +311,7 @@ func TestWebhookRun_FailedCarriesSessionProvenance(t *testing.T) {
 }
 
 func TestWebhookRun_NoInitEventRecordsNothing(t *testing.T) {
-	_, meta := runProvenanceWebhook(t, provenanceTextLine+provenanceOKLine)
+	_, meta := runProvenanceWebhook(t, provenanceTextLine+provenanceBareOKLine)
 	for _, k := range []string{"cli_version", "api_key_source", "permission_mode", "session_id", "mcp_server_errors"} {
 		if _, ok := meta[k]; ok {
 			t.Errorf("metadata[%q] present without an init event — absence is what marks 'never reported'", k)

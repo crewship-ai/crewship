@@ -237,23 +237,16 @@ var crewPeerConvsCmd = &cobra.Command{
 			if item.Escalated {
 				esc = "YES"
 			}
-			rows[i] = []string{f.ShortID(item.ID, shortPeerConvID(item.ID)), item.FromName, item.ToName, q, item.Status, esc, item.CreatedAt}
+			// truncateID is the package's one id shortener, and it already
+			// carries the short-id guard this column needs (an id the server
+			// returns shorter than the cut renders whole instead of panicking a
+			// list command). A second private copy of it here is how the next fix
+			// to quiet-mode or length handling lands on one shortener and not the
+			// other. Eight characters is what this table has always shown; column
+			// 0 goes through Formatter.ShortID so `--format quiet` still emits the
+			// whole id for the next command in the pipe.
+			rows[i] = []string{f.ShortID(item.ID, truncateID(item.ID, 8)), item.FromName, item.ToName, q, item.Status, esc, item.CreatedAt}
 		}
 		return f.Auto(items, headers, rows)
 	},
-}
-
-// shortPeerConvID cuts a peer-conversation id down to the width the QUESTION
-// column needs to stay readable. Eight characters is what the table has always
-// shown; the length check is new — the bare `item.ID[:8]` panicked on any id
-// the server ever returns shorter than that, which is a crash in a list
-// command rather than a truncated cell.
-//
-// Column 0 goes through Formatter.ShortID, so `--format quiet` still emits the
-// whole id for the next command in the pipe.
-func shortPeerConvID(id string) string {
-	if len(id) <= 8 {
-		return id
-	}
-	return id[:8]
 }
