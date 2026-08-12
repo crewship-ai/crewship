@@ -404,7 +404,7 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 			// is off under --setting-sources "" — and this field is the
 			// per-run evidence of it.
 			if len(msg.Skills) > 0 {
-				meta["skills"] = msg.Skills
+				meta["skills"] = json.RawMessage(append([]byte{}, msg.Skills...))
 			}
 			// A --mcp-config entry that fails validation is skipped and the run
 			// continues, exiting 0. An agent that lost crewship-memory that way

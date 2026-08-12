@@ -97,6 +97,29 @@ func TestParseClaudeStream_InitCarriesSessionProvenance(t *testing.T) {
 	}
 }
 
+// The init line is one JSON object, so a field whose shape we guessed wrong
+// does not fail alone: it fails the whole unmarshal, and the parser's fallback
+// dumps the entire line into the transcript as raw text. `skills` is not in the
+// published stream reference — 2.1.204 and 2.1.226 both send an array of
+// strings, but nothing promises that — so it is carried untyped. This pins the
+// blast radius rather than the shape.
+func TestParseClaudeStream_InitSurvivesAnUnexpectedSkillsShape(t *testing.T) {
+	const line = `{"type":"system","subtype":"init","model":"claude-opus-5",
+		"claude_code_version":"2.1.300",
+		"skills":[{"name":"code-review","source":"plugin"}]}`
+
+	events := collectEvents(t, line)
+	for _, e := range events {
+		if e.Type == "text" {
+			t.Fatalf("init line fell back to raw text (%.60q…) — one unexpected field took the whole event with it", e.Content)
+		}
+	}
+	meta := metaOf(t, events, "system")
+	if got := meta["claude_code_version"]; got != "2.1.300" {
+		t.Errorf("claude_code_version = %v, want 2.1.300 — the rest of the line must still parse", got)
+	}
+}
+
 // An init line without the newer fields must not gain empty keys: an absent
 // mcp_server_errors means "no server was skipped", and a key present-but-empty
 // would make a CI gate that fails on a non-empty array read the wrong thing.

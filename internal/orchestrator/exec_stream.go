@@ -64,8 +64,13 @@ type streamJSONMessage struct {
 	APIKeySource      string          `json:"apiKeySource,omitempty"`
 	PermissionMode    string          `json:"permissionMode,omitempty"`
 	Capabilities      []string        `json:"capabilities,omitempty"`
-	Skills            []string        `json:"skills,omitempty"`
 	MCPServerErrors   json.RawMessage `json:"mcp_server_errors,omitempty"`
+	// Skills is RawMessage, not []string, deliberately: the field is not in
+	// the published stream reference, so its shape is not a promise. A typed
+	// field that stopped matching would fail the unmarshal of the ENTIRE init
+	// line and dump it to the UI as raw text — a large blast radius for a
+	// field we only pass through.
+	Skills json.RawMessage `json:"skills,omitempty"`
 	// For "system" type with subtype "api_retry" (Anthropic 2.1.x ships this
 	// as a separate event when auth/rate/billing/server retries kick in).
 	// Surface to journal so backoff investigations have data; pre-fix parser
