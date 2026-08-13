@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef } from "react"
+import { createContext, useCallback, useContext, useRef } from "react"
 import { Camera } from "lucide-react"
 import { toast } from "sonner"
 
@@ -58,6 +58,52 @@ function abortIfPending(sessionId: string, id: string) {
 
 function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError"
+}
+
+/**
+ * "Make sure this conversation exists, and tell me whether it does."
+ *
+ * A chat opened on an agent with no history is a DRAFT: the page mints the id
+ * locally and nothing is written server-side until the conversation actually
+ * starts (PRD Step 3 — arriving is not sending). The upload endpoint resolves
+ * the chat row before it will take a byte (`SELECT agent_id FROM chats WHERE
+ * id = ?`, internal/api/proxy_attachments.go) and answers 404 Chat not found
+ * when there is none — so the first conversation with an agent accepted text
+ * before it accepted a file, and "photograph the receipt, attach it, send" died
+ * on the attach.
+ *
+ * Attaching a file IS an intent to converse, so it creates the row the same way
+ * the first message does: ChatPanel's own `ensureSession`, which is already
+ * handed to the composer for the send path, reaches the upload through here.
+ * That keeps ONE creation path — it is idempotent per session (an in-flight map
+ * collapses racing callers, and the POST is an `INSERT OR IGNORE` upsert), so
+ * two files dropped at once still produce exactly one row.
+ *
+ * A CONTEXT rather than a prop because the zones are not all mounted by the
+ * composer's own JSX: an ask form's `file` / `photo` field mounts another one
+ * inside the sheet, over the same per-session list, and that upload needs the
+ * row for exactly the same reason. Both live under the composer's provider.
+ *
+ * `null` (no provider) means "nobody can vouch for this session" and the upload
+ * proceeds as it always did — that is the honest default for any future zone
+ * mounted on a conversation that already exists.
+ */
+export type EnsureChatSession = () => Promise<boolean>
+
+const EnsureChatSessionContext = createContext<EnsureChatSession | null>(null)
+
+export function EnsureChatSessionProvider({
+  ensureSession,
+  children,
+}: {
+  ensureSession: EnsureChatSession
+  children: React.ReactNode
+}) {
+  return (
+    <EnsureChatSessionContext.Provider value={ensureSession}>
+      {children}
+    </EnsureChatSessionContext.Provider>
+  )
 }
 
 /**
@@ -142,6 +188,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
   const addAttachments = useComposerStore((s) => s.addAttachments)
   const updateAttachment = useComposerStore((s) => s.updateAttachment)
   const { workspaceId } = useWorkspace()
+  const ensureChatSession = useContext(EnsureChatSessionContext)
 
   /** One file, start to finish. The chip already exists in the store and is
    *  patched IN PLACE — never removed and re-added, which would move it to the
@@ -156,6 +203,16 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       // upload was in flight, neither outcome may put it back. `updateAttachment`
       // is a no-op for an id that is gone, so this holds for both branches.
       try {
+        // The row before the bytes. On a draft session this is the POST that
+        // creates the conversation; on one that already exists it is a cached
+        // `true` and costs nothing. Failing here throws into the same handler
+        // a refused upload uses, so a conversation that could not be started
+        // produces an error chip and a named toast rather than a chip that
+        // reads as an attached file — and the endpoint is never called with a
+        // chat id it would 404 on.
+        if (ensureChatSession && !(await ensureChatSession())) {
+          throw new Error("the conversation could not be started")
+        }
         const { path, agent_path } = await uploadOne(agentId, sessionId, wsId, file, ac.signal)
         // `path` (relative to the agent's working directory) is what the
         // outgoing message names — without it the file lands in the
@@ -192,7 +249,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         abortRegistry.delete(key)
       }
     },
-    [agentId, sessionId, updateAttachment],
+    [agentId, sessionId, updateAttachment, ensureChatSession],
   )
 
   const upload = useCallback(

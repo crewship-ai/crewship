@@ -252,6 +252,11 @@ describe("a rejected upload never reads as an attached file", () => {
 
     await waitFor(() => expect(storeList()[0]?.status).toBe("error"))
     toastError.mockClear()
+    // The upload itself calls ensureSession — attaching a file creates the
+    // conversation on a draft session, the same way sending does
+    // (attachment-cold-session.test.tsx). What this test is about is the SEND
+    // below, so the counter starts here.
+    ensureSession.mockClear()
 
     // With no text, a failed attachment is not content: Send used to look
     // available and then do nothing at all when pressed.

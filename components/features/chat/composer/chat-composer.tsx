@@ -17,7 +17,12 @@ import {
 } from "@/lib/attachment-message"
 import { useMessageSubmit } from "../hooks/use-message-submit"
 import { MentionAutocomplete, type CrewMember } from "./mention-autocomplete"
-import { AttachmentZone, AttachmentButton, CameraButton } from "./attachment-zone"
+import {
+  AttachmentZone,
+  AttachmentButton,
+  CameraButton,
+  EnsureChatSessionProvider,
+} from "./attachment-zone"
 import { AskFormSheet } from "../asks/ask-form-sheet"
 import { recordAskProvenance } from "../asks/ask-provenance"
 import { isAttachmentField, type AskForm, type RenderAskTemplate } from "../asks/types"
@@ -34,7 +39,14 @@ interface ChatComposerProps {
   connectionStatus: string
   stopGeneration: () => void
   /** Make sure this session's `chats` row exists, and report whether it does.
-   *  `false` means the message must not go out — see useMessageSubmit. */
+   *  `false` means the message must not go out — see useMessageSubmit.
+   *
+   *  It gates UPLOADS too, through EnsureChatSessionProvider below: the
+   *  attachments endpoint resolves the chat row before it takes a byte, so on a
+   *  draft session (an agent whose first conversation this is) a file could not
+   *  be attached until something had been sent. Attaching is an intent to
+   *  converse, so it creates the row exactly as the first message does — one
+   *  creation path, idempotent per session. */
   ensureSession: () => Promise<boolean>
   sendMessage: (text: string) => void
   onSend?: (sessionId: string, text: string) => void
@@ -233,7 +245,7 @@ export function ChatComposer({
     // the paperclip. Mention autocomplete stays desktop-only: it needs a
     // keyboard-driven caret, and group chat is not a phone surface yet.
     return (
-      <>
+      <EnsureChatSessionProvider ensureSession={ensureSession}>
       {askSheet}
       <div className="p-3 shrink-0">
         <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>
@@ -254,12 +266,12 @@ export function ChatComposer({
           </PromptInput>
         </AttachmentZone>
       </div>
-      </>
+      </EnsureChatSessionProvider>
     )
   }
 
   return (
-    <>
+    <EnsureChatSessionProvider ensureSession={ensureSession}>
     {askSheet}
     <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
       <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>
@@ -286,6 +298,6 @@ export function ChatComposer({
         </PromptInput>
       </AttachmentZone>
     </div>
-    </>
+    </EnsureChatSessionProvider>
   )
 }
