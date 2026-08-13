@@ -39,11 +39,29 @@ vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
 }))
 
-vi.mock("@/components/features/chat/sessions-sidebar", () => ({
-  SessionsSidebar: ({ sessions, activeSessionId }: { sessions: { id: string }[]; activeSessionId: string | null }) => (
-    <div data-testid="sidebar" data-active={activeSessionId ?? ""} data-ids={sessions.map((s) => s.id).join(",")} />
-  ),
-}))
+// The desktop left column is the shared agent tree; SessionsSidebar is now the
+// phone drawer only. What this suite watches for is unchanged — the page's own
+// session list and which of them is active — so the stand-in moved to the
+// component that receives them.
+vi.mock("@/components/features/chat/chat-tree-sidebar", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/components/features/chat/chat-tree-sidebar")>()
+  return {
+    ...mod,
+    ChatTreeSidebar: ({
+      threadsByAgent,
+      activeThreadId,
+    }: {
+      threadsByAgent: Record<string, { id: string }[]>
+      activeThreadId: string | null
+    }) => (
+      <div
+        data-testid="sidebar"
+        data-active={activeThreadId ?? ""}
+        data-ids={(threadsByAgent["agent-1"] ?? []).map((s) => s.id).join(",")}
+      />
+    ),
+  }
+})
 
 // Stand-in for ChatPanel. The "send" button reproduces exactly what the real
 // panel does on submit — ensureSession() POSTs the chat into existence with

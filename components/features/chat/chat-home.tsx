@@ -1,11 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Plus, Users } from "lucide-react"
 
-import { apiFetch } from "@/lib/api-fetch"
-import { useWorkspace } from "@/hooks/use-workspace"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { SubBar } from "@/components/layout/sub-bar"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -14,6 +13,17 @@ import { timeAgo } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
 import { parseSessionTimestamp } from "./session-sort"
+import {
+  AGENT_FANOUT_CAP,
+  ChatTreeSidebar,
+  PER_AGENT_CHAT_LIMIT,
+  RECENT_THREAD_LIMIT,
+  useChatCompactLayout,
+  useChatTreeData,
+  type ChatFolder,
+  type ChatTreeAgent,
+  type ChatTreeThread,
+} from "./chat-tree-sidebar"
 
 /**
  * `/chat` — the front door to the agents.
@@ -22,6 +32,17 @@ import { parseSessionTimestamp } from "./session-sort"
  * endpoints that already exist: `GET /agents` once, then `GET /agents/{id}/chats`
  * per agent, merged and re-sorted on the client. There is no cross-agent
  * "recent conversations" endpoint and this page is not a reason to add one.
+ *
+ * The shape changed once the agent tree came back into scope: this content is
+ * no longer the whole page, it is the RIGHT pane. The left is the same
+ * `ChatTreeSidebar` that `/chat/<agent>` renders, so the surface has ONE left
+ * column instead of one per route, and a wide screen shows a page rather than a
+ * strip of text in a lot of empty. The index keeps a max width of its own —
+ * beside a 280px column there is more than enough room to stretch a line of
+ * text to 2000px, which is not an improvement on the strip.
+ *
+ * Both halves read the SAME fetch (`useChatTreeData`). A tree with its own copy
+ * of the fan-out would double every request on the busiest page of the surface.
  *
  * What this page deliberately does NOT do (PRD O7): mount a ChatPanel. The
  * panel opens its own WebSocket on mount, separate from RealtimeProvider, so
@@ -33,48 +54,13 @@ import { parseSessionTimestamp } from "./session-sort"
  * internal/api/static.go resolves exactly one level).
  */
 
-/**
- * How many agents get a chats request. The fan-out is one round trip per
- * agent, in parallel, on a page whose entire job is to open fast; a workspace
- * with 60 agents would otherwise spend 60 requests to render ~20 rows that
- * come from the handful of agents anyone actually talks to.
- *
- * 12 is chosen against the ordering the roster already has: `/agents` returns
- * live agents by creation recency with ghosts last (internal/api/agents_query.go),
- * so the first 12 are the newest live agents — the ones with recent threads if
- * anyone has any. Every agent still gets a row in the Agents section; the cap
- * only bounds the thread lookup.
- */
-export const AGENT_FANOUT_CAP = 12
+// The fan-out constants live with the fetching, in chat-tree-sidebar. Kept
+// exported from here because this module is where they were first named and
+// callers (and tests) still reach for them at this path.
+export { AGENT_FANOUT_CAP, PER_AGENT_CHAT_LIMIT, RECENT_THREAD_LIMIT }
 
-/** Per-agent page size. 12 × 10 is a comfortable superset of what is shown. */
-export const PER_AGENT_CHAT_LIMIT = 10
-
-/** How many merged threads reach the screen. */
-export const RECENT_THREAD_LIMIT = 25
-
-export interface ChatHomeAgent {
-  id: string
-  name: string
-  slug: string
-  status: string
-  role_title?: string | null
-  avatar_seed?: string | null
-  avatar_style?: string | null
-  avatar_url?: string | null
-  /** Non-null marks a ghost (a retired agent). Not a chat destination. */
-  expired_at?: string | null
-}
-
-export interface ChatHomeThread {
-  id: string
-  title: string | null
-  status: string
-  message_count: number
-  started_at: string
-  ended_at?: string | null
-  last_activity_at?: string | null
-  unread_count?: number
+export type ChatHomeAgent = ChatTreeAgent
+export type ChatHomeThread = ChatTreeThread & {
   /**
    * First line of the last message. `GET /agents/{id}/chats` does not emit
    * one today (internal/api/agent_chats.go selects id/title/mode/status/
@@ -90,6 +76,12 @@ export interface ChatHomeThread {
 /** `/chat/<slug>?session=<id>` — session as a query param, never a path segment. */
 export function threadHref(slug: string, chatId: string): string {
   return `/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(chatId)}`
+}
+
+/** `/chat/<slug>?folder=<folder>` — the folder is a parameter for the same reason. */
+export function folderHref(slug: string, folder: ChatFolder): string {
+  const base = `/chat/${encodeURIComponent(slug)}`
+  return folder === "sessions" ? base : `${base}?folder=${encodeURIComponent(folder)}`
 }
 
 /**
@@ -116,72 +108,16 @@ export function mergeRecentThreads(
 }
 
 export function ChatHome() {
-  const { workspaceId, loading: wsLoading } = useWorkspace()
+  const router = useRouter()
+  const compact = useChatCompactLayout()
+  const { agents, threadsByAgent, threadsLoaded, error, wsLoading } = useChatTreeData()
 
-  const [agents, setAgents] = useState<ChatHomeAgent[] | null>(null)
-  const [threads, setThreads] = useState<ChatHomeThread[]>([])
-  const [threadsLoaded, setThreadsLoaded] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // ── The roster ──
-  useEffect(() => {
-    if (!workspaceId) return
-    let cancelled = false
-    apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((list: ChatHomeAgent[]) => {
-        if (cancelled) return
-        // Ghosts are retired agents; opening a chat with one is not a thing
-        // this page should offer.
-        setAgents(Array.isArray(list) ? list.filter((a) => !a.expired_at) : [])
-        setError(null)
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        setAgents([])
-        setError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceId])
-
-  // ── The fan-out ──
-  useEffect(() => {
-    if (!workspaceId || agents === null) return
-    if (agents.length === 0) {
-      setThreads([])
-      setThreadsLoaded(true)
-      return
-    }
-    let cancelled = false
-    setThreadsLoaded(false)
-    const scope = agents.slice(0, AGENT_FANOUT_CAP)
-    Promise.all(
-      scope.map((a) =>
-        apiFetch(
-          `/api/v1/agents/${encodeURIComponent(a.id)}/chats` +
-            `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${PER_AGENT_CHAT_LIMIT}`,
-        )
-          .then((r) => (r.ok ? r.json() : []))
-          .then((rows: unknown) =>
-            Array.isArray(rows)
-              ? (rows as Omit<ChatHomeThread, "agent">[]).map((row) => ({ ...row, agent: a }))
-              : [],
-          )
-          // One agent's list failing must not blank the page — the other
-          // eleven are still worth showing.
-          .catch(() => [] as ChatHomeThread[]),
-      ),
-    ).then((chunks) => {
-      if (cancelled) return
-      setThreads(mergeRecentThreads(chunks.flat()))
-      setThreadsLoaded(true)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceId, agents])
+  const threads = useMemo(() => {
+    if (!agents) return []
+    return mergeRecentThreads(
+      agents.flatMap((a) => (threadsByAgent[a.id] ?? []).map((t) => ({ ...t, agent: a }))),
+    )
+  }, [agents, threadsByAgent])
 
   const loading = wsLoading || agents === null
 
@@ -192,26 +128,44 @@ export function ChatHome() {
       : `${threads.length} recent · ${agents.length} agent${agents.length === 1 ? "" : "s"}`
 
   return (
-    <div className="flex h-[calc(100vh-48px)] min-h-0 flex-col">
+    <div className="flex h-[calc(100vh-48px)] min-h-0 flex-col bg-background">
       <SubBar icon={CONCEPT_ICON.sessions} title="Chat" description={description} ariaLabel="Chat" />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-4 py-6">
-          {loading ? (
-            <div className="space-y-2" data-testid="chat-home-loading">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-            </div>
-          ) : agents.length === 0 ? (
-            <NoAgents error={error} />
-          ) : (
-            <>
-              <RecentThreads threads={threads} loaded={threadsLoaded} />
-              <AgentList agents={agents} />
-            </>
-          )}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* The tree is a two-pane information architecture. Where two panes do
+            not fit, the index IS the navigation — a 280px column on a 390px
+            phone is the mistake this surface already made once. */}
+        {!compact && (
+          <ChatTreeSidebar
+            agents={agents ?? []}
+            threadsByAgent={threadsByAgent}
+            loading={loading || !threadsLoaded}
+            activeAgentSlug={null}
+            activeFolder={null}
+            activeThreadId={null}
+            onOpenThread={(agent, threadId) => router.push(threadHref(agent.slug, threadId))}
+            onOpenFolder={(agent, folder) => router.push(folderHref(agent.slug, folder))}
+          />
+        )}
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div data-testid="chat-home-pane" className="mx-auto w-full max-w-3xl px-4 py-6">
+            {loading ? (
+              <div className="space-y-2" data-testid="chat-home-loading">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : agents.length === 0 ? (
+              <NoAgents error={error} />
+            ) : (
+              <>
+                <RecentThreads threads={threads} loaded={threadsLoaded} />
+                <AgentList agents={agents} />
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

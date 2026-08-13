@@ -13,7 +13,11 @@ import { ChatHome } from "@/components/features/chat/chat-home"
 // internal/api/static_chat_index_test.go.
 //
 // The client half lives in components/features/chat/chat-home.tsx rather than
-// in app/, matching how the rest of the dashboard is laid out.
+// in app/, matching how the rest of the dashboard is laid out. It renders two
+// panes: the shared ChatTreeSidebar on the left — the SAME column
+// /chat/<agent> has, which is the whole point — and the recent-threads index
+// on the right. No ChatPanel until a thread is chosen (PRD O7), so this route
+// opens no WebSocket.
 export default function ChatIndexPage() {
   return <ChatHome />
 }

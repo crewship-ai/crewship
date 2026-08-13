@@ -96,13 +96,47 @@ recorded so it does not get re-argued from scratch.
 
 | Cut | Why |
 |---|---|
-| **Agent tree with Files / Memory folders** | `/crews` already browses an agent's memory, files and config. A second IA for the same object is the disease this codebase already has — the orphaned `agents/sessions\|settings\|workspace\|logs` page clients are the evidence. Ship the plain session list; revisit when a user asks for the folders. |
+| ~~**Agent tree with Files / Memory folders**~~ **— REVERSED, see §3.3** | The cut read: `/crews` already browses an agent's memory, files and config, and a second IA for the same object is the disease this codebase has. That argument was about duplicating `/crews`. It missed the argument that decided it: every other surface in the product (`/routines`, `/issues`) uses this sidebar shape, and the flat list looked unfinished beside them. |
 | **Document preview pane** | Requires serving agent-authored content inline (`internal/server/routes_files.go:179-181` is `attachment` + `octet-stream` **on purpose**). That is the riskiest work in the whole plan — stored XSS if done casually — for a case where Download already works. §6.3. |
 | **Inline decision card** | The default rule set does not match `agent_run` (`internal/policy/approval_mode.go:25-30`), so approvals in chat essentially do not fire today. Building UI for a non-event is zero usage. Fix the policy first, then the card. §6.1. |
 | **"Allow for 1 hour / always"** | Earlier draft claimed this was 80 % built. It is not: `waitpoint_trust_grants` is keyed `(workspace, pipeline_id, step_id, definition_hash)`. Chat has no such scope key, so this needs a **new grant scope** — design work, not wiring. |
 | **Routine from this conversation** | The registered slash action is real (`internal/api/slash_commands_handler.go:60`) but the transcript→DSL step, which is the whole brain of it, does not exist anywhere. And more ways to create routines does not help a catalogue at 0 runs (§0). §6.2. |
 | **Space / project switcher** | A switcher that only filters implies an isolation boundary it does not provide. A padlock icon that is not a padlock is worse than no icon. §6.4. |
 | **Ask-pack library** | The workspace library with per-agent bindings is the right long-term model and is over-built for 1.0. Step 7 ships one textarea instead: 90 % of the value, 5 % of the cost, no migration. |
+
+### 3.3 Back in: the agent tree
+
+Overruled by the owner and built. The reason is consistency, not features: the
+flat 240px session list was the only in-page sidebar in the product that was
+not the shared shape, and `/chat` had a *second*, different left column of its
+own — two left columns for one surface, neither of them the one `/routines` and
+`/issues` use.
+
+What shipped:
+
+- **One column, `components/features/chat/chat-tree-sidebar.tsx`**, rendered by
+  both routes and assembled from `components/layout/sidebar-kit` (280px, 44px
+  collapsed; toolbar with search + filter + collapse; section headers with
+  counts; `SidebarRow` selection, so the accent bar is the tokenised one).
+- **STATUS facets** — All · Unread · Running · Done, counted from data that was
+  actually fetched: `unread_count` and `ended_at` from `GET /agents/{id}/chats`,
+  `status` from `GET /agents`. There is no **Needs you** facet: neither endpoint
+  can answer it (escalations are a different read), and a facet whose number is
+  a guess is worse than one that is not there. It arrives with the work in §6.1,
+  which is where the escalation read belongs anyway.
+- **Folders per agent** — Sessions / Files / Asks / Memory. Sessions expands to
+  the agent's threads; the other three replace the centre pane, composer
+  included, which is also what keeps the socket count at one (§O7).
+- **No new endpoints and no new route.** The folder is `?folder=`, never
+  `/chat/<agent>/<folder>`: the static handler rewrites exactly one path level
+  and the slug is read from `window.location.pathname`.
+- **Unchanged on a phone.** The drawer and the tab strip from Step 5 are what
+  the tree steps aside for; `sessions-sidebar.tsx` survives as the drawer's
+  contents and nothing else.
+
+What the original cut got right and is still true: this is not a second browser
+for an agent. It navigates conversations, and the Files/Asks/Memory panes are
+views onto what `/crews` administers, not a second place to administer it.
 
 ## 4. The steps
 

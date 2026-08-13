@@ -61,16 +61,31 @@ vi.mock("@/hooks/use-realtime", () => ({
   },
 }))
 
-vi.mock("@/components/features/chat/sessions-sidebar", () => ({
-  SessionsSidebar: ({ sessions }: { sessions: { id: string; title: string | null; last_activity_at?: string | null }[] }) => (
-    <div
-      data-testid="sidebar"
-      data-ids={sessions.map((s) => s.id).join(",")}
-      data-titles={sessions.map((s) => s.title ?? "").join("|")}
-      data-activity={sessions.map((s) => s.last_activity_at ?? "").join("|")}
-    />
-  ),
-}))
+// The desktop left column is the shared agent tree now; SessionsSidebar is the
+// phone drawer. The page still owns the session list and still hands it down,
+// so the stand-in follows it to its new consumer — the rows, their titles and
+// their order are exactly what this suite is about.
+vi.mock("@/components/features/chat/chat-tree-sidebar", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/components/features/chat/chat-tree-sidebar")>()
+  return {
+    ...mod,
+    ChatTreeSidebar: ({
+      threadsByAgent,
+    }: {
+      threadsByAgent: Record<string, { id: string; title: string | null; last_activity_at?: string | null }[]>
+    }) => {
+      const sessions = threadsByAgent["agent-1"] ?? []
+      return (
+        <div
+          data-testid="sidebar"
+          data-ids={sessions.map((s) => s.id).join(",")}
+          data-titles={sessions.map((s) => s.title ?? "").join("|")}
+          data-activity={sessions.map((s) => s.last_activity_at ?? "").join("|")}
+        />
+      )
+    },
+  }
+})
 
 // Stand-in for ChatPanel reproducing exactly what the real one does on submit:
 // ensureSession() POSTs the chat into existence with the id it was handed (and

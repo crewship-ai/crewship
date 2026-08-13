@@ -104,8 +104,10 @@ describe("<ChatPageClient> — slug resolution from URL", () => {
     render(<ChatPageClient />)
 
     // After mount, the agent fetch fires and the chat layout appears.
+    // getAllBy: the agent is named twice now — in the identity strip and again
+    // as its row in the tree that shares this column with every other agent.
     await waitFor(
-      () => expect(screen.getByText(/Filip/)).toBeInTheDocument(),
+      () => expect(screen.getAllByText(/Filip/).length).toBeGreaterThan(0),
       { timeout: 3000 },
     )
   })

@@ -122,13 +122,20 @@ describe("<ChatPageClient> — mobile layout", () => {
     agent.suggested_prompts = null
   })
 
-  it("desktop (1280px) keeps today's fixed 240px session column", async () => {
+  // The only assertion in this file that had to move when the agent tree
+  // landed. It used to read "keeps today's fixed 240px session column": 240px
+  // was this page's own number, and the shared sidebar-kit width is 280. The
+  // mobile cases below are untouched — the drawer and the tab strip are
+  // exactly the behaviour the tree steps aside for.
+  it("desktop (1280px) gives the shared 280px tree its own column", async () => {
     setViewport(1280)
     render(<ChatPageClient />)
     await waitFor(() => expect(screen.getByTestId("chat-panel")).toBeInTheDocument())
 
-    expect(grid().style.gridTemplateColumns).toBe("240px 1fr")
-    expect(screen.getByTestId("sessions-sidebar")).toBeInTheDocument()
+    expect(grid().style.gridTemplateColumns).toBe("280px 1fr")
+    expect(screen.getByTestId("chat-tree-sidebar")).toBeInTheDocument()
+    // The flat session list is the phone drawer now, and nothing else.
+    expect(screen.queryByTestId("sessions-sidebar")).not.toBeInTheDocument()
     // Desktop mode is signalled by the ABSENCE of mobilePanel — that is what
     // makes ChatPanel fall through to its split view.
     expect(panelProp("data-mobile-panel")).toBe("(undefined)")

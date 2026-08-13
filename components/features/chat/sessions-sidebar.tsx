@@ -87,21 +87,28 @@ function originTag(s: SessionRow): OriginTag | null {
 }
 
 /**
- * Left rail of the chat full-page route. Lists recent sessions for the
- * agent with a search box. Empty (0-message) sessions are hidden by
- * default — they're typically auto-created on page load and add noise.
- * Toggle to show them via the empty-state CTA.
+ * The flat session list — now the PHONE drawer, and only that.
+ *
+ * On desktop this rail has been replaced by `chat-tree-sidebar.tsx`, the one
+ * left column both `/chat` and `/chat/<agent>` share. It was not deleted with
+ * it, and the reason is not sentiment: below the mobile breakpoint the tree is
+ * the wrong object. A 280px column with four folders per agent does not fit a
+ * 390px screen, and the behaviour that does — this list, in a drawer, behind
+ * the header's Sessions button, beside the chat/files/more tab strip — is
+ * already built, already tested, and is what the tree steps aside for.
+ *
+ * Lists recent sessions for one agent with a search box. Empty (0-message)
+ * sessions are hidden by default — they're typically auto-created on page load
+ * and add noise. Toggle to show them via the empty-state CTA.
  *
  * Click a session → swaps the chat panel via URL ?session=. New session
  * button lives in the header strip above.
  *
  * Chrome comes from components/layout/sidebar-kit — SidebarSearch, a
  * SidebarSection header carrying the count, and SidebarRow (→ ListRow) for
- * the tokenised accent-bar selection — so this rail and the /routines and
- * /issues rails read as one system instead of three hand-rolled variants of
- * the same box. Chrome only: no status facets and no agent tree, both of
- * which are out of 1.0 on purpose (PRD §3.2 — /crews already browses an
- * agent, and a second IA for the same object is the disease being cured).
+ * the tokenised accent-bar selection — so this rail and the tree and the
+ * /routines and /issues rails read as one system instead of four hand-rolled
+ * variants of the same box.
  */
 export function SessionsSidebar({
   sessions,
