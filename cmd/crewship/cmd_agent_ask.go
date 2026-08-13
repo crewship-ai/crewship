@@ -85,10 +85,32 @@ var agentAskPreviewCmd = &cobra.Command{
 		}
 		chatID, _ := cmd.Flags().GetString("chat-id")
 
-		message, err := askforms.RenderByID(forms, args[1], values, chatID)
-		if err != nil {
+		form, found := askforms.FormByID(forms, args[1])
+		if !found {
+			// RenderByID owns this error: it names the id asked for AND the
+			// ids that exist, which is the second lookup an operator would
+			// otherwise do by hand.
+			_, err := askforms.RenderByID(forms, args[1], values, chatID)
 			return err
 		}
+
+		// The same constraints the sheet applies at submit (internal/askforms
+		// /answers.go). A preview whose whole promise is "this is what gets
+		// sent" must not print a message the console would have refused —
+		// that is the P0.7 gap seen from the other end.
+		if problems := askforms.ValidateAnswers(form, values); len(problems) > 0 {
+			lines := make([]string, 0, len(problems))
+			for _, p := range problems {
+				lines = append(lines, "  "+p.Message)
+			}
+			return fmt.Errorf("these answers would be refused in the chat:\n%s",
+				strings.Join(lines, "\n"))
+		}
+
+		// Belt to the validator's braces, for a definition stored before the
+		// field-type rule existed: an unsafe-typed answer is dropped rather
+		// than rendered into something pipeable.
+		message := askforms.Render(form, askforms.SanitizeValues(form, values), chatID)
 
 		// Plain stdout, no framing. The point of a preview is to be diffable
 		// and pipeable — into a file, into `wc -c`, into a review comment.

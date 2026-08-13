@@ -1,0 +1,263 @@
+{
+  "$comment": [
+    "The ask-form FIELD TYPE and ANSWER CONSTRAINT rules, pinned across the two",
+    "languages that implement them — internal/askforms (definition validator, CLI)",
+    "and lib/ask-validate.ts (the sheet the user actually answers).",
+    "",
+    "This is a second golden fixture, deliberately NOT testdata/ask-templates.json.",
+    "That one pins the two RENDERERS; nothing in here is a rendering rule, and",
+    "mixing them would mean a constraint change had to touch the file that keeps",
+    "the two renderers honest.",
+    "",
+    "Read by internal/askforms/fieldtypes_test.go and lib/__tests__/ask-validate.test.ts.",
+    "A rule added on one side and not the other is a red run in both suites."
+  ],
+
+  "$rule": [
+    "TYPES. Three verdicts, not two:",
+    "  known  — this client has a control for it and renders that control.",
+    "  open   — never heard of it, but the name is inert, so it renders as a text",
+    "           input. This is what lets the server ship a field type without a",
+    "           coordinated frontend release, and it is kept on purpose.",
+    "  unsafe — a name that says the value is a secret, or a name shaped so that",
+    "           nothing can be trusted to render it. It FAILS CLOSED: the",
+    "           definition validator refuses to save it, and if one is already",
+    "           stored (a row written before the validator, or edited around the",
+    "           API) the sheet renders no input for it and refuses to submit.",
+    "",
+    "The asymmetry is the point. An ask form renders into an ordinary, durable",
+    "chat message; there is no field type that makes that safe for a secret. So",
+    "the list stays open for types whose worst case is a plainer control, and is",
+    "closed exactly where the fallback would be a lie."
+  ],
+
+  "type_shape": "^[a-z][a-z0-9_-]*$",
+  "max_type_runes": 32,
+
+  "types": [
+    { "type": "text", "verdict": "known" },
+    { "type": "textarea", "verdict": "known" },
+    { "type": "number", "verdict": "known" },
+    { "type": "money", "verdict": "known" },
+    { "type": "date", "verdict": "known" },
+    { "type": "month", "verdict": "known" },
+    { "type": "select", "verdict": "known" },
+    { "type": "multiselect", "verdict": "known" },
+    { "type": "checkbox", "verdict": "known" },
+    { "type": "file", "verdict": "known" },
+    { "type": "photo", "verdict": "known" },
+
+    { "type": "quantum-flux", "verdict": "open", "$why": "a type this release has never heard of still renders — the open list" },
+    { "type": "rating", "verdict": "open" },
+    { "type": "agent_file", "verdict": "open" },
+    { "type": "monkey", "verdict": "open", "$why": "contains 'key' but is not the token 'key' — a substring match here would close the list on nonsense" },
+    { "type": "keyword", "verdict": "open" },
+    { "type": "tokenizer", "verdict": "unsafe", "reason": "sensitive", "$why": "a false positive we accept: 'token' anywhere in a type name fails closed, and the cost is one awkward rename" },
+
+    { "type": "secret", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "password", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "api_key", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "apikey", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "private-key", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "credential_type", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "oauth_token", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "client_secret", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "passphrase", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "otp", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "totp", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "pin", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "cvv", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "ssn", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "pwd", "verdict": "unsafe", "reason": "sensitive" },
+    { "type": "auth", "verdict": "unsafe", "reason": "sensitive" },
+
+    { "type": "Secret", "verdict": "unsafe", "reason": "unnameable", "$why": "uppercase never reaches a control — the shape rule catches it before the sensitivity rule has to" },
+    { "type": "text input", "verdict": "unsafe", "reason": "unnameable" },
+    { "type": "9lives", "verdict": "unsafe", "reason": "unnameable" },
+    { "type": "-lead", "verdict": "unsafe", "reason": "unnameable" },
+    { "type": "", "verdict": "unsafe", "reason": "unnameable" },
+    { "type": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "verdict": "unsafe", "reason": "unnameable", "$why": "33 characters, one over the cap" }
+  ],
+
+  "$constraints": [
+    "WHERE A CONSTRAINT MEANS WHAT. `min`/`max` are one pair of numbers in the",
+    "schema and three different questions depending on the field:",
+    "  number, money            -> the VALUE must fall in range",
+    "  text, textarea, open     -> the LENGTH in characters must fall in range",
+    "  multiselect, file, photo -> the COUNT of answers must fall in range",
+    "",
+    "`pattern` is anchored (the whole value must match) and applies only to the",
+    "text-ish types. `multiple: false` caps an upload field at one file.",
+    "",
+    "Every combination not listed above is REFUSED WHEN THE FORM IS SAVED, which",
+    "is the same principle as the placeholder rule: a constraint the submit path",
+    "would not enforce must not be storable, or the author is told a lie about",
+    "what their form guarantees.",
+    "",
+    "An empty OPTIONAL answer is not a violation — only `required` speaks to",
+    "emptiness. Otherwise a form with `min: 3` could not be left blank."
+  ],
+
+  "answers": [
+    {
+      "name": "a required text field left empty names itself",
+      "field": { "name": "supplier", "label": "Supplier", "type": "text", "required": true },
+      "value": "",
+      "errors": [{ "code": "required", "message": "Supplier is required." }]
+    },
+    {
+      "name": "an optional field left empty is not a violation of its own constraints",
+      "field": { "name": "note", "label": "Note", "type": "text", "min": 3 },
+      "value": "",
+      "errors": []
+    },
+    {
+      "name": "text min is a length",
+      "field": { "name": "note", "label": "Note", "type": "text", "min": 3 },
+      "value": "ab",
+      "errors": [{ "code": "min", "message": "Note must be at least 3 characters." }]
+    },
+    {
+      "name": "text max is a length, and one character is singular",
+      "field": { "name": "code", "label": "Code", "type": "text", "max": 1 },
+      "value": "ab",
+      "errors": [{ "code": "max", "message": "Code must be at most 1 character." }]
+    },
+    {
+      "name": "an answer is measured after its edges are trimmed, exactly as the renderer would send it",
+      "field": { "name": "code", "label": "Code", "type": "text", "max": 2 },
+      "value": "  ab  ",
+      "errors": []
+    },
+    {
+      "name": "a length is counted in characters, not UTF-16 units",
+      "field": { "name": "note", "label": "Note", "type": "textarea", "max": 2 },
+      "value": "🙂🙂",
+      "errors": []
+    },
+    {
+      "name": "number min is a value",
+      "field": { "name": "qty", "label": "Quantity", "type": "number", "min": 10 },
+      "value": "9",
+      "errors": [{ "code": "min", "message": "Quantity must be at least 10." }]
+    },
+    {
+      "name": "number max is a value",
+      "field": { "name": "qty", "label": "Quantity", "type": "number", "max": 10 },
+      "value": "10.5",
+      "errors": [{ "code": "max", "message": "Quantity must be at most 10." }]
+    },
+    {
+      "name": "a number that is not a number says so before it says anything else",
+      "field": { "name": "qty", "label": "Quantity", "type": "number", "min": 1 },
+      "value": "twelve",
+      "errors": [{ "code": "number", "message": "Quantity must be a number." }]
+    },
+    {
+      "name": "money is a number field with a currency beside it",
+      "field": { "name": "amount", "label": "Amount", "type": "money", "min": 1, "max": 5000 },
+      "value": "12000",
+      "errors": [{ "code": "max", "message": "Amount must be at most 5000." }]
+    },
+    {
+      "name": "a fractional bound keeps its decimals in the message",
+      "field": { "name": "amount", "label": "Amount", "type": "money", "min": 0.5 },
+      "value": "0.25",
+      "errors": [{ "code": "min", "message": "Amount must be at least 0.5." }]
+    },
+    {
+      "name": "pattern is anchored — a match somewhere inside is not a match",
+      "field": { "name": "vat", "label": "VAT ID", "type": "text", "pattern": "CZ[0-9]{8}" },
+      "value": "xxCZ25788001xx",
+      "errors": [{ "code": "pattern", "message": "VAT ID is not in the expected format." }]
+    },
+    {
+      "name": "pattern accepts the whole-value match",
+      "field": { "name": "vat", "label": "VAT ID", "type": "text", "pattern": "CZ[0-9]{8}" },
+      "value": "CZ25788001",
+      "errors": []
+    },
+    {
+      "name": "multiselect min is a count of choices",
+      "field": { "name": "tags", "label": "Tags", "type": "multiselect", "options": ["a", "b", "c"], "min": 2 },
+      "value": ["a"],
+      "errors": [{ "code": "min", "message": "Tags needs at least 2 options." }]
+    },
+    {
+      "name": "multiselect max is a count of choices",
+      "field": { "name": "tags", "label": "Tags", "type": "multiselect", "options": ["a", "b", "c"], "max": 1 },
+      "value": ["a", "b"],
+      "errors": [{ "code": "max", "message": "Tags takes at most 1 option." }]
+    },
+    {
+      "name": "a choice that is not on the list is not an answer",
+      "field": { "name": "category", "label": "Category", "type": "select", "options": ["Telco", "Rent"] },
+      "value": "Whatever",
+      "errors": [{ "code": "options", "message": "Category must be one of its listed options." }]
+    },
+    {
+      "name": "file min is a count of uploads",
+      "field": { "name": "document", "label": "Document", "type": "file", "min": 2 },
+      "value": ["attachments/c1/a.pdf"],
+      "errors": [{ "code": "min", "message": "Document needs at least 2 files." }]
+    },
+    {
+      "name": "multiple:false is one file and says how to fix it",
+      "field": { "name": "document", "label": "Document", "type": "file", "multiple": false },
+      "value": ["attachments/c1/a.pdf", "attachments/c1/b.pdf"],
+      "errors": [{ "code": "multiple", "message": "Document takes one file — remove the extra ones." }]
+    },
+    {
+      "name": "multiple:true is the default and allows several",
+      "field": { "name": "document", "label": "Document", "type": "photo", "multiple": true },
+      "value": ["attachments/c1/a.jpg", "attachments/c1/b.jpg"],
+      "errors": []
+    },
+    {
+      "name": "a required upload field says to attach, not to type",
+      "field": { "name": "document", "label": "Document", "type": "file", "required": true },
+      "value": [],
+      "errors": [{ "code": "required", "message": "Document is required — attach a file before sending." }]
+    },
+    {
+      "name": "a field with no type at all is checked as the text input it renders as",
+      "$why": "the definition validator refuses a typeless field outright; this is an answer checked against a row that never met it, and failing closed there would blank a field that has always rendered fine",
+      "field": { "name": "note", "label": "Note", "type": "", "max": 3 },
+      "value": "abcd",
+      "errors": [{ "code": "max", "message": "Note must be at most 3 characters." }]
+    },
+    {
+      "name": "an unknown-but-inert type is validated as the text input it renders as",
+      "field": { "name": "future", "label": "Future thing", "type": "quantum-flux", "max": 3 },
+      "value": "abcd",
+      "errors": [{ "code": "max", "message": "Future thing must be at most 3 characters." }]
+    },
+    {
+      "name": "a secret-like type fails closed even with a value already in hand",
+      "field": { "name": "api", "label": "API key", "type": "api_key" },
+      "value": "sk-live-DO-NOT-SEND",
+      "errors": [
+        {
+          "code": "type_unsafe",
+          "message": "API key cannot be answered here — the form asks for a value of type api_key, which a chat message cannot carry safely."
+        }
+      ]
+    }
+  ],
+
+  "$definitions": [
+    "Definition-time rejections, asserted by the Go validator only (the console",
+    "never writes a definition; it reads one). Listed here so the two sides",
+    "agree on WHICH definitions can reach a user at all."
+  ],
+
+  "definition_rejections": [
+    { "name": "a secret-like type cannot be saved", "field": { "name": "api", "label": "API key", "type": "api_key" }, "want": "cannot carry" },
+    { "name": "a type nothing can render cannot be saved", "field": { "name": "x", "label": "X", "type": "Text Input" }, "want": "lowercase" },
+    { "name": "min above max is unsatisfiable", "field": { "name": "qty", "label": "Quantity", "type": "number", "min": 10, "max": 2 }, "want": "min 10 above max 2" },
+    { "name": "a pattern that does not compile", "field": { "name": "vat", "label": "VAT", "type": "text", "pattern": "CZ[0-9" }, "want": "not a valid regular expression" },
+    { "name": "a pattern on a type nothing matches it against", "field": { "name": "paid", "label": "Paid", "type": "checkbox", "pattern": "yes" }, "want": "pattern" },
+    { "name": "a bound on a date, which the submit path would not check", "field": { "name": "issued", "label": "Issued", "type": "date", "min": 1 }, "want": "min" },
+    { "name": "multiple on a field that is not an upload", "field": { "name": "note", "label": "Note", "type": "text", "multiple": true }, "want": "multiple" }
+  ]
+}

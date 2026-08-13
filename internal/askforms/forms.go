@@ -53,6 +53,10 @@ const (
 	MaxTemplateRunes = 2000
 	// MaxIDRunes for a form id.
 	MaxIDRunes = 48
+	// MaxPatternRunes for one field's `pattern`. A regular expression longer
+	// than this is not a format check, it is an enumeration, and it has to be
+	// compiled by two engines on every keystroke of a preview.
+	MaxPatternRunes = 200
 )
 
 // Attachment policies (PRD §6, attachment_policy).
@@ -102,10 +106,20 @@ type Field struct {
 	// name from the first is what keeps two money fields on one form from
 	// fighting over a single {{currency}}.
 	Currency []string `json:"currency,omitempty"`
-	Multiple bool     `json:"multiple,omitempty"`
-	Min      *float64 `json:"min,omitempty"`
-	Max      *float64 `json:"max,omitempty"`
-	Pattern  string   `json:"pattern,omitempty"`
+	// Multiple is a POINTER because absent and false are different answers:
+	// an upload field says nothing about arity by default (several photos of
+	// one invoice are one answer), and `"multiple": false` is an author
+	// deliberately capping it at one. A plain bool cannot tell those apart,
+	// and the difference is a constraint the submit path enforces.
+	Multiple *bool `json:"multiple,omitempty"`
+	// Min, Max and Pattern are the constraints ValidateAnswers applies. What
+	// they MEAN depends on the field — a value range on a number, a length on
+	// text, a count on an upload or a multiselect — and a combination this
+	// package would not enforce is refused on save rather than stored as a
+	// promise nothing keeps. See answers.go and checkConstraints.
+	Min     *float64 `json:"min,omitempty"`
+	Max     *float64 `json:"max,omitempty"`
+	Pattern string   `json:"pattern,omitempty"`
 }
 
 // Form is one questionnaire: a chip that opens a sheet, and the template its
@@ -113,10 +127,17 @@ type Field struct {
 // (PRD decision 2) — not a structured payload — which is the only shape that
 // works across every CLI adapter without the agent being trained for it.
 type Form struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	LabelCS  string `json:"label_cs,omitempty"`
-	Icon     string `json:"icon,omitempty"`
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	LabelCS string `json:"label_cs,omitempty"`
+	Icon    string `json:"icon,omitempty"`
+	// Version is the author's revision number for this questionnaire, carried
+	// into every submission envelope (envelope.go) so a transcript written
+	// last month can still be read against the form that produced it — the
+	// definition moves, the answers do not. Optional, and absent means 1:
+	// every form stored before this field existed is the first version of
+	// itself, and omitempty keeps their canonical JSON byte-identical.
+	Version  int    `json:"version,omitempty"`
 	Template string `json:"template"`
 	// Attachment is none | optional | required. Always written out, even at
 	// its default, because the value decides whether the sheet can be
@@ -295,6 +316,24 @@ func Validate(forms []Form) error {
 			if fl.Type == "" {
 				return fmt.Errorf("%s: field %q has no type", where, fl.Name)
 			}
+			// The guarantee behind the open type list (fieldtypes.go): the
+			// server may not ship a type the client would mishandle, so the
+			// place that has to refuse one is here, on the way in.
+			if verdict, reason := ClassifyFieldType(fl.Type); verdict == TypeUnsafe {
+				if reason == ReasonSensitive {
+					return fmt.Errorf("%s: field %q has type %q, which names a secret — an ask "+
+						"form renders into an ordinary chat message that is stored, searched and "+
+						"read by the agent, so it cannot carry one. Ask for the credential in "+
+						"the vault (`crewship credential add`) and reference it by name here",
+						where, fl.Name, fl.Type)
+				}
+				return fmt.Errorf("%s: field %q has type %q, which nothing can render — a type is "+
+					"lowercase letters, digits, %q or %q, starts with a letter and is at most %d "+
+					"characters", where, fl.Name, fl.Type, "-", "_", MaxTypeRunes)
+			}
+			if err := checkConstraints(where, fl); err != nil {
+				return err
+			}
 
 			switch fl.Type {
 			case "select", "multiselect":
@@ -333,6 +372,102 @@ func Validate(forms []Form) error {
 		}
 	}
 	return nil
+}
+
+// constraintKind is which question `min`/`max` answer for a given field.
+type constraintKind int
+
+const (
+	boundsNone   constraintKind = iota // the field has no numeric constraint at all
+	boundsValue                        // number, money — the VALUE must be in range
+	boundsLength                       // text-ish — the LENGTH in characters
+	boundsCount                        // multiselect, file, photo — how many answers
+)
+
+func boundsFor(fieldType string) constraintKind {
+	switch {
+	case fieldType == "number" || fieldType == "money":
+		return boundsValue
+	case fieldType == "multiselect" || IsAttachmentType(fieldType):
+		return boundsCount
+	case fieldType == "text" || fieldType == "textarea":
+		return boundsLength
+	case KnownFieldTypes[fieldType]:
+		// date, month, select, checkbox: a bound would need calendar or
+		// option semantics that ValidateAnswers does not implement.
+		return boundsNone
+	default:
+		// An OPEN type renders as a text input, so it is checked as one.
+		return boundsLength
+	}
+}
+
+// checkConstraints refuses a constraint that the submit path would not
+// enforce.
+//
+// This is the same principle as the placeholder rule, applied to the other
+// half of a definition: `{{typo}}` is refused rather than rendered blank, and
+// `"pattern"` on a checkbox is refused rather than stored as a promise nothing
+// keeps. An author who writes a rule and is told nothing believes their form
+// enforces it; the first time anyone finds out otherwise is from the data.
+func checkConstraints(where string, fl Field) error {
+	kind := boundsFor(fl.Type)
+	if kind == boundsNone && (fl.Min != nil || fl.Max != nil) {
+		which := "min"
+		if fl.Min == nil {
+			which = "max"
+		}
+		return fmt.Errorf("%s: field %q is a %s, and %s is not checked for one — remove it, or "+
+			"the form would claim a rule nothing enforces", where, fl.Name, fl.Type, which)
+	}
+	if fl.Min != nil && fl.Max != nil && *fl.Min > *fl.Max {
+		return fmt.Errorf("%s: field %q has min %s above max %s, which no answer can satisfy",
+			where, fl.Name, formatBound(*fl.Min), formatBound(*fl.Max))
+	}
+	if kind == boundsCount || kind == boundsLength {
+		for name, v := range map[string]*float64{"min": fl.Min, "max": fl.Max} {
+			if v != nil && (*v < 0 || *v != float64(int64(*v))) {
+				return fmt.Errorf("%s: field %q counts characters or answers, so %s must be a "+
+					"whole number that is not negative (got %s)", where, fl.Name, name, formatBound(*v))
+			}
+		}
+	}
+
+	if fl.Pattern != "" {
+		if kind != boundsLength {
+			return fmt.Errorf("%s: field %q is a %s, and pattern is only matched against a typed "+
+				"value — remove it, or the form would claim a rule nothing enforces",
+				where, fl.Name, fl.Type)
+		}
+		if utf8.RuneCountInString(fl.Pattern) > MaxPatternRunes {
+			return fmt.Errorf("%s: field %q has a pattern longer than %d characters",
+				where, fl.Name, MaxPatternRunes)
+		}
+		if _, err := compilePattern(fl.Pattern); err != nil {
+			return fmt.Errorf("%s: field %q has a pattern that is not a valid regular "+
+				"expression: %v", where, fl.Name, err)
+		}
+	}
+
+	if fl.Multiple != nil && !IsAttachmentType(fl.Type) {
+		return fmt.Errorf("%s: field %q is a %s, and multiple only caps how many FILES a field "+
+			"takes — a multiselect is already multi-valued, and everything else is one answer",
+			where, fl.Name, fl.Type)
+	}
+	return nil
+}
+
+// compilePattern anchors the author's pattern at both ends, which is the same
+// thing an HTML `pattern=` attribute means and the only reading that does not
+// silently accept `xxCZ25788001xx` for `CZ[0-9]{8}`.
+//
+// Compiled with Go's RE2 on the way IN, which is what makes it safe to hand
+// the same string to JavaScript's engine on the way out: RE2 has no
+// backreferences and no lookaround, so a pattern that compiles here is a
+// pattern the other side can run without a catastrophic-backtracking case.
+// The reverse would not hold.
+func compilePattern(pattern string) (*regexp.Regexp, error) {
+	return regexp.Compile("^(?:" + pattern + ")$")
 }
 
 func checkLabel(where, fieldName, label string) error {

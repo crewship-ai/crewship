@@ -139,6 +139,40 @@ func TestAgentUpdateAskFormsValidationErrors(t *testing.T) {
 			forms:   `[{"id":`,
 			wantMsg: "not valid JSON",
 		},
+		// The guarantee behind the open field-type list, at the boundary that
+		// has to make it: a form submit renders into an ordinary chat message
+		// that is stored, searched and read by the agent, so a field type
+		// naming a secret can never be allowed near a user. The console fails
+		// closed on one too, but only the write path can promise the server
+		// will never ship it.
+		{
+			name:    "a field type that names a secret",
+			forms:   `[{"id":"r","label":"R","template":"{{api}}","fields":[{"name":"api","label":"API key","type":"api_key"}]}]`,
+			wantMsg: "cannot carry one",
+		},
+		{
+			name:    "a field type nothing could render",
+			forms:   `[{"id":"r","label":"R","template":"{{a}}","fields":[{"name":"a","label":"A","type":"Text Input"}]}]`,
+			wantMsg: "which nothing can render",
+		},
+		// A constraint the submit path would not enforce must not be
+		// storable, or the author is told a lie about what their form
+		// guarantees — the same principle as the placeholder rule above.
+		{
+			name:    "a bound on a field nothing checks it against",
+			forms:   `[{"id":"r","label":"R","template":"{{d}}","fields":[{"name":"d","label":"Issued","type":"date","min":1}]}]`,
+			wantMsg: "is not checked for one",
+		},
+		{
+			name:    "min above max",
+			forms:   `[{"id":"r","label":"R","template":"{{q}}","fields":[{"name":"q","label":"Quantity","type":"number","min":10,"max":2}]}]`,
+			wantMsg: "min 10 above max 2",
+		},
+		{
+			name:    "a pattern that does not compile",
+			forms:   `[{"id":"r","label":"R","template":"{{v}}","fields":[{"name":"v","label":"VAT","type":"text","pattern":"CZ[0-9"}]}]`,
+			wantMsg: "not a valid regular expression",
+		},
 	}
 
 	for _, tt := range tests {

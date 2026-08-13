@@ -19,7 +19,14 @@ import {
 import { cn } from "@/lib/utils"
 
 import { currencyPlaceholder } from "@/lib/ask-template"
+import { classifyAskFieldType, validateAskAnswers } from "@/lib/ask-validate"
 
+import {
+  buildAskEnvelope,
+  newAskSubmissionId,
+  type AskSubmissionEnvelope,
+} from "./ask-envelope"
+import { recordAskSubmission } from "./ask-provenance"
 import { AskFieldAttachments, AskMessageAttachments } from "./field-attachments"
 import { FormField, fieldLabelText, splitMoney } from "./form-field"
 import {
@@ -70,6 +77,23 @@ import {
  *      which is the composer's own `useMessageSubmit` path — so the size
  *      guard, the still-uploading refusal and the draft-survival rules all
  *      still apply to a form exactly as they do to something typed.
+ *
+ * What it DOES own, and did not before (audit P0.6 and P0.7):
+ *
+ *   · **The rules at submit.** A definition may state `min`, `max`, `pattern`
+ *     and `multiple`; until now only `required` was checked here, so the rest
+ *     were promises the form made and nothing kept. They are applied by
+ *     lib/ask-validate.ts, the same module internal/askforms/answers.go is
+ *     pinned to, and every refusal names the field.
+ *   · **Failing closed on a field it cannot render honestly.** An unrecognised
+ *     type still becomes a text input — that is what lets the server ship a
+ *     type without a frontend release — but one that NAMES A SECRET renders no
+ *     input at all and blocks the submit. Such a definition cannot be saved
+ *     any more either; this is for the row that predates the rule.
+ *   · **The submission envelope.** The message stays an ordinary message; the
+ *     structure (form id, version, answers, which upload answered which field)
+ *     rides beside it (./ask-envelope.ts) and is recorded durably before the
+ *     send is attempted.
  */
 
 export interface AskFormSheetProps {
@@ -79,8 +103,15 @@ export interface AskFormSheetProps {
   sessionId: string
   /** Sends the rendered text as an ordinary message. Resolves `true` when the
    *  message actually went out — a size-guard refusal resolves `false` and the
-   *  sheet stays open with everything the user typed still in it. */
-  onSubmit: (form: AskForm, text: string) => Promise<boolean>
+   *  sheet stays open with everything the user typed still in it.
+   *
+   *  The third argument is the submission envelope (./ask-envelope.ts): the
+   *  structured record of what was answered, to be carried as metadata ON the
+   *  message rather than inside it. It is optional to RECEIVE — every existing
+   *  caller keeps compiling — and always passed, so the send path can attach
+   *  it the moment it is able to. Until then the envelope is still recorded
+   *  locally and durably, which is what a reload used to lose. */
+  onSubmit: (form: AskForm, text: string, envelope: AskSubmissionEnvelope) => Promise<boolean>
   /** The `{{field}}` renderer — `lib/ask-template.ts`, injected from the top
    *  of the feature (chat-panel.tsx) rather than imported here. There is still
    *  exactly one renderer in the product; taking it as a parameter is what
@@ -201,27 +232,27 @@ function Sheet({
   const handleSubmit = useCallback(async () => {
     if (submitting || disabled) return
 
-    // Required fields first, named. "Something is missing" is not a message.
+    // An upload still in flight is not a violated rule, it is a "not yet", so
+    // it is answered before the rules and per field: an upload that has not
+    // landed has no path, and a refused one never will — neither can answer
+    // the question, and neither may be answered by the file the field NEXT to
+    // this one got.
     for (const f of form.fields) {
-      if (isAttachmentField(f)) {
-        // Per field, and per field only. An upload that is still in flight has
-        // no path yet and a refused one never will — neither can answer the
-        // question, and neither may be answered by the file the field NEXT to
-        // this one got.
-        if (hasPendingUploads(byField[f.name] ?? [])) {
-          toast.error(`${fieldLabelText(f)} is still uploading — wait for it to finish.`)
-          return
-        }
-        if (f.required && (pathsByField[f.name] ?? []).length === 0) {
-          toast.error(`${fieldLabelText(f)} is required — attach a file before sending.`)
-          return
-        }
-        continue
-      }
-      if (f.required && (values[f.name] ?? "").trim() === "") {
-        toast.error(`${fieldLabelText(f)} is required.`)
+      if (isAttachmentField(f) && hasPendingUploads(byField[f.name] ?? [])) {
+        toast.error(`${fieldLabelText(f)} is still uploading — wait for it to finish.`)
         return
       }
+    }
+
+    // Every rule the definition states, applied where the answer is given.
+    // One module, shared with internal/askforms via testdata/ask-field-types
+    // .json, so the CLI preview and the sheet refuse the same answers with the
+    // same words — and every refusal names the field, because "something is
+    // missing" over six inputs is not a message.
+    const problems = validateAskAnswers(form, renderValues)
+    if (problems.length > 0) {
+      toast.error(problems[0].message)
+      return
     }
 
     // The form-level policy is about the message carrying a document at all,
@@ -244,9 +275,28 @@ function Sheet({
       return
     }
 
+    // The record of what was answered, minted before the send is attempted and
+    // stored durably (./ask-provenance.ts).
+    //
+    // Before the send on purpose, and it is safe to be: the envelope describes
+    // a SUBMISSION, not a delivery. It claims the user answered this form this
+    // way, which is true the moment they press Send, and it is bound to a
+    // message by its own id and text rather than by asserting that one exists.
+    // The old map made the other claim — "this text on screen came from that
+    // form" — which is why recording it before the send could label a message
+    // that never went.
+    const envelope = buildAskEnvelope({
+      form,
+      submissionId: newAskSubmissionId(),
+      values: renderValues,
+      attachmentsByField: pathsByField,
+      renderedText: rendered,
+    })
+    recordAskSubmission(sessionId, envelope)
+
     setSubmitting(true)
     try {
-      const sent = await onSubmit(form, rendered)
+      const sent = await onSubmit(form, rendered, envelope)
       if (sent) onClose()
     } finally {
       setSubmitting(false)
@@ -255,11 +305,12 @@ function Sheet({
     submitting,
     disabled,
     form,
-    values,
     byField,
     pathsByField,
+    renderValues,
     attachments,
     rendered,
+    sessionId,
     onSubmit,
     onClose,
   ])
@@ -330,26 +381,30 @@ function Sheet({
           void handleSubmit()
         }}
       >
-        {form.fields.map((f) => (
-          <FormField
-            key={f.name}
-            field={f}
-            value={values[f.name] ?? ""}
-            onChange={setField(f.name)}
-            idPrefix={`ask-${form.id}-`}
-            testIdPrefix="ask-field"
-            attachmentSlot={
-              isAttachmentField(f) ? (
-                <AskFieldAttachments
-                  agentId={agentId}
-                  sessionId={sessionId}
-                  formId={form.id}
-                  field={f}
-                />
-              ) : undefined
-            }
-          />
-        ))}
+        {form.fields.map((f) =>
+          classifyAskFieldType(fieldType(f)).verdict === "unsafe" ? (
+            <BlockedField key={f.name} field={f} />
+          ) : (
+            <FormField
+              key={f.name}
+              field={f}
+              value={values[f.name] ?? ""}
+              onChange={setField(f.name)}
+              idPrefix={`ask-${form.id}-`}
+              testIdPrefix="ask-field"
+              attachmentSlot={
+                isAttachmentField(f) ? (
+                  <AskFieldAttachments
+                    agentId={agentId}
+                    sessionId={sessionId}
+                    formId={form.id}
+                    field={f}
+                  />
+                ) : undefined
+              }
+            />
+          ),
+        )}
 
         {/* A hidden submit so Enter inside a text field sends the form, the
             same reflex the composer's textarea has. */}
@@ -431,6 +486,36 @@ function Sheet({
   return <div className="mx-auto w-full max-w-3xl px-3 pb-2 md:px-6">{body}</div>
 }
 
+/**
+ * A field this sheet refuses to render.
+ *
+ * The unknown-type fallback is a text input, and that is kept: it is what lets
+ * the server ship a field type without a coordinated frontend release. What it
+ * cannot be allowed to do is render a type that NAMES A SECRET as an ordinary
+ * box, because the value would go straight into a durable, searchable chat
+ * message while the user believed the field had special handling.
+ *
+ * Such a definition can no longer be saved (internal/askforms). This is for
+ * the row that predates that rule, or was written straight into the database:
+ * no input, an explanation of what is wrong with the FORM rather than with the
+ * user, and a submit that refuses while it is on screen.
+ */
+function BlockedField({ field }: { field: AskFormField }) {
+  return (
+    <div
+      className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2"
+      data-testid={`ask-field-blocked-${field.name}`}
+    >
+      <p className="text-sm font-medium">{fieldLabelText(field)}</p>
+      <p className="text-xs text-muted-foreground">
+        This field asks for a {field.type} value, which a chat message cannot carry safely — a
+        form submit is an ordinary message that is stored and searchable. Ask whoever configured
+        this form to remove the field; a credential belongs in the vault, referenced by name.
+      </p>
+    </div>
+  )
+}
+
 /** A definition's `default` arrives as `unknown` (lib/ask-template.ts keeps it
  *  loose so a CLI body need not quote everything). The controls this sheet
  *  renders are all string-valued, so anything else is coerced once, here. */
@@ -471,6 +556,11 @@ export function toAskValues(
 ): AskValues {
   const out: AskValues = {}
   for (const field of fields) {
+    // A field that fails closed has no value AT ALL — not an empty one, not a
+    // redacted one. Nothing renders it, so nothing can have been typed into
+    // it; leaving the key out means the renderer substitutes nothing and the
+    // line it sits on drops, exactly like an unanswered optional field.
+    if (classifyAskFieldType(fieldType(field)).verdict === "unsafe") continue
     const raw = values[field.name] ?? ""
     switch (fieldType(field)) {
       case "file":

@@ -36,6 +36,16 @@ export type FormFieldOption = string | { value: string; label?: string }
  *      server, and a text input the server can validate beats rendering
  *      nothing. This is what lets a new field type ship without a coordinated
  *      frontend release (PRD §6.1), and it is asserted from both sides.
+ *
+ *      One caller narrows it. An ask form renders into a durable chat message,
+ *      so a type whose NAME says the value is a secret must not become an
+ *      ordinary box; ask-form-sheet.tsx checks `classifyAskFieldType` and
+ *      draws its own blocked field instead of calling this component, and the
+ *      server refuses to store such a definition at all (lib/ask-validate.ts,
+ *      internal/askforms/fieldtypes.go). The gate lives THERE rather than in
+ *      this switch because the slash palette's `secret` field is a legitimate
+ *      password input into the credential vault — the same type name, a
+ *      completely different destination.
  *   2. **A field with no `label` is labelled by its underscored name**, with
  *      the capitalisation done in CSS. That is exactly what the slash modal
  *      emitted before the extraction, and its schema (`SlashFormField`) has no

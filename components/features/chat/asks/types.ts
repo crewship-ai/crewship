@@ -91,7 +91,14 @@ export function askFormsFromColumn(raw: unknown): AskForm[] {
 }
 
 /** A field with no explicit type is a text field — the same fallback an
- *  unrecognised type gets, and for the same reason (asks/form-field.tsx). */
+ *  unrecognised type gets, and for the same reason (asks/form-field.tsx).
+ *
+ *  Not every unrecognised type takes that fallback: one whose name says the
+ *  value is a secret fails closed instead, in the sheet and in the definition
+ *  validator both (lib/ask-validate.ts). A field with no type at all is not
+ *  that case — it is an author who left the key out, and "" classifies as
+ *  unnameable, which is why the default is applied here before anything asks
+ *  for a verdict. */
 export function fieldType(field: { type?: string }): string {
   return typeof field.type === "string" && field.type !== "" ? field.type : "text"
 }

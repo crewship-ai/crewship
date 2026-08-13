@@ -17,8 +17,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"testing"
+	"unicode/utf8"
 )
 
 func loadAskFormSchema(t *testing.T) map[string]any {
@@ -124,6 +126,64 @@ func TestSchemaMatchesConstants(t *testing.T) {
 		t.Error("the schema enumerates field types — it must not, or the " +
 			"unknown-type-to-text fallback stops being usable")
 	}
+
+	if got := num(fieldProps["type"], "maxLength"); got != MaxTypeRunes {
+		t.Errorf("schema caps a type at %d, MaxTypeRunes is %d", got, MaxTypeRunes)
+	}
+	if got := str(fieldProps["type"], "pattern"); got != fieldTypeRE.String() {
+		t.Errorf("schema's type pattern is %q, fieldTypeRE is %q", got, fieldTypeRE.String())
+	}
+	if got := num(fieldProps["pattern"], "maxLength"); got != MaxPatternRunes {
+		t.Errorf("schema caps a field pattern at %d, MaxPatternRunes is %d", got, MaxPatternRunes)
+	}
+}
+
+// The schema's deny pattern for `type` is the one rule in this file that
+// cannot be pinned to a constant: it is an ECMA-262 regular expression
+// standing in for a substring-and-token test written in Go. So it is pinned to
+// the BEHAVIOUR instead — against the same fixture the frontend reads, every
+// case of which must be refused by the editor exactly when it is refused by
+// the server.
+//
+// An editor that accepts what the API refuses is only annoying. An editor that
+// green-lights `"type": "api_key"` is a person confidently writing a form that
+// asks a user for a credential.
+func TestSchemaTypeDenyPatternAgreesWithTheClassifier(t *testing.T) {
+	schema := loadAskFormSchema(t)
+
+	fieldProps := schema["items"].(map[string]any)["properties"].(map[string]any)["fields"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	typeSchema, _ := fieldProps["type"].(map[string]any)
+	notNode, _ := typeSchema["not"].(map[string]any)
+	denySrc, _ := notNode["pattern"].(string)
+	if denySrc == "" {
+		t.Fatal("the schema states no `not` pattern for a field type — an editor would " +
+			"complete `\"type\": \"password\"` for a definition the API refuses")
+	}
+	deny, err := regexp.Compile(denySrc)
+	if err != nil {
+		t.Fatalf("the schema's deny pattern does not compile: %v", err)
+	}
+	shape := regexp.MustCompile(typeSchema["pattern"].(string))
+	maxLen := int(typeSchema["maxLength"].(float64))
+
+	for _, tc := range loadFieldTypeFixture(t).Types {
+		schemaRefuses := tc.Type == "" ||
+			utf8.RuneCountInString(tc.Type) > maxLen ||
+			!shape.MatchString(tc.Type) ||
+			deny.MatchString(tc.Type)
+		verdict, _ := ClassifyFieldType(tc.Type)
+		if want := verdict == TypeUnsafe; schemaRefuses != want {
+			t.Errorf("type %q: the schema %s it, the server %s it",
+				tc.Type, accepts(!schemaRefuses), accepts(verdict != TypeUnsafe))
+		}
+	}
+}
+
+func accepts(ok bool) string {
+	if ok {
+		return "accepts"
+	}
+	return "refuses"
 }
 
 // The schema has to accept the definition the API accepts. This is the cheap

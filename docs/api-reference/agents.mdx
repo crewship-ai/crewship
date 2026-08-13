@@ -51,6 +51,8 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | PATCH | [/api/v1/agents/{agentId}/chats/{chatId}](#rename-chat) | Rename a chat session |
 | DELETE | [/api/v1/agents/{agentId}/chats/{chatId}](#delete-chat) | Delete a chat session |
 | POST | [/api/v1/agents/{agentId}/chats/{chatId}/attachments](#chat-attachments) | Upload a chat attachment |
+| GET | [/api/v1/agents/{agentId}/chats/{chatId}/attachments](#list-chat-attachments) | List a chat's attachments |
+| DELETE | [/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}](#delete-chat-attachment) | Delete one chat attachment |
 | GET | [/api/v1/agents/{agentId}/runs](#agent-runs) | List execution history |
 | GET | [/api/v1/agents/{agentId}/credential-bindings](#credential-bindings) | List MCP credential bindings |
 | GET, POST, PATCH, DELETE | [/api/v1/agents/{agentId}/integrations](#agent-integrations) | Manage agent MCP integrations |
@@ -1634,13 +1636,39 @@ workspace. The endpoint returns the sidecar's attachment metadata and uses
 `400` for an invalid upload, `404` for an unknown or mis-nested chat, and
 `502` when the sidecar cannot be reached.
 
-The blob is written to `<crewID>/<agentSlug>/attachments/<chatId>/<filename>`,
-which the agent sees at `/output/<agentSlug>/attachments/<chatId>/<filename>`.
-A provisioned crew owns that tree as uid 1001, so the server cannot create the
+The blob is written to
+`<crewID>/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`, which
+the agent sees at
+`/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`. A
+provisioned crew owns that tree as uid 1001, so the server cannot create the
 directory host-side; the write is replayed through the running crew container
 as that uid. **A stopped crew therefore returns `409`**, with the remedy in the
-message. The `attachments` metadata row is written only after the bytes land —
-a failed upload records nothing.
+message.
+
+**One upload is one identity at one location.** The attachment id segment is
+what makes that true. Uploading two different files under the same name — say
+`evidence.pdf` twice — produces two attachments, two directories and two
+blobs, each resolving to its own recorded checksum; neither overwrites the
+other. Re-uploading the *same* bytes under the *same* name in the same chat is
+a retry, not a second attachment: it resolves to the attachment that already
+exists and returns its path.
+
+Chat attachment blobs are deliberately not content-addressed, because the path
+is what the agent is told to open. They therefore live outside
+`<root>/attachments/` and outside the content-addressed reclaim sweep; the
+delete endpoint below is how their bytes are recovered.
+
+**Metadata is written before the bytes, not after.** The row is inserted first
+in an unpublished state, the blob is written second, and the row is promoted
+last, so `201` means both exist: a success response can never mean "the bytes
+landed and nobody recorded it". Every failure leaves an unpublished row, which
+is never listed and never returned, and which a background collector removes
+along with any bytes it names once it is more than an hour old (the sweep runs hourly, so within about two hours).
+
+Attachments uploaded before this scheme keep their original two-segment path
+(`attachments/<chatId>/<filename>`) and keep working unchanged — the stored key
+is the authority on where an attachment lives, so they list, resolve and delete
+exactly like new ones.
 
 Errors from the storage layer are forwarded as a single sentence prefixed with
 `failed to save attachment: `, not as a nested JSON document.
@@ -1650,13 +1678,68 @@ Errors from the storage layer are forwarded as a single sentence prefixed with
 **Request:** `multipart/form-data` with required binary `file` field; no JSON
 body.
 
-**Response:** `200 OK` or `201 Created` with attachment metadata.
+**Response:** `201 Created` with `{filename, size, path, agent_path}`. `path`
+is the agent-relative
+`attachments/<chatId>/<attachmentId>/<filename>`; `agent_path` is the same
+location as an absolute in-container path.
 
-**Status:** `400` invalid upload, `401` unauthenticated, `403` denied, `404`
-unknown or mis-nested agent/chat, `409` the crew container is not running
-(start the crew and retry), `413` too large to write through the crew
-container, `503` no container runtime is configured, and `502` sidecar
+**Status:** `400` invalid upload, `401` unauthenticated, `403` denied or the
+chat is not this agent's, `404` unknown agent/chat, `409` the crew container is
+not running (start the crew and retry), `413` too large to write through the
+crew container, `503` no container runtime is configured, and `502` sidecar
 failure.
+
+### List Chat Attachments
+
+```
+GET /api/v1/agents/{agentId}/chats/{chatId}/attachments?workspace_id={workspaceId}
+```
+
+Every published attachment on one chat, newest first. Unpublished
+reservations (an upload that did not finish) are never included.
+
+**Auth:** Any authenticated member of the workspace that owns the chat.
+
+**Response:** `200 OK` with an array. Each element carries `id`,
+`workspace_id`, `owner_type` (`chat`), `owner_id` (the chat id), `filename`,
+`content_type`, `size_bytes`, `sha256`, `uploaded_by_user_id`,
+`uploaded_by_agent_id`, `uploaded_by_name`, `created_at`, `path` and
+`agent_path`. `id` is the durable identity — it is what the delete below
+takes, and it is the segment inside `path`.
+
+**Status:** `400` when a path id is missing, `401` unauthenticated, `404` for
+an unknown, mis-nested or cross-tenant chat (the three are indistinguishable
+by design), `500` on a read failure.
+
+### Delete Chat Attachment
+
+```
+DELETE /api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}?workspace_id={workspaceId}
+```
+
+Removes the attachment: the stored file first, then the metadata row.
+
+**Idempotent.** Deleting an attachment that is already gone answers `204` —
+what the caller asked for is already true. Cross-tenant access is refused one
+step earlier: an attachment in another workspace is reachable only through a
+chat in that workspace, and that chat is a `404` here.
+
+If the unlink fails (most often a stopped crew, which owns the tree) the row is
+kept and the error is forwarded as `failed to delete attachment: …`; retrying
+the same call completes the deletion. The order is deliberate — a row that
+outlives its bytes is visible and repairable, whereas bytes that outlive their
+row are unreachable for ever, since no sweep walks this tree.
+
+**Auth:** Authenticated caller with create/write access to the agent chat.
+
+**Request:** No body.
+
+**Response:** `204 No Content`.
+
+**Status:** `400` when a path id is missing, `401` unauthenticated, `403`
+denied, `404` for an unknown, mis-nested or cross-tenant chat, `409`/`5xx`
+forwarded from the storage layer when the bytes cannot be removed, `502`
+sidecar failure.
 
 ### Credential Bindings
 

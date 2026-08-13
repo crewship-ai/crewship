@@ -225,3 +225,108 @@ func runCrewship(t *testing.T, bin, cfgPath, serverURL string, args ...string) (
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+
+// A stored form with a `min` on its amount and a `pattern` on its VAT id —
+// the constraints P0.7 found stated in the definition and enforced nowhere.
+// The preview is the server-side half of "enforced somewhere the user meets".
+const askConstrainedAgentJSON = `{
+	"id":"cag00000000000000000ask","slug":"lucy","name":"Lucy",
+	"agent_role":"AGENT","status":"IDLE","cli_adapter":"CLAUDE_CODE",
+	"tool_profile":"CODING","memory_enabled":false,"timeout_seconds":300,
+	"created_at":"2026-08-13T00:00:00Z","schedule_enabled":false,
+	"webhook_require_timestamp":false,"suggested_prompts":null,
+	"ask_forms":"[{\"id\":\"receipt\",\"label\":\"Add a receipt\",\"template\":\"Amount: {{amount}}\\nVAT: {{vat}}\",\"fields\":[{\"name\":\"amount\",\"label\":\"Amount\",\"type\":\"money\",\"min\":1,\"max\":5000},{\"name\":\"vat\",\"label\":\"VAT ID\",\"type\":\"text\",\"pattern\":\"CZ[0-9]{8}\"}]}]",
+	"_count":{"skills":0,"credentials":0}
+}`
+
+// A definition the validator would refuse today, standing in for the row that
+// was written before it existed (or edited straight in the database). The
+// preview must not print the secret back, and must not print the message.
+const askLegacySecretAgentJSON = `{
+	"id":"cag00000000000000000ask","slug":"lucy","name":"Lucy",
+	"agent_role":"AGENT","status":"IDLE","cli_adapter":"CLAUDE_CODE",
+	"tool_profile":"CODING","memory_enabled":false,"timeout_seconds":300,
+	"created_at":"2026-08-13T00:00:00Z","schedule_enabled":false,
+	"webhook_require_timestamp":false,"suggested_prompts":null,
+	"ask_forms":"[{\"id\":\"conn\",\"label\":\"Connect a service\",\"template\":\"Service: {{service}}\\nKey: {{api}}\",\"fields\":[{\"name\":\"service\",\"label\":\"Service\",\"type\":\"text\"},{\"name\":\"api\",\"label\":\"API key\",\"type\":\"api_key\"}]}]",
+	"_count":{"skills":0,"credentials":0}
+}`
+
+func TestAcceptance_AgentAskPreview_RefusesAnswersTheChatWouldRefuse(t *testing.T) {
+	bin := buildCrewshipBinary(t)
+	srv := askStubServer(t, askConstrainedAgentJSON, nil)
+	defer srv.Close()
+
+	cases := []struct {
+		name string
+		vars []string
+		want string
+	}{
+		{
+			name: "below min",
+			vars: []string{"--var", "amount=0.5"},
+			want: "Amount must be at least 1.",
+		},
+		{
+			name: "above max",
+			vars: []string{"--var", "amount=9000"},
+			want: "Amount must be at most 5000.",
+		},
+		{
+			name: "pattern is anchored, so a match inside the value is not a match",
+			vars: []string{"--var", "vat=xxCZ25788001xx"},
+			want: "VAT ID is not in the expected format.",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"agent", "ask-preview", "lucy", "receipt"}, tc.vars...)
+			out, err := runCrewship(t, bin, askCLIConfig(t), srv.URL, args...)
+			if err == nil {
+				t.Fatalf("the preview rendered a message the chat would refuse:\n%s", out)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("refusal does not name the field and the rule:\n got %s\nwant it to contain %q", out, tc.want)
+			}
+		})
+	}
+
+	// The same form, answered within its constraints, still renders.
+	out, err := runCrewship(t, bin, askCLIConfig(t), srv.URL,
+		"agent", "ask-preview", "lucy", "receipt",
+		"--var", "amount=1249", "--var", "vat=CZ25788001")
+	if err != nil {
+		t.Fatalf("a valid answer was refused: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Amount: 1249") || !strings.Contains(out, "VAT: CZ25788001") {
+		t.Errorf("unexpected render:\n%s", out)
+	}
+}
+
+func TestAcceptance_AgentAskPreview_FailsClosedOnASecretTypedField(t *testing.T) {
+	bin := buildCrewshipBinary(t)
+	srv := askStubServer(t, askLegacySecretAgentJSON, nil)
+	defer srv.Close()
+
+	out, err := runCrewship(t, bin, askCLIConfig(t), srv.URL,
+		"agent", "ask-preview", "lucy", "conn",
+		"--var", "service=Vodafone",
+		"--var", "api=sk-live-DO-NOT-PRINT")
+	if err == nil {
+		t.Fatalf("a form asking for a secret rendered a message:\n%s", out)
+	}
+	if strings.Contains(out, "sk-live") {
+		t.Fatalf("the secret was echoed back into the terminal:\n%s", out)
+	}
+	// A stored definition is validated on the way OUT as well as on the way
+	// in, so a row that predates the rule (or was written around the API) is
+	// refused before any of it is rendered — and the refusal names the field
+	// and says what to do instead.
+	if !strings.Contains(out, `"api"`) || !strings.Contains(out, "api_key") {
+		t.Errorf("the refusal does not name the field that caused it:\n%s", out)
+	}
+	if !strings.Contains(out, "vault") {
+		t.Errorf("the refusal does not say where a credential belongs instead:\n%s", out)
+	}
+}

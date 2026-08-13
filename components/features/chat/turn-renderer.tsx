@@ -15,6 +15,7 @@ import {
 } from "@/components/ai-elements/message"
 import { arrival } from "@/lib/motion"
 import type { ChatTurn } from "@/hooks/use-chat"
+import { askProvenanceForTurn } from "./asks/ask-provenance"
 import { AssistantTurn } from "./assistant-turn"
 import { EditableUserMessage } from "./messages/editable-user-message"
 import { CrewProvisioningCard } from "./crew-provisioning-card"
@@ -66,9 +67,20 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
     // Group-chat attribution: a teammate's message shows their name; the local
     // user's own turns (resolver returns null) render as today.
     const authorName = turn.authorUserId ? resolveAuthorName?.(turn.authorUserId) ?? null : null
+    // Which form this turn came out of.
+    //
+    // The turn's own submission envelope first (asks/ask-envelope.ts): it is
+    // carried WITH the message, so it survives a reload and it cannot confuse
+    // two identical submissions the way a content key did (audit P0.6). The
+    // injected content resolver is the fallback for a turn that has none —
+    // today that is every optimistic turn, until the send path carries the
+    // envelope end to end.
+    //
     // Only the local user's own turns can have come from a form on this
     // client; a teammate's message is attributed to them instead.
-    const askProvenance = turn.authorUserId ? null : resolveAskProvenance?.(textContent) ?? null
+    const askProvenance = turn.authorUserId
+      ? null
+      : askProvenanceForTurn(chatId ?? "", turn) ?? resolveAskProvenance?.(textContent) ?? null
     return (
       <motion.div
         initial={initialAnim}

@@ -34,6 +34,11 @@
       "icon": {
         "type": "string"
       },
+      "version": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "The author's revision number for this questionnaire. Carried into every submission's metadata envelope, so a transcript written last month can still be read against the form that produced it - the definition moves, the answers do not. Optional; absent means 1."
+      },
       "template": {
         "type": "string",
         "minLength": 1,
@@ -79,7 +84,12 @@
             "type": {
               "type": "string",
               "minLength": 1,
-              "description": "text, textarea, number, money, date, month, select, multiselect, checkbox, file or photo. NOT an enum on purpose: an unrecognised type falls back to a text input, which is what lets the server ship a new field type without a coordinated frontend release.",
+              "maxLength": 32,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "not": {
+                "pattern": "(secret|password|passwd|passphrase|credential|token|oauth|cvv|api[_-]?key|private[_-]?key|(^|[_-])(key|pin|otp|totp|ssn|pwd|auth)([_-]|$))"
+              },
+              "description": "text, textarea, number, money, date, month, select, multiselect, checkbox, file or photo. NOT an enum on purpose: an unrecognised type falls back to a text input, which is what lets the server ship a new field type without a coordinated frontend release. The list is open, but not unconditionally: a type whose NAME says the value is a secret (password, api_key, client_secret, otp...) is refused, because a form submit is an ordinary chat message that is stored, searchable and read by the agent — there is no field type that makes that safe. Put the credential in the vault and reference it by name. The `not` pattern here mirrors the rule in internal/askforms/fieldtypes.go, and internal/askforms/schema_test.go checks the two against the same fixture every type case is listed in.",
               "examples": [
                 "text",
                 "textarea",
@@ -122,16 +132,21 @@
               "description": "Offered next to a money amount; the chosen one renders as {{<name>_currency}}."
             },
             "multiple": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Only on file and photo, where false caps the field at one upload. A multiselect is already multi-valued and everything else is one answer, so multiple on any other type is refused - a constraint the submit path would not enforce must not be storable."
             },
             "min": {
-              "type": "number"
+              "type": "number",
+              "description": "What min MEANS depends on the field: the VALUE for number and money, the LENGTH in characters for text, textarea and any unrecognised type, and the COUNT of answers for multiselect, file and photo. There is nothing sensible for date, month, select or checkbox, so a bound on one of those is refused rather than stored and ignored. Checked at submit in the chat and by `crewship agent ask-preview`."
             },
             "max": {
-              "type": "number"
+              "type": "number",
+              "description": "The other end of min, with the same meaning per field type. min above max is refused: no answer could satisfy it."
             },
             "pattern": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 200,
+              "description": "A regular expression the whole value must match - anchored at both ends, like an HTML pattern attribute, so CZ[0-9]{8} does not accept xxCZ25788001xx. Only on the text-ish types (text, textarea, and unrecognised types, which render as text inputs). Compiled by Go's RE2 on save, which is what makes it safe to run in the browser: no backreferences, no lookaround, no catastrophic backtracking."
             }
           }
         }

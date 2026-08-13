@@ -197,9 +197,23 @@ crewship agent get lucy                              # lists them: label, id, fi
 Field types: `text`, `textarea`, `number`, `money`, `date`, `month`, `select`,
 `multiselect`, `checkbox`, `file`, `photo`. An unrecognised type is accepted
 and renders as a text input, so a newer server can offer a type this console
-does not know yet. `select` and `multiselect` need `options`. A `money` field
-named `amount` answers to **two** placeholders: `{{amount}}` and
-`{{amount_currency}}`.
+does not know yet — **except** one whose name says the value is a secret
+(`password`, `api_key`, `client_secret`, `otp`…), which is refused here and
+renders no input in the chat. A form submit is an ordinary chat message that is
+stored, searchable and read by the agent; there is no field type that makes
+that safe. Put the credential in the vault and reference it by name.
+`select` and `multiselect` need `options`. A `money` field named `amount`
+answers to **two** placeholders: `{{amount}}` and `{{amount_currency}}`.
+
+A field may also carry `min`, `max`, `pattern` and `multiple`, all of which are
+checked when a user submits — `min`/`max` are a value on `number`/`money`, a
+length on text, and a count on `multiselect`/`file`/`photo`; `pattern` is an
+anchored full match on the text-ish types; `multiple: false` caps an upload
+field at one file. A constraint that would not be checked for its field type
+(a `pattern` on a checkbox, a bound on a date) is **refused on save** rather
+than stored and ignored, and so are `min` above `max` and a pattern that does
+not compile. Optional `version` is the author's revision number, carried into
+every submission's metadata. Full reference: [Ask forms](/guides/ask-forms).
 
 Three rules decide what is sent:
 
@@ -228,6 +242,16 @@ Render one of an agent's ask forms and print the message it would send. This
 is how a template is tested without opening a browser, and it uses the same
 renderer the chat does — the two are pinned to one golden fixture
 (`testdata/ask-templates.json`), so what you see here is what gets sent.
+
+It also applies the same **constraints** the chat applies at submit, and prints
+the same sentences, so a preview cannot show a message the sheet would have
+refused:
+
+```bash
+crewship agent ask-preview lucy receipt --var amount=9000
+# Error: these answers would be refused in the chat:
+#   Amount must be at most 5000.
+```
 
 ```bash
 crewship agent ask-preview lucy receipt \
