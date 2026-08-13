@@ -907,19 +907,7 @@ func (a *convStoreAdapter) SearchConversations(ctx context.Context, agentID, que
 	if err != nil {
 		return nil, err
 	}
-	out := make([]goapi.ConversationSearchHit, len(hits))
-	for i, h := range hits {
-		out[i] = goapi.ConversationSearchHit{
-			ID:          h.ID,
-			SessionID:   h.SessionID,
-			AgentID:     h.AgentID,
-			Role:        string(h.Role),
-			Content:     h.Content,
-			ToolSummary: h.ToolSummary,
-			Timestamp:   h.Timestamp.UTC().Format(time.RFC3339Nano),
-		}
-	}
-	return out, nil
+	return convHitsToAPI(hits), nil
 }
 
 // recoverOrphanedRuns marks stale RUNNING runs as CANCELLED and resets

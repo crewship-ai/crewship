@@ -1,6 +1,6 @@
 ---
 title: "Conversation Search"
-description: "Keyword (BM25) search across an agent's past chat sessions, scoped to that agent and ranked by relevance."
+description: "Keyword (BM25) search across past chat sessions — one agent or the whole workspace — ranked by relevance."
 icon: "magnifying-glass"
 stability: experimental
 tag: Experimental
@@ -16,20 +16,34 @@ JSONL session log on disk, and as a searchable row in a full-text index. The
 search runs over that index and returns the matching messages ranked by
 relevance, each with its source session id and timestamp.
 
-It answers the question *"what did this agent and I discuss — or decide —
-before?"* without you having to remember which session it happened in.
+It answers the question *"what did we discuss — or decide — before?"* without
+you having to remember which session, or even which agent, it happened in.
 
 This is distinct from the [Crew Journal](/guides/crew-journal) `recall`
 surface, which searches the workspace-wide *event* memory (runs, peer
-conversations, escalations). Conversation search is scoped to a single
-agent's *chat* history.
+conversations, escalations). Conversation search reads the chat transcripts
+themselves.
 
 ## Scope and isolation
 
-- **Per-agent.** A search is always filtered by `agent_id`. An agent can only
-  search its own conversation history; one agent can never read another
-  agent's chats through this surface. The API additionally verifies that the
-  requested agent belongs to your workspace before running the query.
+A search runs in one of two scopes, and both are decided by the server:
+
+- **Agent scope** — you name an agent. The query is filtered to that agent's
+  `agent_id`, and the API verifies the agent belongs to your workspace first.
+  This is the only scope an agent-initiated search can ever have: the agent
+  identity comes from the runtime, so one agent can never read another's
+  chats through this surface.
+- **Workspace scope** — you name none. The API reads the agents in *your*
+  workspace — from your session, never from the request body — and runs one
+  ranked query across them. This is what ⌘K in the dashboard sends, and what
+  the CLI does by default. It spans at most 400 agents (the most recently
+  created ones).
+
+In both scopes the search backend only filters; the API decides which agent
+ids it may ever see, and drops any hit outside that set.
+
+Two limits apply to both scopes:
+
 - **Search-from-now-on.** Only conversations recorded after this feature
   shipped are indexed. There is no backfill of older history — the index
   fills as new turns land.
@@ -41,14 +55,14 @@ agent's *chat* history.
 Use `crewship conversation search` (alias: `crewship conv search`):
 
 ```bash
-# Search one agent's chats by keyword
-crewship conversation search backend-bot "deploy pipeline"
+# Search every agent in the workspace
+crewship conversation search "deploy pipeline"
 
-# Accept an agent id or slug; cap the number of hits
-crewship conversation search agent_123 "rate limit" --limit 50
+# Narrow to one agent (slug or id); cap the number of hits
+crewship conversation search "rate limit" --agent backend-bot --limit 50
 
 # Machine-readable output for piping to jq
-crewship conversation search backend-bot "auth" --format json | jq '.hits[].session_id'
+crewship conversation search "auth" --format json | jq '.hits[].session_id'
 ```
 
 `--format yaml` and `--format ndjson` are honoured too, like every other read command —
@@ -58,13 +72,34 @@ Arguments and flags:
 
 | Argument / flag | Meaning |
 |-----------------|---------|
-| `<agent-slug-or-id>` | The agent whose conversations to search. A slug is resolved to its id. |
 | `<query>` | The search text. Remaining args are joined with spaces. FTS5 operators (`OR`, `NEAR`, `*`) are treated as literal words, not query syntax. |
+| `--agent <slug-or-id>` | Narrow to one agent. A slug is resolved to its id. Omit it to search every agent in the workspace. |
 | `--limit <n>` | Maximum number of hits (1–100). Defaults to 20; out-of-range values (`≤0` or `>100`) fall back to the default of 20. |
 | `--format json\|yaml` | Emit the raw result envelope instead of the table view. |
 
 Each hit shows its timestamp, the message role (`user` / `assistant`), the
-source `session_id`, and a snippet of the matched content.
+agent that said it, the source `session_id`, and a snippet of the matched
+content.
+
+The agent-first positional form this command shipped with
+(`crewship conversation search backend-bot "deploy pipeline"`) still works:
+with no `--agent` and several arguments, the first is read as an agent.
+
+## Dashboard (⌘K)
+
+The command palette carries a **Conversations** group. Unlike the entity
+groups, which are fetched once when the palette opens and filtered in the
+browser, this one asks the server as you type (debounced, and each keystroke
+cancels the request before it), because messages are the largest thing in a
+workspace and a match is a phrase rather than a name.
+
+A row shows the matched snippet, the agent that said it and how long ago;
+selecting it opens that thread at `/chat/<agent-slug>?session=<chat-id>` — the
+same deep link a chat notification uses.
+
+Two keystrokes are the minimum before anything is sent. If the endpoint is
+not configured on the deployment, or the search fails, the group simply does
+not appear: nobody explicitly ran this search, so it never raises an error.
 
 ## API
 
@@ -82,7 +117,7 @@ Request body:
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `agent_id` | yes | Must belong to the caller's workspace. |
+| `agent_id` | no | Omit it to search every agent in the caller's workspace. When given, it must belong to that workspace. |
 | `query` | yes | Free text. Operators are neutralised to literal words. |
 | `limit` | no | 1–100; defaults to 20. Out-of-range values (`≤0` or `>100`) fall back to the default of 20. |
 
@@ -92,11 +127,14 @@ Response:
 {
   "count": 1,
   "query": "deploy pipeline",
+  "scope": "workspace",
   "hits": [
     {
       "id": "msg_abc",
       "session_id": "sess-42",
       "agent_id": "agent_123",
+      "agent_slug": "backend-bot",
+      "agent_name": "Backend Bot",
       "role": "user",
       "content": "please deploy the staging pipeline tonight",
       "ts": "2026-06-01T10:00:00Z"
@@ -110,10 +148,10 @@ Status codes:
 | Code | When |
 |------|------|
 | `200` | Search ran; `hits` may be empty. |
-| `400` | Missing `agent_id` / `query`, or a malformed query. |
+| `400` | Missing `query`, or a malformed query. |
 | `401` | No workspace in the request context. |
 | `404` | The agent does not exist in your workspace. |
-| `503` | The search mirror is not configured on this deployment. |
+| `503` | The search mirror is not configured on this deployment, or (workspace scope only) the configured backend cannot span agents. |
 
 ## Agent tool
 
@@ -137,7 +175,7 @@ recoverable "not available" result rather than failing the run.
 When a chat turn is persisted, the conversation store writes the JSONL line
 (the durable source of truth) and, when a database mirror is configured,
 dual-writes a row into a `conversation_messages` table backed by an
-SQLite FTS5 external-content index. Search joins the index, filters by
-`agent_id`, and orders by BM25. The JSONL files remain authoritative; the
+SQLite FTS5 external-content index. Search joins the index, filters by the
+agent set the API resolved, and orders by BM25. The JSONL files remain authoritative; the
 index is a rebuildable mirror, so a transient write failure costs at most the
 searchability of a single turn, never the turn itself.
