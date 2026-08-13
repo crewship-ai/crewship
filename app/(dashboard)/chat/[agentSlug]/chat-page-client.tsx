@@ -26,7 +26,7 @@ import { deriveSessionTitle } from "@/lib/chat-title"
 import { cn } from "@/lib/utils"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import { SessionsSidebar } from "@/components/features/chat/sessions-sidebar"
-import { withActiveSessionRead } from "@/components/features/chat/session-sort"
+import { sortSessionsByActivity, withActiveSessionRead } from "@/components/features/chat/session-sort"
 import {
   ChatTreeSidebar,
   useChatCompactLayout,
@@ -34,7 +34,7 @@ import {
   type ChatTreeAgent,
   type ChatTreeThread,
 } from "@/components/features/chat/chat-tree-sidebar"
-import { threadHref } from "@/components/features/chat/chat-home"
+import { agentHref, threadHref } from "@/components/features/chat/chat-home"
 import { httpError, scopeErrorMessage, useRetry } from "@/components/features/chat/scope-fetch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
@@ -130,6 +130,20 @@ type SessionRecord = ChatTreeThread & { ended_at: string | null }
  * The left column is the SHARED ChatTreeSidebar, the same one `/chat` renders,
  * so the surface has one left column rather than one per route. What is
  * selected in it is a conversation — the centre is always the conversation.
+ *
+ * Here it renders FOCUSED: naming an agent in the URL is what narrows the tree
+ * to that agent, expanded, with a row back to all of them. `/chat` is every
+ * agent and `/chat/<slug>` is this one, so the switch is the route and there is
+ * no second piece of state to keep in step with it — and six agents with no
+ * threads and a role line each stop crowding the one conversation on screen.
+ * Two things the column reports that this page answers:
+ *
+ *  · **an agent was picked** — another agent is a route change (the slug is the
+ *    path segment) with no `?session=`, because which conversation opens is
+ *    THIS page's decision, made once in openInitialSession. The agent already
+ *    open cannot be navigated to, so the pick selects its most recently active
+ *    conversation instead. Neither path POSTs: a click is not a message.
+ *  · **all agents** — `router.push("/chat")`, the route that already means it.
  *
  * It briefly wasn't. The tree gave each agent four folders and three of them
  * (Files, Asks, Memory) replaced ChatPanel with a pane that duplicated a
@@ -651,6 +665,38 @@ export function ChatPageClient() {
     selectSession(threadId)
   }, [slug, router, selectSession])
 
+  /**
+   * An agent row was picked — "open a conversation with this one".
+   *
+   * Another agent is a route change (the slug is the path segment) and
+   * deliberately carries no `?session=`: which conversation opens is that
+   * page's decision, made once, in `openInitialSession`.
+   *
+   * The agent already open cannot be navigated to, so the same intent is
+   * served here: back to its most recently ACTIVE conversation. Ordered by
+   * activity rather than by the array's order — the list is spliced
+   * optimistically on send, and "the newest" is the same question the tree
+   * answers one column to the left, so the two must not disagree. With no
+   * conversations at all there is nothing to select: the page is already
+   * sitting on the draft that the first message will create, and re-minting
+   * one would throw away whatever is in the composer.
+   */
+  const handleOpenAgent = useCallback((picked: ChatTreeAgent) => {
+    if (picked.slug !== slug) {
+      router.push(agentHref(picked.slug))
+      return
+    }
+    const newest = sortSessionsByActivity(sessions)[0]
+    if (newest && newest.id !== sessionId) selectSession(newest.id)
+  }, [slug, router, sessions, sessionId, selectSession])
+
+  // Out of the focused tree and back to every agent. `/chat` is the route that
+  // already means "all of them", so leaving focus is a navigation and not a
+  // second piece of state that could disagree with the URL.
+  const handleShowAllAgents = useCallback(() => {
+    router.push("/chat")
+  }, [router])
+
   // Wait for client mount + workspace + roster before rendering chat.
   if (slug === null || wsLoading || loadingAgent) {
     return (
@@ -876,9 +922,13 @@ export function ChatPageClient() {
             threadErrors={treeErrors}
             onRetryThreads={retryTreeThreads}
             loading={!tree.threadsLoaded || !sessionsLoaded}
+            // Naming the agent in the URL is what puts the tree in its focused
+            // view: this agent alone, expanded, with a row back to all of them.
             activeAgentSlug={slug}
             activeThreadId={sessionId}
             onOpenThread={handleOpenThread}
+            onOpenAgent={handleOpenAgent}
+            onShowAllAgents={handleShowAllAgents}
             collapsed={treeCollapsed}
             onToggleCollapsed={() => setTreeCollapsed((v) => !v)}
           />

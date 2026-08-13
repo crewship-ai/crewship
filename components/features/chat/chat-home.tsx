@@ -43,6 +43,12 @@ import {
  * Both halves read the SAME fetch (`useChatTreeData`). A tree with its own copy
  * of the fan-out would double every request on the busiest page of the surface.
  *
+ * This is the UNFOCUSED view of that tree: `/chat` is every agent, which is why
+ * it passes no `activeAgentSlug` and needs no way back to them. Picking an agent
+ * — in the tree or in the list below — goes to `/chat/<slug>` and nowhere else:
+ * one destination for "talk to this agent", whichever half of the page it was
+ * clicked in, and no session is created by the click (see `agentHref`).
+ *
  * What this page deliberately does NOT do (PRD O7): mount a ChatPanel. The
  * panel opens its own WebSocket on mount, separate from RealtimeProvider, so
  * an index that previewed a conversation would hold a live socket for a thread
@@ -87,6 +93,21 @@ export type ChatHomeThread = ChatTreeThread & {
 /** `/chat/<slug>?session=<id>` — session as a query param, never a path segment. */
 export function threadHref(slug: string, chatId: string): string {
   return `/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(chatId)}`
+}
+
+/**
+ * `/chat/<slug>` — a conversation with an agent, without naming which one.
+ *
+ * Deliberately session-less. The agent page opens the freshest existing thread
+ * when there is one and mints a LOCAL draft id when there is not
+ * (`chat-page-client`, `openInitialSession`), so the decision lives in one
+ * place and a click on an agent creates nothing on the server. This is the
+ * same href the index's agent list has always used; the tree's agent row now
+ * goes to the same destination rather than being a disclosure with nothing to
+ * disclose.
+ */
+export function agentHref(slug: string): string {
+  return `/chat/${encodeURIComponent(slug)}`
 }
 
 /**
@@ -148,9 +169,12 @@ export function ChatHome() {
             threadErrors={threadErrors}
             onRetryThreads={retryThreads}
             loading={loading || !threadsLoaded}
+            // No agent in focus here: /chat is the view where every agent is
+            // listed, which is also why it needs no way back to them.
             activeAgentSlug={null}
             activeThreadId={null}
             onOpenThread={(owner, threadId) => router.push(threadHref(owner.slug, threadId))}
+            onOpenAgent={(a) => router.push(agentHref(a.slug))}
           />
         )}
 
@@ -296,7 +320,7 @@ function AgentList({ agents }: { agents: ChatHomeAgent[] }) {
         {agents.map((a) => (
           <li key={a.id}>
             <Link
-              href={`/chat/${encodeURIComponent(a.slug)}`}
+              href={agentHref(a.slug)}
               className="flex items-center gap-3 rounded-md border border-transparent px-3 py-2 transition-colors hover:border-white/[0.08] hover:bg-white/[0.03]"
             >
               <AgentAvatar

@@ -80,6 +80,16 @@ const BASE = {
     "agent-bob": [thread("t-3", "Rebuild the index", 90)],
   } as Record<string, ChatTreeThread[]>,
   onOpenThread: vi.fn(),
+  // The agent row is a destination, not just a disclosure. Both callers pass
+  // these; the tree only ever reports the pick.
+  onOpenAgent: vi.fn(),
+  onShowAllAgents: vi.fn(),
+}
+
+function resetBase() {
+  BASE.onOpenThread.mockReset()
+  BASE.onOpenAgent.mockReset()
+  BASE.onShowAllAgents.mockReset()
 }
 
 function agentRow(slug: string): HTMLElement {
@@ -101,9 +111,7 @@ function agentOrder(): string[] {
 }
 
 describe("<ChatTreeSidebar> — the tree", () => {
-  beforeEach(() => {
-    BASE.onOpenThread.mockReset()
-  })
+  beforeEach(resetBase)
   afterEach(() => cleanup())
 
   it("renders one row per agent, and nothing beneath them until one is expanded", () => {
@@ -155,9 +163,150 @@ describe("<ChatTreeSidebar> — the tree", () => {
     expect(screen.getByTestId("chat-tree-expander-ada")).toBeInTheDocument()
     expect(screen.queryByTestId("chat-tree-expander-zed")).toBeNull()
 
-    // Clicking it opens nothing, because there is nothing to open.
+    // Nothing unfolds under it, because there is nothing to unfold.
     fireEvent.click(agentRow("zed"))
     expect(threadRows()).toHaveLength(0)
+  })
+
+  // The defect: the row was `onSelect={onToggle}`, so an agent with no threads
+  // had `canExpand === false` and the row did nothing at all. Someone clicked
+  // "Alex" and the product did not move — on the one surface that is supposed
+  // to make starting a conversation easy.
+  it("clicking an agent with NO conversations asks to open one with it", () => {
+    const zed = agent("zed", "Zed Silent")
+    render(
+      <ChatTreeSidebar
+        {...BASE}
+        agents={[ada, zed]}
+        threadsByAgent={{ ...BASE.threadsByAgent, "agent-zed": [] }}
+      />,
+    )
+
+    fireEvent.click(agentRow("zed"))
+
+    expect(BASE.onOpenAgent).toHaveBeenCalledWith(expect.objectContaining({ slug: "zed" }))
+    // …and the tree does not pretend it has a list to show.
+    expect(threadRows()).toHaveLength(0)
+  })
+
+  it("clicking an agent that HAS conversations opens one too, and reveals the rest", () => {
+    render(<ChatTreeSidebar {...BASE} />)
+
+    fireEvent.click(agentRow("ada"))
+
+    // One rule for both cases: the row is a conversation, not a disclosure.
+    expect(BASE.onOpenAgent).toHaveBeenCalledWith(expect.objectContaining({ slug: "ada" }))
+    expect(threadRows()).toHaveLength(2)
+
+    // Closing the branch again is the chevron's job, and closing is not
+    // opening — it must not ask for a conversation a second time.
+    fireEvent.click(screen.getByTestId("chat-tree-expander-ada"))
+    expect(threadRows()).toHaveLength(0)
+    expect(BASE.onOpenAgent).toHaveBeenCalledTimes(1)
+  })
+
+  it("expands and collapses from the keyboard, without opening anything", () => {
+    render(<ChatTreeSidebar {...BASE} />)
+
+    fireEvent.keyDown(agentRow("ada"), { key: "ArrowRight" })
+    expect(threadRows()).toHaveLength(2)
+
+    fireEvent.keyDown(agentRow("ada"), { key: "ArrowLeft" })
+    expect(threadRows()).toHaveLength(0)
+    expect(BASE.onOpenAgent).not.toHaveBeenCalled()
+  })
+
+  // The clutter: seven agents, six of them with no threads and a role line
+  // each, around one conversation. The route already says which agent is in
+  // hand — /chat is everyone, /chat/<slug> is that one — so the tree follows
+  // the route rather than growing a mode of its own.
+  it("focuses on the agent the route names, and lists everyone again on /chat", () => {
+    const { rerender } = render(<ChatTreeSidebar {...BASE} activeAgentSlug="ada" />)
+
+    expect(agentRow("ada")).toBeInTheDocument()
+    expect(screen.queryByTestId("chat-tree-agent-bob")).toBeNull()
+    // Focused means open: the threads are the point of narrowing to one agent.
+    expect(screen.getByTestId("chat-tree-thread-t-1")).toBeInTheDocument()
+
+    // A tree that narrows without a way out is a trap, so the way out is a row
+    // of its own — reachable by pointer and by keyboard.
+    const back = screen.getByTestId("chat-tree-all-agents")
+    expect(back).toHaveAttribute("tabindex", "0")
+    fireEvent.keyDown(back, { key: "Enter" })
+    fireEvent.click(back)
+    expect(BASE.onShowAllAgents).toHaveBeenCalledTimes(2)
+
+    // …and /chat is everybody, with nothing to go back from.
+    rerender(<ChatTreeSidebar {...BASE} activeAgentSlug={null} />)
+    expect(agentRow("ada")).toBeInTheDocument()
+    expect(agentRow("bob")).toBeInTheDocument()
+    expect(screen.queryByTestId("chat-tree-all-agents")).toBeNull()
+  })
+
+  it("lets a search reach past the focus — a search that cannot see the other six is a lie", () => {
+    render(<ChatTreeSidebar {...BASE} activeAgentSlug="ada" />)
+
+    expect(screen.queryByTestId("chat-tree-agent-bob")).toBeNull()
+
+    fireEvent.change(screen.getByRole("textbox", { name: /search/i }), { target: { value: "bob" } })
+    expect(screen.getByTestId("chat-tree-agent-bob")).toBeInTheDocument()
+
+    // Clearing it returns to the one agent in hand.
+    fireEvent.change(screen.getByRole("textbox", { name: /search/i }), { target: { value: "" } })
+    expect(screen.queryByTestId("chat-tree-agent-bob")).toBeNull()
+  })
+
+  // "More sorted" was the whole of the request. There is no sort control here
+  // and there is not going to be one: the list IS most-recent-first, and what
+  // was missing is the timestamp that lets a reader see that for themselves.
+  it("lists an agent's threads most-recent-first, and says how long ago each was active", () => {
+    render(
+      <ChatTreeSidebar
+        {...BASE}
+        agents={[ada]}
+        // Deliberately handed over out of order — the tree sorts, it does not
+        // trust its input.
+        threadsByAgent={{
+          "agent-ada": [thread("t-old", "Older", 120), thread("t-new", "Newer", 2)],
+        }}
+        activeAgentSlug="ada"
+      />,
+    )
+
+    expect(threadRows().map((r) => r.dataset.testid)).toEqual([
+      "chat-tree-thread-t-new",
+      "chat-tree-thread-t-old",
+    ])
+    expect(screen.getByTestId("chat-tree-thread-t-new")).toHaveTextContent(/2m ago/)
+    expect(screen.getByTestId("chat-tree-thread-t-old")).toHaveTextContent(/2h ago/)
+  })
+
+  // The label and the ordering must come from the same parse. `new Date()` reads
+  // the legacy SQLite format ("2026-07-01 10:00:00", implicitly UTC) in the
+  // local zone, so a naive timeAgo() would put a row hours away from where the
+  // sort put it — and a label that contradicts the order is worse than none.
+  it("reads a legacy timestamp the way it sorts it", () => {
+    const legacy = new Date(Date.now() - 90 * 60_000)
+      .toISOString()
+      .replace("T", " ")
+      .replace(/\.\d+Z$/, "")
+    render(
+      <ChatTreeSidebar
+        {...BASE}
+        agents={[ada]}
+        threadsByAgent={{
+          "agent-ada": [
+            thread("t-legacy", "From the old rows", 0, {
+              started_at: legacy,
+              last_activity_at: null,
+            }),
+          ],
+        }}
+        activeAgentSlug="ada"
+      />,
+    )
+
+    expect(screen.getByTestId("chat-tree-thread-t-legacy")).toHaveTextContent(/1h ago/)
   })
 
   it("orders agents by their most recent thread, so the top of the tree is where the work is", () => {
@@ -312,6 +461,31 @@ describe("<ChatTreeSidebar> — status facets are counted from real data", () =>
 
     expect(screen.queryByTestId("chat-tree-status-needs-you")).toBeNull()
     expect(screen.queryByText(/needs you/i)).toBeNull()
+  })
+
+  // In the focused view the list below these numbers can only ever hold ONE
+  // agent's threads, so a workspace-wide count above it would be a number the
+  // view cannot act on. It counts what it can show — and says whose it is,
+  // because a number that changes meaning between two views without saying so
+  // is worse than either meaning.
+  it("counts the facets over the agent in focus, and names the scope", () => {
+    render(<ChatTreeSidebar {...props} activeAgentSlug="ada" onShowAllAgents={vi.fn()} />)
+
+    // Ada has two of the workspace's three threads; one of them is unread and
+    // one is ended, and she is not the RUNNING agent.
+    expect(within(statusRow("all")).getByText("2")).toBeInTheDocument()
+    expect(within(statusRow("unread")).getByText("1")).toBeInTheDocument()
+    expect(within(statusRow("running")).getByText("0")).toBeInTheDocument()
+    expect(within(statusRow("done")).getByText("1")).toBeInTheDocument()
+
+    expect(screen.getByRole("button", { name: /^status/i }).textContent).toContain("Ada Lovelace")
+  })
+
+  it("counts the whole workspace on /chat, and says nothing about an agent", () => {
+    render(<ChatTreeSidebar {...props} />)
+
+    expect(within(statusRow("all")).getByText("3")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^status/i }).textContent).not.toContain("Ada")
   })
 
   it("picking a facet narrows the tree to the agents it matches", () => {

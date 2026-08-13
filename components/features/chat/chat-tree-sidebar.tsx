@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ChevronDown,
+  ChevronLeft,
   Inbox,
   Activity,
   CheckCircle2,
@@ -11,6 +12,7 @@ import {
 import type { LucideIcon } from "lucide-react"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { formatDateTime, timeAgo } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import {
@@ -45,9 +47,31 @@ import { ScopeFailure, httpError, scopeErrorMessage, useRetry } from "./scope-fe
  *   [🔍 search] [⧩ filter] [⇤ collapse]
  *   STATUS       All · Unread · Running · Done          (counts, collapsible)
  *   AGENTS       ▾ Ada Lovelace                         (expandable)
- *                    Ship the export                    (thread, 24px)
- *                    Weekly summary
+ *                    Ship the export        2m ago      (thread, 24px)
+ *                    Weekly summary        30m ago
  *                  Bob Robot                            (no threads, no chevron)
+ *
+ * **An agent row is a conversation, not a disclosure.** It used to be
+ * `onSelect={onToggle}` — so an agent with no threads had no chevron, and the
+ * row did nothing whatsoever when clicked. Starting a conversation with an
+ * agent nobody has talked to is precisely what this column should make easy,
+ * and it is the only place in the product that offers it at all. Now:
+ *
+ *   click an agent  → `onOpenAgent(agent)`, and the branch unfolds if it has
+ *                     one. The caller routes to `/chat/<slug>`, which already
+ *                     lands on the agent's newest conversation, or on a draft
+ *                     session created by the first message if it has none.
+ *                     Nothing is POSTed by a click.
+ *   click the ▾     → open/close, and only that. So does ←/→ on the row.
+ *
+ * **The tree follows the route into focus.** `/chat` lists every agent;
+ * `/chat/<slug>` lists that agent alone, expanded, with a row back to all of
+ * them. That is `activeAgentSlug` plus `onShowAllAgents` and no new state:
+ * seven agents, six of them with no threads and a role line each, is a lot of
+ * furniture around the one conversation on screen. A typed search reaches past
+ * the focus — a search box that cannot see six of seven agents is a lie — and
+ * the STATUS facets count what the focused list can show, saying whose they
+ * are in the section header so the number never changes meaning in silence.
  *
  * **An agent expands to its threads and to nothing else.** It briefly carried
  * four folders — Sessions / Files / Asks / Memory — and three of them were a
@@ -329,6 +353,26 @@ export interface ChatTreeSidebarProps {
    * (`chat_participants`, v118) is being kept usable.
    */
   onOpenThread: (owner: ChatTreeAgent, threadId: string) => void
+  /**
+   * The agent row itself was picked: "open a conversation with this one".
+   *
+   * The tree reports the pick and nothing else — `/chat` routes to
+   * `/chat/<slug>`, and `/chat/<slug>` selects the agent's newest thread when
+   * the pick is the agent already open. Neither creates a session; a click is
+   * not a message.
+   *
+   * Optional so a caller that only navigates threads still gets the old
+   * behaviour (the row toggles its branch) rather than an inert row.
+   */
+  onOpenAgent?: (agent: ChatTreeAgent) => void
+  /**
+   * Leave the focused view — back to every agent (i.e. `/chat`).
+   *
+   * Passing it is what ALLOWS focus: a tree that narrows to one agent without
+   * a way out is a trap, so the narrowing and the way back arrive together or
+   * not at all.
+   */
+  onShowAllAgents?: () => void
   /** Rows are still arriving; drawn as a hint, never as a blank column. */
   loading?: boolean
   collapsed?: boolean
@@ -348,6 +392,25 @@ function agentMatches(a: ChatTreeAgent, q: string): boolean {
     a.slug.toLowerCase().includes(q) ||
     (a.role_title ?? "").toLowerCase().includes(q)
   )
+}
+
+/**
+ * "2m ago" for the row, and the exact moment for its tooltip — both read off
+ * the SAME timestamp the list is sorted by, and through the SAME parser.
+ *
+ * `timeAgo` alone would not do: it hands the string to `new Date`, which reads
+ * the legacy SQLite format ("2026-07-01 10:00:00", implicitly UTC) in the
+ * local zone, so a row could be labelled hours away from where the ordering
+ * put it. A label that contradicts the order is worse than no label — and the
+ * label is the whole reason the order is legible.
+ */
+function threadActivity(t: ChatTreeThread): { label: string; exact?: string } {
+  const ms = parseSessionTimestamp(t.last_activity_at ?? t.started_at)
+  // An em dash, not "just now": a timestamp we could not read is unknown, and
+  // this row is at the bottom of the list precisely because it is.
+  if (!ms) return { label: "—" }
+  const iso = new Date(ms).toISOString()
+  return { label: timeAgo(iso), exact: formatDateTime(iso) }
 }
 
 /** Epoch millis of an agent's most recent thread; 0 when it has none. */
@@ -402,6 +465,8 @@ export function ChatTreeSidebar({
   activeAgentSlug = null,
   activeThreadId = null,
   onOpenThread,
+  onOpenAgent,
+  onShowAllAgents,
   loading = false,
   collapsed = false,
   onToggleCollapsed,
@@ -430,14 +495,53 @@ export function ChatTreeSidebar({
     })
   }, [])
 
+  const expandAgent = useCallback((slug: string) => {
+    setExpandedAgents((prev) => (prev.has(slug) ? prev : new Set(prev).add(slug)))
+  }, [])
+
+  const collapseAgent = useCallback((slug: string) => {
+    setExpandedAgents((prev) => {
+      if (!prev.has(slug)) return prev
+      const next = new Set(prev)
+      next.delete(slug)
+      return next
+    })
+  }, [])
+
   const q = search.trim().toLowerCase()
+
+  /**
+   * The one agent this view is about, or null for "all of them".
+   *
+   * Read off the route rather than held as state: `/chat` passes no
+   * `activeAgentSlug` and `/chat/<slug>` passes one, so the URL is already the
+   * switch and there is nothing to keep in sync. Three things suspend it:
+   *
+   *  · no `onShowAllAgents` — see the prop; focus without a way out is a trap;
+   *  · a typed search, which must be able to find the agents focus hides;
+   *  · a slug that is not in this list at all (a ghost agent still has a
+   *    history, and its page must not render a column with nobody in it).
+   */
+  const focusAgent = useMemo(() => {
+    if (!activeAgentSlug || !onShowAllAgents || q) return null
+    return agents.find((a) => a.slug === activeAgentSlug) ?? null
+  }, [agents, activeAgentSlug, onShowAllAgents, q])
 
   // Counts are computed over EVERYTHING loaded, not over the post-facet view —
   // otherwise picking "Unread" would make every other facet read 0, which is
   // the bug /routines already fixed once.
+  //
+  // What they count is the SCOPE of the list beneath them: the workspace on
+  // /chat, and the one agent in focus on /chat/<agent>. A workspace-wide
+  // "Unread 12" hanging over a list that can only ever show this agent's two is
+  // a number the view cannot act on — and the facet is a filter on that list,
+  // so it would also read as a promise the click cannot keep. The section
+  // header carries the agent's name while the scope is narrowed, because a
+  // number that changes meaning between views without saying so is worse than
+  // either meaning.
   const statusCounts = useMemo(() => {
     const counts: Record<StatusFacet, number> = { all: 0, unread: 0, running: 0, done: 0 }
-    for (const a of agents) {
+    for (const a of focusAgent ? [focusAgent] : agents) {
       for (const t of threadsByAgent[a.id] ?? []) {
         counts.all++
         if ((t.unread_count ?? 0) > 0) counts.unread++
@@ -446,7 +550,7 @@ export function ChatTreeSidebar({
       }
     }
     return counts
-  }, [agents, threadsByAgent])
+  }, [agents, focusAgent, threadsByAgent])
 
   /** Threads shown under one agent, after facet + origin + search. */
   const visibleThreads = useCallback(
@@ -463,7 +567,12 @@ export function ChatTreeSidebar({
   )
 
   const visibleAgents = useMemo(() => {
-    const matching = agents.filter((a) => {
+    // Focus first: on /chat/<agent> the only row the section can hold is that
+    // agent's — the facets and the origin filter still apply to it, so picking
+    // "Unread" on an agent with none empties the list rather than quietly
+    // widening it back out.
+    const scope = focusAgent ? agents.filter((a) => a.slug === focusAgent.slug) : agents
+    const matching = scope.filter((a) => {
       const threads = visibleThreads(a)
       // "Running" is a property of the agent, so a running agent belongs in
       // the list whether or not it has a thread to show for it.
@@ -475,7 +584,7 @@ export function ChatTreeSidebar({
     })
     // Ordered by the work, not by the alphabet — see sortAgentsByActivity.
     return sortAgentsByActivity(matching, threadsByAgent)
-  }, [agents, threadsByAgent, visibleThreads, facet, origins, q])
+  }, [agents, focusAgent, threadsByAgent, visibleThreads, facet, origins, q])
 
   if (collapsed) {
     return (
@@ -544,7 +653,10 @@ export function ChatTreeSidebar({
 
       {/* ── Status ── (single-select bucket, same shape as /routines) */}
       <SidebarSection
-        label="Status"
+        // Named scope, not a bare "Status": while the tree is focused these
+        // numbers describe one agent, and the reader has to be able to see
+        // that from the counts themselves.
+        label={focusAgent ? `Status · ${focusAgent.name}` : "Status"}
         count={statusCounts.all}
         collapsible
         collapsed={!statusOpen}
@@ -601,6 +713,25 @@ export function ChatTreeSidebar({
         />
         {agentsOpen && (
           <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+            {/* The way out of the focused view. A row rather than a chevron on
+                the section header: it is the only navigation that leaves this
+                agent behind, it carries how many agents are waiting on the
+                other side of it, and as a SidebarRow it is tabbable and
+                answers Enter/Space like every other row here. */}
+            {focusAgent && onShowAllAgents && (
+              <SidebarRow
+                as="div"
+                data-testid="chat-tree-all-agents"
+                aria-label={`All agents (${agents.length})`}
+                onSelect={onShowAllAgents}
+              >
+                <ChevronLeft aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+                <span className="min-w-0 flex-1 truncate text-xs text-foreground/70">All agents</span>
+                <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
+                  {agents.length}
+                </span>
+              </SidebarRow>
+            )}
             {visibleAgents.length === 0 ? (
               <p className="px-3 py-6 text-center text-xs text-muted-foreground">
                 {loading ? "Loading agents…" : agents.length === 0 ? "No agents yet." : "Nothing matches."}
@@ -616,6 +747,19 @@ export function ChatTreeSidebar({
                   onRetryThreads={onRetryThreads}
                   expanded={expandedAgents.has(a.slug)}
                   onToggle={() => toggleAgent(a.slug)}
+                  onExpand={() => expandAgent(a.slug)}
+                  onCollapse={() => collapseAgent(a.slug)}
+                  // One rule for every agent row: it opens a conversation.
+                  // The branch unfolds on the way — never folds, because the
+                  // click that opens something must not also hide it.
+                  onSelect={
+                    onOpenAgent
+                      ? () => {
+                          expandAgent(a.slug)
+                          onOpenAgent(a)
+                        }
+                      : () => toggleAgent(a.slug)
+                  }
                   isActiveAgent={a.slug === activeAgentSlug}
                   activeThreadId={activeThreadId}
                   onOpenThread={onOpenThread}
@@ -639,7 +783,14 @@ interface AgentBranchProps {
   threadsError: string | null
   onRetryThreads?: () => void
   expanded: boolean
+  /** The chevron: open ↔ closed, and nothing else. */
   onToggle: () => void
+  /** ArrowRight / the row's own click — reveal, never hide. */
+  onExpand: () => void
+  /** ArrowLeft. */
+  onCollapse: () => void
+  /** The row was picked: open a conversation with this agent. */
+  onSelect: () => void
   isActiveAgent: boolean
   activeThreadId: string | null
   /**
@@ -659,6 +810,9 @@ function AgentBranch({
   onRetryThreads,
   expanded,
   onToggle,
+  onExpand,
+  onCollapse,
+  onSelect,
   isActiveAgent,
   activeThreadId,
   onOpenThread,
@@ -673,71 +827,101 @@ function AgentBranch({
 
   return (
     <>
-      <SidebarRow
-        as="div"
-        data-testid={`chat-tree-agent-${agent.slug}`}
-        // The kit's row is a ListRow, whose prop surface is closed, so the
-        // disclosure state cannot ride an aria-expanded here. The accessible
-        // name is pinned to the agent instead of drifting with the counts.
-        aria-label={agent.name}
-        selected={isActiveAgent && activeThreadId === null}
-        onSelect={onToggle}
+      {/* The row opens a conversation, so open/close needs a key of its own —
+          the same ←/→ the crews explorer's tree answers. It lives on a wrapper
+          because the kit's row is a ListRow, whose prop surface is closed. */}
+      <div
+        onKeyDown={(e) => {
+          if (!canExpand) return
+          if (e.key === "ArrowRight" && !open) {
+            e.preventDefault()
+            onExpand()
+          }
+          if (e.key === "ArrowLeft" && open) {
+            e.preventDefault()
+            onCollapse()
+          }
+        }}
       >
-        {canExpand ? (
-          <ChevronDown
-            aria-hidden
-            data-testid={`chat-tree-expander-${agent.slug}`}
+        <SidebarRow
+          as="div"
+          data-testid={`chat-tree-agent-${agent.slug}`}
+          // The kit's row is a ListRow, whose prop surface is closed, so the
+          // disclosure state cannot ride an aria-expanded here. The accessible
+          // name is pinned to the agent instead of drifting with the counts.
+          aria-label={agent.name}
+          selected={isActiveAgent && activeThreadId === null}
+          onSelect={onSelect}
+        >
+          {canExpand ? (
+            // Presentational, not a control — the same call the crews explorer
+            // made: a role="button" inside a row that is itself role="button" is
+            // `nested-interactive`, and a nameless one is `aria-command-name` on
+            // top of it. Pointer users get the click; keyboard users get ←/→ on
+            // the row above, which a screen reader announces once.
+            <span
+              aria-hidden="true"
+              data-testid={`chat-tree-expander-${agent.slug}`}
+              className="shrink-0"
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggle()
+              }}
+            >
+              <ChevronDown
+                className={cn(
+                  "h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
+                  !open && "-rotate-90",
+                )}
+              />
+            </span>
+          ) : (
+            <span aria-hidden className="w-3 shrink-0" />
+          )}
+          <AgentAvatar
+            seed={agent.avatar_seed || agent.slug}
+            style={agent.avatar_style}
+            agentId={agent.id}
+            avatarUrl={agent.avatar_url}
+            alt=""
+            className="h-5 w-5 shrink-0"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs text-foreground/90">{agent.name}</span>
+            <span className="block truncate text-[10px] text-muted-foreground-soft">
+              {agent.role_title || "Agent"}
+            </span>
+          </span>
+          <span
+            title={agent.status}
+            aria-label={`Status: ${agent.status.toLowerCase()}`}
             className={cn(
-              "h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-              !open && "-rotate-90",
+              "h-1.5 w-1.5 shrink-0 rounded-full",
+              agent.status === "RUNNING"
+                ? "animate-pulse bg-primary"
+                : agent.status === "STOPPED"
+                  ? "bg-muted-foreground/30"
+                  : "bg-success",
             )}
           />
-        ) : (
-          <span aria-hidden className="w-3 shrink-0" />
-        )}
-        <AgentAvatar
-          seed={agent.avatar_seed || agent.slug}
-          style={agent.avatar_style}
-          agentId={agent.id}
-          avatarUrl={agent.avatar_url}
-          alt=""
-          className="h-5 w-5 shrink-0"
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs text-foreground/90">{agent.name}</span>
-          <span className="block truncate text-[10px] text-muted-foreground-soft">
-            {agent.role_title || "Agent"}
-          </span>
-        </span>
-        <span
-          title={agent.status}
-          aria-label={`Status: ${agent.status.toLowerCase()}`}
-          className={cn(
-            "h-1.5 w-1.5 shrink-0 rounded-full",
-            agent.status === "RUNNING"
-              ? "animate-pulse bg-primary"
-              : agent.status === "STOPPED"
-                ? "bg-muted-foreground/30"
-                : "bg-success",
+          {/* The unread badge used to live on the Sessions folder row. With the
+              folder gone it belongs on the agent — which is also the row that
+              is still visible when the branch is closed. */}
+          {unread > 0 && (
+            <span
+              aria-label={`${unread} unread message${unread === 1 ? "" : "s"}`}
+              className="rounded-full bg-info/20 px-1.5 py-px text-[10px] leading-none text-info"
+            >
+              {unread > 99 ? "99+" : unread}
+            </span>
           )}
-        />
-        {/* The unread badge used to live on the Sessions folder row. With the
-            folder gone it belongs on the agent — which is also the row that
-            is still visible when the branch is closed. */}
-        {unread > 0 && (
-          <span
-            aria-label={`${unread} unread message${unread === 1 ? "" : "s"}`}
-            className="rounded-full bg-info/20 px-1.5 py-px text-[10px] leading-none text-info"
-          >
-            {unread > 99 ? "99+" : unread}
+          {/* An em dash, not a 0: the count of a list that failed to load is
+              not zero, it is unknown. */}
+          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
+            {threadsError ? "—" : totalThreads}
           </span>
-        )}
-        {/* An em dash, not a 0: the count of a list that failed to load is
-            not zero, it is unknown. */}
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
-          {threadsError ? "—" : totalThreads}
-        </span>
-      </SidebarRow>
+        </SidebarRow>
+      </div>
 
       {/* Not gated on `expanded`: a failure the reader has to open a row to
           discover is a failure they will read as "no conversations". */}
@@ -755,6 +939,7 @@ function AgentBranch({
         threads.map((t) => {
           const threadUnread = t.unread_count ?? 0
           const isSelected = isActiveAgent && activeThreadId === t.id
+          const activity = threadActivity(t)
           return (
             <SidebarRow
               key={t.id}
@@ -784,8 +969,19 @@ function AgentBranch({
               >
                 {threadLabel(t)}
               </span>
-              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
-                {t.message_count}
+              {/* The order IS most-recent-first (sortSessionsByActivity, on the
+                  same last_activity_at the server sorts by) — this is what
+                  lets a reader see that without being told, which is what was
+                  actually being asked for by "more sorted". It replaces the
+                  message count: 280px minus an indent holds one trailing
+                  number, and the count of messages says nothing about where a
+                  row sits in the list. The absolute time is on the title, for
+                  the moment "2d ago" is not precise enough. */}
+              <span
+                title={activity.exact}
+                className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50"
+              >
+                {activity.label}
               </span>
             </SidebarRow>
           )

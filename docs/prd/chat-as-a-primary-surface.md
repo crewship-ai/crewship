@@ -124,9 +124,25 @@ What shipped:
   can answer it (escalations are a different read), and a facet whose number is
   a guess is worse than one that is not there. It arrives with the work in §6.1,
   which is where the escalation read belongs anyway.
-- **Folders per agent** — Sessions / Files / Asks / Memory. Sessions expands to
-  the agent's threads; the other three replace the centre pane, composer
-  included, which is also what keeps the socket count at one (§O7).
+- **Folders per agent** — **removed one day after they landed.** `Files`
+  appeared twice in one view: in the tree and in the right rail beside it. The
+  rule that settled it — left column navigates between objects, right panel
+  holds the open object's context, configuration belongs to the object's own
+  settings page — leaves only Sessions in the tree. Asks lives in the agent's
+  config tab, Memory on the agent canvas, Files in the rail.
+- **Focus follows the route.** `/chat` lists every agent; `/chat/<slug>` lists
+  that agent alone, expanded, with a row back to all agents. No new state: the
+  URL already said which agent was in play, so focus survives a reload and
+  travels in a shared link. Focus is suspended while a search is typed — a
+  search box that cannot see six of seven agents is a lie — and when the slug
+  is not in the list, so a ghost agent's page still renders somebody.
+- **Clicking an agent opens a conversation with it.** It used to only toggle
+  the disclosure, so an agent with no threads had an inert row and there was no
+  way to start talking to it from the tree. Expansion kept its own controls
+  (the chevron, and ←/→ on the row).
+- **STATUS facets count the focused agent in the focused view**, and the header
+  says whose. A workspace-wide count over a list that can only show one agent's
+  threads is a promise the click cannot keep.
   **Reverted the next day — see §3.3.1.**
 - **No new endpoints and no new route.** The folder is `?folder=`, never
   `/chat/<agent>/<folder>`: the static handler rewrites exactly one path level
