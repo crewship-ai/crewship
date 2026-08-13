@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -127,11 +128,11 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		// Forward the IPC error verbatim — gives operators a usable
-		// diagnostic without leaking internals. Bound the read: a
-		// runaway IPC error body shouldn't be able to OOM us.
+		// Forward the IPC diagnostic — but as a sentence, not as a nested
+		// document. Bound the read: a runaway IPC error body shouldn't be
+		// able to OOM us.
 		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
-		writeJSON(w, resp.StatusCode, map[string]string{"error": string(buf)})
+		writeJSON(w, resp.StatusCode, map[string]string{"error": attachmentSaveErrorMessage(buf)})
 		return
 	}
 
@@ -170,6 +171,35 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 		// agent can read the attachment without guessing.
 		"agent_path": "/output/" + slug.String + "/" + relPath,
 	})
+}
+
+// attachmentSaveErrorMessage turns the IPC save endpoint's error body into one
+// sentence the composer can put in a toast.
+//
+// Two things were wrong with forwarding it verbatim. The IPC layer answers in
+// JSON, so `{"error": string(buf)}` nested a whole document inside a string
+// field — the user's toast read `{"error":"failed to save file"}`, braces and
+// all. And nothing in that text said which operation failed: the IPC route
+// serves the file editor and `crewship agent file-write` as well, so it can
+// only describe the DESTINATION ("the agent's output directory is owned by the
+// crew runtime… start the crew and retry"). Naming the attachment is this
+// layer's job, because this is the only layer that knows that is what the
+// caller was doing.
+//
+// A body that isn't the expected shape is forwarded as text rather than
+// dropped — an unexpected body is still the best diagnostic available.
+func attachmentSaveErrorMessage(body []byte) string {
+	msg := strings.TrimSpace(string(body))
+	var env struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err == nil && strings.TrimSpace(env.Error) != "" {
+		msg = strings.TrimSpace(env.Error)
+	}
+	if msg == "" {
+		return "failed to save attachment"
+	}
+	return "failed to save attachment: " + msg
 }
 
 // recordChatAttachment writes the metadata row for a chat attachment.
