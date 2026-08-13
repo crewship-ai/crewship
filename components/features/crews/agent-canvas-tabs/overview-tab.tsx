@@ -340,7 +340,10 @@ export function OverviewTab({
             subtitle: `${c.message_count} message${c.message_count === 1 ? "" : "s"}`,
             meta: new Date(c.started_at).toLocaleDateString(),
             tag: "all",
-            href: `/chat/${encodeURIComponent(agent.slug)}`,
+            // ?session= or the row is a lie: without it the chat page falls
+            // back to the freshest session, so clicking the third row down
+            // opens a different conversation than the one it names.
+            href: `/chat/${encodeURIComponent(agent.slug)}?session=${encodeURIComponent(c.id)}`,
           }))}
           footerLabel="Open chat"
           footerHref={`/chat/${encodeURIComponent(agent.slug)}`}

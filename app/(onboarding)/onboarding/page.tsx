@@ -119,6 +119,29 @@ function detectDefaultLanguage(): string {
   return "English"
 }
 
+/**
+ * Look up an agent's slug from its id.
+ *
+ * POST /onboarding/setup answers with `agent_id`, and chat is addressed by
+ * slug (`/chat/<agentSlug>` — the slug is parsed straight out of
+ * window.location.pathname, see chat-page-client.tsx). One GET bridges the
+ * two. It is on the critical path of the wizard's last click, so every
+ * failure mode returns null and the caller falls back to a page that exists
+ * rather than blocking completion on a lookup.
+ */
+async function fetchAgentSlug(agentId: string, workspaceId: string): Promise<string | null> {
+  try {
+    const res = await serverFetch(
+      `/api/v1/agents/${encodeURIComponent(agentId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    )
+    if (!res.ok) return null
+    const agent = await res.json()
+    return typeof agent?.slug === "string" && agent.slug ? agent.slug : null
+  } catch {
+    return null
+  }
+}
+
 type Step = 1 | 2 | 3
 
 export default function OnboardingPage() {
@@ -410,6 +433,12 @@ export default function OnboardingPage() {
         return
       }
       const data = await res.json()
+      // Chat lives at /chat/<agentSlug>, and setup answers with an id, so the
+      // slug is resolved here — once — and shared by the redirect below and
+      // the dashboard's welcome checklist (which reads the breadcrumb).
+      const firstAgentSlug = data.agent_id && data.workspace_id
+        ? await fetchAgentSlug(String(data.agent_id), String(data.workspace_id))
+        : null
       // Drop a "just onboarded" breadcrumb so the dashboard knows to
       // render the welcome checklist on the user's next mount. Both
       // exit paths set it because the chat-redirect user may bounce
@@ -430,14 +459,29 @@ export default function OnboardingPage() {
             // that no longer exists.
             window.localStorage.removeItem("crewship.firstAgentId")
           }
+          // The checklist's "Open chat" needs the slug, not the id. Written
+          // and cleared in lockstep with the id above: a stale slug from a
+          // previous run-through would send the user to another workspace's
+          // agent, which is worse than no deep link at all.
+          if (firstAgentSlug) {
+            window.localStorage.setItem("crewship.firstAgentSlug", firstAgentSlug)
+          } else {
+            window.localStorage.removeItem("crewship.firstAgentSlug")
+          }
         }
       } catch {
         // localStorage unavailable (private mode) — skip the breadcrumb,
         // dashboard will just not show the banner. Not worth blocking
         // onboarding completion on.
       }
-      if (data.agent_id) {
-        router.push(`/crews/agents/${data.agent_id}/chat`)
+      // The wizard's last click. It used to land on /crews/agents/<id>/chat,
+      // a route the /crews redesign deleted — so the very first thing a new
+      // user did after setting up was hit a 404. Chat is /chat/<slug> now.
+      // If the slug could not be resolved we send them to the dashboard,
+      // which carries the welcome checklist and a working "Browse agents":
+      // a generic page that works beats a specific one that doesn't.
+      if (firstAgentSlug) {
+        router.push(`/chat/${encodeURIComponent(firstAgentSlug)}`)
       } else {
         router.push("/")
       }

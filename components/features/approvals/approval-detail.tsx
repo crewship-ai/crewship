@@ -99,7 +99,16 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided }: ApprovalD
                 )}
                 {row.agent_id && (
                   <Badge asChild variant="outline" className="text-[10px] font-mono border-border/60">
-                    <Link href={`/crews/agents/${encodeURIComponent(row.agent_id)}`}>agent · {row.agent_id.slice(0, 8)}</Link>
+                    {/* Was /crews/agents/<agent_id>, a route the /crews
+                        redesign deleted. There is no slug to put in its
+                        place: ApprovalRow carries agent_id only, and the
+                        approvals page mounts no lookup that could resolve
+                        one. An id in ?agent= would be worse than a generic
+                        link — use-crews-selection matches that parameter on
+                        slug, so the id is cleared on arrival and the canvas
+                        opens empty. The roster resolves; the id stays on the
+                        badge for anyone who needs to quote it. */}
+                    <Link href="/crews">agent · {row.agent_id.slice(0, 8)}</Link>
                   </Badge>
                 )}
                 {row.mission_id && (
