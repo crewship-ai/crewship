@@ -127,6 +127,7 @@ What shipped:
 - **Folders per agent** — Sessions / Files / Asks / Memory. Sessions expands to
   the agent's threads; the other three replace the centre pane, composer
   included, which is also what keeps the socket count at one (§O7).
+  **Reverted the next day — see §3.3.1.**
 - **No new endpoints and no new route.** The folder is `?folder=`, never
   `/chat/<agent>/<folder>`: the static handler rewrites exactly one path level
   and the slug is read from `window.location.pathname`.
@@ -137,6 +138,58 @@ What shipped:
 What the original cut got right and is still true: this is not a second browser
 for an agent. It navigates conversations, and the Files/Asks/Memory panes are
 views onto what `/crews` administers, not a second place to administer it.
+
+#### 3.3.1 Reverted: three of the four folders
+
+`Files`, `Asks` and `Memory` are gone from the tree, one day after they landed.
+The bullet above stands as written — this is what happened to it.
+
+**Why.** `Files` was on screen twice at once, in the tree on the left and in
+the chat's own right rail, in the same view. The other two were the same
+mistake one step further away: `Asks` is the agent's configuration tab and
+`Memory` is the agent canvas. The rule the owner settled it with, which now
+governs this surface:
+
+> **left column** = navigation between objects — *where am I going*
+> **right panel** = context of the object I have open — *what is here*
+> **configuration** = the object's own settings page
+
+By that rule Sessions is navigation and stays; the other three were already
+where they belonged, and the tree was a fourth door onto rooms that had three.
+The paragraph above — "this is not a second browser for an agent" — was true as
+a statement of intent and false as a description of what shipped. Sunk cost is
+not a reason to keep a surface that duplicates two others.
+
+**What was removed.** `components/features/chat/panes/` entirely (the three
+panes, the shared `pane-shell`, the barrel and their tests), the `FolderPane`
+branch of the chat page, `CHAT_FOLDERS` / `ChatFolder` / `folderHref` /
+`onOpenFolder` / `activeFolder`, and `files/three-tier-files.tsx`, which the
+Files pane was the only caller of. An agent now expands straight to its
+threads: one step, not two.
+
+**`?folder=` is dead, and does not linger.** It was a query parameter and not a
+path segment, so nothing 404s — but a URL bookmarked while it worked would
+otherwise keep carrying state nothing reads. The page scrubs it with
+`replaceState` on mount and opens the conversation (any `?session=` in the same
+URL is still honoured).
+
+**Salvaged.** The pane distinguished three states the right rail did not:
+loading, a failed fetch with a retry, and "we could not ask" as against "there
+is nothing". That honesty moved into the right rail's Files tab before the pane
+was deleted (`files/crew-files-scope.tsx`), which also fixed the lie it
+replaced: the crew scope used to swallow a failed fetch into `[]` and render
+"No shared crew files". The same treatment now covers the tree's own per-agent
+thread lists, which had the identical defect in the product's primary
+navigation — a 500 drew as "this agent has no conversations". Both go through
+`components/features/chat/scope-fetch.tsx` so they cannot drift.
+
+**Also changed, while the tree was open.** An agent with no sessions has no
+chevron (an expander that opens onto nothing is a promise the tree cannot
+keep), agents are ordered by most recent thread activity rather than
+alphabetically, and the right rail's three icons carry the panel's name in the
+tooltip, in the drawer's accessible name and in the open panel's own heading —
+all read from one map, plus `aria-keyshortcuts` for the shortcut the tooltip
+draws.
 
 ## 4. The steps
 

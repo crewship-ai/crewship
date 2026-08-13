@@ -32,10 +32,13 @@ import {
 import { useFileEditor } from "./hooks/use-file-editor"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { ScopeSection } from "./files/scope-section"
+import { CrewFilesScope } from "./files/crew-files-scope"
 import { TriggersTab } from "./right-panel-tabs/triggers-tab"
 import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 import { SharedContextTab } from "./right-panel-tabs/shared-context-tab"
 import { TeamTab } from "./right-panel-tabs/team-tab"
+import { DRAWER_TAB_LABELS } from "./right-rail"
+import type { DrawerTab } from "@/stores/drawer-store"
 
 interface ChatFileTreeState {
   expandedPaths: string[]
@@ -184,9 +187,19 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
 
   const fileCount = files.filter((f) => !f.is_dir).length
   const editorOpen = editorFile !== null && activeTab === "files"
+  const ActiveTabIcon = RIGHT_PANEL_TABS.find((t) => t.id === activeTab)?.icon
 
   return (
     <div className="flex flex-col border-l overflow-hidden" style={style}>
+      {/* Opened from the rail the tab strip is hidden, and the panel used to
+          arrive with no name on it at all — three unlabelled icons on the
+          rail, and whatever they opened. The heading is the label. */}
+      {hideTabs && (
+        <div className="flex h-[41px] shrink-0 items-center gap-2 border-b px-3">
+          {ActiveTabIcon && <ActiveTabIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
+          <h2 className="text-label font-medium text-foreground">{DRAWER_TAB_LABELS[activeTab as DrawerTab] ?? activeTab}</h2>
+        </div>
+      )}
       {!hideTabs && <div className="flex items-end shrink-0 overflow-x-auto scrollbar-none border-b h-[41px]">
         {RIGHT_PANEL_TABS.map((tab) => (
           <button
@@ -232,11 +245,18 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                 </div>
               )}
             </ScopeSection>
+            {/* Collapsed, and the section mounts its children only when open,
+                so "loaded on demand" is the mechanism rather than a caption.
+                CrewFilesScope owns its own loading / failed / no-crew / empty
+                states — see the note at the top of that file for why a failed
+                fetch must never render as an empty crew. */}
             <ScopeSection icon={Users} title="Crew" defaultOpen={false}>
-              <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
-                <FileText className="h-3 w-3" />
-                Shared crew files (loaded on demand)
-              </div>
+              <CrewFilesScope
+                agentId={agentId}
+                workspaceId={workspaceId}
+                selectedFile={editorFile?.path ?? null}
+                onFileClick={openFileEditor}
+              />
             </ScopeSection>
             <ScopeSection
               icon={Globe}

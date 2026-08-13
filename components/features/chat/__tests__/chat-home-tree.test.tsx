@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, cleanup, waitFor } from "@testing-library/react"
+import { render, screen, cleanup, waitFor, fireEvent, within } from "@testing-library/react"
 
 // =============================================================================
 // /chat with nothing selected.
@@ -135,6 +135,36 @@ describe("ChatHome — the tree beside the index", () => {
 
     expect(screen.queryByTestId("chat-panel")).toBeNull()
     expect(WebSocketSpy).not.toHaveBeenCalled()
+  })
+
+  // A per-agent /chats request that fails used to be caught into `[]`, which
+  // draws as "this agent has no conversations" — in the product's primary
+  // navigation, to someone whose server was unhappy for ten seconds.
+  it("says a failed thread list failed, and re-asks when told to", async () => {
+    let failing = true
+    apiFetch.mockImplementation((url: string) => {
+      if (url.startsWith("/api/v1/agents?")) return ok([agent("ada", "Ada")])
+      if (/^\/api\/v1\/agents\/agent-ada\/chats/.test(url)) {
+        return failing
+          ? Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) })
+          : ok([chat("chat-42", "Ship the export", 10)])
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+
+    render(<ChatHome />)
+
+    const failed = await screen.findByTestId("chat-tree-threads-error-ada")
+    expect(failed).toHaveTextContent(/500/)
+
+    failing = false
+    fireEvent.click(within(failed).getByRole("button", { name: /retry/i }))
+
+    await waitFor(() => expect(screen.queryByTestId("chat-tree-threads-error-ada")).toBeNull())
+    // The list is really there this time — the agent has an expander again,
+    // and it opens onto the thread the first request never delivered.
+    fireEvent.click(screen.getByTestId("chat-tree-agent-ada"))
+    expect(await screen.findByTestId("chat-tree-thread-chat-42")).toBeInTheDocument()
   })
 
   it("shares ONE fan-out with the index — the tree does not fetch the same lists again", async () => {

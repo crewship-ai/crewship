@@ -20,7 +20,6 @@ import {
   RECENT_THREAD_LIMIT,
   useChatCompactLayout,
   useChatTreeData,
-  type ChatFolder,
   type ChatTreeAgent,
   type ChatTreeThread,
 } from "./chat-tree-sidebar"
@@ -69,19 +68,25 @@ export type ChatHomeThread = ChatTreeThread & {
    * per thread to manufacture it.
    */
   last_message_preview?: string | null
-  /** Attached client-side during the merge — the agent the thread belongs to. */
-  agent: ChatHomeAgent
+  /**
+   * The agent this thread is currently filed under — `chats.agent_id`,
+   * attached client-side during the merge because the per-agent responses do
+   * not carry it back.
+   *
+   * Named `owner`, not `agent`: PRD §7 binds shipped code not to name things
+   * "the agent of this thread". The column is single-valued and NOT NULL
+   * today, so one agent owns the row; that is a fact about the schema, not a
+   * claim that a conversation has exactly one agent in it. Group threads are
+   * deferred, not foreclosed, and reads are deliberately NOT routed through a
+   * participant list while that list is always length one (§7 calls that
+   * YAGNI) — only the vocabulary is kept open.
+   */
+  owner: ChatHomeAgent
 }
 
 /** `/chat/<slug>?session=<id>` — session as a query param, never a path segment. */
 export function threadHref(slug: string, chatId: string): string {
   return `/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(chatId)}`
-}
-
-/** `/chat/<slug>?folder=<folder>` — the folder is a parameter for the same reason. */
-export function folderHref(slug: string, folder: ChatFolder): string {
-  const base = `/chat/${encodeURIComponent(slug)}`
-  return folder === "sessions" ? base : `${base}?folder=${encodeURIComponent(folder)}`
 }
 
 /**
@@ -110,12 +115,13 @@ export function mergeRecentThreads(
 export function ChatHome() {
   const router = useRouter()
   const compact = useChatCompactLayout()
-  const { agents, threadsByAgent, threadsLoaded, error, wsLoading } = useChatTreeData()
+  const { agents, threadsByAgent, threadErrors, threadsLoaded, retryThreads, error, wsLoading } =
+    useChatTreeData()
 
   const threads = useMemo(() => {
     if (!agents) return []
     return mergeRecentThreads(
-      agents.flatMap((a) => (threadsByAgent[a.id] ?? []).map((t) => ({ ...t, agent: a }))),
+      agents.flatMap((a) => (threadsByAgent[a.id] ?? []).map((t) => ({ ...t, owner: a }))),
     )
   }, [agents, threadsByAgent])
 
@@ -139,12 +145,12 @@ export function ChatHome() {
           <ChatTreeSidebar
             agents={agents ?? []}
             threadsByAgent={threadsByAgent}
+            threadErrors={threadErrors}
+            onRetryThreads={retryThreads}
             loading={loading || !threadsLoaded}
             activeAgentSlug={null}
-            activeFolder={null}
             activeThreadId={null}
-            onOpenThread={(agent, threadId) => router.push(threadHref(agent.slug, threadId))}
-            onOpenFolder={(agent, folder) => router.push(folderHref(agent.slug, folder))}
+            onOpenThread={(owner, threadId) => router.push(threadHref(owner.slug, threadId))}
           />
         )}
 
@@ -229,17 +235,17 @@ function ThreadRow({ thread: t }: { thread: ChatHomeThread }) {
   const preview = t.last_message_preview?.trim()
   return (
     <Link
-      href={threadHref(t.agent.slug, t.id)}
+      href={threadHref(t.owner.slug, t.id)}
       className={cn(
         "flex items-start gap-3 rounded-md border border-transparent px-3 py-2 transition-colors",
         "hover:border-white/[0.08] hover:bg-white/[0.03]",
       )}
     >
       <AgentAvatar
-        seed={t.agent.avatar_seed || t.agent.slug}
-        style={t.agent.avatar_style}
-        agentId={t.agent.id}
-        avatarUrl={t.agent.avatar_url}
+        seed={t.owner.avatar_seed || t.owner.slug}
+        style={t.owner.avatar_style}
+        agentId={t.owner.id}
+        avatarUrl={t.owner.avatar_url}
         alt=""
         className="mt-0.5 h-7 w-7 shrink-0"
       />
@@ -260,7 +266,7 @@ function ThreadRow({ thread: t }: { thread: ChatHomeThread }) {
         </span>
         {preview && <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{preview}</span>}
         <span className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground-soft">
-          <span className="truncate">{t.agent.name}</span>
+          <span className="truncate">{t.owner.name}</span>
           <span aria-hidden>·</span>
           <span className="tabular-nums">
             {t.message_count} msg{t.message_count === 1 ? "" : "s"}

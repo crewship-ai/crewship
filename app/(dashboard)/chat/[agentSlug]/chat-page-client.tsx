@@ -28,20 +28,14 @@ import { ChatPanel } from "@/components/features/chat/chat-panel"
 import { SessionsSidebar } from "@/components/features/chat/sessions-sidebar"
 import { withActiveSessionRead } from "@/components/features/chat/session-sort"
 import {
-  CHAT_FOLDERS,
   ChatTreeSidebar,
   useChatCompactLayout,
   useChatTreeData,
-  type ChatFolder,
   type ChatTreeAgent,
   type ChatTreeThread,
 } from "@/components/features/chat/chat-tree-sidebar"
-import { folderHref, threadHref } from "@/components/features/chat/chat-home"
-import {
-  AgentAsksPane,
-  AgentFilesPane,
-  AgentMemoryPane,
-} from "@/components/features/chat/panes"
+import { threadHref } from "@/components/features/chat/chat-home"
+import { httpError, scopeErrorMessage, useRetry } from "@/components/features/chat/scope-fetch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -102,6 +96,13 @@ interface AgentRecord extends ChatTreeAgent {
    *  and never fetches the detail. null for every agent nobody configured,
    *  which is what makes lib/agent-suggestions.ts fall back to the role pack. */
   suggested_prompts?: string | null
+  /** The agent's questionnaire forms — `agents.ask_forms`, a TEXT column
+   *  holding a JSON array. On the list response for the same reason
+   *  `suggested_prompts` is: this page resolves its agent by slug out of that
+   *  list and never fetches the detail, and the chat below it would otherwise
+   *  spend a request per mount on this one column. null for every agent nobody
+   *  configured, which is what makes the rail render plain suggestion chips. */
+  ask_forms?: string | null
   crew?: { name: string; slug: string; avatar_style: string | null } | null
 }
 
@@ -119,75 +120,32 @@ const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquar
 type SessionRecord = ChatTreeThread & { ended_at: string | null }
 
 /**
- * `?folder=` → a folder, defaulting to the conversation.
- *
- * Anything unrecognised falls back to "sessions" rather than erroring: a URL
- * someone typed, or one written by a future build, should land on the chat and
- * not on a dead pane.
- */
-function parseFolder(raw: string | null): ChatFolder {
-  const match = CHAT_FOLDERS.find((f) => f.id === raw)
-  return match ? match.id : "sessions"
-}
-
-/* --------------------------------------------------------- folder panes */
-
-/**
- * The centre pane when the tree selection is a folder rather than a thread.
- *
- * Rendered INSTEAD of ChatPanel, never beside it: the composer belongs to a
- * conversation, and leaving a message box under a file listing promises
- * something the pane cannot do. Unmounting the panel is also what closes its
- * WebSocket, so this is the same move that keeps one socket per surface.
- *
- * The panes themselves fetch their own data and own their loading, empty and
- * failure states; this hands them an agent and gets out of the way.
- */
-function FolderPane({
-  folder,
-  agentId,
-  agentSlug,
-  crewId,
-}: {
-  folder: Exclude<ChatFolder, "sessions">
-  agentId: string
-  agentSlug: string
-  crewId: string | null
-}) {
-  return (
-    <div data-testid="chat-folder-pane" data-folder={folder} className="h-full min-h-0 overflow-hidden">
-      {folder === "files" ? (
-        <AgentFilesPane agentId={agentId} agentSlug={agentSlug} crewId={crewId} />
-      ) : folder === "asks" ? (
-        <AgentAsksPane agentId={agentId} agentSlug={agentSlug} />
-      ) : (
-        <AgentMemoryPane agentId={agentId} agentSlug={agentSlug} />
-      )}
-    </div>
-  )
-}
-
-/**
  * Full-page chat at `/chat/[agentSlug]`. Layout:
  *
  *   ┌─ TopBar (global) ────────────────────────────────────────┐
  *   ├─ Header strip (back · agent identity) ───────────────────┤
- *   ├─ Agent tree │ ChatPanel *or* a folder pane ──────────────┤
+ *   ├─ Agent tree │ ChatPanel ─────────────────────────────────┤
  *   └──────────────────────────────────────────────────────────┘
  *
  * The left column is the SHARED ChatTreeSidebar, the same one `/chat` renders,
  * so the surface has one left column rather than one per route. What is
- * selected in it decides the centre: a thread opens the conversation, a folder
- * replaces it (composer included).
+ * selected in it is a conversation — the centre is always the conversation.
+ *
+ * It briefly wasn't. The tree gave each agent four folders and three of them
+ * (Files, Asks, Memory) replaced ChatPanel with a pane that duplicated a
+ * surface elsewhere in the product — `Files` was on screen twice at once, in
+ * this page's tree and in its own right rail. Those panes are deleted, and
+ * with them `?folder=`: the page scrubs the parameter out of a bookmarked URL
+ * rather than leaving dead state in the address bar.
  *
  * Two things the layout is not allowed to do:
  *
  *  · **Grow a path segment.** The static export rewrites exactly one level
  *    (internal/api/static.go) and the slug is read from
- *    window.location.pathname, so the folder is `?folder=`, never
- *    `/chat/<agent>/<folder>`.
+ *    window.location.pathname, so the session is `?session=`, never
+ *    `/chat/<agent>/<session>`.
  *  · **Mount two panels.** ChatPanel opens a WebSocket per mount, so exactly
- *    one is on screen at a time and a folder view has none at all.
+ *    one is on screen at a time.
  *
  * Below the mobile breakpoint the tree steps aside for the behaviour that
  * already shipped: the session drawer plus the chat/files/more tab strip.
@@ -212,8 +170,8 @@ export function ChatPageClient() {
   // `mobilePanel` prop its mobile branches have been waiting for.
   //
   // The threshold is the tree's, not the app's phone breakpoint: 240px of flat
-  // list beside a conversation survived an 800px window; 280px of tree with
-  // four folders per agent does not. ChatPanel's mobile mode is entirely
+  // list beside a conversation survived an 800px window; 280px of tree plus
+  // a status section does not. ChatPanel's mobile mode is entirely
   // prop-driven (it never asks the viewport itself), so raising the number
   // here moves the whole shape together instead of producing a hybrid.
   //
@@ -274,19 +232,12 @@ export function ChatPageClient() {
   const [draftSessionId, setDraftSessionId] = useState<string | null>(null)
   const isDraftSession = sessionId !== null && sessionId === draftSessionId
 
-  // Which of the agent's folders the centre pane is showing. "sessions" is the
-  // conversation itself, and is the default — so it is the one value that does
-  // NOT go in the URL, which keeps /chat/<slug>?session=<id> exactly the shape
-  // internal/chatnotify/notify.go already emits for deep links.
-  const [folder, setFolder] = useState<ChatFolder>(() => parseFolder(searchParams.get("folder")))
-
-  const pageUrl = useCallback((id: string | null, f: ChatFolder) => {
+  const pageUrl = useCallback((id: string | null) => {
     if (slug === null) return null
     const params = new URLSearchParams()
     if (id) params.set("session", id)
-    // One path level. /chat/<agent>/<folder> would be a second, and the Go
+    // One path level. /chat/<agent>/<session> would be a second, and the Go
     // static handler resolves exactly one.
-    if (f !== "sessions") params.set("folder", f)
     const qs = params.toString()
     return `/chat/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`
   }, [slug])
@@ -303,31 +254,36 @@ export function ChatPageClient() {
   const selectSession = useCallback((id: string | null) => {
     setSessionIdState(id)
     setDraftSessionId(null)
-    setFolder("sessions")
     if (slug === null) return
-    pushUrl(pageUrl(id, "sessions"))
+    pushUrl(pageUrl(id))
   }, [slug, pageUrl, pushUrl])
 
-  const selectFolder = useCallback((next: ChatFolder) => {
-    setFolder(next)
-    if (slug === null) return
-    // A draft id is a promise nothing has redeemed yet; it must not survive a
-    // reload, so it never reaches the address bar.
-    pushUrl(pageUrl(sessionId === draftSessionId ? null : sessionId, next))
-  }, [slug, sessionId, draftSessionId, pageUrl, pushUrl])
-
   // Sync from URL on back/forward (the only path that should change the
-  // selection outside of selectSession/selectFolder, since we own URL writes).
+  // selection outside of selectSession, since we own URL writes).
   useEffect(() => {
     const onPop = () => {
       const params = new URLSearchParams(window.location.search)
       setSessionIdState(params.get("session"))
-      setFolder(parseFolder(params.get("folder")))
       setDraftSessionId(null)
     }
     window.addEventListener("popstate", onPop)
     return () => window.removeEventListener("popstate", onPop)
   }, [])
+
+  // `?folder=` is dead. It selected one of the Files / Asks / Memory panes,
+  // and those were deleted for duplicating the right rail, the agent config
+  // tab and the agent canvas. A URL bookmarked while it worked still opens
+  // the conversation — but it must not keep carrying a parameter nothing
+  // reads, so it is scrubbed in place (replaceState: this is the same visit,
+  // and a back button that returns to the dead URL would be a trap).
+  useEffect(() => {
+    if (slug === null || typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    if (!params.has("folder")) return
+    params.delete("folder")
+    const qs = params.toString()
+    window.history.replaceState(null, "", `/chat/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`)
+  }, [slug])
 
   // Pull recent sessions for the sidebar. `sessionsLoaded` gates the
   // ensure-session effect below so it can decide whether to reuse the
@@ -336,6 +292,11 @@ export function ChatPageClient() {
   // POST'd a new chat, piling up empty "Untitled session" rows on every
   // visit (the sidebar would show 17+ stale entries within an hour).
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  // Why the list is missing, when it is. Same rule the tree's fan-out now
+  // follows: a failed fetch is not an empty history, and this page owns the
+  // active agent's list, so it owns the failure too.
+  const [sessionsError, setSessionsError] = useState<string | null>(null)
+  const { nonce: sessionsNonce, retry: retrySessions } = useRetry()
   // Live mirror of sessionId for fetch callbacks whose effects don't (and
   // shouldn't) re-run on session swaps — they need "the active session at
   // response time" to zero its unread count, not a stale closure value.
@@ -346,18 +307,28 @@ export function ChatPageClient() {
     let cancelled = false
     setSessionsLoaded(false)
     apiFetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=20`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((list: SessionRecord[]) => {
-        if (!cancelled && Array.isArray(list)) {
-          // The active session is read by definition — this GET can race
-          // the mark-read PUT (GET served first → stale unread lands here).
-          setSessions(withActiveSessionRead(list, sessionIdRef.current))
-          setSessionsLoaded(true)
-        }
+      .then((r) => {
+        if (!r.ok) throw httpError(r.status)
+        return r.json()
       })
-      .catch(() => { if (!cancelled) setSessionsLoaded(true) })
+      .then((list: SessionRecord[]) => {
+        if (cancelled) return
+        // The active session is read by definition — this GET can race
+        // the mark-read PUT (GET served first → stale unread lands here).
+        if (Array.isArray(list)) setSessions(withActiveSessionRead(list, sessionIdRef.current))
+        setSessionsError(null)
+        setSessionsLoaded(true)
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return
+        // `sessionsLoaded` still flips: the composer must work even when the
+        // history could not be read. What must NOT happen is the sidebar
+        // reporting the failure as "no conversations".
+        setSessionsError(scopeErrorMessage(e))
+        setSessionsLoaded(true)
+      })
     return () => { cancelled = true }
-  }, [agent, workspaceId])
+  }, [agent, workspaceId, sessionsNonce])
 
   // Mark a session read: advances the server-side read cursor (unread
   // badge source, migration v130) and clears the paired "agent replied"
@@ -577,11 +548,11 @@ export function ChatPageClient() {
     // this one are the same visit, and a back button that returns to a URL
     // which mints a *different* draft would be a trap.
     setDraftSessionId(null)
-    const url = pageUrl(sid, folder)
+    const url = pageUrl(sid)
     if (url && typeof window !== "undefined" && window.location.pathname + window.location.search !== url) {
       window.history.replaceState(null, "", url)
     }
-  }, [draftSessionId, pageUrl, folder, autoTitleSession])
+  }, [draftSessionId, pageUrl, autoTitleSession])
 
   // Owner-restricted: delete this agent. Confirmed via native confirm
   // (a richer Dialog variant lands later). On success the user is sent
@@ -651,25 +622,34 @@ export function ChatPageClient() {
     () => (agent ? { ...tree.threadsByAgent, [agent.id]: sessions } : tree.threadsByAgent),
     [tree.threadsByAgent, agent, sessions],
   )
+  // …and the same for the failures: this agent's comes from the page's own
+  // fetch, every other agent's from the fan-out.
+  const treeErrors = useMemo(
+    () =>
+      agent && sessionsError
+        ? { ...tree.threadErrors, [agent.id]: sessionsError }
+        : tree.threadErrors,
+    [tree.threadErrors, agent, sessionsError],
+  )
+  const treeRetryThreads = tree.retryThreads
+  const retryTreeThreads = useCallback(() => {
+    retrySessions()
+    treeRetryThreads()
+  }, [retrySessions, treeRetryThreads])
 
   // Selecting inside this agent is local state plus a history write; selecting
   // another agent is a route change, because the slug is a path segment and
   // that is the one level the static export can rewrite.
-  const handleOpenThread = useCallback((a: ChatTreeAgent, threadId: string) => {
-    if (a.slug !== slug) {
-      router.push(threadHref(a.slug, threadId))
+  // `owner` is the agent the thread is filed under, not "the thread's agent"
+  // (PRD §7). A thread owned by someone else is a route change, because the
+  // slug is the path segment.
+  const handleOpenThread = useCallback((owner: ChatTreeAgent, threadId: string) => {
+    if (owner.slug !== slug) {
+      router.push(threadHref(owner.slug, threadId))
       return
     }
     selectSession(threadId)
   }, [slug, router, selectSession])
-
-  const handleOpenFolder = useCallback((a: ChatTreeAgent, next: ChatFolder) => {
-    if (a.slug !== slug) {
-      router.push(folderHref(a.slug, next))
-      return
-    }
-    selectFolder(next)
-  }, [slug, router, selectFolder])
 
   // Wait for client mount + workspace + roster before rendering chat.
   if (slug === null || wsLoading || loadingAgent) {
@@ -819,18 +799,11 @@ export function ChatPageClient() {
               key={id}
               type="button"
               role="tab"
-              aria-selected={folder === "sessions" && mobilePanel === id}
-              onClick={() => {
-                setMobilePanel(id)
-                // The strip is also the way OUT of a folder pane: a narrow
-                // viewport has no tree to pick Sessions from, so a
-                // ?folder=files deep link would otherwise be a room with no
-                // door.
-                if (folder !== "sessions") selectFolder("sessions")
-              }}
+              aria-selected={mobilePanel === id}
+              onClick={() => setMobilePanel(id)}
               className={cn(
                 "flex-1 flex items-center justify-center gap-1.5 text-xs border-b-2 -mb-px",
-                folder === "sessions" && mobilePanel === id
+                mobilePanel === id
                   ? "border-purple text-foreground"
                   : "border-transparent text-muted-foreground",
               )}
@@ -900,27 +873,18 @@ export function ChatPageClient() {
             className="w-full"
             agents={treeAgents}
             threadsByAgent={treeThreads}
+            threadErrors={treeErrors}
+            onRetryThreads={retryTreeThreads}
             loading={!tree.threadsLoaded || !sessionsLoaded}
             activeAgentSlug={slug}
-            activeFolder={folder}
-            activeThreadId={folder === "sessions" ? sessionId : null}
+            activeThreadId={sessionId}
             onOpenThread={handleOpenThread}
-            onOpenFolder={handleOpenFolder}
             collapsed={treeCollapsed}
             onToggleCollapsed={() => setTreeCollapsed((v) => !v)}
           />
         )}
         <div className="min-w-0 min-h-0 overflow-hidden">
-          {folder !== "sessions" ? (
-            // A folder REPLACES the conversation. ChatPanel — and with it the
-            // composer and its WebSocket — is unmounted, not hidden.
-            <FolderPane
-              folder={folder}
-              agentId={agent.id}
-              agentSlug={agent.slug}
-              crewId={agent.crew_id ?? null}
-            />
-          ) : sessionId ? (
+          {sessionId ? (
             <ChatPanel
               agentId={agent.id}
               sessionId={sessionId}
@@ -935,6 +899,10 @@ export function ChatPageClient() {
               // the product showed the `default` chips.
               agentRole={agent.role_title}
               suggestedPrompts={agent.suggested_prompts ?? null}
+              // Same record, same trip. `null` says "this agent has no forms",
+              // which is an answer — leaving the prop off would say "I don't
+              // know", and the panel would go and ask the server.
+              askForms={agent.ask_forms ?? null}
               // Undefined on desktop — that is what selects ChatPanel's split
               // view; a value selects one of its full-screen mobile branches.
               mobilePanel={isMobile ? mobilePanel : undefined}

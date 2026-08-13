@@ -3,11 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ChevronDown,
-  FolderOpen,
-  Brain,
-  HelpCircle,
   Inbox,
-  MessageSquare,
   Activity,
   CheckCircle2,
   Mail,
@@ -31,7 +27,8 @@ import {
 } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
 
-import { sortSessionsByActivity } from "./session-sort"
+import { parseSessionTimestamp, sortSessionsByActivity } from "./session-sort"
+import { ScopeFailure, httpError, scopeErrorMessage, useRetry } from "./scope-fetch"
 
 /**
  * chat-tree-sidebar — the ONE left column of the chat surface.
@@ -47,10 +44,23 @@ import { sortSessionsByActivity } from "./session-sort"
  *
  *   [🔍 search] [⧩ filter] [⇤ collapse]
  *   STATUS       All · Unread · Running · Done          (counts, collapsible)
- *   AGENTS       ▸ Ada Lovelace                         (expandable)
- *                  ▸ Sessions                           (nested,  24px)
- *                      Ship the export                  (leaf,    48px)
- *                    Files · Asks · Memory
+ *   AGENTS       ▾ Ada Lovelace                         (expandable)
+ *                    Ship the export                    (thread, 24px)
+ *                    Weekly summary
+ *                  Bob Robot                            (no threads, no chevron)
+ *
+ * **An agent expands to its threads and to nothing else.** It briefly carried
+ * four folders — Sessions / Files / Asks / Memory — and three of them were a
+ * second copy of a surface that already existed: Files is in the chat's own
+ * right rail, Asks is the agent's configuration tab, Memory is the agent
+ * canvas. The rule that settled it, and that this file is now bound by:
+ *
+ *   left column = navigation between objects  ("where am I going")
+ *   right panel = context of the open object  ("what is here")
+ *   config page = the object's own settings
+ *
+ * Sessions is navigation, so it stayed — as the agent's own children rather
+ * than as a folder row you had to open first.
  *
  * On the counts: every number here is computed from data that was actually
  * fetched — `GET /agents` (agent `status`) and `GET /agents/{id}/chats`
@@ -62,12 +72,11 @@ import { sortSessionsByActivity } from "./session-sort"
  *
  *  · **No deeper route.** The static export rewrites exactly one path level
  *    (internal/api/static.go) and the agent slug is parsed out of
- *    window.location.pathname, so a folder is a query parameter or component
- *    state — never `/chat/<agent>/<folder>`. This component only ever reports
- *    a selection; the page decides how to record it.
+ *    window.location.pathname, so nothing this column selects may become a
+ *    second path segment. It only ever reports a selection; the page decides
+ *    how to record it.
  *  · **One WebSocket.** ChatPanel opens one per mounted panel, so this column
- *    never mounts a panel, and picking a folder is expected to UNMOUNT the one
- *    that is up rather than render a second surface beside it.
+ *    never mounts a panel of its own.
  */
 
 /* ------------------------------------------------------------------ types */
@@ -81,7 +90,6 @@ export interface ChatTreeAgent {
   avatar_seed?: string | null
   avatar_style?: string | null
   avatar_url?: string | null
-  /** Needed by the Files pane, which browses the crew workspace. */
   crew_id?: string | null
   /** Non-null marks a ghost (a retired agent). Not a chat destination. */
   expired_at?: string | null
@@ -99,16 +107,6 @@ export interface ChatTreeThread {
   /** UI · CLI · WEBHOOK · CRON · AGENT (migration v59); NULL on older rows. */
   origin?: string | null
 }
-
-/** The four things an agent is, from this surface's point of view. */
-export type ChatFolder = "sessions" | "files" | "asks" | "memory"
-
-export const CHAT_FOLDERS: { id: ChatFolder; label: string; icon: LucideIcon }[] = [
-  { id: "sessions", label: "Sessions", icon: MessageSquare },
-  { id: "files", label: "Files", icon: FolderOpen },
-  { id: "asks", label: "Asks", icon: HelpCircle },
-  { id: "memory", label: "Memory", icon: Brain },
-]
 
 type StatusFacet = "all" | "unread" | "running" | "done"
 
@@ -129,8 +127,8 @@ const STATUS_FACETS: { id: StatusFacet; label: string; icon: LucideIcon; tone: s
  *
  * Higher than the app-wide mobile breakpoint (768) on purpose: 240px of list
  * beside a conversation was survivable on an 800px window, and 280px of tree
- * with four folders per agent is not. Below this the surface falls back to the
- * shape that was built for exactly this problem — the session drawer and the
+ * plus a status section is not. Below this the surface falls back to the shape
+ * that was built for exactly this problem — the session drawer and the
  * chat/files/more tab strip — rather than to a squeezed version of the tree.
  */
 export const CHAT_TREE_BREAKPOINT = 900
@@ -193,7 +191,19 @@ export interface ChatTreeData<A extends ChatTreeAgent = ChatTreeAgent> {
    */
   roster: A[] | null
   threadsByAgent: Record<string, ChatTreeThread[]>
+  /**
+   * Agent id → why its thread list is missing.
+   *
+   * The fan-out used to write `.then((r) => (r.ok ? r.json() : []))`, so a
+   * 500 arrived as an empty array and the tree said "this agent has no
+   * conversations" — in the product's primary navigation, to someone whose
+   * server had been unhappy for ten seconds. An agent in here has an unknown
+   * list, not an empty one, and the tree says so.
+   */
+  threadErrors: Record<string, string>
   threadsLoaded: boolean
+  /** Re-run the fan-out. Wired to the Retry beside a failed agent. */
+  retryThreads: () => void
   error: string | null
   wsLoading: boolean
 }
@@ -216,8 +226,10 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
 
   const [roster, setRoster] = useState<A[] | null>(null)
   const [threadsByAgent, setThreadsByAgent] = useState<Record<string, ChatTreeThread[]>>({})
+  const [threadErrors, setThreadErrors] = useState<Record<string, string>>({})
   const [threadsLoaded, setThreadsLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { nonce: threadsNonce, retry: retryThreads } = useRetry()
 
   // ── The roster ──
   useEffect(() => {
@@ -251,6 +263,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
     const scope = agents.filter((a) => a.slug !== skipSlug).slice(0, AGENT_FANOUT_CAP)
     if (scope.length === 0) {
       setThreadsByAgent({})
+      setThreadErrors({})
       setThreadsLoaded(true)
       return
     }
@@ -262,23 +275,37 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
           `/api/v1/agents/${encodeURIComponent(a.id)}/chats` +
             `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${PER_AGENT_CHAT_LIMIT}`,
         )
-          .then((r) => (r.ok ? r.json() : []))
-          .then((rows: unknown) => [a.id, Array.isArray(rows) ? (rows as ChatTreeThread[]) : []] as const)
+          .then((r) => {
+            if (!r.ok) throw httpError(r.status)
+            return r.json()
+          })
+          .then(
+            (rows: unknown) =>
+              [a.id, Array.isArray(rows) ? (rows as ChatTreeThread[]) : [], null] as const,
+          )
           // One agent's list failing must not blank the column — the other
-          // eleven are still worth showing.
-          .catch(() => [a.id, [] as ChatTreeThread[]] as const),
+          // eleven are still worth showing. It must not pass for an EMPTY
+          // list either, which is what returning [] here used to do.
+          .catch((e: unknown) => [a.id, null, scopeErrorMessage(e)] as const),
       ),
-    ).then((pairs) => {
+    ).then((results) => {
       if (cancelled) return
-      setThreadsByAgent(Object.fromEntries(pairs))
+      const lists: Record<string, ChatTreeThread[]> = {}
+      const errors: Record<string, string> = {}
+      for (const [id, rows, err] of results) {
+        if (rows) lists[id] = rows
+        else if (err) errors[id] = err
+      }
+      setThreadsByAgent(lists)
+      setThreadErrors(errors)
       setThreadsLoaded(true)
     })
     return () => {
       cancelled = true
     }
-  }, [workspaceId, agents, skipSlug])
+  }, [workspaceId, agents, skipSlug, threadsNonce])
 
-  return { agents, roster, threadsByAgent, threadsLoaded, error, wsLoading }
+  return { agents, roster, threadsByAgent, threadErrors, threadsLoaded, retryThreads, error, wsLoading }
 }
 
 /* ------------------------------------------------------------------ props */
@@ -286,12 +313,22 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
 export interface ChatTreeSidebarProps {
   agents: ChatTreeAgent[]
   threadsByAgent: Record<string, ChatTreeThread[]>
+  /** Agent id → why its thread list is missing. See ChatTreeData. */
+  threadErrors?: Record<string, string>
+  /** Re-ask for the thread lists. Rendered as the Retry beside a failure. */
+  onRetryThreads?: () => void
   /** Slug of the agent whose surface is on screen, or null on the index. */
   activeAgentSlug?: string | null
-  activeFolder?: ChatFolder | null
   activeThreadId?: string | null
-  onOpenThread: (agent: ChatTreeAgent, threadId: string) => void
-  onOpenFolder: (agent: ChatTreeAgent, folder: ChatFolder) => void
+  /**
+   * A thread was picked. `owner` is the agent the thread is filed under
+   * (`chats.agent_id`) — the caller needs it to build the URL, since the slug
+   * is the path segment. Deliberately not named "the thread's agent": PRD §7
+   * binds this code to vocabulary that does not assume a conversation has
+   * exactly one agent in it, because the group-thread groundwork
+   * (`chat_participants`, v118) is being kept usable.
+   */
+  onOpenThread: (owner: ChatTreeAgent, threadId: string) => void
   /** Rows are still arriving; drawn as a hint, never as a blank column. */
   loading?: boolean
   collapsed?: boolean
@@ -313,6 +350,35 @@ function agentMatches(a: ChatTreeAgent, q: string): boolean {
   )
 }
 
+/** Epoch millis of an agent's most recent thread; 0 when it has none. */
+function lastActivityOf(threads: ChatTreeThread[]): number {
+  let newest = 0
+  for (const t of threads) {
+    const ms = parseSessionTimestamp(t.last_activity_at ?? t.started_at)
+    if (ms > newest) newest = ms
+  }
+  return newest
+}
+
+/**
+ * Agents newest-conversation-first.
+ *
+ * Alphabetical put "Aaron" at the top of a workspace where nobody has talked
+ * to Aaron since March. The roster arrives ordered by creation recency, which
+ * is no better — it is the order the agents were *made*, not the order they
+ * are used. An agent nobody has a thread with sorts last, by name, so the tail
+ * of the list is at least stable and readable.
+ */
+function sortAgentsByActivity<A extends ChatTreeAgent>(
+  agents: A[],
+  threadsByAgent: Record<string, ChatTreeThread[]>,
+): A[] {
+  return [...agents].sort((a, b) => {
+    const delta = lastActivityOf(threadsByAgent[b.id] ?? []) - lastActivityOf(threadsByAgent[a.id] ?? [])
+    return delta !== 0 ? delta : a.name.localeCompare(b.name)
+  })
+}
+
 function threadMatchesFacet(t: ChatTreeThread, a: ChatTreeAgent, facet: StatusFacet): boolean {
   switch (facet) {
     case "unread":
@@ -331,11 +397,11 @@ function threadMatchesFacet(t: ChatTreeThread, a: ChatTreeAgent, facet: StatusFa
 export function ChatTreeSidebar({
   agents,
   threadsByAgent,
+  threadErrors = {},
+  onRetryThreads,
   activeAgentSlug = null,
-  activeFolder = null,
   activeThreadId = null,
   onOpenThread,
-  onOpenFolder,
   loading = false,
   collapsed = false,
   onToggleCollapsed,
@@ -347,33 +413,19 @@ export function ChatTreeSidebar({
   const [facet, setFacet] = useState<StatusFacet>("all")
   const [origins, setOrigins] = useState<string[]>([])
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set())
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
 
   // Arriving at /chat/<agent>?session=<id> must SHOW where you are. Without
   // this the tree would open collapsed on the very row the URL just named.
   useEffect(() => {
     if (!activeAgentSlug) return
     setExpandedAgents((prev) => (prev.has(activeAgentSlug) ? prev : new Set(prev).add(activeAgentSlug)))
-    if (activeFolder === "sessions" || activeThreadId) {
-      const key = `${activeAgentSlug}:sessions`
-      setExpandedFolders((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
-    }
-  }, [activeAgentSlug, activeFolder, activeThreadId])
+  }, [activeAgentSlug])
 
   const toggleAgent = useCallback((slug: string) => {
     setExpandedAgents((prev) => {
       const next = new Set(prev)
       if (next.has(slug)) next.delete(slug)
       else next.add(slug)
-      return next
-    })
-  }, [])
-
-  const toggleFolder = useCallback((key: string) => {
-    setExpandedFolders((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
       return next
     })
   }, [])
@@ -411,7 +463,7 @@ export function ChatTreeSidebar({
   )
 
   const visibleAgents = useMemo(() => {
-    return agents.filter((a) => {
+    const matching = agents.filter((a) => {
       const threads = visibleThreads(a)
       // "Running" is a property of the agent, so a running agent belongs in
       // the list whether or not it has a thread to show for it.
@@ -421,7 +473,9 @@ export function ChatTreeSidebar({
       if (!q) return true
       return agentMatches(a, q) || threads.length > 0
     })
-  }, [agents, visibleThreads, facet, origins, q])
+    // Ordered by the work, not by the alphabet — see sortAgentsByActivity.
+    return sortAgentsByActivity(matching, threadsByAgent)
+  }, [agents, threadsByAgent, visibleThreads, facet, origins, q])
 
   if (collapsed) {
     return (
@@ -558,15 +612,13 @@ export function ChatTreeSidebar({
                   agent={a}
                   threads={visibleThreads(a)}
                   totalThreads={(threadsByAgent[a.id] ?? []).length}
+                  threadsError={threadErrors[a.id] ?? null}
+                  onRetryThreads={onRetryThreads}
                   expanded={expandedAgents.has(a.slug)}
                   onToggle={() => toggleAgent(a.slug)}
-                  expandedFolders={expandedFolders}
-                  onToggleFolder={toggleFolder}
                   isActiveAgent={a.slug === activeAgentSlug}
-                  activeFolder={activeFolder}
                   activeThreadId={activeThreadId}
                   onOpenThread={onOpenThread}
-                  onOpenFolder={onOpenFolder}
                 />
               ))
             )}
@@ -583,34 +635,41 @@ interface AgentBranchProps {
   agent: ChatTreeAgent
   threads: ChatTreeThread[]
   totalThreads: number
+  /** Non-null when this agent's list could not be fetched at all. */
+  threadsError: string | null
+  onRetryThreads?: () => void
   expanded: boolean
   onToggle: () => void
-  expandedFolders: Set<string>
-  onToggleFolder: (key: string) => void
   isActiveAgent: boolean
-  activeFolder: ChatFolder | null
   activeThreadId: string | null
-  onOpenThread: (agent: ChatTreeAgent, threadId: string) => void
-  onOpenFolder: (agent: ChatTreeAgent, folder: ChatFolder) => void
+  /**
+   * `owner` is the agent the thread is filed under today (`chats.agent_id`,
+   * single-valued and NOT NULL) — not a claim that a conversation has exactly
+   * one agent in it. PRD §7 keeps the vocabulary open for the group threads
+   * the schema is being kept ready for.
+   */
+  onOpenThread: (owner: ChatTreeAgent, threadId: string) => void
 }
 
 function AgentBranch({
   agent,
   threads,
   totalThreads,
+  threadsError,
+  onRetryThreads,
   expanded,
   onToggle,
-  expandedFolders,
-  onToggleFolder,
   isActiveAgent,
-  activeFolder,
   activeThreadId,
   onOpenThread,
-  onOpenFolder,
 }: AgentBranchProps) {
-  const sessionsKey = `${agent.slug}:sessions`
-  const sessionsOpen = expandedFolders.has(sessionsKey)
   const unread = threads.reduce((n, t) => n + (t.unread_count ?? 0), 0)
+  // No sessions, no disclosure. A chevron is a promise that there is
+  // something under the row; on an agent nobody has talked to, opening it
+  // used to reveal "No threads yet." — a row whose only content is the
+  // admission that it has none.
+  const canExpand = totalThreads > 0
+  const open = expanded && canExpand
 
   return (
     <>
@@ -621,16 +680,21 @@ function AgentBranch({
         // disclosure state cannot ride an aria-expanded here. The accessible
         // name is pinned to the agent instead of drifting with the counts.
         aria-label={agent.name}
-        selected={isActiveAgent && activeFolder === null && activeThreadId === null}
+        selected={isActiveAgent && activeThreadId === null}
         onSelect={onToggle}
       >
-        <ChevronDown
-          aria-hidden
-          className={cn(
-            "h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-            !expanded && "-rotate-90",
-          )}
-        />
+        {canExpand ? (
+          <ChevronDown
+            aria-hidden
+            data-testid={`chat-tree-expander-${agent.slug}`}
+            className={cn(
+              "h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
+              !open && "-rotate-90",
+            )}
+          />
+        ) : (
+          <span aria-hidden className="w-3 shrink-0" />
+        )}
         <AgentAvatar
           seed={agent.avatar_seed || agent.slug}
           style={agent.avatar_style}
@@ -657,104 +721,84 @@ function AgentBranch({
                 : "bg-success",
           )}
         />
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">{totalThreads}</span>
+        {/* The unread badge used to live on the Sessions folder row. With the
+            folder gone it belongs on the agent — which is also the row that
+            is still visible when the branch is closed. */}
+        {unread > 0 && (
+          <span
+            aria-label={`${unread} unread message${unread === 1 ? "" : "s"}`}
+            className="rounded-full bg-info/20 px-1.5 py-px text-[10px] leading-none text-info"
+          >
+            {unread > 99 ? "99+" : unread}
+          </span>
+        )}
+        {/* An em dash, not a 0: the count of a list that failed to load is
+            not zero, it is unknown. */}
+        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
+          {threadsError ? "—" : totalThreads}
+        </span>
       </SidebarRow>
 
-      {expanded &&
-        CHAT_FOLDERS.map((folder) => {
-          const Icon = folder.icon
-          const isSessions = folder.id === "sessions"
-          const selected = isActiveAgent && activeFolder === folder.id && (!isSessions || activeThreadId === null)
-          return (
-            <div key={folder.id}>
-              <SidebarRow
-                as="div"
-                indent
-                data-testid={`chat-tree-folder-${agent.slug}-${folder.id}`}
-                aria-label={`${agent.name}: ${folder.label}`}
-                selected={selected}
-                onSelect={() => {
-                  if (isSessions) onToggleFolder(sessionsKey)
-                  onOpenFolder(agent, folder.id)
-                }}
-              >
-                {isSessions ? (
-                  <ChevronDown
-                    aria-hidden
-                    className={cn(
-                      "h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                      !sessionsOpen && "-rotate-90",
-                    )}
-                  />
-                ) : (
-                  <span aria-hidden className="w-3 shrink-0" />
-                )}
-                <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
-                <span className="flex-1 truncate text-xs text-foreground/80">{folder.label}</span>
-                {isSessions && (
-                  <>
-                    {unread > 0 && (
-                      <span
-                        aria-label={`${unread} unread message${unread === 1 ? "" : "s"}`}
-                        className="rounded-full bg-info/20 px-1.5 py-px text-[10px] leading-none text-info"
-                      >
-                        {unread > 99 ? "99+" : unread}
-                      </span>
-                    )}
-                    <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
-                      {threads.length}
-                    </span>
-                  </>
-                )}
-              </SidebarRow>
+      {/* Not gated on `expanded`: a failure the reader has to open a row to
+          discover is a failure they will read as "no conversations". */}
+      {threadsError && (
+        <ScopeFailure
+          data-testid={`chat-tree-threads-error-${agent.slug}`}
+          className="ml-6"
+          label={`Could not load ${agent.name}'s conversations.`}
+          detail={`${threadsError} — this is not an empty history; the list could not be fetched.`}
+          onRetry={onRetryThreads}
+        />
+      )}
 
-              {isSessions && sessionsOpen && (
-                threads.length === 0 ? (
-                  <p className="ml-12 px-2 py-1.5 text-[11px] text-muted-foreground-soft">
-                    No threads yet.
-                  </p>
-                ) : (
-                  threads.map((t) => {
-                    const threadUnread = t.unread_count ?? 0
-                    const isSelected = isActiveAgent && activeThreadId === t.id
-                    return (
-                      <SidebarRow
-                        key={t.id}
-                        as="div"
-                        // 48px — a leaf sits one step in from its folder.
-                        className="ml-12"
-                        data-testid={`chat-tree-thread-${t.id}`}
-                        aria-label={threadLabel(t)}
-                        selected={isSelected}
-                        onSelect={() => onOpenThread(agent, t.id)}
-                      >
-                        <span
-                          aria-hidden
-                          className={cn(
-                            "h-1.5 w-1.5 shrink-0 rounded-full",
-                            threadUnread > 0 ? "bg-info" : "bg-muted-foreground/25",
-                          )}
-                        />
-                        <span
-                          className={cn(
-                            "flex-1 truncate text-xs",
-                            t.title ? "text-foreground/80" : "italic text-muted-foreground",
-                            threadUnread > 0 && "font-medium text-foreground",
-                          )}
-                        >
-                          {threadLabel(t)}
-                        </span>
-                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
-                          {t.message_count}
-                        </span>
-                      </SidebarRow>
-                    )
-                  })
-                )
-              )}
-            </div>
+      {open &&
+        threads.map((t) => {
+          const threadUnread = t.unread_count ?? 0
+          const isSelected = isActiveAgent && activeThreadId === t.id
+          return (
+            <SidebarRow
+              key={t.id}
+              as="div"
+              // 24px — one step in from the agent. It was 48px when a thread
+              // hung off a Sessions folder; the folder is gone and so is the
+              // level it added.
+              indent
+              data-testid={`chat-tree-thread-${t.id}`}
+              aria-label={threadLabel(t)}
+              selected={isSelected}
+              onSelect={() => onOpenThread(agent, t.id)}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                  threadUnread > 0 ? "bg-info" : "bg-muted-foreground/25",
+                )}
+              />
+              <span
+                className={cn(
+                  "flex-1 truncate text-xs",
+                  t.title ? "text-foreground/80" : "italic text-muted-foreground",
+                  threadUnread > 0 && "font-medium text-foreground",
+                )}
+              >
+                {threadLabel(t)}
+              </span>
+              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
+                {t.message_count}
+              </span>
+            </SidebarRow>
           )
         })}
+
+      {/* Expanded, but every thread was filtered out by the search or a
+          facet — distinct from "this agent has none", which has no chevron
+          to open in the first place. */}
+      {open && threads.length === 0 && (
+        <p className="ml-6 px-2 py-1.5 text-[11px] text-muted-foreground-soft">
+          No sessions match the filter.
+        </p>
+      )}
     </>
   )
 }

@@ -1,23 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, waitFor, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, cleanup, within } from "@testing-library/react"
 
 // =============================================================================
-// The chat page's left column is the shared agent tree, and what you pick in it
-// decides what the centre pane is.
+// The chat page's left column is the shared agent tree, and the only thing you
+// can pick in it is a conversation.
 //
-// Two things this pins down that the flat session list could not:
+// It briefly offered four folders per agent — Sessions / Files / Asks / Memory
+// — and three of them replaced the centre pane with a surface that already
+// existed somewhere else: Files in this page's own right rail, Asks in the
+// agent's configuration tab, Memory on the agent canvas. `Files` was on screen
+// twice at once, left and right, in the same view. The rule that settled it:
 //
-//  · A FOLDER is not a conversation. Picking Files/Asks/Memory replaces the
-//    centre pane with that folder's surface and takes the composer with it —
-//    a message box dangling under a file listing is a promise the page cannot
-//    keep. Unmounting ChatPanel is also what closes its WebSocket
-//    (chat-panel.tsx opens one per mounted panel), so "no composer" and "no
-//    second socket" are the same fact here.
+//   left column = navigation between objects  ("where am I going")
+//   right panel = context of the open object  ("what is here")
+//   config page = the object's own settings
 //
-//  · The folder never becomes a path segment. The static export rewrites
-//    exactly one level (internal/api/static.go) and the slug is parsed out of
-//    window.location.pathname, so /chat/<agent>/<folder> would 404 in
-//    production while passing every dev-server test. It is a query parameter.
+// So the tree navigates conversations and nothing else, and `?folder=` is dead
+// — including in a URL somebody bookmarked while it worked, which must land on
+// the conversation AND stop carrying a parameter nothing reads.
 // =============================================================================
 
 let searchParams = new URLSearchParams()
@@ -76,7 +76,7 @@ const sessions = [
   { id: "sess-2", title: "The export", status: "ACTIVE", message_count: 9, started_at: iso, ended_at: null, last_activity_at: iso, origin: "UI" },
 ]
 
-function mountDesktop() {
+function mountDesktop(search = "") {
   Object.defineProperty(window, "innerWidth", { value: 1280, writable: true, configurable: true })
   vi.stubGlobal("matchMedia", vi.fn(() => ({
     matches: false,
@@ -86,7 +86,7 @@ function mountDesktop() {
   Object.defineProperty(window, "location", {
     configurable: true,
     writable: true,
-    value: { ...window.location, pathname: "/chat/filip", search: "" },
+    value: { ...window.location, pathname: "/chat/filip", search },
   })
   global.fetch = vi.fn((url: string) => {
     const u = String(url)
@@ -98,15 +98,6 @@ function mountDesktop() {
     }
     return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
   }) as unknown as typeof fetch
-}
-
-/**
- * The agent the URL names is expanded already — arriving at /chat/filip and
- * finding filip collapsed would be the tree hiding where you are — so a folder
- * row is reached by waiting for it, not by opening its parent.
- */
-function folderRow(folder: string): Promise<HTMLElement> {
-  return screen.findByTestId(`chat-tree-folder-filip-${folder}`)
 }
 
 describe("<ChatPageClient> — the tree is the left column", () => {
@@ -135,7 +126,6 @@ describe("<ChatPageClient> — the tree is the left column", () => {
     render(<ChatPageClient />)
     await waitFor(() => expect(screen.getByTestId("chat-panel")).toBeInTheDocument())
 
-    await folderRow("sessions")
     fireEvent.click(await screen.findByTestId("chat-tree-thread-sess-2"))
 
     await waitFor(() =>
@@ -146,47 +136,83 @@ describe("<ChatPageClient> — the tree is the left column", () => {
     ).toBe(true)
   })
 
-  it("selecting a folder replaces the centre pane and takes the composer with it", async () => {
+  it("offers no Files, Asks or Memory row — the tree navigates conversations only", async () => {
     render(<ChatPageClient />)
     await waitFor(() => expect(screen.getByTestId("chat-panel")).toBeInTheDocument())
 
-    fireEvent.click(await folderRow("files"))
+    // The active agent is expanded already (arriving at /chat/filip and
+    // finding filip collapsed would be the tree hiding where you are).
+    await screen.findByTestId("chat-tree-thread-sess-1")
 
-    await waitFor(() => expect(screen.getByTestId("chat-folder-pane")).toBeInTheDocument())
-    expect(screen.queryByTestId("chat-panel")).toBeNull()
-    expect(screen.queryByTestId("chat-composer")).toBeNull()
-  })
-
-  it("encodes the folder as a query parameter, never as a deeper route", async () => {
-    const pushSpy = vi.spyOn(window.history, "pushState")
-    render(<ChatPageClient />)
-    await waitFor(() => expect(screen.getByTestId("chat-panel")).toBeInTheDocument())
-
-    fireEvent.click(await folderRow("memory"))
-
-    await waitFor(() =>
-      expect(
-        pushSpy.mock.calls.some((c) => typeof c[2] === "string" && /[?&]folder=memory\b/.test(c[2])),
-      ).toBe(true),
-    )
-    // One path level. /chat/filip/memory would 404 under the static export.
-    for (const call of pushSpy.mock.calls) {
-      if (typeof call[2] === "string") expect(call[2].split("?")[0]).toBe("/chat/filip")
+    expect(document.querySelectorAll('[data-testid^="chat-tree-folder-"]')).toHaveLength(0)
+    for (const gone of [/^files$/i, /^asks$/i, /^memory$/i, /^sessions$/i]) {
+      expect(screen.queryByText(gone)).toBeNull()
     }
+    expect(screen.queryByTestId("chat-folder-pane")).toBeNull()
   })
 
-  it("comes back to exactly one conversation panel when Sessions is picked again", async () => {
+  it("never unmounts the conversation for a folder — the composer stays put", async () => {
     render(<ChatPageClient />)
     await waitFor(() => expect(screen.getByTestId("chat-panel")).toBeInTheDocument())
 
-    fireEvent.click(await folderRow("asks"))
-    await waitFor(() => expect(screen.queryByTestId("chat-panel")).toBeNull())
-
-    fireEvent.click(await folderRow("sessions"))
+    fireEvent.click(await screen.findByTestId("chat-tree-agent-filip"))
+    fireEvent.click(screen.getByTestId("chat-tree-agent-filip"))
 
     // Each mounted panel opens its own WebSocket, so two on screen is two
-    // sockets for one agent.
-    await waitFor(() => expect(screen.getAllByTestId("chat-panel")).toHaveLength(1))
+    // sockets for one agent — and zero is a page with no conversation on it.
+    expect(screen.getAllByTestId("chat-panel")).toHaveLength(1)
+    expect(screen.getByTestId("chat-composer")).toBeInTheDocument()
+  })
+
+  it("lands a bookmarked ?folder= URL on the conversation and scrubs the dead parameter", async () => {
+    const replaceSpy = vi.spyOn(window.history, "replaceState")
+    searchParams = new URLSearchParams("folder=files&session=sess-2")
+    mountDesktop("?folder=files&session=sess-2")
+
+    render(<ChatPageClient />)
+
+    // The folder pane does not exist any more; the session in the same URL
+    // is still honoured.
+    await waitFor(() => expect(screen.getByTestId("chat-panel")).toBeInTheDocument())
+    expect(screen.getByTestId("chat-panel")).toHaveAttribute("data-session-id", "sess-2")
+    expect(screen.queryByTestId("chat-folder-pane")).toBeNull()
+
+    // …and the address bar stops carrying state nothing reads.
+    await waitFor(() =>
+      expect(
+        replaceSpy.mock.calls.some((c) => typeof c[2] === "string" && c[2] === "/chat/filip?session=sess-2"),
+      ).toBe(true),
+    )
+  })
+
+  it("says the open agent's session list failed rather than showing it as empty", async () => {
+    // The page fetches THIS agent's chats itself (the tree's fan-out skips
+    // it), and that fetch had the same `r.ok ? r.json() : []` defect: a 500
+    // rendered as an agent with no history at all.
+    let failing = true
+    global.fetch = vi.fn((url: string) => {
+      const u = String(url)
+      if (u.includes("/chats")) {
+        return (failing
+          ? Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) })
+          : Promise.resolve({ ok: true, json: () => Promise.resolve(sessions) })) as unknown as Promise<Response>
+      }
+      if (u.includes("/api/v1/agents")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(agents) }) as unknown as Promise<Response>
+      }
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) }) as unknown as Promise<Response>
+    }) as unknown as typeof fetch
+
+    render(<ChatPageClient />)
+
+    const failed = await screen.findByTestId("chat-tree-threads-error-filip")
+    expect(failed).toHaveTextContent(/500/)
+
+    failing = false
+    fireEvent.click(within(failed).getByRole("button", { name: /retry/i }))
+
+    await waitFor(() => expect(screen.queryByTestId("chat-tree-threads-error-filip")).toBeNull())
+    expect(await screen.findByTestId("chat-tree-thread-sess-1")).toBeInTheDocument()
   })
 
   it("below 900px the tree steps aside for the drawer and the tab strip", async () => {
@@ -202,38 +228,5 @@ describe("<ChatPageClient> — the tree is the left column", () => {
     expect(screen.getByRole("tablist", { name: /panel/i })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /sessions/i }))
     expect(screen.getByTestId("sessions-sidebar")).toBeInTheDocument()
-  })
-
-  it("gives a narrow viewport a way out of a folder it was deep-linked into", async () => {
-    searchParams = new URLSearchParams("folder=files")
-    Object.defineProperty(window, "innerWidth", { value: 860, writable: true, configurable: true })
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      writable: true,
-      value: { ...window.location, pathname: "/chat/filip", search: "?folder=files" },
-    })
-
-    render(<ChatPageClient />)
-    expect(await screen.findByTestId("chat-folder-pane")).toBeInTheDocument()
-
-    // There is no tree at this width, so the tab strip is the only door back.
-    fireEvent.click(screen.getByRole("tab", { name: /chat/i }))
-
-    await waitFor(() => expect(screen.getByTestId("chat-panel")).toBeInTheDocument())
-    expect(screen.queryByTestId("chat-folder-pane")).toBeNull()
-  })
-
-  it("opens straight into a folder when the URL already names one", async () => {
-    searchParams = new URLSearchParams("folder=files")
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      writable: true,
-      value: { ...window.location, pathname: "/chat/filip", search: "?folder=files" },
-    })
-
-    render(<ChatPageClient />)
-
-    expect(await screen.findByTestId("chat-folder-pane")).toBeInTheDocument()
-    expect(screen.queryByTestId("chat-panel")).toBeNull()
   })
 })
