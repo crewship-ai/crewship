@@ -86,7 +86,14 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
           <Message from="user">
             <MessageContent>
               <div className="flex items-start gap-2">
-                <span>{textContent}</span>
+                {/* pre-wrap, because a user turn is not always one line. A
+                    message sent with an attachment carries the file's
+                    agent-visible path in its own text (the payload is an
+                    ordinary user message — lib/attachment-message.ts), so the
+                    transcript already shows exactly what the agent got; it
+                    only reads as such if the block's line breaks survive.
+                    Every other multi-line paste was collapsing here too. */}
+                <span className="whitespace-pre-wrap">{textContent}</span>
               </div>
             </MessageContent>
             <div className="text-micro text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity">

@@ -5,14 +5,30 @@ import { persist, createJSONStorage } from "zustand/middleware"
 
 import type { Attachment } from "@/components/ai-elements/attachments"
 
+/**
+ * A composer attachment: the presentational `Attachment` (what the chip
+ * renders) plus the server-assigned path (what the MESSAGE has to name).
+ *
+ * The upload response carries two paths — `agent_path`, the absolute
+ * `/output/<slug>/attachments/<chatId>/<file>`, kept in `url`; and `path`,
+ * the `attachments/<chatId>/<file>` form relative to the agent's working
+ * directory, kept here. The message names the relative one
+ * (lib/attachment-message.ts). Both are kept because they answer different
+ * questions and deriving either from the other means parsing a filename.
+ */
+export type ComposerAttachment = Attachment & {
+  /** `attachments/<chatId>/<filename>` — set once the upload succeeds. */
+  path?: string
+}
+
 interface ComposerState {
   modelId: string | null
   drafts: Record<string, string>
-  attachments: Record<string, Attachment[]>
+  attachments: Record<string, ComposerAttachment[]>
   setModel: (id: string | null) => void
   setDraft: (sessionId: string, text: string) => void
   clearDraft: (sessionId: string) => void
-  addAttachments: (sessionId: string, items: Attachment[]) => void
+  addAttachments: (sessionId: string, items: ComposerAttachment[]) => void
   removeAttachment: (sessionId: string, id: string) => void
   clearAttachments: (sessionId: string) => void
 }

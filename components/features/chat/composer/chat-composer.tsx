@@ -8,7 +8,7 @@ import {
   PromptInputFooter,
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
-import { useComposerStore } from "@/stores/composer-store"
+import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
 import { useMessageSubmit } from "../hooks/use-message-submit"
 import { MentionAutocomplete, type CrewMember } from "./mention-autocomplete"
 import { AttachmentZone, AttachmentButton, CameraButton } from "./attachment-zone"
@@ -36,6 +36,9 @@ interface ChatComposerProps {
   /** Group-chat members for @mention autocomplete (desktop only). */
   mentionMembers?: CrewMember[]
 }
+
+/** Stable empty list for sessions with nothing attached. */
+const NO_ATTACHMENTS: ComposerAttachment[] = []
 
 /**
  * The chat input, extracted from ChatPanel so per-keystroke state updates
@@ -71,6 +74,12 @@ export function ChatComposer({
   // draft/attachment write for ANY session.
   const clearDraft = useComposerStore((s) => s.clearDraft)
   const clearAttachments = useComposerStore((s) => s.clearAttachments)
+  // This session's attachments, so the submit handler can name them in the
+  // message. Subscribed (not read at submit time) so `submitDisabled` can
+  // also see them — attaching a file must enable Send on an empty draft.
+  // Falls back to a shared constant so an empty list keeps a stable identity
+  // and does not re-create the submit callback on every render.
+  const sessionAttachments = useComposerStore((s) => s.attachments[sessionId]) ?? NO_ATTACHMENTS
 
   const mentionTextareaRef = useRef<HTMLTextAreaElement>(null)
   const handleMentionPick = useCallback((member: CrewMember, atIndex: number) => {
@@ -96,13 +105,17 @@ export function ChatComposer({
     isStreaming,
     ensureSession,
     sendMessage,
+    attachments: sessionAttachments,
     onSend,
     onSent: handleSent,
   })
 
   const chatStatus = isStreaming ? ("streaming" as const) : ("ready" as const)
   const placeholder = agentName ? `Message ${agentName}...` : "Send a message..."
-  const submitDisabled = !isStreaming && (!input.trim() || connectionStatus !== "connected")
+  // An attachment is content: a photo with no caption is a message, and
+  // leaving Send disabled for it is how one used to be silently dropped.
+  const hasContent = !!input.trim() || sessionAttachments.length > 0
+  const submitDisabled = !isStreaming && (!hasContent || connectionStatus !== "connected")
 
   if (variant === "mobile") {
     // The mobile branch used to be a bare input: no attachments at all, so a

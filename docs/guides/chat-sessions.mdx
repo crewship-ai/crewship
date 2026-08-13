@@ -401,6 +401,18 @@ The bottom-of-page composer is a single textarea with three superpowers:
 - **Model picker** — dropdown next to the send button overrides the agent's default `llm_model` for this turn only. Useful when an operator wants to spend Opus on a hard reasoning step inside an agent that normally runs Sonnet.
 - **Attachments** — paste images, drag files, or paste image data from the clipboard. Files are uploaded via `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments` (handler `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`) and written to the server's storage provider as a blob. The agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`. 25 MB cap per upload.
 
+  **The message names the file.** Uploading puts bytes in the container; it does not tell the agent they are there. So when the composer sends a message with attachments, it appends a block naming each one by the path relative to the agent's working directory (which *is* `/output/<agentSlug>/`, so `attachments/<chatId>/<filename>` opens as-is):
+
+  ```
+  what do you make of this?
+
+  I've attached a file to this message. The path is relative to your working directory:
+
+  - attachments/cht_xyz789/invoice.pdf
+  ```
+
+  The payload is an ordinary user message — no new envelope, no adapter-specific framing, nothing the agent has to be trained for. The wording is fixed in `lib/attachment-message.ts` and covered by a table-driven test; the transcript shows the block verbatim, because it is exactly what the agent received. Three consequences worth knowing: a message with **no text at all** still sends when something is attached (a photo needs no caption); Send is refused while an upload is still in flight, rather than sending a message that names only the files that finished; and the block counts toward the 64 KiB WebSocket frame cap, so a draft that fits on its own can be refused once attachments are added — the draft and the attachments both survive the refusal.
+
   The upload also records a row in `attachments` (`owner_type = 'chat'`) with the filename, resolved content type, size, SHA-256 and uploader — #1768. The blob's location is unchanged on purpose: `/output/<agentSlug>/...` is what prompts, tools and users already reference, so chat attachments are *not* content-addressed the way [issue attachments](/guides/issue-attachments) are, and `storage_key` on the row is what says where each one lives. There is still no listing or delete endpoint for a chat attachment; the issue surface is the complete one.
 
 Enter sends; Shift-Enter inserts a newline. `Ctrl+K` opens the palette unconditionally.

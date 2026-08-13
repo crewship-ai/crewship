@@ -78,6 +78,37 @@ describe("TurnRenderer", () => {
       )
       expect(container.textContent).not.toContain("internal")
     })
+
+    // A message sent with an attachment carries the file's agent-visible path
+    // in its own text (lib/attachment-message.ts). The transcript therefore
+    // already shows the user exactly what went — as long as the bubble does
+    // not collapse the line breaks the block is built from.
+    const withAttachment =
+      "have a look\n\n" +
+      "I've attached a file to this message. The path is relative to your working directory:\n\n" +
+      "- attachments/sess-1/invoice.pdf"
+
+    it("shows the attachment paths of a sent message, line breaks intact", () => {
+      const { container } = render(
+        <TurnRenderer turn={userTurn(withAttachment)} onCopy={noop} onFileClick={noop} />,
+      )
+      expect(container.textContent).toContain("attachments/sess-1/invoice.pdf")
+      const bubble = screen.getByText(/attachments\/sess-1\/invoice\.pdf/)
+      expect(bubble.className).toContain("whitespace-pre-wrap")
+    })
+
+    it("keeps the line breaks in the editable bubble too", () => {
+      render(
+        <TurnRenderer
+          turn={userTurn(withAttachment)}
+          onCopy={noop}
+          onFileClick={noop}
+          onEditUserMessage={noop}
+        />,
+      )
+      const bubble = screen.getByText(/attachments\/sess-1\/invoice\.pdf/)
+      expect(bubble.className).toContain("whitespace-pre-wrap")
+    })
   })
 
   describe("system role — system_init", () => {

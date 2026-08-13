@@ -8,10 +8,9 @@ import {
   Attachments,
   AttachmentDropZone,
   AttachmentTrigger,
-  type Attachment,
 } from "@/components/ai-elements/attachments"
 import { Button } from "@/components/ui/button"
-import { useComposerStore } from "@/stores/composer-store"
+import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -106,7 +105,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       // (with the server-side path) on success or to error on fail.
       // Pair each chip with its source File so a skipped (oversized)
       // file can't shift indices and mismatch chip ↔ file.
-      const queued: Array<{ att: Attachment; file: File }> = []
+      const queued: Array<{ att: ComposerAttachment; file: File }> = []
       for (const f of files) {
         if (f.size > MAX_SIZE) {
           toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
@@ -129,7 +128,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         const ac = new AbortController()
         abortRegistry.set(abortKey(sessionId, att.id), ac)
         try {
-          const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file, ac.signal)
+          const { path, agent_path } = await uploadOne(agentId, sessionId, workspaceId, file, ac.signal)
           // User removal is authoritative — if the chip was deleted
           // while the upload was in flight, the success/error path
           // must not put it back. Re-read the latest store snapshot
@@ -138,7 +137,10 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
             .some((a) => a.id === att.id)
           if (!stillThere) continue
           removeAttachment(sessionId, att.id)
-          addAttachments(sessionId, [{ ...att, status: "ready", url: agent_path }])
+          // `path` (relative to the agent's working directory) is what the
+          // outgoing message names — without it the file lands in the
+          // container and nothing ever tells the agent it is there.
+          addAttachments(sessionId, [{ ...att, status: "ready", url: agent_path, path }])
         } catch (err) {
           if (isAbortError(err)) continue
           const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
