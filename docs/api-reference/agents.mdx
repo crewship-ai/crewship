@@ -291,6 +291,7 @@ GET /api/v1/agents?workspace_id={workspaceId}
 | `tool_profile` | string | Tool access profile |
 | `memory_enabled` | boolean | Whether agent memory is enabled |
 | `suggested_prompts` | string? | Chat suggestions offered under an empty conversation, one per line (max 8, max 120 chars each). `null` when unconfigured -- the chat then shows the built-in defaults |
+| `ask_forms` | string? | The agent's questionnaires: a JSON array of form definitions, canonical as stored (max 4 forms, max 6 fields each). `null` when unconfigured -- see **Ask forms** under [Update Agent](#update-agent) |
 | `cli_tools` | string? | Comma-separated list of allowed CLI tools |
 | `schedule_cron` | string? | Cron expression for scheduled runs |
 | `schedule_prompt` | string? | Prompt used for scheduled runs |
@@ -407,6 +408,7 @@ Partial update -- only provided fields are changed.
 | `schedule_enabled` | boolean | Enable/disable schedule |
 | `mcp_config_json` | string | Agent MCP config JSON (must contain an `mcpServers` object) |
 | `suggested_prompts` | string | Chat suggestions, one per line (see below) |
+| `ask_forms` | string | Ask forms as a JSON array, given as a **string** (see below) |
 
 **Suggested prompts.** `suggested_prompts` holds the questions this agent
 offers as buttons under an empty conversation, one per line -- at most 8 lines,
@@ -419,6 +421,74 @@ existed. Rejections name the offending line -- `"at most 8 prompts are allowed
 fix the entry rather than the whole list. Set it from the console under an
 agent's **Config -> Chat suggestions**, or with
 `crewship agent update <agent> --suggested-prompts @questions.txt`.
+
+**Ask forms.** `ask_forms` holds the questionnaires this agent offers: a chip
+that opens a short form, whose answers are rendered into an **ordinary user
+message** and sent. The value is a JSON array given as a *string* -- the column
+is TEXT, the console edits it in a textarea and the CLI reads it from a file,
+and accepting a nested array as well would put two encodings of one value on
+one endpoint.
+
+```json
+[{
+  "id": "receipt",
+  "label": "Add a receipt",
+  "template": "Please file this receipt.\n\nSupplier: {{supplier}}\nAmount: {{amount}} {{amount_currency}}\nPeriod: {{month}}\nCategory: {{category}}\nDocument: {{document}}",
+  "attachment": "required",
+  "fields": [
+    {"name": "supplier", "label": "Supplier", "type": "text", "required": true, "placeholder": "Vodafone"},
+    {"name": "amount", "label": "Amount", "type": "money", "required": true, "currency": ["CZK", "EUR", "USD"]},
+    {"name": "month", "label": "Period", "type": "month", "default": "2026-08"},
+    {"name": "category", "label": "Category", "type": "select", "options": ["Telco", "Hosting"]},
+    {"name": "document", "label": "Document", "type": "file"}
+  ]
+}]
+```
+
+`id` is a slug and must be unique; `label` is the chip's text (max 48
+characters); `attachment` is `none` | `optional` | `required` and defaults to
+`none`; `template` is at most 2000 characters. Field types are `text`,
+`textarea`, `number`, `money`, `date`, `month`, `select`, `multiselect`,
+`checkbox`, `file` and `photo` -- **an unrecognised type is accepted and falls
+back to a text input**, which is what lets a new type ship without a
+coordinated frontend release. `select` and `multiselect` must carry `options`.
+A JSON Schema for authoring lives at `schemas/ask-form.v1.json`.
+
+**Money fields answer to two placeholders.** A `money` field named `amount`
+renders as `{{amount}}` for the number and `{{amount_currency}}` for the
+chosen currency. The second name is derived so that two money fields on one
+form cannot fight over a single `{{currency}}`.
+
+**Template rendering.** `{{field}}` substitution only -- no conditionals, no
+loops, no expressions. Three rules decide what gets sent:
+
+1. Every placeholder must name a field on **its own form**, and this is
+   checked when the form is **saved**, not when it is rendered. The author
+   finds out while authoring; the person talking to the agent never meets a
+   broken template.
+2. An empty optional value **drops the whole line it sits on**, static label
+   and all, unless another placeholder on that line produced something. So a
+   receipt with no category sends no `Category:` line rather than a dangling
+   one. This is the only rule that is not obvious from reading a template.
+3. Values are inserted verbatim -- the result is a user message, so nothing is
+   markdown-escaped -- but control characters are stripped, each value is
+   capped at 2000 characters and the finished message at 32000. `file` and
+   `photo` values render as the agent-visible path
+   `attachments/<chatId>/<name>`, one per line when there are several.
+
+**Rejections name the form and the placeholder**, because the caller is
+mid-edit: `form "receipt": template names {{suplier}}, which is not a field on
+that form`, `form "receipt": has no fields`, `two forms share the id
+"receipt"`, `at most 4 forms are allowed per agent (got 5)`. Nothing is
+written when a definition is refused. A value that normalises to nothing --
+`""`, whitespace, `[]`, or `null` -- clears the column.
+
+The stored value is **canonical**: parsed, validated and re-encoded with
+defaults spelled out and a stable key order, so what a caller reads back is
+stable rather than showing a diff nobody made. Set it from the console under
+an agent's **Config -> Ask forms**, or with `crewship agent update <agent>
+--ask-forms @forms.json`, and render one without a browser with `crewship
+agent ask-preview <agent> <form-id> --var k=v`.
 
 **Response:** `200 OK` -- updated agent object.
 

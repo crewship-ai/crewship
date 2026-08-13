@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crewship.io/schemas/ask-form.v1.json",
+  "title": "Crewship ask forms",
+  "description": "The value of agents.ask_forms: the questionnaires one agent offers in the chat composer. Written with `crewship agent update <agent> --ask-forms @forms.json` or in the console under an agent's Config -> Ask forms.\n\nAUTHORING AID, NOT THE ENFORCEMENT. internal/askforms is the single write path and the only validator the server runs; this file exists so an editor can complete and check a forms.json before it is sent. Two validators that can disagree is a worse failure than no schema, so the caps and patterns here are pinned to the Go constants by TestSchemaMatchesConstants in internal/askforms - if you change one, that test makes you change the other. Two rules cannot be expressed in JSON Schema at all and live only in Go: every {{placeholder}} must name a field on its own form, and form ids must be unique.",
+  "type": "array",
+  "maxItems": 4,
+  "items": {
+    "type": "object",
+    "required": [
+      "id",
+      "label",
+      "template",
+      "fields"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_-]*$",
+        "maxLength": 48,
+        "description": "Stable handle. `crewship agent ask-preview <agent> <id>` renders this form."
+      },
+      "label": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 48,
+        "description": "The chip's text."
+      },
+      "label_cs": {
+        "type": "string",
+        "maxLength": 48
+      },
+      "icon": {
+        "type": "string"
+      },
+      "template": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000,
+        "description": "The message that gets sent. {{field}} substitution only - no conditionals, no loops, no expressions. Every placeholder must name a field on this form, or the save is refused. An empty optional value drops the whole line it sits on, static label and all, unless another placeholder on that line produced something."
+      },
+      "attachment": {
+        "enum": [
+          "none",
+          "optional",
+          "required"
+        ],
+        "default": "none"
+      },
+      "fields": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 6,
+        "items": {
+          "type": "object",
+          "required": [
+            "name",
+            "label",
+            "type"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "maxLength": 48,
+              "description": "The placeholder token. {{name}} in the template renders this field's answer. A money field also answers to {{name_currency}}."
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 48
+            },
+            "label_cs": {
+              "type": "string",
+              "maxLength": 48
+            },
+            "type": {
+              "type": "string",
+              "minLength": 1,
+              "description": "text, textarea, number, money, date, month, select, multiselect, checkbox, file or photo. NOT an enum on purpose: an unrecognised type falls back to a text input, which is what lets the server ship a new field type without a coordinated frontend release.",
+              "examples": [
+                "text",
+                "textarea",
+                "number",
+                "money",
+                "date",
+                "month",
+                "select",
+                "multiselect",
+                "checkbox",
+                "file",
+                "photo"
+              ]
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "placeholder": {
+              "type": "string"
+            },
+            "help": {
+              "type": "string"
+            },
+            "default": true,
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1,
+              "description": "Required for select and multiselect."
+            },
+            "currency": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Offered next to a money amount; the chosen one renders as {{<name>_currency}}."
+            },
+            "multiple": {
+              "type": "boolean"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "pattern": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,541 @@
+{
+  "version": 1,
+  "note": [
+    "Golden fixture for ask-form template rendering. Read by BOTH renderers:",
+    "  Go  internal/askforms/render_test.go   (repo root found via runtime.Caller)",
+    "  TS  lib/__tests__/ask-template.test.ts (import from \"@/testdata/ask-templates.json\")",
+    "",
+    "The renderer exists twice because the server and CLI preview and the chat",
+    "composer have to produce the SAME user message. Two implementations that",
+    "can silently disagree about what the user is sending is the defect class",
+    "this file exists to prevent (docs/prd/agent-ask-packs-and-document-intake.md",
+    "section 7). A rule added to one renderer and not the other is a red run here.",
+    "",
+    "Both suites also assert their own constants against `limits` below, so a cap",
+    "that moves in one language and not the other fails loudly instead of showing",
+    "up as a quietly truncated message six weeks later.",
+    "",
+    "Long strings use two directives so the file stays readable:",
+    "  {\"$repeat\": \"x\", \"$count\": 2500}  ->  \"x\" repeated 2500 times",
+    "  {\"$concat\": [part, part, ...]}     ->  the parts joined",
+    "Expansion is recursive over `form`, `values` and `want`. An ARRAY is never a",
+    "directive - it is a real multi-value (a multiselect, or several files) -",
+    "which is why the directives are objects.",
+    "",
+    "The `form` definitions here are RENDERED, not validated: a couple of them",
+    "deliberately break the authoring caps in order to pin what the renderer does",
+    "with input that reached storage anyway. Validation is server-side only and",
+    "is tested in internal/askforms/validate_test.go."
+  ],
+  "limits": {
+    "maxForms": 4,
+    "maxFieldsPerForm": 6,
+    "maxLabelRunes": 48,
+    "maxTemplateRunes": 2000,
+    "maxValueRunes": 2000,
+    "maxMessageRunes": 32000
+  },
+  "cases": [
+    {
+      "name": "the receipt form, every field answered",
+      "chatId": "chat_7f3a",
+      "form": {
+        "id": "receipt",
+        "label": "Add a receipt",
+        "attachment": "required",
+        "template": "Please file this receipt.\n\nSupplier: {{supplier}}\nAmount: {{amount}} {{amount_currency}}\nPeriod: {{month}}\nCategory: {{category}}\nDocument: {{document}}",
+        "fields": [
+          {
+            "name": "supplier",
+            "label": "Supplier",
+            "type": "text",
+            "required": true,
+            "placeholder": "Vodafone"
+          },
+          {
+            "name": "amount",
+            "label": "Amount",
+            "type": "money",
+            "required": true,
+            "currency": [
+              "CZK",
+              "EUR",
+              "USD"
+            ]
+          },
+          {
+            "name": "month",
+            "label": "Period",
+            "type": "month",
+            "default": "2026-08"
+          },
+          {
+            "name": "category",
+            "label": "Category",
+            "type": "select",
+            "options": [
+              "Telco",
+              "Hosting"
+            ]
+          },
+          {
+            "name": "document",
+            "label": "Document",
+            "type": "file"
+          }
+        ]
+      },
+      "values": {
+        "supplier": "Vodafone Czech Republic a.s.",
+        "amount": "1249",
+        "amount_currency": "CZK",
+        "month": "2026-08",
+        "category": "Telco",
+        "document": [
+          "IMG_4821.heic"
+        ]
+      },
+      "want": "Please file this receipt.\n\nSupplier: Vodafone Czech Republic a.s.\nAmount: 1249 CZK\nPeriod: 2026-08\nCategory: Telco\nDocument: attachments/chat_7f3a/IMG_4821.heic"
+    },
+    {
+      "name": "an empty optional value drops its whole line, static label and all",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Supplier: {{supplier}}\nCategory: {{category}}\nPeriod: {{month}}",
+        "fields": [
+          {
+            "name": "supplier",
+            "label": "Supplier",
+            "type": "text"
+          },
+          {
+            "name": "category",
+            "label": "Category",
+            "type": "select",
+            "options": [
+              "Telco"
+            ]
+          },
+          {
+            "name": "month",
+            "label": "Period",
+            "type": "month"
+          }
+        ]
+      },
+      "values": {
+        "supplier": "Vodafone",
+        "category": "",
+        "month": "2026-08"
+      },
+      "want": "Supplier: Vodafone\nPeriod: 2026-08"
+    },
+    {
+      "name": "a line that is nothing but the placeholder drops too",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Close the month.\n{{note}}\nThanks.",
+        "fields": [
+          {
+            "name": "note",
+            "label": "Note",
+            "type": "textarea"
+          }
+        ]
+      },
+      "values": {
+        "note": "   "
+      },
+      "want": "Close the month.\nThanks."
+    },
+    {
+      "name": "a line survives when any one of its placeholders still has a value",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Amount: {{amount}} {{amount_currency}}",
+        "fields": [
+          {
+            "name": "amount",
+            "label": "Amount",
+            "type": "money",
+            "currency": [
+              "CZK"
+            ]
+          }
+        ]
+      },
+      "values": {
+        "amount": "",
+        "amount_currency": "CZK"
+      },
+      "want": "Amount:  CZK"
+    },
+    {
+      "name": "a line with no placeholder at all is never dropped, blank ones included",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Monthly close.\n\nAll of it, please.\n\nSupplier: {{supplier}}\n\nThat is all.",
+        "fields": [
+          {
+            "name": "supplier",
+            "label": "Supplier",
+            "type": "text"
+          }
+        ]
+      },
+      "values": {
+        "supplier": ""
+      },
+      "want": "Monthly close.\n\nAll of it, please.\n\n\nThat is all."
+    },
+    {
+      "name": "several files render as a newline list of agent-visible paths",
+      "chatId": "chat_9",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Documents:\n{{docs}}",
+        "fields": [
+          {
+            "name": "docs",
+            "label": "Documents",
+            "type": "photo",
+            "multiple": true
+          }
+        ]
+      },
+      "values": {
+        "docs": [
+          "page 1.heic",
+          "page 2.heic",
+          "page 3.heic"
+        ]
+      },
+      "want": "Documents:\nattachments/chat_9/page 1.heic\nattachments/chat_9/page 2.heic\nattachments/chat_9/page 3.heic"
+    },
+    {
+      "name": "a value that is already an agent-visible path is not prefixed twice",
+      "chatId": "chat_9",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Document: {{doc}}",
+        "fields": [
+          {
+            "name": "doc",
+            "label": "Document",
+            "type": "file"
+          }
+        ]
+      },
+      "values": {
+        "doc": [
+          "attachments/chat_9/already.pdf"
+        ]
+      },
+      "want": "Document: attachments/chat_9/already.pdf"
+    },
+    {
+      "name": "a file field with nothing attached drops its line like any other empty value",
+      "chatId": "chat_9",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Note: keep this\nDocument: {{doc}}",
+        "fields": [
+          {
+            "name": "doc",
+            "label": "Document",
+            "type": "file"
+          }
+        ]
+      },
+      "values": {
+        "doc": []
+      },
+      "want": "Note: keep this"
+    },
+    {
+      "name": "control characters are stripped from a value but its newlines survive",
+      "note": "A newline inside a textarea value is content. Every other C0 control character, and DEL, is not: it survives no round trip a user can see, and a stray CR would split a line the author did not write. Same rule lib/attachment-message.ts already applies to a path.",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Notes:\n{{notes}}",
+        "fields": [
+          {
+            "name": "notes",
+            "label": "Notes",
+            "type": "textarea"
+          }
+        ]
+      },
+      "values": {
+        "notes": "first\u0007 line\r\nsecond  line \u0000"
+      },
+      "want": "Notes:\nfirst line\nsecond  line"
+    },
+    {
+      "name": "a CRLF template is folded before the lines are decided",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Supplier: {{supplier}}\r\nCategory: {{category}}\r\nDone.",
+        "fields": [
+          {
+            "name": "supplier",
+            "label": "Supplier",
+            "type": "text"
+          },
+          {
+            "name": "category",
+            "label": "Category",
+            "type": "text"
+          }
+        ]
+      },
+      "values": {
+        "supplier": "Vodafone",
+        "category": ""
+      },
+      "want": "Supplier: Vodafone\nDone."
+    },
+    {
+      "name": "a ticked checkbox reads yes, an unticked one is empty and drops its line",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Paid already: {{paid}}\nReimbursable: {{reimbursable}}",
+        "fields": [
+          {
+            "name": "paid",
+            "label": "Paid",
+            "type": "checkbox"
+          },
+          {
+            "name": "reimbursable",
+            "label": "Reimbursable",
+            "type": "checkbox"
+          }
+        ]
+      },
+      "values": {
+        "paid": true,
+        "reimbursable": false
+      },
+      "want": "Paid already: yes"
+    },
+    {
+      "name": "a multiselect reads as a comma list, unlike files",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Tags: {{tags}}",
+        "fields": [
+          {
+            "name": "tags",
+            "label": "Tags",
+            "type": "multiselect",
+            "options": [
+              "Telco",
+              "Hosting",
+              "VAT"
+            ]
+          }
+        ]
+      },
+      "values": {
+        "tags": [
+          "Telco",
+          "Hosting",
+          "  ",
+          "VAT"
+        ]
+      },
+      "want": "Tags: Telco, Hosting, VAT"
+    },
+    {
+      "name": "numbers arrive as numbers and render as plain decimals",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Count: {{count}}\nRate: {{rate}}",
+        "fields": [
+          {
+            "name": "count",
+            "label": "Count",
+            "type": "number"
+          },
+          {
+            "name": "rate",
+            "label": "Rate",
+            "type": "number"
+          }
+        ]
+      },
+      "values": {
+        "count": 1249,
+        "rate": 12.5
+      },
+      "want": "Count: 1249\nRate: 12.5"
+    },
+    {
+      "name": "spaces inside the braces are allowed and do not change the name",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Supplier: {{ supplier }}",
+        "fields": [
+          {
+            "name": "supplier",
+            "label": "Supplier",
+            "type": "text"
+          }
+        ]
+      },
+      "values": {
+        "supplier": "Vodafone"
+      },
+      "want": "Supplier: Vodafone"
+    },
+    {
+      "name": "an unknown field type renders as text, exactly as the slash modal falls back",
+      "note": "The unknown-type -> text fallback (components/features/chat/composer/slash-action-modal.tsx) is what lets the server ship a new field type without a coordinated frontend release. The renderer inherits it: an unrecognised type is a scalar and nothing special happens.",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Rating: {{rating}}",
+        "fields": [
+          {
+            "name": "rating",
+            "label": "Rating",
+            "type": "starrating"
+          }
+        ]
+      },
+      "values": {
+        "rating": "5"
+      },
+      "want": "Rating: 5"
+    },
+    {
+      "name": "a placeholder naming no field renders empty and takes its line with it",
+      "note": "Save-time validation makes this unreachable through the API - an unknown placeholder is refused while the author is still authoring (PRD 7.1). It is pinned anyway: a row written before the validator existed, or by hand, must not put {{braces}} in front of a user.",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Supplier: {{supplier}}\nGhost: {{nosuchfield}}\nBroken: {{ not a name }}",
+        "fields": [
+          {
+            "name": "supplier",
+            "label": "Supplier",
+            "type": "text"
+          }
+        ]
+      },
+      "values": {
+        "supplier": "Vodafone",
+        "nosuchfield": "ignored"
+      },
+      "want": "Supplier: Vodafone"
+    },
+    {
+      "name": "leading and trailing whitespace is trimmed off the finished message",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "\n\n  Supplier: {{supplier}}\n\n  \n",
+        "fields": [
+          {
+            "name": "supplier",
+            "label": "Supplier",
+            "type": "text"
+          }
+        ]
+      },
+      "values": {
+        "supplier": "Vodafone"
+      },
+      "want": "Supplier: Vodafone"
+    },
+    {
+      "name": "one value is capped at 2000 runes, counted in runes and not in UTF-16 units",
+      "note": "The emoji is one rune and two UTF-16 code units. A JS String.slice(0, 2000) keeps 1000 emoji and splits a surrogate pair; a Go byte slice keeps 500. Both are wrong and both fail here.",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": "Notes: {{notes}}",
+        "fields": [
+          {
+            "name": "notes",
+            "label": "Notes",
+            "type": "textarea"
+          }
+        ]
+      },
+      "values": {
+        "notes": {
+          "$repeat": "😀",
+          "$count": 2500
+        }
+      },
+      "want": {
+        "$concat": [
+          "Notes: ",
+          {
+            "$repeat": "😀",
+            "$count": 2000
+          }
+        ]
+      }
+    },
+    {
+      "name": "the finished message is capped at 32000 runes",
+      "note": "Unreachable through a valid form - 6 fields x 2000 runes plus a 2000-rune template cannot reach 32000 - so this template is deliberately over the authoring cap. It is the backstop for rows that never met the validator. Truncation happens BEFORE the final trim, which is why the tail loses its newline.",
+      "chatId": "c1",
+      "form": {
+        "id": "f",
+        "label": "F",
+        "template": {
+          "$repeat": "line\n",
+          "$count": 9000
+        },
+        "fields": [
+          {
+            "name": "unused",
+            "label": "Unused",
+            "type": "text"
+          }
+        ]
+      },
+      "values": {},
+      "want": {
+        "$concat": [
+          {
+            "$repeat": "line\n",
+            "$count": 6399
+          },
+          "line"
+        ]
+      }
+    }
+  ]
+}

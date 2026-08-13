@@ -66,6 +66,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"mcp_config_json":           "mcp_config_json",
 		"webhook_require_timestamp": "webhook_require_timestamp",
 		"suggested_prompts":         "suggested_prompts",
+		"ask_forms":                 "ask_forms",
 	}
 
 	// Validate slug format if being updated
@@ -278,11 +279,29 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		suggestedPrompts, hasSuggestedPrompts = val, true
 	}
 
+	// Same treatment for ask_forms, one step stricter: the value is a JSON
+	// document, so it is parsed, fully validated and re-encoded canonically
+	// before anything is written (internal/askforms). A template naming a
+	// field that does not exist is refused HERE — while the author is still
+	// authoring — rather than surprising a user mid-send (PRD §7 rule 1).
+	askForms, hasAskForms := interface{}(nil), false
+	if v, ok := body["ask_forms"]; ok {
+		val, _, err := askFormsPatch(v)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		askForms, hasAskForms = val, true
+	}
+
 	ub := newUpdate()
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
 			if col == "suggested_prompts" && hasSuggestedPrompts {
 				val = suggestedPrompts
+			}
+			if col == "ask_forms" && hasAskForms {
+				val = askForms
 			}
 			if col == "memory_enabled" || col == "schedule_enabled" || col == "webhook_require_timestamp" {
 				if b, ok := val.(bool); ok {

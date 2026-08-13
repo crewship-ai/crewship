@@ -28,6 +28,26 @@ agent's source documentation.
 > actually files documents. Building them before that is building for an
 > imagined user. Nothing below changes; only its schedule does.
 
+> **What has since shipped (2026-08-13).** The FORMS half went in the same
+> way: a second column, `agents.ask_forms`, holding a JSON array of form
+> definitions, edited on the agent's Configuration tab and through
+> `crewship agent update --ask-forms @forms.json`. Still no pack library, no
+> bindings, no endpoint of its own — it rides the agent PATCH exactly as
+> `suggested_prompts` does, and a pack library will read it as a one-agent
+> pack.
+>
+> Two things below moved as a result:
+>
+> - The renderer of §7 is `internal/askforms/render.go` (not `askpacks`) and
+>   `lib/ask-template.ts`, both pinned to `testdata/ask-templates.json` as
+>   written. Its rules are implemented verbatim; §7.1 is enforced on save.
+> - A `money` field named `amount` answers to **two** placeholders,
+>   `{{amount}}` and `{{amount_currency}}`. The `{{currency}}` in early drafts
+>   could not survive §7.1 with two money fields on one form.
+>
+> Per-agent caps as shipped: 4 forms, 6 fields each, 48-character labels,
+> 2000-character templates. The intake pipeline of §8 remains unbuilt.
+
 ---
 
 ## 1. The problem, stated concretely

@@ -1,6 +1,6 @@
 "use client"
 
-import { Bot, CalendarClock, MessageSquareText, Settings2, Sparkles, Webhook, Wrench } from "lucide-react"
+import { Bot, CalendarClock, ClipboardList, MessageSquareText, Settings2, Sparkles, Webhook, Wrench } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { toast } from "sonner"
 
@@ -11,6 +11,7 @@ import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provid
 
 import { Appear, DetailCard } from "@/components/ui/detail"
 import { MAX_SUGGESTED_PROMPTS, MAX_SUGGESTED_PROMPT_LENGTH } from "@/lib/agent-suggestions"
+import { MAX_FIELDS_PER_FORM, MAX_FORMS, summarizeAskForms } from "@/lib/ask-template"
 import { AGENT_EXTERNAL_TRIGGERS, AGENT_SELF_LEARNING } from "@/lib/feature-gates"
 import { cn } from "@/lib/utils"
 
@@ -174,6 +175,111 @@ function SuggestedPromptsField({ value, onSave }: {
     </ConfigRow>
   )
 }
+
+/**
+ * Ask forms — the questions that need answers before they can be asked.
+ *
+ * Chat suggestions above are one line of text each; a form collects a
+ * supplier, an amount, a month and a photo of the receipt, then renders them
+ * into an ordinary message. The definition is JSON and is edited as JSON,
+ * deliberately: a schema builder is the right surface once forms are shared
+ * across agents (the pack library in the companion PRD), and until then a
+ * builder would be several hundred lines of UI standing between an author and
+ * a document they can already read.
+ *
+ * The counts and the parse error are a courtesy, not the rule. The server
+ * validates on write (internal/askforms) and names the form and the
+ * placeholder when it refuses — including the one refusal that matters most,
+ * a {{placeholder}} that names no field, which is caught here at SAVE time so
+ * the person talking to the agent never meets a broken template.
+ */
+function AskFormsField({ value, onSave }: {
+  value: string
+  onSave: (next: string) => Promise<void> | void
+}) {
+  const id = useId()
+  const [local, setLocal] = useState(value)
+  const server = useRef(value)
+  useEffect(() => {
+    server.current = value
+    setLocal(value)
+  }, [value])
+
+  const summary = summarizeAskForms(local)
+
+  async function commit() {
+    if (local === server.current) return
+    try {
+      await onSave(local)
+      server.current = local
+      toast.success("Ask forms saved")
+    } catch (err) {
+      setLocal(server.current)
+      toast.error(err instanceof Error ? err.message : "Could not save")
+    }
+  }
+
+  return (
+    <ConfigRow
+      full
+      label="Forms"
+      hint="A JSON array of form definitions. Each one becomes a chip that opens a short questionnaire; submitting it sends an ordinary message built from the template."
+      htmlFor={id}
+    >
+      <div className="w-full">
+        <textarea
+          id={id}
+          value={local}
+          rows={10}
+          spellCheck={false}
+          placeholder={ASK_FORMS_PLACEHOLDER}
+          onChange={(e) => setLocal(e.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault()
+              setLocal(server.current)
+              ;(e.target as HTMLElement).blur()
+            }
+          }}
+          className={cn(
+            textareaBase,
+            "min-h-[180px] resize-y py-1.5 font-mono text-xs leading-relaxed",
+            (summary.error || summary.tooManyForms || summary.overFullForms.length > 0) &&
+              "border-destructive",
+          )}
+        />
+        <div className="type-meta mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span className={cn("text-muted-foreground-soft", summary.tooManyForms && "text-destructive")}>
+            {summary.forms} / {MAX_FORMS} forms · {summary.fields} fields
+          </span>
+          {summary.error && <span className="text-destructive">{summary.error}</span>}
+          {!summary.error && summary.overFullForms.length > 0 && (
+            <span className="text-destructive">
+              {summary.overFullForms.join(", ")} — the limit is {MAX_FIELDS_PER_FORM} fields per form
+            </span>
+          )}
+        </div>
+      </div>
+    </ConfigRow>
+  )
+}
+
+/** Shown in an empty editor: a whole working form, because the fastest way to
+ *  write the second one is to edit the first. */
+const ASK_FORMS_PLACEHOLDER = `[
+  {
+    "id": "receipt",
+    "label": "Add a receipt",
+    "attachment": "required",
+    "template": "Please file this receipt.\\n\\nSupplier: {{supplier}}\\nAmount: {{amount}} {{amount_currency}}\\nPeriod: {{month}}",
+    "fields": [
+      { "name": "supplier", "label": "Supplier", "type": "text", "required": true },
+      { "name": "amount", "label": "Amount", "type": "money", "currency": ["CZK", "EUR"] },
+      { "name": "month", "label": "Period", "type": "month" }
+    ]
+  }
+]`
 
 /**
  * Like parseSuggestedPrompts but WITHOUT the cap — the editor has to be able
@@ -401,11 +507,34 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
         </DetailCard>
       </Appear>
 
+      {/* Ask forms sit next to the suggestions because they are the same
+          feature at two sizes: a question you click, and a question you fill
+          in first. The footer states the one rule an author cannot infer from
+          the JSON — the line-drop — where they will actually read it. */}
+      <Appear order={6}>
+        <DetailCard
+          bare icon={ClipboardList} title="Ask forms"
+          footer={<>
+            Every <code className="font-mono text-foreground/80">{"{{field}}"}</code> in a template must
+            name a field on the same form, or the save is refused. An <b className="font-medium text-foreground">
+            unanswered optional field takes its whole line away</b> — label and all — so
+            {" "}<code className="font-mono text-foreground/80">Period: {"{{month}}"}</code> leaves nothing
+            behind when no month was given. Preview one without a browser with{" "}
+            <code className="font-mono text-foreground/80">crewship agent ask-preview {agent.slug} &lt;form-id&gt; --var k=v</code>.
+          </>}
+        >
+          <AskFormsField
+            value={(agent as AgentRecord & { ask_forms?: string | null }).ask_forms ?? ""}
+            onSave={(v) => patch({ ask_forms: v })}
+          />
+        </DetailCard>
+      </Appear>
+
       {/* The system prompt is the longest thing on this screen and the one
           people actually read, so it takes a column of its own instead of
           being squeezed beside a switch. It stays inside the same bounded
           block — 800 characters of mono set 2000px wide is unreadable. */}
-      <Appear order={6}>
+      <Appear order={7}>
         <SystemPromptEditor
           value={agent.system_prompt}
           onSave={(v) => patch({ system_prompt: v })}
@@ -414,7 +543,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
       </Appear>
 
       {AGENT_SELF_LEARNING && (
-        <Appear order={7}>
+        <Appear order={8}>
           <div data-testid="learning-card">
             <DetailCard
               bare icon={Sparkles} title="Learning posture"

@@ -207,6 +207,24 @@ var agentUpdateCmd = &cobra.Command{
 			}
 			body["suggested_prompts"] = v
 		}
+		// Ask forms: a JSON array of form definitions. @file is the shape
+		// that actually gets used — a form with five fields and a template
+		// is not something anyone types on a command line, and keeping it in
+		// a file next to whatever else configures the agent is how it gets
+		// reviewed. The server validates it and names the form and the
+		// placeholder when it refuses; an explicit empty string clears the
+		// list.
+		if flags.Changed("ask-forms") {
+			v, _ := flags.GetString("ask-forms")
+			if strings.HasPrefix(v, "@") {
+				data, err := os.ReadFile(v[1:])
+				if err != nil {
+					return fmt.Errorf("read ask forms file: %w", err)
+				}
+				v = string(data)
+			}
+			body["ask_forms"] = v
+		}
 		if flags.Changed("avatar-seed") {
 			v, _ := flags.GetString("avatar-seed")
 			body["avatar_seed"] = v
