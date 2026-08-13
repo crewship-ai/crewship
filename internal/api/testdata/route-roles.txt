@@ -79,6 +79,7 @@ GET /api/v1/admin/keeper/judge/models roleManage
 GET /api/v1/memory/export roleManage
 PATCH /api/v1/admin/memory/config roleManage
 PATCH /api/v1/agents/{agentId} roleInline
+PATCH /api/v1/agents/{agentId}/chats/{chatId} roleSelf
 PATCH /api/v1/agents/{agentId}/integrations/{integrationId} roleCreate
 PATCH /api/v1/agents/{agentId}/learning roleManage
 PATCH /api/v1/automations/{id} roleManage

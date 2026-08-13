@@ -499,6 +499,93 @@ Examples:
 	},
 }
 
+// chatRenameCmd gives a chat session a name — CLI parity for
+// PATCH /api/v1/agents/{agentId}/chats/{chatId} (PRD chat-as-a-primary-surface,
+// Step 2). `chats.title` has existed since the first migration and nothing
+// wrote it, so every session in `crewship chat list` reads "-" forever.
+//
+// The title is normalised server-side (one line, control characters stripped,
+// capped) — the CLI sends what the user typed and reports what came back, so
+// the two never disagree about what was stored. The agent is auto-resolved from
+// the chat (same lookup as `chat read`); pass --agent to skip the scan.
+//
+// Calls client.Patch directly rather than the patchJSON wrapper: the CLI↔route
+// contract test (cli_route_contract_test.go) only sees call sites shaped as a
+// method on *cli.Client, so the wrapper form would silently drop this command
+// out of the invariant that its route exists.
+var chatRenameCmd = &cobra.Command{
+	Use:     "rename <chat-id> <title>",
+	Aliases: []string{"title"},
+	Short:   "Rename a chat session",
+	Long: `Set the title of a chat session — what the sidebar, the session list
+and the "agent replied" notification call it.
+
+Quote the title: it is one argument, not the rest of the line.
+
+Examples:
+  crewship chat rename c_abc123 "Refactor the queue worker"
+  crewship chat rename c_abc123 "Audit pass" --agent atlas
+  crewship chat rename c_abc123 "Audit pass" --format json`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		chatID := args[0]
+		title := args[1]
+
+		agentOverride, _ := cmd.Flags().GetString("agent")
+		var agentID string
+		if agentOverride != "" {
+			agentID, err = resolveAgentID(client, agentOverride)
+			if err != nil {
+				return err
+			}
+		} else {
+			agentID, err = lookupChatAgentID(client, chatID)
+			if err != nil {
+				return fmt.Errorf("resolve agent for chat %s: %w (pass --agent to override)", chatID, err)
+			}
+		}
+
+		resp, err := client.Patch("/api/v1/agents/"+url.PathEscape(agentID)+
+			"/chats/"+url.PathEscape(chatID), map[string]string{"title": title})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		// The response is one chat row in the same shape `chat list` prints, so
+		// --format json round-trips into the same jq expressions.
+		var updated struct {
+			ID    string  `json:"id"`
+			Title *string `json:"title"`
+		}
+		if err := cli.ReadJSON(resp, &updated); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(updated)
+		case "yaml":
+			return f.YAML(updated)
+		case "ndjson":
+			return f.NDJSON(updated)
+		}
+		stored := title
+		if updated.Title != nil {
+			stored = *updated.Title
+		}
+		cli.PrintSuccess(fmt.Sprintf("Chat %s renamed to %q.", chatID, stored))
+		return nil
+	},
+}
+
 // chatDeleteCmd removes a chat session and its conversation history —
 // CLI parity for DELETE /api/v1/agents/{agentId}/chats/{chatId} (#998).
 // The gate is server-side: the chat's creator, or anyone with agent-edit
@@ -803,6 +890,8 @@ func init() {
 
 	chatReadCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
 
+	chatRenameCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
+
 	chatDeleteCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
 	chatDeleteCmd.Flags().Bool("yes", false, "Skip the confirmation prompt")
 
@@ -823,6 +912,7 @@ func init() {
 	chatCmd.AddCommand(chatCreateCmd)
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatReadCmd)
+	chatCmd.AddCommand(chatRenameCmd)
 	chatCmd.AddCommand(chatDeleteCmd)
 	chatCmd.AddCommand(chatSteerCmd)
 

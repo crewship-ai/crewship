@@ -25,6 +25,7 @@ Auth: every subcommand requires an authenticated session (`crewship login`). All
 | `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
 | `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes an `UNREAD` column (replies you haven't seen). |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
+| `chat rename <chat-id> <title>` | Give the session a name — what `chat list`, the sidebar and reply notifications call it. Alias: `title`. |
 | `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/` in the container). |
 | `chat react add <chat-id> <msg-id> <emoji>` | Add an emoji reaction to a single message. |
 | `chat react remove <chat-id> <msg-id> <emoji>` | Remove your reaction (`rm` / `delete` aliases). |
@@ -63,6 +64,35 @@ The upload is one multipart POST to `POST /api/v1/agents/{agentId}/chats/{chatId
 | `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent (same lookup as `chat attach`). |
 
 Calls `PUT /api/v1/agents/{agentId}/chats/{chatId}/read`. Your read cursor advances to now: `UNREAD` in `chat list` drops to 0 for the session, and the "agent replied" inbox item for it flips to read. Read state is per user — marking a shared group chat read doesn't touch anyone else's badge.
+
+### `chat rename <chat-id> <title>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent (same lookup as `chat attach`). |
+
+Calls `PATCH /api/v1/agents/{agentId}/chats/{chatId}` with `{"title": "..."}`.
+Quote the title — it is one argument, not the rest of the line.
+
+The server normalises what you send before storing it: the whole title is folded
+onto one line (newlines and tab runs become a single space), control characters
+and invisible formatting characters are stripped, and the result is trimmed and
+capped at **200 characters** (characters, not bytes — an emoji or a Czech title
+gets the same length as an English one). A title that is empty after that, or
+longer than the cap, is refused with `400` rather than silently truncated.
+
+Who may rename: the chat's creator always, and anyone who can edit the agent for
+anyone else's chats — the same gate as `chat delete`.
+
+```bash
+crewship chat rename c_abc123 "Refactor the queue worker"
+crewship chat rename c_abc123 "Audit pass" --agent atlas
+crewship chat rename c_abc123 "Audit pass" --format json
+```
+
+Human output is `Chat <chat-id> renamed to "<title>".` — the title in the message
+is the **stored** one, so normalisation is visible. `--format json` / `yaml` /
+`ndjson` emit `{"id":"<chat-id>","title":"<stored title>"}`.
 
 ### `chat steer <chat-id>`
 

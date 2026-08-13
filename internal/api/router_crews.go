@@ -341,6 +341,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Mark-read: advances the caller's per-chat read cursor (unread badge
 	// source) and clears the paired "agent replied" inbox item.
 	r.authedMut("PUT", "/api/v1/agents/{agentId}/chats/{chatId}/read", roleSelf, agents.MarkChatRead)
+	// Rename: writes chats.title, which nothing wrote before. Same roleSelf →
+	// scopeSelf registration and the same creator-or-agent-editor handler gate
+	// as the delete below, for the same reason — a narrowly-scoped CLI token
+	// that may open a session must be able to name it.
+	r.authedMut("PATCH", "/api/v1/agents/{agentId}/chats/{chatId}", roleSelf, agents.UpdateChat)
 	// Delete: creator-or-agent-editor gate lives in the handler (#998 —
 	// lets one-shot programmatic chats clean up after themselves). roleSelf
 	// (not roleInline) so it is scope-exempt like create/read above (#1074):
