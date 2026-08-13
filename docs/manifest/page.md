@@ -71,10 +71,57 @@ spec:
 | `sla` | yes | Go duration string: `30s`, `5m`, `1h`. Must be greater than zero. Sent to the server as `sla_seconds`. |
 | `span` | no | 1–12. Defaults to 12 (full width); 0 would render a panel with no width. |
 | `public` | no | Opts this one panel into a published page. Default deny, per panel, never per page — publishing must never be a bulk action over panels nobody looked at. |
+| `actions` | no | The buttons this panel offers. Declared here, by a human, and nowhere else — a click posts an action **id** and the server resolves it against this stored list. See [`spec.panels[].actions[]`](#spec-panels-actions). Max 6 per panel. |
+| `wake` | no | Thresholds that turn this panel from a display into a sensor. See [`spec.panels[].wake[]`](#spec-panels-wake). Max 4 per panel. |
+| `on_failure` | no | `{issue: crew/<slug>}`. When the panel's SLA lapses or its producer reports a failure, an issue is opened on that crew — once per lapse, not once per check. |
 
 Panel ORDER is the layout. The grid is declared, never dragged, so two
 pages with the same panels in a different order are two different
 pages, and reordering the list is a real change the plan will report.
+
+### `spec.panels[].actions[]`
+
+| Field | Required | Notes |
+|---|---|---|
+| `id` | yes | Slug-shaped, unique within the **page** (not the panel) — it is what a click posts and it goes in a URL path. |
+| `kind` | yes | `call`, `link`, `toggle` or `custom`. Closed, and there is no default: a button whose kind was guessed does something nobody declared. |
+| `label` | yes | What the button says. |
+| `style` | no | `default`, `primary` or `danger`. |
+| `confirm` | no | `{title, body, confirm_label?, cancel_label?}`. Drawn by host chrome, never by panel content. Declare one only where the blast radius earns it. |
+| `routine` | `call` | The routine slug this action runs. Resolved at save time and again at click time; never taken from the request. |
+| `params` | no | Fixed, author-controlled values merged into the run's inputs. They win over anything a caller sends. |
+| `inputs` | no | Collected from the user before dispatch and validated server-side. `{name, label?, type?, required?, default?, options?}`; type is `text`, `textarea`, `number`, `boolean` or `select`. There is no `secret` type — a page holds no credentials. |
+| `target` | `toggle` | Panel ids this action shows or hides. Must exist on this page. |
+| `ref` | `link` | `{kind, id}` naming an internal entity: `issue`, `run`, `page` or `agent`. There is no URL field and there will not be one — the renderer builds the address. |
+
+A `link` never reaches the server; a `toggle` is client-side panel state;
+a `custom` action resolves to a handler compiled into the web client and
+takes fixed `params` only. Only a `call` is dispatchable, and dispatching
+anything else is refused.
+
+`narrative.v1` panels may not declare actions in this release. A panel
+that both renders agent-written prose and can trigger an operation is the
+combination the security rules refuse.
+
+### `spec.panels[].wake[]`
+
+| Field | Required | Notes |
+|---|---|---|
+| `when` | yes | The threshold, in one of two forms: `any(state == "critical")` / `all(state == "ok")` over a `status.v1` panel (`!=` is allowed; the state must be one of `ok`, `warning`, `critical`), or `value > 90` over a `metric.v1` panel (`>=`, `<`, `<=`, `==`, `!=` too). It is not an expression language, and a predicate the panel's schema cannot satisfy is refused at save time rather than never matching. |
+| `for` | no | Go duration. The condition must hold this long, continuously, before the gate fires, so one bad scrape wakes nobody. The window is measured against the panel's stored payloads: a panel that pushes once and goes quiet never satisfies a non-zero `for` — that case belongs to `on_failure`. Max 24h. |
+| `agent` | yes | `crew/<slug>` — the crew that gets woken. A crew and never a single agent: the crew is the durable subject. |
+| `writes` | no | The panel id the woken agent is expected to write. Checked to exist on this page. It is a declaration, not a grant — the agent still needs produce authority on that panel. |
+
+Each gate compiles, at save time, to a row in `automations` named
+`page <slug>/<panel> wake <n>` (see
+[Automations](/guides/automations)). Those rows are DERIVED: the page
+spec owns them, every save rewrites them, and deleting the page deletes
+them. Editing one directly does not stick.
+
+Neither `wake` nor `on_failure` is echoed by the read path, so — exactly
+like `public` — the plan cannot diff them. They are sent on every create
+and update, so a change to a gate lands as soon as anything else on the
+page changes; changing only a gate and nothing else reports no drift.
 
 ## Examples
 
@@ -178,6 +225,7 @@ context, following `saved-views` and `missions`.
 | `spec.panels[].sla` | `panels[].sla_seconds` | `30s` → `30`. One representation in the database, one on the wire, one for humans. |
 | `spec.panels[].span` | `panels[].span` | Default applied client-side. |
 | `spec.panels[].public` | `panels[].public` | Sent when true. See the caveat under [Drift detection](#drift-detection). |
+| `spec.panels[].actions` | `panels[].actions` | Sent verbatim; the server stores them in the page's spec and resolves every click against that copy. |
 
 Endpoints:
 
@@ -187,6 +235,8 @@ Endpoints:
 - `PATCH /api/v1/pages/{slug}` — update
 - `DELETE /api/v1/pages/{slug}` — delete
 - `PUT /api/v1/pages/{slug}/panels/{id}/data` — the producer write path
+- `GET /api/v1/pages/{slug}/panels/{id}/actions` — what a panel offers
+- `POST /api/v1/pages/{slug}/panels/{id}/actions/{actionId}` — dispatch one; answers `202` with a pending id
 
 ## Validation rules
 
@@ -203,6 +253,14 @@ use, so a document that validates here validates everywhere:
 - `producer` must parse as `<kind>/<ref>` with a known kind.
 - `sla` must parse as a duration and be greater than zero.
 - `span` must be within 1–12.
+- Action ids are slug-shaped and unique within the page; `kind` is
+  closed and an undeclared one is a refusal, not a warning.
+- A `call` names a routine slug; a `link` carries an entity `ref` and
+  never anything URL-shaped; a `toggle` targets panels that exist on this
+  page; a `custom` action takes fixed params only.
+- An input's name is `[a-z_][a-z0-9_]*`, must not collide with a fixed
+  param, and its type is one of the five — `secret` is refused.
+- A `narrative.v1` panel declaring actions is refused.
 
 The manifest layer adds the checks only it can make, resolving each
 reference against the rest of the bundle plus what the server already
@@ -213,6 +271,9 @@ has:
 - `producer: routine/<slug>` must resolve to a declared or remote
   routine,
 - `producer: agent/<slug>` must resolve to a declared or remote agent.
+- every `call` action's `routine` must resolve to a declared or remote
+  routine — a button that only resolves at click time is discovered
+  mid-incident.
 
 `script/…` and `webhook/…` producers are **not** checked. A script is a
 path inside a crew container and a webhook token is minted after the

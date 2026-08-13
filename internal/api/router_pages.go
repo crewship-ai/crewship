@@ -44,6 +44,10 @@ import "net/http"
 
 func (r *Router) registerPageRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
+	// Held on the Router so cmd_start can reach THIS instance: it owns the
+	// create/update/delete paths that write wake-gate rules, and the freshness
+	// sweeper has to run against the same clock and journal.
+	r.pages = p
 
 	// Same two wrappers every read route in this package uses; the local
 	// aliases keep the registration lines readable (router_orchestration.go).
@@ -64,4 +68,8 @@ func (r *Router) registerPageRoutes() {
 	// (§10b.1) register themselves, next to their handlers — see
 	// router_pages_transfer.go.
 	r.registerPageTransferRoutes()
+
+	// Action dispatch (§8b.2) — router_pages_actions.go, which also argues why
+	// its POST declares a role floor where the mutations above declare roleSelf.
+	r.registerPageActionRoutes()
 }

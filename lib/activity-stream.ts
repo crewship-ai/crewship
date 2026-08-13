@@ -226,6 +226,10 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "page.panel.updated",
       "page.grant_added",
       "page.grant_removed",
+      "page.panel.stale",
+      "page.panel.recovered",
+      "page.wake.fired",
+      "page.action.dispatched",
     ],
   },
 ]

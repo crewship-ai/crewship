@@ -29,8 +29,9 @@ place to say so.
 
 ## What an automation can and cannot do
 
-An automation can **only enqueue**. It never executes a routine inline, never
-writes to an issue, and holds no veto over anything.
+An automation can **only enqueue** — or, for the one rule type nothing but
+Pages writes today, open an issue. It never executes a routine inline and holds
+no veto over anything.
 
 That is a deliberate boundary, not a missing feature. Automations are matched
 on the journal **write path** — the moment an event durably commits — so
@@ -54,6 +55,7 @@ background flush rather than inline.
 | `event_type` | One journal entry type, e.g. `mission.status_change`. Exactly one — there is no wildcard. |
 | `matcher` | Narrows which entries of that type match. Empty matches all of them. |
 | `action` | `routine_slug` plus the `inputs` to run it with. |
+| `action_kind` | `routine` (the only kind `automation create` writes) or `issue`, which opens an issue on a crew instead of parking a run. Issue rules are written by [Pages' wake gates](/guides/pages), not by hand. |
 | `debounce_seconds` | How long the parked run stays open for further events to fold into. Default `10`. |
 | `max_per_hour` | Cap on runs this rule may cause per hour. Default `60`. |
 | `enabled` | A disabled rule never matches. It is not merely skipped later — it never enters the matcher at all. |
@@ -150,6 +152,30 @@ Note that `mission.status_change` is the CATCH-ALL issue entry type, not
 "status changed specifically" — `created`, `assignee_changed`, `commented` and
 `mentioned` have their own entry types, everything else lands here. That is why
 the `action` predicate is usually needed and not redundant.
+
+### Rules a Page wrote
+
+A page panel's `wake:` gate compiles to a rule in this same table, named
+`page <slug>/<panel> wake <n>`, with `action_kind: issue`. They appear in
+`crewship automation list` like any other rule, which is the point — a gate you
+cannot see is a gate you cannot debug.
+
+They are **derived state**: the page spec owns them, every save of that page
+rewrites them, and deleting the page deletes them. Disabling or editing one
+here does not stick. Remove the gate from the page instead.
+
+Their event type is `page.panel.updated`, which every accepted panel push
+emits, and it carries:
+
+| Key | Value |
+|---|---|
+| `page` / `page_id` | The page's slug and id. Predicates use the id: a slug can be recycled. |
+| `panel` | The panel id that was pushed. |
+| `schema` | The panel's schema, e.g. `status.v1`. |
+| `producer` | `<kind>/<ref>` — who was permitted to write it. |
+| `seq` | The payload's sequence number within the panel's ring. |
+| `state` | The producer's own verdict, `ok` or `failed`. Not the freshness state: `fresh` and `stale` are functions of the clock and are never stored. |
+| `wake_<n>` | Present, and `true`, ONLY when the panel's nth wake gate is armed by this push — its threshold is met and its `for` window has elapsed. This is what a gate's rule matches on, and it is why the threshold itself never has to be evaluated on the write path. |
 
 ### Inputs and the `event` namespace
 

@@ -16,6 +16,27 @@ export {
 } from "./series-panel"
 export { SealedPanel } from "./sealed-panel"
 export { PanelErrorPanel, PendingSchemaPanel, UnknownSchemaPanel } from "./fallback-panel"
+export { entityHref, ENTITY_ROUTES, isEntityRefKind } from "./entity-href"
+export {
+  PanelActions,
+  PanelActionsProvider,
+  normalizePanelActions,
+  panelActionUrl,
+  dispatchBody,
+  readDispatchAck,
+  alreadyRunningSentence,
+  refusalSentence,
+  CUSTOM_ACTION_HANDLERS,
+  SCHEMAS_WITHOUT_ACTIONS,
+  ACTION_KINDS,
+  ACTION_STYLES,
+  type PageAction,
+  type ActionKind,
+  type ActionStyle,
+  type ActionConfirm,
+  type ActionInput,
+  type CustomActionHandler,
+} from "./panel-actions"
 export {
   PanelAge,
   PanelFrame,

@@ -96,6 +96,144 @@ type PanelSpec struct {
 	// action over panels the author has not looked at. Only a human may set it
 	// — an agent can build the page but cannot widen its reach.
 	Public bool `json:"public,omitempty" yaml:"public,omitempty"`
+
+	// Actions are the buttons this panel offers (§8b.1). They are DECLARED
+	// here, by a human editing the page, and that is the whole security
+	// property: the click posts an action id, the server resolves it against
+	// this stored list, and the wire format has no field in which a caller
+	// could name a routine of its own. An agent may write a narrative onto a
+	// panel; it can never author the button underneath it (§8 rule 4).
+	Actions []PanelAction `json:"actions,omitempty" yaml:"actions,omitempty"`
+
+	// OnFailure says what happens when this panel stops reporting (§4 rule 4).
+	// A page that quietly goes stale must generate work for a human rather
+	// than sit there looking plausible.
+	OnFailure *PanelOnFailure `json:"on_failure,omitempty" yaml:"on_failure,omitempty"`
+
+	// Wake gates turn this panel from a display into a sensor (§5, §0.1): a
+	// threshold on the pushed payload wakes an agent, which writes its
+	// analysis back onto the same page. Each gate compiles to an `automations`
+	// row — the journal-event matcher that already exists — rather than to a
+	// second eventing path.
+	Wake []PanelWake `json:"wake,omitempty" yaml:"wake,omitempty"`
+}
+
+// PanelAction is one button (§8b.1).
+//
+// The vocabulary is the small set Block Kit, Adaptive Cards and amis arrived at
+// independently: an id, a label, a semantic style, an optional confirm step,
+// and a distinction between "this calls the server" and "this only affects the
+// client". Adaptive Cards' Action.Execute — a named remote operation — is the
+// direct analogue of "run this routine".
+type PanelAction struct {
+	// ID is unique within the page. It is what a click posts; see §8b.2.
+	ID string `json:"id" yaml:"id"`
+
+	// Kind is closed. "custom" resolves to a handler registered in our own
+	// client at build time — never to user-supplied code — and exists from day
+	// one on Airbnb's advice, because an extension point retrofitted later is
+	// an extension point bolted onto a shape that never expected it.
+	Kind PanelActionKind `json:"kind" yaml:"kind"`
+
+	Label string           `json:"label" yaml:"label"`
+	Style PanelActionStyle `json:"style,omitempty" yaml:"style,omitempty"`
+
+	// Confirm is drawn by host chrome, never by panel content (§8 rule 5), so
+	// an injected panel cannot fake or skip it.
+	Confirm *PanelActionConfirm `json:"confirm,omitempty" yaml:"confirm,omitempty"`
+
+	// Routine is the named operation a "call" runs. It is read from HERE at
+	// dispatch time and never from the request.
+	Routine string `json:"routine,omitempty" yaml:"routine,omitempty"`
+
+	// Params are fixed and author-controlled; Inputs are collected from the
+	// user and validated server-side against this declaration.
+	Params map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Inputs []PanelInput   `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+
+	// Target is the panel ids a "toggle" shows or hides. Local only.
+	Target []string `json:"target,omitempty" yaml:"target,omitempty"`
+
+	// Ref is the internal entity a "link" points at — never a URL (§8 rule 3).
+	// The renderer builds the address. Slack AI's private-channel leak was a
+	// rendered link, and CamoLeak proved a trusted first-party proxy is not a
+	// defence, so the schema simply has nowhere to put one.
+	Ref *PanelEntityRef `json:"ref,omitempty" yaml:"ref,omitempty"`
+}
+
+// PanelActionKind is closed: a new kind is a server release.
+type PanelActionKind string
+
+const (
+	ActionCall   PanelActionKind = "call"
+	ActionLink   PanelActionKind = "link"
+	ActionToggle PanelActionKind = "toggle"
+	ActionCustom PanelActionKind = "custom"
+)
+
+// PanelActionStyle is the semantic triad all three mature formats converged on.
+type PanelActionStyle string
+
+const (
+	ActionStyleDefault PanelActionStyle = "default"
+	ActionStylePrimary PanelActionStyle = "primary"
+	ActionStyleDanger  PanelActionStyle = "danger"
+)
+
+// PanelActionConfirm is the confirm step. Friction is calibrated to blast
+// radius (§8 rule 7): a read-only or reversible action declares none, because
+// Anthropic's own containment data shows ~93% of prompts get approved and a
+// universal dialog is a rubber stamp rather than a control.
+type PanelActionConfirm struct {
+	Title        string `json:"title" yaml:"title"`
+	Body         string `json:"body" yaml:"body"`
+	ConfirmLabel string `json:"confirm_label,omitempty" yaml:"confirm_label,omitempty"`
+	CancelLabel  string `json:"cancel_label,omitempty" yaml:"cancel_label,omitempty"`
+}
+
+// PanelInput is one parameter collected before a "call" dispatches. The shape
+// mirrors the server-declared form schema SlashActionModal already renders, so
+// the surface has one field switch rather than two.
+type PanelInput struct {
+	Name     string   `json:"name" yaml:"name"`
+	Label    string   `json:"label,omitempty" yaml:"label,omitempty"`
+	Type     string   `json:"type,omitempty" yaml:"type,omitempty"`
+	Required bool     `json:"required,omitempty" yaml:"required,omitempty"`
+	Default  string   `json:"default,omitempty" yaml:"default,omitempty"`
+	Options  []string `json:"options,omitempty" yaml:"options,omitempty"`
+}
+
+// PanelEntityRef names an internal entity. Kind is closed and there is no URL
+// field anywhere in it, deliberately.
+type PanelEntityRef struct {
+	Kind string `json:"kind" yaml:"kind"`
+	ID   string `json:"id" yaml:"id"`
+}
+
+// PanelOnFailure routes a panel's failure to somewhere a human will see it.
+type PanelOnFailure struct {
+	// Issue is "crew/<slug>" — the crew whose board gets the issue.
+	Issue string `json:"issue,omitempty" yaml:"issue,omitempty"`
+}
+
+// PanelWake is one threshold that wakes an agent (§5).
+type PanelWake struct {
+	// When is the predicate over the pushed payload, e.g.
+	// `any(state == "critical")`. Deliberately not a general expression
+	// language: it is matched against a payload, and a predicate nobody can
+	// read is a predicate nobody can audit.
+	When string `json:"when" yaml:"when"`
+
+	// For requires the condition to hold this long before firing, so a single
+	// bad scrape does not wake anybody.
+	For string `json:"for,omitempty" yaml:"for,omitempty"`
+
+	// Agent is "crew/<slug>" — who gets woken.
+	Agent string `json:"agent" yaml:"agent"`
+
+	// Writes is the panel id the woken agent is expected to write. It is a
+	// declaration, not a grant: the agent still needs produce authority on it.
+	Writes string `json:"writes,omitempty" yaml:"writes,omitempty"`
 }
 
 // SLADuration parses the declared SLA.
@@ -234,5 +372,19 @@ func (d *Document) Validate() error {
 				"panel %q declares span %d; the grid has 12 columns", p.ID, p.Span)
 		}
 	}
-	return nil
+
+	// Actions last, because two of their rules are page-scoped: ids are unique
+	// within the PAGE (§8b.1) and a toggle may only target a panel that exists
+	// on it, neither of which is answerable inside the per-panel loop above.
+	// The stored spec is the dispatch allow-list (§8b.2), so an action that does
+	// not validate here is an action that can never be clicked.
+	if err := validatePageActions(d.Spec.Panels); err != nil {
+		return err
+	}
+	// Gates last, and here rather than only in the handler: ParseDocument and
+	// the manifest kind both call Validate, so a gate that names a panel which
+	// is not on the page has to fail at parse time. Otherwise `crewship apply`
+	// and the editor accept it and the server refuses it later, which is the
+	// same document being valid in one door and invalid in the next.
+	return ValidateGates(d)
 }

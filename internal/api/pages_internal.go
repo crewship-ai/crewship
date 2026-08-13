@@ -222,8 +222,12 @@ func (h *PageHandler) PushDataInternal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// §11b.6 — the same 422, from the same function, as the public path.
-	if _, err := pages.ValidatePayload(pages.PanelSchema(panel.Schema), req.Data); err != nil {
+	// §11b.6 — the same 422, from the same function, as the public path. The
+	// decoded payload is kept for the same reason the public path keeps it:
+	// the wake gates read it, and a routine push arms a gate exactly as a
+	// human push does (§5).
+	payload, err := pages.ValidatePayload(pages.PanelSchema(panel.Schema), req.Data)
+	if err != nil {
 		var ve *pages.ValidationError
 		if errors.As(err, &ve) {
 			if ve.Code == pages.CodeTooLarge {
@@ -350,7 +354,7 @@ func (h *PageHandler) PushDataInternal(w http.ResponseWriter, r *http.Request) {
 		actorType = journal.ActorOrchestrator
 	}
 	h.recordPanelPush(r.Context(), req.WorkspaceID, rec, panel, seq, push, actorType, actorID,
-		fmt.Sprintf("routine run %s pushed %s/%s", req.AuthorRunID, rec.Slug, panel.PanelID))
+		fmt.Sprintf("routine run %s pushed %s/%s", req.AuthorRunID, rec.Slug, panel.PanelID), payload)
 
 	panel.HasData = true
 	panel.Seq = seq

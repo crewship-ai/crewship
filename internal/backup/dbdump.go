@@ -247,6 +247,7 @@ var BackupTables = []string{
 	"page_versions",      // FK page_id → pages
 	"page_grants",        // FK page_id → pages; FK granted_by_user_id → users
 	"page_public_tokens", // FK page_id → pages
+	"page_panel_alerts",  // FK panel_id → page_panels; FK issue_id → missions
 }
 
 // DBDump captures the exported rows from one or more tables. Keys are

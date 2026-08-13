@@ -478,15 +478,27 @@ var startCmd = &cobra.Command{
 				// A rule saved through the API must fire on the NEXT event,
 				// not up to a minute later — otherwise the first thing an
 				// author sees after saving is nothing happening.
-				if apiRouter := srv.APIRouter(); apiRouter != nil {
-					if ah := apiRouter.Automations(); ah != nil {
-						ah.SetRefresh(func(c context.Context) {
-							if err := autoReg.Refresh(c); err != nil {
-								logger.Error("automation: registry refresh after write failed", "err", err)
-							}
-						})
+				refresh := func(c context.Context) {
+					if err := autoReg.Refresh(c); err != nil {
+						logger.Error("automation: registry refresh after write failed", "err", err)
 					}
 				}
+				if apiRouter := srv.APIRouter(); apiRouter != nil {
+					if ah := apiRouter.Automations(); ah != nil {
+						ah.SetRefresh(refresh)
+					}
+					// Pages' wake gates (docs/prd/pages.md §5) compile to rows
+					// in the SAME table, so a page save has to refresh the
+					// same registry — a gate authored a second ago that fires
+					// nothing for a minute reads as broken.
+					if ph := apiRouter.Pages(); ph != nil {
+						ph.SetAutomationRefresh(refresh)
+					}
+				}
+				// The sink for the issue-kind rules those gates compile to.
+				// Without it a gate matches, coalesces and then logs that it
+				// had nowhere to go — loudly, rather than silently.
+				autoReg.SetIssueOpener(api.NewPagesWakeIssueOpener(deps.DB, srv.WSHub(), jw, logger))
 				logger.Info("automation registry wired (journal commit → pending_runs)")
 			}
 		}
@@ -1086,6 +1098,19 @@ var startCmd = &cobra.Command{
 				recurringIssues.Start(ctx)
 				defer recurringIssues.Stop()
 				logger.Info("recurring-issue dispatcher wired (cron triggers; 30s tick)")
+
+				// Pages' freshness sweeper (docs/prd/pages.md §4 rule 4).
+				// Nothing else notices a panel that stopped reporting: the
+				// verdict is computed on READ, so an unwatched page would go
+				// quiet and say nothing. One minute; the lapse is recorded in
+				// page_panel_alerts, so a missed tick delays the issue by one
+				// interval and cannot duplicate or drop it.
+				if apiRouter := srv.APIRouter(); apiRouter != nil {
+					if ph := apiRouter.Pages(); ph != nil {
+						ph.StartPanelFreshnessSweeper(ctx, 0)
+						logger.Info("pages freshness sweeper wired (on_failure → issue; 1m tick)")
+					}
+				}
 			}
 		}
 

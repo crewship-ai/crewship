@@ -186,7 +186,11 @@ func (h *PageHandler) PushData(w http.ResponseWriter, r *http.Request) {
 			"the request body is empty; a push carries the panel's payload as JSON")
 		return
 	}
-	if _, err := pages.ValidatePayload(pages.PanelSchema(panel.Schema), body); err != nil {
+	// The decoded payload is kept, not discarded: the wake gates read it
+	// (§5), and decoding it a second time to answer "is this critical" would
+	// be paying for the schema twice on the write path.
+	payload, err := pages.ValidatePayload(pages.PanelSchema(panel.Schema), body)
+	if err != nil {
 		var ve *pages.ValidationError
 		if errors.As(err, &ve) {
 			if ve.Code == pages.CodeTooLarge {
@@ -286,7 +290,7 @@ func (h *PageHandler) PushData(w http.ResponseWriter, r *http.Request) {
 		map[string]any{"page_id": rec.ID, "slug": rec.Slug, "panel_id": panel.PanelID})
 
 	h.recordPanelPush(r.Context(), wsID, rec, panel, seq, push, journal.ActorUser, user.ID,
-		fmt.Sprintf("%s pushed %s/%s", user.Email, rec.Slug, panel.PanelID))
+		fmt.Sprintf("%s pushed %s/%s", user.Email, rec.Slug, panel.PanelID), payload)
 
 	panel.HasData = true
 	panel.Seq = seq
@@ -432,13 +436,33 @@ func evictPanelRing(ctx context.Context, tx *sql.Tx, panelRowID string, now time
 // and rendering. A failure to write the entry is logged instead, the same
 // bargain reportUnauthorisedPush makes in the other direction.
 func (h *PageHandler) recordPanelPush(ctx context.Context, wsID string, rec *pageRecord,
-	panel *panelRecord, seq int64, push string, actorType journal.ActorType, actorID, summary string) {
+	panel *panelRecord, seq int64, push string, actorType journal.ActorType, actorID, summary string,
+	payload pages.Payload) {
 	if h.journal == nil {
 		return
 	}
 	severity := journal.SeverityInfo
 	if push == "failed" {
 		severity = journal.SeverityWarn
+	}
+	entryPayload := map[string]any{
+		"page":     rec.Slug,
+		"page_id":  rec.ID,
+		"panel":    panel.PanelID,
+		"schema":   panel.Schema,
+		"producer": panel.producerRef(),
+		"seq":      seq,
+		// The producer's own verdict, not the freshness state: fresh and
+		// stale are functions of the clock and are never stored (§4), so
+		// an entry claiming one would be wrong the moment it was read.
+		"state": push,
+	}
+	// §5: a panel whose wake gates this push ARMS carries one extra boolean
+	// per armed gate, and that boolean is what the compiled `automations` rule
+	// matches on. A panel with no gates adds nothing — the predicate, the hold
+	// window and the ring read all live behind a length check (pages_wake.go).
+	for k, v := range h.wakeSignals(ctx, wsID, panel, payload, h.evaluator().Now().UTC()) {
+		entryPayload[k] = v
 	}
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: wsID,
@@ -448,18 +472,7 @@ func (h *PageHandler) recordPanelPush(ctx context.Context, wsID string, rec *pag
 		ActorType:   actorType,
 		ActorID:     actorID,
 		Summary:     summary,
-		Payload: map[string]any{
-			"page":     rec.Slug,
-			"page_id":  rec.ID,
-			"panel":    panel.PanelID,
-			"schema":   panel.Schema,
-			"producer": panel.producerRef(),
-			"seq":      seq,
-			// The producer's own verdict, not the freshness state: fresh and
-			// stale are functions of the clock and are never stored (§4), so
-			// an entry claiming one would be wrong the moment it was read.
-			"state": push,
-		},
+		Payload:     entryPayload,
 	}); err != nil && h.logger != nil {
 		h.logger.Warn("pages: journal entry for an accepted push was not written",
 			"page", rec.Slug, "panel", panel.PanelID, "error", err)

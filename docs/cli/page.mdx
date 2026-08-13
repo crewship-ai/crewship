@@ -32,6 +32,8 @@ workspace from your current context the same way it does for
 | `update <slug>` | Change an existing page's definition |
 | `delete <slug> --yes` | Delete a page |
 | `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
+| `actions <slug>/<panel>` | List the actions a panel declares, and the routine each one runs |
+| `action <slug>/<panel> <action-id>` | Dispatch a declared action |
 | `grant <slug> --user\|--crew\|--agent <subject> --level <level>` | Grant read, produce, or write on a page |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
 | `grants <slug>` | List a page's grants |
@@ -109,6 +111,32 @@ default that means "never mind" (§4). `owner` names the crew whose membership
 gates who can see the panel; it is the permission anchor, not decoration.
 `producer` names the routine, script, or agent allowed to push data into it —
 see [`page set`](#crewship-page-set-slug-panel) below.
+
+A panel may also declare the sensor half — a `wake:` threshold that opens an
+issue on a crew when the pushed payload crosses it, and `on_failure:` for when
+it stops arriving at all:
+
+```yaml
+    - id: sluzby
+      schema: status.v1
+      owner: crew/lookout
+      producer: script/watch-services.sh
+      sla: 60s
+      on_failure:
+        issue: crew/lookout          # SLA lapses → an issue, once per lapse
+      wake:
+        - when: any(state == "critical")
+          for: 5m                    # must hold this long — one bad scrape wakes nobody
+          agent: crew/devops         # who gets woken
+          writes: incident           # where they are expected to answer
+```
+
+The CLI sends both verbatim and the server parses them: `when` is checked
+against the panel's own schema, and a predicate that panel could never satisfy
+is refused here rather than accepted and silently never matched. See
+[Pages → wake gates](/guides/pages) for the grammar and
+[`page get`](#crewship-page-get-slug) plus `crewship automation list` for
+seeing what a gate became.
 
 Backed by `POST /api/v1/pages`.
 
@@ -236,6 +264,162 @@ jq -n '{
 
 ---
 
+## `crewship page actions <slug>/<panel>`
+
+List the actions a panel declares.
+
+```bash
+crewship page actions fleet-201/sluzby
+```
+
+```
+ID           KIND    LABEL        RUNS                     CONFIRM  INPUTS
+restart-api  call    Restart API  routine/restart-api      yes      reason*
+open-issue   link    Open ENG-15  issue/ENG-15             —        —
+collapse     toggle  Collapse     panels zatizeni          —        —
+```
+
+Backed by `GET /api/v1/pages/{slug}/panels/{id}/actions`. The list comes from
+the page's **stored spec** — the same list the server resolves a click against
+— so what you see is exactly what can be dispatched. A panel you may not see
+answers `404`, the same answer an unknown panel gives, so an action list is
+never an existence oracle for somebody else's crew.
+
+Only `call` actions reach the server. A `link` navigates to an internal entity
+(`issue`, `run`, `page`, `agent`) and the renderer builds the address — there is
+no URL field anywhere in the schema and there will not be one. A `toggle` is
+client-side panel state. A `custom` action resolves to a handler compiled into
+the web client.
+
+---
+
+## `crewship page action <slug>/<panel> <action-id>`
+
+Dispatch one of a panel's declared actions.
+
+```bash
+crewship page action fleet-201/sluzby restart-api --input reason="deploy wedged"
+```
+
+```
+Queued: restart-api on fleet-201/sluzby runs routine/restart-api.
+  pending: pnd_01k2r7wn8q0000000000001
+  fires:   2026-08-12T09:14:22Z
+  This returned when the run was accepted, not when it finished.
+```
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--input k=v` | | An input the action declared. **Repeatable**; a value may contain a comma, so this is not a comma-separated list. |
+| `--idempotency-key` | | Pin the dedupe key. Defaults to a fresh UUID per invocation. |
+
+Backed by `POST /api/v1/pages/{slug}/panels/{id}/actions/{actionId}`.
+
+### You cannot name a routine here, and that is the design
+
+There is no `--routine` flag, and the request body carries **only** the
+collected inputs. The server resolves the action id against the page's stored
+spec and dispatches the routine named *there*. A compromised client, an injected
+narrative panel, or an agent cannot choose what runs, because the wire format
+has no field for it. The allow-list is not a check the server remembers to
+perform — it is the only path that exists.
+
+Inputs are validated server-side against the action's own declaration. An input
+the action did not declare is **refused**, not passed through; a required input
+that is missing is refused before anything runs; a fixed `param` the page author
+set is not yours to override.
+
+### It returns when the run is queued, not when it finishes
+
+The answer is `202` with a pending id. Nothing waits for the run — a page button
+on a ten-minute routine must not hold a connection. Watch the run itself on the
+page, in the activity feed, or with `crewship routine runs`.
+
+### Retrying is safe, replaying with different inputs is not
+
+Every dispatch carries an `Idempotency-Key`, generated locally, one per
+invocation. Pass `--idempotency-key` to pin it so a retry from a shell loop or a
+CI step resolves to the original dispatch instead of starting a second run.
+
+Reusing a key with **different** inputs is refused with `409` rather than
+silently deduped onto the first run — a replayed key that quietly returned
+somebody else's result would tell you a click succeeded that never happened.
+
+| Response | Meaning |
+|---|---|
+| `202` `SCHEDULED` | Queued. `pending_id` is the receipt. |
+| `202` `DEDUPED` | Same key, same inputs — the original dispatch, not a second run. |
+| `400` | The inputs do not satisfy the action's declaration, or the action is not a `call`. |
+| `403` | You can see the panel but may not run routines (MANAGER+, the same floor the routine's own endpoint applies). |
+| `404` | No such action on this panel — or no such panel, for you. The two are deliberately indistinguishable. |
+| `409` | The key was replayed with different inputs, or the routine is missing / awaiting approval / disabled. |
+| `429` | This action is already running. Carries `Retry-After`. |
+
+### Who may dispatch
+
+Two halves, and both must hold:
+
+1. You can **see the panel** — membership of its owning crew, or a workspace
+   admin role. A caller who would get a sealed placeholder gets `404`, not
+   `403`: the action does not exist for them, and a `403` would confirm it
+   exists for someone else.
+2. You hold what the **routine** requires — MANAGER+, and the routine must be
+   `active`. A page button is never a cheaper way to run a routine than the
+   routine's own surface.
+
+Every dispatch is journalled as `page.action.dispatched`, carrying who clicked,
+which action, and which routine the server resolved it to.
+
+### Declaring an action
+
+Actions are declared in the page document, by a human editing the page. An agent
+can write a panel's data; it can never author the button underneath it.
+
+```yaml
+panels:
+  - id: sluzby
+    schema: status.v1
+    owner: crew/lookout
+    producer: script/watch-services.sh
+    sla: 30s
+    actions:
+      - id: restart-api
+        kind: call
+        label: Restart API
+        style: danger              # default | primary | danger
+        routine: restart-api       # resolved at save time and at click time
+        params:                    # fixed, author-controlled
+          cluster: prod
+        confirm:                   # drawn by host chrome, never by panel content
+          title: Restart the API?
+          body: In-flight requests are dropped.
+        inputs:                    # collected from the user, validated server-side
+          - name: reason
+            type: text             # text | textarea | number | boolean | select
+            required: true
+      - id: open-incident
+        kind: link
+        label: Open the incident
+        ref: { kind: issue, id: ENG-15 }
+      - id: collapse
+        kind: toggle
+        label: Collapse
+        target: [zatizeni]
+```
+
+Refused at save, every time:
+
+- an action `kind` outside `call | link | toggle | custom`, or none at all;
+- a `call` that names no routine, or names one that does not exist here;
+- a `link` carrying anything URL-shaped instead of an entity id;
+- a `toggle` targeting a panel that is not on the page;
+- two actions on one page sharing an id;
+- an input named after a fixed param, or an input collecting a secret;
+- actions on a `narrative.v1` panel — a panel that renders agent-written prose
+  and can also trigger an action is refused in this release.
+
+---
+
 ## `crewship page grant <slug>`
 
 Grants layer on top of a panel's crew-based visibility — they widen who may
@@ -322,6 +506,17 @@ an exported page spec.
   belongs to the install it came from; moving it between workspaces would
   mean shipping numbers with no producer behind them.
 </Note>
+
+<Warning>
+  The bundle carries a panel's structure — id, schema, owner, producer, SLA
+  and span. It does **not** yet carry `wake:` gates or `on_failure:`, so an
+  imported page arrives unmonitored and the gates have to be added again in
+  this workspace. That is deliberate rather than silent: a gate names a crew,
+  and a crew reference has to be bindable (`--bind`) before it can be carried,
+  or an import would install a gate pointing at a crew that does not exist
+  here and quietly wake nobody. Until then the bundle omits what it cannot
+  bind.
+</Warning>
 
 ---
 

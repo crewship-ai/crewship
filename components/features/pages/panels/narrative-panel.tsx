@@ -5,6 +5,7 @@ import { FileText } from "lucide-react"
 import Link from "next/link"
 
 import { cn } from "@/lib/utils"
+import { entityHref } from "./entity-href"
 import { defaultEmptyHint, panelGate, provenanceProducedAt } from "./freshness"
 import {
   FailedValue,
@@ -15,10 +16,8 @@ import {
   resolveNow,
 } from "./panel-frame"
 import {
-  ENTITY_REF_KINDS,
   NARRATIVE_BLOCK_KINDS,
   type EntityRef,
-  type EntityRefKind,
   type NarrativeBlock,
   type NarrativePayload,
   type PanelProps,
@@ -180,49 +179,28 @@ function BlockText({ block }: { block: NarrativeBlock }) {
   )
 }
 
-/**
- * §8 rule 3, the permitted half: the payload names an entity, this file builds
- * the URL.
- *
- * The route table is a flat record keyed on the closed `EntityRefKind` set,
- * looked up through a Set so an inherited key can never select a route, and
- * the id is encoded before it is interpolated. A ref whose kind is unknown, or
- * whose id is empty, renders as nothing — a producer that cannot name a real
- * entity does not get a link built out of what it did send.
- */
-const ENTITY_ROUTES: Record<EntityRefKind, (id: string) => string> = {
-  issue: (id) => `/issues/${id}`,
-  run: (id) => `/activity?run=${id}`,
-  page: (id) => `/pages/${id}`,
-  agent: (id) => `/crews/agents/${id}`,
-  crew: (id) => `/crews/${id}`,
-}
-
-const ENTITY_REF_KIND_SET: ReadonlySet<string> = new Set<string>(ENTITY_REF_KINDS)
 const NARRATIVE_BLOCK_KIND_SET: ReadonlySet<string> = new Set<string>(NARRATIVE_BLOCK_KINDS)
 
 function isBlockKind(value: unknown): value is (typeof NARRATIVE_BLOCK_KINDS)[number] {
   return typeof value === "string" && NARRATIVE_BLOCK_KIND_SET.has(value)
 }
 
-function isEntityRefKind(value: unknown): value is EntityRefKind {
-  return typeof value === "string" && ENTITY_REF_KIND_SET.has(value)
-}
-
 /**
- * The id is checked here as well as at the API boundary, and that is not
- * belt-and-braces theatre: a payload stored before this file existed, or one
- * arriving from a build whose server is older, must not be able to grow a
- * relative id into a path. `..`, a slash and a scheme are all refused, and
- * what survives is encoded.
+ * §8 rule 3, the permitted half: the payload names an entity, `entityHref`
+ * builds the URL.
+ *
+ * The resolver lives in `entity-href.ts` because §8b.1's `kind: "link"` action
+ * needs the identical rules — closed kind set, refused relative id, encoded
+ * before interpolation — and two copies of that is two chances to weaken one.
+ * A ref whose kind is unknown, or whose id is empty, renders as nothing: a
+ * producer that cannot name a real entity does not get a link built out of what
+ * it did send.
  */
-const SAFE_ENTITY_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/
-
 function EntityRefLink({ refValue }: { refValue?: EntityRef | null }) {
-  if (!refValue || typeof refValue !== "object") return null
-  const kind = refValue.kind
-  const id = typeof refValue.id === "string" ? refValue.id.trim() : ""
-  if (!isEntityRefKind(kind) || !id || !SAFE_ENTITY_ID.test(id) || id.includes("..")) return null
+  const href = entityHref(refValue)
+  if (!href) return null
+  const kind = refValue!.kind as string
+  const id = (refValue!.id as string).trim()
 
   return (
     <>
@@ -231,7 +209,7 @@ function EntityRefLink({ refValue }: { refValue?: EntityRef | null }) {
         data-slot="narrative-ref"
         data-ref-kind={kind}
         data-ref-id={id}
-        href={ENTITY_ROUTES[kind](encodeURIComponent(id))}
+        href={href}
         className={cn(
           "font-medium text-primary underline-offset-2 hover:underline",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",

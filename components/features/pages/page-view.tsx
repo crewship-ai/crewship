@@ -37,6 +37,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { cn } from "@/lib/utils"
 import { PanelRenderer } from "@/components/features/pages/panels"
+import {
+  PanelActionsProvider,
+  useHiddenPanels,
+  type PageAction,
+} from "@/components/features/pages/panels/panel-actions"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
 import type { PageView as PageRecord } from "@/hooks/use-pages"
 
@@ -73,9 +78,25 @@ export interface PageViewProps {
   onBack: () => void
   /** Injected clock — absolute ages are computed, so a test can pin `now`. */
   now?: Date
+  /**
+   * Only for a caller that already holds it. Left unset, the action bar reads
+   * the active workspace from `useWorkspace()` — which is loaded by the time
+   * this surface mounts, and which is the source the rest of the dashboard
+   * uses. Passing it avoids that lookup where it is already known.
+   */
+  workspaceId?: string | null
 }
 
-export function PageView({ page, slug, loading, error, notFound, onBack, now }: PageViewProps) {
+export function PageView({
+  page,
+  slug,
+  loading,
+  error,
+  notFound,
+  onBack,
+  now,
+  workspaceId,
+}: PageViewProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumb back-bar — inside the content area, matching /routines and
@@ -110,6 +131,7 @@ export function PageView({ page, slug, loading, error, notFound, onBack, now }: 
             error={error}
             notFound={notFound}
             now={now}
+            workspaceId={workspaceId}
           />
         </div>
       </div>
@@ -124,6 +146,7 @@ function PageBody({
   error,
   notFound,
   now,
+  workspaceId,
 }: Omit<PageViewProps, "onBack">) {
   if (notFound) {
     return (
@@ -190,11 +213,71 @@ function PageBody({
         )}
       </div>
 
-      <div
-        data-slot="panel-grid"
-        className="grid grid-cols-1 gap-4 md:grid-cols-12 print:grid-cols-1"
-      >
-        {panels.map((panel) => (
+      <PanelGrid panels={panels} slug={slug} now={now} workspaceId={workspaceId} />
+    </>
+  )
+}
+
+/**
+ * The grid, and the only surface in the app that mounts `PanelActionsProvider`.
+ *
+ * The actions reach the buttons through that provider rather than through
+ * `PanelSpec`, so a panel rendered anywhere else — the public page (§7.3.2
+ * rule 1), the dashboard strip, a test — has no route by which an action could
+ * become a button. Absence is the default; this component is the single
+ * exception, on the one surface where the viewer is authenticated and the
+ * server has already filtered the page per crew.
+ */
+function PanelGrid({
+  panels,
+  slug,
+  now,
+  workspaceId,
+}: {
+  panels: NonNullable<PageRecord["panels"]>
+  slug: string
+  now?: Date
+  workspaceId?: string | null
+}) {
+  const actions = React.useMemo(() => {
+    const map = new Map<string, readonly PageAction[]>()
+    for (const panel of panels) {
+      if (panel.actions.length > 0) map.set(panel.spec.id, panel.actions)
+    }
+    return map
+  }, [panels])
+
+  return (
+    <PanelActionsProvider slug={slug} actions={actions} workspaceId={workspaceId}>
+      <PanelGridCells panels={panels} now={now} />
+    </PanelActionsProvider>
+  )
+}
+
+/**
+ * The cells, inside the provider so they can read what a `toggle` hid.
+ *
+ * `kind: "toggle"` is local and shows or hides panel ids
+ * (`internal/pages/spec.go` `PanelAction.Target`); this is where "hidden"
+ * becomes true. It is view state and nothing else — no request was made, no
+ * spec changed, and a reload brings every panel back.
+ */
+function PanelGridCells({
+  panels,
+  now,
+}: {
+  panels: NonNullable<PageRecord["panels"]>
+  now?: Date
+}) {
+  const hidden = useHiddenPanels()
+  return (
+    <div
+      data-slot="panel-grid"
+      className="grid grid-cols-1 gap-4 md:grid-cols-12 print:grid-cols-1"
+    >
+      {panels
+        .filter((panel) => !hidden.has(panel.spec.id))
+        .map((panel) => (
           <div
             key={panel.spec.id}
             data-slot="panel-cell"
@@ -210,7 +293,6 @@ function PageBody({
             <PanelRenderer panel={panel.spec} data={panel.snapshot} now={now} />
           </div>
         ))}
-      </div>
-    </>
+    </div>
   )
 }

@@ -171,6 +171,17 @@ type pageWritePanelJSON struct {
 	SLASeconds int    `json:"sla_seconds"`
 	Span       int    `json:"span"`
 	Public     bool   `json:"public,omitempty"`
+	// Actions ride through verbatim (§8b.1). The CLI does not interpret them:
+	// ParseDocument already refused anything the vocabulary does not admit, and
+	// the server validates again, which is the gate. Re-encoding them field by
+	// field here would be a place for the two representations to drift.
+	Actions []pages.PanelAction `json:"actions,omitempty"`
+	// Wake gates and on_failure ride through verbatim for the same reason
+	// (§5, §4 rule 4). The predicate in `when:` is parsed by the SERVER, which
+	// is where the panel's schema is known and where the refusal has to
+	// happen; a CLI-side parse would be a second grammar to keep in step.
+	Wake      []pages.PanelWake     `json:"wake,omitempty"`
+	OnFailure *pages.PanelOnFailure `json:"on_failure,omitempty"`
 }
 
 // ── list ───────────────────────────────────────────────────────────────────
@@ -454,6 +465,9 @@ func pageWriteFrom(doc *pages.Document) *pageWriteJSON {
 			SLASeconds: int(sla.Seconds()),
 			Span:       p.Span,
 			Public:     p.Public,
+			Actions:    p.Actions,
+			Wake:       p.Wake,
+			OnFailure:  p.OnFailure,
 		})
 	}
 	return out

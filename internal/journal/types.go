@@ -505,6 +505,37 @@ const (
 	// payload. "An ACL nobody can audit is not a security control."
 	EntryPageGrantAdded   EntryType = "page.grant_added"
 	EntryPageGrantRemoved EntryType = "page.grant_removed"
+
+	// EntryPageActionDispatched records a click on a panel's declared action
+	// (§8b.2): who clicked, which action, and which routine the SERVER resolved
+	// it to. The routine is in the payload rather than assumed from the action
+	// id because the point of the dispatch design is that the server chose it —
+	// so the audit trail is where that choice is written down.
+	EntryPageActionDispatched EntryType = "page.action.dispatched"
+
+	// EntryPagePanelStale is written ONCE per lapse by the freshness
+	// sweeper: a panel that was reporting is now stale or failed (§4).
+	// It is the producer behind notify.CategoryPagesStale, which was a
+	// registered category with nothing emitting it. Payload: page,
+	// page_id, panel, verdict, age_seconds, sla_seconds, reason, and —
+	// when the panel declared on_failure — issue_id / issue_identifier.
+	//
+	// Once per lapse rather than once per tick: the edge is recorded in
+	// page_panel_alerts, so a panel quiet for a week produces one entry
+	// and one issue rather than one of each per minute.
+	EntryPagePanelStale EntryType = "page.panel.stale"
+
+	// EntryPagePanelRecovered is the other edge: data arrived inside the
+	// SLA again and the open alert was cleared. Emitted so "it fixed
+	// itself at 03:12" is answerable from the journal rather than from
+	// the absence of anything.
+	EntryPagePanelRecovered EntryType = "page.panel.recovered"
+
+	// EntryPageWakeFired records a wake gate waking a crew (§5): the
+	// threshold held for its window, the automation matched, and an issue
+	// was opened. Payload: page, page_id, panel, gate, crew, writes,
+	// issue_id, issue_identifier, coalesced_events.
+	EntryPageWakeFired EntryType = "page.wake.fired"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI

@@ -44,10 +44,11 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
-// ActionKindRoutine is the only action kind v1 accepts. The column exists so
-// 'issue' / 'notify' can land without a migration; anything else is rejected
-// at write time rather than discovered at fire time by a rule that silently
-// does nothing.
+// ActionKindRoutine parks a deferred routine run — the original action, and
+// still the only one an author can create through `crewship automation
+// create`. 'notify' remains reserved; 'issue' landed with Pages' wake gates
+// (see issue.go). Anything outside the set is rejected at write time rather
+// than discovered at fire time by a rule that silently does nothing.
 const ActionKindRoutine = "routine"
 
 // ErrNotFound is returned when an automation id does not resolve inside the
@@ -153,6 +154,9 @@ func jsonEqual(a, b any) bool {
 type Action struct {
 	RoutineSlug string         `json:"routine_slug"`
 	Inputs      map[string]any `json:"inputs,omitempty"`
+	// Issue is the config for ActionKindIssue and is nil for every routine
+	// rule, so a row written before that kind existed decodes unchanged.
+	Issue *IssueAction `json:"issue,omitempty"`
 }
 
 // Automation is one stored rule.
@@ -226,11 +230,18 @@ func (a *Automation) Validate() error {
 	if a.ActionKind == "" {
 		a.ActionKind = ActionKindRoutine
 	}
-	if a.ActionKind != ActionKindRoutine {
-		return fmt.Errorf("automation: action_kind %q is not supported (only %q)", a.ActionKind, ActionKindRoutine)
-	}
-	if a.Action.RoutineSlug == "" {
-		return errors.New("automation: action.routine_slug required")
+	switch a.ActionKind {
+	case ActionKindRoutine:
+		if a.Action.RoutineSlug == "" {
+			return errors.New("automation: action.routine_slug required")
+		}
+	case ActionKindIssue:
+		if err := validateIssueAction(a.Action.Issue); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("automation: action_kind %q is not supported (only %q, %q)",
+			a.ActionKind, ActionKindRoutine, ActionKindIssue)
 	}
 	// Range checks only — Validate does not rewrite. It used to coerce a zero
 	// to the default first, which collapsed a distinction the API layer takes

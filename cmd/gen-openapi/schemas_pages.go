@@ -107,9 +107,33 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"created_at": timeString(), "updated_at": timeString(),
 	})
 
+	// The write half carries two fields the read half does not echo: the
+	// sensor (§5, §4 rule 4). They are stored in the page spec and read from
+	// there by the gate compiler and the freshness sweeper; a panel document
+	// coming BACK does not repeat them, and documenting them on the response
+	// would promise a round-trip that `page export` is the door for.
+	writePanelSpec := mergeProps(panelSpec, map[string]any{
+		"wake": map[string]any{"type": "array",
+			"items": obj(map[string]any{
+				"when": map[string]any{"type": "string",
+					"description": "The threshold, in one of two forms: `any(state == \"critical\")` / `all(state == \"ok\")` over a status.v1 panel, or `value > 90` over a metric.v1 panel. Not an expression language; a predicate the panel's schema cannot satisfy is refused at save time rather than never matching (§5)."},
+				"for": map[string]any{"type": "string",
+					"description": "Go duration. The condition must hold this long, continuously, before the gate fires, so one bad scrape wakes nobody. Max 24h."},
+				"agent": map[string]any{"type": "string",
+					"description": "`crew/<slug>` — the crew woken when the gate fires. A crew and never a single agent."},
+				"writes": map[string]any{"type": "string",
+					"description": "The panel the woken agent is expected to write. Must exist on this page. A declaration, not a grant: the agent still needs produce authority on it."},
+			}),
+			"description": "Thresholds that turn this panel into a sensor (§5). Each compiles to an `automations` row owned by the page spec. Max 4 per panel."},
+		"on_failure": obj(map[string]any{
+			"issue": map[string]any{"type": "string",
+				"description": "`crew/<slug>` — the crew an SLA lapse or a producer failure opens an issue on, once per lapse (§4 rule 4)."},
+		}),
+	})
+
 	writeBody := obj(map[string]any{
 		"slug": str(), "name": str(), "description": str(),
-		"panels": map[string]any{"type": "array", "items": obj(panelSpec),
+		"panels": map[string]any{"type": "array", "items": obj(writePanelSpec),
 			"description": "The parsed spec (§11b.2). The CLI parses the YAML document and sends this; the server validates it and checks that every declared owner crew and producer routine or agent resolves (§10b.1)."},
 	})
 

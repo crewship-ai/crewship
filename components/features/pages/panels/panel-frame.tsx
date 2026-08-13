@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { SectionCard } from "@/components/ui/section-card"
+import { PanelActions } from "./panel-actions"
 import {
   EM_DASH,
   formatAbsoluteAge,
@@ -80,6 +81,16 @@ export function PanelFrame({
     >
       <div className="flex flex-col gap-3">
         {children}
+        {/*
+         * The action bar (§8b). It lives in the FRAME rather than in each
+         * schema's component for the same reason the confirmation dialog is
+         * host chrome (§8 rule 5): there is then exactly one place a button on
+         * a panel can come from, and it is ours. `PanelActions` draws nothing
+         * unless a `PanelActionsProvider` above it supplied actions for this
+         * panel id — which the public grid never does (§7.3.2 rule 1) — and
+         * `publicView` refuses a second time regardless.
+         */}
+        <PanelActions panel={panel} publicView={publicView} />
         {showProvenance ? <PanelProvenance data={data} now={now} publicView={publicView} /> : null}
       </div>
     </SectionCard>

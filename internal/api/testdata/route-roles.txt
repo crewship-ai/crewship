@@ -236,6 +236,7 @@ POST /api/v1/onboarding/complete roleSelf
 POST /api/v1/onboarding/setup roleSelf
 POST /api/v1/pages roleInline
 POST /api/v1/pages/import roleInline
+POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
 POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/projects roleCreate

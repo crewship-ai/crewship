@@ -157,12 +157,213 @@ retention window, and the panel would flip from *"stale, last value 12:40"* to
 *"never produced"* — the system forgetting a failure instead of reporting it,
 which is the one thing this contract exists to prevent.
 
-**`on_failure: {issue: crew/<slug>}`** opens an issue on the owning crew. A
-page that quietly stops updating must generate work for a human, not just a
-dimmed tile nobody happens to look at.
+**`on_failure: {issue: crew/<slug>}`** opens an issue on that crew. A page that
+quietly stops updating must generate work for a human, not just a dimmed tile
+nobody happens to look at.
+
+What notices is a sweeper, once a minute. It has to be a sweeper: freshness is
+computed when a page is READ, and the case this rule exists for is the page
+nobody is reading. So the check runs whether or not anybody is watching, and
+the largest delay it adds is one interval — a panel with a 30s SLA is reported
+between 30 and 90 seconds after it goes quiet.
+
+Each lapse is reported **once**, not once per check:
+
+- The edge is recorded in the database, so a panel dead for a week produces one
+  issue and one notification rather than ten thousand. A restart, a deploy or a
+  missed tick delays the report by one interval; it cannot duplicate or drop it.
+- The record is cleared when data arrives inside the SLA again, and a
+  `page.panel.recovered` entry says so. The NEXT outage is a new edge and opens
+  a new issue — a monitor that reports only your first outage is worse than
+  none.
+- A panel with no `on_failure` still reports its lapse: the page owner gets the
+  `pages.stale` notification, nobody gets an issue. Awareness and work are
+  different things, and only the second one needs an owner.
+- The issue is opened on the crew `on_failure` names and assigned to that
+  crew's lead agent, so it can be started without being edited first. A crew
+  with no lead agent cannot be given work — the lapse stays unreported and
+  loudly logged until one exists, rather than being silently swallowed.
+
+A panel that has never received anything is not an incident on the day it is
+authored. It becomes one once it has existed for longer than its own SLA and
+still has nothing: a producer that was never wired up is exactly the silent
+failure this section exists to catch.
 
 **Every panel footer carries provenance** — producer, run id, timestamp — and
 it is server-attached, never producer-claimed.
+
+## Wake gates — the panel as a sensor
+
+This is the part that makes a Page more than a dashboard. A cheap script
+pushes, a threshold wakes an agent, and the agent writes its analysis back onto
+the same page:
+
+```yaml
+- id: sluzby
+  schema: status.v1
+  owner: crew/lookout
+  producer: script/watch-services.sh
+  sla: 60s
+  wake:
+    - when: any(state == "critical")
+      for: 5m
+      agent: crew/devops
+      writes: incident
+```
+
+**`when` is not an expression language.** It is two forms:
+
+| Form | Panel | Examples |
+|---|---|---|
+| `any(...)` / `all(...)` over `state` | `status.v1` | `any(state == "critical")`, `all(state == "ok")`, `any(state != "ok")` |
+| a comparison on `value` | `metric.v1` | `value > 90`, `value <= 0.5`, `value != 0` |
+
+A predicate the panel's schema cannot satisfy — `value > 90` on a `status.v1`
+panel — is refused when you save the page, not accepted and then silently never
+matched. So is a state outside the closed set (`ok`, `warning`, `critical`), and
+so is a `writes:` naming a panel that is not on this page.
+
+**`for` requires the condition to hold.** It is measured against the panel's
+own stored payloads: the gate fires when the oldest unbroken run of matching
+pushes is at least `for` old. One good scrape in the middle restarts the
+window, and a panel that pushed once and went quiet never satisfies a non-zero
+`for` — that is `on_failure`'s case, not this one. Omit `for` and the gate
+fires on the first push that crosses the threshold.
+
+**What actually happens when it fires.** The gate opens an issue on the crew
+named by `agent:`, assigned to that crew's lead agent, saying which panel
+crossed which threshold and — if `writes:` is set — where the answer goes.
+`writes` is a declaration, not a grant: the woken agent still needs produce
+authority on that panel, and if its push is refused, that is the ACL working.
+
+**It fires once per crossing.** Two things make that true, and both matter:
+
+- a burst of pushes inside the rule's debounce window is coalesced into one
+  issue — 200 events, one issue, which is what makes a gate safe to point at a
+  panel pushed every five seconds;
+- while the issue is open, the same gate does not open a second one. When the
+  condition clears, the gate re-arms and the next crossing opens a new issue.
+
+**Under the covers it is an automation.** Each gate compiles at save time to a
+row in `automations` named `page <slug>/<panel> wake <n>`, matching on the
+`page.panel.updated` journal entry that every accepted push already emits.
+There is no second eventing path, which means gates inherit the debounce, the
+hourly burst brake and the visibility that
+[automations](/guides/automations) already have — `crewship automation list`
+shows them.
+
+Those rows are owned by the page spec. Every save rewrites them, deleting the
+page deletes them, and editing one by hand does not stick.
+
+## Actions — the interactive half
+
+A page that cannot *do* anything is a report. A panel may declare **actions**:
+buttons an operator clicks to run a routine, open an internal entity, or fold a
+panel away.
+
+```yaml
+actions:
+  - id: restart-api
+    kind: call                 # call | link | toggle | custom
+    label: Restart API
+    style: danger
+    routine: restart-api
+    confirm:
+      title: Restart the API?
+      body: In-flight requests are dropped.
+    inputs:
+      - name: reason
+        type: text
+        required: true
+```
+
+Dispatch one with
+[`crewship page action`](/cli/page#crewship-page-action-slug-panel-action-id),
+or from the panel itself.
+
+### The button posts an id, not a routine
+
+This is the load-bearing decision, and it is what makes "actions come from the
+page's declared allow-list only" verifiable rather than aspirational.
+
+A click posts to
+`POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}`, and the body
+carries **only the collected inputs**. The server resolves the action id against
+the page's stored spec and dispatches the routine named *there*. A compromised
+client, an injected narrative panel, or an agent cannot name a routine at click
+time, because the wire format has no field for one.
+
+An agent may write a panel's data. It can never author the button underneath it.
+
+### A link carries an entity, never a URL
+
+A `link` action names an internal entity by kind and id — `issue`, `run`,
+`page`, `agent` — and the renderer builds the address. There is no URL field
+anywhere in the action schema, deliberately: Slack AI's private-channel
+exfiltration in 2024 was a rendered link, and CamoLeak (CVE-2025-59145) proved
+that proxying through a trusted first-party host is not a defence. The schema
+simply has nowhere to put one.
+
+### Confirmation is drawn by the host, and only where it earns its place
+
+A `confirm` block is rendered by the application chrome, never by panel content,
+so an injected panel cannot fake or skip it. And it is calibrated to blast
+radius rather than applied universally: a read-only or reversible action
+declares none. A dialog on every click is a rubber stamp, not a control.
+
+For the same reason, a `narrative.v1` panel — the one whose content an agent
+writes — may not declare actions in this release. A panel that both displays
+untrusted prose and can trigger an action is the shape that turns a prompt
+injection into an operation.
+
+### Clicking returns when the run is queued
+
+The endpoint answers `202` with a pending id, never the run's result. A button
+on a ten-minute routine must not hold a connection open, and no surface in the
+product waits on one.
+
+Three answers follow from that, and all three are the same construction rather
+than three features:
+
+- **A double-click is one run.** Every dispatch carries an `Idempotency-Key`;
+  the same key with the same inputs resolves to the original dispatch.
+- **A replayed key with *different* inputs is refused** (`409`) rather than
+  silently resolved onto the first run. A key that quietly returned somebody
+  else's result would report a click that never happened as a success.
+- **"Already running" is an answer, not a queue.** A second dispatch while the
+  first is still in flight gets `429` with `Retry-After`.
+
+### What the browser does with those answers
+
+The button is drawn by the page, not by the panel's payload, and every state it
+can be in comes from one of the answers above:
+
+| You see | Because |
+|---|---|
+| A dialog with the action's own title and body | the action declares `confirm`. Nothing is sent until you answer it, and the dialog is application chrome — a panel supplies four strings, never markup. |
+| A small form | the action declares `inputs`. The fields come from the server's declaration; only *required* is checked here, everything else is the server's to judge. |
+| **Queued. It has not started yet.** | the `202`. The click enqueued a run; the button says so rather than claiming the work is done. |
+| The routine's run rail, inline under the panel | the routine the receipt named turned up in the workspace's active-run feed. It is the same rail the Routines surface draws — the button did not invent a second progress view. |
+| **Running…**, and the button greyed | that routine is still in flight. Clicking again would only earn a `429`. |
+| **…already running — try again in 5 s.** | the `429`, quoting the server's own sentence and the `Retry-After` it sent. This is an answer, not a failure. |
+| The server's refusal, in the server's words, with your inputs still in the form | a `4xx`/`5xx`. Nothing is cleared, because a retry needs it. Press the action again to re-send the values as they now stand. |
+
+A `toggle` folds the panels it targets away and back. It is local to your
+browser: no request is made, nothing is saved, and a reload brings them back.
+
+### Who may click
+
+Two halves, and both must hold: you can **see the panel** (crew membership, or a
+workspace admin role), and you hold what the **routine itself** requires
+(MANAGER+, and the routine must be `active`). A page button is never a cheaper
+way to run a routine than the routine's own surface.
+
+A caller who cannot see the panel gets `404` — the same answer as an action that
+does not exist. A `403` would confirm that the action exists for somebody else,
+which is precisely what the sealed placeholder is designed not to disclose.
+
+Every dispatch is journalled with who clicked, which action, and which routine
+the server resolved it to.
 
 ## Permission model
 

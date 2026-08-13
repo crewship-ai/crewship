@@ -104,6 +104,18 @@ var journalCategories = map[journal.EntryType]string{
 	// "every crew on this instance is three releases old", which is an
 	// instance-health fact — exactly what system.health names, and its first
 	// journal producer.
+	// Pages. pages.stale was a registered category with no producer at all —
+	// the freshness contract's whole point is that a page which quietly stops
+	// updating must say so, and nothing said it. page.panel.stale is written
+	// once per LAPSE by the sweeper (not once per tick), so this maps a
+	// notification to an edge rather than to a condition, which is what keeps
+	// it from becoming the firehose the paragraph above warns about.
+	//
+	// page.panel.recovered is deliberately absent: the recovery is in the
+	// journal for whoever asks, and "your panel is fine again" is not worth a
+	// second delivery to somebody who may not have read the first.
+	journal.EntryPagePanelStale: notify.CategoryPagesStale,
+
 	journal.EntryImageStale:      notify.CategorySystemHealth,
 	journal.EntrySystemMigration: notify.CategorySystemMigration,
 	journal.EntryGuardrailInput:  notify.CategorySecurity,

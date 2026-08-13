@@ -129,10 +129,17 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// every external reader an accountant or client was given, with no
 	// error anyone would see until they clicked.
 	"page_public_tokens": IntentInclude,
-	"hooks":               IntentInclude,
-	"labels":              IntentInclude,
-	"milestones":          IntentInclude,
-	"projects":            IntentInclude,
+	// page_panel_alerts is the edge a lapse was already reported on: one row
+	// per (panel, gate) while an alert is open, deleted on recovery. It rides
+	// the bundle because dropping it is not neutral in either direction — a
+	// restore without it re-opens an issue on the next sweep for an outage a
+	// human already closed by hand, and it carries the issue_id that makes the
+	// recovery entry able to name what it is closing.
+	"page_panel_alerts": IntentInclude,
+	"hooks":             IntentInclude,
+	"labels":            IntentInclude,
+	"milestones":        IntentInclude,
+	"projects":          IntentInclude,
 
 	// === Eval / training (round-trip) =========================
 	"eval_runs":           IntentInclude,

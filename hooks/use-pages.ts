@@ -33,6 +33,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeChannelSafe, useRealtimeEventSafe } from "@/hooks/use-realtime"
 import {
+  normalizePanelActions,
+  type PageAction,
+} from "@/components/features/pages/panels/panel-actions"
+import {
   PANEL_STATES,
   type PanelSnapshot,
   type PanelSpec,
@@ -81,6 +85,16 @@ export interface WirePanel {
    *  panel components already refuse to render it in a public view (§7.3.2b). */
   failure?: string | null
   reason?: string | null
+  /**
+   * §8b.1: `[{id, kind, label, style?, confirm?, inputs?, ref?, target?}]`.
+   *
+   * Typed `unknown` on purpose. `normalizePanelActions` copies field by field
+   * onto a fresh object, so a `routine` a spec or an agent smuggled onto the
+   * wire has nowhere to land — and declaring a `WireAction` interface here
+   * would invite somebody to add that field to it. §8b.2: the button posts an
+   * action id, and the SERVER resolves what it runs.
+   */
+  actions?: unknown
 }
 
 export interface WirePage {
@@ -175,6 +189,18 @@ export interface PanelView {
   /** Server-computed, or null when this build could not read one. */
   state: PanelState | null
   /**
+   * The panel's declared buttons (§8b). Always an array — a panel with no
+   * actions has zero of them, never `undefined`, so no caller has to decide
+   * what a missing list means.
+   *
+   * A SEALED panel gets an empty list whatever the wire said. §11b.14 fixes
+   * its serialisation as `{panel_id, span, sealed, owner_crew_name}` and
+   * nothing else; an action arriving alongside that is either a serialisation
+   * bug or an attempt to put a button on a panel the viewer was refused, and
+   * both answers are the same.
+   */
+  actions: PageAction[]
+  /**
    * A panel the viewer may not see (§7.1 rule 2, §11b.14). The server has
    * already removed everything but the id, the grid slot and the owning crew's
    * name, so this is not a hint — it is the whole panel.
@@ -228,6 +254,7 @@ export function toPanelView(raw: WirePanel, index = 0): PanelView {
     },
     producer: trimmed(raw.producer),
     state,
+    actions: sealed ? [] : normalizePanelActions(raw.actions),
   }
 }
 

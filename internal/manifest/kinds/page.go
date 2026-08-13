@@ -376,6 +376,20 @@ func (d *PageDocument) writeBody() (map[string]any, error) {
 		if p.Public {
 			panel["public"] = true
 		}
+		// The sensor half (PRD §5, §4 rule 4). Sent verbatim: the server
+		// parses `when:` against the panel's schema and resolves the crews,
+		// which is where those rules belong — a manifest that declared a gate
+		// the applier dropped on the floor would be a page that looks
+		// monitored and is not. Like `public`, they are not diffable from
+		// here (the read path does not echo them), so a change to a gate alone
+		// is only applied when something else on the page changes too; see
+		// pagePanelsDiffer.
+		if len(p.Wake) > 0 {
+			panel["wake"] = p.Wake
+		}
+		if p.OnFailure != nil {
+			panel["on_failure"] = p.OnFailure
+		}
 		panels = append(panels, panel)
 	}
 	body := map[string]any{

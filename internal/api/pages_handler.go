@@ -66,6 +66,12 @@ type PageHandler struct {
 	// Layer 2 — the floor that survives more than one replica — is in the push
 	// transaction itself (pages_data.go).
 	pushLimits *pages.PushLimiter
+	// automationRefresh reloads the in-memory automation registry after this
+	// handler has written wake-gate rules. Nil in tests and in any process
+	// that runs no registry; see SetAutomationRefresh in pages_wake.go for why
+	// the alternative is a gate that does nothing for up to a minute after it
+	// is authored.
+	automationRefresh func(context.Context)
 }
 
 // NewPageHandler builds the handler with the production clock.
@@ -122,6 +128,25 @@ type pagePanelWire struct {
 	SLASeconds int    `json:"sla_seconds"`
 	Span       int    `json:"span"`
 	Public     bool   `json:"public,omitempty"`
+
+	// Actions are the buttons this panel declares (§8b.1). They ride on the
+	// WRITE half of this struct: a human authoring the page sends them, and the
+	// server stores them in spec_json, which is the allow-list a click is
+	// resolved against (§8b.2). They are not echoed on the read path here — a
+	// panel's actions are served by GET …/panels/{id}/actions, which reads that
+	// same stored spec (pages_actions.go), so there is one reader of it and a
+	// sealed panel cannot leak its buttons through the page document.
+	Actions []pages.PanelAction `json:"actions,omitempty"`
+
+	// Wake and OnFailure are the sensor half of the panel (§5, §4 rule 4) and
+	// ride on the WRITE half of this struct, like Actions: a human authors
+	// them, the server stores them in spec_json, and spec_json is what the
+	// gate compiler and the freshness sweeper read. They are not echoed on the
+	// read path — `crewship page export` serves the stored spec, which is
+	// where the authored form belongs, and a panel document that carried
+	// half the spec back would invite a client to treat it as the whole of it.
+	Wake      []pages.PanelWake     `json:"wake,omitempty"`
+	OnFailure *pages.PanelOnFailure `json:"on_failure,omitempty"`
 
 	State      string          `json:"state,omitempty"`
 	Reason     string          `json:"reason,omitempty"`
@@ -251,6 +276,12 @@ type panelRecord struct {
 	// crew removed. It outranks the clock — no amount of recent data makes a
 	// panel whose producer is gone current.
 	Fault string
+
+	// Gates are the panel's compiled `wake:` thresholds and its on_failure
+	// crew (§5, §4 rule 4), attached from the spec loadPanels already parses.
+	// A panel that declares neither leaves this zero, and the push path spends
+	// one length check on it. See pages_wake.go.
+	Gates panelGates
 
 	// Snapshot, filled from the newest page_panel_data row when there is one.
 	HasData    bool
@@ -468,6 +499,14 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The sensor's half of the same gate: every `wake:` predicate has to be
+	// readable against its panel's schema, and every crew it names has to
+	// exist (§5). Before the transaction, so a bad gate is a 400 rather than a
+	// rollback.
+	gates, ok := h.resolveGates(w, r, wsID, doc)
+	if !ok {
+		return
+	}
 
 	// §7.1 rule 1: a page has exactly one owner, and it is either a user or a
 	// crew — owner_user_id XOR owner_crew_id, which the schema enforces. The
@@ -542,6 +581,14 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// §5: each wake gate compiles to an `automations` row, in the SAME
+	// transaction as the page. A page whose spec says it wakes devops, saved
+	// next to a rule set that failed to write, is a page that lies about what
+	// it does.
+	if err := reconcileWakeAutomations(r.Context(), tx, wsID, pageID, doc.Metadata.Slug, gates, user.ID, now); err != nil {
+		replyInternalError(w, h.logger, "compile page wake gates", err)
+		return
+	}
 	// §10b.1: every save is a version, following the pipeline_versions
 	// precedent — several agents may rewrite one page and the one who breaks it
 	// is rarely the one who notices.
@@ -564,6 +611,9 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "reload created panels", err)
 		return
 	}
+	// A gate authored in this save must fire on the NEXT push, not up to a
+	// minute later (§5).
+	h.refreshAutomations(r.Context())
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
 	writeJSON(w, http.StatusCreated, h.pageDocument(r.Context(), rec, panels, nil))
 }
@@ -634,6 +684,10 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	gates, ok := h.resolveGates(w, r, wsID, base)
+	if !ok {
+		return
+	}
 
 	specJSON, err := json.Marshal(base)
 	if err != nil {
@@ -660,6 +714,13 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := reconcilePanels(r.Context(), tx, rec.ID, base, resolved, now); err != nil {
 		replyInternalError(w, h.logger, "reconcile page panels", err)
+		return
+	}
+	// A gate removed from the spec loses its rule here, in the same
+	// transaction that removed it. The rules are derived state; the spec is
+	// the source of truth (§5).
+	if err := reconcileWakeAutomations(r.Context(), tx, wsID, rec.ID, rec.Slug, gates, user.ID, now); err != nil {
+		replyInternalError(w, h.logger, "compile page wake gates", err)
 		return
 	}
 	var seq int64
@@ -695,6 +756,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "reload updated panels", err)
 		return
 	}
+	h.refreshAutomations(r.Context())
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": updated.ID, "slug": updated.Slug})
 	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, nil))
 }
@@ -730,6 +792,18 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "delete page", err)
 		return
 	}
+	// Panels, data, versions and grants cascade from the page row; the wake
+	// gates' `automations` rows belong to another feature's table and do not.
+	// A rule left behind would sit in `automation list` matching an event no
+	// surviving panel can emit.
+	if err := deletePageWakeAutomations(r.Context(), h.db, wsID, rec.ID); err != nil {
+		// The page is gone and the response is a 204 either way; a rule the
+		// delete could not remove is an orphan to log, not a reason to tell
+		// the caller their delete failed.
+		h.logger.Warn("pages: deleting the page's wake automations failed",
+			"page", rec.Slug, "page_id", rec.ID, "error", err)
+	}
+	h.refreshAutomations(r.Context())
 	broadcastWorkspaceEvent(h.hub, wsID, "page.deleted", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -867,6 +941,10 @@ func (h *PageHandler) loadPanels(ctx context.Context, wsID, pageID string) ([]*p
 	if err := h.db.QueryRowContext(ctx, `SELECT spec_json FROM pages WHERE id = ?`, pageID).Scan(&specJSON); err == nil {
 		_ = json.Unmarshal([]byte(specJSON), &specDoc)
 	}
+	// The same spec carries each panel's wake gates and on_failure block
+	// (§5, §4 rule 4). Attached here, off a document that is already parsed,
+	// so the sensor costs the read path nothing — see pages_wake.go.
+	attachPanelGates(&specDoc, byPanelID)
 	ordered := make([]*panelRecord, 0, len(order))
 	seen := map[string]bool{}
 	for _, ps := range specDoc.Spec.Panels {
@@ -1076,14 +1154,17 @@ func panelSpecsFrom(w http.ResponseWriter, in []pagePanelWire) ([]pages.PanelSpe
 			return nil, false
 		}
 		out = append(out, pages.PanelSpec{
-			ID:       p.ID,
-			Schema:   pages.PanelSchema(p.Schema),
-			Title:    p.Title,
-			Owner:    p.Owner,
-			Producer: p.Producer,
-			SLA:      fmt.Sprintf("%ds", p.SLASeconds),
-			Span:     p.Span,
-			Public:   p.Public,
+			ID:        p.ID,
+			Schema:    pages.PanelSchema(p.Schema),
+			Title:     p.Title,
+			Owner:     p.Owner,
+			Producer:  p.Producer,
+			SLA:       fmt.Sprintf("%ds", p.SLASeconds),
+			Span:      p.Span,
+			Public:    p.Public,
+			Actions:   p.Actions,
+			Wake:      p.Wake,
+			OnFailure: p.OnFailure,
 		})
 	}
 	return out, true
@@ -1202,6 +1283,12 @@ func (h *PageHandler) resolveReferences(w http.ResponseWriter, r *http.Request, 
 			}
 		}
 		out[p.ID] = resolvedPanel{OwnerCrewID: crewID, Kind: string(kind), Ref: ref}
+	}
+	// The same gate applied to the routines a `call` action names — see
+	// resolveActionRoutines in pages_actions.go for why a button that resolves
+	// only at click time is the worse half of this failure.
+	if !h.resolveActionRoutines(w, r, wsID, doc) {
+		return nil, false
 	}
 	return out, true
 }
