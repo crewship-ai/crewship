@@ -78,7 +78,7 @@ export function NarrativePanel({ panel, data, now, publicView = false, className
         ) : null}
         <PanelValue basis="measured" dimmed={gate.dimmed} className="flex flex-col gap-2">
           {verdict ? (
-            <p data-slot="narrative-verdict" className="text-body font-semibold text-foreground">
+            <p data-slot="narrative-verdict" className="type-page-value font-semibold text-foreground">
               {verdict}
             </p>
           ) : null}
@@ -86,7 +86,7 @@ export function NarrativePanel({ panel, data, now, publicView = false, className
             // A measured "the agent ran and had nothing to say". Not the em
             // dash: the producer did run, so there IS a basis — the basis is
             // that there was nothing to report (§9b.4).
-            <p className="text-body text-muted-foreground">
+            <p className="type-page-value text-muted-foreground">
               The agent produced no narrative in its latest push.
             </p>
           ) : (
@@ -138,7 +138,7 @@ function NarrativeBlocks({ blocks }: { blocks: NarrativeBlock[] }) {
           <ul
             key={group.at}
             data-slot="narrative-list"
-            className="flex list-disc flex-col gap-1 pl-4 text-body text-muted-foreground marker:text-muted-foreground-soft"
+            className="flex list-disc flex-col gap-1 pl-4 type-page-value text-muted-foreground marker:text-muted-foreground-soft"
           >
             {group.items.map((item, i) => (
               <li key={i} data-slot="narrative-block" data-kind="list" className="min-w-0 break-words">
@@ -151,7 +151,7 @@ function NarrativeBlocks({ blocks }: { blocks: NarrativeBlock[] }) {
             key={group.at}
             data-slot="narrative-block"
             data-kind="paragraph"
-            className="min-w-0 break-words text-body text-muted-foreground"
+            className="min-w-0 break-words type-page-value text-muted-foreground"
           >
             <BlockText block={group.items[0]} />
           </p>

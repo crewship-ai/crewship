@@ -168,7 +168,11 @@ type pageWritePanelJSON struct {
 	Title  string `json:"title,omitempty"`
 	// The panel's glyph (internal/pages/icons.go). ParseDocument has already
 	// refused anything outside the closed set, and the server refuses it again.
-	Icon       string `json:"icon,omitempty"`
+	Icon string `json:"icon,omitempty"`
+	// The tab this panel renders under (internal/pages/tabs.go). Sent for the
+	// same reason as the icon: it is authored page structure, and a field the
+	// CLI drops is a field `crewship page update --file page.yaml` deletes.
+	Tab        string `json:"tab,omitempty"`
 	Owner      string `json:"owner"`
 	Producer   string `json:"producer"`
 	SLASeconds int    `json:"sla_seconds"`
@@ -464,6 +468,7 @@ func pageWriteFrom(doc *pages.Document) *pageWriteJSON {
 			Schema:     string(p.Schema),
 			Title:      p.Title,
 			Icon:       string(p.Icon),
+			Tab:        p.Tab,
 			Owner:      p.Owner,
 			Producer:   p.Producer,
 			SLASeconds: int(sla.Seconds()),

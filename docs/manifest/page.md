@@ -45,6 +45,7 @@ spec:
       schema: status.v1         # required — closed set, see below
       title: Jede to?           # optional — the panel heading
       icon: container           # optional — closed set, see below
+      tab: Síť                  # optional — the screen it renders on; no tab anywhere = no bar
       owner: crew/lookout       # required — permission anchor, not a label
       producer: script/watch-services.sh   # required — who may write it
       sla: 30s                  # required — Go duration; 0 is not allowed
@@ -68,6 +69,7 @@ spec:
 | `schema` | yes | One of the closed set. `metric.v1`, `status.v1` and `table.v1` ship first; the rest are reserved and are refused with "reserved but not yet implemented" until their renderer lands. |
 | `title` | no | Panel heading. |
 | `icon` | no | The panel's glyph, from a closed set of 13: `memory` (RAM), `cpu`, `disk`, `network`, `container`, `database`, `queue`, `clock`, `calendar`, `money`, `people`, `deploy`, `alert`. Absent means the icon the panel's schema implies, which is what three `status.v1` panels on one page all get. The set is closed because an open string is a name the server accepts and the browser cannot draw, and a blank header reads as a design decision rather than as an error; the refusal names every allowed value. There is no `check` and no per-icon colour — the panel already renders a verdict, and colour on this surface means state. |
+| `tab` | no | The screen this panel renders on. The bar is the tab names in the order they FIRST APPEAR in this list — there is no `tabs:` block, so there is no second list that can disagree with the panels. A panel that declares none lands on the first tab; a page where nothing declares one has no bar and renders as it always did. Max 32 characters, max 8 tabs per page, and two names differing only by case are refused. |
 | `owner` | yes | `crew/<slug>`. Must be a crew — never a user. |
 | `producer` | yes | `<kind>/<ref>` with kind in `{routine, script, agent, webhook}`. There is no `sql` or `datasource` kind and there will not be one. |
 | `sla` | yes | Go duration string: `30s`, `5m`, `1h`. Must be greater than zero. Sent to the server as `sla_seconds`. |
@@ -80,6 +82,17 @@ spec:
 Panel ORDER is the layout. The grid is declared, never dragged, so two
 pages with the same panels in a different order are two different
 pages, and reordering the list is a real change the plan will report.
+With `tab:` on the panels, that order is also the order of the bar.
+
+A tab HIDES panels, which is why it is not only a layout choice. Each
+tab carries the worst freshness state of its own panels — `failed` over
+`stale` over `never_produced` over `fresh` — as a glyph beside its name,
+and the page's own freshness summary is computed over EVERY tab rather
+than the visible one. A panel that stops reporting on a tab nobody is
+looking at still says so. A tab whose panels are all sealed to a reader
+still appears on that reader's bar, carrying its placeholders: the page
+has the same shape for everyone, and a bar that reflowed per viewer
+would disclose, by what it left out, whose data was on it.
 
 ### `spec.panels[].actions[]`
 
@@ -192,6 +205,43 @@ Anyone in `engineering` but not in `devops` sees the `build` panel and
 a sealed placeholder where `incidents` is — same grid, same two slots,
 no payload and no producer name for the panel they may not see.
 
+### A page with tabs
+
+```yaml
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Síť
+  slug: sit
+spec:
+  panels:
+    - id: dosah
+      schema: status.v1
+      owner: crew/ops
+      producer: script/ping-go
+      sla: 30s
+      tab: Síť
+
+    - id: latence
+      schema: metric.v1
+      owner: crew/ops
+      producer: script/ping-go
+      sla: 30s
+      tab: Odezva
+
+    - id: http
+      schema: series.v1
+      owner: crew/engineering
+      producer: script/ping-py
+      sla: 30s
+      tab: Odezva              # same name, same tab
+```
+
+Two tabs — `Síť` then `Odezva`, the order they first appear — under the
+breadcrumb, one screen at a time instead of one long scroll. Adding a
+third is one word on the panel that needs it. Deleting every `tab:` puts
+the page back to a single grid with no bar.
+
 ## CLI reference
 
 The per-entity command is `crewship page`, defined in
@@ -224,6 +274,7 @@ context, following `saved-views` and `missions`.
 | `spec.panels[].schema` | `panels[].schema` | |
 | `spec.panels[].title` | `panels[].title` | Omitted when empty. |
 | `spec.panels[].icon` | `panels[].icon` | Omitted when empty — absent means "the schema's own", and an empty string would say the same thing a second way. Echoed on the read path (unlike `public`, `actions` and the gates), so drift detection compares it. |
+| `spec.panels[].tab` | `panels[].tab` | Omitted when empty. Echoed on the read path — on the sealed placeholder too, because the tab bar is the page's shape and is the same for every viewer — so drift detection compares it. |
 | `spec.panels[].owner` | `panels[].owner` | |
 | `spec.panels[].producer` | `panels[].producer` | |
 | `spec.panels[].sla` | `panels[].sla_seconds` | `30s` → `30`. One representation in the database, one on the wire, one for humans. |
@@ -268,6 +319,10 @@ use, so a document that validates here validates everywhere:
 - `icon`, when declared, must be a member of the closed set. Case is not
   folded and synonyms are not guessed: `Memory` and `ram` are both refused,
   because accepting either would teach a spelling that is not the vocabulary.
+- `tab`, when declared, must be one readable line: not blank, no control
+  characters, at most 32 characters, and at most 8 distinct tabs per page.
+  Two names that differ only in case are refused — `Odezva` and `odezva`
+  are two tabs a reader sees as one. Names are trimmed, never case-folded.
 - Action ids are slug-shaped and unique within the page; `kind` is
   closed and an undeclared one is a refusal, not a warning.
 - A `call` names a routine slug; a `link` carries an entity `ref` and
@@ -338,8 +393,10 @@ discovered:
    create and update and does take effect; it simply cannot be verified
    from the manifest side, so a page whose `public` flag was flipped in
    the UI will not be reported as drifted.
-2. **A sealed panel is compared on `id` and `span` only.** That is all a
-   placeholder carries. If you apply a manifest containing a panel owned
+2. **A sealed panel is compared on `id`, `span` and `tab` only.** That is
+   all a placeholder carries — the three fields that are the page's SHAPE
+   rather than the panel's data, and the page has the same shape for
+   everyone. If you apply a manifest containing a panel owned
    by a crew you are not in, drift in its schema, producer, title, icon
    or SLA is invisible — and treating "cannot see" as "must differ" would PATCH
    the page on every single apply, minting a version nobody asked for.

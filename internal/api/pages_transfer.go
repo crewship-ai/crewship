@@ -110,11 +110,15 @@ type pageBundlePage struct {
 // while publication is a property of the install. A bundle that lost the icon
 // would install a page whose headers all look alike, which is the state this
 // field exists to end.
+// `tab` travels for the same reason as the icon and as `span`: it is the
+// page's shape, authored into the document, and a bundle that dropped it would
+// install one long scroll where the author drew four screens.
 type pageBundlePanel struct {
 	ID         string `json:"id"`
 	Schema     string `json:"schema"`
 	Title      string `json:"title,omitempty"`
 	Icon       string `json:"icon,omitempty"`
+	Tab        string `json:"tab,omitempty"`
 	Owner      string `json:"owner"`
 	Producer   string `json:"producer"`
 	SLASeconds int    `json:"sla_seconds"`
@@ -230,6 +234,7 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 			Schema:     string(p.Schema),
 			Title:      p.Title,
 			Icon:       string(p.Icon),
+			Tab:        p.Tab,
 			Owner:      strings.TrimSpace(p.Owner),
 			Producer:   strings.TrimSpace(p.Producer),
 			SLASeconds: int(sla.Seconds()),
@@ -399,6 +404,7 @@ func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
 			// bundle: an icon this build does not know is a refused import,
 			// not a panel that renders a blank header here.
 			Icon:     pages.PanelIcon(strings.TrimSpace(p.Icon)),
+			Tab:      p.Tab,
 			Owner:    strings.TrimSpace(p.Owner),
 			Producer: strings.TrimSpace(p.Producer),
 			SLA:      fmt.Sprintf("%ds", p.SLASeconds),

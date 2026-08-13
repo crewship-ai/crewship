@@ -21,13 +21,21 @@ import type { PanelProps } from "./types"
 
 /**
  * The panel shell. One card idiom for every schema, copied from the Routines
- * overview (§9b.2): small icon + 11px uppercase tracking-wider label on the
- * left, right-aligned muted status word on the right — and the right-hand word
- * is always the *answer* ("current", "stale", "no data yet"), never a repeat of
+ * overview (§9b.2): small icon + uppercase tracked label on the left,
+ * right-aligned muted status word on the right — and the right-hand word is
+ * always the *answer* ("current", "stale", "no data yet"), never a repeat of
  * the label.
  *
  * The shell is `SectionCard`, documented as the canonical container for
  * grouped content inside a page. Pages does not invent a panel shell.
+ *
+ * **Type comes from the Pages register** (`app/globals.css`, "The Pages
+ * register") and never from a pixel value written here. This file is where the
+ * four roles a panel is made of are first drawn — `.type-page-label` on the
+ * header, `.type-page-meta` on the status word and the age, `.type-page-stamp`
+ * on the provenance footer, `.type-page-metric` on the value and on the em dash
+ * that stands in for it — so a schema's own component inherits the sizes by
+ * rendering into this frame rather than by restating them.
  */
 export interface PanelFrameProps extends PanelProps {
   /**
@@ -95,14 +103,14 @@ export function PanelFrame({
       title={
         <span
           data-slot="panel-label"
-          className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70"
+          className="type-page-label inline-flex items-center gap-1.5 text-foreground/70"
         >
           <Icon className="h-3.5 w-3.5 text-muted-foreground-soft" aria-hidden="true" />
           <span>{label}</span>
         </span>
       }
       actions={
-        <span data-slot="panel-status-word" className="text-[11px] text-muted-foreground">
+        <span data-slot="panel-status-word" className="type-page-meta text-muted-foreground">
           {statusWord ?? panelStateWord(data.state)}
         </span>
       }
@@ -185,15 +193,15 @@ export function FailedValue({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <PanelValue basis="none" tone="destructive" className="text-display font-semibold leading-none">
+        <PanelValue basis="none" tone="destructive" className="type-page-metric">
           {EM_DASH}
         </PanelValue>
         {now ? <PanelAge producedAt={producedAt} now={now} /> : null}
       </div>
       {publicView ? (
-        <p className="text-body text-muted-foreground">Data are not current.</p>
+        <p className="type-page-value text-muted-foreground">Data are not current.</p>
       ) : (
-        <p className="text-body text-destructive/90">
+        <p className="type-page-value text-destructive/90">
           {failure?.trim() || "The producer's last run failed."}
         </p>
       )}
@@ -216,11 +224,11 @@ export function NeverProducedValue({ hint }: { hint: string }) {
         basis="none"
         tone="muted"
         dimmed
-        className="text-display font-semibold leading-none"
+        className="type-page-metric"
       >
         {EM_DASH}
       </PanelValue>
-      <p className="text-body text-muted-foreground">{hint}</p>
+      <p className="type-page-value text-muted-foreground">{hint}</p>
     </div>
   )
 }
@@ -240,7 +248,7 @@ export function PanelAge({
   const age = formatAbsoluteAge(producedAt, now)
   if (!age) return null
   return (
-    <span data-slot="panel-age" className="text-[11px] text-muted-foreground tabular-nums">
+    <span data-slot="panel-age" className="type-page-meta text-muted-foreground tabular-nums">
       {age}
     </span>
   )
@@ -266,7 +274,7 @@ export function PanelProvenance({
   return (
     <div
       data-slot="panel-provenance"
-      className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border/60 pt-2 font-mono text-[11px] text-muted-foreground-soft"
+      className="type-page-stamp flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border/60 pt-2 text-muted-foreground-soft"
     >
       {!publicView && producer ? <span>{producer}</span> : null}
       {!publicView && runId ? <span>{runId}</span> : null}

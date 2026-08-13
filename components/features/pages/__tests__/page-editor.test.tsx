@@ -199,6 +199,34 @@ describe("a stored page round-trips through the document and back to the wire", 
     ])
   })
 
+  it("keeps the panel's icon and its tab across the round trip", () => {
+    // Both are authored, neither has a column, and both come back on the read
+    // path — so both have to survive this file. A PATCH replaces the panel set
+    // wholesale, which makes "not mentioned" mean "removed": before this, a
+    // title edit deleted every icon on the page, and it would have deleted
+    // every tab too. The failure is silent and looks like a page whose author
+    // never set them.
+    const tabbed: WirePage = {
+      ...FLEET,
+      panels: [
+        { ...(FLEET.panels as Record<string, unknown>[])[0], icon: "container", tab: "Síť" },
+        { ...(FLEET.panels as Record<string, unknown>[])[1], tab: "Odezva" },
+      ] as WirePage["panels"],
+    }
+
+    const text = pageDocumentText(tabbed)
+    expect(text).toContain("icon: container")
+    expect(text).toContain("tab: Síť")
+
+    const body = (parsePageBuffer(text) as { ok: true; body: PageWriteBody }).body
+    expect(body.panels[0].icon).toBe("container")
+    expect(body.panels[0].tab).toBe("Síť")
+    expect(body.panels[1].tab).toBe("Odezva")
+    // A panel that declares neither still sends neither — absent is not the
+    // same as empty, and an empty string is a second way to say "none".
+    expect(body.panels[1].icon).toBeUndefined()
+  })
+
   it("carries no server-attached field back onto the wire", () => {
     // §4 rule 5 / §7.1b: state, provenance and payload are the server's to
     // write. A round trip that sent them back would be a producer claiming an

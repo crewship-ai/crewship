@@ -24,9 +24,9 @@ export function UnknownSchemaPanel({ panel, data, now, publicView, className }: 
       className={className}
       icon={CircleHelp}
     >
-      <p className="text-body text-muted-foreground">
+      <p className="type-page-value text-muted-foreground">
         This version of Crewship does not render{" "}
-        <code className="font-mono text-[12px] text-foreground">{String(panel.schema)}</code>{" "}
+        <code className="type-page-stamp text-foreground">{String(panel.schema)}</code>{" "}
         panels. Upgrade Crewship, or change this panel to one of the schemas this build knows.
       </p>
     </PanelFrame>
@@ -54,8 +54,8 @@ export function PendingSchemaPanel({ panel, data, now, publicView, className }: 
       className={className}
       icon={icon}
     >
-      <p className="text-body text-muted-foreground">
-        <code className="font-mono text-[12px] text-foreground">{String(panel.schema)}</code>{" "}
+      <p className="type-page-value text-muted-foreground">
+        <code className="type-page-stamp text-foreground">{String(panel.schema)}</code>{" "}
         panels arrive in a later release. The panel and its data are being kept — nothing pushed
         to it is lost.
       </p>
@@ -78,7 +78,7 @@ export function PanelErrorPanel({ panel, data, now, publicView, className }: Pan
       className={className}
       icon={TriangleAlert}
     >
-      <p className="text-body text-destructive">
+      <p className="type-page-value text-destructive">
         This panel could not be rendered from its latest payload. The rest of the page is
         unaffected; re-push the panel or check the producer&apos;s output shape.
       </p>

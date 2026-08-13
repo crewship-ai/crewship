@@ -83,6 +83,17 @@ type PanelSpec struct {
 	// unknown schema, which at least renders a fallback that says so.
 	Icon PanelIcon `json:"icon,omitempty" yaml:"icon,omitempty"`
 
+	// Tab is the name on the tab bar this panel appears under. Optional: a page
+	// where no panel declares one has no bar and renders exactly as it did
+	// before tabs existed.
+	//
+	// One key on the panel and no `tabs:` block, so adding a tab is one word
+	// rather than a new section — and so there is no second list that can
+	// disagree with the panels about which of them exists. Bar order is first
+	// appearance; a panel with no tab lands on the first one. The whole rule,
+	// and the reason a tab is more than a layout choice, is in tabs.go.
+	Tab string `json:"tab,omitempty" yaml:"tab,omitempty"`
+
 	// Owner is the permission anchor, not a label: "crew/<slug>". A panel the
 	// viewer may not see is filtered server-side before serialisation and
 	// leaves a sealed placeholder in its grid slot, so the page has the same
@@ -393,6 +404,15 @@ func (d *Document) Validate() error {
 			return newError(CodeInvalidSpec, p.Schema,
 				"panel %q declares span %d; the grid has 12 columns", p.ID, p.Span)
 		}
+	}
+
+	// Tabs before actions, and page-scoped for the same kind of reason: how many
+	// distinct tabs a page declares, and whether two of them differ only by
+	// case, are not questions the per-panel loop above can answer. A tab hides
+	// panels (tabs.go), so a bar that draws a blank word, or the same word
+	// twice, is a page whose reader cannot tell what they are not being shown.
+	if err := validatePageTabs(d.Spec.Panels); err != nil {
+		return err
 	}
 
 	// Actions last, because two of their rules are page-scoped: ids are unique

@@ -206,7 +206,7 @@ function PublicPageFooter({ page, now }: { page: PublicPage; now?: Date }) {
   return (
     <footer
       data-slot="public-page-footer"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-3 text-[11px] text-muted-foreground-soft"
+      className="type-page-meta flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-3 text-muted-foreground-soft"
     >
       {generated ? <span>Rendered {formatInstant(generated, now)}</span> : null}
       {expires ? <span data-slot="public-page-expiry">This link stops working {formatInstant(expires, now)}</span> : null}

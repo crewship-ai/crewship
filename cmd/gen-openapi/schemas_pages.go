@@ -54,6 +54,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 				"database", "queue", "clock", "calendar", "money", "people",
 				"deploy", "alert"},
 			"description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state."},
+		"tab": map[string]any{"type": "string",
+			"description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4)."},
 		"owner": map[string]any{"type": "string",
 			"description": "`crew/<slug>`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2)."},
 		"producer": map[string]any{"type": "string",
@@ -79,11 +81,17 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	// the page has the same shape for everyone, and `sealed` is present rather
 	// than inferred, so a serialisation bug cannot be read as a permission
 	// decision.
+	// The one addition to that list is `tab`, and it is there for the
+	// placeholder's own reason: the page must have the same shape for everyone,
+	// and a tab whose panels are all sealed to this reader must still appear on
+	// their bar. It is authored page structure, exactly like `span`, and says
+	// nothing about the panel's data, producer or health.
 	sealedPanel := obj(map[string]any{
 		"panel_id":        str(),
 		"span":            integer(),
 		"sealed":          map[string]any{"type": "boolean", "enum": []any{true}},
 		"owner_crew_name": str(),
+		"tab":             str(),
 	})
 
 	page := obj(map[string]any{

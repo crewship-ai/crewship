@@ -50,7 +50,7 @@ export function StatusPanel({ panel, data, now, publicView = false, className }:
         ) : null}
         <PanelValue basis="measured" dimmed={gate.dimmed}>
           {items.length === 0 ? (
-            <p className="text-body text-muted-foreground">
+            <p className="type-page-value text-muted-foreground">
               The producer reported no items in its latest push.
             </p>
           ) : (
@@ -135,16 +135,26 @@ function StatusRow({ item }: { item: StatusItem }) {
         aria-hidden="true"
         className={cn("-my-2 w-1 shrink-0 rounded-r-sm", stateRailClass(presentation.badge))}
       />
-      {/* Name over label, so a narrow panel loses neither. */}
+      {/* Name over label, so a narrow panel loses neither.
+       *
+       * The name is the row's CONTENT and the label qualifies it, so they take
+       * the register's value and meta roles — not `.type-row` and `text-micro`,
+       * which is what they were. Those two are the same 14px and 11px by
+       * coincidence of history rather than by a rule, and `.type-row`'s 1.3rem
+       * leading disagreed with the 1.25rem the collapsed table cards next to it
+       * use for the identical job. One 14px in Pages, and it is the one
+       * PropertyRow is written in (`app/globals.css`, "The Pages register"). */}
       <div className="flex min-w-0 flex-1 flex-col justify-center">
-        <span className="type-row truncate">{name}</span>
+        <span className="type-page-value truncate">{name}</span>
         {label ? (
-          <span className="truncate text-micro text-muted-foreground">{label}</span>
+          <span className="type-page-meta truncate text-muted-foreground">{label}</span>
         ) : null}
       </div>
+      {/* No size override: the house pill is 12px, which IS the register's meta
+       * role. A panel that restated it would be the drift this round removed. */}
       <StatusBadge
         status={presentation.badge}
-        className="shrink-0 self-center text-micro"
+        className="shrink-0 self-center"
         label={
           <>
             <span data-slot="status-glyph" aria-hidden="true" className="font-semibold">

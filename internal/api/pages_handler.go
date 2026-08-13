@@ -138,6 +138,16 @@ type pagePanelWire struct {
 	// the schema's own icon.
 	Icon string `json:"icon,omitempty"`
 
+	// Tab is the name on the tab bar this panel appears under
+	// (internal/pages/tabs.go). It rides on BOTH halves of this struct for the
+	// same reason the icon does — the client draws the bar, and a document that
+	// carried the tab only on the write path would render every page as one
+	// long scroll and lose the author's grouping on the next read.
+	//
+	// A page where no panel declares one sends nothing anywhere, and the client
+	// draws no bar.
+	Tab string `json:"tab,omitempty"`
+
 	// Actions are the buttons this panel declares (§8b.1). They ride on the
 	// WRITE half of this struct: a human authoring the page sends them, and the
 	// server stores them in spec_json, which is the allow-list a click is
@@ -179,6 +189,20 @@ type pageSealedPanelWire struct {
 	Span          int    `json:"span"`
 	Sealed        bool   `json:"sealed"`
 	OwnerCrewName string `json:"owner_crew_name"`
+
+	// Tab is the one field §11b decision 14's list has gained, and it is here
+	// for the decision's OWN reason rather than in spite of it.
+	//
+	// The placeholder exists so the page has the same shape for everyone: the
+	// grid does not reflow depending on who is looking. A tab bar is part of
+	// that shape. Without this field a sealed panel would have no tab, would
+	// fall onto the first one, and a tab whose panels are all foreign would
+	// vanish from that reader's bar — which both reflows the page per viewer
+	// and discloses, by the tab's absence, that everything on it belongs to a
+	// crew they are not in. The tab name is authored page structure, exactly
+	// like `span`; it says nothing about the panel's data, its producer or its
+	// health, which is what the placeholder withholds.
+	Tab string `json:"tab,omitempty"`
 }
 
 // pageWire is the page document returned by get/create/update.
@@ -287,6 +311,10 @@ type panelRecord struct {
 	// attached from the parsed spec the read path already loads, next to the
 	// wake gates — see panelsFor.
 	Icon string
+	// Tab is the bar this panel renders under (internal/pages/tabs.go). Like
+	// the icon it has no column and is attached from the parsed spec: it is
+	// layout, and page_panels carries the contract.
+	Tab string
 	// Fault is §10b.4's stated reason: the producer was deleted, the owning
 	// crew removed. It outranks the clock — no amount of recent data makes a
 	// panel whose producer is gone current.
@@ -974,6 +1002,12 @@ func (h *PageHandler) loadPanels(ctx context.Context, wsID, pageID string) ([]*p
 			// the spec (the racing-edit case below) simply keeps its schema's
 			// icon, which is what it had before it declared one.
 			p.Icon = string(ps.Icon)
+			// The tab travels the same road, for the same reason. A panel in
+			// the table but not in the spec keeps no tab and therefore lands on
+			// the first one — it is already rendering at the end of the page
+			// rather than disappearing (§10b.4), and a visible panel on the
+			// wrong tab is a better failure than a panel on no tab at all.
+			p.Tab = ps.Tab
 			ordered = append(ordered, p)
 			seen[ps.ID] = true
 		}
@@ -1028,6 +1062,7 @@ func (h *PageHandler) panelWire(p *panelRecord) pagePanelWire {
 		Schema:     p.Schema,
 		Title:      p.Title,
 		Icon:       p.Icon,
+		Tab:        p.Tab,
 		Owner:      p.ownerRef(),
 		Producer:   p.producerRef(),
 		SLASeconds: p.SLASeconds,
@@ -1105,6 +1140,7 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 				Span:          p.Span,
 				Sealed:        true,
 				OwnerCrewName: p.OwnerCrewName,
+				Tab:           p.Tab,
 			})
 			continue
 		}
@@ -1233,7 +1269,11 @@ func panelSpecsFrom(w http.ResponseWriter, in []pagePanelWire) ([]pages.PanelSpe
 			// Untrusted, and refused by name in Validate below: an icon the
 			// client cannot draw must never reach spec_json, because from
 			// there it reaches a header that renders blank.
-			Icon:      pages.PanelIcon(p.Icon),
+			Icon: pages.PanelIcon(p.Icon),
+			// Untrusted in the same way, and normalised and refused by
+			// validatePageTabs: a blank or unreadable tab name would draw
+			// nothing on the bar while still hiding the panels under it.
+			Tab:       p.Tab,
 			Owner:     p.Owner,
 			Producer:  p.Producer,
 			SLA:       fmt.Sprintf("%ds", p.SLASeconds),

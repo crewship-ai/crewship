@@ -845,6 +845,16 @@ page: a band of four stat tiles, then paired cards below.
   left, right-aligned muted status word — `38 total`, `none scheduled`, `no runs yet`,
   `nothing pending`, `all clean`. The right-hand word is always the *answer*, never a repeat of
   the label.
+- **Type comes from the Pages register**, declared once in `app/globals.css` under *"The Pages
+  register"* and never as a pixel value in a component. Five roles, named for the job:
+  `.type-page-label` (the uppercase header above, and a table's column heads), `.type-page-value`
+  (the content — cells, rows, prose, banners), `.type-page-meta` (the qualifier — status word,
+  age, counts, hints), `.type-page-stamp` (machine text — ids, slugs, run ids, versions) and
+  `.type-page-metric` (the one big number, and the em dash that stands in for it). Every one is
+  sized from a `--typo-*` house token, so the product's scale still reaches Pages; a surface that
+  writes `text-[11px]` has left the system and `type-register.test.tsx` fails. The rail is the
+  exception and is not Pages' to size: it belongs to the navigation register (`.type-nav`,
+  `.type-nav-sub`), because a rail is scanned and a card is read.
 - Page shell: `PageShell` / `PageHeader` (`components/layout/page-shell.tsx:32`,
   `page-header.tsx:7`); in-page tab switching `ToolbarStrip` (`toolbar-strip.tsx:40`) or `SubBar`
   (`sub-bar.tsx:82`).

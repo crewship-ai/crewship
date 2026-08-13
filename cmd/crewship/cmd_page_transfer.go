@@ -57,7 +57,11 @@ type pageBundlePanelJSON struct {
 	// The panel's glyph, from the closed set the server validates against
 	// (internal/pages/icons.go). Carried so `export | import` is a round trip:
 	// a field the bundle drops is a field the install silently loses.
-	Icon       string `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
+	// The panel's tab (internal/pages/tabs.go), carried for the same reason:
+	// a bundle that dropped it would install one long scroll where the author
+	// drew several screens.
+	Tab        string `json:"tab,omitempty" yaml:"tab,omitempty"`
 	Owner      string `json:"owner" yaml:"owner"`
 	Producer   string `json:"producer" yaml:"producer"`
 	SLASeconds int    `json:"sla_seconds" yaml:"sla_seconds"`

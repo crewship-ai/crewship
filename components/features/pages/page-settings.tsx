@@ -105,13 +105,16 @@ import {
 
 // ── The shared idiom (§9b.2) ───────────────────────────────────────────────
 //
-// "Small icon + 11px uppercase tracking-wider label on the left, right-aligned
-// muted status word. The right-hand word is always the ANSWER, never a repeat
-// of the label."
+// "Small icon + uppercase tracked label on the left, right-aligned muted status
+// word. The right-hand word is always the ANSWER, never a repeat of the label."
+//
+// The two sizes that used to be written out here are `.type-page-label` and
+// `.type-page-meta` from the Pages register (`app/globals.css`). §9b.2 says
+// what the idiom IS; the register says how big it is, once.
 
 function CardLabel({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
+    <span className="type-page-label inline-flex items-center gap-1.5 text-foreground/70">
       <Icon className="h-3.5 w-3.5 text-muted-foreground-soft" />
       {children}
     </span>
@@ -119,7 +122,7 @@ function CardLabel({ icon: Icon, children }: { icon: React.ElementType; children
 }
 
 function CardAnswer({ children }: { children: React.ReactNode }) {
-  return <span className="text-[11px] text-muted-foreground">{children}</span>
+  return <span className="type-page-meta text-muted-foreground">{children}</span>
 }
 
 /** One label/answer line. Same idiom, one row deep. */
@@ -138,7 +141,7 @@ function Fact({
       data-fact={label.toLowerCase()}
       className="flex items-baseline justify-between gap-4 border-b border-border/40 py-2 last:border-b-0"
     >
-      <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground-soft">
+      <span className="type-page-label shrink-0 text-muted-foreground-soft">
         {label}
       </span>
       <span
@@ -163,7 +166,7 @@ function Refusal({ children }: { children: React.ReactNode }) {
     <div
       role="alert"
       data-slot="page-settings-refusal"
-      className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/[0.06] px-3 py-2 text-[12px] text-destructive"
+      className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/[0.06] px-3 py-2 type-page-value text-destructive"
     >
       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <span className="min-w-0">{children}</span>
@@ -208,7 +211,7 @@ function GrantRow({
       )}
     >
       <div className="flex items-center gap-2">
-        <Badge variant="outline" className="h-4 shrink-0 px-1.5 font-mono text-[10px] leading-none">
+        <Badge variant="outline" className="h-4 shrink-0 px-1.5 font-mono leading-none">
           {grant.subjectType}
         </Badge>
         <span className="min-w-0 truncate text-xs font-medium text-foreground" title={grant.subject}>
@@ -216,7 +219,7 @@ function GrantRow({
         </span>
         <Badge
           variant="secondary"
-          className="h-4 shrink-0 px-1.5 text-[10px] leading-none"
+          className="h-4 shrink-0 px-1.5 leading-none"
           title={PAGE_GRANT_LEVEL_MEANING[grant.level as PageGrantLevel] ?? grant.level}
         >
           {grant.level}
@@ -227,7 +230,7 @@ function GrantRow({
           variant="ghost"
           onClick={onRevoke}
           disabled={disabled}
-          className="h-6 shrink-0 gap-1 px-2 text-[11px] text-muted-foreground hover:text-destructive"
+          className="type-page-meta h-6 shrink-0 gap-1 px-2 text-muted-foreground hover:text-destructive"
           aria-label={`Revoke ${grant.level} from ${grant.subjectType}/${grant.subject}`}
         >
           <Trash2 className="h-3 w-3" />
@@ -239,7 +242,7 @@ function GrantRow({
           panel_ids column means the grant covers the whole page, and saying
           "none" here would describe an agent as authorised for nothing. */}
       {grant.level === "produce" && (
-        <span className="text-[11px] text-muted-foreground">
+        <span className="type-page-meta text-muted-foreground">
           {grant.panels.length > 0
             ? `panels: ${grant.panels.join(", ")}`
             : "every panel on this page"}
@@ -248,17 +251,17 @@ function GrantRow({
 
       {/* §7.1b rule 1: only a human issues a grant, and the audit trail is
           the point. Who vouched for this, and when. */}
-      <span className="text-[11px] text-muted-foreground-soft">
+      <span className="type-page-meta text-muted-foreground-soft">
         Granted by <span className="text-muted-foreground">{dashed(grant.grantedBy)}</span>
         {grant.grantedAt ? ` · ${formatDateTime(grant.grantedAt)}` : ""}
       </span>
 
       {grant.live ? (
-        <span data-slot="grant-status" className="text-[11px] text-muted-foreground-soft">
+        <span data-slot="grant-status" className="type-page-meta text-muted-foreground-soft">
           live
         </span>
       ) : (
-        <span data-slot="grant-status" className="text-[11px] font-medium text-destructive">
+        <span data-slot="grant-status" className="type-page-meta font-medium text-destructive">
           {/* Verbatim. The reason is the only thing that tells the owner what
               to fix, and "inert" alone tells them something is wrong without
               telling them what. */}
@@ -267,7 +270,7 @@ function GrantRow({
       )}
 
       {grant.level === "read" && (
-        <span data-slot="grant-read-caveat" className="text-[11px] text-warn">
+        <span data-slot="grant-read-caveat" className="type-page-meta text-warn">
           {PAGE_GRANT_READ_CAVEAT}
         </span>
       )}
@@ -487,14 +490,14 @@ function AccessCard({
                   placeholder={panelIDs.length > 0 ? panelIDs.slice(0, 3).join(", ") : "panel ids, comma-separated"}
                   className="h-8 text-xs"
                 />
-                <span className="text-[11px] text-muted-foreground-soft">
+                <span className="type-page-meta text-muted-foreground-soft">
                   Leave empty to cover every panel. A scope naming a panel this page does not have is refused —
                   it would authorise nothing.
                 </span>
               </div>
             )}
 
-            <span className="text-[11px] text-muted-foreground-soft">
+            <span className="type-page-meta text-muted-foreground-soft">
               {level === "read" ? PAGE_GRANT_READ_CAVEAT : PAGE_GRANT_LEVEL_MEANING[level]}
             </span>
           </form>
@@ -558,7 +561,7 @@ function VersionRow({
       data-seq={version.seq}
       className="flex items-center gap-2 border-b border-border/40 py-2 last:border-b-0"
     >
-      <span className="w-10 shrink-0 font-mono text-[11px] text-muted-foreground-soft">v{version.seq}</span>
+      <span className="type-page-stamp w-10 shrink-0 text-muted-foreground-soft">v{version.seq}</span>
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-xs text-foreground/85">
           {dashed(version.name)}
@@ -567,7 +570,7 @@ function VersionRow({
             {version.panelCount} {version.panelCount === 1 ? "panel" : "panels"}
           </span>
         </span>
-        <span className="truncate text-[11px] text-muted-foreground-soft">
+        <span className="type-page-meta truncate text-muted-foreground-soft">
           {/* A version whose author was erased is still a version worth
               keeping (the migration says so), and `—` is the honest answer
               for it — not a blank that reads as a bug. */}
@@ -575,7 +578,7 @@ function VersionRow({
         </span>
       </div>
       {version.current ? (
-        <Badge variant="outline" className="h-4 shrink-0 px-1.5 text-[10px] leading-none">
+        <Badge variant="outline" className="h-4 shrink-0 px-1.5 leading-none">
           current
         </Badge>
       ) : (
@@ -584,7 +587,7 @@ function VersionRow({
           variant="ghost"
           onClick={onRollback}
           disabled={disabled}
-          className="h-6 shrink-0 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+          className="type-page-meta h-6 shrink-0 gap-1 px-2 text-muted-foreground hover:text-foreground"
           aria-label={`Roll back to version ${version.seq}`}
         >
           <Undo2 className="h-3 w-3" />
@@ -791,11 +794,11 @@ export function PageSettings({ workspaceId, slug, page, onClose }: PageSettingsP
         className="relative flex h-full max-h-[92vh] w-full max-w-[720px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl"
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
-          <div className="flex min-w-0 items-center gap-2.5 text-[12px] text-muted-foreground">
+          <div className="type-page-meta flex min-w-0 items-center gap-2.5 text-muted-foreground">
             <CONCEPT_ICON.pages className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
             <span className="font-medium text-foreground">Page settings</span>
             <span className="opacity-60">·</span>
-            <span className="truncate font-mono text-[11px]">{slug}</span>
+            <span className="type-page-stamp truncate">{slug}</span>
           </div>
           <Button size="sm" variant="ghost" onClick={onClose} className="h-8 gap-1.5 px-2.5 text-xs">
             <X className="h-3.5 w-3.5" />

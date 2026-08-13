@@ -122,6 +122,106 @@ colour. `target` is a ceiling, rendered as a ratio meter. `sparkline` points
 are evenly spaced by contract — a producer that pushes irregularly should use
 `series.v1` instead, not stretch `metric.v1`'s sparkline to fit.
 
+## Tabs — several screens, one page
+
+A page is a fixed structure you return to, and past about six panels it stops
+being glanceable and becomes a scroll: the thing you came for is below the
+fold. Declare a `tab:` and the page grows a bar under the breadcrumb, one
+screen at a time — the shape an ordinary website has had for thirty years.
+
+```yaml
+spec:
+  panels:
+    - id: dosah
+      schema: status.v1
+      owner: crew/ops
+      producer: script/ping-go
+      sla: 30s
+      tab: Síť                        # optional; no tab anywhere = no bar
+
+    - id: latence
+      schema: metric.v1
+      owner: crew/ops
+      producer: script/ping-go
+      sla: 30s
+      tab: Odezva
+
+    - id: http
+      schema: series.v1
+      owner: crew/engineering
+      producer: script/ping-py
+      sla: 30s
+      tab: Odezva                     # same name = same tab
+```
+
+One key on the panel, and **no `tabs:` block**. Adding a tab is one word on the
+panel that needs it rather than a new section plus an entry in it — and there
+is no second list that can disagree with the panels, so a tab with no panels,
+a panel listed twice and a panel nobody listed are all states this format
+cannot represent.
+
+Three rules, and they are all you need to predict what renders:
+
+- **Bar order is first appearance.** The spec is read top to bottom and the
+  page is drawn the way it reads, exactly as panel order is the layout.
+- **A panel with no `tab` lands on the first tab.** So declaring one on a
+  single panel of an existing page gives you a working page rather than an
+  error. If you want the first tab to be named after those panels, name it on
+  the first panel — the first tab is the tab of the first panel that declares
+  one.
+- **A page where nothing declares a `tab` has no bar at all** and renders
+  exactly as it did before tabs existed.
+
+### A tab hides panels, so the bar carries state
+
+This is the part that is not layout. The claim this whole feature rests on is
+that a panel which stops reporting *says so* — and a critical panel sitting on
+the third tab, behind a click nobody made, would be perfectly silent. So:
+
+- **Every tab carries the worst state of its own panels** — `failed` over
+  `stale` over `never_produced` over `fresh` — drawn as a glyph beside the
+  name, never as colour alone. The tab that is broken looks broken from the
+  tab you are standing on.
+- **The page's freshness summary is computed over every tab, never the visible
+  one.** The word top-right does not change when you switch tabs. A page that
+  read FRESH while a hidden tab was failing would be the old-numbers failure
+  with one extra click in front of it.
+- **A tab whose panels are all sealed to you still appears**, with its
+  placeholders under it. The page has the same shape for everyone: a bar that
+  reflowed per reader would, by what it left out, say whose data was on it.
+  Such a tab carries no state glyph — the server sends no state for a panel you
+  may not see, and the bar does not guess one.
+
+### Deep links, print and phones
+
+The selected tab is in the URL — `/pages/sit?tab=odezva` — so a link opens on
+the screen you meant. An unknown tab falls back to the first one rather than
+rendering nothing.
+
+**Print ignores tabs.** Paper cannot be clicked, so printing a page renders
+every tab's panels, in bar order, each under its tab name, and the bar itself
+is not printed.
+
+On a phone the bar scrolls sideways rather than wrapping into a stack of rows,
+and the panels below it are the same single column they always were.
+
+### What is refused
+
+A tab name is a word on a bar, so the authoring gate refuses what cannot be
+drawn as one, with the reason:
+
+| Refused | Why |
+|---|---|
+| a blank name (`tab: "   "`) | draws nothing on the bar and still hides the panels under it |
+| longer than 32 characters | pushes every other tab off a phone screen |
+| a newline or control character | a tab name is one line of text |
+| two names differing only in case | `Odezva` and `odezva` are two tabs a reader sees as one |
+| more than 8 tabs on a page | past that the bar cannot be scanned, and the page is a site |
+
+`tab: ""` is treated as "no tab", the same way an empty `title:` or `icon:` is —
+omitting the key and declaring it empty mean the same thing. Names are trimmed
+but never case-folded: the bar draws the word you wrote.
+
 ## What a Page is not
 
 This is the part worth reading before you build on top of one.

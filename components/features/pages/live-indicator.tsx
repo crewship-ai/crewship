@@ -106,7 +106,7 @@ export function LiveIndicator({
       data-liveness={liveness}
       title={copy.hint}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 text-[11px] tracking-wide",
+        "type-page-meta inline-flex shrink-0 items-center gap-1.5 tracking-wide",
         copy.text,
         className,
       )}

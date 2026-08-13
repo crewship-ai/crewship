@@ -71238,6 +71238,10 @@
                           "description": "1–12 columns of the grid. Absent means 12.",
                           "type": "integer"
                         },
+                        "tab": {
+                          "description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4).",
+                          "type": "string"
+                        },
                         "title": {
                           "type": "string"
                         },
@@ -71397,6 +71401,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "tab": {
+                                "description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4).",
+                                "type": "string"
+                              },
                               "title": {
                                 "type": "string"
                               }
@@ -71419,6 +71427,9 @@
                               },
                               "span": {
                                 "type": "integer"
+                              },
+                              "tab": {
+                                "type": "string"
                               }
                             },
                             "type": "object"
@@ -71557,6 +71568,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "tab": {
+                                "description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4).",
+                                "type": "string"
+                              },
                               "title": {
                                 "type": "string"
                               }
@@ -71579,6 +71594,9 @@
                               },
                               "span": {
                                 "type": "integer"
+                              },
+                              "tab": {
+                                "type": "string"
                               }
                             },
                             "type": "object"
@@ -72047,6 +72065,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "tab": {
+                                "description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4).",
+                                "type": "string"
+                              },
                               "title": {
                                 "type": "string"
                               }
@@ -72069,6 +72091,9 @@
                               },
                               "span": {
                                 "type": "integer"
+                              },
+                              "tab": {
+                                "type": "string"
                               }
                             },
                             "type": "object"
@@ -72269,6 +72294,10 @@
                           "description": "1–12 columns of the grid. Absent means 12.",
                           "type": "integer"
                         },
+                        "tab": {
+                          "description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4).",
+                          "type": "string"
+                        },
                         "title": {
                           "type": "string"
                         },
@@ -72428,6 +72457,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "tab": {
+                                "description": "Optional. The tab this panel renders under (internal/pages/tabs.go). Bar order is FIRST APPEARANCE in the panel list, and a panel with no tab lands on the first tab; a page where no panel declares one has no bar. Each tab carries the worst state of its own panels, and the page's freshness summary is computed over ALL tabs — a hidden tab must never be a place a panel can go stale quietly (§4).",
+                                "type": "string"
+                              },
                               "title": {
                                 "type": "string"
                               }
@@ -72450,6 +72483,9 @@
                               },
                               "span": {
                                 "type": "integer"
+                              },
+                              "tab": {
+                                "type": "string"
                               }
                             },
                             "type": "object"

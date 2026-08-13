@@ -129,7 +129,13 @@ type PagePanelRemote struct {
 	// Icon is echoed by the read path (unlike `public`, `actions` and the
 	// gates below), so it is one of the fields drift detection can actually
 	// compare. A field the applier can see is a field the applier checks.
-	Icon       string `json:"icon,omitempty"`
+	Icon string `json:"icon,omitempty"`
+	// Tab is echoed for the same reason, and on the SEALED placeholder too —
+	// which is why it is compared above the `Sealed` check below, exactly like
+	// `span`. A tab is the page's shape, not the panel's data: a page must have
+	// the same bar for everyone, so moving a panel this account cannot see onto
+	// another tab is still a change the applier can see and plan.
+	Tab        string `json:"tab,omitempty"`
 	Owner      string `json:"owner"`
 	Producer   string `json:"producer"`
 	SLASeconds int    `json:"sla_seconds"`
@@ -405,6 +411,11 @@ func (d *PageDocument) writeBody() (map[string]any, error) {
 		if icon := strings.TrimSpace(string(p.Icon)); icon != "" {
 			panel["icon"] = icon
 		}
+		// The tab, on the same terms: absent means "no tab", and a page where
+		// no panel declares one has no bar at all.
+		if tab := strings.TrimSpace(p.Tab); tab != "" {
+			panel["tab"] = tab
+		}
 		if p.Public {
 			panel["public"] = true
 		}
@@ -502,6 +513,12 @@ func pagePanelsDiffer(declared []pages.PanelSpec, remote []PagePanelRemote) bool
 			return true
 		}
 		if pageSpanOrDefault(d.Span) != r.Span {
+			return true
+		}
+		// Above the sealed check, like the span: the tab bar is the page's
+		// shape and is the same for every viewer, so it is comparable even for
+		// a panel whose contents this account cannot see.
+		if strings.TrimSpace(d.Tab) != r.Tab {
 			return true
 		}
 		if r.Sealed {
@@ -676,6 +693,7 @@ func pageDocumentFromRemote(remote *PageRemote) (*PageDocument, error) {
 			Schema:   pages.PanelSchema(p.Schema),
 			Title:    p.Title,
 			Icon:     pages.PanelIcon(p.Icon),
+			Tab:      p.Tab,
 			Owner:    p.Owner,
 			Producer: p.Producer,
 			SLA:      pageFormatSLA(p.SLASeconds),

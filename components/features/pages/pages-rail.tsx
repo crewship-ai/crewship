@@ -63,11 +63,25 @@ export interface PagesRailProps {
   onToggleCollapse?: () => void
 }
 
+/**
+ * Everything this file adds to the rail is sized in the NAVIGATION register
+ * (`.type-nav-sub`, `app/globals.css`), not in the Pages one.
+ *
+ * That is the register's own rule, applied rather than re-argued: *"A detail
+ * card is read; a rail is scanned… sized down so the row belongs to the face
+ * rather than competing with it."* `SidebarRow` from the kit is already written
+ * in `.type-nav`, so a count or a badge Pages hangs off that row has to be its
+ * sub-size or the row reads as two competing type systems in one line. The
+ * Pages register governs the main pane; the rail was never its territory.
+ *
+ * It also settles the sub-floor: these were 10px, under the 11px `--typo-micro`
+ * documents as the smallest allowed, and `.type-nav-sub` is exactly 11.
+ */
 function Count({ n, dim = false }: { n: number; dim?: boolean }) {
   return (
     <span
       className={cn(
-        "ml-auto shrink-0 text-[10px] tabular-nums",
+        "type-nav-sub ml-auto shrink-0 tabular-nums",
         dim ? "text-muted-foreground-soft/50" : "text-muted-foreground-soft",
       )}
     >
@@ -229,7 +243,7 @@ export function PagesRail({
                     A badge that means one thing on some rows and another on
                     the rest is unreadable at a glance. */}
                 {page.tally.total > 0 && (
-                  <span className="shrink-0 rounded-full bg-white/[0.05] px-1.5 py-px text-[10px] tabular-nums text-muted-foreground">
+                  <span className="type-nav-sub shrink-0 rounded-full bg-white/[0.05] px-1.5 py-px tabular-nums text-muted-foreground">
                     {page.tally.total}
                   </span>
                 )}
@@ -237,7 +251,7 @@ export function PagesRail({
             )
           })}
           {displayed.length === 0 && (
-            <div className="px-3 py-6 text-center text-[11px] text-muted-foreground-soft">
+            <div className="type-nav-sub px-3 py-6 text-center text-muted-foreground-soft">
               {pages.length === 0 ? (
                 <>
                   {/* Authoring is three doors onto one document (§10b.1). The
@@ -248,7 +262,7 @@ export function PagesRail({
                     <button
                       type="button"
                       onClick={onCreatePage}
-                      className="mt-2 rounded-md border border-border/60 px-2.5 py-1 text-[11px] text-foreground/80 transition-colors hover:border-primary/40 hover:text-primary"
+                      className="type-nav-sub mt-2 rounded-md border border-border/60 px-2.5 py-1 text-foreground/80 transition-colors hover:border-primary/40 hover:text-primary"
                     >
                       New page
                     </button>

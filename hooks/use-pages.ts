@@ -79,6 +79,16 @@ export interface WirePanel {
   sealed?: boolean | null
   /** A closed name from internal/pages/icons.go; unknown falls back per schema. */
   icon?: string | null
+  /**
+   * The tab this panel renders under (internal/pages/tabs.go). Absent on a page
+   * that declares none, which is every page that existed before tabs did.
+   *
+   * It rides on the SEALED placeholder too, and deliberately: a tab is a
+   * property of the page, so a tab whose panels are all foreign to this viewer
+   * still has to appear on their bar (§2.3 — the page has the same shape for
+   * everyone).
+   */
+  tab?: string | null
   panel_id?: string | null
   owner_crew_name?: string | null
   /** §11b.8: four states, and the SERVER sends `never_produced`. */
@@ -193,6 +203,15 @@ export interface PanelView {
   snapshot: PanelSnapshot
   /** The declared producer — shown when nothing has ever been pushed. */
   producer: string | null
+  /**
+   * The tab this panel renders under, or null.
+   *
+   * On `PanelView` rather than on `spec`, because the panel components never
+   * see it: which screen a panel is on is a property of the PAGE's layout, the
+   * same kind of thing as its position in the list. `page-view.tsx` groups by
+   * it; nothing inside a panel is allowed to care.
+   */
+  tab: string | null
   /** Server-computed, or null when this build could not read one. */
   state: PanelState | null
   /**
@@ -264,9 +283,104 @@ export function toPanelView(raw: WirePanel, index = 0): PanelView {
       failure: trimmed(raw.failure) ?? trimmed(raw.reason),
     },
     producer: trimmed(raw.producer),
+    tab: trimmed(raw.tab),
     state,
     actions: sealed ? [] : normalizePanelActions(raw.actions),
   }
+}
+
+// ── Tabs (internal/pages/tabs.go) ──────────────────────────────────────────
+
+/**
+ * One tab, as the bar and the grid consume it.
+ *
+ * `state` is what makes this more than a grouping. A tab HIDES panels, and §4
+ * is the whole claim of this feature: a panel that stops reporting says so. A
+ * failed panel on the third tab would be perfectly silent, so every tab carries
+ * the worst state of its own panels and the bar draws it — with a glyph, never
+ * with colour alone (§3).
+ */
+export interface PageTabView {
+  /** What `?tab=` carries. Derived from the name; see `tabSlug`. */
+  id: string
+  /** The tab name exactly as authored. */
+  name: string
+  /** This tab's panels, in spec order. */
+  panels: PanelView[]
+  /**
+   * The worst state among this tab's panels, or null when none of them carries
+   * a readable one — which is what a tab of only SEALED panels looks like, and
+   * it is honest: the server sends no state for a panel this viewer may not
+   * see, so the bar says nothing about it rather than guessing `fresh`.
+   */
+  state: PanelState | null
+}
+
+/**
+ * A tab name as a URL-safe id, so a link opens on the right tab.
+ *
+ * Accents are folded away for the URL only — `Síť` addresses as `sit` — because
+ * a query string full of percent-escapes is not a link anybody pastes. The bar
+ * still draws the name the author wrote; nothing here changes what is
+ * displayed. A name with nothing ASCII in it keeps its own lowercased form,
+ * which URLSearchParams escapes on the way out and decodes on the way back.
+ */
+export function tabSlug(name: string): string {
+  const folded = name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  return folded || name.trim().toLowerCase()
+}
+
+/**
+ * The page's tabs in bar order, with every panel on exactly one of them.
+ *
+ * This mirrors `pages.Tabs` (internal/pages/tabs.go) and the two are tested in
+ * the same terms, because a client that grouped differently from the server's
+ * own idea of the page would put a panel on a tab nobody declared:
+ *
+ *  · Bar order is FIRST APPEARANCE in the panel list — the spec is read top to
+ *    bottom and the page is drawn the way it reads (§9).
+ *  · A panel with no tab lands on the FIRST tab. That is what makes "adding a
+ *    tab is one word" true: declaring one on a single panel of an existing page
+ *    has to produce a working page rather than an error or a lost panel.
+ *  · A page where nothing declares a tab returns an empty list: no bar, and the
+ *    grid renders exactly as it did before tabs existed.
+ */
+export function derivePageTabs(panels: readonly PanelView[]): PageTabView[] {
+  const order: string[] = []
+  const index = new Map<string, number>()
+  for (const panel of panels) {
+    const name = panel.tab
+    if (!name || index.has(name)) continue
+    index.set(name, order.length)
+    order.push(name)
+  }
+  if (order.length === 0) return []
+
+  const ids = new Set<string>()
+  const tabs: PageTabView[] = order.map((name) => {
+    // Two names can fold to the same slug ("Síť" and "Sit"). The bar still
+    // shows both; the second one takes a suffixed id so a link addresses
+    // exactly one of them rather than whichever came first.
+    const base = tabSlug(name)
+    let id = base
+    for (let n = 2; ids.has(id); n += 1) id = `${base}-${n}`
+    ids.add(id)
+    return { id, name, panels: [], state: null }
+  })
+
+  for (const panel of panels) {
+    const at = panel.tab ? (index.get(panel.tab) ?? 0) : 0
+    tabs[at].panels.push(panel)
+  }
+  for (const tab of tabs) {
+    tab.state = worstPanelState(tab.panels.map((p) => p.state))
+  }
+  return tabs
 }
 
 /** Per-state panel tally for one page. `unknown` is its own bucket. */

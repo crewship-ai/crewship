@@ -798,7 +798,7 @@ function ActionStatus({
         role="status"
         data-slot="panel-action-status"
         data-state="already-running"
-        className="text-[11px] text-muted-foreground"
+        className="type-page-meta text-muted-foreground"
       >
         {alreadyRunningSentence(dispatch.data)}
       </p>
@@ -812,7 +812,7 @@ function ActionStatus({
           role="alert"
           data-slot="panel-action-status"
           data-state="refused"
-          className="text-[11px] text-destructive"
+          className="type-page-meta text-destructive"
         >
           {refusalSentence(dispatch.error)}
         </p>
@@ -821,7 +821,7 @@ function ActionStatus({
             type="button"
             data-slot="panel-action-retry"
             onClick={dispatch.retry}
-            className="text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+            className="type-page-meta font-medium text-primary underline-offset-2 hover:underline"
           >
             Try again
           </button>
@@ -836,7 +836,7 @@ function ActionStatus({
         role="status"
         data-slot="panel-action-status"
         data-state="accepted"
-        className="text-[11px] text-muted-foreground"
+        className="type-page-meta text-muted-foreground"
       >
         Started — the run has not finished yet.
       </p>
@@ -877,7 +877,7 @@ function ActionProgress({
           title={`${ack.label} — run activity`}
         />
       ) : (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="type-page-meta text-muted-foreground">
           {ack.deduped
             ? `${ack.label} — already queued; this click joined the run that was pending.`
             : `${ack.label} — queued. It has not started yet.`}
@@ -987,7 +987,7 @@ function ActionField({
     </Label>
   )
   const hint = invalid ? (
-    <p role="alert" className="text-[11px] text-destructive">
+    <p role="alert" className="type-page-meta text-destructive">
       {field.label || field.name} is required.
     </p>
   ) : null

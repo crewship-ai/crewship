@@ -22,6 +22,15 @@
  *    clamp — it creates seven implicit columns and the page scrolls sideways
  *    on a phone, which is the opposite of "mobile and tablet first".
  *
+ * ## Tabs (epic #1935)
+ *
+ * A page may carry a bar of tabs under the breadcrumb, one screen at a time
+ * instead of one long scroll. The bar, the grouping rule and everything that
+ * follows from tabs HIDING panels live in `page-tabs.tsx`; what this file owes
+ * the feature is one property, and it is the important one: **the header's
+ * freshness summary is computed over every panel on the page, never over the
+ * visible tab.** It must not move when the tab does.
+ *
  * Each cell is a named `@container/panel`, which is what the panels' own
  * `@md/panel:` rules resolve against: a panel in a `span: 4` cell collapses
  * its table to a card list while the `span: 12` panel beside it keeps the
@@ -74,6 +83,13 @@ import {
 } from "@/components/features/pages/panels/panel-actions"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
 import { LiveIndicator, type PageLiveness } from "@/components/features/pages/live-indicator"
+import {
+  PageTabGroup,
+  PageTabs,
+  PageTabsStyles,
+  usePageTabState,
+} from "@/components/features/pages/page-tabs"
+import { derivePageTabs, type PageTabView } from "@/hooks/use-pages"
 import type { PageView as PageRecord, PanelView } from "@/hooks/use-pages"
 
 /**
@@ -264,6 +280,14 @@ export function PageView({
   workspaceId,
   live = "offline",
 }: PageViewProps) {
+  // The bar is derived from the panels the SERVER sent, sealed placeholders
+  // included, so it has the same shape for every viewer (§2.3). It lives out
+  // here rather than in PageBody because the owner asked for it under the
+  // breadcrumb row and outside the scroll area — a bar that scrolls away is a
+  // bar you have to go back up to use.
+  const tabs = React.useMemo<PageTabView[]>(() => derivePageTabs(page?.panels ?? []), [page])
+  const [activeTab, selectTab] = usePageTabState(tabs)
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumb back-bar — inside the content area, matching /routines and
@@ -281,20 +305,24 @@ export function PageView({
         <span className="truncate text-xs font-medium text-foreground/85" title={page?.name ?? slug}>
           {page?.name ?? slug}
         </span>
-        <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground">{slug}</span>
+        <span className="type-page-stamp ml-1 truncate text-muted-foreground">{slug}</span>
         {/* The liveness indicator sits in the header, once — not on every
             panel. "Is the pipe open" is a property of the page; "did MY data
             just change" is a property of a panel, and each is said in exactly
             one place. */}
         <div className="ml-auto flex shrink-0 items-center gap-3">
           {page?.ownerLabel && (
-            <span className="shrink-0 text-[11px] text-muted-foreground-soft">
+            <span className="type-page-meta shrink-0 text-muted-foreground-soft">
               {page.ownerLabel}
             </span>
           )}
           <LiveIndicator liveness={live} />
         </div>
       </div>
+
+      {tabs.length > 0 && (
+        <PageTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} />
+      )}
 
       <div className="flex-1 overflow-auto">
         <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
@@ -306,6 +334,8 @@ export function PageView({
             notFound={notFound}
             now={now}
             workspaceId={workspaceId}
+            tabs={tabs}
+            activeTab={activeTab}
           />
         </div>
       </div>
@@ -321,7 +351,9 @@ function PageBody({
   notFound,
   now,
   workspaceId,
-}: Omit<PageViewProps, "onBack">) {
+  tabs,
+  activeTab,
+}: Omit<PageViewProps, "onBack"> & { tabs: PageTabView[]; activeTab: string }) {
   if (notFound) {
     return (
       <EmptyState
@@ -363,6 +395,13 @@ function PageBody({
     )
   }
 
+  // The freshness summary is computed over the whole PAGE — every panel the
+  // server sent, on every tab — and never over the tab in view. That is the
+  // rule that keeps tabs from undoing §4: a page that reads FRESH while a
+  // hidden tab is failing is the silent-old-numbers failure with one extra
+  // click in front of it. `page.state` and `panels.length` come off the record
+  // as the server sent it, so switching tabs cannot move either, and there is a
+  // test that says so in those terms.
   const meta = page.state ? PAGE_STATE_META[page.state] : null
 
   return (
@@ -378,7 +417,7 @@ function PageBody({
         {meta && (
           <span
             className={cn(
-              "shrink-0 whitespace-nowrap text-[11px] uppercase tracking-wider",
+              "type-page-label shrink-0 whitespace-nowrap",
               meta.tone,
             )}
           >
@@ -387,7 +426,14 @@ function PageBody({
         )}
       </div>
 
-      <PanelGrid panels={panels} slug={slug} now={now} workspaceId={workspaceId} />
+      <PanelGrid
+        panels={panels}
+        slug={slug}
+        now={now}
+        workspaceId={workspaceId}
+        tabs={tabs}
+        activeTab={activeTab}
+      />
     </>
   )
 }
@@ -401,17 +447,27 @@ function PageBody({
  * become a button. Absence is the default; this component is the single
  * exception, on the one surface where the viewer is authenticated and the
  * server has already filtered the page per crew.
+ *
+ * The provider wraps ALL the tabs, not one grid per tab. Action ids are unique
+ * within the PAGE and a `toggle` may name any panel on it
+ * (`internal/pages/spec.go`), so a provider per tab would leave a button that
+ * validated at save time doing nothing at click time — the worst shape a
+ * control can have.
  */
 function PanelGrid({
   panels,
   slug,
   now,
   workspaceId,
+  tabs,
+  activeTab,
 }: {
   panels: NonNullable<PageRecord["panels"]>
   slug: string
   now?: Date
   workspaceId?: string | null
+  tabs: PageTabView[]
+  activeTab: string
 }) {
   const actions = React.useMemo(() => {
     const map = new Map<string, readonly PageAction[]>()
@@ -423,7 +479,24 @@ function PanelGrid({
 
   return (
     <PanelActionsProvider slug={slug} actions={actions} workspaceId={workspaceId}>
-      <PanelGridCells panels={panels} now={now} />
+      {tabs.length === 0 ? (
+        // No panel on this page declares a tab: no bar, no groups, and the
+        // grid is exactly the markup it was before tabs existed.
+        <PanelGridCells panels={panels} now={now} />
+      ) : (
+        <div className="flex flex-col gap-4">
+          <PageTabsStyles />
+          {tabs.map((tab) => (
+            // Every group stays mounted and the inactive ones are hidden, which
+            // is what lets print reveal them all (§10b.8) — and what keeps a
+            // panel's "the data just changed" baseline from resetting every
+            // time somebody clicks back to its tab.
+            <PageTabGroup key={tab.id} tab={tab} active={tab.id === activeTab}>
+              <PanelGridCells panels={tab.panels} now={now} />
+            </PageTabGroup>
+          ))}
+        </div>
+      )}
     </PanelActionsProvider>
   )
 }

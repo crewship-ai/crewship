@@ -58,11 +58,9 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
               className="flex flex-wrap items-baseline gap-x-1.5"
             >
               {/* A measured 0 is a 0. Only "no basis to compute" is an em dash. */}
-              <span className="text-display font-semibold leading-none tabular-nums">
-                {String(payload.value)}
-              </span>
+              <span className="type-page-metric">{String(payload.value)}</span>
               {payload.unit ? (
-                <span className="text-body text-muted-foreground">{payload.unit}</span>
+                <span className="type-page-value text-muted-foreground">{payload.unit}</span>
               ) : null}
               <MetricDelta delta={payload.delta} deltaGood={payload.delta_good} />
             </PanelValue>
@@ -71,7 +69,7 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
               basis="none"
               tone="muted"
               dimmed={gate.dimmed}
-              className="text-display font-semibold leading-none"
+              className="type-page-metric"
             >
               {EM_DASH}
             </PanelValue>
@@ -127,7 +125,7 @@ function MetricDelta({
     <span
       data-slot="panel-delta"
       className={cn(
-        "text-micro tabular-nums",
+        "type-page-meta tabular-nums",
         good === null && "text-muted-foreground",
         good === true && "text-success",
         good === false && "text-destructive",
@@ -205,7 +203,7 @@ function TargetMeter({
       </div>
       <span
         className={cn(
-          "text-micro tabular-nums",
+          "type-page-meta tabular-nums",
           good === null && "text-muted-foreground",
           good === true && "text-success",
           good === false && "text-destructive",

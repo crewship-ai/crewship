@@ -8,16 +8,24 @@
  * read as a different application from the card beside it.
  *
  * So the assertions are on CLASSES, not on a screenshot, and the ones that
- * matter most are not literals at all: they compare the card's type classes
- * against what `components/layout/property-row.tsx` — the product's canonical
- * label/value pair — actually renders. A test that hard-codes `text-label`
- * passes forever after PropertyRow moves on; this one fails, which is the
- * point. The house scale changing must reach here.
+ * matter most are not literals at all — a test that hard-codes `text-label`
+ * passes forever after the house scale moves on.
+ *
+ * **The type-parity assertions moved.** They used to compare this card's class
+ * strings against what `components/layout/property-row.tsx` renders. The card
+ * is now written in the Pages register (`app/globals.css`), so the two files no
+ * longer spell the same size the same way and a string comparison would be
+ * asserting a spelling rather than a scale. The real claim — that the card's
+ * value and label roles resolve to the same `--typo-*` tokens PropertyRow's
+ * `text-body`/`text-label` do — is asserted through the CSS in
+ * `components/features/pages/__tests__/type-register.test.tsx`, which survives
+ * a rename on either side. What stays here is what is local to this file: the
+ * card names roles rather than pixels, it is not the stat-block idiom, and its
+ * density is the one this panel deliberately chose.
  */
 import { describe, it, expect } from "vitest"
-import { render } from "@testing-library/react"
+import { fireEvent, render } from "@testing-library/react"
 
-import { PropertyRow } from "@/components/layout/property-row"
 import { PanelRenderer } from "../registry"
 import { EM_DASH } from "../freshness"
 import { FIXTURE_NOW, tableFixtures } from "../fixtures"
@@ -52,46 +60,28 @@ function typeTokens(el: Element): Set<string> {
     el.className
       .split(/\s+/)
       .filter(Boolean)
-      .filter((c) => /^(text-|font-|uppercase|lowercase|capitalize|tracking-|leading-)/.test(c))
+      .filter((c) =>
+        /^(type-page-|text-|font-|uppercase|lowercase|capitalize|tracking-|leading-)/.test(c),
+      )
       .filter((c) => !ALIGNMENT.has(c)),
   )
 }
 
-/** What PropertyRow actually renders today, read off the DOM rather than copied. */
-function houseTypeTokens(): { label: Set<string>; value: Set<string> } {
-  const { container } = render(<PropertyRow label="house">value</PropertyRow>)
-  const row = container.firstElementChild!
-  const label = row.children[0]
-  const value = row.children[1]
-  // The row itself carries `text-body`; the label overrides it and the value
-  // restates it, so the row's own tokens belong to both.
-  const rowTokens = typeTokens(row)
-  const merge = (own: Set<string>) => {
-    const out = new Set(own)
-    // A size on the child wins over the size on the row.
-    const hasSize = [...own].some((c) => /^text-(micro|label|body|default|heading|title|display)$/.test(c))
-    for (const c of rowTokens) {
-      if (hasSize && /^text-(micro|label|body|default|heading|title|display)$/.test(c)) continue
-      out.add(c)
-    }
-    return out
-  }
-  return { label: merge(typeTokens(label)), value: merge(typeTokens(value)) }
-}
-
 describe("the card list is the house label/value pair, not a stat block", () => {
-  it("labels carry PropertyRow's label type, and nothing else", () => {
-    const house = houseTypeTokens()
+  it("labels carry the register's meta role, and nothing else that sets type", () => {
     const { container } = render(<PanelRenderer {...tableFixtures.fresh} now={FIXTURE_NOW} />)
     const labels = cardLabels(cards(container)[0])
     expect(labels).toHaveLength(3)
     for (const label of labels) {
-      expect([...typeTokens(label)].sort()).toEqual([...house.label].sort())
+      expect([...typeTokens(label)].sort()).toEqual([
+        "font-medium",
+        "text-muted-foreground",
+        "type-page-meta",
+      ])
     }
   })
 
-  it("values carry PropertyRow's value type, and nothing else", () => {
-    const house = houseTypeTokens()
+  it("values carry the register's value role, and nothing else that sets type", () => {
     const { container } = render(<PanelRenderer {...tableFixtures.fresh} now={FIXTURE_NOW} />)
     // The `null` cell is muted on purpose (§9b.4) and is asserted separately.
     const measured = cardCells(cards(container)[0]).filter(
@@ -99,7 +89,7 @@ describe("the card list is the house label/value pair, not a stat block", () => 
     )
     expect(measured.length).toBeGreaterThan(0)
     for (const cell of measured) {
-      expect([...typeTokens(cell)].sort()).toEqual([...house.value].sort())
+      expect([...typeTokens(cell)].sort()).toEqual(["text-foreground", "type-page-value"])
     }
   })
 
@@ -118,26 +108,53 @@ describe("the card list is the house label/value pair, not a stat block", () => 
     }
     for (const cell of cardCells(card)) {
       expect(cell.className).not.toMatch(/\btext-(display|title|heading|default)\b/)
+      expect(cell.className).not.toMatch(/\btype-page-(metric|label)\b/)
       // An unsized value inherits 16px from the card — which is how this
-      // started. Every value states its size.
-      expect(cell.className).toMatch(/\btext-body\b/)
+      // started. Every value states its role.
+      expect(cell.className).toMatch(/\btype-page-value\b/)
     }
   })
 
-  it("keeps PropertyRow's density: one hairline per pair, none under the last", () => {
+  /**
+   * The density this panel chose, and it is deliberately NOT PropertyRow's.
+   *
+   * PropertyRow's rhythm — `py-2` and a hairline under every pair but the last
+   * — is right for one property list. A collapsed table is N of them: on the
+   * live `flotila` page, five columns by three rows is fifteen pairs and
+   * fifteen rules in a quarter-width column, every one individually correct and
+   * the stack a wall. Separation moved up a level, to the card, where the
+   * grouping actually is; the card already has a border and a tinted surface
+   * saying the same thing the interior rules were saying badly.
+   *
+   * This replaces "keeps PropertyRow's density", which asserted the two
+   * measurements that changed. What it must NOT become is a test that pins
+   * `py-1`: the claim is that the pair is separated once, at the card, and that
+   * the two halves of a pair always share their padding — a pair whose halves
+   * disagree steps, whether or not there is a rule to show it.
+   */
+  it("separates per card, not per pair", () => {
     const { container } = render(<PanelRenderer {...tableFixtures.fresh} now={FIXTURE_NOW} />)
     const card = cards(container)[0]
     const labels = cardLabels(card)
     const cells = cardCells(card)
     expect(labels).toHaveLength(cells.length)
+    expect(labels.length).toBeGreaterThan(1)
+
+    for (const half of [...labels, ...cells]) {
+      expect(half.className).not.toMatch(/\bborder-b\b/)
+    }
+    // The card is what carries the separation now.
+    expect(card.className).toMatch(/\bborder\b/)
+
+    const padding = (el: Element) => el.className.match(/\bpy-[\d.]+\b/)?.[0]
     labels.forEach((label, i) => {
-      const last = i === labels.length - 1
-      expect(label.className.includes("border-b")).toBe(!last)
-      expect(cells[i].className.includes("border-b")).toBe(!last)
-      // Both halves of a pair share the padding, or the hairline steps.
-      expect(label.className).toMatch(/\bpy-2\b/)
-      expect(cells[i].className).toMatch(/\bpy-2\b/)
+      expect(padding(label)).toBeTruthy()
+      expect(padding(cells[i])).toBe(padding(label))
     })
+    // …and it is tighter than the single-list rhythm it departs from, which is
+    // the whole point of departing.
+    const pairPadding = Number(padding(labels[0])!.replace("py-", ""))
+    expect(pairPadding).toBeLessThan(2)
   })
 
   /**
@@ -151,6 +168,67 @@ describe("the card list is the house label/value pair, not a stat block", () => 
     expect(card.querySelector("dl")).toBeTruthy()
     for (const label of cardLabels(card)) expect(label.tagName).toBe("DT")
     for (const cell of cardCells(card)) expect(cell.tagName).toBe("DD")
+  })
+})
+
+/**
+ * The bound on the card form's height (§11b.12).
+ *
+ * The wide table spends one row of height per payload row; the card form spends
+ * one row per CELL, so a 200-row payload — the documented maximum, accepted
+ * because it is *"more than anyone reads and more than we will virtualise"* —
+ * is a panel with no upper bound on its height inside a page of panels that all
+ * have one. The cap is on the card form alone, and that asymmetry is the reason
+ * it exists rather than an oversight.
+ *
+ * The live page that prompted the density work has three rows, so none of this
+ * fires there — the wall was fixed by the rhythm, not by hiding anything.
+ */
+describe("the card form caps its height, and says so", () => {
+  function manyRows(n: number) {
+    return {
+      panel: { id: "fleet", schema: "table.v1", title: "Fleet", span: 4 },
+      data: {
+        state: "fresh" as const,
+        payload: {
+          columns: [{ key: "host" }, { key: "port", align: "right" as const }],
+          rows: Array.from({ length: n }, (_, i) => ({ host: `host-${i}`, port: 8000 + i })),
+        },
+        provenance: { produced_at: FIXTURE_NOW },
+      },
+    }
+  }
+
+  it("draws every card while the list is short", () => {
+    const { container } = render(<PanelRenderer {...manyRows(8)} now={FIXTURE_NOW} />)
+    expect(cards(container)).toHaveLength(8)
+    expect(container.querySelector('[data-slot="table-cards-toggle"]')).toBeNull()
+  })
+
+  it("caps a long list and names the true total, so nothing is hidden silently", () => {
+    const { container } = render(<PanelRenderer {...manyRows(30)} now={FIXTURE_NOW} />)
+    expect(cards(container)).toHaveLength(8)
+    const toggle = container.querySelector('[data-slot="table-cards-toggle"]')!
+    expect(toggle).toBeTruthy()
+    expect(toggle.getAttribute("data-expanded")).toBe("false")
+    expect(toggle.textContent).toContain("30")
+  })
+
+  it("shows all of them on a click, and folds back", () => {
+    const { container } = render(<PanelRenderer {...manyRows(30)} now={FIXTURE_NOW} />)
+    const toggle = container.querySelector<HTMLButtonElement>(
+      '[data-slot="table-cards-toggle"]',
+    )!
+    fireEvent.click(toggle)
+    expect(cards(container)).toHaveLength(30)
+    expect(toggle.getAttribute("data-expanded")).toBe("true")
+    fireEvent.click(toggle)
+    expect(cards(container)).toHaveLength(8)
+  })
+
+  it("never caps the wide table, which costs one row per row", () => {
+    const { container } = render(<PanelRenderer {...manyRows(30)} now={FIXTURE_NOW} />)
+    expect(container.querySelectorAll("table tbody tr")).toHaveLength(30)
   })
 })
 

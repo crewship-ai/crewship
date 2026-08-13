@@ -455,13 +455,20 @@ describe("table.v1", () => {
 })
 
 describe("the card-header idiom (PRD §9b.2)", () => {
-  it("puts an icon and an 11px uppercase tracked label left, a muted status word right", () => {
+  /**
+   * The size, the case and the tracking used to be asserted as three separate
+   * class names because the header wrote them out as three separate class
+   * names. They are one role now — `.type-page-label` in the Pages register
+   * (`app/globals.css`), which carries all three — so this asserts the role and
+   * `type-register.test.tsx` asserts what the role is made of. Restating
+   * `uppercase` here would only prove the header had stopped using the register.
+   */
+  it("puts an icon and the register's uppercase label left, a muted status word right", () => {
     const { container } = render(<PanelRenderer {...tableFixtures.fresh} now={FIXTURE_NOW} />)
     const label = container.querySelector('[data-slot="panel-label"]')
     expect(label).toBeTruthy()
-    expect(label!.className).toMatch(/text-\[11px\]/)
-    expect(label!.className).toMatch(/uppercase/)
-    expect(label!.className).toMatch(/tracking-wider/)
+    expect(label!.className).toMatch(/\btype-page-label\b/)
+    expect(label!.className).not.toMatch(/text-\[/)
     expect(label!.querySelector("svg")).toBeTruthy()
 
     const word = container.querySelector('[data-slot="panel-status-word"]')

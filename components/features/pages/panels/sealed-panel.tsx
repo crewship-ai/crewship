@@ -62,7 +62,7 @@ export function SealedPanel({ panel, data, now, publicView, className }: PanelPr
       // exists to withhold.
       showProvenance={false}
     >
-      <p data-slot="panel-sealed" data-owner-crew={crew || undefined} className="text-body text-muted-foreground">
+      <p data-slot="panel-sealed" data-owner-crew={crew || undefined} className="type-page-value text-muted-foreground">
         {crew ? `Hidden · crew ${crew}` : "Hidden · owned by another crew"}
       </p>
     </PanelFrame>

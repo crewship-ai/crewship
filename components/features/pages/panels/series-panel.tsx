@@ -78,7 +78,7 @@ export function SeriesPanel({ panel, data, now, publicView = false, className }:
     // A produced payload that describes nothing. Still not an em dash: the
     // producer did run, and the em dash means "no basis to compute".
     body = (
-      <p className="text-body text-muted-foreground">
+      <p className="type-page-value text-muted-foreground">
         The latest push declared no categories to plot. Add `labels` and at least one series.
       </p>
     )
@@ -95,7 +95,7 @@ export function SeriesPanel({ panel, data, now, publicView = false, className }:
                 replacement, and they are the first thing a narrow panel loses. */}
             <ul
               data-slot="series-legend"
-              className="flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-muted-foreground"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 type-page-meta text-muted-foreground"
             >
               {drawn.map((s) => (
                 <li

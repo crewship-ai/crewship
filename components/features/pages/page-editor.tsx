@@ -73,6 +73,18 @@ export interface PageWritePanel {
   span?: number
   public?: boolean
   /**
+   * The two authored SCALARS that are not part of a panel's contract: its
+   * glyph (internal/pages/icons.go) and the tab it renders under
+   * (internal/pages/tabs.go). Neither has a column — both live in `spec_json`
+   * and both come back on the read path — so both must make the round trip
+   * here for the same reason the gates do: `PATCH` replaces the panel set
+   * wholesale, and a field this file does not mention is a field the save
+   * deletes. A page whose tabs vanished after a title edit is one long scroll
+   * with nothing in a log to say why.
+   */
+  icon?: string
+  tab?: string
+  /**
    * The pass-through half — §8b.1 buttons, §5 wake gates, §4 rule 4's failure
    * route. Carried VERBATIM and typed loosely on purpose, the way
    * `cmd_page.go`'s `pageWritePanelJSON` carries `[]pages.PanelAction` without
@@ -297,6 +309,11 @@ export function pageDocumentText(page: WirePage): string {
           schema: p.schema ?? "",
         }
         if (p.title) out.title = p.title
+        // Before `owner`, because a document is read top to bottom and these
+        // two say what the panel IS — its glyph and the screen it lives on —
+        // rather than who may touch it.
+        if (typeof p.icon === "string" && p.icon.trim() !== "") out.icon = p.icon.trim()
+        if (typeof p.tab === "string" && p.tab.trim() !== "") out.tab = p.tab.trim()
         out.owner = p.owner ?? ""
         out.producer = p.producer ?? ""
         out.sla = formatSlaSeconds(sla ?? 0)
@@ -401,6 +418,13 @@ export function parsePageBuffer(text: string): PageBufferResult {
       producer: asString(p.producer),
     }
     if (p.title != null && asString(p.title) !== "") panel.title = asString(p.title)
+    // The two authored scalars, sent back exactly as they were rendered. Not
+    // validated here: the icon set is closed server-side and the tab name has
+    // its own refusals (blank, absurdly long, two that differ only by case),
+    // and re-deciding either here would be a second grammar that can disagree
+    // with the one that matters (§10b.1).
+    if (asString(p.icon) !== "") panel.icon = asString(p.icon)
+    if (asString(p.tab) !== "") panel.tab = asString(p.tab)
     // `sla_seconds` is honoured when someone writes the canonical form
     // directly — a document round-tripped out of `crewship page get -f json`
     // carries it — and `sla` is the sugar. Neither is invented when both are
@@ -816,15 +840,15 @@ export function PageEditor({
         className="relative flex h-full max-h-[92vh] w-full max-w-[1100px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl"
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
-          <div className="flex items-center gap-2.5 text-[12px] text-muted-foreground">
+          <div className="type-page-meta flex items-center gap-2.5 text-muted-foreground">
             <span className="font-medium text-foreground">{title}</span>
             <span className="opacity-60">·</span>
             {/* The document, named. Three doors onto it (§10b.1), and the other
                 two are a file on disk — saying which document this is makes
                 the CLI the obvious next step rather than a separate world. */}
-            <span className="font-mono text-[11px]">kind: Page</span>
+            <span className="type-page-stamp">kind: Page</span>
             {dirty && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-warn/20 px-2.5 py-0.5 text-[11px] font-medium text-warn">
+              <span className="type-page-meta inline-flex items-center gap-1.5 rounded-full bg-warn/20 px-2.5 py-0.5 font-medium text-warn">
                 <span className="h-1.5 w-1.5 rounded-full bg-current" />
                 unsaved
               </span>
@@ -866,7 +890,7 @@ export function PageEditor({
             cannot represent a sealed panel, so a PATCH built from it would
             delete another crew's panel without either of them being told. */}
         {sealed > 0 && (
-          <div className="shrink-0 border-b border-destructive/30 bg-destructive/[0.06] px-4 py-2.5 text-[13px] text-destructive">
+          <div className="shrink-0 border-b border-destructive/30 bg-destructive/[0.06] px-4 py-2.5 type-page-value text-destructive">
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
@@ -894,15 +918,15 @@ export function PageEditor({
           <div
             data-testid="page-editor-panels-rewritten"
             role="status"
-            className="shrink-0 border-b border-warn/30 bg-warn/[0.06] px-4 py-2.5 text-[13px] text-warn"
+            className="shrink-0 border-b border-warn/30 bg-warn/[0.06] px-4 py-2.5 type-page-value text-warn"
           >
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
                 This save replaces the panel list. A panel&apos;s{" "}
-                <span className="font-mono text-[12px]">actions</span>,{" "}
-                <span className="font-mono text-[12px]">wake</span> and{" "}
-                <span className="font-mono text-[12px]">on_failure</span> are not sent back by the
+                <span className="type-page-stamp">actions</span>,{" "}
+                <span className="type-page-stamp">wake</span> and{" "}
+                <span className="type-page-stamp">on_failure</span> are not sent back by the
                 server when a page is read, so they are missing from this document unless you write
                 them — and anything this buffer does not restate is deleted, along with the wake
                 rules it compiled to. Editing only the name or description leaves the panels, and
@@ -915,7 +939,7 @@ export function PageEditor({
         {confirmDiscard && (
           <div
             role="alert"
-            className="flex shrink-0 items-center gap-3 border-b border-warn/30 bg-warn/[0.06] px-4 py-2.5 text-[13px] text-warn"
+            className="flex shrink-0 items-center gap-3 border-b border-warn/30 bg-warn/[0.06] px-4 py-2.5 type-page-value text-warn"
           >
             <span className="flex-1">
               This document has unsaved changes. Nothing has been sent to the server yet.
@@ -941,7 +965,7 @@ export function PageEditor({
           <div
             data-testid="page-editor-refusal"
             role="alert"
-            className="shrink-0 border-b border-destructive/30 bg-destructive/[0.06] px-4 py-2.5 text-[13px] text-destructive"
+            className="shrink-0 border-b border-destructive/30 bg-destructive/[0.06] px-4 py-2.5 type-page-value text-destructive"
           >
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -966,13 +990,13 @@ export function PageEditor({
         {/* One line, and only when it has something to say. The warnings are
             hints from the closed vocabulary; the verdict is the server's. */}
         {validation.ok && warnings.length > 0 && (
-          <div className="shrink-0 border-t border-warn/30 bg-warn/[0.06] px-4 py-2 text-[11px] text-warn">
+          <div className="shrink-0 border-t border-warn/30 bg-warn/[0.06] px-4 py-2 type-page-meta text-warn">
             {warnings.length} thing{warnings.length === 1 ? "" : "s"} the schema would question —
             hover the marked lines. The server has the final say.
           </div>
         )}
         {!validation.ok && (
-          <div className="shrink-0 border-t border-destructive/30 bg-destructive/[0.06] px-4 py-2 font-mono text-[11px] text-destructive">
+          <div className="shrink-0 border-t border-destructive/30 bg-destructive/[0.06] px-4 py-2 type-page-stamp text-destructive">
             {validation.line ? `line ${validation.line}: ` : ""}
             {validation.message}
           </div>

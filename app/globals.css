@@ -430,6 +430,89 @@ body {
     line-height: 1rem;
   }
 
+  /* ── The Pages register ──
+     A third named register, for the panel surface. Same standing as the
+     navigation register above: not an exception to the roles, a NAMED set of
+     roles for a genuinely different reading task.
+
+     A panel is a CARD OF EVIDENCE. Four or five of them tile a page, each one
+     answering a question a producer pushed the answer to, and every panel
+     carries the same four runs of text in the same order — what this is, what
+     it says, the qualifier, and who produced it when. That repetition is the
+     whole reason this register exists: the roles are the same on every panel of
+     every schema, so they get names once here rather than a size each, in each
+     schema's component, eleven times over.
+
+       .type-page-label    11px UPPERCASE  panel header, card header, column head
+       .type-page-value    14px            the content: cells, rows, prose, banners
+       .type-page-meta     12px            the qualifier: status word, age, counts, hints
+       .type-page-stamp    11px mono       machine text: ids, slugs, run ids, versions
+       .type-page-metric   30px            the one big number, and the em dash that
+                                           stands in for it
+
+     **Every size here is a house token, not a number.** That is the point of
+     the block and the reason it is not a second font: Pages was already off the
+     scale — `text-[11px]` in eleven files, `text-[10px]` in three, below the
+     floor `--typo-micro` documents — and the fix for a surface that spelled its
+     sizes out is to give its roles names, not to give it a typeface. Change
+     `--typo-*` above and Pages moves with the product; it cannot drift again
+     without editing this block, which is exactly the property it lacked.
+
+     Two judgements are recorded here rather than left to each component:
+
+     **The qualifier is 12px, not 11.** Every one of those `text-[11px]` runs
+     was a supporting line — the status word, the age, the empty hint, a count —
+     and a panel grid is mostly supporting lines. The comment on the roles above
+     already settled this argument once, out loud: at the smaller size *"a whole
+     page of them read as fine print rather than as dense"*, and *"the density
+     this product wants comes from how much fits in a card, not from how small
+     the letters are."* Pages was the surface that had not heard it. 11px stays
+     for the two runs that are genuinely not meant to be read line by line —
+     the uppercase label you aim at, and the machine stamp you go looking for —
+     and both sit AT the documented floor rather than under it.
+
+     **The value is 14px at 1.25rem, which is `--typo-body` exactly.** Two 14px
+     idioms had grown inside Pages: `.type-row` at 1.3rem leading in
+     `status-panel.tsx`, and `text-body` at 1.25rem in the collapsed table
+     cards. Same size, different leading, no rule about which wins. `text-body`
+     wins, for two reasons that both point the same way: it is the token that
+     tracks `--typo-body` (`.type-row` hard-codes 0.875rem and would sit still
+     through a scale change), and `components/layout/property-row.tsx` — the
+     product's canonical label/value pair, which the table card list is bound to
+     verbatim — is written in it. A register whose value role disagreed with
+     PropertyRow would make a collapsed table read as a different product from
+     the detail pane beside it, which is the exact defect this surface was
+     already fixed for once. */
+  .type-page-label {
+    font-size: var(--typo-micro);
+    line-height: var(--typo-micro-lh);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .type-page-value {
+    font-size: var(--typo-body);
+    line-height: var(--typo-body-lh);
+  }
+  .type-page-meta {
+    font-size: var(--typo-label);
+    line-height: var(--typo-label-lh);
+  }
+  .type-page-stamp {
+    font-family: var(--font-mono);
+    font-size: var(--typo-micro);
+    line-height: var(--typo-micro-lh);
+  }
+  /* `leading-none` and tabular figures ride along, because a metric that
+     changes in place must not jitter and a 30px number with 2.25rem of leading
+     puts a visible gap between itself and its unit. */
+  .type-page-metric {
+    font-size: var(--typo-display);
+    line-height: 1;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
   /* Hairline: 211 uses of border-white/10 and 53 of border-white/8 existed
      because the divider inside a card had no name — only the card's own
      border did. Now it has one. */

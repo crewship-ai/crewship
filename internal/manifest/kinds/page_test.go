@@ -609,6 +609,37 @@ func TestPagePanelsDiffer(t *testing.T) {
 	}
 }
 
+// TestPagePanelsDiffer_TabIsDiffedIncludingOnASealedPanel — the tab bar is the
+// page's shape, so it is echoed by the read path (on the sealed placeholder
+// too) and is therefore something an apply can see. Without this, moving a
+// panel to another tab would plan as "unchanged" and the page would keep the
+// layout somebody just rewrote.
+func TestPagePanelsDiffer_TabIsDiffedIncludingOnASealedPanel(t *testing.T) {
+	declared := pageTestDoc().Spec.Panels
+	declared[0].Tab = "Síť"
+
+	if !pagePanelsDiffer(declared, pageRemoteMatching(pageTestDoc()).Panels) {
+		t.Fatal("adding a tab planned as unchanged; the read path echoes it, so it is comparable")
+	}
+
+	onTab := pageRemoteMatching(pageTestDoc()).Panels
+	onTab[0].Tab = "Síť"
+	if pagePanelsDiffer(declared, onTab) {
+		t.Fatal("a page already on that tab planned as drifted, which re-applies on every run")
+	}
+
+	// A panel this account may not see still carries its tab, and moving it is
+	// still a change: a bar that differed per viewer would not be one page.
+	sealed := []PagePanelRemote{{PanelID: "services", Sealed: true, Span: 8, Tab: "Odezva", OwnerCrewName: "Lookout"}}
+	if !pagePanelsDiffer(declared, sealed) {
+		t.Fatal("a sealed panel on a different tab planned as unchanged")
+	}
+	sealed[0].Tab = "Síť"
+	if pagePanelsDiffer(declared, sealed) {
+		t.Fatal("a sealed panel on the declared tab planned as drifted")
+	}
+}
+
 // TestPagePanelsDiffer_PublicIsNotDiffed pins the deliberate blind spot:
 // the read path does not serialise `public`, so diffing it would report
 // drift forever on any page that declares a public panel.

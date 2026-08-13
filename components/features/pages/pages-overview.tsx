@@ -10,10 +10,16 @@
  * the components Routines and Dashboard already use, so a card on this page
  * and a card on that one cannot drift.
  *
- * The card header idiom is copied exactly: small icon + 11px uppercase
- * tracking-wider label on the left, right-aligned muted status word on the
- * right — and the right-hand word is always the ANSWER (`all fresh`,
- * `nothing pending`, `no pushes yet`), never a repeat of the label.
+ * The card header idiom is copied exactly: small icon + uppercase tracked label
+ * on the left, right-aligned muted status word on the right — and the
+ * right-hand word is always the ANSWER (`all fresh`, `nothing pending`,
+ * `no pushes yet`), never a repeat of the label.
+ *
+ * Type is the Pages register (`app/globals.css`): the row a card lists is
+ * `.type-page-value`, everything qualifying it is `.type-page-meta`, and a
+ * count or an instant that has to line up column-wise is `.type-page-stamp`.
+ * The rows here were 12px with 10px metadata under them, which is the fine
+ * print the register was declared to end.
  *
  * The em-dash rule (§9b.4) is load-bearing on the tiles. `0` is a measured
  * zero — we looked and there was nothing. `—` is *no basis to compute*, which
@@ -247,18 +253,18 @@ export function PagesOverview({
                         />
                         <span
                           className={cn(
-                            "min-w-0 flex-1 truncate text-[12px]",
+                            "type-page-value min-w-0 flex-1 truncate",
                             empty ? "text-foreground/40" : "text-foreground/85",
                           )}
                         >
                           {row.meta.label}
                         </span>
-                        <span className="shrink-0 text-[10px] text-muted-foreground-soft tabular-nums">
+                        <span className="type-page-meta shrink-0 text-muted-foreground-soft tabular-nums">
                           {row.panels} {row.panels === 1 ? "panel" : "panels"}
                         </span>
                         <span
                           className={cn(
-                            "w-8 shrink-0 text-right font-mono text-[11px] tabular-nums",
+                            "type-page-stamp w-8 shrink-0 text-right tabular-nums",
                             empty ? "text-muted-foreground-soft/50" : "text-foreground/85",
                           )}
                         >
@@ -305,10 +311,10 @@ export function PagesOverview({
                         )}
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[12px] text-foreground/90">
+                        <span className="type-page-value block truncate text-foreground/90">
                           {p.name}
                         </span>
-                        <span className="block truncate text-[10px] text-muted-foreground">
+                        <span className="type-page-meta block truncate text-muted-foreground">
                           {[
                             p.tally.failed > 0 ? `${p.tally.failed} failed` : null,
                             p.tally.never_produced > 0
@@ -320,7 +326,7 @@ export function PagesOverview({
                         </span>
                       </span>
                       {p.ownerLabel && (
-                        <span className="shrink-0 text-[10px] text-muted-foreground-soft">
+                        <span className="type-page-meta shrink-0 text-muted-foreground-soft">
                           {p.ownerLabel}
                         </span>
                       )}
@@ -366,14 +372,14 @@ export function PagesOverview({
                         )}
                         aria-hidden
                       />
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/90">
+                      <span className="type-page-value min-w-0 flex-1 truncate text-foreground/90">
                         {p.name}
                       </span>
-                      <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:block">
+                      <span className="type-page-meta hidden shrink-0 text-muted-foreground sm:block">
                         {p.tally.total} {p.tally.total === 1 ? "panel" : "panels"}
                       </span>
                       {/* Absolute, never "a while ago" (§4 rule 3). */}
-                      <span className="shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground-soft">
+                      <span className="type-page-stamp shrink-0 text-right tabular-nums text-muted-foreground-soft">
                         {formatInstant(p.lastProducedAt!, clock)}
                       </span>
                     </button>
