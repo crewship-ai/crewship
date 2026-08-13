@@ -27,6 +27,36 @@
  * its table to a card list while the `span: 12` panel beside it keeps the
  * table, at one viewport width. That is the whole point of §9's container
  * queries.
+ *
+ * ## Liveness (epic #1935)
+ *
+ * A pulse HERE means one thing: *this panel's data just changed*. It is not a
+ * heartbeat — a panel that pulses permanently looks identical whether the last
+ * payload landed a second or an hour ago, and it is the kind of motion a
+ * reader stops seeing within a day. Silence therefore carries information too:
+ * a producer that dies simply stops flashing, and its panel greys itself out
+ * on its own once the server's verdict crosses the SLA.
+ *
+ * Three refusals keep the flash from claiming more than the freshness verdict
+ * does (§4 is the whole reason this product exists):
+ *
+ *  · Only a `fresh` panel flashes. A `stale`, `failed` or never-produced panel
+ *    is silent no matter what arrives — motion must never imply a liveness the
+ *    verdict disagrees with.
+ *  · Only a CHANGED payload flashes. The same bytes arriving again is not news;
+ *    it is a producer repeating itself, and re-flashing would turn the cue into
+ *    the heartbeat it exists not to be.
+ *  · An EMPTY payload never flashes. A panel drawing the em dash has received
+ *    nothing worth celebrating (§9b.4).
+ *
+ * The first payload a panel is ever seen with is a baseline, not an arrival —
+ * otherwise every panel flashes on load and the cue means "you opened a page".
+ *
+ * Cost: 0 KB. `motion` is 45 KB gzip for what is one CSS animation, and §9's
+ * rendering budget is ~0 KB of new weight (animation is CSS-only there in as
+ * many words). The keyframes are declared BELOW rather than in
+ * `app/globals.css`, so the whole cue — the rule, its duration and its
+ * reduced-motion fallback — reads in one place.
  */
 
 import * as React from "react"
@@ -43,7 +73,8 @@ import {
   type PageAction,
 } from "@/components/features/pages/panels/panel-actions"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
-import type { PageView as PageRecord } from "@/hooks/use-pages"
+import { LiveIndicator, type PageLiveness } from "@/components/features/pages/live-indicator"
+import type { PageView as PageRecord, PanelView } from "@/hooks/use-pages"
 
 /**
  * `span` → grid class. A literal map, because Tailwind reads source text: a
@@ -69,6 +100,133 @@ export function spanClass(span: number | undefined): string {
   return SPAN_CLASS[n]
 }
 
+// ── "Data just arrived" (epic #1935) ───────────────────────────────────────
+
+/** How long a panel stays highlighted after its payload changed. */
+export const PANEL_ARRIVAL_MS = 1200
+
+/**
+ * The cue, in full.
+ *
+ * A single-shot `box-shadow` ramp: up fast enough to catch the eye at the edge
+ * of vision, down slowly enough that it reads as a decay rather than a blink.
+ * It paints on the CELL, not inside the card, so the panel components own
+ * nothing of this and a panel rendered anywhere else (the public page, the
+ * dashboard strip) has no route by which it could flash.
+ *
+ * The reduced-motion block is the `app/globals.css` idiom for `.agent-active-*`
+ * — `animation: none`, and the meaning survives without it. Here that means the
+ * highlight still APPEARS for the same window and then goes, as a steady ring
+ * with no ramp: no movement, no fade, same information. The DOM state
+ * (`data-panel-arrival`) is set identically either way, so nothing about *what*
+ * is being said depends on the media query; only how it is drawn.
+ *
+ * Declared here rather than in `app/globals.css` deliberately: this rule is
+ * meaningless outside this component, and the file it would otherwise live in
+ * is being edited on another branch.
+ */
+export const PANEL_ARRIVAL_CSS = `
+@keyframes crewship-panel-arrival {
+  0%   { box-shadow: 0 0 0 0 rgba(30, 123, 254, 0); }
+  8%   { box-shadow: 0 0 0 2px rgba(30, 123, 254, 0.45), 0 0 16px 2px rgba(30, 123, 254, 0.20); }
+  100% { box-shadow: 0 0 0 2px rgba(30, 123, 254, 0), 0 0 16px 2px rgba(30, 123, 254, 0); }
+}
+[data-panel-arrival="flash"] {
+  animation: crewship-panel-arrival ${PANEL_ARRIVAL_MS}ms ease-out 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-panel-arrival="flash"] {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(30, 123, 254, 0.35);
+  }
+}
+`
+
+/**
+ * React 19 hoists a `<style>` carrying `href` + `precedence` into the head and
+ * dedupes it by href, so the grid can declare its own rule without a global
+ * stylesheet edit and without shipping it once per panel.
+ */
+function PanelArrivalStyles() {
+  return (
+    <style href="crewship-panel-arrival" precedence="medium">
+      {PANEL_ARRIVAL_CSS}
+    </style>
+  )
+}
+
+/** True when the payload is something rather than the absence of something. */
+function hasPayload(payload: unknown): boolean {
+  if (payload === null || payload === undefined) return false
+  if (typeof payload === "string") return payload.trim() !== ""
+  if (Array.isArray(payload)) return payload.length > 0
+  if (typeof payload === "object") return Object.keys(payload as object).length > 0
+  return true
+}
+
+/**
+ * What "the data changed" means, as one comparable string — or null for a
+ * panel that is not allowed to flash at all.
+ *
+ * Keyed on the PAYLOAD and nothing else. `produced_at` moves every time a
+ * producer runs, whether or not it found anything new, so a signature carrying
+ * it would flash on a 30-second cron pushing identical numbers — which is a
+ * heartbeat, and a heartbeat is what this is not.
+ */
+export function panelArrivalSignature(panel: PanelView): string | null {
+  // The verdict is the authority. `stale` and `failed` are silent by
+  // construction, and so is a state this build could not read (normalised to
+  // `never_produced` — never optimistically to `fresh`).
+  if (panel.snapshot.state !== "fresh") return null
+  if (!hasPayload(panel.snapshot.payload)) return null
+  try {
+    return JSON.stringify(panel.snapshot.payload) ?? null
+  } catch {
+    // A payload that cannot be serialised cannot be compared, and a cue we
+    // cannot justify is one we do not show.
+    return null
+  }
+}
+
+/**
+ * Flash once when `signature` changes to a new, non-null value.
+ *
+ * The first signature observed is a baseline: a panel does not flash because
+ * it mounted. A null signature (ineligible panel) clears any flash in flight
+ * and is remembered, so the transition back into `fresh` with genuinely new
+ * data is what flashes — not the recovery itself.
+ *
+ * Known limit: a second payload landing INSIDE the window extends the
+ * highlight rather than restarting the ramp, because the attribute never
+ * leaves and a CSS animation only replays when its selector re-matches. At the
+ * cadence a panel is pushed at (§4 SLAs are seconds-to-minutes) that is one
+ * highlight for two arrivals a fraction of a second apart, which is what a
+ * reader would perceive anyway — and the alternative, blinking the attribute
+ * off for a frame, would flicker.
+ */
+export function useArrivalFlash(signature: string | null, durationMs = PANEL_ARRIVAL_MS): boolean {
+  const [flashing, setFlashing] = React.useState(false)
+  // `undefined` is "nothing observed yet", which is distinct from a panel
+  // observed to be ineligible (`null`).
+  const seen = React.useRef<string | null | undefined>(undefined)
+
+  React.useEffect(() => {
+    const previous = seen.current
+    seen.current = signature
+    if (previous === undefined) return
+    if (signature === null) {
+      setFlashing(false)
+      return
+    }
+    if (previous === signature) return
+    setFlashing(true)
+    const timer = setTimeout(() => setFlashing(false), durationMs)
+    return () => clearTimeout(timer)
+  }, [signature, durationMs])
+
+  return flashing
+}
+
 export interface PageViewProps {
   page: PageRecord | null
   slug: string
@@ -85,6 +243,14 @@ export interface PageViewProps {
    * uses. Passing it avoids that lookup where it is already known.
    */
   workspaceId?: string | null
+  /**
+   * Whether this page is actually subscribed and receiving (`usePage().live`).
+   *
+   * Defaults to `offline` rather than to `live`: a caller that does not pass it
+   * has no realtime provider to speak of, and the indicator's whole job is to
+   * refuse to claim liveness it cannot demonstrate.
+   */
+  live?: PageLiveness
 }
 
 export function PageView({
@@ -96,6 +262,7 @@ export function PageView({
   onBack,
   now,
   workspaceId,
+  live = "offline",
 }: PageViewProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -115,11 +282,18 @@ export function PageView({
           {page?.name ?? slug}
         </span>
         <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground">{slug}</span>
-        {page?.ownerLabel && (
-          <span className="ml-auto shrink-0 text-[11px] text-muted-foreground-soft">
-            {page.ownerLabel}
-          </span>
-        )}
+        {/* The liveness indicator sits in the header, once — not on every
+            panel. "Is the pipe open" is a property of the page; "did MY data
+            just change" is a property of a panel, and each is said in exactly
+            one place. */}
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          {page?.ownerLabel && (
+            <span className="shrink-0 text-[11px] text-muted-foreground-soft">
+              {page.ownerLabel}
+            </span>
+          )}
+          <LiveIndicator liveness={live} />
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto">
@@ -275,24 +449,41 @@ function PanelGridCells({
       data-slot="panel-grid"
       className="grid grid-cols-1 gap-4 md:grid-cols-12 print:grid-cols-1"
     >
+      <PanelArrivalStyles />
       {panels
         .filter((panel) => !hidden.has(panel.spec.id))
         .map((panel) => (
-          <div
-            key={panel.spec.id}
-            data-slot="panel-cell"
-            data-panel-span={panel.spec.span}
-            // min-w-0 so a wide table inside a narrow cell scrolls in its own
-            // box instead of stretching the track and shoving its neighbours
-            // off the grid.
-            className={cn(
-              "@container/panel min-w-0 print:break-inside-avoid",
-              spanClass(panel.spec.span),
-            )}
-          >
-            <PanelRenderer panel={panel.spec} data={panel.snapshot} now={now} />
-          </div>
+          // Keyed on the panel id, so a refetch replaces the payload inside a
+          // cell that persists — which is what makes "changed since last time"
+          // a question this component can answer at all.
+          <PanelCell key={panel.spec.id} panel={panel} now={now} />
         ))}
+    </div>
+  )
+}
+
+/** One cell: the grid slot, the container context, and the arrival cue. */
+function PanelCell({ panel, now }: { panel: PanelView; now?: Date }) {
+  const signature = panelArrivalSignature(panel)
+  const flashing = useArrivalFlash(signature)
+  return (
+    <div
+      data-slot="panel-cell"
+      data-panel-span={panel.spec.span}
+      // Set in both states rather than toggled on and off: the DOM always says
+      // what it means, which is also what a reduced-motion reader is left with.
+      data-panel-arrival={flashing ? "flash" : "idle"}
+      // min-w-0 so a wide table inside a narrow cell scrolls in its own
+      // box instead of stretching the track and shoving its neighbours
+      // off the grid. rounded-xl matches the card the cue is drawn around —
+      // a box-shadow follows the border radius of the box it is painted on,
+      // and a square ring around a rounded card reads as a rendering bug.
+      className={cn(
+        "@container/panel min-w-0 rounded-xl print:break-inside-avoid",
+        spanClass(panel.spec.span),
+      )}
+    >
+      <PanelRenderer panel={panel.spec} data={panel.snapshot} now={now} />
     </div>
   )
 }

@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { SectionCard } from "@/components/ui/section-card"
 import { PanelActions } from "./panel-actions"
+import { isPanelIconName, resolvePanelIcon } from "./panel-icon"
 import {
   EM_DASH,
   formatAbsoluteAge,
@@ -29,6 +30,17 @@ import type { PanelProps } from "./types"
  * grouped content inside a page. Pages does not invent a panel shell.
  */
 export interface PanelFrameProps extends PanelProps {
+  /**
+   * The icon this panel's SCHEMA implies — a Gauge for a metric, a table for a
+   * table. It is the fallback, not the answer: an author who declared `icon:`
+   * in the page spec overrides it below.
+   *
+   * The override is resolved HERE rather than in each schema's component, for
+   * the reason the action bar lives here (§8 rule 5): one place a panel's
+   * chrome can come from, and it is ours. It also means every schema — the
+   * five that render, the reserved one, the fallbacks — honours the field
+   * without any of them being taught about it.
+   */
   icon: LucideIcon
   children: React.ReactNode
   /**
@@ -51,17 +63,33 @@ export function PanelFrame({
   now,
   publicView = false,
   className,
-  icon: Icon,
+  icon: schemaIcon,
   children,
   statusWord,
   showProvenance = true,
 }: PanelFrameProps) {
   const label = panel.title?.trim() || panel.id
+  // §3's icon field. Untrusted text — the server validated it against the
+  // closed set on the way in, and this narrows it again on the way out, so a
+  // name this build cannot draw costs the schema's own icon rather than an
+  // empty header. `data-panel-icon` records which of the two won, next to
+  // `data-panel-schema`, so the decision is visible in the DOM.
+  //
+  // A SEALED panel is exempt, and the exemption is §11b.14 rather than
+  // tidiness: that placeholder is a permission decision, the server serialises
+  // it as exactly `{panel_id, span, sealed, owner_crew_name}` and sends no
+  // icon at all — so an icon arriving on one is a wire that disagrees with the
+  // contract, and honouring it would repaint "you may not see this" as a
+  // subject the viewer was never told about. The lock wins.
+  const sealed = panel.sealed === true
+  const Icon = sealed ? schemaIcon : resolvePanelIcon(panel.icon, schemaIcon)
+  const iconSource = !sealed && isPanelIconName(panel.icon) ? panel.icon : "schema"
   return (
     <SectionCard
       data-slot="panel"
       data-panel-id={panel.id}
       data-panel-schema={panel.schema}
+      data-panel-icon={iconSource}
       data-panel-state={data.state}
       className={cn("gap-3 py-4", className)}
       title={

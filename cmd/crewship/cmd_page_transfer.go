@@ -51,9 +51,13 @@ import (
 const pageBundleFormatCLI = "crewship-page-bundle/v1"
 
 type pageBundlePanelJSON struct {
-	ID         string `json:"id" yaml:"id"`
-	Schema     string `json:"schema" yaml:"schema"`
-	Title      string `json:"title,omitempty" yaml:"title,omitempty"`
+	ID     string `json:"id" yaml:"id"`
+	Schema string `json:"schema" yaml:"schema"`
+	Title  string `json:"title,omitempty" yaml:"title,omitempty"`
+	// The panel's glyph, from the closed set the server validates against
+	// (internal/pages/icons.go). Carried so `export | import` is a round trip:
+	// a field the bundle drops is a field the install silently loses.
+	Icon       string `json:"icon,omitempty" yaml:"icon,omitempty"`
 	Owner      string `json:"owner" yaml:"owner"`
 	Producer   string `json:"producer" yaml:"producer"`
 	SLASeconds int    `json:"sla_seconds" yaml:"sla_seconds"`

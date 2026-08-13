@@ -123,9 +123,13 @@ type PageRemote struct {
 // pagePanelsDiffer, and pageDocumentFromRemote below.
 type PagePanelRemote struct {
 	// Full-panel fields.
-	ID         string `json:"id"`
-	Schema     string `json:"schema"`
-	Title      string `json:"title,omitempty"`
+	ID     string `json:"id"`
+	Schema string `json:"schema"`
+	Title  string `json:"title,omitempty"`
+	// Icon is echoed by the read path (unlike `public`, `actions` and the
+	// gates below), so it is one of the fields drift detection can actually
+	// compare. A field the applier can see is a field the applier checks.
+	Icon       string `json:"icon,omitempty"`
 	Owner      string `json:"owner"`
 	Producer   string `json:"producer"`
 	SLASeconds int    `json:"sla_seconds"`
@@ -395,6 +399,12 @@ func (d *PageDocument) writeBody() (map[string]any, error) {
 		if p.Title != "" {
 			panel["title"] = p.Title
 		}
+		// Omitted when unset rather than sent empty: an absent icon means
+		// "the schema's own", and sending "" would say the same thing in a
+		// second way the server would have to know to read.
+		if icon := strings.TrimSpace(string(p.Icon)); icon != "" {
+			panel["icon"] = icon
+		}
 		if p.Public {
 			panel["public"] = true
 		}
@@ -501,6 +511,12 @@ func pagePanelsDiffer(declared []pages.PanelSpec, remote []PagePanelRemote) bool
 			return true
 		}
 		if d.Title != r.Title {
+			return true
+		}
+		// The icon IS comparable — the read path echoes it — so removing
+		// `icon:` from a manifest plans as a change and restores the schema's
+		// default, rather than leaving the old glyph on the page forever.
+		if strings.TrimSpace(string(d.Icon)) != r.Icon {
 			return true
 		}
 		if strings.TrimSpace(d.Owner) != r.Owner {
@@ -659,6 +675,7 @@ func pageDocumentFromRemote(remote *PageRemote) (*PageDocument, error) {
 			ID:       p.ID,
 			Schema:   pages.PanelSchema(p.Schema),
 			Title:    p.Title,
+			Icon:     pages.PanelIcon(p.Icon),
 			Owner:    p.Owner,
 			Producer: p.Producer,
 			SLA:      pageFormatSLA(p.SLASeconds),

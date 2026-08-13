@@ -129,6 +129,15 @@ type pagePanelWire struct {
 	Span       int    `json:"span"`
 	Public     bool   `json:"public,omitempty"`
 
+	// Icon is the author's glyph for this panel, from the closed set in
+	// internal/pages/icons.go. It rides on BOTH halves of this struct, unlike
+	// the actions and the gates below: the client draws the header, so a
+	// document that carried the icon only on the write path would render every
+	// panel with its schema's icon and lose the distinction on the next read.
+	// A panel that declares none sends nothing, and the client falls back to
+	// the schema's own icon.
+	Icon string `json:"icon,omitempty"`
+
 	// Actions are the buttons this panel declares (§8b.1). They ride on the
 	// WRITE half of this struct: a human authoring the page sends them, and the
 	// server stores them in spec_json, which is the allow-list a click is
@@ -272,6 +281,12 @@ type panelRecord struct {
 	ProducerRef   string
 	SLASeconds    int
 	Span          int
+	// Icon is the author's chosen glyph. It has no column: it is presentation,
+	// it is validated on the way into spec_json, and page_panels carries the
+	// contract (schema, owner, producer, SLA) rather than the styling. It is
+	// attached from the parsed spec the read path already loads, next to the
+	// wake gates — see panelsFor.
+	Icon string
 	// Fault is §10b.4's stated reason: the producer was deleted, the owning
 	// crew removed. It outranks the clock — no amount of recent data makes a
 	// panel whose producer is gone current.
@@ -953,6 +968,12 @@ func (h *PageHandler) loadPanels(ctx context.Context, wsID, pageID string) ([]*p
 	seen := map[string]bool{}
 	for _, ps := range specDoc.Spec.Panels {
 		if p, ok := byPanelID[ps.ID]; ok && !seen[ps.ID] {
+			// The icon comes off the spec for the same reason the gates do:
+			// it is authored, it is not part of the panel's contract, and the
+			// document is already parsed here. A panel in the table but not in
+			// the spec (the racing-edit case below) simply keeps its schema's
+			// icon, which is what it had before it declared one.
+			p.Icon = string(ps.Icon)
 			ordered = append(ordered, p)
 			seen[ps.ID] = true
 		}
@@ -1006,6 +1027,7 @@ func (h *PageHandler) panelWire(p *panelRecord) pagePanelWire {
 		ID:         p.PanelID,
 		Schema:     p.Schema,
 		Title:      p.Title,
+		Icon:       p.Icon,
 		Owner:      p.ownerRef(),
 		Producer:   p.producerRef(),
 		SLASeconds: p.SLASeconds,
@@ -1205,9 +1227,13 @@ func panelSpecsFrom(w http.ResponseWriter, in []pagePanelWire) ([]pages.PanelSpe
 			return nil, false
 		}
 		out = append(out, pages.PanelSpec{
-			ID:        p.ID,
-			Schema:    pages.PanelSchema(p.Schema),
-			Title:     p.Title,
+			ID:     p.ID,
+			Schema: pages.PanelSchema(p.Schema),
+			Title:  p.Title,
+			// Untrusted, and refused by name in Validate below: an icon the
+			// client cannot draw must never reach spec_json, because from
+			// there it reaches a header that renders blank.
+			Icon:      pages.PanelIcon(p.Icon),
 			Owner:     p.Owner,
 			Producer:  p.Producer,
 			SLA:       fmt.Sprintf("%ds", p.SLASeconds),

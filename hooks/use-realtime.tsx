@@ -320,6 +320,21 @@ export function useRealtime(): RealtimeContextValue {
 }
 
 /**
+ * Provider-tolerant status read — the `useRealtimeEventSafe` of the connection
+ * state. Returns the socket's status, or null when no RealtimeProvider is
+ * mounted (a unit test, a public surface), which callers must treat as "not
+ * connected" rather than "unknown, probably fine".
+ *
+ * Exists because a surface with NO poll backstop has to be able to say so:
+ * `RealtimeStatusBanner` shows the app-wide outage after three seconds, but a
+ * per-page indicator needs the same state without throwing outside the
+ * provider (`components/features/pages/live-indicator.tsx`).
+ */
+export function useRealtimeStatusSafe(): WSStatus | null {
+  return useContext(RealtimeContext)?.status ?? null
+}
+
+/**
  * Subscribe to a specific realtime event type.
  * The callback is called whenever the event fires.
  * Returns the latest event of this type (or null).

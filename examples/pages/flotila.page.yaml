@@ -10,6 +10,7 @@ spec:
     # because "is it working" outranks every number on the page.
     - id: sluzby
       schema: status.v1
+      icon: container
       title: Jede to?
       owner: crew/ops
       producer: script/fleet-watch.sh
@@ -21,6 +22,7 @@ spec:
     # without this the arrow renders muted rather than guessing (§11b.9).
     - id: pamet
       schema: metric.v1
+      icon: memory
       title: Volná paměť
       owner: crew/ops
       producer: script/fleet-watch.sh
@@ -31,6 +33,7 @@ spec:
     # would be two panels (§3).
     - id: disk
       schema: series.v1
+      icon: disk
       title: Místo na disku podle klonu
       owner: crew/engineering
       producer: script/fleet-watch.sh
@@ -42,6 +45,7 @@ spec:
     # measured data and renders empty (§9b.4).
     - id: klony
       schema: table.v1
+      icon: deploy
       title: Co kde běží
       owner: crew/engineering
       producer: script/fleet-watch.sh
@@ -53,6 +57,7 @@ spec:
     # sanitising them out of the payload.
     - id: rozbor
       schema: narrative.v1
+      icon: alert
       title: Co s tím
       owner: crew/ops
       producer: script/fleet-watch.sh

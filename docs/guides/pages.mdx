@@ -70,6 +70,51 @@ user-supplied string.
 | `table.v1` | `{columns[{key,label,align?}], rows[]}` | table; rows are **keyed objects** matching `columns`, not positional arrays |
 | `narrative.v1` | `{blocks[{kind: paragraph\|list, text}], verdict?, actions?[]}` | prose plus the page's declared action buttons |
 
+### Panel icons
+
+A panel's icon is derived from its schema, which is right until a page carries
+three `status.v1` panels — "is it running", "who is on call", "what deployed
+today" wear one face, and the header stops telling the reader which panel they
+are looking at. Declare `icon:` to say what the panel is *about*:
+
+```yaml
+    - id: pamet
+      schema: metric.v1
+      title: Volná paměť
+      icon: memory                    # optional; default is the schema's own
+      owner: crew/lookout
+      producer: script/free.sh
+      sla: 30s
+      span: 4
+```
+
+**The set is closed**, for the reason the schema vocabulary is: an open string
+would be a name the server accepts and the browser cannot draw, and a blank
+panel header reads as a design decision rather than as an error — a quieter
+failure than an unknown schema, which at least renders a fallback that says so.
+An icon outside the set is refused when the page is saved, and the refusal
+names every value you could have used instead.
+
+| Group | Names |
+|---|---|
+| The machine | `memory` (RAM), `cpu`, `disk`, `network`, `container` |
+| What it talks to | `database`, `queue` |
+| Time | `clock` (uptime, latency, how long since), `calendar` |
+| The business | `money`, `people` (headcount, who is on call), `deploy`, `alert` |
+
+Thirteen, and deliberately short enough to read in one go: a vocabulary nobody
+can hold in their head is one you pick from by grepping, which is an open
+string with extra steps.
+
+There is **no `check` and no `warning`**, and no per-icon colour. The panel
+already renders a verdict — `status.v1` draws ✓ / ! / ✕ per item, the frame
+draws the freshness word, and colour on this surface means state
+(`ok`/`warning`/`critical`). A tick in the header would be a second verdict on
+the same card and you could not tell whether it described the subject or the
+state. `alert` is admitted because an incident board is a real *subject*; it
+draws a siren, never the triangle a broken panel uses. The icon carries
+identity; the state carries colour.
+
 A `metric.v1` `delta` is directionless by default — it renders with a sign and
 an arrow in a neutral tone, because green-up on a rising error rate would be a
 lie. An optional `delta_good: "up" | "down"` opts into success/destructive

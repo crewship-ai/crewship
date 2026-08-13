@@ -71175,6 +71175,25 @@
                     "description": "The parsed spec (§11b.2). The CLI parses the YAML document and sends this; the server validates it and checks that every declared owner crew and producer routine or agent resolves (§10b.1).",
                     "items": {
                       "properties": {
+                        "icon": {
+                          "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
+                          "enum": [
+                            "memory",
+                            "cpu",
+                            "disk",
+                            "network",
+                            "container",
+                            "database",
+                            "queue",
+                            "clock",
+                            "calendar",
+                            "money",
+                            "people",
+                            "deploy",
+                            "alert"
+                          ],
+                          "type": "string"
+                        },
                         "id": {
                           "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
                           "type": "string"
@@ -71292,6 +71311,25 @@
                             "properties": {
                               "data": {
                                 "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
+                              },
+                              "icon": {
+                                "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
+                                "enum": [
+                                  "memory",
+                                  "cpu",
+                                  "disk",
+                                  "network",
+                                  "container",
+                                  "database",
+                                  "queue",
+                                  "clock",
+                                  "calendar",
+                                  "money",
+                                  "people",
+                                  "deploy",
+                                  "alert"
+                                ],
+                                "type": "string"
                               },
                               "id": {
                                 "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
@@ -71433,6 +71471,25 @@
                             "properties": {
                               "data": {
                                 "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
+                              },
+                              "icon": {
+                                "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
+                                "enum": [
+                                  "memory",
+                                  "cpu",
+                                  "disk",
+                                  "network",
+                                  "container",
+                                  "database",
+                                  "queue",
+                                  "clock",
+                                  "calendar",
+                                  "money",
+                                  "people",
+                                  "deploy",
+                                  "alert"
+                                ],
+                                "type": "string"
                               },
                               "id": {
                                 "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
@@ -71905,6 +71962,25 @@
                               "data": {
                                 "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
                               },
+                              "icon": {
+                                "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
+                                "enum": [
+                                  "memory",
+                                  "cpu",
+                                  "disk",
+                                  "network",
+                                  "container",
+                                  "database",
+                                  "queue",
+                                  "clock",
+                                  "calendar",
+                                  "money",
+                                  "people",
+                                  "deploy",
+                                  "alert"
+                                ],
+                                "type": "string"
+                              },
                               "id": {
                                 "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
                                 "type": "string"
@@ -72130,6 +72206,25 @@
                     "description": "The parsed spec (§11b.2). The CLI parses the YAML document and sends this; the server validates it and checks that every declared owner crew and producer routine or agent resolves (§10b.1).",
                     "items": {
                       "properties": {
+                        "icon": {
+                          "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
+                          "enum": [
+                            "memory",
+                            "cpu",
+                            "disk",
+                            "network",
+                            "container",
+                            "database",
+                            "queue",
+                            "clock",
+                            "calendar",
+                            "money",
+                            "people",
+                            "deploy",
+                            "alert"
+                          ],
+                          "type": "string"
+                        },
                         "id": {
                           "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
                           "type": "string"
@@ -72247,6 +72342,25 @@
                             "properties": {
                               "data": {
                                 "description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."
+                              },
+                              "icon": {
+                                "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
+                                "enum": [
+                                  "memory",
+                                  "cpu",
+                                  "disk",
+                                  "network",
+                                  "container",
+                                  "database",
+                                  "queue",
+                                  "clock",
+                                  "calendar",
+                                  "money",
+                                  "people",
+                                  "deploy",
+                                  "alert"
+                                ],
+                                "type": "string"
                               },
                               "id": {
                                 "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",

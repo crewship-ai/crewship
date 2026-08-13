@@ -163,9 +163,12 @@ type pageWriteJSON struct {
 }
 
 type pageWritePanelJSON struct {
-	ID         string `json:"id"`
-	Schema     string `json:"schema"`
-	Title      string `json:"title,omitempty"`
+	ID     string `json:"id"`
+	Schema string `json:"schema"`
+	Title  string `json:"title,omitempty"`
+	// The panel's glyph (internal/pages/icons.go). ParseDocument has already
+	// refused anything outside the closed set, and the server refuses it again.
+	Icon       string `json:"icon,omitempty"`
 	Owner      string `json:"owner"`
 	Producer   string `json:"producer"`
 	SLASeconds int    `json:"sla_seconds"`
@@ -460,6 +463,7 @@ func pageWriteFrom(doc *pages.Document) *pageWriteJSON {
 			ID:         p.ID,
 			Schema:     string(p.Schema),
 			Title:      p.Title,
+			Icon:       string(p.Icon),
 			Owner:      p.Owner,
 			Producer:   p.Producer,
 			SLASeconds: int(sla.Seconds()),

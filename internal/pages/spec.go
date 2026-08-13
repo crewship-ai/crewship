@@ -73,6 +73,16 @@ type PanelSpec struct {
 	Schema PanelSchema `json:"schema" yaml:"schema"`
 	Title  string      `json:"title,omitempty" yaml:"title,omitempty"`
 
+	// Icon is the panel's glyph, from the closed set in icons.go. Optional:
+	// a panel that declares none keeps the icon its schema implies. It exists
+	// because a page with three status.v1 panels on it had three identical
+	// headers, and the schema is the wrong thing to derive identity from —
+	// "is it running" and "who is on call" are the same SHAPE and not the same
+	// subject. Closed for the reason PanelSchema is: an open string is a name
+	// the client cannot draw, and a blank header is a quieter failure than an
+	// unknown schema, which at least renders a fallback that says so.
+	Icon PanelIcon `json:"icon,omitempty" yaml:"icon,omitempty"`
+
 	// Owner is the permission anchor, not a label: "crew/<slug>". A panel the
 	// viewer may not see is filtered server-side before serialisation and
 	// leaves a sealed placeholder in its grid slot, so the page has the same
@@ -347,6 +357,18 @@ func (d *Document) Validate() error {
 			return newError(CodeInvalidSpec, p.Schema,
 				"panel %q declares unknown schema %q; the set is closed", p.ID, p.Schema)
 		}
+		// The icon is normalised before it is checked, and checked before it is
+		// stored: what validates is exactly what the client will be asked to
+		// resolve. Trimming only — no case folding — because `icon: Memory`
+		// silently becoming `memory` teaches an author a spelling that is not
+		// the vocabulary, and the next name they guess will not be forgiven.
+		p.Icon = PanelIcon(strings.TrimSpace(string(p.Icon)))
+		if p.Icon != "" && !p.Icon.Known() {
+			return newError(CodeInvalidSpec, p.Schema,
+				"panel %q declares icon %q; the set is closed — one of: %s",
+				p.ID, p.Icon, PanelIconList())
+		}
+
 		if _, err := p.OwnerCrewSlug(); err != nil {
 			return newError(CodeInvalidSpec, p.Schema, "panel %q: %v", p.ID, err)
 		}

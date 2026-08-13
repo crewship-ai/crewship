@@ -95,7 +95,7 @@ export function SeriesPanel({ panel, data, now, publicView = false, className }:
                 replacement, and they are the first thing a narrow panel loses. */}
             <ul
               data-slot="series-legend"
-              className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-muted-foreground"
             >
               {drawn.map((s) => (
                 <li

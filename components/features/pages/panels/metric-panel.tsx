@@ -80,7 +80,12 @@ export function MetricPanel({ panel, data, now, publicView = false, className }:
             <PanelAge producedAt={provenanceProducedAt(data.provenance)} now={clock} />
           ) : null}
         </div>
-        <TargetMeter value={numeric} target={payload.target} dimmed={gate.dimmed} />
+        <TargetMeter
+          value={numeric}
+          target={payload.target}
+          deltaGood={payload.delta_good}
+          dimmed={gate.dimmed}
+        />
         <Sparkline values={payload.sparkline} dimmed={gate.dimmed} />
       </div>
     )
@@ -122,7 +127,7 @@ function MetricDelta({
     <span
       data-slot="panel-delta"
       className={cn(
-        "text-[11px] tabular-nums",
+        "text-micro tabular-nums",
         good === null && "text-muted-foreground",
         good === true && "text-success",
         good === false && "text-destructive",
@@ -134,35 +139,79 @@ function MetricDelta({
   )
 }
 
-/** Hand-drawn meter — one div, one width. No chart library, no measurement. */
+/**
+ * Hand-drawn meter — one div, one width. No chart library, no measurement.
+ *
+ * **Reaching the target is the one thing on this panel colour is allowed to
+ * say, and only when the payload said which way is good.** §11b.10 calls
+ * `target` a ceiling; §3 reserves the status colours; and §11b.9 settles the
+ * argument for the delta right above — *"green-up on an error rate would be a
+ * lie, so the payload has to say which way is good."* A target is the same
+ * shape of claim: 128 of 150 invoices reaching 150 is an achievement, 128 of
+ * 150 open incidents reaching 150 is a fire, and nothing in `{value, target}`
+ * distinguishes them. So the same opt-in decides it:
+ *
+ *   crossed + `delta_good: "up"`    → success  (up is good; the goal is met)
+ *   crossed + `delta_good: "down"`  → destructive (down is good; the cap is hit)
+ *   crossed, no `delta_good`        → the neutral bar, and the word "reached"
+ *
+ * The word rides with the colour in every case, so the meter still reports the
+ * fact on a monochrome print and to a reader who cannot separate the hues —
+ * the same rule §3 pins on `status.v1`, applied here rather than re-argued.
+ */
 function TargetMeter({
   value,
   target,
+  deltaGood,
   dimmed,
 }: {
   value: number | null
   target?: number | null
+  deltaGood?: "up" | "down" | null
   dimmed: boolean
 }) {
   if (value === null || typeof target !== "number" || !Number.isFinite(target) || target <= 0) {
     return null
   }
   const pct = Math.max(0, Math.min(100, (value / target) * 100))
+  const reached = value >= target
+  // `null` is "reached, but the payload never said whether that is good news".
+  const good = reached && deltaGood ? deltaGood === "up" : null
   return (
     <div
       data-slot="panel-target"
+      data-reached={reached ? "true" : "false"}
       role="meter"
       aria-valuenow={value}
       aria-valuemin={0}
       aria-valuemax={target}
-      aria-label={`${value} of a target of ${target}`}
+      aria-label={
+        reached
+          ? `${value} of a target of ${target}, target reached`
+          : `${value} of a target of ${target}`
+      }
       className={cn("flex flex-col gap-1", dimmed && "opacity-60")}
     >
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-primary" style={{ width: `${pct.toFixed(1)}%` }} />
+        <div
+          className={cn(
+            "h-full rounded-full",
+            good === null && "bg-primary",
+            good === true && "bg-success",
+            good === false && "bg-destructive",
+          )}
+          style={{ width: `${pct.toFixed(1)}%` }}
+        />
       </div>
-      <span className="text-[11px] text-muted-foreground tabular-nums">
-        {`of ${target} target`}
+      <span
+        className={cn(
+          "text-micro tabular-nums",
+          good === null && "text-muted-foreground",
+          good === true && "text-success",
+          good === false && "text-destructive",
+        )}
+      >
+        {reached ? `${target} target · reached` : `of ${target} target`}
       </span>
     </div>
   )

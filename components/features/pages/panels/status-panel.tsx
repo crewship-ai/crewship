@@ -5,6 +5,7 @@ import { Activity } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/components/ui/status-badge"
+import { STATUS_DOT_CLASSES } from "@/lib/colors"
 import { defaultEmptyHint, panelGate, provenanceProducedAt } from "./freshness"
 import {
   FailedValue,
@@ -94,6 +95,26 @@ const STATE_PRESENTATION: Record<string, { glyph: string; word: string; badge: s
 
 const UNKNOWN_PRESENTATION = { glyph: "?", word: "unknown", badge: "UNKNOWN" }
 
+/**
+ * The state rail — the row's left edge, in the state's own colour.
+ *
+ * This is the one panel §3 hands a palette to: *"status colours are reserved"*
+ * is a rule that reserves them FOR this triad, and a grid of a dozen services
+ * that a reader has to parse pill by pill is the case the colour exists to
+ * solve. The rail is scanned; the pill is read.
+ *
+ * It routes through `STATUS_DOT_CLASSES` for the same reason the pill routes
+ * through `STATUS_BADGE_CLASSES` — Pages does not get a second status colour
+ * map, and the fallback for a state a producer invented is the same neutral the
+ * badge falls back to, so an unknown state is grey on both.
+ *
+ * Colour is never the carrier: the glyph and the word are still in the pill
+ * beside it, and `data-state` still holds the machine-readable truth.
+ */
+function stateRailClass(badge: string): string {
+  return STATUS_DOT_CLASSES[badge] ?? "bg-muted-foreground"
+}
+
 function StatusRow({ item }: { item: StatusItem }) {
   const rawState = typeof item?.state === "string" ? item.state.toLowerCase() : ""
   const known = Object.prototype.hasOwnProperty.call(STATE_PRESENTATION, rawState)
@@ -106,19 +127,24 @@ function StatusRow({ item }: { item: StatusItem }) {
       data-slot="status-item"
       data-state={known ? rawState : "unknown"}
       className={cn(
-        "flex min-w-0 items-center gap-2 rounded-lg border border-border/60 bg-surface-subtle px-2.5 py-2",
+        "flex min-w-0 items-stretch gap-2 overflow-hidden rounded-lg border border-border/60 bg-surface-subtle py-2 pr-2.5 pl-0",
       )}
     >
+      <span
+        data-slot="status-rail"
+        aria-hidden="true"
+        className={cn("-my-2 w-1 shrink-0 rounded-r-sm", stateRailClass(presentation.badge))}
+      />
       {/* Name over label, so a narrow panel loses neither. */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col justify-center">
         <span className="type-row truncate">{name}</span>
         {label ? (
-          <span className="truncate text-[11px] text-muted-foreground">{label}</span>
+          <span className="truncate text-micro text-muted-foreground">{label}</span>
         ) : null}
       </div>
       <StatusBadge
         status={presentation.badge}
-        className="shrink-0 text-[11px]"
+        className="shrink-0 self-center text-micro"
         label={
           <>
             <span data-slot="status-glyph" aria-hidden="true" className="font-semibold">

@@ -31,7 +31,12 @@ import { useCallback, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
-import { useRealtimeChannelSafe, useRealtimeEventSafe } from "@/hooks/use-realtime"
+import {
+  useRealtimeChannelSafe,
+  useRealtimeEventSafe,
+  useRealtimeStatusSafe,
+} from "@/hooks/use-realtime"
+import { pageLiveness, type PageLiveness } from "@/components/features/pages/live-indicator"
 import {
   normalizePanelActions,
   type PageAction,
@@ -72,6 +77,8 @@ export interface WirePanel {
    *  inferred from missing fields, so a serialisation bug can never be
    *  mistaken for a permission decision. */
   sealed?: boolean | null
+  /** A closed name from internal/pages/icons.go; unknown falls back per schema. */
+  icon?: string | null
   panel_id?: string | null
   owner_crew_name?: string | null
   /** §11b.8: four states, and the SERVER sends `never_produced`. */
@@ -233,6 +240,10 @@ export function toPanelView(raw: WirePanel, index = 0): PanelView {
       // Carried on the SPEC, not beside it: page-view.tsx passes
       // `panel={panel.spec}` to the registry, so a flag anywhere else
       // never reaches the component that has to key on it (§11b.14).
+      // The author's chosen glyph. Untrusted here on purpose: PanelFrame
+      // narrows it through a Set and falls back to the schema's own icon, so an
+      // unknown name costs the header nothing and never renders blank.
+      icon: trimmed(raw.icon),
       sealed,
       owner_crew_name: trimmed(raw.owner_crew_name),
     },
@@ -557,17 +568,30 @@ export const pagesKeys = {
  *
  * `realtime.reconnected` is the gap: a socket that dropped and came back
  * missed every push in between, and this surface has no poll backstop.
+ *
+ * That last clause is also why this returns the channel it registered: with no
+ * poll backstop, "the socket is down" is not a cosmetic detail — it is the
+ * difference between numbers that are current and numbers that stopped moving
+ * without saying so. The header indicator is fed from here rather than from a
+ * timer of its own, so it can never be lit on a page nothing is arriving at
+ * (`components/features/pages/live-indicator.tsx`).
  */
-function usePagesRealtime(workspaceId: string | null | undefined, pageId?: string | null) {
+function usePagesRealtime(
+  workspaceId: string | null | undefined,
+  pageId?: string | null,
+): string | null {
   const qc = useQueryClient()
   const invalidate = useCallback(() => {
     if (!workspaceId) return
     qc.invalidateQueries({ queryKey: pagesKeys.all(workspaceId) })
   }, [qc, workspaceId])
 
+  const channel = pageId ? `page:${pageId}` : null
+
   useRealtimeEventSafe("page.panel.updated", invalidate)
   useRealtimeEventSafe("realtime.reconnected", invalidate)
-  useRealtimeChannelSafe(pageId ? `page:${pageId}` : null)
+  useRealtimeChannelSafe(channel)
+  return channel
 }
 
 /** An HTTP failure that keeps its status, so a 404 can get its own empty state. */
@@ -649,6 +673,12 @@ export interface UsePageResult {
   error: string | null
   /** True for a 404 — a slug that names nothing gets its own empty state. */
   notFound: boolean
+  /**
+   * Whether this page is actually receiving. Derived from the socket status
+   * and the `page:{pageId}` registration above — never from a timer, and never
+   * from "a payload arrived recently", which is a claim about the past.
+   */
+  live: PageLiveness
 }
 
 /** One page, with its panels and their payloads. */
@@ -672,7 +702,8 @@ export function usePage(
   })
 
   const page = useMemo(() => (query.data ? toPageView(query.data) : null), [query.data])
-  usePagesRealtime(workspaceId, page?.id ?? null)
+  const channel = usePagesRealtime(workspaceId, page?.id ?? null)
+  const status = useRealtimeStatusSafe()
 
   const err = query.error as Error | null
   return {
@@ -681,5 +712,6 @@ export function usePage(
     loading: query.isPending && Boolean(workspaceId) && Boolean(slug),
     error: err ? err.message : null,
     notFound: err instanceof PagesRequestError && err.status === 404,
+    live: pageLiveness(status, channel),
   }
 }

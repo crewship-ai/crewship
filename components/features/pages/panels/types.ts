@@ -89,6 +89,17 @@ export interface PanelSpec {
   /** Untrusted until narrowed — this is a string, not a `PanelSchema`. */
   schema: string
   title?: string
+  /**
+   * The author's glyph for this panel, from the closed set in
+   * `panel-icon.tsx` (mirrored from `internal/pages/icons.go`).
+   *
+   * Untrusted until narrowed — a string, not a `PanelIconName` — for the same
+   * reason `schema` is: the server validates it at save time, and the renderer
+   * narrows it again rather than trusting a wire value. Absent means the icon
+   * this panel's schema implies, which is what every panel had before the
+   * field existed.
+   */
+  icon?: string | null
   /** Permission anchor, not a label. */
   owner?: string | null
   /** 1..12, consumed by the page grid — not by the panel itself. */

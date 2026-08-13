@@ -22,6 +22,26 @@ import type { PanelProps, TableAlign, TableCell, TableColumn, TablePayload, Tabl
  * The collapse is a `@container` query on the panel's own box, not a viewport
  * breakpoint: a table panel with `span: 4` is narrow on a 27" monitor, and a
  * viewport breakpoint would keep showing it six columns of nothing.
+ *
+ * **The card form is a property list, not a stack of stat blocks.** When the
+ * table collapses, each row becomes label/value pairs — and the product already
+ * has exactly one way to draw a label/value pair: `components/layout/property-row.tsx`.
+ * The card list therefore carries PropertyRow's measurements verbatim (120px
+ * label column, `gap-3`, `py-2`, `text-label` medium muted label, `text-body`
+ * value, `border-b border-border/40` hairline, no rule under the last pair) so
+ * a collapsed table reads as the same product as an issue detail pane.
+ *
+ * It does not literally render `PropertyRow`: this list is a `<dl>` with real
+ * `<dt>`/`<dd>` elements, so the key/value relationship survives into the
+ * accessibility tree and every cell keeps the `data-slot`/`data-basis`
+ * attributes the em-dash rule is asserted through. PropertyRow is a `div` with
+ * a children slot and can carry neither. The classes are shared; only the
+ * elements differ, and this comment is the link — if PropertyRow's density
+ * changes, this changes with it.
+ *
+ * What it must NOT be is what it was: an 11px uppercase tracked label over a
+ * value at the inherited 16px, which is the stat-block idiom and made a narrow
+ * table panel read as a different product from the panel beside it.
  */
 export function TablePanel({ panel, data, now, publicView = false, className }: PanelProps) {
   const clock = resolveNow(now)
@@ -73,7 +93,7 @@ export function TablePanel({ panel, data, now, publicView = false, className }: 
                           data-key={col.key}
                           scope="col"
                           className={cn(
-                            "px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
+                            "px-2 py-1.5 text-micro font-semibold uppercase tracking-wider text-muted-foreground",
                             alignClass(col.align),
                           )}
                         >
@@ -105,17 +125,51 @@ export function TablePanel({ panel, data, now, publicView = false, className }: 
                   <li
                     key={i}
                     data-slot="table-card"
-                    className="rounded-lg border border-border/60 bg-surface-subtle p-2.5"
+                    className="rounded-lg border border-border/60 bg-surface-subtle px-3 py-1"
                   >
-                    <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1">
-                      {columns.map((col, ci) => (
-                        <React.Fragment key={col.key}>
-                          <dt className="text-[11px] uppercase tracking-wider text-muted-foreground-soft">
-                            {col.label ?? col.key}
-                          </dt>
-                          <Cell as="dd" column={col} value={cellOf(row, col.key, ci)} />
-                        </React.Fragment>
-                      ))}
+                    {/*
+                     * One grid for the whole card, not one per pair: the label
+                     * column is then a single track and every value in the card
+                     * starts on the same x, which is the alignment a stack of
+                     * per-pair grids quietly loses. `minmax(0,120px)` is
+                     * PropertyRow's 120px, allowed to shrink rather than
+                     * overflow when a `span: 4` panel gets narrow.
+                     *
+                     * The tracks stretch rather than centre, so the two halves
+                     * of a pair share one baseline for the hairline under them.
+                     * PropertyRow can afford `items-center` because its rule is
+                     * on the row; here it is on each cell, and a value that
+                     * wraps to two lines would otherwise break the rule into
+                     * two segments at different heights. The label centres
+                     * itself inside its own stretched cell instead.
+                     */}
+                    <dl className="grid grid-cols-[minmax(0,120px)_minmax(0,1fr)] gap-x-3 text-body">
+                      {columns.map((col, ci) => {
+                        // The hairline belongs to the pair, and the last pair
+                        // has none — PropertyRow's `last:border-0`, which a
+                        // two-element pair in one grid cannot express as a
+                        // selector.
+                        const rule = ci === columns.length - 1 ? "" : "border-b border-border/40"
+                        return (
+                          <React.Fragment key={col.key}>
+                            <dt
+                              data-slot="table-card-label"
+                              className={cn(
+                                "flex items-center py-2 text-label font-medium text-muted-foreground",
+                                rule,
+                              )}
+                            >
+                              {col.label ?? col.key}
+                            </dt>
+                            <Cell
+                              as="dd"
+                              column={col}
+                              value={cellOf(row, col.key, ci)}
+                              className={cn("py-2", rule)}
+                            />
+                          </React.Fragment>
+                        )
+                      })}
                     </dl>
                   </li>
                 ))}
@@ -153,15 +207,36 @@ export function TablePanel({ panel, data, now, publicView = false, className }: 
  * dash over `""` would be reporting "we have nothing to look at" about a cell
  * the producer deliberately emptied, which is the one glyph in this product
  * that must mean the same thing on both sides of the wire.
+ *
+ * Two presentation rules ride along, and both are here rather than at the two
+ * call sites so a `<td>` and its `<dd>` can never drift apart:
+ *
+ *  - **`tabular-nums` on every cell, not only on numeric ones.** The alignment
+ *    a column of figures needs is a property of the COLUMN, and a producer that
+ *    pushes a port as `"8083"` must line up under one that pushes `8083`. The
+ *    feature only changes the advance width of digit glyphs, so it costs a cell
+ *    of words nothing; making it conditional on the JS type would leave the one
+ *    case that actually matters — the stringly-typed payload — unaligned.
+ *  - **The declared alignment holds in the card form too.** `align: "right"` is
+ *    a statement about the value, not about which of the two layouts is on
+ *    screen, so the `<dd>` right-aligns inside its grid track exactly as the
+ *    `<td>` does inside its column.
+ *
+ * There is deliberately no colour here. §3 reserves the status colours, and a
+ * cell tinted on the strength of its own value would be this panel inventing a
+ * second, unlabelled status vocabulary — green in a table that means neither
+ * "ok" nor "series 3" but "some number this component decided it liked".
  */
 function Cell({
   as: As,
   column,
   value,
+  className,
 }: {
   as: "td" | "dd"
   column: TableColumn
   value: TableCell
+  className?: string
 }) {
   const missing = value === null || value === undefined
   return (
@@ -170,10 +245,11 @@ function Cell({
       data-key={column.key}
       data-basis={missing ? "none" : "measured"}
       className={cn(
-        As === "td" ? "px-2 py-1.5" : "min-w-0 break-words",
-        typeof value === "number" && "tabular-nums",
+        "tabular-nums",
+        As === "td" ? "px-2 py-1.5" : "min-w-0 break-words text-body text-foreground",
         alignClass(column.align),
         missing && "text-muted-foreground-soft",
+        className,
       )}
     >
       {missing ? EM_DASH : formatCell(value)}

@@ -44,6 +44,7 @@ spec:
     - id: services              # required — the address a producer pushes to
       schema: status.v1         # required — closed set, see below
       title: Jede to?           # optional — the panel heading
+      icon: container           # optional — closed set, see below
       owner: crew/lookout       # required — permission anchor, not a label
       producer: script/watch-services.sh   # required — who may write it
       sla: 30s                  # required — Go duration; 0 is not allowed
@@ -66,6 +67,7 @@ spec:
 | `id` | yes | Slug-shaped, unique within the page. This is the push address (`crewship page set <page>/<panel>`), so it is stable across edits. |
 | `schema` | yes | One of the closed set. `metric.v1`, `status.v1` and `table.v1` ship first; the rest are reserved and are refused with "reserved but not yet implemented" until their renderer lands. |
 | `title` | no | Panel heading. |
+| `icon` | no | The panel's glyph, from a closed set of 13: `memory` (RAM), `cpu`, `disk`, `network`, `container`, `database`, `queue`, `clock`, `calendar`, `money`, `people`, `deploy`, `alert`. Absent means the icon the panel's schema implies, which is what three `status.v1` panels on one page all get. The set is closed because an open string is a name the server accepts and the browser cannot draw, and a blank header reads as a design decision rather than as an error; the refusal names every allowed value. There is no `check` and no per-icon colour — the panel already renders a verdict, and colour on this surface means state. |
 | `owner` | yes | `crew/<slug>`. Must be a crew — never a user. |
 | `producer` | yes | `<kind>/<ref>` with kind in `{routine, script, agent, webhook}`. There is no `sql` or `datasource` kind and there will not be one. |
 | `sla` | yes | Go duration string: `30s`, `5m`, `1h`. Must be greater than zero. Sent to the server as `sla_seconds`. |
@@ -221,6 +223,7 @@ context, following `saved-views` and `missions`.
 | `spec.panels[].id` | `panels[].id` | |
 | `spec.panels[].schema` | `panels[].schema` | |
 | `spec.panels[].title` | `panels[].title` | Omitted when empty. |
+| `spec.panels[].icon` | `panels[].icon` | Omitted when empty — absent means "the schema's own", and an empty string would say the same thing a second way. Echoed on the read path (unlike `public`, `actions` and the gates), so drift detection compares it. |
 | `spec.panels[].owner` | `panels[].owner` | |
 | `spec.panels[].producer` | `panels[].producer` | |
 | `spec.panels[].sla` | `panels[].sla_seconds` | `30s` → `30`. One representation in the database, one on the wire, one for humans. |
@@ -262,6 +265,9 @@ use, so a document that validates here validates everywhere:
 - `producer` must parse as `<kind>/<ref>` with a known kind.
 - `sla` must parse as a duration and be greater than zero.
 - `span` must be within 1–12.
+- `icon`, when declared, must be a member of the closed set. Case is not
+  folded and synonyms are not guessed: `Memory` and `ram` are both refused,
+  because accepting either would teach a spelling that is not the vocabulary.
 - Action ids are slug-shaped and unique within the page; `kind` is
   closed and an undeclared one is a refusal, not a warning.
 - A `call` names a routine slug; a `link` carries an entity `ref` and
@@ -334,8 +340,8 @@ discovered:
    the UI will not be reported as drifted.
 2. **A sealed panel is compared on `id` and `span` only.** That is all a
    placeholder carries. If you apply a manifest containing a panel owned
-   by a crew you are not in, drift in its schema, producer, title or SLA
-   is invisible — and treating "cannot see" as "must differ" would PATCH
+   by a crew you are not in, drift in its schema, producer, title, icon
+   or SLA is invisible — and treating "cannot see" as "must differ" would PATCH
    the page on every single apply, minting a version nobody asked for.
    Apply as a member of the owning crews if you need the full diff.
 
