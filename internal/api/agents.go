@@ -294,7 +294,14 @@ type agentResponse struct {
 	// new one exactly once. Pointer + omitempty: only the Get handler
 	// computes it, so list responses omit the field rather than reporting
 	// a false "not configured".
-	WebhookSecretSet *bool          `json:"webhook_secret_set,omitempty"`
+	WebhookSecretSet *bool `json:"webhook_secret_set,omitempty"`
+	// SuggestedPrompts is the agent's own chat suggestions, one per line
+	// (PRD chat-as-a-primary-surface, Step 7). null when unconfigured, which
+	// is the majority case and means "use the role packs" — the client falls
+	// back in lib/agent-suggestions.ts. Present on the list response too,
+	// because the chat page resolves its agent out of GET /agents by slug and
+	// never fetches the detail.
+	SuggestedPrompts *string        `json:"suggested_prompts"`
 	MCPConfigJSON    *string        `json:"mcp_config_json,omitempty"`
 	CreatedAt        string         `json:"created_at"`
 	UpdatedAt        string         `json:"updated_at"`

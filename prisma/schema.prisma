@@ -434,6 +434,12 @@ model Agent {
   timeout_seconds Int         @default(1800)
   tool_profile    ToolProfile @default(CODING)
   memory_enabled  Boolean     @default(false)
+  // Chat suggestions shown as buttons under an empty conversation: one per
+  // line, at most 8, at most 120 characters each. NULL = not configured, and
+  // the chat falls back to the role packs in lib/agent-suggestions.ts. The
+  // caps are enforced in internal/api/agents_suggested_prompts.go, not here —
+  // see the migration for why they are not a CHECK.
+  suggested_prompts String?
   webhook_secret  String?
   created_at      DateTime    @default(now())
   updated_at      DateTime    @default(now()) @updatedAt

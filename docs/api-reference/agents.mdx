@@ -48,6 +48,7 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | GET | [/api/v1/agents/{agentId}/chats](#list-chats) | List chat sessions |
 | POST | [/api/v1/agents/{agentId}/chats](#create-chat) | Create a new chat session |
 | PUT | [/api/v1/agents/{agentId}/chats/{chatId}/read](#mark-chat-read) | Mark a chat read |
+| PATCH | [/api/v1/agents/{agentId}/chats/{chatId}](#rename-chat) | Rename a chat session |
 | DELETE | [/api/v1/agents/{agentId}/chats/{chatId}](#delete-chat) | Delete a chat session |
 | POST | [/api/v1/agents/{agentId}/chats/{chatId}/attachments](#chat-attachments) | Upload a chat attachment |
 | GET | [/api/v1/agents/{agentId}/runs](#agent-runs) | List execution history |
@@ -289,6 +290,7 @@ GET /api/v1/agents?workspace_id={workspaceId}
 | `timeout_seconds` | integer | Maximum execution time |
 | `tool_profile` | string | Tool access profile |
 | `memory_enabled` | boolean | Whether agent memory is enabled |
+| `suggested_prompts` | string? | Chat suggestions offered under an empty conversation, one per line (max 8, max 120 chars each). `null` when unconfigured -- the chat then shows the built-in defaults |
 | `cli_tools` | string? | Comma-separated list of allowed CLI tools |
 | `schedule_cron` | string? | Cron expression for scheduled runs |
 | `schedule_prompt` | string? | Prompt used for scheduled runs |
@@ -404,6 +406,19 @@ Partial update -- only provided fields are changed.
 | `schedule_prompt` | string | Schedule prompt |
 | `schedule_enabled` | boolean | Enable/disable schedule |
 | `mcp_config_json` | string | Agent MCP config JSON (must contain an `mcpServers` object) |
+| `suggested_prompts` | string | Chat suggestions, one per line (see below) |
+
+**Suggested prompts.** `suggested_prompts` holds the questions this agent
+offers as buttons under an empty conversation, one per line -- at most 8 lines,
+at most 120 characters each. The server normalises on write: CRLF becomes LF,
+each line is trimmed, blank lines are dropped, and a value that ends up empty
+is stored as `null`. An agent with `null` here is not misconfigured; it simply
+shows the built-in defaults, which is what every agent did before the field
+existed. Rejections name the offending line -- `"at most 8 prompts are allowed
+(got 9)"`, `"prompt 3 exceeds 120 characters (it has 154)"` -- so a caller can
+fix the entry rather than the whole list. Set it from the console under an
+agent's **Config -> Chat suggestions**, or with
+`crewship agent update <agent> --suggested-prompts @questions.txt`.
 
 **Response:** `200 OK` -- updated agent object.
 
@@ -1474,6 +1489,46 @@ path parameters.
 
 **Status:** `401` unauthenticated, `403` denied, and `404` when the chat is
 not nested under the supplied agent and workspace.
+
+### Rename Chat
+
+```
+PATCH /api/v1/agents/{agentId}/chats/{chatId}
+```
+
+Sets `chats.title` -- the name the session list, the chat sidebar and the
+agent-replied notification display. A session with no title reads "Untitled
+session" everywhere, so this is what makes a list of conversations navigable.
+
+**Auth:** The chat creator may rename their own chat; an agent editor may rename
+any chat for that agent -- the same gate as Delete Chat.
+
+**Request:** `{ "title": "Refactor the queue worker" }`. `title` is required and
+must be a string; an absent key, `null`, a non-string and a title that is empty
+after normalisation are all `400`.
+
+**Normalisation (server-side, before storage):** whitespace runs -- including
+newlines and tabs -- collapse to a single space, because a title is one line by
+definition; control characters and invisible formatting characters (zero-width
+padding, the right-to-left override used for label spoofing) are stripped, with
+the ZERO WIDTH JOINER exempted so emoji sequences survive; the result is trimmed
+and capped at **200 characters**. The cap counts characters, not bytes, so a
+Czech or Japanese title gets the same length as an English one. Over the cap is
+`400`, never a silent truncation.
+
+The stored title is **text, not HTML**: markup is preserved verbatim (`<Draft>
+plan` stays `<Draft> plan`), and every consumer is responsible for escaping it
+when rendering.
+
+**Response:** `200 OK` with the updated chat row -- the same object shape one
+element of [List Chats](#list-chats) has, including `unread_count`, so a client
+can replace the row it already holds without refetching the list. Renaming does
+not touch `last_activity_at`: fixing a name must not reorder the list.
+
+**Status:** `400` invalid or empty/over-long title, `401` unauthenticated, `403`
+when the caller is neither the creator nor an agent editor, `404` when the chat
+is not nested under the supplied agent and workspace (cross-tenant included),
+and `500` on a storage failure.
 
 ### Delete Chat
 

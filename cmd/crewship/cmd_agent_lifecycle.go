@@ -191,6 +191,22 @@ var agentUpdateCmd = &cobra.Command{
 				body["system_prompt"] = v
 			}
 		}
+		// Chat suggestions, one per line. @file so a list can live in the
+		// repo next to whatever else configures the agent; the server
+		// normalises and caps it (8 prompts, 120 characters each) and names
+		// the offending line if it refuses. An explicit empty string clears
+		// the list, at which point the agent falls back to the role defaults.
+		if flags.Changed("suggested-prompts") {
+			v, _ := flags.GetString("suggested-prompts")
+			if strings.HasPrefix(v, "@") {
+				data, err := os.ReadFile(v[1:])
+				if err != nil {
+					return fmt.Errorf("read suggested prompts file: %w", err)
+				}
+				v = string(data)
+			}
+			body["suggested_prompts"] = v
+		}
 		if flags.Changed("avatar-seed") {
 			v, _ := flags.GetString("avatar-seed")
 			body["avatar_seed"] = v

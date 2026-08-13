@@ -65,6 +65,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"schedule_enabled":          "schedule_enabled",
 		"mcp_config_json":           "mcp_config_json",
 		"webhook_require_timestamp": "webhook_require_timestamp",
+		"suggested_prompts":         "suggested_prompts",
 	}
 
 	// Validate slug format if being updated
@@ -262,9 +263,27 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate and canonicalise suggested_prompts before anything is written.
+	// The stored form is LF-separated, trimmed and blank-line-free, and an
+	// emptied textarea becomes NULL — see agents_suggested_prompts.go. The
+	// error text names the offending prompt by position: a list of eight
+	// short strings is not something "invalid input" helps anyone fix.
+	suggestedPrompts, hasSuggestedPrompts := interface{}(nil), false
+	if v, ok := body["suggested_prompts"]; ok {
+		val, _, err := suggestedPromptsPatch(v)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		suggestedPrompts, hasSuggestedPrompts = val, true
+	}
+
 	ub := newUpdate()
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
+			if col == "suggested_prompts" && hasSuggestedPrompts {
+				val = suggestedPrompts
+			}
 			if col == "memory_enabled" || col == "schedule_enabled" || col == "webhook_require_timestamp" {
 				if b, ok := val.(bool); ok {
 					if b {

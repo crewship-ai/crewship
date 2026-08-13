@@ -124,6 +124,7 @@ crewship agent update <slug-or-id> --role LEAD --memory
 | `--llm-provider` | `string` | | LLM provider: `ANTHROPIC`, `OPENAI`, `GOOGLE`. |
 | `--llm-model` | `string` | | LLM model. |
 | `--memory` | `bool` | `false` | Enable memory. |
+| `--suggested-prompts` | `string` | | Chat suggestions shown as buttons under an empty conversation: one per line, max 8 lines, max 120 characters each. Text or `@file.txt`. Pass `""` to clear, after which the agent shows the built-in defaults. |
 | `--lead-mode` | `string` | | Lead mode. |
 | `--timeout` | `int` | `0` | Timeout in seconds. |
 | `--schedule-cron` | `string` | | Cron expression to run the agent on a schedule (e.g. `*/5 * * * *`); empty string clears it. |
@@ -140,6 +141,26 @@ crewship agent update <slug-or-id> --role LEAD --memory
 mixed with other field updates in the same invocation — run it on its own:
 `crewship agent update <id> --self-learning[=false] --learning-reason "…"`.
 </Note>
+
+Suggested prompts are what the agent offers as buttons under an empty
+conversation — the questions someone would otherwise type every morning.
+They are per agent, so two agents in one workspace can offer different ones,
+and an agent without any keeps showing the built-in defaults. The list is
+normalised on write (blank lines dropped, each line trimmed), and a rejection
+names the line: `prompt 3 exceeds 120 characters (it has 154)`.
+
+```bash
+crewship agent update lucy --suggested-prompts "$(cat <<'EOF'
+What shipped this week?
+Which invoices are overdue?
+Draft a reply to the last email
+EOF
+)"
+
+crewship agent update lucy --suggested-prompts @questions.txt   # from a file
+crewship agent update lucy --suggested-prompts ""               # back to defaults
+crewship agent get lucy                                         # read them back
+```
 
 ## `crewship agent rotate-webhook-secret`
 

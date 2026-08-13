@@ -1,0 +1,60 @@
+-- Per-agent chat suggestions — the one column of the PRD's Step 7
+-- (docs/prd/chat-as-a-primary-surface.md §4).
+--
+-- ── Why a column at all ────────────────────────────────────────────────────
+--
+-- The chips under an empty chat are hardcoded per ROLE in
+-- lib/agent-suggestions.ts, and the live chat page never passes a role, so
+-- every agent in every workspace offers the same four: "Help me get started",
+-- "What can you do?", "Show me your skills", "Run a quick task". Chips are the
+-- one surface that REPLACES typing rather than adding a step, which makes
+-- generic chips the most-seen and least-useful text in the product.
+--
+-- The alternative that needs no migration is a convention inside
+-- system_prompt_legacy — a "## Suggested questions" heading someone parses.
+-- Rejected: it makes a display string part of the model's instructions, it is
+-- unsearchable, and the first agent whose prompt legitimately contains that
+-- heading breaks it. One nullable TEXT column is honest about what it holds.
+--
+-- ── Why TEXT and not a table, or JSON ──────────────────────────────────────
+--
+-- A `suggested_prompts` table with (agent_id, position, text) is the shape
+-- this would take if prompts were ever shared, reordered by drag, or bound to
+-- more than one agent. They are not, and the companion PRD
+-- (agent-ask-packs-and-document-intake.md) is where that model belongs — it
+-- waits for a second user who wants to share a pack. A table now would be a
+-- join, a CRUD surface and an ordering story bought for a textarea.
+--
+-- JSON in the column was likewise rejected: a JSON array can be malformed by
+-- hand-editing in a way newline-separated text cannot, and every read path
+-- would need an unmarshal that can fail. Newline-separated is the format the
+-- UI edits natively (a textarea), so what is stored is what was typed.
+--
+-- ── The caps live in the application, not in a CHECK ───────────────────────
+--
+-- At most 8 prompts, at most 120 characters each, blank lines ignored, each
+-- line trimmed — enforced in normalizeSuggestedPrompts (internal/api/
+-- agents_suggested_prompts.go), which is the single write path. Deliberately
+-- not a CHECK constraint:
+--
+--   * a CHECK can express "length(suggested_prompts) < N" but not "at most 8
+--     non-blank lines, each at most 120 characters", so it would encode a
+--     weaker rule that reads as if it were the rule;
+--   * the API must return "prompt 3 exceeds 120 characters", not a constraint
+--     violation. A rule enforced twice, once precisely and once approximately,
+--     drifts — and SQLite cannot ALTER a CHECK, so the approximate half would
+--     need a table rebuild to correct.
+--
+-- The normaliser is also what makes the storage canonical: CRLF is folded to
+-- LF and blank lines are dropped on WRITE, so no reader has to guess.
+--
+-- ── NULL means "not configured", and that is load-bearing ──────────────────
+--
+-- Nullable with no default. NULL and the empty string both mean unset, and the
+-- write path collapses an emptied textarea to NULL so there is one such value.
+-- Unset is not a degraded state: getSuggestions falls back to today's role
+-- packs, so every existing agent — every row this ALTER touches — keeps
+-- behaving exactly as it did before this migration ran. That is why this can
+-- be a plain ADD COLUMN with no backfill: there is nothing to back-fill to.
+
+ALTER TABLE agents ADD COLUMN suggested_prompts TEXT;

@@ -149,6 +149,19 @@ var agentGetCmd = &cobra.Command{
 				pairs = append(pairs, []string{"Last Run", *agent.ScheduleLastRun})
 			}
 		}
+		// Chat suggestions, listed one per line under a single label so
+		// `agent get` shows what `agent update --suggested-prompts` wrote.
+		// Absent when unconfigured — that is the majority case, and it means
+		// the role defaults are in use, not that anything is missing.
+		if agent.SuggestedPrompts != nil && *agent.SuggestedPrompts != "" {
+			for i, p := range strings.Split(*agent.SuggestedPrompts, "\n") {
+				label := ""
+				if i == 0 {
+					label = "Suggested Prompts"
+				}
+				pairs = append(pairs, []string{label, p})
+			}
+		}
 		// Surface the webhook replay policy only when it's on (#815) — the
 		// default-off case stays off the lean detail view.
 		if agent.WebhookRequireTimestamp {
@@ -191,6 +204,8 @@ func init() {
 	agentUpdateCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC|OPENAI|GOOGLE")
 	agentUpdateCmd.Flags().String("llm-model", "", "LLM model")
 	agentUpdateCmd.Flags().Bool("memory", false, "Enable memory")
+	agentUpdateCmd.Flags().String("suggested-prompts", "",
+		"Chat suggestions shown as buttons under an empty chat: one per line, max 8, max 120 chars each. Text or @file.txt; pass \"\" to clear")
 	agentUpdateCmd.Flags().Bool("self-learning", false, "Enable/disable per-agent self-learning (requires --learning-reason for audit)")
 	agentUpdateCmd.Flags().String("learning-reason", "", "Audit reason recorded with the --self-learning change (required when --self-learning is set)")
 	agentUpdateCmd.Flags().String("lead-mode", "", "Lead mode")
@@ -263,6 +278,10 @@ type agentDetailResponse struct {
 	// WebhookRequireTimestamp is the read side of `agent update
 	// --webhook-require-timestamp` (#815).
 	WebhookRequireTimestamp bool `json:"webhook_require_timestamp"`
+	// SuggestedPrompts is the read side of `agent update
+	// --suggested-prompts`: the agent's own chat suggestions, one per line.
+	// nil/empty means unconfigured, i.e. the chat shows the role defaults.
+	SuggestedPrompts *string `json:"suggested_prompts"`
 	// WebhookSecretSet reports whether a webhook signing secret is
 	// configured (#999). The value itself is show-once — obtain one via
 	// `agent rotate-webhook-secret`. Pointer: nil on servers predating
