@@ -6,6 +6,8 @@ stability: experimental
 tag: Experimental
 ---
 
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
+
 # crewship page
 
 Manage Pages — workspace-scoped dashboards built from panels. A page holds no
@@ -42,7 +44,11 @@ workspace from your current context the same way it does for
 | `webhook revoke <slug> --id <id> --yes` | Withdraw one webhook token |
 | `export <slug>` | Export a page's spec as a portable bundle |
 | `import <bundle> --slug <slug> --bind <crew>=<crew>` | Import a bundle, binding its declared references |
+| `versions <slug>` | List the page's structural history |
 | `rollback <slug> --to <seq>` | Roll back to a previous version |
+| `publish <slug>` | Publish a page behind an expiring public link |
+| `links <slug>` | List a page's public links and which still work |
+| `unpublish <slug> --id <id>` | Withdraw one public link |
 
 ---
 
@@ -193,18 +199,20 @@ echo '{"value": 42, "unit": "jobs"}' | crewship page set fleet-201/queue-depth -
 | Flag | Required | Description |
 |---|:---:|---|
 | `--data` | ✓ | The panel payload, JSON. `-` reads it from stdin — the form every producer script uses. |
+| `--state` |  | The producer's own verdict: `ok` (the default) or `failed`. A producer that ran and could not measure pushes `failed` with whatever it does know; the panel then shows a failure rather than ageing quietly into staleness. `fresh` and `stale` are the server's arithmetic and are refused here. |
 
 Backed by `PUT /api/v1/pages/{slug}/panels/{id}/data`. `page set` authenticates
 with your session or CLI token the way any other `crewship` command does, and a
 producer script always calls the same command wherever it runs.
 
 <Note>
-  A producer running **inside a crew container** currently reaches that same
-  public route. The sidecar path
-  (`POST /api/v1/internal/pages/{slug}/panels/{id}/data`), which would let the
-  sidecar hold the workspace-bound token so the agent process never sees a
-  credential at all, is not built yet. Until it lands, a container producer needs
-  a CLI token like any other client.
+  A producer running **inside a crew container** does not use this command, and
+  does not need a CLI token. It pushes to its sidecar —
+  `PUT http://localhost:9119/pages/{page}/{panel}` — which attaches the identity
+  from the agent's own token and forwards to
+  `PUT /api/v1/internal/pages/{page}/data`. The credential stays in the sidecar
+  and never enters the agent process. See
+  [Pushing from inside a container](/guides/pages#from-inside-a-crew-container).
 </Note>
 
 The server, not the script, attaches provenance (`producer`, `run_id`,
@@ -564,6 +572,73 @@ for it survive in the payload ring. Showing an old payload as current after a
 rollback is exactly the dishonesty the [freshness
 contract](/guides/pages#the-freshness-contract) exists to prevent. Up to the
 last 50 versions are kept.
+
+---
+
+## `crewship page versions <slug>`
+
+```bash
+crewship page versions fleet-201
+```
+
+Lists the page's structural history — who changed the layout, when, and what
+version number to hand [`page rollback`](#crewship-page-rollback-slug). Up to
+the last 50 versions are kept. Panel *data* is not versioned here; a version is
+a record of what the page was shaped like, not of what it showed.
+
+---
+
+## `crewship page publish <slug>`
+
+Publish a page to someone outside the workspace, behind an expiring link.
+
+```bash
+crewship page publish uzaverka --expires-in-days 7
+crewship page publish uzaverka --show-provenance
+printf '%s' "$PASSWORD" | crewship page publish uzaverka --password-stdin
+```
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--expires-in-days` |  | Days until the link stops working. Default 30, maximum 365. Omitting it sends no field at all, so the server's default applies and the two cannot drift. |
+| `--password-stdin` |  | Read a password for this link from stdin, or prompt with echo off on a terminal. There is deliberately no `--password <secret>`: argv is visible in `ps` to every user on the box, and in the shell history afterwards. |
+| `--show-provenance` |  | Include producer names and run ids on the public page. Stripped by default — producer and routine names are internal vocabulary, and a public page that leaks them describes your infrastructure to whoever holds the link. |
+
+The URL is printed **once**. The token is stored as a SHA-256 digest, so
+nothing can show it again — not this command, not `page links`, not the
+database. Lose it and you mint a new one.
+
+Publishing exposes only the panels explicitly marked public, never the whole
+page. See [Public pages](/guides/pages#public-pages).
+
+---
+
+## `crewship page links <slug>`
+
+```bash
+crewship page links uzaverka
+```
+
+Lists a page's public links and says which of them still work — expired,
+password-protected, and what each one exposes. It cannot show you a link
+again; see `page publish` above for why.
+
+---
+
+## `crewship page unpublish <slug>`
+
+```bash
+crewship page unpublish uzaverka --id pgl_... --yes
+```
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--id` | ✓ | The link to withdraw, from `crewship page links <slug>`. |
+| `--yes`, `-y` |  | Skip the interactive confirmation prompt. |
+
+Withdraws one link without touching the others. Several links per page is the
+intended shape — revoking the one you sent a supplier does not break the one on
+the wall display.
 
 ---
 

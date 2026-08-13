@@ -159,7 +159,24 @@ var endpointHeadingPattern = regexp.MustCompile(`(?i)^#{1,6}\s+.*\b(GET|POST|PUT
 var pathPattern = regexp.MustCompile(`/[[:alnum:]_./{}~:-]+(?:\?[[:alnum:]_./{}=&%,~:+-]+)?`)
 var statusPattern = regexp.MustCompile(`(?i)\bstatus(?:es)?\s*:`)
 var envNamePattern = regexp.MustCompile(`\bCREWSHIP_[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*\b`)
-var manifestKindsPattern = regexp.MustCompile(`expected one of: ([A-Za-z0-9_, ]+)`)
+
+// The manifest kind roster, read from where it is DECLARED.
+//
+// It used to be scraped out of the parser's error message — `expected one of:
+// Crew, Agent, …` — which worked only for as long as that message contained a
+// hand-typed literal. #1935 replaced two such literals with a single const
+// built from the Kind* constants, which is the right change and which this
+// tool experienced as the roster vanishing: 225 correct documentation
+// references were reported as "missing from the source inventory" because the
+// set they were being checked against was empty.
+//
+// A declaration cannot be reworded the way prose can, so that is what is read
+// now. The path is pinned because a broad `Kind… = "…"` sweep over every Go
+// file in the tree would collect journal entry kinds, panel kinds and a dozen
+// other unrelated enums.
+const manifestKindSourcePath = "internal/manifest/schema.go"
+
+var manifestKindsPattern = regexp.MustCompile(`(?m)^\s*Kind[A-Za-z0-9_]*\s*=\s*"([A-Za-z0-9_]+)"\s*$`)
 var httpStatusPattern = regexp.MustCompile(`(?i)(?:` + "`" + `)?[1-5][0-9]{2}(?:` + "`" + `)?(?:\s+[a-z][a-z -]+)?`)
 
 type endpointEvidence struct {
@@ -644,7 +661,10 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 	walk(manifest.Commands)
 	sort.Slice(r.CLI, func(i, j int) bool { return r.CLI[i].Path < r.CLI[j].Path })
 	r.Env = inventoryEnvironmentVariables(sources, docs)
-	r.Manifest = inventoryManifestKinds(sources, docs)
+	r.Manifest, err = inventoryManifestKinds(sources, docs)
+	if err != nil {
+		return err
+	}
 	r.Reverse = inventoryDocsToCode(openAPI, manifest, docs, r.Env, r.Manifest)
 	r.Summary = summarize(r)
 
@@ -700,18 +720,27 @@ func inventoryEnvironmentVariables(sources, docs []docFile) []surfaceRecord {
 	return result
 }
 
-func inventoryManifestKinds(sources, docs []docFile) []surfaceRecord {
+func inventoryManifestKinds(sources, docs []docFile) ([]surfaceRecord, error) {
 	seen := map[string]bool{}
 	for _, source := range sources {
+		if source.Path != manifestKindSourcePath {
+			continue
+		}
 		for _, match := range manifestKindsPattern.FindAllStringSubmatch(source.Text, -1) {
-			for _, name := range strings.Split(match[1], ",") {
-				name = strings.TrimSpace(name)
-				if name != "" {
-					seen[name] = true
-				}
+			if name := strings.TrimSpace(match[1]); name != "" {
+				seen[name] = true
 			}
 		}
 	}
+	// An empty roster is this tool being broken, not the documentation being
+	// wrong. Reported as a docs gap it accuses every page that correctly names
+	// a kind; reported here it names the one file to go and look at.
+	if len(seen) == 0 {
+		return nil, fmt.Errorf(
+			"no manifest kinds found in %s — the Kind* declarations moved or were reshaped, "+
+				"so this gate has nothing to check documentation against", manifestKindSourcePath)
+	}
+
 	var names []string
 	for name := range seen {
 		names = append(names, name)
@@ -725,7 +754,7 @@ func inventoryManifestKinds(sources, docs []docFile) []surfaceRecord {
 		}
 		result = append(result, rec)
 	}
-	return result
+	return result, nil
 }
 
 func docsContainingToken(needle string, docs []docFile) []string {

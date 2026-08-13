@@ -150,9 +150,257 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "The parsed spec (§11b.2). The CLI parses the YAML document and sends this; the server validates it and checks that every declared owner crew and producer routine or agent resolves (§10b.1)."},
 	})
 
+	// ── Grants (§7.1, §7.1b) ────────────────────────────────────────────────
+	//
+	// `live` is the field worth documenting rather than the columns behind it.
+	// A grant is only as wide as the human who issued it, so liveness is
+	// recomputed on every read against that human's CURRENT reach; a client
+	// that cached `level` and skipped `live` would show a permission that
+	// stopped working the moment its issuer left the crew.
+	grant := obj(map[string]any{
+		"subject_type":       map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
+		"subject":            str(),
+		"subject_id":         str(),
+		"level":              map[string]any{"type": "string", "enum": []string{"read", "produce", "write"}},
+		"panels":             arr(str()),
+		"granted_by":         str(),
+		"granted_by_user_id": str(),
+		"granted_at":         timeString(),
+		"live": map[string]any{"type": "boolean",
+			"description": "Recomputed on read, never stored (§7.1b). False when the issuing human no longer reaches what the grant names — the grant stops working at the same moment."},
+		"inert_reason": map[string]any{"type": "string",
+			"description": "Present only when `live` is false, naming why in a sentence an operator can act on."},
+	})
+	grantsResponse := obj(map[string]any{
+		"page":   str(),
+		"grants": arr(grant),
+		"changed": map[string]any{"type": "integer",
+			"description": "Rows affected by an issue or a revoke. 0 on a revoke naming a subject that held no grant — a revoke that changed nothing still succeeded."},
+	})
+
+	// ── Versions and rollback (§10b.1) ──────────────────────────────────────
+	version := obj(map[string]any{
+		"seq": integer(), "created_at": timeString(),
+		"author": str(), "author_label": str(), "name": str(),
+		"panel_count": integer(),
+		"current":     boolean(),
+	})
+
+	// ── Transfer (§10b.2) ───────────────────────────────────────────────────
+	//
+	// A bundle carries the page's SHAPE and nothing else: no payloads, no
+	// grants, no tokens, and no `public` flag on a panel. Publication is a
+	// property of the install, not of the document, so a bundle that could
+	// carry it would publish panels nobody in the receiving workspace has
+	// looked at.
+	bundleRef := obj(map[string]any{
+		"ref":     str(),
+		"kind":    map[string]any{"type": "string", "enum": []string{"crew", "agent", "routine"}},
+		"used_by": arr(str()),
+		"reason":  str(),
+	})
+	bundleProps := map[string]any{
+		"format": map[string]any{"type": "string",
+			"description": "`crewship.page.bundle/v1`. An unknown format is refused rather than read optimistically."},
+		"page": obj(map[string]any{
+			"name": str(), "slug": str(), "description": str(), "owner": str(),
+			"panels": arr(obj(panelSpec)),
+		}),
+		"references": map[string]any{"type": "array", "items": bundleRef,
+			"description": "Every reference the page makes to something outside itself. The importer must bind each one explicitly; an unbound reference is refused (422), because guessing would hand the page to whoever happens to hold that name in the receiving workspace."},
+		"metadata": obj(map[string]any{"exported_at": timeString(), "panel_count": integer()}),
+	}
+	bundle := obj(bundleProps)
+
+	// ── Public links (§7.3) ─────────────────────────────────────────────────
+	publicToken := obj(map[string]any{
+		"id": str(),
+		"token": map[string]any{"type": "string",
+			"description": "Returned ONCE, by the publish call. The column holds a SHA-256 digest, so no later read can produce it."},
+		"url":             str(),
+		"expires_at":      timeString(),
+		"show_provenance": boolean(),
+		"has_password":    boolean(),
+		"created_by":      str(),
+		"created_at":      timeString(),
+		"revoked_at":      timeString(),
+		"last_seen_at":    timeString(),
+		"live": map[string]any{"type": "boolean",
+			"description": "Not revoked and not yet expired. Two columns and a clock is a calculation every reader would otherwise repeat, and one of them would get it wrong."},
+		"panels": map[string]any{"type": "array", "items": str(),
+			"description": "The panel ids this link exposes — the human-attested set (§7.3.2), so \"what does this link show\" is answerable without reading the spec."},
+	})
+	revoked := obj(map[string]any{
+		"id": str(), "revoked": boolean(),
+		"already": map[string]any{"type": "boolean",
+			"description": "Present when the row was already revoked. Revoking twice succeeds; it is the state that matters, not who got there first."},
+	})
+
+	// The public READ shape. Deliberately narrower than the authenticated one:
+	// no producer names, no run ids, no owner crews (§7.3.4). A stale panel
+	// carries its AGE and never its reason — "last updated 3 days ago" is
+	// useful to a stranger, "producer script/watch-services.sh has not run
+	// since Tuesday" describes the operator's infrastructure to them.
+	publicPage := obj(map[string]any{
+		"slug": str(), "name": str(), "description": str(),
+		"generated_at":    timeString(),
+		"show_provenance": boolean(),
+		"panels": arr(obj(map[string]any{
+			"id": str(), "schema": str(), "title": str(), "span": integer(),
+			"state":       map[string]any{"type": "string", "enum": []string{"fresh", "stale", "failed", "never_produced"}},
+			"produced_at": timeString(),
+			"data":        map[string]any{"description": "The payload as the producer sent it."},
+			// Present only on a link published with show_provenance.
+			"provenance": provenance,
+		})),
+	})
+
+	// ── Webhooks (§10b.4) ───────────────────────────────────────────────────
+	webhook := obj(map[string]any{
+		"id": str(),
+		"panel": map[string]any{"type": "string",
+			"description": "A token is bound to exactly ONE panel, so a leaked token can write that panel and nothing else."},
+		"name": str(),
+		"token": map[string]any{"type": "string",
+			"description": "Returned once, by the mint call, and stored as a digest thereafter."},
+		"url":           str(),
+		"created_by":    str(),
+		"created_at":    timeString(),
+		"revoked_at":    timeString(),
+		"last_fired_at": timeString(),
+		"fire_count":    integer(),
+		"live":          boolean(),
+	})
+
+	// ── Actions (§8b) ───────────────────────────────────────────────────────
+	actionInput := obj(map[string]any{
+		"name": str(), "label": str(),
+		"type":     map[string]any{"type": "string", "enum": []string{"string", "number", "boolean", "select"}},
+		"required": boolean(), "default": str(),
+		"options": arr(str()),
+	})
+	action := obj(map[string]any{
+		"id": str(),
+		"kind": map[string]any{"type": "string", "enum": []string{"call", "link", "toggle", "custom"},
+			"description": "Closed set. A `link` carries an ENTITY reference, never a URL — a panel that could render an arbitrary link is a phishing surface a producer controls."},
+		"label":   str(),
+		"style":   map[string]any{"type": "string", "enum": []string{"default", "primary", "danger"}},
+		"confirm": obj(map[string]any{"title": str(), "body": str()}),
+		"routine": map[string]any{"type": "string",
+			"description": "Read-only. The caller dispatches an ACTION ID, never a routine name, so a button cannot be redirected at something the panel author did not declare."},
+		"params": anyObject(),
+		"inputs": arr(actionInput),
+		"target": arr(str()),
+		"ref":    obj(map[string]any{"kind": str(), "id": str()}),
+	})
+
 	return map[string]DomainSchema{
 		"GET /api/v1/pages": {
 			Response: arr(pageRow),
+		},
+		"DELETE /api/v1/pages/{slug}": {
+			// 204, no body. Declared so the document says "nothing comes back"
+			// rather than leaving a client to guess at an empty object.
+			Response: obj(map[string]any{}),
+		},
+		"GET /api/v1/pages/{slug}/grants": {Response: grantsResponse},
+		"PUT /api/v1/pages/{slug}/grants": {
+			Request: obj(map[string]any{
+				"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
+				"subject":      str(),
+				"level":        map[string]any{"type": "string", "enum": []string{"read", "produce", "write"}},
+				"panels": map[string]any{"type": "array", "items": str(),
+					"description": "Optional. Restricts a produce grant to named panels; omitted means every panel on the page."},
+			}),
+			Response: grantsResponse,
+		},
+		"DELETE /api/v1/pages/{slug}/grants": {Response: grantsResponse},
+
+		"GET /api/v1/pages/{slug}/versions": {
+			Response: obj(map[string]any{
+				"page": str(), "retained": integer(), "versions": arr(version),
+			}),
+		},
+		"POST /api/v1/pages/{slug}/rollback": {
+			Request: obj(map[string]any{
+				"to": map[string]any{"type": "integer",
+					"description": "Required. The version to restore, from the versions list."},
+			}),
+			Response: obj(map[string]any{
+				"page": page, "rolled_back_to": integer(), "version": integer(),
+				"dimmed": map[string]any{"type": "array", "items": str(),
+					"description": "Panels the rollback brought back that hold no current data. A rollback never resurrects an old payload, and naming them here tells the operator who ran it rather than leaving them to find a blank panel five minutes later."},
+			}),
+		},
+
+		"GET /api/v1/pages/{slug}/export": {Response: bundle},
+		"POST /api/v1/pages/import": {
+			Request: obj(mergeProps(bundleProps, map[string]any{
+				"slug": map[string]any{"type": "string", "description": "The slug to create in this workspace."},
+				"bind": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"},
+					"description": "One entry per declared reference, mapping the bundle's name to something that exists here."},
+			})),
+			Response: page,
+		},
+
+		"GET /api/v1/pages/{slug}/public": {
+			Response: obj(map[string]any{"page": str(), "links": arr(publicToken)}),
+		},
+		"POST /api/v1/pages/{slug}/public": {
+			Request: obj(map[string]any{
+				"expires_in_days": map[string]any{"type": "integer",
+					"description": "Default 30, maximum 365. OMIT the field to take the server's default; sending a number pins one that can drift from it."},
+				"password": map[string]any{"type": "string",
+					"description": "8–72 bytes. bcrypt silently truncates past 72, so a longer one is refused rather than quietly shortened."},
+				"show_provenance": map[string]any{"type": "boolean",
+					"description": "Default false. Producer and routine names are internal vocabulary; a public page that carries them describes the operator's infrastructure to whoever holds the link."},
+			}),
+			Response: publicToken,
+		},
+		"DELETE /api/v1/pages/{slug}/public/{tokenId}": {Response: revoked},
+
+		"GET /api/v1/pages/{slug}/webhooks": {
+			Response: obj(map[string]any{"page": str(), "webhooks": arr(webhook)}),
+		},
+		"POST /api/v1/pages/{slug}/webhooks": {
+			Request:  obj(map[string]any{"panel": str(), "name": str()}),
+			Response: webhook,
+		},
+		"DELETE /api/v1/pages/{slug}/webhooks/{webhookId}": {Response: revoked},
+
+		// The token in the path IS the authentication, and the body is the
+		// payload with no envelope — the same bytes the CLI write path takes,
+		// judged by the same schema.
+		"POST /api/v1/page-webhooks/{token}": {
+			Request: anyObject(),
+			Response: obj(map[string]any{
+				"accepted": boolean(), "panel": str(), "seq": integer(),
+			}),
+		},
+
+		"GET /api/v1/public/pages/{token}": {Response: publicPage},
+		"POST /api/v1/public/pages/{token}/unlock": {
+			Request: obj(map[string]any{"password": str()}),
+			// A correct password SERVES the page; there is no separate
+			// "unlocked" acknowledgement to round-trip for.
+			Response: publicPage,
+		},
+
+		"GET /api/v1/pages/{slug}/panels/{panelId}/actions": {
+			Response: obj(map[string]any{"page": str(), "panel": str(), "actions": arr(action)}),
+		},
+		"POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}": {
+			Request: obj(map[string]any{
+				"inputs": map[string]any{"type": "object", "additionalProperties": true,
+					"description": "The inputs the action declares. An Idempotency-Key header is bound to the RESOLVED inputs, so retrying is safe and replaying the same key with different inputs answers 409."},
+			}),
+			Response: obj(map[string]any{
+				"status": map[string]any{"type": "string", "enum": []string{"SCHEDULED", "DEDUPED"},
+					"description": "The run is QUEUED, not finished. A dispatch returns when the work is accepted; the outcome arrives on the run."},
+				"pending_id": str(), "fire_at": timeString(),
+				"deduped": boolean(), "coalesced": boolean(),
+				"page": str(), "panel": str(), "action": str(), "routine": str(),
+			}),
 		},
 		"GET /api/v1/pages/{slug}": {
 			Response: page,

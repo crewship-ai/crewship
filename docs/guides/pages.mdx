@@ -222,6 +222,61 @@ drawn as one, with the reason:
 omitting the key and declaring it empty mean the same thing. Names are trimmed
 but never case-folded: the bar draws the word you wrote.
 
+## Where a producer pushes from
+
+A producer is whatever runs closest to the thing being measured. Crewship does
+not care what language it is written in or where it lives; it cares that the
+push arrives with an identity it can check. There are four doors, and which one
+you use is decided by where your code already runs — not by what you are
+allowed to do.
+
+| Your producer is | It pushes through | Identity comes from |
+|---|---|---|
+| a script on a host you control | `crewship page set <page>/<panel>` | a CLI token |
+| a step in a routine | the `page.write` verb | the run the dispatcher injected |
+| an agent inside a crew container | `PUT /pages/{page}/{panel}` on the sidecar | the agent's own token, held by the sidecar |
+| a third-party system | a panel webhook | the webhook token, bound to one panel |
+
+The four doors are one write. They share the schema validation, the 64 KiB
+payload cap, the push-rate floor, and the same refusal sentences — the entry
+point is the only thing that differs.
+
+### From inside a crew container
+
+An agent does not get a CLI token. It pushes to its sidecar on localhost, and
+the sidecar attaches the identity:
+
+```bash
+curl -s -X PUT http://localhost:9119/pages/sit/latence \
+  -H "Content-Type: application/json" \
+  -d '{"value": 42, "unit": "ms", "delta_good": "down"}' \
+  -K /dev/fd/3 3<<AUTH
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+```
+
+The `fd-3` form is how every sidecar call carries its token: a bearer token
+passed as `-H` is visible in the container's process table to anything else
+running in it.
+
+The body is the payload, exactly as it is for `crewship page set`. Add
+`?state=failed` when the producer ran and could not measure — that is the only
+part of its own state a producer gets to assert.
+
+**What the agent cannot do is claim to be someone else.** `workspace_id`,
+`crew_id` and `agent_id` are written by the sidecar from the container's own
+configuration and the token on the request; the same fields inside the payload
+are inert. A sibling agent sharing the sidecar pushes as itself, not as the
+agent the container booted with, and a forged token pushes as nobody. This is
+why the door exists at all: handing a container a CLI token would work, and
+would put the one credential the sidecar is there to hold inside the process it
+is holding it against.
+
+Whether the agent may write *this* panel is a separate question, answered the
+same way for every door — the panel's declared `producer:` must name it, or a
+human must have issued it a `produce` grant. See
+[Producer authority](#producer-authority-is-separate-from-viewer-authority).
+
 ## What a Page is not
 
 This is the part worth reading before you build on top of one.

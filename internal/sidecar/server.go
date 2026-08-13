@@ -612,6 +612,13 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				s.handlePipelinesDryRun(w, r, slug)
 				return
 
+			// Pages producer route (docs/prd/pages.md §7.1 rule 4, #1946).
+			// One arm, because one push writes one panel; pages.go refuses
+			// any other shape rather than guessing at it.
+			case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/pages/"):
+				s.handlePagePush(w, r)
+				return
+
 			// PRD-SLASH-CAPABILITIES-2026 §6.5 — slash-action routes.
 			// User-initiated routine / skill / credential mutation
 			// flows through here when the chat-bridge or CLI repl
