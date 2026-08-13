@@ -1,8 +1,14 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Search, Terminal, AlertTriangle, MonitorSmartphone } from "lucide-react"
+import { Terminal, AlertTriangle, MonitorSmartphone } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  SidebarRow,
+  SidebarSearch,
+  SidebarSection,
+  SidebarToolbar,
+} from "@/components/layout/sidebar-kit"
 import { parseSessionTimestamp, sortSessionsByActivity } from "./session-sort"
 
 export interface SessionRow {
@@ -88,6 +94,14 @@ function originTag(s: SessionRow): OriginTag | null {
  *
  * Click a session → swaps the chat panel via URL ?session=. New session
  * button lives in the header strip above.
+ *
+ * Chrome comes from components/layout/sidebar-kit — SidebarSearch, a
+ * SidebarSection header carrying the count, and SidebarRow (→ ListRow) for
+ * the tokenised accent-bar selection — so this rail and the /routines and
+ * /issues rails read as one system instead of three hand-rolled variants of
+ * the same box. Chrome only: no status facets and no agent tree, both of
+ * which are out of 1.0 on purpose (PRD §3.2 — /crews already browses an
+ * agent, and a second IA for the same object is the disease being cured).
  */
 export function SessionsSidebar({
   sessions,
@@ -120,21 +134,18 @@ export function SessionsSidebar({
 
   return (
     <aside className="border-r border-white/8 bg-card flex flex-col min-h-0">
-      <div className="px-3 py-2 border-b border-white/8 flex items-center gap-2">
-        <div className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded bg-muted border border-white/10">
-          <Search className="h-3 w-3 text-muted-foreground" />
-          <input
-            type="search"
-            aria-label="Search chat sessions"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search sessions…"
-            className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
-          />
-        </div>
-      </div>
+      <SidebarToolbar className="border-b border-white/8">
+        <SidebarSearch
+          value={search}
+          onValueChange={setSearch}
+          placeholder="Search sessions…"
+          aria-label="Search chat sessions"
+        />
+      </SidebarToolbar>
 
-      <div className="flex-1 min-h-0 overflow-y-auto py-1">
+      <SidebarSection label="Sessions" count={visible.length} />
+
+      <div className="flex-1 min-h-0 overflow-y-auto pb-1">
         {visible.length === 0 ? (
           <div className="px-3 py-6 text-center text-xs text-muted-foreground space-y-2">
             <p>
@@ -164,16 +175,18 @@ export function SessionsSidebar({
               // is being read right now (mark-read fires on selection).
               const unread = !active && (s.unread_count ?? 0) > 0 ? s.unread_count! : 0
               return (
-                <button
+                // as="div": the rows are not inside a <ul>, and ListRow's
+                // default <li> would be an orphan. Selection styling comes
+                // from ListRow (the tokenised accent bar) rather than the
+                // hand-rolled `border-l-2 border-primary` this replaced.
+                <SidebarRow
                   key={s.id}
-                  type="button"
-                  onClick={() => onSelect(s.id)}
-                  className={cn(
-                    "w-full text-left px-3 py-2 hover:bg-white/[0.04] border-l-2 transition-colors",
-                    active ? "bg-primary/10 border-primary" : "border-transparent",
-                  )}
+                  as="div"
+                  selected={active}
+                  onSelect={() => onSelect(s.id)}
+                  className="flex-col items-stretch gap-0.5 px-3 py-2 text-left"
                 >
-                  <div className="flex items-center justify-between gap-2 mb-0.5">
+                  <div className="flex items-center justify-between gap-2">
                     <span
                       className={cn(
                         "text-xs truncate",
@@ -229,7 +242,7 @@ export function SessionsSidebar({
                       {s.message_count} msg{s.message_count === 1 ? "" : "s"}
                     </span>
                   </div>
-                </button>
+                </SidebarRow>
               )
             })}
             {hiddenCount > 0 && !showEmpty && (

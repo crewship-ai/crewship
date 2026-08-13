@@ -9,6 +9,7 @@ import {
   LogOut, Menu, Network, Search, Settings, Shield, ShieldCheck, Store, User, X, Zap,
 } from "lucide-react"
 
+import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { useRealtime } from "@/hooks/use-realtime"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Button } from "@/components/ui/button"
@@ -45,11 +46,21 @@ const DOCS_URL = "https://docs.crewship.ai"
 const GITHUB_URL = "https://github.com/crewship-ai/crewship"
 const SUPPORT_URL = "https://github.com/crewship-ai/crewship/issues"
 
-const mobileNavSections = [
+/**
+ * Exported for the same reason as `navSections` in app-sidebar: the two nav
+ * definitions are hand-kept twins, and a test that reads both is what stops a
+ * surface from existing on the desktop rail and nowhere on a phone.
+ */
+export const mobileNavSections = [
   {
     label: "Work",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
+      // Same entry as the desktop rail, same icon (CONCEPT_ICON.sessions).
+      // The mobile sheet otherwise picks its icons locally from lucide, but
+      // an icon that changes between breakpoints is the drift lib/concept-icons
+      // exists to prevent.
+      { title: "Chat", href: "/chat", icon: CONCEPT_ICON.sessions },
       { title: "Crews & Agents", href: "/crews", icon: Network },
     ],
   },
