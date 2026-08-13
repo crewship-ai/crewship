@@ -52,6 +52,10 @@ func TestPagesGet_AuthoredHalfIsWithheldFromAReader(t *testing.T) {
 	h, _, _, wsID, ownerID := newPagesFixture(t)
 	pagesCreate(t, h, wsID, ownerID, "fleet-201")
 	pagesSeedUser(t, h, wsID, "reader", "reader@example.com", "MEMBER")
+	// `read` reaches the page and stops there: it is exactly the grant that
+	// must NOT come with the authored half, since editing is the `write` verb.
+	pagesGrant(t, h, wsID, ownerID, "fleet-201",
+		`{"subject_type":"user","subject":"reader@example.com","level":"read"}`)
 
 	doc := pagesGet(t, h, wsID, "reader", "MEMBER", "fleet-201")
 	raw, err := json.Marshal(doc)

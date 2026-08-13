@@ -131,6 +131,18 @@ type PanelSpec struct {
 	// than sit there looking plausible.
 	OnFailure *PanelOnFailure `json:"on_failure,omitempty" yaml:"on_failure,omitempty"`
 
+	// Refresh names the event that RUNS this panel's producer (§12 v1.1, and
+	// the worked example at §6). It is a TRIGGER declaration, not a hint: a
+	// page holds no query and no datasource, so the only way a panel's
+	// contents change is a producer pushing to it, and a `refresh:` that does
+	// not run the producer cannot refresh anything.
+	//
+	// Closed, and refused at save time with the vocabulary named — the whole
+	// reasoning, and the four things it refuses, are in refresh.go. Like the
+	// gates it rides on, it is compiled into an `automations` row rather than
+	// into a second eventing path.
+	Refresh PanelRefresh `json:"refresh,omitempty" yaml:"refresh,omitempty"`
+
 	// Wake gates turn this panel from a display into a sensor (§5, §0.1): a
 	// threshold on the pushed payload wakes an agent, which writes its
 	// analysis back onto the same page. Each gate compiles to an `automations`
@@ -428,5 +440,12 @@ func (d *Document) Validate() error {
 	// is not on the page has to fail at parse time. Otherwise `crewship apply`
 	// and the editor accept it and the server refuses it later, which is the
 	// same document being valid in one door and invalid in the next.
-	return ValidateGates(d)
+	if err := ValidateGates(d); err != nil {
+		return err
+	}
+	// Refresh AFTER the gates, and not by accident: `refresh: on:wake` is a
+	// declaration ABOUT the gates — it is refused on a page that declares none,
+	// and refused on a panel that declares its own — so it can only be checked
+	// once the gates on this document are known to compile (refresh.go).
+	return ValidateRefresh(d)
 }

@@ -602,7 +602,7 @@ func TestPagePanelsDiffer(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			if got := pagePanelsDiffer(tc.declared, tc.remote); got != tc.want {
+			if got := pagePanelsDiffer(tc.declared, tc.remote, false); got != tc.want {
 				t.Fatalf("pagePanelsDiffer = %v, want %v", got, tc.want)
 			}
 		})
@@ -618,24 +618,24 @@ func TestPagePanelsDiffer_TabIsDiffedIncludingOnASealedPanel(t *testing.T) {
 	declared := pageTestDoc().Spec.Panels
 	declared[0].Tab = "Síť"
 
-	if !pagePanelsDiffer(declared, pageRemoteMatching(pageTestDoc()).Panels) {
+	if !pagePanelsDiffer(declared, pageRemoteMatching(pageTestDoc()).Panels, false) {
 		t.Fatal("adding a tab planned as unchanged; the read path echoes it, so it is comparable")
 	}
 
 	onTab := pageRemoteMatching(pageTestDoc()).Panels
 	onTab[0].Tab = "Síť"
-	if pagePanelsDiffer(declared, onTab) {
+	if pagePanelsDiffer(declared, onTab, false) {
 		t.Fatal("a page already on that tab planned as drifted, which re-applies on every run")
 	}
 
 	// A panel this account may not see still carries its tab, and moving it is
 	// still a change: a bar that differed per viewer would not be one page.
 	sealed := []PagePanelRemote{{PanelID: "services", Sealed: true, Span: 8, Tab: "Odezva", OwnerCrewName: "Lookout"}}
-	if !pagePanelsDiffer(declared, sealed) {
+	if !pagePanelsDiffer(declared, sealed, false) {
 		t.Fatal("a sealed panel on a different tab planned as unchanged")
 	}
 	sealed[0].Tab = "Síť"
-	if pagePanelsDiffer(declared, sealed) {
+	if pagePanelsDiffer(declared, sealed, false) {
 		t.Fatal("a sealed panel on the declared tab planned as drifted")
 	}
 }
@@ -646,7 +646,7 @@ func TestPagePanelsDiffer_TabIsDiffedIncludingOnASealedPanel(t *testing.T) {
 func TestPagePanelsDiffer_PublicIsNotDiffed(t *testing.T) {
 	declared := pageTestDoc().Spec.Panels
 	declared[0].Public = true
-	if pagePanelsDiffer(declared, pageRemoteMatching(pageTestDoc()).Panels) {
+	if pagePanelsDiffer(declared, pageRemoteMatching(pageTestDoc()).Panels, false) {
 		t.Fatal("public must not drive drift: the server never sends it back")
 	}
 }

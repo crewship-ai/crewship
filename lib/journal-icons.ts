@@ -258,6 +258,9 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "page.wake.fired": Zap,
   // A human pressed a button on a page and a routine was enqueued (§8b.2).
   "page.action.dispatched": Play,
+  // The page's arrangement changed — the event a `refresh: on:panels-changed`
+  // panel runs its producer on.
+  "page.spec.changed": LayoutTemplate,
 }
 
 /**

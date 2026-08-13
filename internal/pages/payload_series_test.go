@@ -20,6 +20,21 @@ import (
 
 func f(v float64) *float64 { return &v }
 
+// lbl builds an axis. An empty string means an UNNAMED tick — `null` on the
+// wire — because a Go composite literal has no shorter way to write one and
+// "" is not a legal label, so the shorthand cannot be mistaken for data.
+func lbl(names ...string) []*string {
+	out := make([]*string, len(names))
+	for i, n := range names {
+		if n == "" {
+			continue
+		}
+		s := n
+		out[i] = &s
+	}
+	return out
+}
+
 func TestValidateSeries_Accepts(t *testing.T) {
 	t.Parallel()
 
@@ -203,7 +218,7 @@ func TestSeriesPayload_MergeOverflow(t *testing.T) {
 	t.Run("the sixth and everything after it become one 'other'", func(t *testing.T) {
 		p := &SeriesPayload{
 			Unit:   "ks",
-			Labels: []string{"mon", "tue"},
+			Labels: lbl("mon", "tue"),
 			Series: []Series{
 				{Name: "a", Values: []*float64{f(1), f(1)}},
 				{Name: "b", Values: []*float64{f(2), f(2)}},
@@ -257,7 +272,7 @@ func TestSeriesPayload_MergeOverflow(t *testing.T) {
 
 	t.Run("a point where some are measured is the sum of those", func(t *testing.T) {
 		p := &SeriesPayload{
-			Unit: "ks", Labels: []string{"mon"},
+			Unit: "ks", Labels: lbl("mon"),
 			Series: []Series{
 				{Name: "a", Values: []*float64{f(1)}}, {Name: "b", Values: []*float64{f(1)}},
 				{Name: "c", Values: []*float64{f(1)}}, {Name: "d", Values: []*float64{f(1)}},
@@ -273,7 +288,7 @@ func TestSeriesPayload_MergeOverflow(t *testing.T) {
 
 	t.Run("a pre-existing 'other' absorbs the overflow rather than doubling", func(t *testing.T) {
 		p := &SeriesPayload{
-			Unit: "ks", Labels: []string{"mon"},
+			Unit: "ks", Labels: lbl("mon"),
 			Series: []Series{
 				{Name: OverflowSeriesName, Values: []*float64{f(2)}},
 				{Name: "b", Values: []*float64{f(1)}}, {Name: "c", Values: []*float64{f(1)}},
@@ -378,6 +393,124 @@ func TestValidateSeries_Caps(t *testing.T) {
 	}
 }
 
+// ── the sparse axis ───────────────────────────────────────────────────────
+//
+// `labels[]` used to demand a non-empty string for every tick, which made a
+// 24-point window impossible to render: the producer had to send 24 names, and
+// 24 names across a half-width panel truncate to "-1…" apiece. The producer
+// cannot fix that — it does not know the panel's width — so the schema was
+// forcing a rendering decision onto the one participant who cannot make it.
+//
+// `null` is now a tick the producer declines to name. The value at that index
+// is untouched: a null LABEL removes a name, never a data point.
+
+func TestValidateSeries_SparseAxis(t *testing.T) {
+	t.Parallel()
+
+	// Four names over a twelve-point window — the shape ping.py pushes.
+	raw := `{"unit":"ms","labels":["-55s",null,null,"-40s",null,null,"-25s",null,null,"-10s",null,"now"],
+	         "series":[{"name":"api","values":[1,2,3,4,5,6,7,8,9,10,11,12]}]}`
+	p, err := ValidateSeries([]byte(raw))
+	if err != nil {
+		t.Fatalf("a sparse axis was refused: %v", err)
+	}
+	if len(p.Labels) != 12 {
+		t.Fatalf("%d labels survived, want 12 — a null label is still a category", len(p.Labels))
+	}
+	if len(p.Series[0].Values) != len(p.Labels) {
+		t.Fatalf("%d values for %d labels; the two arrays are still one contract",
+			len(p.Series[0].Values), len(p.Labels))
+	}
+	if p.Labels[1] != nil {
+		t.Errorf("labels[1] = %q; an unnamed tick must decode as absent, not as an empty name", *p.Labels[1])
+	}
+	if p.Labels[0] == nil || *p.Labels[0] != "-55s" {
+		t.Errorf("labels[0] = %v, want -55s", p.Labels[0])
+	}
+	if n := p.NamedLabels(); n != 5 {
+		t.Errorf("NamedLabels() = %d, want 5", n)
+	}
+}
+
+// The half of the old rule that was right: a label must be a label. An empty
+// string is what a broken format expression produces, and accepting it would
+// make a deliberate blank indistinguishable from a bug — the same reason §9b.4
+// keeps `0` and `null` apart one column to the right.
+func TestValidateSeries_RefusesAnEmptyLabelString(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		`{"unit":"ms","labels":[""],"series":[{"name":"api","values":[1]}]}`,
+		`{"unit":"ms","labels":["a","","c"],"series":[{"name":"api","values":[1,2,3]}]}`,
+		`{"unit":"ms","labels":["a","   "],"series":[{"name":"api","values":[1,2]}]}`,
+	} {
+		if _, err := ValidateSeries([]byte(raw)); err == nil {
+			t.Errorf("accepted an empty label: %s", raw)
+		}
+	}
+}
+
+// An axis where NOTHING is named is not a sparse axis, it is a chart whose x
+// meaning nobody stated. The renderer may thin names down to one; it may never
+// be handed zero.
+func TestValidateSeries_RefusesAnAxisWithNoNameAnywhere(t *testing.T) {
+	t.Parallel()
+
+	raw := `{"unit":"ms","labels":[null,null,null],"series":[{"name":"api","values":[1,2,3]}]}`
+	_, err := ValidateSeries([]byte(raw))
+	if err == nil {
+		t.Fatal("accepted an axis with no name on it")
+	}
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want *ValidationError, got %T", err)
+	}
+	if ve.Code != CodeInconsistentPayload {
+		t.Errorf("code = %q, want %q", ve.Code, CodeInconsistentPayload)
+	}
+}
+
+// The wire contract only widened. Every payload a live producer is already
+// pushing — all labels named, which was the only legal shape — validates
+// unchanged, which is what makes this deployable under running producers.
+func TestValidateSeries_SparseAxisIsBackwardCompatible(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		`{"unit":"ms","labels":["mon","tue","wed"],"series":[{"name":"api","values":[1,2,3]}]}`,
+		`{"unit":"ms","labels":["-45s","-40s","-35s"],"series":[{"name":"api","values":[1,null,3]}]}`,
+	} {
+		p, err := ValidateSeries([]byte(raw))
+		if err != nil {
+			t.Fatalf("a payload that was legal before is refused now: %v (%s)", err, raw)
+		}
+		if p.NamedLabels() != len(p.Labels) {
+			t.Errorf("NamedLabels() = %d for %d fully named labels", p.NamedLabels(), len(p.Labels))
+		}
+	}
+}
+
+// The merge copies the axis, and an unnamed tick has to survive the copy — it
+// is a position in every series' values array.
+func TestSeriesPayload_MergeOverflow_KeepsUnnamedTicks(t *testing.T) {
+	t.Parallel()
+
+	p := &SeriesPayload{Unit: "ks", Labels: lbl("mon", "")}
+	for i := 0; i < 6; i++ {
+		p.Series = append(p.Series, Series{Name: fmt.Sprintf("s%d", i), Values: []*float64{f(1), f(1)}})
+	}
+	got := p.MergeOverflow()
+	if len(got.Labels) != 2 {
+		t.Fatalf("%d labels survived the merge, want 2", len(got.Labels))
+	}
+	if got.Labels[1] != nil {
+		t.Errorf("the unnamed tick came back named %q", *got.Labels[1])
+	}
+	if v := got.Series[len(got.Series)-1].Values[1]; v == nil || *v != 2 {
+		t.Errorf("other at the unnamed tick = %v, want 2 — a nameless category still carries data", v)
+	}
+}
+
 // ValidatePayload is the single entry point every write path uses.
 func TestValidatePayload_DispatchesSeries(t *testing.T) {
 	t.Parallel()
@@ -433,7 +566,7 @@ func buildSeries(t *testing.T, series, labels int) *SeriesPayload {
 	t.Helper()
 	p := &SeriesPayload{Unit: "ks"}
 	for i := 0; i < labels; i++ {
-		p.Labels = append(p.Labels, fmt.Sprintf("l%d", i))
+		p.Labels = append(p.Labels, lbl(fmt.Sprintf("l%d", i))...)
 	}
 	for i := 0; i < series; i++ {
 		s := Series{Name: fmt.Sprintf("s%d", i)}

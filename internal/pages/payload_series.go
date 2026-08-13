@@ -62,10 +62,64 @@ type Series struct {
 
 // SeriesPayload is series.v1.
 type SeriesPayload struct {
-	Unit   string   `json:"unit"`
-	Labels []string `json:"labels"`
-	Series []Series `json:"series"`
+	Unit string `json:"unit"`
+	// Labels is the axis: one entry per category, in render order. A nil entry
+	// is a tick the producer declined to NAME — the category still exists and
+	// every series still carries a value at that index. See the sparse-axis
+	// note below.
+	Labels []*string `json:"labels"`
+	Series []Series  `json:"series"`
 }
+
+// The sparse axis, and the two designs it is not.
+//
+// `labels[]` used to be `minLength: 1` strings, all the way down: every tick
+// had to carry a name. A producer pushing a 24-point rolling window therefore
+// had to send 24 names, and 24 names across a half-width panel truncate to
+// "-1…" apiece. The producer cannot fix that, because the producer does not
+// know the panel's width — so the schema was forcing a rendering decision onto
+// the one participant who cannot make it. The rule's defensible half is that a
+// label must be a label; its broken half was that a tick must have one.
+//
+// So `null` is an unnamed tick, `""` is still refused, and how many of the
+// NAMED ticks actually get drawn is the renderer's decision (it thins them
+// evenly to fit, and thins labels only — never a data point).
+//
+// Rejected, and worth writing down because both look cheaper from a distance:
+//
+//   - **Empty string as the blank.** It needs no schema change at all, which is
+//     exactly what is wrong with it: `""` is what a broken format expression
+//     produces, so a schema that accepts it can no longer tell a deliberate
+//     blank from a producer bug. That is the distinction §9b.4 spends the whole
+//     `values` array on — `0` is a measurement and `null` is the absence of
+//     one — and the axis gets the same treatment one column to the left.
+//
+//   - **Per-point objects, `points[{label?, value}]`.** It reads tidier and it
+//     is the wrong shape twice over. It breaks the wire for every producer
+//     already pushing (§3's table pins `{unit, labels[], series[{name,
+//     values[]}]}`, and this is a vocabulary change, not a fix), and it
+//     dissolves the one cross-check that catches the worst silent failure this
+//     panel has: `len(values) != len(labels)`, which is how a short array is
+//     stopped from shifting every later bar onto the wrong category. With a
+//     label per point there is nothing left to compare, and a series that
+//     dropped a point simply renders as a shorter, plausible chart.
+//
+//   - **Renderer-side thinning ALONE, with the schema untouched.** Half right,
+//     and it is the half that is kept: only the renderer knows the width, so
+//     only the renderer may decide how many names fit. But by itself it forces
+//     the producer to invent a name for every tick just so the renderer can
+//     throw most of them away, and it makes the drawn set arbitrary — every
+//     sixth of 24 evenly generated names is "-3s, -33s, -63s", which is a
+//     stride the producer never chose. Naming is the producer's (it knows what
+//     a tick MEANS); fitting is the renderer's (it knows the width). Both, not
+//     either.
+//
+// The change widens the wire with exactly one exception, named here because a
+// silent narrowing is how a live producer starts getting 422s: a label of
+// nothing but whitespace used to pass `minLength: 1` on a technicality and
+// draw an empty tick. It is now refused, with a message that names the index
+// and points at `null`. Every other payload that validated before — all labels
+// named, which was the only legal shape — validates unchanged.
 
 // Schema implements Payload.
 func (p *SeriesPayload) Schema() PanelSchema { return SchemaSeries }
@@ -110,6 +164,9 @@ func ValidateSeries(raw []byte) (*SeriesPayload, error) {
 	if err := checkSingleUnit(p.Unit); err != nil {
 		return nil, err
 	}
+	if err := checkAxisIsNamed(p.Labels); err != nil {
+		return nil, err
+	}
 
 	seen := make(map[string]bool, len(p.Series))
 	for i := range p.Series {
@@ -133,6 +190,56 @@ func ValidateSeries(raw []byte) (*SeriesPayload, error) {
 		}
 	}
 	return &p, nil
+}
+
+// NamedLabels counts the ticks that carry a name. The renderer draws at most
+// this many axis labels and usually fewer; the number of CATEGORIES is
+// len(Labels) and is never affected by it.
+func (p *SeriesPayload) NamedLabels() int {
+	if p == nil {
+		return 0
+	}
+	n := 0
+	for _, l := range p.Labels {
+		if l != nil && strings.TrimSpace(*l) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// checkAxisIsNamed is the sparse axis' one boundary.
+//
+// Two things the published schema cannot say. First, `minLength: 1` counts
+// characters, so "   " passes it — and a label of spaces is an empty label
+// that got past the door, not a name. If a producer means "do not name this
+// tick" the way to say so is `null`, which is unambiguous; whitespace is
+// ambiguous, which is the whole reason `""` was kept illegal.
+//
+// Second, at least one tick has to be named. The renderer may thin the names
+// down to a single one, but it may never be handed zero: an axis where nothing
+// is named is not a sparse axis, it is a chart whose x meaning nobody stated,
+// and no amount of width would let the renderer recover it.
+func checkAxisIsNamed(labels []*string) error {
+	named := 0
+	for i, l := range labels {
+		if l == nil {
+			continue
+		}
+		if strings.TrimSpace(*l) == "" {
+			return newError(CodeSchemaViolation, SchemaSeries,
+				"label %d is blank; a tick you do not want to name is null, which says so — "+
+					"whitespace is an empty label that got past the length check", i)
+		}
+		named++
+	}
+	if named == 0 {
+		return newError(CodeInconsistentPayload, SchemaSeries,
+			"none of the %d labels is named; null means \"do not name THIS tick\" and the renderer "+
+				"thins the rest to fit, but an axis with no name anywhere states no x meaning at all — "+
+				"name at least the ends of the window", len(labels))
+	}
+	return nil
 }
 
 // unitSeparators are the ways a producer writes two units into a field that
@@ -247,5 +354,5 @@ func (p *SeriesPayload) MergeOverflow() *SeriesPayload {
 	}
 	kept[target].Values = values
 
-	return &SeriesPayload{Unit: p.Unit, Labels: append([]string(nil), p.Labels...), Series: kept}
+	return &SeriesPayload{Unit: p.Unit, Labels: append([]*string(nil), p.Labels...), Series: kept}
 }

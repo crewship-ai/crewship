@@ -22,12 +22,21 @@
       "minItems": 1,
       "maxItems": 50,
       "items": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 60,
-        "description": "One category on the shared axis. Plain text; the renderer truncates what will not fit and keeps the full string in a tooltip."
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "description": "A named category. Plain text; the renderer truncates what will not fit and keeps the full string in a tooltip."
+          },
+          {
+            "type": "null",
+            "description": "An UNNAMED tick: this category exists, carries a value in every series, and the producer is declining to name it. Not an empty label — the same distinction `values` draws between `0` and `null`, one step to the left."
+          }
+        ],
+        "description": "One category on the shared axis: a non-empty string, or `null` for a tick the producer is deliberately not naming. `\"\"` is neither and is refused, and so is a label of nothing but spaces (which the length check alone cannot catch, so the server does) — an empty string is what a broken format expression produces, and a contract that accepted it could not tell a deliberate blank from a bug."
       },
-      "description": "The categories, in render order — the producer sorts, because the panel has no query with which to sort anything. Every series carries exactly one value per label, in this order. Bounded at 50: past that the bars are thinner than their gaps and the honest rendering is a table."
+      "description": "The categories, in render order — the producer sorts, because the panel has no query with which to sort anything. Every series carries exactly one value per label, in this order, INCLUDING the unnamed ones: a `null` here removes a name, never a data point. At least one label must be named; an axis of 50 nulls is a chart whose x meaning nobody stated. How many of the named ones are actually drawn is the RENDERER's decision, because only it knows the panel's width — a producer that names every tick of a 24-point window gets an evenly thinned axis, not 24 labels truncated into noise. Bounded at 50: past that the bars are thinner than their gaps and the honest rendering is a table."
     },
     "series": {
       "type": "array",

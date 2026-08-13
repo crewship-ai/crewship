@@ -2,7 +2,6 @@ package api
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -308,13 +307,17 @@ func (r readRoute) key() string { return r.verb + " " + r.path }
 func scanReadRoutes(t *testing.T) []readRoute {
 	t.Helper()
 
-	routerFiles, err := filepath.Glob("router_*.go")
-	if err != nil {
-		t.Fatalf("glob router files: %v", err)
-	}
-	if len(routerFiles) == 0 {
-		t.Fatal("no router_*.go files found — test is looking in the wrong directory")
-	}
+	// Discovery is by CONTENT, not by filename, and shares routeRegistrarFiles
+	// with the mutation twin so the two invariants can never disagree about
+	// what the route surface is.
+	//
+	// This used to glob router_*.go. #1953 fixed that on the mutation side and
+	// left this one, on the correct reading that it was latent — no file
+	// outside the naming convention registered a READ route at the time. That
+	// is not a property anything enforces, and the mutation hole was latent
+	// too right up until pages_internal.go existed. A gate that is only sound
+	// while a convention holds is a gate whose soundness nobody is checking.
+	routerFiles := routeRegistrarFiles(t)
 
 	var routes []readRoute
 	scanned := 0

@@ -4,13 +4,18 @@ import * as React from "react"
 import type { ComponentType } from "react"
 import { ErrorBoundary } from "react-error-boundary"
 
+import { EmbedPanel } from "./embed-panel"
 import { MetricPanel } from "./metric-panel"
 import { NarrativePanel } from "./narrative-panel"
 import { SeriesPanel } from "./series-panel"
 import { StatusPanel } from "./status-panel"
 import { TablePanel } from "./table-panel"
 import { SealedPanel } from "./sealed-panel"
-import { PanelErrorPanel, PendingSchemaPanel, UnknownSchemaPanel } from "./fallback-panel"
+// PendingSchemaPanel is no longer reachable from this table: embed.v1 was the
+// last reserved-but-unbuilt schema, and it now has a component that gives the
+// per-instance answer instead. The fallback stays exported for the next
+// schema that is reserved before it is built.
+import { PanelErrorPanel, UnknownSchemaPanel } from "./fallback-panel"
 import { isPanelSchema, type PanelProps, type PanelSchema } from "./types"
 
 /**
@@ -31,11 +36,13 @@ export const PANEL_REGISTRY: Record<PanelSchema, ComponentType<PanelProps>> = {
   "status.v1": StatusPanel,
   "table.v1": TablePanel,
   "narrative.v1": NarrativePanel,
-  // Reserved from the first migration (§3.1) — a page may legitimately carry
-  // one, so it gets the "arrives in a later release" copy, not "this version
-  // does not render embed.v1". It needs a second origin and a sandbox proxy
-  // rather than a payload type, which is why it is the last one out.
-  "embed.v1": PendingSchemaPanel,
+  // The escape hatch (§3.1). Unlike the five above it, whether it draws
+  // anything depends on the INSTANCE: it renders a cross-origin sandboxed
+  // frame when an operator has declared a vetted destination and refuses, with
+  // the reason, when one has not. The refusal lives in the component rather
+  // than in this table because "not configured here" and "not built yet" are
+  // different sentences and only the component knows which one is true.
+  "embed.v1": EmbedPanel,
 }
 
 /** Untrusted string in, component out. Never throws, never returns undefined. */

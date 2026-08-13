@@ -122,6 +122,16 @@ func attachPanelGates(doc *pages.Document, byPanelID map[string]*panelRecord) {
 // gatePlan is a validated page's sensor declarations with every crew resolved.
 type gatePlan struct {
 	panels []gatePlanPanel
+	// refresh is the page's `refresh:` declarations (pages_refresh.go). They
+	// travel with the gates because they are compiled into the SAME table, by
+	// the same reconcile, inside the same transaction — a page whose spec says
+	// a panel refreshes on wake, saved next to a rule that failed to write, is
+	// a page that lies about what it does, exactly as it is for a gate.
+	//
+	// Nothing here needs resolving against the database: `refresh:` names no
+	// crew, and the routine it runs is the panel's own producer, which
+	// resolveReferences has already required to exist.
+	refresh []pages.RefreshTrigger
 }
 
 type gatePlanPanel struct {
@@ -140,7 +150,20 @@ func (h *PageHandler) resolveGates(w http.ResponseWriter, r *http.Request, wsID 
 		writeSpecError(w, err)
 		return nil, false
 	}
-	plan := &gatePlan{}
+	// `refresh:` on the same terms and for the same reason (pages_refresh.go).
+	// Document.Validate already ran it on both write paths; running it again
+	// here is the same bargain ValidateGates strikes on the line above —
+	// nothing reaches the compiler that has not just been checked, whichever
+	// door the document came through.
+	if err := pages.ValidateRefresh(doc); err != nil {
+		writeSpecError(w, err)
+		return nil, false
+	}
+	// pages.ValidateGates ran above and Document.Validate runs validatePageRefresh
+	// straight after it, so by here every declaration below is known to name a
+	// routine producer, and `on:wake` is known to have a gate on this page it
+	// could fire from.
+	plan := &gatePlan{refresh: pages.RefreshTriggers(doc)}
 	crewIDs := map[string]string{}
 	resolve := func(slug string) (string, bool) {
 		if id, ok := crewIDs[slug]; ok {
@@ -302,6 +325,18 @@ func reconcileWakeAutomations(ctx context.Context, tx *sql.Tx, wsID, pageID, pag
 				}
 				wanted[a.ID] = a
 			}
+		}
+		// `refresh:` compiles into the SAME table, through the same reconcile
+		// and under the same page id prefix (pages_refresh.go). Sharing the
+		// prefix is what makes the delete loop below — and deletePageWakeAutomations
+		// — remove a refresh rule the spec no longer declares, without either of
+		// them having to know that refresh exists.
+		for _, t := range plan.refresh {
+			a := buildRefreshAutomation(wsID, pageID, pageSlug, t, authorUserID)
+			if err := a.Validate(); err != nil {
+				return fmt.Errorf("refresh: %s on panel %q: %w", t.On, t.PanelID, err)
+			}
+			wanted[a.ID] = a
 		}
 	}
 

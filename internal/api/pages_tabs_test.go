@@ -113,6 +113,11 @@ func TestPagesGet_SealedPlaceholderKeepsItsTab(t *testing.T) {
 		t.Fatalf("insert membership: %v", err)
 	}
 
+	// Reach comes from the grant; the seal comes from crew membership, and the
+	// grant does not touch it (§7.1 rule 3).
+	pagesGrant(t, h, wsID, userID, "sit-3",
+		`{"subject_type":"user","subject":"outsider@example.com","level":"read"}`)
+
 	doc := pagesGet(t, h, wsID, "outsider", "MEMBER", "sit-3")
 	for panelID, want := range map[string]string{"dosah": "Síť", "latence": "Odezva"} {
 		panel := pagesPanel(t, doc, panelID)

@@ -189,6 +189,12 @@ type pageWritePanelJSON struct {
 	// happen; a CLI-side parse would be a second grammar to keep in step.
 	Wake      []pages.PanelWake     `json:"wake,omitempty"`
 	OnFailure *pages.PanelOnFailure `json:"on_failure,omitempty"`
+	// The event that runs this panel's producer (internal/pages/refresh.go).
+	// Sent for the reason the tab is: a field the CLI drops is a field
+	// `crewship page update --file page.yaml` DELETES — and here what is
+	// deleted is the `automations` row that makes the trigger real, so the
+	// page would go on looking like it refreshes and stop doing it.
+	Refresh string `json:"refresh,omitempty"`
 }
 
 // ── list ───────────────────────────────────────────────────────────────────
@@ -477,6 +483,7 @@ func pageWriteFrom(doc *pages.Document) *pageWriteJSON {
 			Actions:    p.Actions,
 			Wake:       p.Wake,
 			OnFailure:  p.OnFailure,
+			Refresh:    string(p.Refresh),
 		})
 	}
 	return out

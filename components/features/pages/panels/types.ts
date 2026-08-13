@@ -139,6 +139,20 @@ export interface PanelSnapshot<P = unknown> {
   failure?: string | null
   /** Overrides the default "how to make data arrive" sentence (§9b.3). */
   emptyHint?: string | null
+  /**
+   * `embed.v1` only: the URL the server RESOLVED from the payload's `source`
+   * name against this instance's vetted allow-list
+   * (`internal/pages/embed.go`).
+   *
+   * It arrives beside the payload rather than inside it, and that placement is
+   * the security property. The payload is producer-written and carries no URL
+   * at all; this field is server-written, from an operator's list, and the
+   * client never resolves a name itself. A build where the server does not
+   * send it renders the panel as a refusal — see `embed-panel.tsx` — which is
+   * the correct behaviour, because a client that guessed a URL here would be
+   * the exact hole the schema is shaped to avoid.
+   */
+  embed?: { url?: string | null } | null
 }
 
 export interface PanelProps {
@@ -249,6 +263,26 @@ export interface NarrativePayload {
   verdict?: string | null
 }
 
+// ── embed.v1 (§3.1) ───────────────────────────────────────────────────────
+
+/**
+ * The escape hatch's payload. Two fields, and the absences are the design.
+ *
+ * There is no `url`, `src`, `html`, `srcdoc`, `sandbox`, `allow` or `height`,
+ * and none of them is coming. An iframe src is fetched by the READER's browser
+ * at render time, so a URL a producer could set on every push is an outbound
+ * channel with the reader's IP on it — the CamoLeak shape of §8 rule 2 with
+ * execution added. The producer names one entry in an allow-list a human
+ * vetted; the server resolves it and puts the URL on
+ * `PanelSnapshot.embed.url`.
+ */
+export interface EmbedPayload {
+  /** Untrusted: a name that resolves to nothing renders a refusal, never a frame. */
+  source?: string | null
+  /** Plain text drawn by host chrome above the frame. Never markup. */
+  caption?: string | null
+}
+
 // ── series.v1 (§3) ────────────────────────────────────────────────────────
 
 export interface SeriesEntry {
@@ -264,6 +298,16 @@ export interface SeriesEntry {
 export interface SeriesPayload {
   /** One unit for the whole panel (§3). A series carries none of its own. */
   unit?: string | null
-  labels?: string[] | null
+  /**
+   * One entry per category. `null` is a tick the producer declines to NAME —
+   * the category still exists and still carries a value in every series. The
+   * producer knows what a tick means; only the renderer knows how many of
+   * those names fit, so it thins the named ones rather than the data.
+   *
+   * `""` is refused by the schema: an empty string is what a broken format
+   * expression produces, so a blank you meant has to look different from a
+   * blank you shipped.
+   */
+  labels?: (string | null)[] | null
   series?: SeriesEntry[] | null
 }

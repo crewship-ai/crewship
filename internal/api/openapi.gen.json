@@ -71230,8 +71230,16 @@
                         "public": {
                           "type": "boolean"
                         },
+                        "refresh": {
+                          "description": "Optional, and CLOSED. The event that RUNS this panel's producer — a trigger, not a hint: a page holds no query, so nothing polls and a refresh that does not run the producer refreshes nothing. `on:wake` fires when a wake gate ANYWHERE on this page fires; `on:panels-changed` fires when the page's panel list changes (a rename is not a panel change). Each compiles to an `automations` row with `action_kind: routine`, so the producer run is debounced, coalesced, rate-capped and priced against the chain-depth budget like any other automation. Refused at save time: a value outside the set; a producer that is not `routine/\u003cslug\u003e` (the server cannot run a script, call a webhook producer, or dispatch an agent — an agent is woken by a gate's `writes:`); `on:wake` on a page that declares no gate; and `on:wake` on a panel that declares its own gate, which is a loop.",
+                          "enum": [
+                            "on:wake",
+                            "on:panels-changed"
+                          ],
+                          "type": "string"
+                        },
                         "schema": {
-                          "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                          "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                           "enum": [
                             "metric.v1",
                             "series.v1",
@@ -71384,7 +71392,7 @@
                                 "type": "string"
                               },
                               "schema": {
-                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                                 "enum": [
                                   "metric.v1",
                                   "series.v1",
@@ -71551,7 +71559,7 @@
                                 "type": "string"
                               },
                               "schema": {
-                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                                 "enum": [
                                   "metric.v1",
                                   "series.v1",
@@ -71800,7 +71808,7 @@
                               "type": "boolean"
                             },
                             "schema": {
-                              "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                              "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                               "enum": [
                                 "metric.v1",
                                 "series.v1",
@@ -71964,7 +71972,7 @@
                                 "type": "string"
                               },
                               "schema": {
-                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                                 "enum": [
                                   "metric.v1",
                                   "series.v1",
@@ -72131,7 +72139,7 @@
                                 "type": "string"
                               },
                               "schema": {
-                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                                 "enum": [
                                   "metric.v1",
                                   "series.v1",
@@ -72507,7 +72515,7 @@
                                 "type": "string"
                               },
                               "schema": {
-                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                                 "enum": [
                                   "metric.v1",
                                   "series.v1",
@@ -72745,8 +72753,16 @@
                         "public": {
                           "type": "boolean"
                         },
+                        "refresh": {
+                          "description": "Optional, and CLOSED. The event that RUNS this panel's producer — a trigger, not a hint: a page holds no query, so nothing polls and a refresh that does not run the producer refreshes nothing. `on:wake` fires when a wake gate ANYWHERE on this page fires; `on:panels-changed` fires when the page's panel list changes (a rename is not a panel change). Each compiles to an `automations` row with `action_kind: routine`, so the producer run is debounced, coalesced, rate-capped and priced against the chain-depth budget like any other automation. Refused at save time: a value outside the set; a producer that is not `routine/\u003cslug\u003e` (the server cannot run a script, call a webhook producer, or dispatch an agent — an agent is woken by a gate's `writes:`); `on:wake` on a page that declares no gate; and `on:wake` on a panel that declares its own gate, which is a loop.",
+                          "enum": [
+                            "on:wake",
+                            "on:panels-changed"
+                          ],
+                          "type": "string"
+                        },
                         "schema": {
-                          "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                          "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                           "enum": [
                             "metric.v1",
                             "series.v1",
@@ -72899,7 +72915,7 @@
                                 "type": "string"
                               },
                               "schema": {
-                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                                 "enum": [
                                   "metric.v1",
                                   "series.v1",
@@ -73161,7 +73177,7 @@
                                 "type": "boolean"
                               },
                               "schema": {
-                                "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                                 "enum": [
                                   "metric.v1",
                                   "series.v1",
@@ -75192,7 +75208,7 @@
                                     "type": "string"
                                   },
                                   "schema": {
-                                    "description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible.",
+                                    "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                                     "enum": [
                                       "metric.v1",
                                       "series.v1",

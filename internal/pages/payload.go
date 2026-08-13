@@ -48,6 +48,10 @@ func ValidatePayload(schema PanelSchema, raw []byte) (Payload, error) {
 		return ValidateTable(raw)
 	case SchemaNarrative:
 		return ValidateNarrative(raw)
+	case SchemaEmbed:
+		// Refuses everything on an instance with no embed allow-list, which is
+		// every instance by default — see internal/pages/embed.go.
+		return ValidateEmbed(raw)
 	}
 	if schema.Known() {
 		return nil, newError(CodeUnknownSchema, schema,

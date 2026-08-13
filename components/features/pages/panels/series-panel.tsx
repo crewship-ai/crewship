@@ -20,6 +20,15 @@ import {
 import type { PanelProps, SeriesEntry, SeriesPayload } from "./types"
 
 /**
+ * `series.v1` as this panel reads it.
+ *
+ * Kept as a named alias after #1958 widened `SeriesPayload.labels` itself, so
+ * the reader of this file still meets the sparse axis by name at the point the
+ * payload is cast.
+ */
+type SeriesPayloadWithSparseAxis = SeriesPayload
+
+/**
  * `series.v1` — a grouped bar chart (§3, bar only in v1).
  *
  * Hand-written inline SVG, not a chart library. §9 proposed recharts, but
@@ -72,6 +81,27 @@ import type { PanelProps, SeriesEntry, SeriesPayload } from "./types"
  * point of the header above — that the geometry is IN the exported HTML, in
  * user units, with no client-side measurement.
  *
+ * ## The axis is a negotiation (`labels[]` may carry nulls)
+ *
+ * A producer with a 24-point window used to have to send 24 names, because
+ * `labels[]` demanded a non-empty string per tick — and 24 names across a
+ * half-width panel were drawn as "-1…" apiece. The producer cannot fix that:
+ * it does not know the panel's width. So the decision is split at the seam
+ * where the knowledge is:
+ *
+ *  · **The producer names the ticks it wants named.** `null` is a tick it
+ *    declines to name — a category that exists and carries a value in every
+ *    series, with no name of its own. `""` stays illegal on the wire, because
+ *    an empty string is what a broken format expression produces and a schema
+ *    that accepted it could not tell a deliberate blank from a bug.
+ *  · **The renderer decides how many of those names it can draw.** `planAxis`
+ *    thins the named ticks by an even stride until what is left is legible.
+ *
+ * Thinning labels is honest; thinning data is not. Every category the payload
+ * declares keeps its group and every point keeps its bar, whatever the axis
+ * does — and the name of a tick the axis dropped is still on that tick's own
+ * bars, in the `<title>`.
+ *
  * ⚠ The palette itself is a known open dependency, recorded rather than worked
  * around. §3's fourth rule is *"status colours are reserved — green 'running'
  * must never also mean 'series 3'"*, and today it cannot hold: `app/globals.css`
@@ -88,10 +118,15 @@ import type { PanelProps, SeriesEntry, SeriesPayload } from "./types"
 export function SeriesPanel({ panel, data, now, publicView = false, className }: PanelProps) {
   const clock = resolveNow(now)
   const gate = panelGate(data)
-  const payload = (data.payload ?? {}) as SeriesPayload
+  const payload = (data.payload ?? {}) as SeriesPayloadWithSparseAxis
 
-  const labels = Array.isArray(payload.labels)
-    ? payload.labels.map((l) => (typeof l === "string" ? l : ""))
+  // A tick is either NAMED (a non-empty string the producer chose) or UNNAMED
+  // (`null`). Anything else that arrives — an empty string from an older
+  // producer, a number, a stored payload from before the schema widened — is
+  // read as unnamed rather than drawn as a blank tick, because a blank drawn
+  // label is indistinguishable from a rendering fault.
+  const labels: (string | null)[] = Array.isArray(payload.labels)
+    ? payload.labels.map((l) => (typeof l === "string" && l.trim() !== "" ? l : null))
     : []
   const unit = typeof payload.unit === "string" ? payload.unit.trim() : ""
   const drawn = mergeOverflow(Array.isArray(payload.series) ? payload.series : [], labels.length)
@@ -370,6 +405,141 @@ const PAD_TOP = 14
 const AXIS_H = 16
 const GROUP_GAP = 6
 
+// ── the axis ──────────────────────────────────────────────────────────────
+
+/** The axis label size, in the same user units everything else is drawn in. */
+const AXIS_FONT = 8
+
+/**
+ * The width one glyph of `AXIS_FONT` takes, near enough.
+ *
+ * Nothing here measures text, and that is deliberate rather than lazy: a
+ * `ResizeObserver` or a `getComputedTextLength` would move the axis out of the
+ * server-rendered markup, which is the property the whole chart is built for
+ * (see the header). An 8px sans glyph averages a little over half its size;
+ * 4.4 is the average advance rounded UP, so the estimate errs towards fewer
+ * labels rather than towards two that touch.
+ */
+const AXIS_CHAR_W = 4.4
+
+/** Clear space between two neighbouring labels. Below this they read as one. */
+const AXIS_LABEL_GAP = 4
+
+/**
+ * The least a drawn label may say: four glyphs and an ellipsis.
+ *
+ * This is the number the original bug violated — 24 labels across a half-width
+ * panel left room for two glyphs, so every one of them was drawn as "-1…",
+ * which is not a label but a rumour of one. When a label cannot be given this
+ * much room, the answer is to draw FEWER labels, never smaller ones.
+ */
+export const AXIS_MIN_LABEL_CHARS = 5
+
+/** What the renderer decided to draw on the axis. */
+export interface AxisPlan {
+  /** Parallel to `labels`: the text to draw at each tick, or `null` for none. */
+  ticks: (string | null)[]
+  /** How many ticks the producer named. */
+  named: number
+  /** How many names survived the fit. */
+  drawn: number
+  /** True when the renderer dropped names the producer did send. */
+  thinned: boolean
+}
+
+/**
+ * Choose the axis labels, and their truncation, from the payload alone.
+ *
+ * Two decisions, in this order:
+ *
+ *  1. **Which ticks are candidates.** Only the ones the producer named. An
+ *     unnamed tick is never given a name here — inventing one would put a
+ *     string on the chart that nobody measured, which is the same class of
+ *     error as a direct label that counted up.
+ *  2. **How many of them fit.** The smallest even stride whose drawn labels
+ *     each clear `AXIS_MIN_LABEL_CHARS`. Even, because an axis whose gaps vary
+ *     reads as data — §11b.16 makes even spacing a contract for the points, and
+ *     a reader extends the same assumption to the ticks. Anchored on the LAST
+ *     named tick, walking backwards: a payload's last category is the one a
+ *     reader looks for first (it is "now" in every rolling window), and
+ *     anchoring at one end is what keeps the surviving gaps identical —
+ *     forcing both ends instead leaves one short gap that looks like a
+ *     measurement.
+ *
+ * The stride is decided in the fixed `viewBox`'s user units, which is why it
+ * needs no measurement to be correct at any width: the whole chart is scaled
+ * uniformly by the browser, so a label that clears its neighbour in user units
+ * clears it on a phone and on a 4K display alike.
+ *
+ * What it will not do is drop a data point. `ticks` is exactly as long as
+ * `labels`, every category keeps its group, and the name of a tick that is not
+ * drawn stays on that tick's bars in their `<title>`.
+ */
+export function planAxis(labels: readonly (string | null)[]): AxisPlan {
+  const empty: AxisPlan = { ticks: labels.map(() => null), named: 0, drawn: 0, thinned: false }
+  if (labels.length === 0) return empty
+
+  const named: number[] = []
+  labels.forEach((l, i) => {
+    if (typeof l === "string" && l.trim() !== "") named.push(i)
+  })
+  // The server refuses an axis with no name anywhere; a payload stored before
+  // it did, or one that lost its names to a producer bug, still has to render.
+  if (named.length === 0) return empty
+
+  const groupW = (VIEW_W - PAD_L - PAD_R) / labels.length
+
+  let keep = named
+  let width = availableWidth(named, groupW)
+  for (let stride = 2; stride <= named.length && width < AXIS_MIN_LABEL_CHARS * AXIS_CHAR_W; stride++) {
+    keep = everyNthFromTheEnd(named, stride)
+    width = availableWidth(keep, groupW)
+  }
+
+  const chars = Math.max(1, Math.floor(width / AXIS_CHAR_W))
+  const ticks = labels.map(() => null as string | null)
+  for (const i of keep) ticks[i] = truncate(labels[i] as string, chars)
+
+  return { ticks, named: named.length, drawn: keep.length, thinned: keep.length < named.length }
+}
+
+/**
+ * The width a label may occupy at each of `keep`, which is the tightest gap
+ * between two of them — the labels are centred on their ticks, so two
+ * neighbours a apart may each be `a - gap` wide before they touch.
+ *
+ * A single label is bounded by the plot instead, not by the viewBox edge: an
+ * edge label is nudged inwards when it is drawn (see `tickX`), which costs a
+ * few user units of alignment and is what every chart does, rather than
+ * costing the label itself.
+ */
+function availableWidth(keep: readonly number[], groupW: number): number {
+  const plotW = VIEW_W - PAD_L - PAD_R
+  let w = plotW
+  for (let i = 1; i < keep.length; i++) {
+    w = Math.min(w, (keep[i] - keep[i - 1]) * groupW - AXIS_LABEL_GAP)
+  }
+  return Math.max(0, w)
+}
+
+/** Every `stride`-th candidate, anchored on the last one. */
+function everyNthFromTheEnd(named: readonly number[], stride: number): number[] {
+  const keep: number[] = []
+  for (let i = named.length - 1; i >= 0; i -= stride) keep.push(named[i])
+  return keep.reverse()
+}
+
+/**
+ * Where a tick's label is centred, nudged just far enough to stay inside the
+ * viewBox. An SVG root clips, so an un-nudged label on the last category of a
+ * dense axis would lose its final glyphs to the edge — a nudge of a few user
+ * units is visible to nobody, and a clipped label is visible to everybody.
+ */
+function tickX(center: number, text: string): number {
+  const half = (text.length * AXIS_CHAR_W) / 2
+  return Math.min(Math.max(center, PAD_L + half), VIEW_W - PAD_R - half)
+}
+
 /**
  * Grouped columns, drawn in user units into a fixed `viewBox` and scaled
  * uniformly by the browser (`preserveAspectRatio` defaults to `xMidYMid
@@ -389,12 +559,17 @@ function BarChart({
   unit,
   frames,
 }: {
-  labels: string[]
+  labels: (string | null)[]
   series: DrawnSeries[]
   colors: Map<string, string>
   unit: string
   frames: ReadonlyMap<string, TweenFrame>
 }) {
+  // What the axis can say at this width. Decided before anything is drawn, and
+  // it decides nothing about the bars: `labels.length` groups are drawn either
+  // way (§9b.4's sibling — a chart may show less of its axis than it was given,
+  // never less of its data).
+  const axis = planAxis(labels)
   // §3: direct labels at ≤ 4 series. Past that the numbers collide with each
   // other and the legend is doing the work anyway.
   const directLabels = series.length <= 4 && labels.length * series.length <= 24
@@ -435,7 +610,7 @@ function BarChart({
       viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
       role="img"
       focusable="false"
-      aria-label={chartSummary(labels, series, unit)}
+      aria-label={chartSummary(labels, series, unit, axis)}
       className="h-auto w-full"
     >
       {/* The zero line. Every bar is measured from it, so it is drawn even
@@ -454,8 +629,17 @@ function BarChart({
 
       {labels.map((label, li) => {
         const gx = PAD_L + li * groupW + GROUP_GAP / 2
+        const tick = axis.ticks[li]
         return (
-          <g key={li} data-slot="series-group" data-label={label}>
+          <g
+            key={li}
+            data-slot="series-group"
+            data-label={label ?? undefined}
+            // Three states, and they are three different facts: the producer
+            // named this tick and the axis drew it; the producer named it and
+            // the axis could not fit it; the producer did not name it.
+            data-label-state={tick !== null ? "drawn" : label !== null ? "thinned" : "unnamed"}
+          >
             {series.map((s, si) => {
               // `measured` is what the producer sent and is what every piece of
               // TEXT below reads. `v` is where the rectangle is this frame, and
@@ -503,8 +687,14 @@ function BarChart({
                     fill={`var(${colors.get(s.name)})`}
                   >
                     {/* `measured`, not `v`: the tooltip is a number a reader
-                        will quote, and it must be the producer's own. */}
-                    <title>{`${s.name} · ${label}: ${measured}${unit ? ` ${unit}` : ""}`}</title>
+                        will quote, and it must be the producer's own.
+
+                        This is also where the name of a category the AXIS
+                        could not fit stays reachable — the label is thinned
+                        off the axis, never off the data — and where a tick
+                        the producer left unnamed simply has no name to give,
+                        rather than an empty one between two separators. */}
+                    <title>{barTitle(s.name, label, measured, unit)}</title>
                   </rect>
                   {directLabels ? (
                     <text
@@ -527,18 +717,24 @@ function BarChart({
                 </g>
               )
             })}
-            <text
-              data-slot="series-label"
-              x={PAD_L + li * groupW + groupW / 2}
-              y={VIEW_H - 4}
-              textAnchor="middle"
-              fontSize={8}
-              fill="currentColor"
-              className="text-muted-foreground-soft"
-            >
-              {truncate(label, Math.max(3, Math.floor(groupW / 4)))}
-              <title>{label}</title>
-            </text>
+            {tick !== null ? (
+              <text
+                data-slot="series-label"
+                data-tick-index={li}
+                x={tickX(PAD_L + li * groupW + groupW / 2, tick)}
+                y={VIEW_H - 4}
+                textAnchor="middle"
+                fontSize={AXIS_FONT}
+                fill="currentColor"
+                className="text-muted-foreground-soft"
+              >
+                {tick}
+                {/* Only when the drawn text is not the whole name. A tooltip
+                    that repeats what is already on screen teaches a reader
+                    that tooltips say nothing. */}
+                {tick !== label ? <title>{label}</title> : null}
+              </text>
+            ) : null}
           </g>
         )
       })}
@@ -546,12 +742,29 @@ function BarChart({
   )
 }
 
+/** One bar's tooltip. A tick with no name contributes no name. */
+function barTitle(seriesName: string, label: string | null, value: number, unit: string): string {
+  const where = label === null ? seriesName : `${seriesName} · ${label}`
+  return `${where}: ${value}${unit ? ` ${unit}` : ""}`
+}
+
 /**
  * The alt text. A chart that only exists as geometry is a chart a screen
  * reader cannot read, and §7.3.2b's "always carries when its data was
  * produced" has a sibling here: always carries what it shows.
+ *
+ * It also carries what it did NOT show. A sighted reader can see that the axis
+ * names five ticks of twenty-four; a reader who cannot would otherwise be told
+ * "twenty-four categories" by a summary and shown five names by the axis, with
+ * nothing to reconcile the two. Thinning that is disclosed is a rendering
+ * decision; thinning that is not is a chart quietly disagreeing with itself.
  */
-function chartSummary(labels: string[], series: DrawnSeries[], unit: string): string {
+function chartSummary(
+  labels: (string | null)[],
+  series: DrawnSeries[],
+  unit: string,
+  axis: AxisPlan,
+): string {
   const names = series.map((s) => s.name).join(", ")
   const measured = series.reduce((n, s) => n + s.values.filter((v) => v !== null).length, 0)
   const total = series.length * labels.length
@@ -559,7 +772,12 @@ function chartSummary(labels: string[], series: DrawnSeries[], unit: string): st
   return (
     `Bar chart${unit ? ` in ${unit}` : ""}: ${series.length} series (${names}) ` +
     `over ${labels.length} categories` +
-    (gaps > 0 ? `, ${gaps} of ${total} points with no data` : "")
+    (gaps > 0 ? `, ${gaps} of ${total} points with no data` : "") +
+    (axis.thinned
+      ? `; the axis names ${axis.drawn} of its ${axis.named} labels at this width — every point is drawn`
+      : axis.drawn < labels.length
+        ? `; ${axis.drawn} of the ${labels.length} categories are named — every point is drawn`
+        : "")
   )
 }
 

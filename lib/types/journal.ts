@@ -170,6 +170,7 @@ export const JOURNAL_ENTRY_TYPES = [
   // started a run" is the reason §8 rule 8 treats the platform's own agent as
   // an untrusted producer: the record has to exist regardless of who clicked.
   "page.action.dispatched",
+  "page.spec.changed",
 ] as const
 
 export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number]

@@ -536,6 +536,20 @@ const (
 	// was opened. Payload: page, page_id, panel, gate, crew, writes,
 	// issue_id, issue_identifier, coalesced_events.
 	EntryPageWakeFired EntryType = "page.wake.fired"
+
+	// EntryPageSpecChanged records that a page's ARRANGEMENT changed — a
+	// panel added, removed, reordered or edited. It is the event
+	// `refresh: on:panels-changed` is armed on (§12 v1.1), which is why it
+	// is a journal entry rather than only the websocket broadcast that
+	// already existed: an automation matcher can only see the journal.
+	//
+	// Emitted on create and on any update whose panel list differs, and
+	// NOT on a rename — the page's metadata is not its arrangement. That
+	// "differs" is a fingerprint over the panel list, so a producer that
+	// re-applies the same manifest emits nothing and cannot refresh
+	// itself in a circle. Payload: page, page_id, panels, created,
+	// fingerprint.
+	EntryPageSpecChanged EntryType = "page.spec.changed"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI

@@ -61,29 +61,25 @@ export type PageGrantLevel = (typeof PAGE_GRANT_LEVELS)[number]
 export const PAGE_SUBJECT_TYPES = ["user", "crew", "agent"] as const
 export type PageSubjectType = (typeof PAGE_SUBJECT_TYPES)[number]
 
-/** What each verb actually means (§7.1b's own table). */
-export const PAGE_GRANT_LEVEL_MEANING: Record<PageGrantLevel, string> = {
-  read: "may see the page and its panels",
-  produce: "may push payloads into named panels",
-  write: "may edit the page spec — add, remove and re-arrange panels",
-}
-
 /**
- * `read` is stored and validated and reaches no decision.
+ * What each verb actually means (§7.1b's own table).
  *
- * A conformance audit of this release found that `pageGrantRead` has no reader
- * outside `validPageGrantLevel`: page visibility is workspace membership,
- * panel visibility is crew membership (`canSeePanel`, which does not consult
- * grants at all), and nothing anywhere asks whether a subject holds `read`.
+ * All three OPEN the page — `read` is the floor the other two build on, since a
+ * grantee who may rewrite a page has to be able to look at it. What none of
+ * them do is unseal a panel: a grant widens reach to the page and never to a
+ * crew's data (§7.1 rule 3), so the `read` line says so where somebody issuing
+ * one will read it, rather than leaving them to discover a page of sealed
+ * placeholders and file it as a bug.
  *
- * The row is NOT hidden and the level is NOT removed from the form — that is
- * an open product decision (§15) and not one a UI may make by omission. What
- * the UI owes the reader is the truth beside it, in the same way an inert
- * grant is shown with its reason rather than filtered out.
+ * An earlier build had a PAGE_GRANT_READ_CAVEAT here, warning that `read`
+ * decided nothing at all. It decides page reach now, server-side, and the
+ * warning went at the same commit the behaviour arrived.
  */
-export const PAGE_GRANT_READ_CAVEAT =
-  "Stored, but it decides nothing today: who can see this page is workspace membership, " +
-  "and who can see a panel is crew membership. Nothing reads this level — it records intent, not access."
+export const PAGE_GRANT_LEVEL_MEANING: Record<PageGrantLevel, string> = {
+  read: "opens the page — panels stay sealed unless the grantee's own crew membership already opened them",
+  produce: "opens the page, and may push payloads into named panels",
+  write: "opens the page, and may edit its spec — add, remove and re-arrange panels",
+}
 
 export function isPageGrantLevel(value: unknown): value is PageGrantLevel {
   return typeof value === "string" && (PAGE_GRANT_LEVELS as readonly string[]).includes(value)

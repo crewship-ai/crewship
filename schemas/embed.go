@@ -22,8 +22,8 @@ var RoutineV1 []byte
 // which is the set that needed no chart engine and therefore no new
 // dependency; series and narrative followed, and neither added one either
 // (the chart is hand-written inline SVG, the prose is React elements).
-// embed.v1 is still named in the migration's CHECK so admitting it later is
-// additive, and it gets its schema when it gets its sandbox.
+// embed.v1 followed as the sixth, and it is the one whose payload carries no
+// content at all — only the NAME of a destination an operator already vetted.
 //
 // Two properties are shared by all of them and are load-bearing rather than
 // stylistic:
@@ -66,3 +66,15 @@ var PanelNarrativeV1 []byte
 //
 //go:embed panel.series.v1.json
 var PanelSeriesV1 []byte
+
+// PanelEmbedV1 is the escape hatch (§3.1), and the shortest of the six because
+// almost everything an embed panel could have carried is a field this schema
+// refuses to have. It names one entry in the instance's vetted allow-list and
+// one line of plain caption; it has no `url`, no `html`, no `srcdoc`, no
+// `sandbox` and no geometry. An iframe src is fetched by the READER's browser,
+// so a producer-settable URL would be the CamoLeak channel with execution
+// added — §8 rules 1 to 3 keep it out of the schema rather than out of a
+// payload. The reasoning is in internal/pages/embed.go.
+//
+//go:embed panel.embed.v1.json
+var PanelEmbedV1 []byte

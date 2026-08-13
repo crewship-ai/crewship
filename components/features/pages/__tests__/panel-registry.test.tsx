@@ -25,6 +25,7 @@ import {
   resolvePanelComponent,
   PanelRenderer,
 } from "@/components/features/pages/panels/registry"
+import { EmbedPanel } from "@/components/features/pages/panels/embed-panel"
 import { MetricPanel } from "@/components/features/pages/panels/metric-panel"
 import { StatusPanel } from "@/components/features/pages/panels/status-panel"
 import { TablePanel } from "@/components/features/pages/panels/table-panel"
@@ -70,20 +71,26 @@ describe("panel registry", () => {
     // CHECK accepts 'embed.v1', so a page carrying one is valid and stored.
     // Leaving it out of the TS vocabulary rendered it as an UNKNOWN schema —
     // "this version of Crewship does not render embed.v1" — when the true
-    // answer is "reserved, arrives in a later release".
+    // answer is about this INSTANCE, not about this build: the escape hatch
+    // draws a frame where an operator has declared a vetted destination and
+    // refuses, saying so, where none is declared. `EmbedPanel` owns both
+    // answers; the fallback would only ever give the wrong one.
     expect(isPanelSchema("embed.v1")).toBe(true)
-    expect(PANEL_REGISTRY["embed.v1"]).toBe(PendingSchemaPanel)
+    expect(PANEL_REGISTRY["embed.v1"]).toBe(EmbedPanel)
     expect(resolvePanelComponent("embed.v1")).not.toBe(UnknownSchemaPanel)
+    expect(resolvePanelComponent("embed.v1")).not.toBe(PendingSchemaPanel)
 
-    render(
+    const { container } = render(
       <PanelRenderer
         panel={{ id: "grafana", schema: "embed.v1", title: "Embed" }}
         data={{ state: "never_produced" }}
         now={FIXTURE_NOW}
       />,
     )
-    expect(screen.getByText(/later release/i)).toBeInTheDocument()
     expect(screen.queryByText(/does not render/i)).toBeNull()
+    // Nothing was ever pushed here, so there is no frame and no destination —
+    // the em-dash empty state, exactly as for the other five (§9b.4).
+    expect(container.querySelector("iframe")).toBeNull()
   })
 
   it("maps the three v0 schemas to their own components", () => {
