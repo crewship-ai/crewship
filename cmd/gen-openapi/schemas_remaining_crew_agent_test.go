@@ -8,6 +8,15 @@ func TestRemainingCrewAgentCatalogUsesConcreteContracts(t *testing.T) {
 		t.Fatalf("remaining crew/agent catalog has %d routes, want at least 45", len(routes))
 	}
 	for route, contract := range routes {
+		// A 204 contract has no body by definition, so "concrete response
+		// schema" does not apply to it — declaring one would describe bytes the
+		// handler never writes.
+		if len(contract.SuccessStatuses) == 1 && contract.SuccessStatuses[0] == "204" {
+			if contract.Response != nil {
+				t.Fatalf("%s is declared 204 but also carries a response schema", route)
+			}
+			continue
+		}
 		if contract.Response == nil {
 			t.Fatalf("%s has no response schema", route)
 		}

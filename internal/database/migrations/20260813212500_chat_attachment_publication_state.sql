@@ -1,0 +1,79 @@
+-- Attachments gain a PUBLICATION STATE, so a stored blob can never be a fact
+-- nothing recorded (chat surface audit 2026-08-13, P0.3).
+--
+-- ── What was wrong ────────────────────────────────────────────────────────
+--
+-- The chat upload path wrote the bytes first and the row afterwards, and the
+-- row was explicitly best-effort: `recordChatAttachment` logged a failed INSERT
+-- and the endpoint still answered 201. So a success response could mean "the
+-- bytes landed and nobody recorded them".
+--
+-- That is worse here than anywhere else in this table, because the chat arc's
+-- blobs are deliberately NOT content-addressed — they live at the agent-visible
+-- path, outside <root>/attachments/, which is exactly the tree
+-- reclaimAttachmentBlobs walks. An unrecorded chat blob is therefore not merely
+-- untracked: no row names it, no route can reach it, and no sweep will ever
+-- collect it. It is permanent residency, bought with a request that reported
+-- success.
+--
+-- ── The fix this column exists for ────────────────────────────────────────
+--
+-- The order is inverted: the row is written FIRST as `pending`, the bytes are
+-- published second, and only then is the row promoted to `stored`. The rule the
+-- upload path now obeys is one sentence:
+--
+--     a 201 means there is a `stored` row AND bytes at its storage_key.
+--
+-- Every other outcome leaves a `pending` row, which is invisible to the list
+-- endpoint, was never returned to any caller, and is reclaimable — with its
+-- bytes, if any landed — by the collector in internal/api/attachments_gc.go.
+-- The orphan is not eliminated (nothing spanning a database and a filesystem
+-- can eliminate it); it is made EXPLICIT and recoverable, which is the half of
+-- the choice that was missing.
+--
+-- ── Why a column rather than a separate table ─────────────────────────────
+--
+-- The state IS a property of the attachment, and the two questions it answers —
+-- "may this row be shown?" and "may these bytes be reclaimed?" — are asked of
+-- the row itself on both read paths. A side table would need a join on every
+-- list and would let a row exist with no state at all, which is the ambiguity
+-- being removed.
+--
+-- ── The domain is enforced in Go, not by a CHECK ──────────────────────────
+--
+-- SQLite cannot ALTER a CHECK onto an existing table; adding one means a full
+-- table rebuild, which for a bookkeeping column is a much larger risk than the
+-- thing it guards. Both readers therefore fail SAFE on any value they do not
+-- recognise, and that is the real guarantee:
+--
+--   * the list endpoint selects state = 'stored'      — an unknown value is never shown;
+--   * the reclaimer selects  state <> 'stored'        — an unknown value is still collected.
+--
+-- A typo can only make an attachment disappear, never make an unpublished one
+-- look published, and never strand bytes.
+--
+-- ── Existing rows ─────────────────────────────────────────────────────────
+--
+-- DEFAULT 'stored' backfills every row that already exists, and that is the
+-- truthful value rather than a convenient one: under the old ordering a row
+-- only ever came into being AFTER its bytes were written, so every row in the
+-- table today is, by construction, published. Attachments uploaded before this
+-- change therefore keep working unchanged — they are listed, they are
+-- deletable, and they keep their legacy storage_key (which has no attachment-id
+-- segment, because storage_key has always been the authority on where a given
+-- attachment lives rather than something derived on read).
+--
+-- The issue and comment arcs are unaffected in practice: they are
+-- content-addressed and their crash-orphans are already collected by the sweep
+-- over <root>/attachments/. They inherit 'stored' and never leave it. The
+-- column is on the shared table because the state is not chat-specific in kind
+-- — if the issue arc ever wants the same two-phase publish, it is already here.
+
+ALTER TABLE attachments ADD COLUMN state TEXT NOT NULL DEFAULT 'stored';
+
+-- The reclaimer's whole working set. PARTIAL, so it stays approximately empty:
+-- a row is unpublished only between two statements of one request, and the
+-- index holds exactly the rows where that crossing did not complete. Ordering
+-- by created_at is how the collector applies its grace period without a scan.
+CREATE INDEX IF NOT EXISTS idx_attachments_unpublished
+    ON attachments(created_at) WHERE state <> 'stored';

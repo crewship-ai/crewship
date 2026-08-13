@@ -53,14 +53,20 @@ package api
 //     anything — fully reclaimed);
 //   - blobs left by a crash between storeAttachmentBlob and its INSERT;
 //   - .tmp-* files from a write that died, once older than
-//     attachmentTempReclaimAge.
+//     attachmentTempReclaimAge;
+//   - UNPUBLISHED chat attachments — a row still in state `pending` past the
+//     grace period, together with whatever bytes it names. That pass is
+//     row-driven rather than tree-driven and is described on
+//     reclaimUnpublishedChatAttachments below.
 //
 // NOT collected:
 //
-//   - chat attachment blobs. They are not content-addressed and live outside
-//     <root>/attachments/ entirely (proxy_attachments.go); deleting a chat's
-//     bytes is the crew-files surface's job. The sweep never leaves the
-//     attachments tree, which is what keeps that true;
+//   - PUBLISHED chat attachment blobs. They are not content-addressed and live
+//     outside <root>/attachments/ entirely (proxy_attachments.go); a live one
+//     is removed by DELETE …/chats/{chatId}/attachments/{attachmentId}, and a
+//     whole chat's tree by cleanupChatAttachments when the chat is deleted.
+//     The tree sweep never leaves the attachments/ directory, which is what
+//     keeps that true;
 //   - anything in the tree that is not named like a sha256 and is not a .tmp-*
 //     file. An operator's own file is not this collector's to delete;
 //   - empty shard/workspace DIRECTORIES. They cost an inode and removing them
@@ -84,6 +90,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -125,7 +132,7 @@ func StartAttachmentBlobGC(ctx context.Context, db *sql.DB, logger *slog.Logger,
 	done := beginBackgroundWork()
 	go func() {
 		defer done()
-		sweepAttachmentBlobs(ctx, db, logger, root)
+		runAttachmentGCPass(ctx, db, logger, root)
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
@@ -133,7 +140,7 @@ func StartAttachmentBlobGC(ctx context.Context, db *sql.DB, logger *slog.Logger,
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				sweepAttachmentBlobs(ctx, db, logger, root)
+				runAttachmentGCPass(ctx, db, logger, root)
 			}
 		}
 	}()
@@ -198,4 +205,159 @@ func sweepAttachmentBlobs(ctx context.Context, db *sql.DB, logger *slog.Logger, 
 			"blobs", removed, "workspaces", workspaces, "duration", time.Since(start))
 	}
 	return removed
+}
+
+// runAttachmentGCPass is one full pass: the content-addressed tree sweep, then
+// the unpublished-chat-attachment reclaim.
+//
+// Two passes rather than one because they are two different enumerations of two
+// different populations. The tree sweep asks "is there a file no row names?" and
+// can only be answered by walking the tree. The reclaim below asks "is there a
+// row no upload finished?" and can only be answered from the table — its blobs
+// are not in the tree the sweep walks, and half of them do not exist at all.
+func runAttachmentGCPass(ctx context.Context, db *sql.DB, logger *slog.Logger, root string) {
+	sweepAttachmentBlobs(ctx, db, logger, root)
+	reclaimUnpublishedChatAttachments(ctx, db, logger, root, chatAttachmentPublishGrace)
+}
+
+// chatAttachmentPublishGrace is how long a reservation may stay unpublished
+// before the collector treats it as abandoned.
+//
+// The window it has to clear is one request: the row is inserted, the bytes are
+// PUT through the IPC socket, the row is promoted. The IPC client's own timeout
+// is 30 s, so an hour is roughly two orders of magnitude of headroom — long
+// enough that no live upload can be collected underneath itself even on a
+// pathologically slow host, short enough that an abandoned reservation and its
+// bytes do not outlive the working day.
+//
+// It deliberately matches attachmentTempReclaimAge and the GC interval: three
+// numbers with the same justification should not be three different numbers to
+// remember.
+const chatAttachmentPublishGrace = time.Hour
+
+// reclaimUnpublishedChatAttachments removes rows that never finished publishing,
+// and the bytes they name.
+//
+// ── What it is collecting ─────────────────────────────────────────────────
+//
+// AgentChatAttachment writes the row first (state `pending`), publishes the
+// bytes second, and promotes the row third. Every ordinary failure compensates
+// itself — the handler deletes its own reservation and answers an error — so the
+// rows this pass sees are the ones where the PROCESS did not survive to do that:
+// killed between the INSERT and the IPC PUT (no bytes), or between the PUT and
+// the promotion (bytes, unpromoted).
+//
+// Both are collectable by the same rule, and safely, because a `pending` row was
+// never returned to anybody: the list endpoint matches `stored` exactly, so no
+// client has ever seen it, and no 201 was ever sent for it. Removing it cannot
+// contradict something a user was told.
+//
+// ── Why it is row-driven ──────────────────────────────────────────────────
+//
+// Chat blobs live under <root>/<crewID>/<agentSlug>/attachments/… — outside the
+// content-addressed tree, which is the whole point of the layout (the path is
+// the agent-visible contract). A tree walk could not tell an unpublished blob
+// from a live one there without consulting the table anyway, and would miss the
+// half of the population that has no file at all. The table is the authority, so
+// the table is the enumeration.
+//
+// Best-effort throughout, and ordered bytes-then-row for the same reason the
+// delete endpoint is: a row that outlives its bytes is visible and retryable, a
+// blob that outlives its row is neither.
+//
+// One limit, stated rather than discovered: it runs only where the collector
+// runs, and the collector needs a storage root (StartAttachmentBlobGC). On an
+// instance with no storage configured a `pending` row would therefore survive —
+// which is bearable because such an instance cannot store bytes at all, so the
+// upload fails at the IPC layer and the handler removes its own reservation on
+// the way out. The uncollected case there needs a crash mid-request on a host
+// that could never have completed it.
+func reclaimUnpublishedChatAttachments(ctx context.Context, db *sql.DB, logger *slog.Logger, root string, grace time.Duration) int {
+	if db == nil {
+		return 0
+	}
+	cutoff := time.Now().UTC().Add(-grace).Format(time.RFC3339)
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, storage_key FROM attachments
+		 WHERE owner_type = ? AND state <> ? AND created_at < ?
+		 LIMIT 500`,
+		string(attachmentOwnerChat), attachmentStateStored, cutoff)
+	if err != nil {
+		if logger != nil && !errors.Is(err, context.Canceled) {
+			logger.Warn("chat attachment GC: query unpublished rows", "error", err)
+		}
+		return 0
+	}
+	type pending struct{ id, key string }
+	var stale []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.id, &p.key); err != nil {
+			rows.Close()
+			if logger != nil {
+				logger.Warn("chat attachment GC: scan unpublished row", "error", err)
+			}
+			return 0
+		}
+		stale = append(stale, p)
+	}
+	rows.Close()
+
+	var removed int
+	for _, p := range stale {
+		if err := ctx.Err(); err != nil {
+			return removed
+		}
+		removeChatAttachmentBlob(root, p.key, logger)
+		if _, err := db.ExecContext(ctx,
+			`DELETE FROM attachments WHERE id = ? AND state <> ?`, p.id, attachmentStateStored); err != nil {
+			if logger != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("chat attachment GC: delete unpublished row",
+					"attachment_id", p.id, "error", err)
+			}
+			continue
+		}
+		removed++
+	}
+	if removed > 0 && logger != nil {
+		logger.Info("chat attachment GC: reclaimed unpublished attachments", "attachments", removed)
+	}
+	return removed
+}
+
+// removeChatAttachmentBlob unlinks one chat attachment's bytes from the local
+// storage root, and the directory that held them if it is now empty.
+//
+// The storage key is a value this process computed, but it is re-validated
+// against the root before it is used as a path: a corrupted row must never be
+// able to make the collector unlink something outside the storage tree. Same
+// defence-in-depth as cleanupChatAttachments, and the same limitation — this
+// walks the local filesystem, so a non-local StorageProvider would need the
+// removal routed through its Delete (TODO(#1768), tracked there).
+//
+// The parent is removed with Remove, not RemoveAll: for a current key the parent
+// is the attachment's own <attachmentId>/ directory and removing it is exactly
+// right, while for a LEGACY key (uploaded before the id segment existed) the
+// parent is the chat's shared directory — and Remove on a non-empty directory
+// fails harmlessly, which is what makes one call correct for both.
+func removeChatAttachmentBlob(root, storageKey string, logger *slog.Logger) {
+	if root == "" || storageKey == "" {
+		return
+	}
+	full := filepath.Clean(filepath.Join(root, storageKey))
+	base := filepath.Clean(root)
+	if full == base || !strings.HasPrefix(full, base+string(filepath.Separator)) {
+		if logger != nil {
+			logger.Warn("chat attachment GC: refusing to unlink outside the storage root",
+				"storage_key", storageKey)
+		}
+		return
+	}
+	if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
+		if logger != nil {
+			logger.Warn("chat attachment GC: unlink failed", "path", full, "error", err)
+		}
+		return
+	}
+	_ = os.Remove(filepath.Dir(full))
 }

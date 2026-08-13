@@ -32,6 +32,12 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	}
 	action := object(map[string]any{"success": boolean(), "status": str(), "message": str()})
 	addAction := func(method, path, name string) { add(method, path, name, action) }
+	// A 204 has no body, so it gets no component. Declaring one would put a
+	// schema in the spec for bytes the handler never writes, which is the same
+	// class of untruth this catalog exists to remove.
+	addNoContent := func(method, path string) {
+		routes[method+" "+path] = DomainSchema{SuccessStatuses: []string{"204"}}
+	}
 
 	// Agent read subresources.
 	add("GET", "/api/v1/agents/crews-status", "RemainingAgentCrewsStatusV1", object(map[string]any{"crews": array(anyObject()), "agents": array(anyObject())}))
@@ -117,7 +123,22 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	// Remaining subroute actions. These handlers deliberately return compact
 	// maps (or a file/task envelope), rather than the parent resource.
 	add("GET", "/api/v1/crewshipd", "RemainingCrewshipdStatusV1", object(map[string]any{"status": str(), "version": str(), "message": str()}))
-	add("POST", "/api/v1/agents/{agentId}/chats/{chatId}/attachments", "RemainingAgentAttachmentV1", object(map[string]any{"id": str(), "name": str(), "content_type": str(), "size": integer(), "url": str()}))
+	// The chat attachment triple. The upload's response was catalogued as
+	// {id,name,content_type,size,url}; the handler has never answered that —
+	// it answers {filename,size,path,agent_path}, and that shape is a contract
+	// the composer decodes, so the spec is corrected to it here.
+	//
+	// `path` is agent-relative (attachments/<chatId>/<attachmentId>/<filename>)
+	// and `agent_path` is the same location inside the container. The list adds
+	// the row's own identity and checksum, which is what the delete takes.
+	add("POST", "/api/v1/agents/{agentId}/chats/{chatId}/attachments", "RemainingAgentAttachmentV1", object(map[string]any{"filename": str(), "size": integer(), "path": str(), "agent_path": str()}))
+	add("GET", "/api/v1/agents/{agentId}/chats/{chatId}/attachments", "RemainingAgentAttachmentListV1", array(object(map[string]any{
+		"id": str(), "workspace_id": str(), "owner_type": str(), "owner_id": str(),
+		"filename": str(), "content_type": str(), "size_bytes": integer(), "sha256": str(),
+		"uploaded_by_user_id": str(), "uploaded_by_agent_id": str(), "uploaded_by_name": str(),
+		"created_at": str(), "path": str(), "agent_path": str(),
+	})))
+	addNoContent("DELETE", "/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}")
 	add("PUT", "/api/v1/agents/{agentId}/files/save", "RemainingAgentFileSavedV1", object(map[string]any{"path": str(), "saved": boolean(), "message": str()}))
 	addAction("POST", "/api/v1/agents/{agentId}/stop", "RemainingAgentStoppedV1")
 	addAction("DELETE", "/api/v1/crews/{crewId}", "RemainingCrewDeletedV1")

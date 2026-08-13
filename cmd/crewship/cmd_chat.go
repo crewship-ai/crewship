@@ -307,18 +307,9 @@ Examples:
 		chatID := args[0]
 		localPath := args[1]
 
-		agentOverride, _ := cmd.Flags().GetString("agent")
-		var agentID string
-		if agentOverride != "" {
-			agentID, err = resolveAgentID(client, agentOverride)
-			if err != nil {
-				return err
-			}
-		} else {
-			agentID, err = lookupChatAgentID(client, chatID)
-			if err != nil {
-				return fmt.Errorf("resolve agent for chat %s: %w (pass --agent to override)", chatID, err)
-			}
+		agentID, err := resolveChatAgent(cmd, client, chatID)
+		if err != nil {
+			return err
 		}
 
 		fh, err := os.Open(localPath)
@@ -369,6 +360,162 @@ Examples:
 		}
 		return nil
 	},
+}
+
+// chatAttachmentsCmd groups the two lifecycle halves of a chat attachment that
+// `chat attach` (the upload) never had: enumerating them and removing them.
+//
+// Until these existed a chat attachment could be created and then neither
+// listed nor deleted through any API. That was not merely missing convenience:
+// chat blobs are deliberately not content-addressed — the path is the
+// agent-visible contract — so they sit outside the reclaim sweep, and without a
+// delete the only way to recover the bytes was to delete the whole chat.
+//
+// Both resolve the agent from the chat exactly as `chat attach` does; pass
+// --agent to skip the scan.
+var chatAttachmentsCmd = &cobra.Command{
+	Use:     "attachments",
+	Aliases: []string{"attachment"},
+	Short:   "List or remove the files attached to a chat session",
+}
+
+var chatAttachmentsListCmd = &cobra.Command{
+	Use:   "list <chat-id>",
+	Short: "List the files attached to a chat session",
+	Long: `Show every file attached to a chat session: its id, name, size,
+checksum and the path the agent reads it from.
+
+The ID column is the attachment's durable identity — the same upload always
+resolves to the same id and the same bytes, and it is what 'chat attachments
+delete' takes.
+
+Examples:
+  crewship chat attachments list c_abc123
+  crewship chat attachments list c_abc123 --format json | jq '.[].agent_path'`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		chatID := args[0]
+		agentID, err := resolveChatAgent(cmd, client, chatID)
+		if err != nil {
+			return err
+		}
+
+		resp, err := client.Get("/api/v1/agents/" + url.PathEscape(agentID) +
+			"/chats/" + url.PathEscape(chatID) + "/attachments")
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var items []struct {
+			ID        string `json:"id"`
+			Filename  string `json:"filename"`
+			SizeBytes int64  `json:"size_bytes"`
+			SHA256    string `json:"sha256"`
+			Path      string `json:"path"`
+			AgentPath string `json:"agent_path"`
+			CreatedAt string `json:"created_at"`
+		}
+		if err := cli.ReadJSON(resp, &items); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"ID", "FILENAME", "SIZE", "SHA256", "AGENT PATH", "CREATED"}
+		var rows [][]string
+		for _, it := range items {
+			created := it.CreatedAt
+			if t, err := time.Parse(time.RFC3339, created); err == nil {
+				created = t.Format("2006-01-02 15:04")
+			}
+			// Twelve hex characters is enough to recognise a file across two
+			// uploads of one name; the full digest is in --format json.
+			short := it.SHA256
+			if len(short) > 12 {
+				short = short[:12]
+			}
+			rows = append(rows, []string{
+				it.ID, it.Filename, fmt.Sprintf("%d", it.SizeBytes),
+				short, it.AgentPath, created,
+			})
+		}
+		return f.Auto(items, headers, rows)
+	},
+}
+
+var chatAttachmentsDeleteCmd = &cobra.Command{
+	Use:     "delete <chat-id> <attachment-id>",
+	Aliases: []string{"rm", "remove"},
+	Short:   "Remove one file from a chat session (deletes the bytes too)",
+	Long: `Delete a chat attachment: the metadata row and the stored file.
+
+Idempotent — deleting an attachment that is already gone succeeds, because
+what the caller asked for is already true. Get the attachment id from
+'crewship chat attachments list'.
+
+Examples:
+  crewship chat attachments delete c_abc123 att_xyz789 --yes
+  crewship chat attachments rm c_abc123 att_xyz789 --agent atlas --yes`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		chatID, attachmentID := args[0], args[1]
+
+		if yes, _ := cmd.Flags().GetBool("yes"); !yes {
+			if !confirmInteractive(fmt.Sprintf("Delete attachment %s from chat %s? The file is removed too.",
+				attachmentID, chatID)) {
+				return fmt.Errorf("aborted")
+			}
+		}
+
+		agentID, err := resolveChatAgent(cmd, client, chatID)
+		if err != nil {
+			return err
+		}
+
+		resp, err := client.Delete("/api/v1/agents/" + url.PathEscape(agentID) +
+			"/chats/" + url.PathEscape(chatID) + "/attachments/" + url.PathEscape(attachmentID))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		out := map[string]string{"chat_id": chatID, "attachment_id": attachmentID, "status": "deleted"}
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(out)
+		case "yaml":
+			return f.YAML(out)
+		}
+		cli.PrintSuccess(fmt.Sprintf("Attachment %s removed from chat %s.", attachmentID, chatID))
+		return nil
+	},
+}
+
+// resolveChatAgent is the --agent-or-lookup step every chat subcommand under
+// an /agents/{agentId}/chats/{chatId} route repeats. Factored out when the
+// attachment lifecycle commands became the fifth and sixth copy.
+func resolveChatAgent(cmd *cobra.Command, client *cli.Client, chatID string) (string, error) {
+	if override, _ := cmd.Flags().GetString("agent"); override != "" {
+		return resolveAgentID(client, override)
+	}
+	agentID, err := lookupChatAgentID(client, chatID)
+	if err != nil {
+		return "", fmt.Errorf("resolve agent for chat %s: %w (pass --agent to override)", chatID, err)
+	}
+	return agentID, nil
 }
 
 // chatListCmd lists recent chats for an agent. Same data as the
@@ -463,18 +610,9 @@ Examples:
 		}
 		chatID := args[0]
 
-		agentOverride, _ := cmd.Flags().GetString("agent")
-		var agentID string
-		if agentOverride != "" {
-			agentID, err = resolveAgentID(client, agentOverride)
-			if err != nil {
-				return err
-			}
-		} else {
-			agentID, err = lookupChatAgentID(client, chatID)
-			if err != nil {
-				return fmt.Errorf("resolve agent for chat %s: %w (pass --agent to override)", chatID, err)
-			}
+		agentID, err := resolveChatAgent(cmd, client, chatID)
+		if err != nil {
+			return err
 		}
 
 		path := "/api/v1/agents/" + url.PathEscape(agentID) +
@@ -535,18 +673,9 @@ Examples:
 		chatID := args[0]
 		title := args[1]
 
-		agentOverride, _ := cmd.Flags().GetString("agent")
-		var agentID string
-		if agentOverride != "" {
-			agentID, err = resolveAgentID(client, agentOverride)
-			if err != nil {
-				return err
-			}
-		} else {
-			agentID, err = lookupChatAgentID(client, chatID)
-			if err != nil {
-				return fmt.Errorf("resolve agent for chat %s: %w (pass --agent to override)", chatID, err)
-			}
+		agentID, err := resolveChatAgent(cmd, client, chatID)
+		if err != nil {
+			return err
 		}
 
 		resp, err := client.Patch("/api/v1/agents/"+url.PathEscape(agentID)+
@@ -618,18 +747,9 @@ Examples:
 			}
 		}
 
-		agentOverride, _ := cmd.Flags().GetString("agent")
-		var agentID string
-		if agentOverride != "" {
-			agentID, err = resolveAgentID(client, agentOverride)
-			if err != nil {
-				return err
-			}
-		} else {
-			agentID, err = lookupChatAgentID(client, chatID)
-			if err != nil {
-				return fmt.Errorf("resolve agent for chat %s: %w (pass --agent to override)", chatID, err)
-			}
+		agentID, err := resolveChatAgent(cmd, client, chatID)
+		if err != nil {
+			return err
 		}
 
 		resp, err := client.Delete("/api/v1/agents/" + url.PathEscape(agentID) +
@@ -888,6 +1008,12 @@ func init() {
 
 	chatAttachCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
 
+	chatAttachmentsListCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
+	chatAttachmentsDeleteCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
+	chatAttachmentsDeleteCmd.Flags().Bool("yes", false, "Skip the confirmation prompt")
+	chatAttachmentsCmd.AddCommand(chatAttachmentsListCmd)
+	chatAttachmentsCmd.AddCommand(chatAttachmentsDeleteCmd)
+
 	chatReadCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
 
 	chatRenameCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
@@ -909,6 +1035,7 @@ func init() {
 	chatCmd.AddCommand(chatReactCmd)
 	chatCmd.AddCommand(chatParticipantsCmd)
 	chatCmd.AddCommand(chatAttachCmd)
+	chatCmd.AddCommand(chatAttachmentsCmd)
 	chatCmd.AddCommand(chatCreateCmd)
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatReadCmd)

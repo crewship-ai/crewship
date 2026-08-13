@@ -28,6 +28,8 @@ Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachmen
 | POST | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#add-reaction) | Add a reaction |
 | DELETE | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}`](#remove-reaction) | Remove a reaction |
 | POST | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments`](#upload-attachment) | Upload a chat attachment |
+| GET | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments`](/api-reference/agents#list-chat-attachments) | List a chat's attachments |
+| DELETE | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}`](/api-reference/agents#delete-chat-attachment) | Delete one chat attachment |
 | GET | [`/api/v1/chats/{chatId}/stream`](#stream-a-run) | Watch a session's agent run as newline-delimited JSON |
 | POST | [`/api/v1/conversations/search`](#search-conversations) | Search conversation history — one agent, or the whole workspace |
 
@@ -169,12 +171,12 @@ workspace member; `500` database error while removing the reaction.
 
 ## Chat attachments
 
-Files attached by an operator to a chat session. The binary is written to the storage provider and the agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`.
+Files attached by an operator to a chat session. The binary is written to the storage provider and the agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`.
 
-Each upload also records a row in `attachments` (`owner_type = 'chat'`) carrying the filename, resolved content type, size, SHA-256 and uploader. Before #1768 no row was written at all and the file on disk was the entire state; the dead `chat_attachments` table it was supposed to use was dropped in the same change.
+Each upload also records a row in `attachments` (`owner_type = 'chat'`) carrying the filename, resolved content type, size, SHA-256 and uploader. The row is written **before** the bytes and promoted after they land, so a `201` always means both exist — a success can never mean "the file is stored and nothing recorded it". An upload that fails part-way leaves an unpublished row, which is never listed and is reclaimed with any bytes it named within about two hours (a one-hour grace period, collected by an hourly sweep). Before #1768 no row was written at all and the file on disk was the entire state; the dead `chat_attachments` table it was supposed to use was dropped in the same change.
 
 <Note>
-The row is metadata only — there is no listing, download or delete endpoint for a chat attachment yet, and the blob is **not** content-addressed the way an issue attachment's is: it stays at `<crewID>/<agentSlug>/attachments/<chatId>/<filename>` because that path is the agent-visible contract. `storage_key` on the row is the authority on where any given attachment lives. See [Issue attachments](/guides/issue-attachments) for the surface that is complete.
+The blob is **not** content-addressed the way an issue attachment's is: it stays at `<crewID>/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>` because that path is the agent-visible contract. `storage_key` on the row is the authority on where any given attachment lives — which is what keeps attachments uploaded before the id segment existed working at their original path. The attachment id in the path is what makes one upload one identity at one location: two different files called `evidence.pdf` are two attachments with two checksums, and neither overwrites the other. Listing and deletion live on the agent route — see [List Chat Attachments](/api-reference/agents#list-chat-attachments) and [Delete Chat Attachment](/api-reference/agents#delete-chat-attachment). There is still no download endpoint for a chat attachment; the agent reads it from its own filesystem.
 </Note>
 
 ### Upload attachment
@@ -200,8 +202,8 @@ The path is **agent-and-chat scoped**, not just chat-scoped — the handler veri
 {
   "filename": "report.pdf",
   "size": 482311,
-  "path": "attachments/cht_xyz/report.pdf",
-  "agent_path": "/output/viktor/attachments/cht_xyz/report.pdf"
+  "path": "attachments/cht_xyz/att_9f2a1c/report.pdf",
+  "agent_path": "/output/viktor/attachments/cht_xyz/att_9f2a1c/report.pdf"
 }
 ```
 

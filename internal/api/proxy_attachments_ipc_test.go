@@ -174,13 +174,20 @@ func TestAgentChatAttachment_RecordsRowOnlyAfterBytesLand(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
 	}
-	var key string
+	var id, key, state string
 	if err := h.db.QueryRow(
-		`SELECT storage_key FROM attachments WHERE chat_id = ? AND filename = ?`,
-		chatID, "notes.txt").Scan(&key); err != nil {
+		`SELECT id, storage_key, state FROM attachments WHERE chat_id = ? AND filename = ?`,
+		chatID, "notes.txt").Scan(&id, &key, &state); err != nil {
 		t.Fatalf("no metadata row for a save that succeeded: %v", err)
 	}
-	if want := "crew-ipc/alex/attachments/" + chatID + "/notes.txt"; key != want {
+	// The key gained the attachment id: the location is per-upload, not per
+	// filename. See proxy_attachments_identity_test.go for why.
+	if want := "crew-ipc/alex/attachments/" + chatID + "/" + id + "/notes.txt"; key != want {
 		t.Errorf("storage_key = %q, want %q", key, want)
+	}
+	// And a 201 means the row is PUBLISHED, not merely reserved.
+	if state != attachmentStateStored {
+		t.Errorf("state = %q after a 201, want %q — a success response must mean the row is durable",
+			state, attachmentStateStored)
 	}
 }

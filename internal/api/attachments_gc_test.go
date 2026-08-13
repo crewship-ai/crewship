@@ -194,3 +194,117 @@ func TestAttachmentGC_NoStorageRootIsANoOp(t *testing.T) {
 		t.Errorf("a sweep with no storage root removed %d file(s)", n)
 	}
 }
+
+// ── unpublished chat attachments ───────────────────────────────────────────
+
+// The reclaim that makes the chat upload's orphan EXPLICIT rather than
+// permanent (chat surface audit 2026-08-13, P0.3).
+//
+// A `pending` row is a reservation whose request did not survive to finish. It
+// was never returned to a caller and the list never shows it, so collecting it
+// cannot contradict anything a user was told — and it is the ONLY thing that
+// can collect it, because these blobs live outside the content-addressed tree
+// the other sweep walks.
+func TestReclaimUnpublishedChatAttachments(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	root := t.TempDir()
+
+	if _, err := db.Exec(
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew-gcx', ?, 'Crew', 'crew-gcx')`, wsID); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO agents (id, workspace_id, crew_id, name, slug, status) VALUES ('agent-gcx', ?, 'crew-gcx', 'A', 'alex', 'IDLE')`,
+		wsID); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO chats (id, agent_id, workspace_id, created_by, status) VALUES ('chat-gcx', 'agent-gcx', ?, ?, 'ACTIVE')`,
+		wsID, userID); err != nil {
+		t.Fatalf("seed chat: %v", err)
+	}
+
+	seed := func(id, state, created string, withBytes bool) string {
+		t.Helper()
+		key := "crew-gcx/alex/attachments/chat-gcx/" + id + "/evidence.pdf"
+		if withBytes {
+			full := filepath.Join(root, key)
+			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(full, []byte("bytes-"+id), 0o644); err != nil {
+				t.Fatalf("write blob: %v", err)
+			}
+		}
+		if _, err := db.Exec(`
+			INSERT INTO attachments
+				(id, workspace_id, owner_type, chat_id, filename, content_type, size_bytes,
+				 sha256, storage_key, state, created_at)
+			VALUES (?, ?, 'chat', 'chat-gcx', 'evidence.pdf', 'application/pdf', 7, ?, ?, ?, ?)`,
+			id, wsID, attachmentDigest([]byte("bytes-"+id)), key, state, created); err != nil {
+			t.Fatalf("seed attachment %s: %v", id, err)
+		}
+		return key
+	}
+
+	old := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Died after the bytes landed, before the promotion: row AND file go.
+	staleWithBytes := seed("att-stale-bytes", "pending", old, true)
+	// Died before the bytes landed: row goes, there was never a file.
+	seed("att-stale-nobytes", "pending", old, false)
+	// Still inside the grace window — a live upload must never be collected
+	// underneath itself.
+	freshKey := seed("att-fresh", "pending", now, true)
+	// Published. Untouchable by this pass at any age.
+	publishedKey := seed("att-published", "stored", old, true)
+
+	n := reclaimUnpublishedChatAttachments(context.Background(), db, newTestLogger(), root, time.Hour)
+	if n != 2 {
+		t.Errorf("reclaimed %d attachments, want 2", n)
+	}
+
+	for _, id := range []string{"att-stale-bytes", "att-stale-nobytes"} {
+		var rows int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE id = ?`, id).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		if rows != 0 {
+			t.Errorf("%s survived the reclaim — an unpublished row is unreachable for ever otherwise", id)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, staleWithBytes)); !os.IsNotExist(err) {
+		t.Errorf("bytes of an abandoned reservation are still on disk (%v) — nothing else walks this tree", err)
+	}
+	for _, id := range []string{"att-fresh", "att-published"} {
+		var rows int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE id = ?`, id).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		if rows != 1 {
+			t.Errorf("%s was collected; it must not be", id)
+		}
+	}
+	for _, key := range []string{freshKey, publishedKey} {
+		if _, err := os.Stat(filepath.Join(root, key)); err != nil {
+			t.Errorf("bytes at %s were collected: %v", key, err)
+		}
+	}
+}
+
+// The reclaimer never unlinks outside the storage root, whatever a corrupted
+// row claims its bytes are called.
+func TestRemoveChatAttachmentBlob_StaysInsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "precious.txt")
+	if err := os.WriteFile(outside, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removeChatAttachmentBlob(root, "../../"+filepath.Base(filepath.Dir(outside))+"/precious.txt", newTestLogger())
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("a traversing storage_key unlinked a file outside the storage root: %v", err)
+	}
+}
