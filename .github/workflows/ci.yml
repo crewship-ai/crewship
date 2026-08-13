@@ -516,6 +516,47 @@ jobs:
         env:
           NEXTAUTH_SECRET: "ci-build-secret-not-real"
 
+      # ── /chat survives `output: "export"` ──
+      #
+      # PRD chat-as-a-primary-surface §9 rule 1: "Step 4's acceptance test
+      # runs against the static export, not the dev server. The rewrite is
+      # the risk; a dev-server test would pass while production 404s."
+      #
+      # internal/api/static_chat_index_test.go proves the SERVING half —
+      # given a filesystem with chat.html and chat/_.html, the handler's
+      # ordering sends /chat to the index and /chat/<slug> to the per-agent
+      # placeholder. It builds that filesystem with fstest.MapFS, so by
+      # construction it cannot notice Next emitting different filenames, and
+      # the two would then disagree in silence: every Go test green, /chat a
+      # 404 in the shipped binary.
+      #
+      # This step proves the EMITTING half, against the same `out/` that the
+      # `binary` job embeds. Two greps' worth of CI time, and it is the only
+      # place in the pipeline that looks at the real export's filenames.
+      #
+      # Deliberately not a Playwright project over a served build: this
+      # catches the actual risk (the filename) without a second web server,
+      # a second browser install and ~3 min per run. Deliberately not a Go
+      # test reading web/out/: the Go jobs use .github/actions/setup-go-embed,
+      # which stages only the tracked placeholder, so such a test would
+      # t.Skip in every job that runs it — and buying a permanent skip would
+      # also mean raising scripts/skip-budget.txt for coverage that never
+      # executes.
+      - name: Static export emits the /chat routes
+        run: |
+          set -euo pipefail
+          missing=0
+          # out/chat.html            — app/(dashboard)/chat/page.tsx, served for /chat
+          # out/chat/_.html          — the [agentSlug] placeholder, served for /chat/<slug>
+          for f in out/chat.html out/chat/_.html; do
+            if [ ! -f "$f" ]; then
+              echo "::error file=next.config.ts::$f is not in the static export. /chat (or /chat/<agentSlug>) will 404 in the shipped binary — internal/api/static.go serves these exact filenames and internal/api/static_chat_index_test.go assumes they exist. If a route moved, update both."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+          echo "✓ out/chat.html and out/chat/_.html are in the export"
+
       - name: Upload static export
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

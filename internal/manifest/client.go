@@ -258,6 +258,10 @@ type AgentResponse struct {
 	TimeoutSeconds int     `json:"timeout_seconds"`
 	MemoryEnabled  bool    `json:"memory_enabled"`
 	RoleTitle      *string `json:"role_title"`
+	// SuggestedPrompts is agents.suggested_prompts — newline-separated,
+	// already normalised by the server on write. NULL (nil here) and ""
+	// both mean "not configured"; deref collapses the two.
+	SuggestedPrompts *string `json:"suggested_prompts"`
 }
 
 // FindLeadAgentByCrew returns the LEAD-role agent of a crew, or

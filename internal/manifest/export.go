@@ -136,6 +136,11 @@ func ExportCrew(ctx context.Context, c *Client, slug string, opts ExportOptions)
 				Model:    deref(a.LLMModel),
 			},
 			Prompt: deref(a.SystemPrompt),
+			// Newline-separated and already normalised server-side, so it
+			// round-trips byte-for-byte; yaml.Marshal renders it as a block
+			// scalar. Without this line `crewship export` → `crewship apply`
+			// silently dropped every configured prompt.
+			SuggestedPrompts: deref(a.SuggestedPrompts),
 		}
 		// Best-effort: a failure here loses bindings for this one
 		// agent but the rest of the crew still exports. We write a

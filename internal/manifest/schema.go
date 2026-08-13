@@ -557,6 +557,29 @@ type Agent struct {
 	Prompt     string `yaml:"prompt,omitempty"      json:"prompt,omitempty"`
 	PromptFile string `yaml:"prompt_file,omitempty" json:"prompt_file,omitempty"`
 
+	// SuggestedPrompts is the agent's own chat suggestions — the chips
+	// under an empty composer — as ONE PROMPT PER LINE. It is stored
+	// verbatim in agents.suggested_prompts, which is newline-separated
+	// text and not a list (see the migration
+	// 20260812233006_agent_suggested_prompts.sql for why), so the
+	// manifest carries the same string the textarea edits and YAML
+	// renders it as a block scalar exactly like Prompt above:
+	//
+	//	suggested_prompts: |
+	//	  What shipped this week?
+	//	  Who is blocked?
+	//
+	// Caps — at most 8 prompts, at most 120 characters each — are
+	// re-stated in validate.go's checkSuggestedPrompts so `crewship plan`
+	// rejects an over-long list without a round-trip. That mirrors the
+	// server's normalizeSuggestedPrompts (internal/api/
+	// agents_suggested_prompts.go) the same way validAgentRole mirrors
+	// the server's role enum; the server stays the enforcing copy.
+	//
+	// Empty means "not declared here", NOT "clear them" — see
+	// agentBodyDiffers in plan.go.
+	SuggestedPrompts string `yaml:"suggested_prompts,omitempty" json:"suggested_prompts,omitempty"`
+
 	// Skills and EnvRefs are slug-level references to entries in
 	// the surrounding CrewSpec/WorkspaceSpec. Apply resolves the
 	// slugs to IDs after the underlying objects are created.

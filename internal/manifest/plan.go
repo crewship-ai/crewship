@@ -833,6 +833,16 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 					if err != nil {
 						return err
 					}
+					// POST /api/v1/agents dropped the update-only fields it
+					// was just handed (see buildAgentPostCreateBody), so a
+					// brand-new agent still has them unset. One PATCH puts
+					// them where the manifest said they should be, before
+					// the bindings run.
+					if follow := buildAgentPostCreateBody(&agentCopy); len(follow) > 0 {
+						if _, err := client.UpdateAgent(ctx, created.ID, follow); err != nil {
+							return fmt.Errorf("agent %q created but its suggested_prompts could not be set: %w", agentCopy.Slug, err)
+						}
+					}
 					return applyAgentRefs(ctx, client, created.ID, &agentCopy, wsCreds, wsSkills)
 				})
 		}
@@ -1112,6 +1122,16 @@ func agentBodyDiffers(existing *AgentResponse, a *Agent) bool {
 	if a.RoleTitle != "" && a.RoleTitle != deref(existing.RoleTitle) {
 		return true
 	}
+	// Guarded on non-empty, like role_title and unlike prompt: an agent
+	// exported with no prompts configured comes back with the field
+	// omitted, and an omitted field must mean "not declared here" rather
+	// than "clear whatever is on the server". Without the guard a
+	// round-tripped empty agent would report drift forever — the PATCH
+	// body below only carries the key when it is non-empty, so the diff
+	// would never settle.
+	if a.SuggestedPrompts != "" && a.SuggestedPrompts != deref(existing.SuggestedPrompts) {
+		return true
+	}
 	return false
 }
 
@@ -1156,6 +1176,36 @@ func buildAgentBody(a *Agent, crewID, crewSlug string) map[string]any {
 	}
 	if a.Prompt != "" {
 		body["system_prompt"] = a.Prompt
+	}
+	for k, v := range buildAgentPostCreateBody(a) {
+		body[k] = v
+	}
+	return body
+}
+
+// buildAgentPostCreateBody carries the fields that PATCH
+// /api/v1/agents/{id} accepts but POST /api/v1/agents does NOT.
+//
+// createAgentRequest (internal/api/agents_create.go) models a fixed set
+// of columns and readJSON ignores everything else, so a key that only
+// the update handler knows about is accepted with a 201 and silently
+// dropped. suggested_prompts is such a key: it reached the update
+// allow-list (internal/api/agents_update.go) and never the create
+// struct.
+//
+// The fields therefore go out twice — once inside buildAgentBody, which
+// is what the update path PATCHes, and once as a follow-up PATCH right
+// after a create. Sending them in the create body too is harmless and
+// keeps one definition of the set; it is the follow-up that actually
+// persists them on a new agent.
+//
+// This is the hook for the next column of the same shape (ask_forms is
+// landing beside suggested_prompts): add the field here and it is
+// covered on both paths at once.
+func buildAgentPostCreateBody(a *Agent) map[string]any {
+	body := map[string]any{}
+	if a.SuggestedPrompts != "" {
+		body["suggested_prompts"] = a.SuggestedPrompts
 	}
 	return body
 }

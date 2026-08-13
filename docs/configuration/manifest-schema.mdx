@@ -185,6 +185,7 @@ Crew-scoped MCP integration. Mirrors what `POST /api/v1/crews/{id}/integrations`
 | `memory_enabled` | bool | — | Enables the file-first agent memory. |
 | `prompt` | string | — | Inline system prompt. Hard cap 64 KB. |
 | `prompt_file` | string | — | Relative path. Mutually exclusive with `prompt:`. |
+| `suggested_prompts` | string | — | The agent's own chat suggestions — the chips under an empty composer — **one per line**, written as a YAML block scalar. At most 8 lines, at most 120 characters each; blank lines are ignored. Omit it to leave the server's value alone and fall back to the role packs. |
 | `skills` | `[]string` | — | Slug references; must resolve in the merged workspace + crew scope. |
 | `env_refs` | `[]string` | — | Env var name references; must resolve in the merged credential scope. |
 
@@ -254,6 +255,8 @@ The validator runs the following cross-checks at validate time (no network, no D
 | `agent_role` must be `AGENT` or `LEAD` | `<agent>: agent_role "X" invalid (want AGENT or LEAD)` |
 | `cli_adapter` must be one of the 6 supported enum values | `<agent>: cli_adapter "X" invalid` |
 | `tool_profile` must be `FULL`, `CODING`, or `MINIMAL` | `<agent>: tool_profile "X" invalid (want FULL, CODING, MINIMAL)` |
+| `suggested_prompts` holds at most 8 non-blank lines | `<agent>: suggested_prompts has N entries (at most 8 are allowed)` |
+| Each `suggested_prompts` line is at most 120 characters | `<agent>: suggested_prompts entry N exceeds 120 characters (it has M)` |
 | Each crew needs at least one agent | `crew "X": at least one agent is required` |
 | Slugs / names unique within scope | `<scope>: duplicate <thing> "X"` (skill / credential / agent / mcp / service / crew) |
 | Service `name` must be a DNS label | `<scope> service "X": name must be a DNS label (lowercase letters/digits/'-', start with letter, end with letter or digit)` |

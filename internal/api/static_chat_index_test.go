@@ -27,6 +27,14 @@ import (
 // and /chat fell all the way through to the SPA index — the 404 that
 // hooks/use-active-runs.ts routed around by sending agent runs to /crews.
 //
+// What this file CANNOT catch: it builds its own filesystem, so it proves
+// the handler serves those two names, never that Next still emits them. If
+// the export starts writing something else, every case below stays green
+// and /chat 404s in the shipped binary. The other half of the pair is the
+// "Static export emits the /chat routes" step in the `frontend` job of
+// .github/workflows/ci.yml, which greps the real out/ after `pnpm build`.
+// Change a filename here and you must change it there.
+//
 // Not asserted here, because it is not a chat behaviour: a TRAILING slash
 // ("/chat/") still lands on the SPA index. `path + ".html"` becomes
 // "chat/.html", the exact stat hits a directory, and the one-level rewrite

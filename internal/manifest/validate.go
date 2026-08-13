@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // slugFormat mirrors api.validSlugFormat: lowercase letters, digits,
@@ -180,6 +181,7 @@ func (v *validator) checkCrewSpec(meta Metadata, spec *CrewSpec, wsCreds map[str
 		if a.ToolProfile != "" && !validToolProfile(a.ToolProfile) {
 			v.errf("%s: tool_profile %q invalid (want FULL, CODING, MINIMAL)", label, a.ToolProfile)
 		}
+		v.checkSuggestedPrompts(label, a.SuggestedPrompts)
 
 		for _, sk := range a.Skills {
 			if _, ok := skills[sk]; !ok {
@@ -191,6 +193,51 @@ func (v *validator) checkCrewSpec(meta Metadata, spec *CrewSpec, wsCreds map[str
 				v.errf("%s references unknown credential env %q", label, env)
 			}
 		}
+	}
+}
+
+// Caps on agents.suggested_prompts. Duplicated, not shared: the
+// enforcing copy is normalizeSuggestedPrompts in
+// internal/api/agents_suggested_prompts.go, which is unexported and
+// lives behind the HTTP boundary the CLI talks to — the same reason
+// validAgentRole restates the server's role enum rather than importing
+// it. This copy exists so `crewship plan` and `crewship validate` name
+// the offending prompt offline, before any request is sent; a manifest
+// that slips past it still meets the server's 400.
+//
+// Keep the two numbers in step. If they ever drift, the server wins and
+// the symptom is an apply that fails at the PATCH instead of at plan.
+const (
+	maxManifestSuggestedPrompts     = 8
+	maxManifestSuggestedPromptRunes = 120
+)
+
+// checkSuggestedPrompts validates the newline-separated prompt list the
+// same way the server normalises it: CRLF folded, lines trimmed, blank
+// lines ignored (they are how people space out a textarea, not prompts),
+// positions counted over the prompts a reader can SEE.
+func (v *validator) checkSuggestedPrompts(label, raw string) {
+	if raw == "" {
+		return
+	}
+	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	count := 0
+	for _, line := range strings.Split(normalized, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		count++
+		if n := utf8.RuneCountInString(line); n > maxManifestSuggestedPromptRunes {
+			v.errf("%s: suggested_prompts entry %d exceeds %d characters (it has %d)",
+				label, count, maxManifestSuggestedPromptRunes, n)
+		}
+	}
+	if count > maxManifestSuggestedPrompts {
+		v.errf("%s: suggested_prompts has %d entries (at most %d are allowed)",
+			label, count, maxManifestSuggestedPrompts)
 	}
 }
 
