@@ -3,7 +3,8 @@ import { readFileSync, readdirSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 
 // =============================================================================
-// No live surface may link to /crews/agents/<id>/*.
+// No live surface may link into the /crews/agents family — the bare index
+// /crews/agents included, not just /crews/agents/<id>/*.
 //
 // The selection-driven /crews redesign deleted that whole subtree — app/
 // (dashboard)/crews/ is a single page.tsx now — but a long tail of call sites
@@ -36,6 +37,23 @@ import { join, relative, sep } from "node:path"
 // A list has to be remembered; a scan cannot be forgotten. e2e/ is excluded on
 // purpose — those specs walk the deleted routes deliberately to assert the
 // 404/redirect behaviour, which playwright.config.ts:7 already acknowledges.
+//
+// WHY THE MATCHER IS A REGEX AND NOT A PREFIX STRING. It used to be the literal
+// "/crews/agents/" — with a trailing slash, because every site found in the
+// first sweep was a sub-route. That shape cannot see the *index*: the toolbar
+// breadcrumb's <Link href="/crews/agents"> and app/(dashboard)/agents/page.tsx's
+// router.replace("/crews/agents") both sailed through a green gate into a route
+// that has no page.tsx and no web/out/crews/agents.html — the Go static handler
+// falls all the way through to the SPA root, so the click lands the user on the
+// dashboard under a URL that promises an agent roster. A gate aimed one segment
+// too deep is the kind that gets trusted.
+//
+// So the rule is the whole family, index and subtree alike, and it is checked
+// after unescaping backslash-slash — /^\/crews\/agents\/([^/]+)/ is a live
+// reference to the dead route written in a form a substring search cannot see,
+// and that regex was in fact the gate that kept the toolbar's dead branch
+// alive. `/crews?agent=<slug>`, the convention that replaced all of this, does
+// not contain the sequence and is never flagged.
 // =============================================================================
 
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..")
@@ -53,7 +71,33 @@ const SKIP_DIRS = new Set(["node_modules", ".next", "out", ".git", "e2e", "cover
  */
 const SELF = join("app", "(onboarding)", "onboarding", "__tests__", "dead-agent-routes.test.ts")
 
-const DEAD_PREFIX = ["/crews", "agents", ""].join("/")
+/**
+ * The dead family: `/crews/agents` and anything below it. The negative
+ * lookahead stops the match one character short of a longer word so a
+ * hypothetical sibling segment (`/crews/agents-archive`) would have to be
+ * judged on its own merits rather than inheriting this verdict; `/crews/agents`
+ * itself, `/crews/agents/`, `/crews/agents/<id>/chat`, `/crews/agents?x=1` and
+ * the same strings closed by a quote all match.
+ *
+ * Assembled from parts for the same reason the old prefix constant was: this
+ * file is scanned like any other, and a literal here would report itself.
+ */
+const DEAD_ROUTE_RE = new RegExp(["", "crews", "agents"].join("/") + "(?![\\w-])")
+
+/**
+ * Undo regex-literal escaping before matching. `/^\/crews\/agents\/([^/]+)/`
+ * is a reference to the dead route that a search for the plain path cannot
+ * see — and that exact regex is how the app toolbar kept a breadcrumb branch
+ * for a deleted page. Unescaping is safe in the only direction that matters:
+ * it can add matches, never hide one.
+ */
+function unescapeSlashes(line: string): string {
+  return line.split("\\/").join("/")
+}
+
+function hitsDeadRoute(line: string): boolean {
+  return DEAD_ROUTE_RE.test(unescapeSlashes(line))
+}
 
 function walk(dir: string, out: string[] = []): string[] {
   let entries
@@ -158,7 +202,7 @@ function offendersIn(rel: string): string[] {
   return src
     .split("\n")
     .map((line, i) => [i + 1, line] as const)
-    .filter(([, line]) => line.includes(DEAD_PREFIX))
+    .filter(([, line]) => hitsDeadRoute(line))
     .map(([n, line]) => `${rel.split(sep).join("/")}:${n}: ${line.trim()}`)
 }
 
@@ -190,9 +234,46 @@ const REPAIRED = [
   "components/features/crews/crew-agents.tsx",
   "components/features/onboarding/setup-nudge.tsx",
   "hooks/use-active-runs.ts",
+  // Index-route sweep: these two linked at /crews/agents itself, which the
+  // trailing-slash prefix this gate used to carry could not see.
+  "components/layout/app-toolbar.tsx",
+  "app/(dashboard)/agents/page.tsx",
 ]
 
-describe("no component links to the deleted /crews/agents/* routes", () => {
+// The matcher is the whole gate, so it gets pinned directly rather than only
+// through the files it happens to clear today. The negative cases are the
+// reason this check can be run over the real tree at all: the surviving
+// convention and the prose that explains the dead one both have to survive it.
+describe("the /crews/agents matcher", () => {
+  it.each([
+    ["/crews", "agents"].join("/"),
+    ["/crews", "agents/"].join("/"),
+    ["/crews", "agents/ag_123"].join("/"),
+    ["/crews", "agents/ag_123/chat"].join("/"),
+    ["/crews", "agents/new?crew_id=c1"].join("/"),
+    `router.replace("${["/crews", "agents"].join("/")}")`,
+    // Escaped-slash form — a regex literal matching the dead route.
+    "const AGENT_PATH_RE = /^\\/crews\\/agents\\/([^/]+)/",
+  ])("flags %s", (line) => {
+    expect(hitsDeadRoute(line)).toBe(true)
+  })
+
+  it.each([
+    "/crews",
+    "/crews?agent=casey",
+    'href={`/crews?agent=${encodeURIComponent(slug)}`}',
+    "/crews?new=agent",
+    "/crews?crew=platform",
+    "/chat/casey",
+    "/agents",
+    "/api/v1/agents",
+    "/api/v1/agents/ag_123/chats",
+  ])("allows %s", (line) => {
+    expect(hitsDeadRoute(line)).toBe(false)
+  })
+})
+
+describe("no component links into the deleted /crews/agents family", () => {
   it.each(REPAIRED)("%s", (rel) => {
     expect(offendersIn(rel)).toEqual([])
   })

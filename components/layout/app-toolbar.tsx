@@ -29,12 +29,10 @@ import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
-import { getCrewDotColor } from "@/lib/entities"
 import { CommandPalette } from "@/components/command-palette"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
 import { useAppStore } from "@/lib/store"
-import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 import { SystemStatusPill } from "./status-pill"
@@ -113,60 +111,19 @@ export const mobileNavSections = [
 
 
 
-interface AgentBreadcrumb {
-  agentName: string
-  crewName: string | null
-  crewId: string | null
-  crewColor: string | null
-}
-
-
-const AGENT_PATH_RE = /^\/crews\/agents\/([^/]+)/
-
-
-function useAgentBreadcrumb(pathname: string, workspaceId: string | null): AgentBreadcrumb | null {
-  const [data, setData] = useState<AgentBreadcrumb | null>(null)
-  const match = pathname.match(AGENT_PATH_RE)
-  const agentId = match?.[1]
-
-  useEffect(() => {
-    if (!agentId || agentId === "_" || agentId === "new" || !workspaceId) {
-      setData(null)
-      return
-    }
-
-    let cancelled = false
-    setData(null)
-
-    async function fetchBreadcrumb() {
-      try {
-        const res = await apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-        if (!res.ok) {
-          if (!cancelled) setData(null)
-          return
-        }
-        const agent = await res.json()
-        if (!cancelled) {
-          setData({
-            agentName: agent.name,
-            crewName: agent.crew?.name ?? null,
-            crewId: agent.crew_id,
-            crewColor: agent.crew?.color ?? null,
-          })
-        }
-      } catch {
-        if (!cancelled) setData(null)
-      }
-    }
-
-    fetchBreadcrumb()
-    return () => { cancelled = true }
-  }, [agentId, workspaceId])
-
-  return agentId ? data : null
-}
-
-
+// There used to be an agent-detail breadcrumb here — "Agents / <crew> /
+// <agent>", keyed on a /^\/crews\/agents\/([^/]+)/ match of the pathname and
+// fed by a GET /api/v1/agents/<id> to resolve the names. All three of its
+// destinations were routes the selection-driven /crews redesign deleted:
+// /crews/agents (no page.tsx, no crews/agents.html in the export) and
+// /crews/<crewId> (same). The branch could not fire from a working navigation
+// either, because nothing routes to /crews/agents/<id> any more — it rendered
+// only when the Go static handler fell a bad URL through to the SPA root,
+// which put an agent breadcrumb above the dashboard and fired a fetch for it.
+//
+// The agent detail surface is now /crews?agent=<slug> on the /crews canvas,
+// which carries its own sub-bar, and the one deep page that still needs a way
+// back — chat — has the breadcrumb below pointing exactly there.
 export function AppToolbar() {
   const pathname = usePathname()
   const { workspaceId } = useWorkspace()
@@ -174,7 +131,6 @@ export function AppToolbar() {
   const crewsStatus = useCrewsStatus(workspaceId)
   const provisioning = useProvisioningStatus(workspaceId)
   const { session, signOut } = useAuth()
-  const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
   const { status: wsStatus } = useRealtime()
   const isMobile = useIsMobile()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -197,51 +153,11 @@ export function AppToolbar() {
   const userEmail = session?.user?.email ?? ""
   const userAvatar = session?.user?.avatar_url ?? ""
 
-  const isAgentPage = AGENT_PATH_RE.test(pathname)
   const chatMatch = pathname.match(/^\/chat\/([^/]+)/)
   const isChatPage = Boolean(chatMatch)
   const chatAgentSlug = chatMatch?.[1] ? decodeURIComponent(chatMatch[1]) : null
 
   function renderBreadcrumbs() {
-    if (isAgentPage && agentBreadcrumb) {
-      return (
-        <>
-          <Link href="/crews/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Agents
-          </Link>
-          {agentBreadcrumb.crewName && agentBreadcrumb.crewId && (
-            <>
-              <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
-              <Link
-                href={`/crews/${agentBreadcrumb.crewId}`}
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
-              >
-                <span
-                  className="h-2 w-2 rounded-full shrink-0"
-                  style={{ backgroundColor: getCrewDotColor(agentBreadcrumb.crewColor) }}
-                />
-                {agentBreadcrumb.crewName}
-              </Link>
-            </>
-          )}
-          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
-          <span className="text-sm font-semibold truncate">{agentBreadcrumb.agentName}</span>
-        </>
-      )
-    }
-
-    if (isAgentPage) {
-      return (
-        <>
-          <Link href="/crews/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Agents
-          </Link>
-          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
-          <span className="text-sm text-muted-foreground">...</span>
-        </>
-      )
-    }
-
     // Chat page: link back to /crews?agent=<slug> so the toolbar back-action
     // restores agent selection in the canvas (instead of dumping the user
     // on an empty roster).
