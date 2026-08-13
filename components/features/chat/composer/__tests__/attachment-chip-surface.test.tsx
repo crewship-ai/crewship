@@ -80,7 +80,7 @@ const baseProps = {
   isStreaming: false,
   connectionStatus: "connected",
   stopGeneration: vi.fn(),
-  ensureSession: vi.fn(async () => {}),
+  ensureSession: vi.fn(async () => true),
   sendMessage: vi.fn(),
 }
 

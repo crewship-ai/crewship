@@ -31,7 +31,7 @@ import { useComposerStore } from "@/stores/composer-store"
 import { WS_MAX_OUTBOUND_FRAME_BYTES } from "@/hooks/use-websocket"
 
 const sendMessage = vi.fn()
-const ensureSession = vi.fn(async () => {})
+const ensureSession = vi.fn(async () => true)
 
 const baseProps = {
   agentId: "agent-1",

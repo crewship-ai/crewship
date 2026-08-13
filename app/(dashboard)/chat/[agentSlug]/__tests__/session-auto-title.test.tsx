@@ -88,10 +88,18 @@ vi.mock("@/components/features/chat/chat-tree-sidebar", async (importOriginal) =
 })
 
 // Stand-in for ChatPanel reproducing exactly what the real one does on submit:
-// ensureSession() POSTs the chat into existence with the id it was handed (and
-// only the first time — the real one is gated on `sessionReady`), the message
-// goes out, THEN onSend() tells the page. The awaits are the contract this
-// suite checks the title against; see hooks/use-message-submit.ts.
+// ensureSession() POSTs the chat into existence with the id it was handed —
+// once per session, and only ever skipped for a row the panel has CONFIRMED
+// (created, or loaded real messages for), never for one an empty history
+// merely implied — then the message goes out, THEN onSend() tells the page.
+// The awaits are the contract this suite checks the title against; see
+// hooks/use-message-submit.ts.
+//
+// That the real panel does this at all is not taken on trust here: it is
+// pinned against the server's actual responses in
+// app/(dashboard)/chat/[agentSlug]/__tests__/session-on-first-send.test.tsx
+// and components/features/chat/__tests__/chat-panel-session-create.test.tsx,
+// which render the real thing.
 vi.mock("@/components/features/chat/chat-panel", () => ({
   ChatPanel: ({
     agentId, sessionId, initialInput, autoSendInitial, onSend,

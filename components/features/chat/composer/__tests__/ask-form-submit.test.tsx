@@ -43,7 +43,7 @@ const receipt: AskForm = {
 }
 
 const sendMessage = vi.fn()
-const ensureSession = vi.fn(async () => {})
+const ensureSession = vi.fn(async () => true)
 const onCloseAskForm = vi.fn()
 const onSent = vi.fn()
 

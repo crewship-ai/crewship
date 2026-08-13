@@ -8,6 +8,7 @@ import {
   WifiOff,
   Users,
 } from "lucide-react"
+import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
@@ -118,7 +119,31 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
-  const [sessionReady, setSessionReady] = useState(false)
+
+  // Sessions whose `chats` row this panel has CONFIRMED exists. Confirmed
+  // means one of exactly two things happened: we created the row ourselves
+  // (the POST below came back ok), or the server handed us real messages for
+  // it. It is never INFERRED.
+  //
+  // It used to be inferred, and that was the bug: the history GET treats
+  // anything that is not a 404 as proof of existence, but
+  // GET /chats/{id}/messages answers 200 with an empty message list for a chat
+  // that does not exist at all (internal/api/proxy.go, ChatMessages — the
+  // shape the CLI's history/export/recap commands read too, so it is not
+  // moving). A draft session therefore looked "ready", the create POST was
+  // skipped, and the first message went out against a chat with no row: no
+  // conversation persisted, an auto-title PATCH into the void, and a WS
+  // channel the authorizer could not authorise (internal/ws/channel_auth.go,
+  // isSessionOwner → send_message denied).
+  //
+  // A ref, not state: nothing renders from it, and the create path must read
+  // the value as it is at click time rather than as it was when the callback
+  // was memoised. Keyed by session id so switching back and forth inside one
+  // mount doesn't re-ask.
+  const confirmedRowsRef = useRef<Set<string>>(new Set())
+  // In-flight create per session id, so two sends in the same tick (a
+  // suggestion chip plus a fast Enter) share one POST — and one re-subscribe.
+  const createInFlightRef = useRef<Map<string, Promise<boolean>>>(new Map())
 
   // Cutoff: turns whose timestamp is BEFORE this number skip the arrival
   // animation. Bumped on every session swap so loaded-from-history turns
@@ -129,7 +154,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const sessionLoadedFor = useRef<string | null>(null)
 
   useEffect(() => {
-    setSessionReady(false)
     setHistoryLoading(true)
     setAnimateAfter(Date.now() + 250)
     sessionLoadedFor.current = sessionId
@@ -219,20 +243,28 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     // retry with backoff and, if it still fails, LEAVE the existing turns in
     // place rather than wiping them — a network blip must never look like an
     // empty chat. A genuine 404 (brand-new session) is not an error.
-    const fetchOnce = async (): Promise<{ exists: boolean; messages: HistoryMessage[] } | "retry"> => {
+    //
+    // A 404 and a 200 carrying an empty list are the SAME answer here — "no
+    // history" — and this panel deliberately draws no other conclusion from
+    // either. The server returns the second for a chat that does not exist
+    // (proxy.go), so "not a 404" says nothing about whether the row is there;
+    // reading it as existence is what skipped the create and lost the
+    // conversation. Only messages that actually came back are proof, and that
+    // is recorded below.
+    const fetchOnce = async (): Promise<{ messages: HistoryMessage[] } | "retry"> => {
       try {
         const r = await apiFetch(`/api/v1/chats/${sessionId}/messages?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (r.status === 404) return { exists: false, messages: [] }
+        if (r.status === 404) return { messages: [] }
         if (!r.ok) return "retry"
         const data = await r.json()
-        return { exists: true, messages: (data?.messages ?? []) as HistoryMessage[] }
+        return { messages: (data?.messages ?? []) as HistoryMessage[] }
       } catch {
         return "retry"
       }
     }
 
     const run = async () => {
-      let result: { exists: boolean; messages: HistoryMessage[] } | "retry" = "retry"
+      let result: { messages: HistoryMessage[] } | "retry" = "retry"
       for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
         if (attempt > 0) await new Promise((res) => setTimeout(res, 300 * attempt))
         result = await fetchOnce()
@@ -250,8 +282,11 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         return
       }
 
-      const { exists, messages } = result
-      setSessionReady(exists)
+      const { messages } = result
+      // Messages exist ⇒ the chat they belong to exists. This is the one
+      // reading of a history response that is safe, and it is what lets a
+      // conversation the user is coming back to skip the create POST.
+      if (messages.length > 0) confirmedRowsRef.current.add(sessionId)
       // Replace atomically — including with [] for an empty (newly created)
       // session — so visible turns swap cleanly between sessions.
       loadHistory(messages.map((m) => ({
@@ -312,19 +347,47 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return list
   }, [agentId, agentSlug, agentName, agentRole, participantNames, currentUserId])
 
-  // Creates the `chats` row for a draft session (PRD Step 3: arriving is not
-  // sending). `sessionReady` is the "this session exists on the server" flag —
-  // set from the history GET for a session that already existed, and set here
-  // for one that did not.
-  const ensureSession = useCallback(async () => {
-    if (sessionReady || !workspaceId || !sessionId) return
-    try {
-      const res = await apiFetch(
-        `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, origin: "UI" }) },
-      )
-      if (res.ok) {
-        setSessionReady(true)
+  /**
+   * Make sure this session's `chats` row exists before anything is sent into
+   * it (PRD Step 3: arriving is not sending, so the row is created by the
+   * first message).
+   *
+   * Returns whether the row is there. **Callers must not send when it is
+   * false** — the WS channel authorizer resolves a session by looking the chat
+   * up (internal/ws/channel_auth.go, isSessionOwner), so a `send_message` for
+   * a row that does not exist is refused server-side and the reply, the
+   * persisted turn and the auto-title all quietly fail to happen.
+   *
+   * The rule is "confirm, don't infer": on the first send for a session we
+   * POST unless we have already confirmed the row. The POST is an upsert
+   * (`INSERT OR IGNORE`, internal/api/agent_chats.go CreateChat), so the
+   * redundant one — for a session created by /chats up front, or one whose
+   * history came back legitimately empty — costs a single round trip that
+   * writes nothing, once per session, on a surface that is about to open a
+   * WebSocket anyway. Probing first to avoid it would cost the same round trip
+   * and could not answer the question (see `confirmedRowsRef`).
+   *
+   * A failure is not latched: nothing is marked confirmed, so the next send
+   * tries again.
+   */
+  const ensureSession = useCallback(async (): Promise<boolean> => {
+    if (!workspaceId || !sessionId) return false
+    if (confirmedRowsRef.current.has(sessionId)) return true
+
+    // Two sends racing into the same fresh session share one POST — and
+    // therefore one resubscribeSession.
+    const pending = createInFlightRef.current.get(sessionId)
+    if (pending) return pending
+
+    const sid = sessionId
+    const attempt = (async (): Promise<boolean> => {
+      try {
+        const res = await apiFetch(
+          `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sid, origin: "UI" }) },
+        )
+        if (!res.ok) return false
+        confirmedRowsRef.current.add(sid)
         // The mount-time `subscribe` for this session was refused — the
         // channel authorizer needs the row, and until this POST there was no
         // row (see the comment on resubscribeSession in hooks/use-chat.ts).
@@ -332,9 +395,32 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         // resubscribeSession is per-session idempotent and reuses the socket
         // this panel already has; it never opens a second one.
         resubscribeSession()
+        return true
+      } catch {
+        return false
+      } finally {
+        createInFlightRef.current.delete(sid)
       }
-    } catch { /* ignore */ }
-  }, [agentId, workspaceId, sessionId, sessionReady, resubscribeSession])
+    })()
+    createInFlightRef.current.set(sid, attempt)
+    return attempt
+  }, [agentId, workspaceId, sessionId, resubscribeSession])
+
+  /** ensureSession, plus the one thing the user has to be told about.
+   *
+   *  A create that fails means the message cannot be sent, and a message that
+   *  cannot be sent must not look sent — the composer keeps the draft (onSent
+   *  never runs), the sidebar gets no phantom row (onSend never runs), and
+   *  this says why. It is deliberately the ONLY toast on this path: it fires
+   *  when a send is actually refused, not on a background probe or a retry, so
+   *  it cannot become the noise nobody reads. */
+  const ensureSessionForSend = useCallback(async (): Promise<boolean> => {
+    const ok = await ensureSession()
+    if (!ok) {
+      toast.error("Couldn't start this conversation — your message wasn't sent. Check your connection and try again.")
+    }
+    return ok
+  }, [ensureSession])
 
   // Fetch files only when the Files tab might be visible (drawer open + active)
   const filesVisible = drawerOpen && drawerActiveTab === "files"
@@ -380,21 +466,25 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     if (connectionStatus !== "connected" || isStreaming) return
     autoSentRef.current = true
     void (async () => {
-      await ensureSession()
+      // No row, no send — the server would refuse it anyway, and the handoff
+      // silently dropping the goal it was sent here with is exactly the shape
+      // of failure this whole change is about. The toast tells the user; the
+      // ref stays set so a failed handoff does not retry itself in a loop.
+      if (!(await ensureSessionForSend())) return
       sendMessage(text)
       onSend?.(sessionId, text)
     })()
-  }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSession, sendMessage, onSend, sessionId])
+  }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSessionForSend, sendMessage, onSend, sessionId])
 
   const composerInitialInput = autoSendInitial ? undefined : initialInput
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming) return
-    await ensureSession()
+    if (!(await ensureSessionForSend())) return
     sendMessage(suggestion)
     setPinNonce((n) => n + 1)
     onSend?.(sessionId, suggestion)
-  }, [isStreaming, sendMessage, ensureSession, sessionId, onSend])
+  }, [isStreaming, sendMessage, ensureSessionForSend, sessionId, onSend])
 
   // This agent's questionnaire forms. Empty for every agent nobody has
   // configured — which is to say for almost all of them — and an empty list
@@ -600,7 +690,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}
           stopGeneration={stopGeneration}
-          ensureSession={ensureSession}
+          ensureSession={ensureSessionForSend}
           sendMessage={sendMessage}
           onSend={onSend}
           onSent={handleSent}
@@ -657,7 +747,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}
           stopGeneration={stopGeneration}
-          ensureSession={ensureSession}
+          ensureSession={ensureSessionForSend}
           sendMessage={sendMessage}
           onSend={onSend}
           onSent={handleSent}

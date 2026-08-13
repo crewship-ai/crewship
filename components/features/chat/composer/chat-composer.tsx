@@ -29,7 +29,9 @@ interface ChatComposerProps {
   isStreaming: boolean
   connectionStatus: string
   stopGeneration: () => void
-  ensureSession: () => Promise<void>
+  /** Make sure this session's `chats` row exists, and report whether it does.
+   *  `false` means the message must not go out — see useMessageSubmit. */
+  ensureSession: () => Promise<boolean>
   sendMessage: (text: string) => void
   onSend?: (sessionId: string, text: string) => void
   /** Called after a message actually went out (size guard passed) — the

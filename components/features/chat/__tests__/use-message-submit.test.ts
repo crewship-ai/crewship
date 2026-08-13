@@ -70,7 +70,7 @@ describe("useMessageSubmit", () => {
     const sendMessage = vi.fn()
     const onSend = vi.fn()
     const onSent = vi.fn()
-    const ensureSession = vi.fn(async () => {})
+    const ensureSession = vi.fn(async () => true)
     const { result } = renderHook(() =>
       useMessageSubmit({
         sessionId: "session-1",
@@ -93,6 +93,28 @@ describe("useMessageSubmit", () => {
     expect(sendMessage).toHaveBeenCalledWith("hello")
     expect(onSend).toHaveBeenCalledWith("session-1", "hello")
     expect(onSent).toHaveBeenCalledTimes(1)
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("does not send when the session's row could not be created", async () => {
+    // ensureSession returning false means the `chats` row is not there. The WS
+    // channel authorizer refuses a send_message for a session it cannot resolve
+    // (internal/ws/channel_auth.go, isSessionOwner), so sending anyway loses the
+    // message silently while the composer clears as though it had gone. Nothing
+    // downstream may run: no send, no onSend (a phantom sidebar row and an
+    // auto-title PATCH against a chat that does not exist), no onSent (the draft
+    // and the attachments have to survive for the retry).
+    const ensureSession = vi.fn(async () => false)
+    const { result, sendMessage, onSend, onSent } = setup({ ensureSession })
+
+    await act(async () => { await result.current({ text: "hello", files: [] }) })
+
+    expect(ensureSession).toHaveBeenCalledTimes(1)
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onSent).not.toHaveBeenCalled()
+    // The message about it belongs to whoever tried to create the row — this
+    // hook does not double up on it.
     expect(toastError).not.toHaveBeenCalled()
   })
 
@@ -176,7 +198,7 @@ describe("useMessageSubmit — attachments ride along with the message", () => {
     const sendMessage = vi.fn()
     const onSend = vi.fn()
     const onSent = vi.fn()
-    const ensureSession = vi.fn(async () => {})
+    const ensureSession = vi.fn(async () => true)
     const { result } = renderHook(() =>
       useMessageSubmit({
         sessionId: "session-1",

@@ -61,7 +61,12 @@ export function checkChatMessageSize(sessionId: string, content: string): Messag
 export interface UseMessageSubmitOptions {
   sessionId: string
   isStreaming: boolean
-  ensureSession: () => Promise<void>
+  /** Makes sure the session's `chats` row exists before anything is sent into
+   *  it, and reports whether it does. `false` is a hard stop: the WS channel
+   *  authorizer refuses a `send_message` for a session with no row
+   *  (internal/ws/channel_auth.go), so sending anyway would drop the user's
+   *  message on the floor while the UI acted as though it had been saved. */
+  ensureSession: () => Promise<boolean>
   /** useWebSocket-backed send, exposed via useChat's sendMessage. Receives
    *  the COMPOSED content — the user's text plus the attachment block. */
   sendMessage: (text: string) => void
@@ -133,7 +138,12 @@ export function useMessageSubmit({
         return
       }
 
-      await ensureSession()
+      // The row has to exist before the message can go anywhere. When it
+      // could not be created, nothing else runs: no send, no `onSend` (which
+      // would put a phantom row in the sidebar and fire an auto-title PATCH at
+      // a chat that isn't there), and no `onSent` — so the draft and the
+      // attachments survive for a retry. The caller has already told the user.
+      if (!(await ensureSession())) return
       sendMessage(content)
       onSend?.(sessionId, text)
       onSent()
