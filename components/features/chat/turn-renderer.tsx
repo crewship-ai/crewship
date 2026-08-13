@@ -4,6 +4,7 @@ import React from "react"
 import { motion } from "motion/react"
 import {
   AlertCircle,
+  ClipboardList,
   Settings2,
   Wrench,
   RefreshCw,
@@ -47,10 +48,16 @@ interface TurnRendererProps {
    *  Returns null for the local user (no label) or when no participant info is
    *  available. Optional — callers without group context omit it. */
   resolveAuthorName?: (userId: string) => string | null
+  /** Resolves a user turn's content to the ask form it was submitted from, or
+   *  null for anything typed. Submitting a form sends an ORDINARY message —
+   *  there is nothing on the wire that marks it — so without this line the
+   *  transcript shows text the user never typed as if they had. Optional; a
+   *  caller that has no ask forms omits it and nothing renders. */
+  resolveAskProvenance?: (content: string) => string | null
 }
 
 /** Render a single turn (user, assistant, or system). */
-export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName }: TurnRendererProps) {
+export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
   const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
   const initialAnim = shouldAnimate ? arrival.initial : false
   const transition = shouldAnimate ? arrival.transition : { duration: 0 }
@@ -59,6 +66,9 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
     // Group-chat attribution: a teammate's message shows their name; the local
     // user's own turns (resolver returns null) render as today.
     const authorName = turn.authorUserId ? resolveAuthorName?.(turn.authorUserId) ?? null : null
+    // Only the local user's own turns can have come from a form on this
+    // client; a teammate's message is attributed to them instead.
+    const askProvenance = turn.authorUserId ? null : resolveAskProvenance?.(textContent) ?? null
     return (
       <motion.div
         initial={initialAnim}
@@ -68,6 +78,15 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
         data-turn-id={turn.id}
         className="group flex flex-col"
       >
+        {askProvenance && (
+          <div
+            data-testid="ask-provenance"
+            className="ml-auto mb-0.5 flex items-center gap-1 text-micro text-muted-foreground"
+          >
+            <ClipboardList className="h-3 w-3" aria-hidden="true" />
+            <span>via {askProvenance}</span>
+          </div>
+        )}
         {authorName && (
           <div className="ml-auto mb-0.5 flex items-center gap-1.5 text-micro text-muted-foreground">
             <span aria-hidden="true" className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-[9px] font-semibold text-primary">

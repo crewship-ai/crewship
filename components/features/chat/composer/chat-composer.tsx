@@ -9,9 +9,14 @@ import {
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { composeMessageWithAttachments } from "@/lib/attachment-message"
 import { useMessageSubmit } from "../hooks/use-message-submit"
 import { MentionAutocomplete, type CrewMember } from "./mention-autocomplete"
 import { AttachmentZone, AttachmentButton, CameraButton } from "./attachment-zone"
+import { AskFormSheet } from "../asks/ask-form-sheet"
+import { recordAskProvenance } from "../asks/ask-provenance"
+import { isAttachmentField, type AskForm, type RenderAskTemplate } from "../asks/types"
 
 interface ChatComposerProps {
   agentId: string
@@ -35,6 +40,22 @@ interface ChatComposerProps {
   initialInput?: string
   /** Group-chat members for @mention autocomplete (desktop only). */
   mentionMembers?: CrewMember[]
+  /** The ask form the user opened from the chip rail, or null. The sheet is
+   *  mounted HERE rather than in ChatPanel for two reasons that pull the same
+   *  way: it has to grow directly above the composer inside the same column
+   *  (PRD §5.2), and submitting it has to go down the composer's own
+   *  `useMessageSubmit` path so the size guard, the still-uploading refusal
+   *  and the attachment block apply to a form exactly as they do to something
+   *  typed. Mounting it in the parent would have meant a second submit path. */
+  askForm?: AskForm | null
+  /** Fired when the sheet closes — cancelled, escaped, or sent. */
+  onCloseAskForm?: () => void
+  /** `lib/ask-template.ts`'s renderer, injected from ChatPanel. Optional
+   *  because a composer with no ask forms — every caller that predates this —
+   *  never needs one; the sheet only mounts when a form AND a renderer are
+   *  both present, so a form can never be sent through a renderer that is not
+   *  the product's. */
+  renderAskTemplate?: RenderAskTemplate
 }
 
 /** Stable empty list for sessions with nothing attached. */
@@ -61,6 +82,9 @@ export function ChatComposer({
   onSent,
   initialInput,
   mentionMembers,
+  askForm,
+  onCloseAskForm,
+  renderAskTemplate,
 }: ChatComposerProps) {
   const [input, setInput] = useState(initialInput ?? "")
 
@@ -91,9 +115,16 @@ export function ChatComposer({
     })
   }, [])
 
+  // Set by handleSent, read by the ask sheet's submit. `useMessageSubmit`
+  // returns nothing either way, and the sheet must NOT close on a send the
+  // size guard refused — everything the user filled in has to still be there
+  // for them to trim and retry, which is the same rule the draft follows.
+  const sentRef = useRef(false)
+
   // Only fires when the message actually went out — a size-guard rejection
   // must leave the draft intact so the user can trim and resend.
   const handleSent = useCallback(() => {
+    sentRef.current = true
     setInput("")
     clearDraft(sessionId)
     clearAttachments(sessionId)
@@ -109,6 +140,66 @@ export function ChatComposer({
     onSend,
     onSent: handleSent,
   })
+
+  /** Submitting a form is submitting a message. Same hook, same guards, same
+   *  attachment block — the only thing the form contributed is the text. */
+  const handleAskSubmit = useCallback(
+    async (form: AskForm, text: string): Promise<boolean> => {
+      sentRef.current = false
+      // Provenance is keyed by the content that will actually be on the turn,
+      // which is the COMPOSED string (rendered template + attachment block),
+      // not the template output on its own.
+      recordAskProvenance(
+        sessionId,
+        composeMessageWithAttachments(text, sessionAttachments),
+        form.label,
+      )
+      // `files` is PromptInput's own (unused) attachment channel — this
+      // composer's attachments live in the store and are read by
+      // useMessageSubmit, so the field is present and empty.
+      await handleSubmit({ text, files: [] })
+      return sentRef.current
+    },
+    [handleSubmit, sessionId, sessionAttachments],
+  )
+
+  const noopCloseAskForm = useCallback(() => {}, [])
+  const isMobile = useIsMobile()
+  // A bottom sheet on a phone, and also below the chat page's 900px compact
+  // breakpoint — that is the point at which the page hands this composer the
+  // "mobile" variant, so the variant is the signal rather than a third
+  // media query that could disagree with it.
+  const askSheet = renderAskTemplate ? (
+    <AskFormSheet
+      form={askForm ?? null}
+      renderTemplate={renderAskTemplate}
+      agentId={agentId}
+      sessionId={sessionId}
+      compact={variant === "mobile" || isMobile}
+      disabled={isStreaming || connectionStatus !== "connected"}
+      onSubmit={handleAskSubmit}
+      onClose={onCloseAskForm ?? noopCloseAskForm}
+    />
+  ) : null
+
+  /**
+   * Who draws the attachment chips right now.
+   *
+   * The sheet's `file` / `photo` slot mounts the same AttachmentZone this
+   * composer does, over the same per-session list — so with a sheet open the
+   * uploaded file was on screen twice, once under the field that asked for it
+   * and once under the input. Both were telling the truth; one of them has to
+   * stop.
+   *
+   * The sheet wins, because that is where the question is: the chip is the
+   * field's answer, and removing it there is editing that answer. But only
+   * when the sheet actually renders an upload control — a form with no
+   * `file` / `photo` field has nowhere to show them, and the composer's
+   * paperclip is then the only way anything got attached at all, so hiding
+   * them there would hide the attachment completely.
+   */
+  const sheetOwnsChips =
+    !!renderAskTemplate && !!askForm && askForm.fields.some(isAttachmentField)
 
   const chatStatus = isStreaming ? ("streaming" as const) : ("ready" as const)
   const placeholder = agentName ? `Message ${agentName}...` : "Send a message..."
@@ -126,8 +217,10 @@ export function ChatComposer({
     // the paperclip. Mention autocomplete stays desktop-only: it needs a
     // keyboard-driven caret, and group chat is not a phone surface yet.
     return (
+      <>
+      {askSheet}
       <div className="p-3 shrink-0">
-        <AttachmentZone agentId={agentId} sessionId={sessionId}>
+        <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>
           <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
             <PromptInputTextarea
               value={input}
@@ -145,12 +238,15 @@ export function ChatComposer({
           </PromptInput>
         </AttachmentZone>
       </div>
+      </>
     )
   }
 
   return (
+    <>
+    {askSheet}
     <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
-      <AttachmentZone agentId={agentId} sessionId={sessionId}>
+      <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>
         <MentionAutocomplete
           text={input}
           textareaRef={mentionTextareaRef}
@@ -174,5 +270,6 @@ export function ChatComposer({
         </PromptInput>
       </AttachmentZone>
     </div>
+    </>
   )
 }

@@ -17,7 +17,7 @@ import {
   ConversationScrollButton,
   ConversationEmptyState,
 } from "@/components/ai-elements/conversation"
-import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
+import { renderAskTemplate } from "@/lib/ask-template"
 import { useChat, type HistoryPart } from "@/hooks/use-chat"
 import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -35,6 +35,10 @@ import { ChatComposer } from "./composer/chat-composer"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { FollowUps } from "./suggestions/follow-ups"
+import { AskRail } from "./asks/ask-rail"
+import { useAskForms } from "./asks/use-ask-forms"
+import { lookupAskProvenance } from "./asks/ask-provenance"
+import { askFormsFromColumn, type AskForm } from "./asks/types"
 import { ConversationSearch } from "./search/conversation-search"
 import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
@@ -66,6 +70,19 @@ interface ChatPanelProps {
    *  null/empty (every agent nobody has configured) the role pack answers
    *  exactly as before. */
   suggestedPrompts?: string | null
+  /** The agent's questionnaire forms — the raw `agents.ask_forms` column, a
+   *  JSON array as TEXT, from the record the caller already has.
+   *
+   *  The three states are distinct and all three are used:
+   *    · a string → these are the forms;
+   *    · `null`   → this agent has no forms (the answer for almost every
+   *      agent), and no request is made;
+   *    · omitted  → the caller has no agent record, and `useAskForms` falls
+   *      back to fetching the detail endpoint for itself.
+   *
+   *  The chat page passes it because it resolved this agent out of the roster
+   *  it fetched for the tree, exactly as it does for `suggestedPrompts`. */
+  askForms?: string | null
   /** How this session was created — UI / CLI / WEBHOOK / CRON / AGENT.
    *  Rendered as a chip in the connection bar so the user knows where
    *  they are at a glance. Undefined = unknown (pre-migration). */
@@ -91,8 +108,12 @@ interface ChatPanelProps {
 
 const noopFileClick = () => {}
 
+/** Cold-start rail cap: two rows at 1280px (PRD §5.1). The rest collapses
+ *  into `+N`. Follow-ups keep their own cap of 3, inside FollowUps. */
+const EMPTY_STATE_CHIP_LIMIT = 6
+
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -375,6 +396,47 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     onSend?.(sessionId, suggestion)
   }, [isStreaming, sendMessage, ensureSession, sessionId, onSend])
 
+  // This agent's questionnaire forms. Empty for every agent nobody has
+  // configured — which is to say for almost all of them — and an empty list
+  // is what makes the rail below render exactly the chips it rendered before
+  // this feature existed.
+  //
+  // Parsed here, from the column the caller handed down, so the chat costs no
+  // request for it. `undefined` (no record at all) is passed through as
+  // undefined, which is what leaves the hook's own fetch in charge. Memoised
+  // because the hook takes the parsed list as a dependency: a fresh array
+  // every render would re-run its effect on every render.
+  const providedAskForms = useMemo(
+    () => (askForms === undefined ? undefined : askFormsFromColumn(askForms)),
+    [askForms],
+  )
+  const askFormList = useAskForms(agentId, providedAskForms)
+
+  // The form whose sheet is open, if any. Owned here rather than in the
+  // composer because the chips that open it live here; the SHEET is mounted
+  // by the composer, which is the only place it can both sit above the input
+  // and reuse the composer's own submit path.
+  const [activeAskForm, setActiveAskForm] = useState<AskForm | null>(null)
+  // A sheet is about one conversation. Swapping sessions with one open would
+  // leave it hovering over a chat it was never opened from, holding answers
+  // meant for the previous one.
+  useEffect(() => { setActiveAskForm(null) }, [sessionId])
+
+  const handleFormClick = useCallback((form: AskForm) => {
+    // Deliberately no send, no ensureSession, no pin. Opening a form is not
+    // an interaction with the agent yet — that is the whole distinction the
+    // chip's glyph and ellipsis are promising.
+    setActiveAskForm(form)
+  }, [])
+
+  const closeAskForm = useCallback(() => setActiveAskForm(null), [])
+
+  /** "via Add a receipt" over a user bubble that came out of a form. */
+  const resolveAskProvenance = useCallback(
+    (content: string) => lookupAskProvenance(sessionId, content),
+    [sessionId],
+  )
+
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {})
   }, [])
@@ -423,6 +485,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       onRegenerate={!isStreaming ? regenerateWithPin : undefined}
       onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
+      resolveAskProvenance={resolveAskProvenance}
       footer={<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />}
     />
   ) : (
@@ -449,6 +512,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               agentId={agentId}
               chatId={sessionId}
               resolveAuthorName={resolveAuthorName}
+              resolveAskProvenance={resolveAskProvenance}
             />
           ))}
         </AnimatePresence>
@@ -518,11 +582,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         </div>
         {turns.length === 0 && !historyLoading && (
           <div className="px-4 pb-2 shrink-0">
-            <Suggestions>
-              {defaultSuggestions.map((s) => (
-                <Suggestion key={s} suggestion={s} onClick={() => handleSuggestionClick(s)}>{s}</Suggestion>
-              ))}
-            </Suggestions>
+            <AskRail
+              questions={defaultSuggestions}
+              forms={askFormList}
+              limit={EMPTY_STATE_CHIP_LIMIT}
+              disabled={isStreaming}
+              onPickQuestion={handleSuggestionClick}
+              onPickForm={handleFormClick}
+            />
           </div>
         )}
         <ChatComposer
@@ -538,6 +605,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}
+          askForm={activeAskForm}
+          onCloseAskForm={closeAskForm}
+          renderAskTemplate={renderAskTemplate}
         />
       </div>
     )
@@ -560,17 +630,22 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         </div>
         {turns.length === 0 && !historyLoading && (
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
-            <Suggestions>
-              {defaultSuggestions.map((s) => (
-                <Suggestion key={s} suggestion={s} onClick={() => handleSuggestionClick(s)}>{s}</Suggestion>
-              ))}
-            </Suggestions>
+            <AskRail
+              questions={defaultSuggestions}
+              forms={askFormList}
+              limit={EMPTY_STATE_CHIP_LIMIT}
+              disabled={isStreaming}
+              onPickQuestion={handleSuggestionClick}
+              onPickForm={handleFormClick}
+            />
           </div>
         )}
         <div className="mx-auto w-full max-w-3xl">
         <FollowUps
           prompts={followUpPrompts}
           onPick={handleSuggestionClick}
+          forms={askFormList}
+          onPickForm={handleFormClick}
           show={!isStreaming && turns.length > 0 && turns[turns.length - 1].role === "assistant"}
         />
         </div>
@@ -588,6 +663,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           onSent={handleSent}
           initialInput={composerInitialInput}
           mentionMembers={mentionMembers}
+          askForm={activeAskForm}
+          onCloseAskForm={closeAskForm}
+          renderAskTemplate={renderAskTemplate}
         />
       </div>
 

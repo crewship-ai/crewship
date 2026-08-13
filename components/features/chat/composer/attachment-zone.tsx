@@ -23,6 +23,21 @@ interface AttachmentZoneProps {
   agentId: string
   sessionId: string
   children: React.ReactNode
+  /**
+   * Draw the chip list for this session's attachments. Default true.
+   *
+   * There is ONE attachment list per session (the store), and more than one
+   * zone can be mounted over it at a time: the composer always has one, and a
+   * form's `file` / `photo` field mounts another while its sheet is open. Two
+   * zones drawing the same list put the same file on screen twice, which reads
+   * as "did I attach that twice?".
+   *
+   * So the list is never duplicated to fix that — the renderer is switched
+   * off. The drop target stays live either way: dropping a file on the
+   * composer while a sheet is open must still attach it, it just appears in
+   * the sheet, next to the field that asked for it.
+   */
+  showChips?: boolean
 }
 
 // Module-level abort registry, keyed by `${sessionId}::${attachmentId}`.
@@ -158,7 +173,12 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
   )
 }
 
-export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneProps) {
+export function AttachmentZone({
+  agentId,
+  sessionId,
+  children,
+  showChips = true,
+}: AttachmentZoneProps) {
   // Subscribe only to THIS session's attachment list — the whole-store
   // subscription re-rendered every mounted zone on any session's draft or
   // attachment write.
@@ -184,7 +204,7 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
       <AttachmentDropZone onFiles={handleFiles} className="rounded-xl">
         {children}
       </AttachmentDropZone>
-      {sessionAttachments.length > 0 && (
+      {showChips && sessionAttachments.length > 0 && (
         <Attachments
           attachments={sessionAttachments}
           onRemove={handleRemove}
