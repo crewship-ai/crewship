@@ -61,10 +61,15 @@ const pagesEndpoint = "/api/v1/pages"
 // Panels is []pages.PanelSpec — the authoring type itself, not a copy.
 // A panel therefore declares exactly what it declares to the CLI:
 // id, schema, title, owner, producer, sla (a duration STRING, "30s"),
-// span and public. `wake:` / `actions:` / `refresh:` are v1.1 (§12) and
-// are not fields on that type yet; a manifest naming one fails at
-// validate rather than being silently ignored, which is the behaviour
-// the PRD asks for in §6.
+// span, public, and the authored half the surface is for — `actions:`
+// (§8b.1), `wake:` (§5) and `on_failure:` (§4 rule 4). Every one of
+// those is a field on pages.PanelSpec, is validated by
+// pages.Document.Validate, and is SENT by writeBody. That last clause is
+// the one that was false: actions validated here and were dropped on the
+// way out, so a manifest declaring buttons applied with exit 0 and
+// produced a page with none. `refresh:` is still v1.1 (§12) and is not a
+// field on the type; a manifest naming it fails at validate rather than
+// being silently ignored, which is what §6 asks for.
 type PageSpec struct {
 	Panels []pages.PanelSpec `yaml:"panels" json:"panels"`
 }
@@ -109,6 +114,13 @@ type PageRemote struct {
 // The snapshot half of the wire panel (state, reason, data, provenance)
 // is deliberately absent: it is server-computed and no manifest declares
 // it, so modelling it here would invite a diff against it.
+//
+// `public`, `actions`, `wake` and `on_failure` are absent for the
+// opposite reason: they ARE declared, and the read path does not send
+// them back (pages_handler.go:132-149). Adding fields for them would
+// model them as always-empty and every page that declares one would read
+// as drifted. The consequence is stated where it costs something —
+// pagePanelsDiffer, and pageDocumentFromRemote below.
 type PagePanelRemote struct {
 	// Full-panel fields.
 	ID         string `json:"id"`
@@ -282,9 +294,13 @@ func pageErrorDetail(err error) string {
 //
 // `remote` is the page matched BY SLUG (LookupPageRemoteBySlug), or nil
 // when the workspace has no page under that slug. Create posts the whole
-// document; update PATCHes name + description + the full panel list,
-// because PATCH /pages/{slug} replaces the panel set wholesale and a
-// partial list would delete the panels it left out.
+// document; update PATCHes the same body minus the slug — the full panel
+// list included, because PATCH /pages/{slug} replaces the panel set
+// wholesale and a partial list would delete the panels it left out, and
+// each panel complete with its actions and its gates, because a panel
+// sent without them is a panel whose buttons and wake rules are dropped
+// in the same transaction (pages_wake.go reconciles against what it was
+// sent).
 //
 // The slug is never sent on update: the server refuses a PATCH that
 // changes it ("a page's slug is its address"), so including it can only
@@ -325,12 +341,18 @@ func (d *PageDocument) Plan(
 		}}, nil
 	}
 
-	patch := map[string]any{
-		"name":   body["name"],
-		"panels": body["panels"],
-	}
-	if desc, ok := body["description"]; ok {
-		patch["description"] = desc
+	// The update body is the create body MINUS the slug, derived rather
+	// than re-listed. A hand-written subset here is the same mistake as a
+	// hand-written panel: the day writeBody learns a new top-level key,
+	// create would send it and update would silently not, and the two
+	// doors would disagree about what a page is. The slug is the one
+	// exclusion and it is named, with its reason, in the doc comment.
+	patch := make(map[string]any, len(body))
+	for k, v := range body {
+		if k == "slug" {
+			continue
+		}
+		patch[k] = v
 	}
 	slug := remote.Slug
 	return []internalapi.PlanItem{{
@@ -376,14 +398,21 @@ func (d *PageDocument) writeBody() (map[string]any, error) {
 		if p.Public {
 			panel["public"] = true
 		}
-		// The sensor half (PRD §5, §4 rule 4). Sent verbatim: the server
-		// parses `when:` against the panel's schema and resolves the crews,
-		// which is where those rules belong — a manifest that declared a gate
-		// the applier dropped on the floor would be a page that looks
-		// monitored and is not. Like `public`, they are not diffable from
-		// here (the read path does not echo them), so a change to a gate alone
-		// is only applied when something else on the page changes too; see
+		// The buttons (§8b.1) and the sensor half (§5, §4 rule 4). Sent
+		// verbatim, exactly as cmd_page.go's pageWritePanelJSON sends them:
+		// the server parses `when:` against the panel's schema, resolves the
+		// crews, and stores the action list a later click is resolved against.
+		// That is where those rules belong — a manifest that declared a gate or
+		// a button the applier dropped on the floor would be a page that looks
+		// monitored, or operable, and is not.
+		//
+		// Like `public`, none of the three is diffable from here (the read path
+		// does not echo them), so a change to a gate or a button ALONE is only
+		// applied when something else on the page changes too; see
 		// pagePanelsDiffer.
+		if len(p.Actions) > 0 {
+			panel["actions"] = p.Actions
+		}
 		if len(p.Wake) > 0 {
 			panel["wake"] = p.Wake
 		}
@@ -441,12 +470,17 @@ func (d *PageDocument) driftFields(remote *PageRemote) []string {
 // here for a case an admin-run apply does not hit. Documented in
 // docs/manifest/page.md.
 //
-// `public` is not compared at all: the read path does not serialise it
-// (pages_handler.go panelWire builds no Public field), so the remote
-// value is always false on the wire and diffing it would report drift
-// forever on any page that declares a public panel. It is still SENT on
-// create and update — the write path reads it — so the declared value
-// lands; it just cannot be verified from here.
+// `public`, `actions`, `wake` and `on_failure` are not compared at all:
+// the read path serialises none of them (pages_handler.go panelWire
+// builds the spec fields it can echo and stops there), so the remote
+// value is always the zero one on the wire and diffing it would report
+// drift forever on any page that declares a button or a gate. They are
+// still SENT on create and update — the write path reads all four — so
+// the declared value lands; it just cannot be verified from here, which
+// means a manifest whose ONLY change is to a gate or a button plans as
+// "unchanged". That is a known hole with one honest fix (echo the
+// authored half to a caller who may edit the spec) and it lives on the
+// server side of the wire, not here.
 func pagePanelsDiffer(declared []pages.PanelSpec, remote []PagePanelRemote) bool {
 	if len(declared) != len(remote) {
 		return true
@@ -597,6 +631,20 @@ func ExportPages(ctx context.Context, c internalapi.Client) ([]*PageDocument, er
 // DELETES that panel the next time anyone applies it. Refusing, and
 // naming the panel, is the only outcome that cannot lose somebody's
 // work.
+//
+// KNOWN GAP, same class, no fix available at this layer: the fields
+// below are enumerated by hand because PageRemote is all this function
+// has, and PageRemote cannot carry `public`, `actions`, `wake` or
+// `on_failure` — the read path does not send them. An exported document
+// is therefore complete in its panels and INCOMPLETE in their authored
+// halves, and re-applying it would delete a page's buttons and gates for
+// exactly the reason the sealed-panel refusal exists. It is not refused
+// the way a sealed panel is, because the exporter cannot tell a page
+// that has none (the overwhelming majority) from one that has some:
+// there is no evidence to refuse on, only an absent field. Closing this
+// needs the read path to echo the authored half to a caller who may edit
+// the spec; until then ExportPages has no non-test caller (see the note
+// on ExportPages), so nothing ships on top of the gap.
 func pageDocumentFromRemote(remote *PageRemote) (*PageDocument, error) {
 	panels := make([]pages.PanelSpec, 0, len(remote.Panels))
 	for i := range remote.Panels {

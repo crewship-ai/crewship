@@ -1110,7 +1110,13 @@ Consequences, all simplifications:
 A panel should be writable by anything, not only by something that can execute the `crewship`
 binary — a cron on someone else's box, a Zapier step, a PLC gateway, a GitHub Action.
 
-`POST /api/v1/pages/webhooks/{token}` with the payload as the body. The shape is copied from
+`POST /api/v1/page-webhooks/{token}` with the payload as the body. (This section first named
+`POST /api/v1/pages/webhooks/{token}`; that pattern cannot be registered — Go's ServeMux rejects
+it as a conflict against `POST /api/v1/pages/{slug}/public` and `.../rollback`, both of which match
+`/api/v1/pages/webhooks/public`, and the failure is a panic at boot. The endpoint therefore gets
+its own top-level space, as every other token-addressed door already has: `/api/v1/webhooks/{token}`
+for a pipeline, `/api/v1/public/pages/{token}` for a published page. See
+`internal/api/router_pages_webhooks.go`.) The shape is copied from
 `pipeline_webhooks` rather than invented: tokens are **SHA-256 hashed at rest** (since #1888,
 `internal/pipeline/webhooks.go:23-46`), holding the token is the authorisation, and the token is
 bound to exactly one panel — so a leaked token can write one panel and nothing else.
@@ -1166,6 +1172,8 @@ Repo rule: every endpoint gets a CLI command, and the acceptance test drives the
 | `PUT /api/v1/pages/{slug}/panels/{id}/data` | `crewship page set <slug>/<panel> --data -` |
 | `GET/PUT/DELETE …/grants` | `crewship page grant` / `revoke` |
 | `POST /api/v1/internal/pages/{slug}/panels/{id}/data` | sidecar path for container scripts |
+| `POST/GET …/{slug}/webhooks`, `DELETE …/{slug}/webhooks/{id}` | `crewship page webhook create` / `list` / `revoke` |
+| `POST /api/v1/page-webhooks/{token}` | none, deliberately — §10b.5c is the door for a producer that cannot run the binary |
 
 `crewship page set <page>/<panel> --data -` reading JSON on stdin is the single write path, and
 it is what appears in every producer script. Provenance is attached server-side.

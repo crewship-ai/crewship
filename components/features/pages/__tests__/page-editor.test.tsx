@@ -62,12 +62,16 @@ vi.mock("@/components/features/files/file-editor", () => ({
   },
 }))
 
+import { parse as parseYaml } from "yaml"
+
 import {
   PageEditor,
   formatSlaSeconds,
   newPageTemplate,
   pageDiagnostics,
   pageDocumentText,
+  pagePatchBody,
+  panelsDifferFromStored,
   parsePageBuffer,
   sealedPanelCount,
   slaSecondsFrom,
@@ -260,6 +264,205 @@ describe("a stored page round-trips through the document and back to the wire", 
   })
 })
 
+// ── 2b. The sensor half (§5, §8b.1, §4 rule 4) ─────────────────────────────
+
+// A page that is a SENSOR and an operator console, not just a display. This is
+// the document `crewship page create --file` accepts, pasted into the editor —
+// the third door onto the same file (§10b.1).
+const SENSOR_DOC = [
+  "apiVersion: crewship/v1",
+  "kind: Page",
+  "metadata:",
+  "  name: Flotila .201",
+  "  slug: fleet-201",
+  "spec:",
+  "  panels:",
+  "    - id: sluzby",
+  "      schema: status.v1",
+  "      title: Jede to?",
+  "      owner: crew/lookout",
+  "      producer: script/watch-services.sh",
+  "      sla: 30s",
+  "      span: 8",
+  "      public: true",
+  "      wake:",
+  '        - when: any(state == "critical")',
+  "          for: 5m",
+  "          agent: crew/devops",
+  "          writes: incident",
+  "      on_failure:",
+  "        issue: crew/lookout",
+  "      actions:",
+  "        - id: restart-api",
+  "          kind: call",
+  "          label: Restart API",
+  "          style: danger",
+  "          routine: restart-api",
+  "          params:",
+  "            cluster: prod",
+  "          confirm:",
+  "            title: Restart the API?",
+  "            body: In-flight requests are dropped.",
+  "          inputs:",
+  "            - name: reason",
+  "              type: text",
+  "              required: true",
+  "    - id: incident",
+  "      schema: narrative.v1",
+  "      owner: crew/devops",
+  "      producer: routine/incident-rozbor",
+  "      sla: 1h",
+  "      span: 12",
+  "",
+].join("\n")
+
+/** The panels as the AUTHOR wrote them, read out of the document itself so the
+ *  expectation below comes from the YAML and not from a list somebody
+ *  maintained by hand next to the code under test. */
+function authoredPanels(text: string): Record<string, unknown>[] {
+  const doc = parseYaml(text) as { spec: { panels: Record<string, unknown>[] } }
+  return doc.spec.panels
+}
+
+describe("a panel's actions, wake and on_failure reach the wire", () => {
+  // This is the shape of test that would have caught the bug. Asserting that
+  // `id`/`schema`/`owner`/`producer`/`sla_seconds`/`span` survive passes on the
+  // broken code — the dropped keys were the ones nobody had listed. So the
+  // expectation is the document's OWN key set, and the only rename allowed is
+  // the one §11b decision 3 mandates.
+  it("carries every key the document declares, not just the ones the code remembered", () => {
+    const parsed = parsePageBuffer(SENSOR_DOC)
+    expect(parsed.ok).toBe(true)
+    const body = (parsed as { ok: true; body: PageWriteBody }).body
+
+    authoredPanels(SENSOR_DOC).forEach((authored, i) => {
+      const sent = body.panels[i] as unknown as Record<string, unknown>
+      for (const key of Object.keys(authored)) {
+        if (key === "sla") {
+          expect(sent).toHaveProperty("sla_seconds")
+          continue
+        }
+        // A key the editor drops is a key the save DELETES: PATCH replaces
+        // spec.panels wholesale and reconciles the page's automations rows
+        // against what it was sent (pages_wake.go).
+        expect(sent).toHaveProperty(key)
+      }
+    })
+  })
+
+  it("rides them through verbatim, in the CLI's spelling", () => {
+    // cmd_page.go's pageWritePanelJSON is the reference: `actions`, `wake`,
+    // `on_failure`, sent as authored. The vocabulary belongs to the server —
+    // it parses `when:` against the panel's schema and resolves the crews — so
+    // a field-by-field re-encode here would be a second grammar to keep in
+    // step, and the place the two would drift.
+    const body = (parsePageBuffer(SENSOR_DOC) as { ok: true; body: PageWriteBody }).body
+    const authored = authoredPanels(SENSOR_DOC)[0]
+
+    expect(body.panels[0].wake).toEqual(authored.wake)
+    expect(body.panels[0].on_failure).toEqual(authored.on_failure)
+    expect(body.panels[0].actions).toEqual(authored.actions)
+    // A button that arrived without its routine or its confirm step is a
+    // different button.
+    const action = (body.panels[0].actions as Record<string, unknown>[])[0]
+    expect(action.routine).toBe("restart-api")
+    expect(action.confirm).toEqual({
+      title: "Restart the API?",
+      body: "In-flight requests are dropped.",
+    })
+  })
+
+  it("says so out loud when the container is the wrong kind", () => {
+    // §6: a spec the translation cannot carry must fail loudly. Dropping it
+    // silently is the failure this whole block exists to prevent.
+    const broken = SENSOR_DOC.replace(
+      ["      wake:", '        - when: any(state == "critical")'].join("\n"),
+      "      wake: every 5 minutes\n      x: ",
+    )
+    const parsed = parsePageBuffer(broken)
+    expect(parsed.ok).toBe(false)
+    expect((parsed as { ok: false; message: string }).message).toContain("wake")
+  })
+
+  it("omits them when the panel declares none — absent is not the same as empty", () => {
+    // `actions: []` says "this panel's buttons are gone". That is a thing to
+    // say, and not a thing to say by accident.
+    const body = (parsePageBuffer(SENSOR_DOC) as { ok: true; body: PageWriteBody }).body
+    expect(body.panels[1]).not.toHaveProperty("actions")
+    expect(body.panels[1]).not.toHaveProperty("wake")
+    expect(body.panels[1]).not.toHaveProperty("on_failure")
+  })
+
+  it("round-trips them out of a stored page and back, if the read path ever sends them", () => {
+    // Today `GET /api/v1/pages/{slug}` does not echo the authored half
+    // (pages_handler.go:132-149). The rendering is written to carry it anyway:
+    // the day it does, the editor round-trips it with no second change, and
+    // until then this pins that the document and the wire agree about the keys.
+    const stored: WirePage = {
+      ...FLEET,
+      panels: [
+        {
+          ...(FLEET.panels as Record<string, unknown>[])[0],
+          wake: [{ when: 'any(state == "critical")', agent: "crew/devops", writes: "incident" }],
+          on_failure: { issue: "crew/lookout" },
+          actions: [{ id: "restart-api", kind: "call", label: "Restart API", routine: "restart-api" }],
+        },
+        (FLEET.panels as Record<string, unknown>[])[1],
+      ] as WirePage["panels"],
+    }
+    const text = pageDocumentText(stored)
+    expect(text).toContain("wake:")
+    expect(text).toContain("on_failure:")
+    expect(text).toContain("actions:")
+
+    const body = (parsePageBuffer(text) as { ok: true; body: PageWriteBody }).body
+    const storedPanel = (stored.panels as Record<string, unknown>[])[0]
+    expect(body.panels[0].wake).toEqual(storedPanel.wake)
+    expect(body.panels[0].on_failure).toEqual(storedPanel.on_failure)
+    expect(body.panels[0].actions).toEqual(storedPanel.actions)
+  })
+})
+
+describe("a save that did not touch the panels does not rewrite them", () => {
+  // The data-losing save: open a page with wake gates, change the title, press
+  // Save. The panel list the editor can rebuild from a GET is a LOSSY copy of
+  // the stored one — the authored half is not echoed — so sending it back
+  // deletes every gate on the page. `pages_handler.go:672` only replaces the
+  // panels `if req.Panels != nil`, and that nil is the whole fix.
+  const body = (parsePageBuffer(pageDocumentText(FLEET)) as { ok: true; body: PageWriteBody }).body
+
+  it("omits panels entirely when only the metadata changed", () => {
+    const patch = pagePatchBody(FLEET, { ...body, name: "Flotila .202" })
+    expect(patch).not.toHaveProperty("panels")
+    expect(patch.name).toBe("Flotila .202")
+  })
+
+  it("ignores cosmetic differences — the comparison is of the wire shape", () => {
+    // Comments, key order and `1h` vs `3600s` are not edits to the grid, and a
+    // panel write nobody asked for is a page_versions row nobody asked for.
+    const reordered = pageDocumentText(FLEET)
+      .replace("  description: Stav flotily\n", "  description: Stav flotily\n  # a comment\n")
+      .replace("sla: 1h", "sla: 3600s")
+    const parsed = parsePageBuffer(reordered) as { ok: true; body: PageWriteBody }
+    expect(pagePatchBody(FLEET, parsed.body)).not.toHaveProperty("panels")
+  })
+
+  it("sends them the moment a panel actually changes", () => {
+    const changed = {
+      ...body,
+      panels: [{ ...body.panels[0], span: 6 }, body.panels[1]],
+    }
+    expect(pagePatchBody(FLEET, changed).panels).toHaveLength(2)
+    expect(panelsDifferFromStored(FLEET, changed.panels)).toBe(true)
+  })
+
+  it("sends them when there is no stored page to compare against", () => {
+    // Nothing can be proven, so the panel list is sent. Over-sending is the
+    // safe direction to be wrong in; under-sending drops an edit.
+    expect(pagePatchBody(null, body).panels).toHaveLength(2)
+  })
+})
+
 describe("the starter document", () => {
   it("is a Page, and every field the gate requires is visibly a placeholder", () => {
     const parsed = parsePageBuffer(newPageTemplate("crew/lookout"))
@@ -445,6 +648,48 @@ describe("<PageEditor>", () => {
     await waitFor(() => expect(calls.length).toBe(2))
     expect((calls[1].body as PageWriteBody).slug).toBe("fleet-202")
     expect((calls[1].body as PageWriteBody).panels[0]).not.toHaveProperty("sla_seconds")
+  })
+
+  it("renames a page without disarming it", async () => {
+    // The reported bug, end to end: open a page, change the title, press Save.
+    // The PATCH must carry the new name and NOT a panel list — the panels the
+    // editor could rebuild from a GET are missing their wake gates, their
+    // actions and their on_failure, and the handler reconciles the page's
+    // automations rows against whatever panel list it is sent.
+    const renamed = pageDocumentText(FLEET).replace("Flotila .201", "Flotila .202")
+    const { calls } = renderEditor({ mode: "edit", page: FLEET }, () => okJSON({ slug: "fleet-201" }))
+    act(() => emitDocChange!(renamed))
+
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(calls.length).toBe(1))
+
+    const body = calls[0].body as PageWriteBody
+    expect(calls[0].method).toBe("PATCH")
+    expect(body.name).toBe("Flotila .202")
+    expect(body).not.toHaveProperty("panels")
+    // And nothing warns, because nothing is at risk.
+    expect(screen.queryByTestId("page-editor-panels-rewritten")).toBeNull()
+  })
+
+  it("says what a panel edit costs, and still sends it", async () => {
+    // Unlike a sealed panel there is no evidence to refuse on: the read path
+    // sends no `wake` / `actions` / `on_failure`, so the editor cannot tell a
+    // page that has them from one that does not, and a block would embargo
+    // every grid edit of every page over a risk most pages do not carry. So:
+    // say it, do not swallow it, and do not block it.
+    const widened = pageDocumentText(FLEET).replace("span: 8", "span: 6")
+    const { calls } = renderEditor({ mode: "edit", page: FLEET }, () => okJSON({ slug: "fleet-201" }))
+    act(() => emitDocChange!(widened))
+
+    const warning = screen.getByTestId("page-editor-panels-rewritten")
+    expect(warning.textContent).toContain("replaces the panel list")
+    const save = screen.getByRole("button", { name: /^save$/i })
+    expect(save).not.toBeDisabled()
+
+    fireEvent.click(save)
+    await waitFor(() => expect(calls.length).toBe(1))
+    const body = calls[0].body as PageWriteBody
+    expect(body.panels[0].span).toBe(6)
   })
 
   it("does not rebuild the editor while you type", () => {

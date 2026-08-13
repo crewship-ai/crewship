@@ -462,6 +462,31 @@ crewship page grants fleet-201
 
 See the [Page commands](/cli/page) reference for the full flag surface.
 
+The same ACL is editable in the browser: open a page and press **Settings**
+in the bar beside **Edit**. The Access card lists every grant with the human
+who issued it and the server's use-time verdict — a grant whose issuer has
+since left the workspace, or lost ADMIN, is shown **inert** with the reason
+rather than hidden, because "the grant you added is doing nothing" is exactly
+what a page owner needs to be told. Revoking asks first.
+
+<Note>
+`read` is accepted, stored and journalled, and today it decides nothing:
+page visibility is workspace membership and panel visibility is crew
+membership. The UI says so next to every `read` grant rather than drawing it
+as access. Use `produce` to let something push, and `write` to let it edit
+the spec.
+</Note>
+
+### What a page is, and what changed it
+
+The same Settings surface answers the other half: the page's owner (a user or
+a crew), its slug, description and panel count, when it was created and when
+its spec last changed — and the retained version history, each version
+credited to the human or agent that saved it. Any version can be restored
+from there, with the same confirmation `crewship page rollback` deserves: a
+panel a rollback brings back arrives with no data, because old payloads are
+never resurrected and shown as current.
+
 ## Public pages
 
 A page can be published for someone with no Crewship account at all — an

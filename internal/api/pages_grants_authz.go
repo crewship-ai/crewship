@@ -115,7 +115,22 @@ type pageGrantRecord struct {
 // inertReason says, in a sentence a person can act on, why a stored grant is
 // currently worth nothing. An ACL row that silently does nothing is worse than
 // no row: somebody believes access was granted.
+//
+// The `read` case (issue C5, §7.1b's verb table: "`read` — may see the page
+// and its panels") is checked FIRST, ahead of the liveness verdict, and it is
+// unconditional — a `read` grant is inert even when its issuer is fully live.
+// That is deliberate, not an oversight: liveness answers "could this human
+// still issue this grant right now", and for `read` the honest answer to a
+// different question — "does issuing it change anything" — is no, in THIS
+// build, regardless of who issued it or how current their standing is. See
+// the long comment below for why, and what would have to change to make it
+// stop being true.
 func (g pageGrantRecord) inertReason() string {
+	if g.Level == pageGrantRead {
+		return "read grants are accepted, stored and journalled, but no authorization " +
+			"decision in this build consults them — see the comment on pageReadGrantOpenDecision " +
+			"in this file for the two ways to resolve that and what each would touch"
+	}
 	if g.Live {
 		return ""
 	}
@@ -124,6 +139,93 @@ func (g pageGrantRecord) inertReason() string {
 	}
 	return "the human who issued it no longer owns or administers this page"
 }
+
+// pageReadGrantOpenDecision is not a function that runs; it is where the
+// open question C5 raised lives, so it has one findable name instead of being
+// scattered across commit messages. Nothing below this comment executes.
+//
+// THE GAP: §7.1b's verb table states plainly that `read` "may see the page
+// and its panels". validPageGrantLevel (above) accepts it, pages_grants.go
+// stores it, journals it, and lists it back as Live=true — every surface an
+// administrator looks at says the grant succeeded. But grantsFor (this file)
+// is consulted by exactly two callers — mayEditSpec's `write` check and
+// mayProduce's `produce` check (pages_authz.go) — and neither one, nor
+// canSeePanel, nor PageHandler.List/Get (pages_handler.go), nor anything else
+// in this package, ever asks "does a live `read` grant cover this caller".
+// Page reachability today is decided entirely by workspace membership
+// (pages_authz.go's header comment pins this reading and explains why: §7
+// states the PANEL rule precisely — panel.owner_crew_id is the ACL — and
+// leaves the PAGE rule implicit, and "every member reaches the page's
+// structure" is the reading that makes §7.1b's "sealed placeholder for a
+// panel it cannot read" sentence make sense). Under that reading a `read`
+// grant has nothing left to widen: everyone already in the workspace can
+// already reach the page. So the grant is accepted into a schema that has no
+// use for it — which is worse than rejecting it, because a human who issued
+// one believes they changed something.
+//
+// This file does NOT resolve the gap by picking a behaviour. §7 never states
+// who may reach a PAGE (only a panel), so both readings below are consistent
+// with the PRD as written, and they behave very differently. Whoever owns
+// docs/prd/pages.md §7.1 decides; this comment exists so that decision is
+// between two described options, not a re-derivation from scratch.
+//
+// ── Reading A: keep the status quo (workspace membership reaches the page,
+//    exactly as pages_authz.go's header comment already documents; `read`
+//    grants exist for a subject that isn't a colleague — §7.3's public
+//    token, once it exists) ──
+//
+//   Changes required: none. This is what the code already does. The only
+//   change under this reading is the one this file makes: inertReason()
+//   above tells the truth about it, so the grants-listing endpoint
+//   (pages_grants.go GET, which already surfaces InertReason for the
+//   liveness case) shows an administrator the same honesty for `read` that
+//   it already shows for a revoked issuer, instead of reporting Live=true
+//   for a grant that changes no decision.
+//
+// ── Reading B: a page is reachable only by (1) its owner — isPageOwner,
+//    pages_authz.go, (2) a member of any crew that owns one of its panels —
+//    i.e. viewer.Crews intersects the page's panels' owner_crew_id set, and
+//    (3) a caller named by a live `read` grant — grantsFor, this file ──
+//
+//   Changes required, all in this package:
+//
+//     - pages_authz.go gains a new function, e.g. canSeePage(ctx, wsID,
+//       userID, rec, viewer) bool, mirroring canSeePanel's shape: owner OR
+//       any crew overlap with the page's panels OR a live read grant via
+//       grantsFor. canRole(role, "manage") still short-circuits to true, for
+//       the same reason canSeePanel's ADMIN carve-out exists — effectiveRole
+//       already takes the max of workspace and crew role, so denying ADMIN
+//       here would only make two paths disagree.
+//
+//     - PageHandler.List (pages_handler.go) currently lists every page in
+//       `WHERE p.workspace_id = ?` unconditionally. It would need to load
+//       each page's panels' owner_crew_id set (or join it in SQL) before
+//       filtering, and drop the ones where canSeePage is false — a page a
+//       caller cannot reach must not even appear as a locked row, the same
+//       "sealed rather than visible-but-denied" posture §11b decision 14
+//       already takes for panels.
+//
+//     - PageHandler.Get (pages_handler.go) would call canSeePage right after
+//       loadPage and, on false, return 404 rather than 403 — matching how a
+//       page a caller cannot reach should look identical to one that does
+//       not exist, so the endpoint is not an existence oracle for pages
+//       outside the caller's reach.
+//
+//     - Any other call site that loads a page for a viewer-scoped response —
+//       at minimum pages_versions.go's history endpoints and
+//       pages_wake.go's wake-gate listing — would need the same gate. Each
+//       one currently trusts "loaded within this workspace" as sufficient;
+//       Reading B removes that assumption everywhere, not just in List/Get.
+//
+//     - grantsFor itself needs no change — it already loads live `read`
+//       grants correctly. Reading B is entirely about finally calling it
+//       from a page-reachability check, not about how it resolves grants.
+//
+//   Reading B is a strictly larger and more invasive change than Reading A,
+//   and it is the one that makes the currently-dead `read` level start doing
+//   something. It is also the one most likely to change who can see what for
+//   existing workspaces the moment it ships, which is exactly why it should
+//   not be picked implicitly inside a fix for a conformance audit.
 
 // grant narrows the record to what the permission checks read.
 func (g pageGrantRecord) grant() pageGrant {

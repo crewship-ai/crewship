@@ -37,6 +37,9 @@ workspace from your current context the same way it does for
 | `grant <slug> --user\|--crew\|--agent <subject> --level <level>` | Grant read, produce, or write on a page |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
 | `grants <slug>` | List a page's grants |
+| `webhook create <slug> --panel <id>` | Mint a URL that lets something outside the workspace write one panel |
+| `webhook list <slug>` | List a page's webhook tokens and say which still work |
+| `webhook revoke <slug> --id <id> --yes` | Withdraw one webhook token |
 | `export <slug>` | Export a page's spec as a portable bundle |
 | `import <bundle> --slug <slug> --bind <crew>=<crew>` | Import a bundle, binding its declared references |
 | `rollback <slug> --to <seq>` | Roll back to a previous version |
@@ -561,6 +564,72 @@ for it survive in the payload ring. Showing an old payload as current after a
 rollback is exactly the dishonesty the [freshness
 contract](/guides/pages#the-freshness-contract) exists to prevent. Up to the
 last 50 versions are kept.
+
+---
+
+## `crewship page webhook`
+
+Let a producer that **cannot run this binary** write one panel: a cron on
+someone else's box, a Zapier step, a PLC gateway, a GitHub Action. Anything
+that can run the CLI should use [`page set`](#crewship-page-set-slug-panel)
+instead — one write path, provenance attached server-side, and no credential
+to leak.
+
+```bash
+crewship page webhook create uzaverka --panel cron --name "PLC hall 2"
+crewship page webhook list uzaverka
+crewship page webhook revoke uzaverka --id pgwh_... --yes
+```
+
+`create` prints the URL **once** and nothing can show it again: the token is
+stored as a SHA-256 digest, the same at-rest shape [pipeline
+webhooks](/cli/webhook) use. Copy it into the sender's secret store, or mint a
+second one — several tokens per panel is the intended shape, so revoking the
+PLC's does not break the GitHub Action's.
+
+The sender POSTs the panel's payload as the body, with no envelope around it:
+
+```bash
+curl -X POST https://crewship.example.com/api/v1/page-webhooks/pgw_... \
+     -H 'Content-Type: application/json' \
+     -d '{"items":[{"name":"linka-2","state":"ok","label":"412 ks/h"}]}'
+```
+
+A producer that ran and failed says so on the query string —
+`?state=failed` — with whatever payload it has. `fresh` and `stale` are the
+server's arithmetic and are not a sender's to claim, and neither is
+`produced_at`: provenance is attached server-side, so a body carrying a
+timestamp or a producer name is refused rather than believed.
+
+### What the token can and cannot do
+
+A webhook is a `produce` grant in a different coat, and it obeys every rule
+that grant does.
+
+| | |
+|---|---|
+| **Issued only by a human** | An agent may build the page and may not mint a credential that writes it from outside. |
+| **Bound to one panel** | Not one page — one panel. The panel is not on the wire, so there is no field through which a holder could name another one: a leaked token writes that panel and nothing else. |
+| **Never more than its issuer** | The token carries no authority of its own. Every request re-derives what the human who issued it may do *right now*, so it stops working the moment they leave the workspace, leave the crew, or lose the grant. Nobody has to remember the token exists. |
+| **Rate limited per panel** | The same push limits as every other write path, including the minimum interval enforced at the write. Minting a second token does not buy a second allowance. |
+| **Revocable, and journalled** | Revocation takes effect on the sender's next request. Every write is recorded with the token id as the actor, so an operator can tell which token to revoke. |
+
+A token whose panel is deleted from the page spec dies with it, the same way
+the panel's payload ring does.
+
+### Flags
+
+| Flag | Command | Purpose |
+|---|---|---|
+| `--panel` | `create` | The panel this token writes. Required — there is no page-wide token. |
+| `--name` | `create` | A label for the listing ("PLC hall 2"), so tokens can be told apart when one has to be revoked. |
+| `--id` | `revoke` | The token to withdraw, from `webhook list`. |
+| `--yes` | `revoke` | Skip the confirmation prompt. |
+
+`webhook list` never shows a token value — the column holds a digest, so there
+is nothing to show. A revoked token stays in the listing on purpose: "was it
+used after we pulled it" is the question an incident asks, and a deleted row
+cannot answer it.
 
 ---
 

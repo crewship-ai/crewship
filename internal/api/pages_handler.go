@@ -440,7 +440,11 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), rec, panels, viewer))
+	// A caller who may edit the spec gets the authored half back, so the
+	// document the editor renders is the whole page rather than a copy that
+	// loses its gates on save.
+	authored := h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec)
+	writeJSON(w, http.StatusOK, h.pageDocumentFor(r.Context(), rec, panels, viewer, authored))
 }
 
 // ── 3. Create — POST /api/v1/pages ─────────────────────────────────────────
@@ -1043,6 +1047,25 @@ func pushReference(p *panelRecord) string {
 // 14). A nil viewer sees everything and is only ever passed on the create and
 // update paths, where the caller has just authored the spec.
 func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer) pageWire {
+	return h.pageDocumentFor(ctx, rec, panels, viewer, false)
+}
+
+// pageDocumentFor is pageDocument with one extra decision: whether to echo the
+// AUTHORED half of each panel — actions, wake gates and on_failure.
+//
+// The original design withheld them from every read so that spec_json had one
+// reader and a sealed panel could not leak its buttons. That was right about
+// the leak and wrong about the consequence: the in-app editor renders its YAML
+// from this document, so a document without them is a lossy copy of the page,
+// and saving that copy back deleted the gates and their compiled automation
+// rows. A page could be disarmed by renaming it.
+//
+// So the withholding narrows rather than disappears. `authored` is true only
+// for a caller who may already edit the spec — who can therefore read the
+// whole of it through export anyway — and a sealed panel never reaches this
+// branch, because it was replaced by the placeholder above. A reader who
+// cannot edit still sees exactly what they saw before.
+func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
 		ID:          rec.ID,
 		Slug:        rec.Slug,
@@ -1063,9 +1086,37 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 			})
 			continue
 		}
-		out.Panels = append(out.Panels, h.panelWire(p))
+		wire := h.panelWire(p)
+		if authored {
+			h.attachAuthoredHalf(ctx, rec.ID, p.PanelID, &wire)
+		}
+		out.Panels = append(out.Panels, wire)
 	}
 	return out
+}
+
+// attachAuthoredHalf copies a panel's declared actions, wake gates and
+// on_failure onto the wire.
+//
+// It reads through storedPanelSpec, which is the one reader of spec_json, so
+// "what the author saved" still has a single implementation and this cannot
+// drift from what a click is resolved against.
+//
+// A read failure is not fatal and deliberately so: the panel's DATA is already
+// on the wire and correct, and refusing the whole page because its authored
+// half could not be re-read would turn a lossy document into no document.
+// The editor's own banner covers the remaining case.
+func (h *PageHandler) attachAuthoredHalf(ctx context.Context, pageID, panelID string, wire *pagePanelWire) {
+	spec, err := h.storedPanelSpec(ctx, pageID, panelID)
+	if err != nil || spec == nil {
+		if err != nil && h.logger != nil {
+			h.logger.Warn("pages: authored half not echoed", "panel", panelID, "error", err)
+		}
+		return
+	}
+	wire.Actions = spec.Actions
+	wire.Wake = spec.Wake
+	wire.OnFailure = spec.OnFailure
 }
 
 // ownerRef renders the page's owner as `user/<id>` or `crew/<slug>` — exactly

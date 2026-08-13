@@ -118,10 +118,11 @@ Each gate compiles, at save time, to a row in `automations` named
 spec owns them, every save rewrites them, and deleting the page deletes
 them. Editing one directly does not stick.
 
-Neither `wake` nor `on_failure` is echoed by the read path, so — exactly
-like `public` — the plan cannot diff them. They are sent on every create
-and update, so a change to a gate lands as soon as anything else on the
-page changes; changing only a gate and nothing else reports no drift.
+Neither `wake` nor `on_failure` is echoed by the read path — nor is
+`actions` — so, exactly like `public`, the plan cannot diff any of them.
+All four are sent on every create and update, so a change to a gate or a
+button lands as soon as anything else on the page changes; changing only
+a gate and nothing else reports no drift.
 
 ## Examples
 
@@ -226,6 +227,14 @@ context, following `saved-views` and `missions`.
 | `spec.panels[].span` | `panels[].span` | Default applied client-side. |
 | `spec.panels[].public` | `panels[].public` | Sent when true. See the caveat under [Drift detection](#drift-detection). |
 | `spec.panels[].actions` | `panels[].actions` | Sent verbatim; the server stores them in the page's spec and resolves every click against that copy. |
+| `spec.panels[].wake` | `panels[].wake` | Sent verbatim; the server parses `when:` against the panel's schema and compiles each gate to an `automations` row. |
+| `spec.panels[].on_failure` | `panels[].on_failure` | Sent verbatim. |
+
+Every panel key in the document reaches the wire — the only rename is
+`sla` → `sla_seconds`. That matters more than it looks: `PATCH` replaces
+`spec.panels` wholesale and reconciles the page's `automations` rows
+against the panel list it was sent, so a key the applier drops is not a
+key the server ignores, it is a gate or a button the apply DELETES.
 
 Endpoints:
 

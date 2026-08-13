@@ -1,0 +1,60 @@
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Flotila
+  slug: flotila
+  description: Tři workstationy na crewship-dev, jak je vidí skript uvnitř té mašiny.
+spec:
+  panels:
+    # status.v1 — the question a human actually arrives with. It is first
+    # because "is it working" outranks every number on the page.
+    - id: sluzby
+      schema: status.v1
+      title: Jede to?
+      owner: crew/ops
+      producer: script/fleet-watch.sh
+      sla: 90s
+      span: 8
+
+    # metric.v1 — one number with a delta and a sparkline. delta_good says
+    # which direction is the good one: free memory going UP is good, and
+    # without this the arrow renders muted rather than guessing (§11b.9).
+    - id: pamet
+      schema: metric.v1
+      title: Volná paměť
+      owner: crew/ops
+      producer: script/fleet-watch.sh
+      sla: 90s
+      span: 4
+
+    # series.v1 — one unit for the whole panel, by construction. Two units
+    # would be two panels (§3).
+    - id: disk
+      schema: series.v1
+      title: Místo na disku podle klonu
+      owner: crew/engineering
+      producer: script/fleet-watch.sh
+      sla: 5m
+      span: 8
+
+    # table.v1 — keyed rows matching the declared columns. A null cell is
+    # "no basis to compute" and renders as an em dash; an empty string is
+    # measured data and renders empty (§9b.4).
+    - id: klony
+      schema: table.v1
+      title: Co kde běží
+      owner: crew/engineering
+      producer: script/fleet-watch.sh
+      sla: 5m
+      span: 4
+
+    # narrative.v1 — paragraphs and lists only. No images, no URLs, no
+    # markup: §8 rules 1-3 keep them out of the schema rather than
+    # sanitising them out of the payload.
+    - id: rozbor
+      schema: narrative.v1
+      title: Co s tím
+      owner: crew/ops
+      producer: script/fleet-watch.sh
+      sla: 5m
+      span: 12

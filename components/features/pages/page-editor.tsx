@@ -15,6 +15,14 @@
  *     document `crewship page create --file` would accept — `apiVersion` /
  *     `kind` / `metadata` / `spec`, nothing added and nothing renamed. An
  *     editor-only key would make the third door open onto a different room.
+ *     The corollary is the one this file got wrong once and must not again: a
+ *     key the document HAS is a key the wire body carries. `actions:`, `wake:`
+ *     and `on_failure:` are the sensor half of a panel (§5, §8b.1, §4 rule 4);
+ *     `PATCH` replaces `spec.panels` wholesale and reconciles the page's
+ *     `automations` rows against what it was sent, so a field this translation
+ *     drops is a gate the save DELETES. See `pageWritePanel` — every writable
+ *     key is carried, and the pass-through half is carried verbatim, exactly as
+ *     `cmd_page.go`'s `pageWritePanelJSON` carries it.
  *
  *  2. **The document shape is not the wire shape.** `POST /api/v1/pages` takes
  *     the FLAT `{slug, name, description, panels, owner}`
@@ -64,6 +72,22 @@ export interface PageWritePanel {
   sla_seconds?: number
   span?: number
   public?: boolean
+  /**
+   * The pass-through half — §8b.1 buttons, §5 wake gates, §4 rule 4's failure
+   * route. Carried VERBATIM and typed loosely on purpose, the way
+   * `cmd_page.go`'s `pageWritePanelJSON` carries `[]pages.PanelAction` without
+   * looking inside it: the vocabulary is the server's, it validates `when:`
+   * against the panel's schema and resolves the crews these name, and a second
+   * copy of those shapes here would be a second grammar to keep in step.
+   *
+   * They are not decoration. `PATCH /api/v1/pages/{slug}` replaces the panel
+   * set wholesale and reconciles `automations` in the same transaction, so a
+   * panel sent without its gates is a panel whose gates are deleted — silently,
+   * which §6 says is worse than failing.
+   */
+  actions?: unknown[]
+  wake?: unknown[]
+  on_failure?: Record<string, unknown>
 }
 
 /** The flat request body (`pageWriteRequest`). */
@@ -80,6 +104,20 @@ export interface PageWriteBody {
    *  is owned by its creator, exactly as one authored through the CLI is. */
   owner?: string
 }
+
+/**
+ * The `PATCH` body, which is the write body with `panels` OPTIONAL.
+ *
+ * `pageWriteRequest.Panels` is a nil-able slice and the handler only replaces
+ * the stored panel set `if req.Panels != nil` (`pages_handler.go:672-678`).
+ * That is the difference between "these are the panels" and "I did not touch
+ * the panels", and it is the only thing that makes a metadata-only save from
+ * this editor lossless: the read path does not echo `actions` / `wake` /
+ * `on_failure` (`pages_handler.go:132-149` says so in as many words), so a
+ * panel list rebuilt from a GET cannot restate them, and sending that list back
+ * would delete every gate on the page. Renaming a page must not disarm it.
+ */
+export type PagePatchBody = Omit<PageWriteBody, "panels"> & { panels?: PageWritePanel[] }
 
 const UNITS: Record<string, number> = {
   ns: 1e-9,
@@ -205,6 +243,35 @@ export function sealedPanelCount(page: WirePage | null | undefined): number {
   return page.panels.filter(isSealed).length
 }
 
+/** A wire panel, plus the two authored keys `WirePanel` has no field for
+ *  because today's read path never sends them. Read defensively rather than
+ *  assumed absent: the day `GET /api/v1/pages/{slug}` echoes the authored half
+ *  to a caller who may edit the spec, this editor round-trips it without a
+ *  second change, and until then these are simply undefined. */
+type WirePanelAuthored = WirePanel & { wake?: unknown; on_failure?: unknown }
+
+/** The authored keys that ride through this file verbatim, in the order
+ *  `pageWritePanelJSON` declares them. Enumerated ONCE: every place that has to
+ *  know the list reads it from here, so a fourth key is one edit and not a
+ *  scavenger hunt through the two translations. */
+const PASSTHROUGH_KEYS = ["actions", "wake", "on_failure"] as const
+type PassthroughKey = (typeof PASSTHROUGH_KEYS)[number]
+
+/** `on_failure` is a mapping; the other two are lists. This is the ONLY thing
+ *  either translation checks about them — the vocabulary inside is the
+ *  server's, and re-deciding here what a valid `when:` is would be a second
+ *  grammar that can disagree with the one that matters (§10b.1). */
+const PASSTHROUGH_IS_LIST: Record<PassthroughKey, boolean> = {
+  actions: true,
+  wake: true,
+  on_failure: false,
+}
+
+function passthroughShapeOK(key: PassthroughKey, value: unknown): boolean {
+  if (value == null || typeof value !== "object") return false
+  return PASSTHROUGH_IS_LIST[key] === Array.isArray(value)
+}
+
 /**
  * A stored page, rendered as the document a human edits.
  *
@@ -235,6 +302,13 @@ export function pageDocumentText(page: WirePage): string {
         out.sla = formatSlaSeconds(sla ?? 0)
         if (typeof p.span === "number" && p.span > 0) out.span = p.span
         if ((p as { public?: boolean }).public) out.public = true
+        // The authored half, when the wire carried it. Rendered from the same
+        // list the parser reads, so the document and the request body can never
+        // know about different keys.
+        for (const key of PASSTHROUGH_KEYS) {
+          const value = (p as WirePanelAuthored as Record<string, unknown>)[key]
+          if (passthroughShapeOK(key, value)) out[key] = value
+        }
         return out
       }),
     },
@@ -337,6 +411,28 @@ export function parsePageBuffer(text: string): PageBufferResult {
     if (sla !== null) panel.sla_seconds = sla
     if (typeof p.span === "number" && Number.isFinite(p.span)) panel.span = Math.trunc(p.span)
     if (p.public === true) panel.public = true
+    // The sensor half and the buttons, forwarded verbatim (§5, §8b.1, §4
+    // rule 4). Dropping them here is what made a title edit delete a page's
+    // wake gates: the server replaces `spec.panels` with what it is sent and
+    // reconciles `automations` against the result, so "not mentioned" reads as
+    // "removed". The only thing checked is the container kind, because a
+    // `wake:` that is a string cannot be translated at all, and §6 asks for a
+    // loud failure rather than a quiet one.
+    for (const key of PASSTHROUGH_KEYS) {
+      const value = p[key]
+      if (value == null) continue
+      if (!passthroughShapeOK(key, value)) {
+        return {
+          ok: false,
+          message: PASSTHROUGH_IS_LIST[key]
+            ? `spec.panels[${i}].${key} is a list`
+            : `spec.panels[${i}].${key} is a mapping`,
+        }
+      }
+      // Assigned, not re-encoded: the vocabulary belongs to the server, and a
+      // field-by-field copy here would be the place the two drift.
+      ;(panel as unknown as Record<string, unknown>)[key] = value
+    }
     panels.push(panel)
   }
 
@@ -349,6 +445,63 @@ export function parsePageBuffer(text: string): PageBufferResult {
       panels,
     },
   }
+}
+
+// ── "I did not touch the panels" ───────────────────────────────────────────
+
+/** The stored page's panels, in the wire shape a save would send them in.
+ *  Null when there is no stored page, or when the document rendered from it
+ *  does not parse — in which case nothing can be proven and the panel list is
+ *  sent, which is the status quo and the safe direction to be wrong in. */
+function storedPanelsOf(page: WirePage | null | undefined): PageWritePanel[] | null {
+  if (!page) return null
+  const parsed = parsePageBuffer(pageDocumentText(page))
+  return parsed.ok ? parsed.body.panels : null
+}
+
+/**
+ * Would this save change the panel list at all?
+ *
+ * Compared as JSON, in the WIRE shape, because that is the only comparison that
+ * answers the question being asked — "is the array I am about to send the array
+ * the server already has?". Both sides come out of `parsePageBuffer`, so
+ * cosmetic differences (key order, quoting, comments, `1h` vs `3600s`) are
+ * normalised away before the comparison and do not count as a change.
+ *
+ * The failure direction matters: this can only ever report a change that is not
+ * one, never miss one. A false "changed" costs a redundant panel write; a false
+ * "unchanged" would skip a write the author asked for.
+ */
+export function panelsDifferFromStored(
+  page: WirePage | null | undefined,
+  panels: PageWritePanel[],
+): boolean {
+  const stored = storedPanelsOf(page)
+  if (stored === null) return true
+  return JSON.stringify(stored) !== JSON.stringify(panels)
+}
+
+/**
+ * The body a `PATCH` should carry — the parsed buffer, minus `panels` when the
+ * buffer's panels are the stored ones.
+ *
+ * This is the fix for the save that renamed a page and disarmed it. The editor
+ * cannot restate a stored page's `wake:`, `actions:` or `on_failure:` — the
+ * read path does not send them (`pages_handler.go:132-149`) — so the panel list
+ * it can build is a LOSSY copy of the stored one. Sending a lossy copy of
+ * something nobody edited is pure downside: `pages_handler.go:672-678` skips
+ * the replacement entirely when `panels` is absent, and the stored spec, gates
+ * and all, is what gets re-validated and re-versioned.
+ *
+ * When the panels DID change the list is sent, because that is what was asked
+ * for — and the editor says out loud what that costs (see the banner below).
+ */
+export function pagePatchBody(page: WirePage | null | undefined, body: PageWriteBody): PagePatchBody {
+  if (!panelsDifferFromStored(page, body.panels)) {
+    const { panels: _panels, ...rest } = body
+    return rest
+  }
+  return body
 }
 
 // ── Inline diagnostics (additive, never a gate) ────────────────────────────
@@ -485,7 +638,9 @@ interface SaveVariables {
    *  edited and never the one in the buffer. Renaming through a PATCH is the
    *  server's refusal to make, and it makes it well. */
   slug: string
-  body: PageWriteBody
+  /** `PageWriteBody` on create (`panels` is the page); `PagePatchBody` on
+   *  edit, where an untouched panel list is omitted rather than resent. */
+  body: PagePatchBody
 }
 
 export function PageEditor({
@@ -532,6 +687,13 @@ export function PageEditor({
   const [refusal, setRefusal] = React.useState<string | null>(null)
 
   const validation = React.useMemo(() => parsePageBuffer(liveText), [liveText])
+
+  /** True when this save would REWRITE the stored panel list rather than leave
+   *  it alone. Only then is the authored half the editor cannot see at risk. */
+  const panelsRewritten = React.useMemo(
+    () => mode === "edit" && validation.ok && panelsDifferFromStored(page, validation.body.panels),
+    [mode, page, validation],
+  )
   const extraExtensions = React.useMemo(() => pageEditorExtensions(), [])
   const warnings = React.useMemo(() => pageDiagnostics(liveText), [liveText])
 
@@ -628,7 +790,14 @@ export function PageEditor({
     // §10b.1: every save is a version, and the server writes one on PATCH.
     // A delete-and-recreate would produce a page with no history and a new id,
     // and would drop every grant on it.
-    save.mutate({ method: "PATCH", slug: page?.slug ?? parsed.body.slug, body: parsed.body })
+    //
+    // `pagePatchBody` drops `panels` when nothing in the grid moved, so
+    // renaming a page cannot delete its wake gates.
+    save.mutate({
+      method: "PATCH",
+      slug: page?.slug ?? parsed.body.slug,
+      body: pagePatchBody(page, parsed.body),
+    })
   }
 
   const title = mode === "create" ? "New page" : `Edit ${page?.slug ?? "page"}`
@@ -705,6 +874,39 @@ export function PageEditor({
                 {sealed === 1 ? "is" : "are"} owned by a crew you are not in. Saving from here
                 would delete {sealed === 1 ? "it" : "them"}, so this page is editable only by
                 someone who can see all of it.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* The half of §11b decision 14's problem that has no placeholder to
+            show for it. A panel's `actions:`, `wake:` and `on_failure:` are
+            authored here but never echoed by the read path
+            (pages_handler.go:132-149), so this document cannot restate them and
+            cannot even tell you which panels have them. A save that leaves the
+            panel list alone is lossless — pagePatchBody omits it — but one that
+            rewrites it deletes whatever this buffer does not say, including the
+            automations rows a wake gate compiles to. Said out loud rather than
+            blocked: unlike a sealed panel, there is no evidence here to block
+            ON, and a rule that fired on every grid edit of every page would
+            embargo in-app editing over a risk most pages do not carry. */}
+        {panelsRewritten && sealed === 0 && (
+          <div
+            data-testid="page-editor-panels-rewritten"
+            role="status"
+            className="shrink-0 border-b border-warn/30 bg-warn/[0.06] px-4 py-2.5 text-[13px] text-warn"
+          >
+            <div className="flex items-start gap-2">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                This save replaces the panel list. A panel&apos;s{" "}
+                <span className="font-mono text-[12px]">actions</span>,{" "}
+                <span className="font-mono text-[12px]">wake</span> and{" "}
+                <span className="font-mono text-[12px]">on_failure</span> are not sent back by the
+                server when a page is read, so they are missing from this document unless you write
+                them — and anything this buffer does not restate is deleted, along with the wake
+                rules it compiled to. Editing only the name or description leaves the panels, and
+                their gates, untouched.
               </span>
             </div>
           </div>

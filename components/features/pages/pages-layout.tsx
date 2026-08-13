@@ -26,7 +26,7 @@
 
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { FilePlus2, Pencil } from "lucide-react"
+import { FilePlus2, Pencil, SlidersHorizontal } from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
@@ -47,6 +47,7 @@ import { PagesRail } from "@/components/features/pages/pages-rail"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
 import { PageEditor, sealedPanelCount, type PageEditorMode } from "@/components/features/pages/page-editor"
+import { PageSettings } from "@/components/features/pages/page-settings"
 
 export interface PagesLayoutProps {
   workspaceId: string
@@ -115,6 +116,18 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const sealed = sealedPanelCount(detail.raw)
   const canEdit = Boolean(slug) && detail.page != null && sealed === 0
 
+  // ── Settings (§7.1b, §10b.1) ─────────────────────────────────────────────
+  // Who reaches this page, and what this page is. It sits beside Edit rather
+  // than inside it: the editor owns one document, and grants and versions are
+  // rows in two other tables no document can express. Unlike Edit it is NOT
+  // gated on `sealed` — reading an ACL and rolling back a spec are exactly the
+  // things an owner of a partially-sealed page still needs, and the server
+  // gates both itself (§7.1 rule 3, and the version route's own refusal).
+  const [settingsOpen, setSettingsOpen] = React.useState(false)
+  // A slug change means a different page; a settings sheet left open over it
+  // would be showing another page's ACL.
+  React.useEffect(() => setSettingsOpen(false), [slug])
+
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
       <SubBar
@@ -124,6 +137,16 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         ariaLabel="Pages"
         actions={
           <>
+            {slug && (
+              <SubBarSecondary
+                icon={SlidersHorizontal}
+                onClick={() => setSettingsOpen(true)}
+                disabled={detail.page == null}
+                title="Who reaches this page, and what it is"
+              >
+                Settings
+              </SubBarSecondary>
+            )}
             {slug && (
               <SubBarSecondary
                 icon={Pencil}
@@ -206,6 +229,15 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           )}
         </div>
       </div>
+
+      {settingsOpen && slug && (
+        <PageSettings
+          workspaceId={workspaceId}
+          slug={slug}
+          page={detail.raw}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       {editor && (
         <PageEditor

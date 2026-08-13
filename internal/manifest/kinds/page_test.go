@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -763,6 +764,279 @@ func TestPageFormatSLA(t *testing.T) {
 			t.Errorf("pageFormatSLA(%d) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+// ── The authored half survives the write path ──────────────────────────────
+
+// pageSensorYAML is a page that is a SENSOR and an OPERATOR console, not
+// just a display: the status panel carries a wake gate (§5), a failure
+// route (§4 rule 4) and two buttons (§8b.1), and it is written at the
+// v1 feature level so `pages.ParseDocument` — KnownFields(true) — accepts
+// every byte of it.
+const pageSensorYAML = `
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Flotila .201
+  slug: fleet-201
+spec:
+  panels:
+    - id: sluzby
+      schema: status.v1
+      title: Jede to?
+      owner: crew/lookout
+      producer: script/watch-services.sh
+      sla: 30s
+      span: 8
+      public: true
+      wake:
+        - when: any(state == "critical")
+          for: 5m
+          agent: crew/devops
+          writes: incident
+      on_failure:
+        issue: crew/lookout
+      actions:
+        - id: restart-api
+          kind: call
+          label: Restart API
+          style: danger
+          routine: watch
+          params:
+            cluster: prod
+          confirm:
+            title: Restart the API?
+            body: In-flight requests are dropped.
+          inputs:
+            - name: reason
+              type: text
+              required: true
+        - id: collapse
+          kind: toggle
+          label: Collapse
+          target: [incident]
+    - id: incident
+      schema: narrative.v1
+      owner: crew/devops
+      producer: routine/incident-rozbor
+      sla: 1h
+      span: 12
+`
+
+// pageSensorDoc parses pageSensorYAML through BOTH doors and fails the
+// test if either refuses it. `crewship apply` decodes into PageDocument;
+// `crewship page create --file` decodes into pages.Document. §6 says
+// they are the same document, so a fixture only one of them accepts
+// would be testing a shape nobody can author.
+func pageSensorDoc(t *testing.T) *PageDocument {
+	t.Helper()
+	if _, err := pages.ParseDocument([]byte(pageSensorYAML)); err != nil {
+		t.Fatalf("pages.ParseDocument refused the fixture: %v", err)
+	}
+	var d PageDocument
+	if err := yaml.Unmarshal([]byte(pageSensorYAML), &d); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	ctx := pageTestCtx()
+	ctx.DeclaredRoutines = append(ctx.DeclaredRoutines, internalapi.SlugLookup{Slug: "incident-rozbor"})
+	if err := d.Validate(ctx); err != nil {
+		t.Fatalf("Validate refused the fixture: %v", err)
+	}
+	return &d
+}
+
+// TestPageWriteBody_CarriesEveryDeclaredKey is the regression test for a
+// manifest that validated clean, applied with exit 0 and produced a page
+// with no buttons.
+//
+// It is deliberately written as a comparison of KEY SETS rather than as a
+// list of the fields writeBody happens to send. A test that asserted
+// `id`, `schema`, `owner`, `producer`, `sla_seconds` and `span` were
+// present would have passed on the broken code — the dropped field was
+// one nobody had listed. So: every key the author wrote in the YAML has
+// to appear on the wire, and the only permitted rename is the one §11b
+// decision 3 mandates.
+func TestPageWriteBody_CarriesEveryDeclaredKey(t *testing.T) {
+	d := pageSensorDoc(t)
+
+	// The panels exactly as authored, read straight out of the source
+	// bytes so the expectation comes from the DOCUMENT and not from the
+	// struct that might be missing a field.
+	var authored struct {
+		Spec struct {
+			Panels []map[string]any `yaml:"panels"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal([]byte(pageSensorYAML), &authored); err != nil {
+		t.Fatalf("yaml.Unmarshal (authored): %v", err)
+	}
+
+	body, err := d.writeBody()
+	if err != nil {
+		t.Fatalf("writeBody: %v", err)
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var sent struct {
+		Panels []map[string]any `json:"panels"`
+	}
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(sent.Panels) != len(authored.Spec.Panels) {
+		t.Fatalf("panels sent = %d, authored = %d", len(sent.Panels), len(authored.Spec.Panels))
+	}
+
+	for i, want := range authored.Spec.Panels {
+		got := sent.Panels[i]
+		for key := range want {
+			// §11b decision 3: `sla: 30s` is the only key that crosses the
+			// wire under another name.
+			if key == "sla" {
+				if _, ok := got["sla_seconds"]; !ok {
+					t.Errorf("panel %d: sla declared, sla_seconds not sent: %+v", i, got)
+				}
+				continue
+			}
+			if _, ok := got[key]; !ok {
+				t.Errorf("panel %d: %q is declared in the document and is not on the wire — "+
+					"PATCH replaces spec.panels wholesale, so a key the applier drops is a key it DELETES; got %+v",
+					i, key, got)
+			}
+		}
+	}
+}
+
+// TestPageWriteBody_AuthoredHalfRidesVerbatim pins the CONTENT, not just
+// the presence, of the three pass-through keys: a button that arrived
+// with its routine or its confirm step stripped is a different button,
+// and a gate that lost its `for` window wakes somebody on one bad scrape.
+func TestPageWriteBody_AuthoredHalfRidesVerbatim(t *testing.T) {
+	d := pageSensorDoc(t)
+	body, err := d.writeBody()
+	if err != nil {
+		t.Fatalf("writeBody: %v", err)
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var sent struct {
+		Panels []struct {
+			ID        string                `json:"id"`
+			Actions   []pages.PanelAction   `json:"actions"`
+			Wake      []pages.PanelWake     `json:"wake"`
+			OnFailure *pages.PanelOnFailure `json:"on_failure"`
+		} `json:"panels"`
+	}
+	if err := json.Unmarshal(raw, &sent); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	p := sent.Panels[0]
+	declared := d.Spec.Panels[0]
+
+	if len(p.Actions) != len(declared.Actions) {
+		t.Fatalf("actions sent = %d, declared = %d — a page that applied with exit 0 and has no buttons",
+			len(p.Actions), len(declared.Actions))
+	}
+	if !reflect.DeepEqual(p.Actions, declared.Actions) {
+		t.Errorf("actions did not ride verbatim:\n sent = %+v\n want = %+v", p.Actions, declared.Actions)
+	}
+	if !reflect.DeepEqual(p.Wake, declared.Wake) {
+		t.Errorf("wake did not ride verbatim:\n sent = %+v\n want = %+v", p.Wake, declared.Wake)
+	}
+	if !reflect.DeepEqual(p.OnFailure, declared.OnFailure) {
+		t.Errorf("on_failure did not ride verbatim:\n sent = %+v\n want = %+v", p.OnFailure, declared.OnFailure)
+	}
+	// The second panel declares none of the three, and an empty list is not
+	// the same statement as an absent key: `actions: []` would be "this
+	// panel's buttons are gone", which is a thing to say and not a thing to
+	// say by accident.
+	var bare struct {
+		Panels []map[string]any `json:"panels"`
+	}
+	if err := json.Unmarshal(raw, &bare); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"actions", "wake", "on_failure"} {
+		if _, present := bare.Panels[1][key]; present {
+			t.Errorf("panel 2 declares no %s; it must be absent, not empty: %+v", key, bare.Panels[1])
+		}
+	}
+}
+
+// TestPageDocument_Plan_SendsActionsOnBothVerbs walks the two paths that
+// actually reach the server. writeBody being right is necessary; Plan
+// putting its output in the create body AND in the PATCH body is what
+// makes it true of an apply.
+func TestPageDocument_Plan_SendsActionsOnBothVerbs(t *testing.T) {
+	panelsOf := func(t *testing.T, body any) []map[string]any {
+		t.Helper()
+		m, ok := body.(map[string]any)
+		if !ok {
+			t.Fatalf("body is %T, want map", body)
+		}
+		panels, ok := m["panels"].([]map[string]any)
+		if !ok {
+			t.Fatalf("panels is %T", m["panels"])
+		}
+		return panels
+	}
+
+	t.Run("create", func(t *testing.T) {
+		d := pageSensorDoc(t)
+		items, err := d.Plan(context.Background(), newPageFakeClient(), nil)
+		if err != nil {
+			t.Fatalf("Plan: %v", err)
+		}
+		c := newPageFakeClient()
+		if err := items[0].Exec(context.Background(), c); err != nil {
+			t.Fatalf("Exec: %v", err)
+		}
+		panels := panelsOf(t, c.Calls[0].Body)
+		for _, key := range []string{"actions", "wake", "on_failure"} {
+			if _, present := panels[0][key]; !present {
+				t.Errorf("POST body drops %q: %+v", key, panels[0])
+			}
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		d := pageSensorDoc(t)
+		remote := &PageRemote{
+			Slug: "fleet-201",
+			Name: "Old name",
+			Panels: []PagePanelRemote{
+				{ID: "sluzby", Schema: "status.v1", Title: "Jede to?", Owner: "crew/lookout",
+					Producer: "script/watch-services.sh", SLASeconds: 30, Span: 8},
+				{ID: "incident", Schema: "narrative.v1", Owner: "crew/devops",
+					Producer: "routine/incident-rozbor", SLASeconds: 3600, Span: 12},
+			},
+		}
+		items, err := d.Plan(context.Background(), newPageFakeClient(), remote)
+		if err != nil {
+			t.Fatalf("Plan: %v", err)
+		}
+		if items[0].Action != internalapi.ActionUpdate {
+			t.Fatalf("want update, got %+v", items[0])
+		}
+		c := newPageFakeClient()
+		if err := items[0].Exec(context.Background(), c); err != nil {
+			t.Fatalf("Exec: %v", err)
+		}
+		panels := panelsOf(t, c.Calls[0].Body)
+		// PATCH replaces spec.panels wholesale and reconciles the page's
+		// automations rows against the result, so a panel sent without its
+		// gate is a gate deleted — by the update that was only meant to fix
+		// the page's name.
+		for _, key := range []string{"actions", "wake", "on_failure"} {
+			if _, present := panels[0][key]; !present {
+				t.Errorf("PATCH body drops %q: %+v", key, panels[0])
+			}
+		}
+	})
 }
 
 // TestPageWriteBody_JSONShape checks the body marshals to the shape the

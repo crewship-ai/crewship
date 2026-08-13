@@ -247,7 +247,13 @@ var BackupTables = []string{
 	"page_versions",      // FK page_id → pages
 	"page_grants",        // FK page_id → pages; FK granted_by_user_id → users
 	"page_public_tokens", // FK page_id → pages
-	"page_panel_alerts",  // FK panel_id → page_panels; FK issue_id → missions
+	// page_webhooks FKs into page_panels (the one panel a token may write) and
+	// users (the human who issued it) — both are dumped above this line, which
+	// is what makes this position FK-safe with PRAGMA foreign_keys ON during
+	// restore. It must stay after page_panels in particular: the token is bound
+	// to the panel ROW, and the FK is ON DELETE CASCADE.
+	"page_webhooks",     // FK panel_id → page_panels; FK created_by_user_id → users
+	"page_panel_alerts", // FK panel_id → page_panels; FK issue_id → missions
 }
 
 // DBDump captures the exported rows from one or more tables. Keys are
