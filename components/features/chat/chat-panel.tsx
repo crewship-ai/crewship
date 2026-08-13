@@ -31,6 +31,8 @@ import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
 import { RightDrawer } from "./right-drawer"
 import { SlashPalette } from "./composer/slash-palette"
+import { SlashActionModal } from "./composer/slash-action-modal"
+import type { SlashActionSchema as ServerSlashCommand } from "@/hooks/use-slash-commands"
 import { type CrewMember } from "./composer/mention-autocomplete"
 import { ChatComposer } from "./composer/chat-composer"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
@@ -543,10 +545,72 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     setPinNonce((n) => n + 1)
   }, [editAndResend])
 
+  // ── The slash palette's delegated commands ────────────────────────────────
+  //
+  // Every id the palette hands over must DO something here. It used to hand
+  // over branch / search / export / run-task as well, and this handler covered
+  // regenerate and clear: the other four closed the palette and did nothing
+  // (audit P0.8). Search and export are now real — the two surfaces that own
+  // those UIs already existed, they were just unreachable from anywhere but
+  // their own hotkey — and the rest are classified in the palette itself.
+  //
+  // The list the palette delegates is PANEL_HANDLED_COMMAND_IDS, which
+  // chat-panel-slash-actions.test.tsx walks: a new delegated command is red
+  // until it is handled here.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+
   const handleSlashCommand = useCallback((id: string) => {
     if (id === "regenerate") regenerateWithPin()
     else if (id === "clear") loadHistory([])
+    else if (id === "search") setSearchOpen(true)
+    else if (id === "export") setExportOpen(true)
   }, [regenerateWithPin, loadHistory])
+
+  // Rows that would be no-ops on THIS conversation right now. Static
+  // classification (does the capability exist at all?) lives in the palette;
+  // this is the part only the host can know.
+  const slashDisabledCommands = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {}
+    if (turns.length === 0) {
+      out.clear = "Nothing to clear yet"
+      out.regenerate = "Nothing to regenerate yet"
+      out.search = "Nothing to search yet"
+      out.export = "Nothing to export yet"
+    } else if (isStreaming) {
+      out.regenerate = "Wait for the reply to finish"
+    }
+    return out
+  }, [turns.length, isStreaming])
+
+  // The server-driven action the user picked, if any. The panel owns the
+  // modal (not the palette) because the form pre-fills from the conversation.
+  const [slashAction, setSlashAction] = useState<ServerSlashCommand | null>(null)
+  useEffect(() => { setSlashAction(null) }, [sessionId])
+
+  /** What "…from this conversation" means for an action's form: the transcript,
+   *  trimmed, as the raw material for the field that asks for one. Only fields
+   *  the catalogue actually declares are used (SlashActionModal ignores keys
+   *  that no field is named after). */
+  const slashActionPreFill = useMemo<Record<string, string>>(() => {
+    const transcript = turns
+      .filter((t) => t.role === "user" || t.role === "assistant")
+      .slice(-6)
+      .map((t) => {
+        const text = t.parts.filter((p) => p.type === "text").map((p) => p.content).join("\n").trim()
+        if (!text) return ""
+        return `${t.role === "user" ? "You" : agentName ?? "Assistant"}: ${text}`
+      })
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 4000)
+    const preFill: Record<string, string> = {}
+    if (transcript) {
+      preFill.prompt = transcript
+      preFill.description = transcript
+    }
+    return preFill
+  }, [turns, agentName])
 
   // Opt-in virtualized list (localStorage crewship.virtualChat=1) — mounts
   // only the viewport instead of every turn. Initialized false and flipped
@@ -772,10 +836,27 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       </RightDrawer>
 
       <RightRail className={cn(pushOpen && "border-l-0")} />
-      <SlashPalette agentSlug={agentSlug} onCommand={handleSlashCommand} />
+      {/* workspaceId is what makes the server-driven Actions group exist at
+          all: useSlashCommands(undefined) never runs its query, so the palette
+          rendered without it could only ever show the client rows. */}
+      <SlashPalette
+        agentSlug={agentSlug}
+        workspaceId={workspaceId ?? undefined}
+        onCommand={handleSlashCommand}
+        onAction={setSlashAction}
+        disabledCommands={slashDisabledCommands}
+      />
+      {workspaceId && (
+        <SlashActionModal
+          command={slashAction}
+          workspaceId={workspaceId}
+          contextPreFill={slashActionPreFill}
+          onClose={() => setSlashAction(null)}
+        />
+      )}
       <ArtifactPane agentId={agentId} />
-      <ConversationSearch turns={turns} />
-      <ExportDialog turns={turns} agentName={agentName} />
+      <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
+      <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
       <ReconnectBanner status={connectionStatus} />
     </div>
   )

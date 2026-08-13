@@ -17,10 +17,21 @@ interface SearchHit {
 
 interface ConversationSearchProps {
   turns: ChatTurn[]
+  /** Controlled open state. The bar owned its own until the slash palette's
+   *  /search needed a way in — the palette can't press ⌘F, so ChatPanel holds
+   *  the state and both entry points write to it. Omit both props to keep the
+   *  hotkey-only behaviour. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
-export function ConversationSearch({ turns }: ConversationSearchProps) {
-  const [open, setOpen] = useState(false)
+export function ConversationSearch({ turns, open: openProp, onOpenChange }: ConversationSearchProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) setInternalOpen(next)
+    onOpenChange?.(next)
+  }
   const [query, setQuery] = useState("")
   const [cursor, setCursor] = useState(0)
 
@@ -28,9 +39,10 @@ export function ConversationSearch({ turns }: ConversationSearchProps) {
     "mod+f",
     (e) => {
       e.preventDefault()
-      setOpen((v) => !v)
+      setOpen(!open)
     },
     { enableOnFormTags: true, enableOnContentEditable: true },
+    [open, openProp],
   )
 
   useHotkeys(

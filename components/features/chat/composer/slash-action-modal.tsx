@@ -194,17 +194,24 @@ function endpointForCommand(id: string, workspaceId: string): string {
   const ws = encodeURIComponent(workspaceId)
   switch (id) {
     case "routine":
+      // Reachable only if someone re-enables the action: this endpoint
+      // SCHEDULES an existing pipeline and rejects any body without
+      // target_pipeline_id/target_pipeline_slug, which a conversation does
+      // not have. The palette classifies "routine" as disabled for exactly
+      // that reason (SERVER_ACTION_CONTRACT in slash-palette.tsx); the branch
+      // stays because the body shape is still the right one for the day a
+      // transcript→routine step exists.
       return `/api/v1/workspaces/${ws}/pipeline-schedules`
     case "skill":
       return `/api/v1/workspaces/${ws}/skills/generate`
     case "credential":
       return `/api/v1/credentials?workspace_id=${ws}`
-    case "issue":
-      // Issue create is crew-scoped — we don't have crew_id in
-      // this surface yet. Wire through ChatPanel context in a
-      // follow-up; for now the modal pre-validates by hitting the
-      // workspace-default crew via a helper.
-      return `/api/v1/issues?workspace_id=${ws}`
+    // "issue" intentionally absent. This used to return
+    // `/api/v1/issues?workspace_id=…`, which is not a route: POST issues is
+    // registered ONLY as /api/v1/crews/{crewId}/issues (router_orchestration
+    // .go), so every submit was a 404 dressed up as a form. Chat has no crew
+    // id to put in that path, so the action is disabled in the palette rather
+    // than pointed at a URL that cannot work.
     // "remember" intentionally absent — see catalog note in
     // internal/api/slash_commands_handler.go. The backend route
     // doesn't exist yet; the server-side catalog omits the entry
@@ -236,12 +243,8 @@ function buildPayload(id: string, values: Record<string, string>): unknown {
         type: values.type || "SECRET",
         value: values.value,
       }
-    case "issue":
-      return {
-        title: values.title,
-        description: values.description,
-        priority: values.priority || "none",
-      }
+    // No "issue" case: endpointForCommand has no mapping for it, so the
+    // request is refused before a body is ever built.
     default:
       return values
   }
