@@ -168,9 +168,11 @@ describe("ChatHome — the tree beside the index", () => {
   })
 
   // The row used to be a disclosure and nothing else, so an agent nobody has
-  // talked to was inert: no threads, no chevron, no destination. Starting a
-  // conversation with exactly that agent is what this surface is for.
-  it("clicking an agent with no conversations opens one with it, and creates nothing", async () => {
+  // talked to was inert: no threads, no chevron, no destination. It was then
+  // made to navigate, which is what the owner rejected — every pick a page
+  // transition. The row is a local filter now, and starting a conversation is
+  // an explicit row underneath it.
+  it("clicking an agent narrows the tree, and does not leave the page", async () => {
     apiFetch.mockImplementation(
       routes([agent("ada", "Ada"), agent("bob", "Bob")], {
         "agent-ada": [chat("chat-42", "Ship the export", 10)],
@@ -182,6 +184,23 @@ describe("ChatHome — the tree beside the index", () => {
 
     fireEvent.click(await screen.findByTestId("chat-tree-agent-bob"))
 
+    await waitFor(() => expect(screen.queryByTestId("chat-tree-agent-ada")).toBeNull())
+    expect(mockPush).not.toHaveBeenCalled()
+  })
+
+  it("starting a conversation from the tree navigates — there is no panel here to swap", async () => {
+    apiFetch.mockImplementation(
+      routes([agent("ada", "Ada"), agent("bob", "Bob")], {
+        "agent-ada": [chat("chat-42", "Ship the export", 10)],
+        "agent-bob": [],
+      }),
+    )
+
+    render(<ChatHome />)
+
+    fireEvent.click(await screen.findByTestId("chat-tree-agent-bob"))
+    fireEvent.click(await screen.findByTestId("chat-tree-start-bob"))
+
     // /chat/<slug> with no ?session= already lands on a draft session that the
     // first message creates (chat-page-client, openInitialSession). No new
     // route, no new endpoint, and no "Untitled session" for a stray click.
@@ -192,7 +211,7 @@ describe("ChatHome — the tree beside the index", () => {
     expect(wrote).toBe(false)
   })
 
-  it("clicking an agent that has conversations opens that agent too — one rule, not two", async () => {
+  it("clicking an agent that has conversations unfolds it, and still does not navigate", async () => {
     apiFetch.mockImplementation(
       routes([agent("ada", "Ada")], { "agent-ada": [chat("chat-42", "Ship the export", 10)] }),
     )
@@ -201,11 +220,13 @@ describe("ChatHome — the tree beside the index", () => {
 
     fireEvent.click(await screen.findByTestId("chat-tree-agent-ada"))
 
-    // Not `?session=chat-42`: the agent page opens the newest conversation
-    // itself, and that is one place deciding it rather than two.
-    expect(mockPush).toHaveBeenCalledWith("/chat/ada")
-    // …and the branch is open, so the rest of the list is right there.
+    // One rule for both cases — the row filters, and the branch it filters to
+    // is open, so the rest of the list is right there.
     expect(await screen.findByTestId("chat-tree-thread-chat-42")).toBeInTheDocument()
+    // …and an agent with conversations needs no "start one" row: the threads
+    // under it are the way in.
+    expect(screen.queryByTestId("chat-tree-start-ada")).toBeNull()
+    expect(mockPush).not.toHaveBeenCalled()
   })
 
   it("shares ONE fan-out with the index — the tree does not fetch the same lists again", async () => {

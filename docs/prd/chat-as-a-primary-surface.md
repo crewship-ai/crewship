@@ -130,20 +130,25 @@ What shipped:
   holds the open object's context, configuration belongs to the object's own
   settings page — leaves only Sessions in the tree. Asks lives in the agent's
   config tab, Memory on the agent canvas, Files in the rail.
-- **Focus follows the route.** `/chat` lists every agent; `/chat/<slug>` lists
-  that agent alone, expanded, with a row back to all agents. No new state: the
-  URL already said which agent was in play, so focus survives a reload and
-  travels in a shared link. Focus is suspended while a search is typed — a
-  search box that cannot see six of seven agents is a lie — and when the slug
-  is not in the list, so a ghost agent's page still renders somebody.
-- **Clicking an agent opens a conversation with it.** It used to only toggle
-  the disclosure, so an agent with no threads had an inert row and there was no
-  way to start talking to it from the tree. Expansion kept its own controls
-  (the chevron, and ←/→ on the row).
-- **STATUS facets count the focused agent in the focused view**, and the header
-  says whose. A workspace-wide count over a list that can only show one agent's
-  threads is a promise the click cannot keep.
-  **Reverted the next day — see §3.3.1.**
+- ~~**Focus follows the route.**~~ **REVERSED, see §3.3.2.** `/chat/<slug>`
+  briefly listed that agent alone, and clicking an agent was what put you
+  there. Narrowing the tree is a local filter now, and the route narrows
+  nothing.
+- **Clicking an agent narrows the tree to it, and clicking it again widens it
+  back out** — animated, local, and with no navigation in either direction.
+  Expansion keeps its own controls (the chevron, and ←/→ on the row).
+- **An agent with no conversations can still be talked to.** The row used to
+  only toggle the disclosure, so an agent nobody had messaged was inert — no
+  threads, no chevron, nothing on click — on the one surface whose job is to
+  make starting a conversation easy. Since the plain click is the filter, this
+  is an explicit **Start a conversation** row under a narrowed agent that has
+  none. It is a `SidebarRow`, so it is tabbable and answers Enter/Space, and it
+  POSTs nothing: a click is not a message.
+- **STATUS facets count the agent the filter is on**, and the header says
+  whose. A workspace-wide count over a list that can only show one agent's
+  threads is a promise the click cannot keep. (The scope was the ROUTE's agent
+  in the first cut; it is the filter's now, because the filter is the only
+  thing that narrows the column.)
 - **No new endpoints and no new route.** The folder is `?folder=`, never
   `/chat/<agent>/<folder>`: the static handler rewrites exactly one path level
   and the slug is read from `window.location.pathname`.
@@ -206,6 +211,60 @@ alphabetically, and the right rail's three icons carry the panel's name in the
 tooltip, in the drawer's accessible name and in the open panel's own heading —
 all read from one map, plus `aria-keyshortcuts` for the shortcut the tooltip
 draws.
+
+#### 3.3.2 Reversed: focus was a route, and is now a filter
+
+The bullet above stands as written — this is what happened to it.
+
+**What shipped first.** Clicking an agent in the tree navigated to
+`/chat/<slug>`, and being on that route was what made the tree list that agent
+alone. It was chosen for exactly one reason: the URL already said which agent
+was in play, so narrowing cost no new state, survived a reload and travelled in
+a shared link.
+
+**Why it was wrong.** The whole page reloads. Every agent you looked at was a
+route change, so the dashboard chrome tore down and rebuilt to change one name
+in a list. The owner, watching it:
+
+> clicking Riley hides the other agents; clicking Riley again brings them back,
+> animated. It should be a filter.
+
+Trading state for a page transition is a bad trade in one direction only, and
+this was that direction: nobody can feel a `useState`, and everybody feels a
+transition. "No new state" was an argument about the code, not about the
+product.
+
+**What it is now.** `filterSlug`, local to `chat-tree-sidebar.tsx`.
+
+- Clicking an agent narrows the tree to it and unfolds it; clicking the same
+  row again widens it back out. No router, no URL write, no fetch.
+- Branches enter and leave under `spring.smooth` inside an
+  `AnimatePresence mode="popLayout"`, so the agent that stays springs up into
+  the gap instead of waiting on a height collapse. `prefers-reduced-motion`
+  gets no layout animation, no travel and a zero-length transition.
+- `activeAgentSlug` selects and auto-expands, and narrows nothing.
+  `/chat/<slug>` lists every agent until the reader says otherwise.
+- The **All agents** row is gone with the navigation it undid. Clearing the
+  filter is a `Show all N` button in the AGENTS section header — one piece of
+  local state, no destination.
+- A typed search still reaches past the narrowing, and still suspends it rather
+  than clearing it.
+
+**What replaced the click.** The click used to be how you started a
+conversation with an agent that had none. That is the **Start a conversation**
+row in the bullet above.
+
+**And the swap is in place too.** Using that row on an agent this page does not
+already have open no longer navigates either. `chat-page-client.tsx` already
+bypasses the Next router for the session — `history.pushState` plus a
+`popstate` listener, because a router-driven param change re-evaluates the
+layout subtree and visibly remounts the dashboard chrome on static-export
+builds — and the slug now goes through the same path: push the URL, move the
+local slug, re-resolve the agent out of the roster already in memory (no
+request), and let the panel follow. Opening ANOTHER agent's thread from the
+tree takes the same path, carrying the thread. **The page no longer calls the
+router at all.** `/chat` still navigates for it, because there is no ChatPanel
+on the index to swap an agent under (O7).
 
 ## 4. The steps
 

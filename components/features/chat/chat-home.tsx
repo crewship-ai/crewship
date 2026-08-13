@@ -43,11 +43,17 @@ import {
  * Both halves read the SAME fetch (`useChatTreeData`). A tree with its own copy
  * of the fan-out would double every request on the busiest page of the surface.
  *
- * This is the UNFOCUSED view of that tree: `/chat` is every agent, which is why
- * it passes no `activeAgentSlug` and needs no way back to them. Picking an agent
- * — in the tree or in the list below — goes to `/chat/<slug>` and nowhere else:
- * one destination for "talk to this agent", whichever half of the page it was
+ * Nothing is selected here, which is why it passes no `activeAgentSlug`.
+ * Clicking an agent IN THE TREE narrows the tree — a local filter, no route
+ * change; that is the tree's own behaviour and this page does not participate
+ * in it. Starting a conversation is the tree's `Start a conversation` row and
+ * the agent list below, and both go to `/chat/<slug>` and nowhere else: one
+ * destination for "talk to this agent", whichever half of the page it was
  * clicked in, and no session is created by the click (see `agentHref`).
+ *
+ * This page is allowed to navigate for it, where `/chat/<slug>` is not: there
+ * is no ChatPanel here to swap the agent under (O7, below), so there is
+ * nothing an in-place swap could avoid remounting.
  *
  * What this page deliberately does NOT do (PRD O7): mount a ChatPanel. The
  * panel opens its own WebSocket on mount, separate from RealtimeProvider, so
@@ -169,11 +175,14 @@ export function ChatHome() {
             threadErrors={threadErrors}
             onRetryThreads={retryThreads}
             loading={loading || !threadsLoaded}
-            // No agent in focus here: /chat is the view where every agent is
-            // listed, which is also why it needs no way back to them.
+            // Nothing is open on the index, so nothing is selected in the
+            // tree. Narrowing it is the reader's own filter, and local to it.
             activeAgentSlug={null}
             activeThreadId={null}
             onOpenThread={(owner, threadId) => router.push(threadHref(owner.slug, threadId))}
+            // "Start a conversation" — the tree's row, not its agent row.
+            // A navigation is correct here: there is no panel on this page to
+            // swap an agent under.
             onOpenAgent={(a) => router.push(agentHref(a.slug))}
           />
         )}

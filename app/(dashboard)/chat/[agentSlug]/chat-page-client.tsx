@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { AnimatePresence, motion } from "motion/react"
 import {
@@ -26,7 +26,7 @@ import { deriveSessionTitle } from "@/lib/chat-title"
 import { cn } from "@/lib/utils"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import { SessionsSidebar } from "@/components/features/chat/sessions-sidebar"
-import { sortSessionsByActivity, withActiveSessionRead } from "@/components/features/chat/session-sort"
+import { withActiveSessionRead } from "@/components/features/chat/session-sort"
 import {
   ChatTreeSidebar,
   useChatCompactLayout,
@@ -34,13 +34,13 @@ import {
   type ChatTreeAgent,
   type ChatTreeThread,
 } from "@/components/features/chat/chat-tree-sidebar"
-import { agentHref, threadHref } from "@/components/features/chat/chat-home"
 import { httpError, scopeErrorMessage, useRetry } from "@/components/features/chat/scope-fetch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
 
 /**
- * Read the agent slug from the live URL after client hydration.
+ * Read the agent slug from the live URL after client hydration, and let the
+ * page write it back.
  *
  * useParams() is unreliable in Next.js static export: the page is
  * prerendered with [{ agentSlug: "_" }] and useParams returns "_"
@@ -50,15 +50,27 @@ import { apiFetch } from "@/lib/api-fetch"
  *
  * Returns null until client mount completes — page renders a loading
  * state during that brief window.
+ *
+ * The setter is what makes an in-place agent swap possible. It is the same
+ * trade this page already makes for the session (see `selectSession`): the
+ * router is the thing that remounts the dashboard chrome on a static-export
+ * build, so the page owns the URL and re-reads it on popstate rather than
+ * asking Next.js to re-resolve a route param. Back/forward across a swap is
+ * why the listener lives here and not only beside the session's.
  */
-function useAgentSlugFromUrl(): string | null {
+function useAgentSlugFromUrl(): [string | null, (slug: string) => void] {
   const [slug, setSlug] = useState<string | null>(null)
   useEffect(() => {
     if (typeof window === "undefined") return
-    const m = window.location.pathname.match(/^\/chat\/([^/]+)\/?$/)
-    if (m) setSlug(decodeURIComponent(m[1]))
+    const read = () => {
+      const m = window.location.pathname.match(/^\/chat\/([^/]+)\/?$/)
+      if (m) setSlug(decodeURIComponent(m[1]))
+    }
+    read()
+    window.addEventListener("popstate", read)
+    return () => window.removeEventListener("popstate", read)
   }, [])
-  return slug
+  return [slug, setSlug]
 }
 
 /**
@@ -131,19 +143,24 @@ type SessionRecord = ChatTreeThread & { ended_at: string | null }
  * so the surface has one left column rather than one per route. What is
  * selected in it is a conversation — the centre is always the conversation.
  *
- * Here it renders FOCUSED: naming an agent in the URL is what narrows the tree
- * to that agent, expanded, with a row back to all of them. `/chat` is every
- * agent and `/chat/<slug>` is this one, so the switch is the route and there is
- * no second piece of state to keep in step with it — and six agents with no
- * threads and a role line each stop crowding the one conversation on screen.
- * Two things the column reports that this page answers:
+ * Here it renders UNNARROWED: every agent, with this one selected and open.
+ * It briefly narrowed to the agent in the URL, and clicking an agent was what
+ * put it there — so every pick was a route change, and the dashboard chrome
+ * tore down and rebuilt to look at a different name. Narrowing is now a local
+ * filter inside the tree (chat-tree-sidebar), which costs a render, and this
+ * page passes `activeAgentSlug` for selection only.
  *
- *  · **an agent was picked** — another agent is a route change (the slug is the
- *    path segment) with no `?session=`, because which conversation opens is
- *    THIS page's decision, made once in openInitialSession. The agent already
- *    open cannot be navigated to, so the pick selects its most recently active
- *    conversation instead. Neither path POSTs: a click is not a message.
- *  · **all agents** — `router.push("/chat")`, the route that already means it.
+ * **This page no longer calls the router at all.** Two things the column
+ * reports that it answers, and neither is a navigation:
+ *
+ *  · **a thread was picked** — this agent's is `selectSession` (local state +
+ *    history.pushState). Another agent's is the same swap as below, carrying
+ *    the thread.
+ *  · **start a conversation** — offered under a filtered agent with nothing to
+ *    open. Another agent is `swapAgent`: push the URL, move the local slug,
+ *    re-resolve the agent out of the roster already in memory, let the panel
+ *    follow. No `?session=`, because which conversation opens is decided once,
+ *    in openInitialSession. Nothing POSTs: a click is not a message.
  *
  * It briefly wasn't. The tree gave each agent four folders and three of them
  * (Files, Asks, Memory) replaced ChatPanel with a pane that duplicated a
@@ -167,9 +184,8 @@ type SessionRecord = ChatTreeThread & { ended_at: string | null }
  */
 export function ChatPageClient() {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const { workspaceId, loading: wsLoading } = useWorkspace()
-  const slug = useAgentSlugFromUrl()
+  const [slug, setSlug] = useAgentSlugFromUrl()
 
   // The tree's roster and its per-agent thread lists. `skipSlug` hands THIS
   // agent's threads back to the page: the page owns them (optimistic inserts,
@@ -651,51 +667,80 @@ export function ChatPageClient() {
     treeRetryThreads()
   }, [retrySessions, treeRetryThreads])
 
-  // Selecting inside this agent is local state plus a history write; selecting
-  // another agent is a route change, because the slug is a path segment and
-  // that is the one level the static export can rewrite.
+  /**
+   * Swap the agent this page is about, WITHOUT a navigation.
+   *
+   * The slug is a path segment, so this used to be `router.push` — and a
+   * router-driven param change re-evaluates the whole layout subtree, which
+   * visibly remounts the topbar, the left rail and the dashboard chrome on
+   * production static-export builds. That is the same defect `selectSession`
+   * already routes around for the session, and the fix is the same one: write
+   * the URL with `history.pushState`, move the local state, and let React
+   * re-render in place. `popstate` (in `useAgentSlugFromUrl` and beside the
+   * session, above) is what puts back/forward back in the loop.
+   *
+   * The agent itself is re-resolved from `tree.roster`, which is already in
+   * memory — the swap costs no request to find out who we just moved to.
+   *
+   * Everything cleared here is about the agent being left: its sessions, the
+   * failure of its list, the draft it was sitting on. `sessionId` is set to
+   * the thread being opened, or null so `openInitialSession` decides — the one
+   * place that decision is ever made.
+   */
+  const swapAgent = useCallback((nextSlug: string, threadId: string | null = null) => {
+    if (nextSlug === slug) return
+    const qs = threadId ? `?session=${encodeURIComponent(threadId)}` : ""
+    const url = `/chat/${encodeURIComponent(nextSlug)}${qs}`
+    setSlug(nextSlug)
+    setSessionIdState(threadId)
+    setDraftSessionId(null)
+    setSessions([])
+    setSessionsLoaded(false)
+    setSessionsError(null)
+    setError(null)
+    setAuthoringSession(null)
+    // A `?prompt=` handoff belongs to the agent it was addressed to. Leaving
+    // it armed would auto-send somebody else's goal into this conversation.
+    promptConsumedRef.current = true
+    if (
+      typeof window !== "undefined" &&
+      window.location.pathname + window.location.search !== url
+    ) {
+      // pushState, not replaceState: this is a new place, and Back should
+      // return to the agent the reader came from.
+      window.history.pushState(null, "", url)
+    }
+  }, [slug, setSlug])
+
+  // Selecting inside this agent is local state plus a history write; another
+  // agent's thread is the swap above, carrying the thread so the page lands on
+  // the conversation that was actually clicked.
   // `owner` is the agent the thread is filed under, not "the thread's agent"
-  // (PRD §7). A thread owned by someone else is a route change, because the
-  // slug is the path segment.
+  // (PRD §7).
   const handleOpenThread = useCallback((owner: ChatTreeAgent, threadId: string) => {
     if (owner.slug !== slug) {
-      router.push(threadHref(owner.slug, threadId))
+      swapAgent(owner.slug, threadId)
       return
     }
     selectSession(threadId)
-  }, [slug, router, selectSession])
+  }, [slug, swapAgent, selectSession])
 
   /**
-   * An agent row was picked — "open a conversation with this one".
+   * "Start a conversation with this agent" — the tree's own row, offered under
+   * a filtered agent that has no threads. The agent row itself is a filter now
+   * and reports nothing.
    *
-   * Another agent is a route change (the slug is the path segment) and
-   * deliberately carries no `?session=`: which conversation opens is that
-   * page's decision, made once, in `openInitialSession`.
+   * Another agent swaps in place, with no `?session=`: which conversation
+   * opens is `openInitialSession`'s decision, made once.
    *
-   * The agent already open cannot be navigated to, so the same intent is
-   * served here: back to its most recently ACTIVE conversation. Ordered by
-   * activity rather than by the array's order — the list is spliced
-   * optimistically on send, and "the newest" is the same question the tree
-   * answers one column to the left, so the two must not disagree. With no
-   * conversations at all there is nothing to select: the page is already
-   * sitting on the draft that the first message will create, and re-minting
-   * one would throw away whatever is in the composer.
+   * The agent already open needs nothing done to it. The row only appears when
+   * it has no conversations, and a page with no conversations is already
+   * sitting on the draft that the first message will create — re-minting one
+   * would throw away whatever is in the composer.
    */
-  const handleOpenAgent = useCallback((picked: ChatTreeAgent) => {
-    if (picked.slug !== slug) {
-      router.push(agentHref(picked.slug))
-      return
-    }
-    const newest = sortSessionsByActivity(sessions)[0]
-    if (newest && newest.id !== sessionId) selectSession(newest.id)
-  }, [slug, router, sessions, sessionId, selectSession])
-
-  // Out of the focused tree and back to every agent. `/chat` is the route that
-  // already means "all of them", so leaving focus is a navigation and not a
-  // second piece of state that could disagree with the URL.
-  const handleShowAllAgents = useCallback(() => {
-    router.push("/chat")
-  }, [router])
+  const handleStartConversation = useCallback((picked: ChatTreeAgent) => {
+    if (picked.slug !== slug) swapAgent(picked.slug)
+  }, [slug, swapAgent])
 
   // Wait for client mount + workspace + roster before rendering chat.
   if (slug === null || wsLoading || loadingAgent) {
@@ -922,13 +967,13 @@ export function ChatPageClient() {
             threadErrors={treeErrors}
             onRetryThreads={retryTreeThreads}
             loading={!tree.threadsLoaded || !sessionsLoaded}
-            // Naming the agent in the URL is what puts the tree in its focused
-            // view: this agent alone, expanded, with a row back to all of them.
+            // Selection and auto-expand only. Naming the agent in the URL used
+            // to narrow the column to it; narrowing is the tree's own filter
+            // now, and it is off until the reader turns it on.
             activeAgentSlug={slug}
             activeThreadId={sessionId}
             onOpenThread={handleOpenThread}
-            onOpenAgent={handleOpenAgent}
-            onShowAllAgents={handleShowAllAgents}
+            onOpenAgent={handleStartConversation}
             collapsed={treeCollapsed}
             onToggleCollapsed={() => setTreeCollapsed((v) => !v)}
           />
@@ -936,6 +981,13 @@ export function ChatPageClient() {
         <div className="min-w-0 min-h-0 overflow-hidden">
           {sessionId ? (
             <ChatPanel
+              // Keyed on the AGENT, never on the session. A session swap has
+              // always been a prop change (the panel is keyed on sessionId
+              // internally); an agent swap is a different conversation
+              // surface, and now that it happens in place rather than through
+              // a route change, the key is what guarantees it starts clean
+              // instead of inheriting the previous agent's panel state.
+              key={agent.id}
               agentId={agent.id}
               sessionId={sessionId}
               agentName={agent.name}

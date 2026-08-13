@@ -1,17 +1,19 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { AnimatePresence, motion } from "motion/react"
 import {
   ChevronDown,
-  ChevronLeft,
   Inbox,
   Activity,
   CheckCircle2,
   Mail,
+  MessageSquarePlus,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { prefersReducedMotion, spring } from "@/lib/motion"
 import { formatDateTime, timeAgo } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -51,27 +53,37 @@ import { ScopeFailure, httpError, scopeErrorMessage, useRetry } from "./scope-fe
  *                    Weekly summary        30m ago
  *                  Bob Robot                            (no threads, no chevron)
  *
- * **An agent row is a conversation, not a disclosure.** It used to be
- * `onSelect={onToggle}` — so an agent with no threads had no chevron, and the
- * row did nothing whatsoever when clicked. Starting a conversation with an
- * agent nobody has talked to is precisely what this column should make easy,
- * and it is the only place in the product that offers it at all. Now:
+ * **An agent row is a FILTER.** Click one and the other agents animate away,
+ * leaving that agent expanded with its threads; click the same row again and
+ * they animate back. Seven agents, six of them with no threads and a role line
+ * each, is a lot of furniture around one conversation — and narrowing it is a
+ * thing the reader does, not a thing the address bar does.
  *
- *   click an agent  → `onOpenAgent(agent)`, and the branch unfolds if it has
- *                     one. The caller routes to `/chat/<slug>`, which already
- *                     lands on the agent's newest conversation, or on a draft
- *                     session created by the first message if it has none.
- *                     Nothing is POSTed by a click.
+ *   click an agent  → `filterSlug` toggles, and the branch unfolds. No router,
+ *                     no URL write, no fetch, no remount.
  *   click the ▾     → open/close, and only that. So does ←/→ on the row.
  *
- * **The tree follows the route into focus.** `/chat` lists every agent;
- * `/chat/<slug>` lists that agent alone, expanded, with a row back to all of
- * them. That is `activeAgentSlug` plus `onShowAllAgents` and no new state:
- * seven agents, six of them with no threads and a role line each, is a lot of
- * furniture around the one conversation on screen. A typed search reaches past
- * the focus — a search box that cannot see six of seven agents is a lie — and
- * the STATUS facets count what the focused list can show, saying whose they
- * are in the section header so the number never changes meaning in silence.
+ * This replaces a route-driven "focus": clicking an agent used to navigate to
+ * `/chat/<slug>`, and being on that route was what narrowed the tree. It cost
+ * no state, and it cost a full page transition per pick — the dashboard chrome
+ * tore down and rebuilt every time somebody looked at a different agent. The
+ * user cannot feel a `useState`; they feel every transition. So the filter is
+ * local state, `activeAgentSlug` narrows nothing any more, and `/chat/<slug>`
+ * lists every agent until the reader says otherwise.
+ *
+ * Two things ride along with the filter, both inherited from the version it
+ * replaces because both were right: a typed search reaches PAST it (a search
+ * box that cannot see six of seven agents is a lie), and the STATUS facets
+ * count what the narrowed list can show, saying whose they are in the section
+ * header so the number never changes meaning in silence.
+ *
+ * **Starting a conversation has its own row.** The plain click belongs to the
+ * filter now, so the defect that started all this — an agent nobody has talked
+ * to had an inert row, on the one surface whose job is to make talking to it
+ * easy — is answered by an explicit "Start a conversation" row under a filtered
+ * agent with no threads. It is a `SidebarRow`, so it is tabbable and answers
+ * Enter/Space. It reports `onOpenAgent(agent)` and POSTs nothing; a click is
+ * not a message.
  *
  * **An agent expands to its threads and to nothing else.** It briefly carried
  * four folders — Sessions / Files / Asks / Memory — and three of them were a
@@ -341,7 +353,13 @@ export interface ChatTreeSidebarProps {
   threadErrors?: Record<string, string>
   /** Re-ask for the thread lists. Rendered as the Retry beside a failure. */
   onRetryThreads?: () => void
-  /** Slug of the agent whose surface is on screen, or null on the index. */
+  /**
+   * Slug of the agent whose surface is on screen, or null on the index.
+   *
+   * Selection and auto-expand ONLY. It used to also narrow the list to that
+   * one agent, which made every pick a route change; the narrowing is the
+   * filter's job now, and the filter is off until the reader turns it on.
+   */
   activeAgentSlug?: string | null
   activeThreadId?: string | null
   /**
@@ -354,25 +372,18 @@ export interface ChatTreeSidebarProps {
    */
   onOpenThread: (owner: ChatTreeAgent, threadId: string) => void
   /**
-   * The agent row itself was picked: "open a conversation with this one".
+   * "Start a conversation with this agent" — the `Start a conversation` row
+   * under a filtered agent that has none, NOT the agent row itself (that is
+   * the filter).
    *
-   * The tree reports the pick and nothing else — `/chat` routes to
-   * `/chat/<slug>`, and `/chat/<slug>` selects the agent's newest thread when
-   * the pick is the agent already open. Neither creates a session; a click is
-   * not a message.
+   * The tree reports the pick and nothing else. `/chat` has no panel to swap,
+   * so it navigates; `/chat/<slug>` swaps the agent in place. Neither creates
+   * a session: a click is not a message.
    *
-   * Optional so a caller that only navigates threads still gets the old
-   * behaviour (the row toggles its branch) rather than an inert row.
+   * Optional — without it a threadless agent simply says it has no
+   * conversations, which is the truth, rather than offering a dead row.
    */
   onOpenAgent?: (agent: ChatTreeAgent) => void
-  /**
-   * Leave the focused view — back to every agent (i.e. `/chat`).
-   *
-   * Passing it is what ALLOWS focus: a tree that narrows to one agent without
-   * a way out is a trap, so the narrowing and the way back arrive together or
-   * not at all.
-   */
-  onShowAllAgents?: () => void
   /** Rows are still arriving; drawn as a hint, never as a blank column. */
   loading?: boolean
   collapsed?: boolean
@@ -466,7 +477,6 @@ export function ChatTreeSidebar({
   activeThreadId = null,
   onOpenThread,
   onOpenAgent,
-  onShowAllAgents,
   loading = false,
   collapsed = false,
   onToggleCollapsed,
@@ -478,6 +488,15 @@ export function ChatTreeSidebar({
   const [facet, setFacet] = useState<StatusFacet>("all")
   const [origins, setOrigins] = useState<string[]>([])
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set())
+  /**
+   * The one agent the reader has narrowed to, or null for "all of them".
+   *
+   * Local, deliberately. Its predecessor read the agent off `activeAgentSlug`
+   * — no new state, at the price of a route change per pick, which remounts
+   * the dashboard chrome on the static-export build. Nobody can feel a piece
+   * of state; everybody feels a page transition.
+   */
+  const [filterSlug, setFilterSlug] = useState<string | null>(null)
 
   // Arriving at /chat/<agent>?session=<id> must SHOW where you are. Without
   // this the tree would open collapsed on the very row the URL just named.
@@ -511,37 +530,79 @@ export function ChatTreeSidebar({
   const q = search.trim().toLowerCase()
 
   /**
-   * The one agent this view is about, or null for "all of them".
+   * The agent the filter is on, or null for "all of them". Two things suspend
+   * it without clearing it:
    *
-   * Read off the route rather than held as state: `/chat` passes no
-   * `activeAgentSlug` and `/chat/<slug>` passes one, so the URL is already the
-   * switch and there is nothing to keep in sync. Three things suspend it:
-   *
-   *  · no `onShowAllAgents` — see the prop; focus without a way out is a trap;
-   *  · a typed search, which must be able to find the agents focus hides;
-   *  · a slug that is not in this list at all (a ghost agent still has a
-   *    history, and its page must not render a column with nobody in it).
+   *  · a typed search, which must be able to find the agents it hides;
+   *  · a slug that is not in this list (the roster moved under us — a filter
+   *    pinned to somebody who is gone must not empty the column).
    */
-  const focusAgent = useMemo(() => {
-    if (!activeAgentSlug || !onShowAllAgents || q) return null
-    return agents.find((a) => a.slug === activeAgentSlug) ?? null
-  }, [agents, activeAgentSlug, onShowAllAgents, q])
+  const filterAgent = useMemo(() => {
+    if (!filterSlug || q) return null
+    return agents.find((a) => a.slug === filterSlug) ?? null
+  }, [agents, filterSlug, q])
+
+  /**
+   * The agent row was picked. Toggle the filter, and unfold on the way in —
+   * narrowing to one agent in order to show it closed would be a filter that
+   * hides what it was asked to reveal.
+   *
+   * Nothing else happens here. No navigation, no fetch, no callback: the whole
+   * point of the redo is that this costs a render.
+   */
+  const pickAgent = useCallback(
+    (slug: string) => {
+      setFilterSlug((prev) => (prev === slug ? null : slug))
+      expandAgent(slug)
+    },
+    [expandAgent],
+  )
+
+  /**
+   * The branches coming and going.
+   *
+   * `mode="popLayout"` on the list below (see the render) takes an exiting
+   * branch out of the flow immediately, so the agent that STAYS springs up
+   * into the gap while the others fade left — rather than everything waiting
+   * on a height collapse to finish. `layout` is what animates that reflow.
+   *
+   * Reduced motion is not a slower version of this. It is no version of it:
+   * no layout animation, no travel, and a zero-length transition, so the rows
+   * are simply there or not.
+   */
+  const reduced = prefersReducedMotion()
+  const branchMotion = reduced
+    ? {
+        layout: false,
+        initial: false as const,
+        animate: { opacity: 1 },
+        exit: { opacity: 0 },
+        transition: { duration: 0 },
+      }
+    : {
+        layout: true as const,
+        initial: { opacity: 0, x: -8 },
+        animate: { opacity: 1, x: 0 },
+        exit: { opacity: 0, x: -8 },
+        transition: spring.smooth,
+      }
 
   // Counts are computed over EVERYTHING loaded, not over the post-facet view —
   // otherwise picking "Unread" would make every other facet read 0, which is
   // the bug /routines already fixed once.
   //
-  // What they count is the SCOPE of the list beneath them: the workspace on
-  // /chat, and the one agent in focus on /chat/<agent>. A workspace-wide
+  // What they count is the SCOPE of the list beneath them: the workspace when
+  // the filter is off, the one agent it is on when it is on. A workspace-wide
   // "Unread 12" hanging over a list that can only ever show this agent's two is
   // a number the view cannot act on — and the facet is a filter on that list,
   // so it would also read as a promise the click cannot keep. The section
   // header carries the agent's name while the scope is narrowed, because a
   // number that changes meaning between views without saying so is worse than
-  // either meaning.
+  // either meaning. (The scope used to be the ROUTE's agent; it is the
+  // filter's now, which is the only thing that narrows this column.)
   const statusCounts = useMemo(() => {
     const counts: Record<StatusFacet, number> = { all: 0, unread: 0, running: 0, done: 0 }
-    for (const a of focusAgent ? [focusAgent] : agents) {
+    for (const a of filterAgent ? [filterAgent] : agents) {
       for (const t of threadsByAgent[a.id] ?? []) {
         counts.all++
         if ((t.unread_count ?? 0) > 0) counts.unread++
@@ -550,7 +611,7 @@ export function ChatTreeSidebar({
       }
     }
     return counts
-  }, [agents, focusAgent, threadsByAgent])
+  }, [agents, filterAgent, threadsByAgent])
 
   /** Threads shown under one agent, after facet + origin + search. */
   const visibleThreads = useCallback(
@@ -567,11 +628,11 @@ export function ChatTreeSidebar({
   )
 
   const visibleAgents = useMemo(() => {
-    // Focus first: on /chat/<agent> the only row the section can hold is that
-    // agent's — the facets and the origin filter still apply to it, so picking
-    // "Unread" on an agent with none empties the list rather than quietly
-    // widening it back out.
-    const scope = focusAgent ? agents.filter((a) => a.slug === focusAgent.slug) : agents
+    // The filter first: while it is on, the only row the section can hold is
+    // that agent's — the facets and the origin filter still apply to it, so
+    // picking "Unread" on an agent with none empties the list rather than
+    // quietly widening it back out.
+    const scope = filterAgent ? agents.filter((a) => a.slug === filterAgent.slug) : agents
     const matching = scope.filter((a) => {
       const threads = visibleThreads(a)
       // "Running" is a property of the agent, so a running agent belongs in
@@ -584,7 +645,7 @@ export function ChatTreeSidebar({
     })
     // Ordered by the work, not by the alphabet — see sortAgentsByActivity.
     return sortAgentsByActivity(matching, threadsByAgent)
-  }, [agents, focusAgent, threadsByAgent, visibleThreads, facet, origins, q])
+  }, [agents, filterAgent, threadsByAgent, visibleThreads, facet, origins, q])
 
   if (collapsed) {
     return (
@@ -653,10 +714,10 @@ export function ChatTreeSidebar({
 
       {/* ── Status ── (single-select bucket, same shape as /routines) */}
       <SidebarSection
-        // Named scope, not a bare "Status": while the tree is focused these
+        // Named scope, not a bare "Status": while the filter is on these
         // numbers describe one agent, and the reader has to be able to see
         // that from the counts themselves.
-        label={focusAgent ? `Status · ${focusAgent.name}` : "Status"}
+        label={filterAgent ? `Status · ${filterAgent.name}` : "Status"}
         count={statusCounts.all}
         collapsible
         collapsed={!statusOpen}
@@ -710,61 +771,67 @@ export function ChatTreeSidebar({
           collapsible
           collapsed={!agentsOpen}
           onToggle={() => setAgentsOpen((v) => !v)}
+          // Clearing the filter, in the header rather than as a row in the
+          // list. This is NOT the "All agents" row it replaces: that one was
+          // a `router.push("/chat")` — the way out of a NAVIGATION — and it is
+          // gone with the navigation. This writes one piece of local state,
+          // and it exists because a filter whose only off-switch is "click the
+          // same row again" is a filter people get stuck inside.
+          actions={
+            filterAgent ? (
+              <button
+                type="button"
+                data-testid="chat-tree-clear-filter"
+                onClick={() => setFilterSlug(null)}
+                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/70 hover:bg-white/[0.05] hover:text-foreground"
+              >
+                Show all {agents.length}
+              </button>
+            ) : undefined
+          }
         />
         {agentsOpen && (
-          <div className="min-h-0 flex-1 overflow-y-auto pb-2">
-            {/* The way out of the focused view. A row rather than a chevron on
-                the section header: it is the only navigation that leaves this
-                agent behind, it carries how many agents are waiting on the
-                other side of it, and as a SidebarRow it is tabbable and
-                answers Enter/Space like every other row here. */}
-            {focusAgent && onShowAllAgents && (
-              <SidebarRow
-                as="div"
-                data-testid="chat-tree-all-agents"
-                aria-label={`All agents (${agents.length})`}
-                onSelect={onShowAllAgents}
-              >
-                <ChevronLeft aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/60" />
-                <span className="min-w-0 flex-1 truncate text-xs text-foreground/70">All agents</span>
-                <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
-                  {agents.length}
-                </span>
-              </SidebarRow>
-            )}
+          // `relative`: popLayout takes an exiting branch out of the flow by
+          // positioning it absolutely, and it has to land against this list
+          // rather than against whatever happens to be positioned above it.
+          <div className="relative min-h-0 flex-1 overflow-y-auto pb-2">
             {visibleAgents.length === 0 ? (
               <p className="px-3 py-6 text-center text-xs text-muted-foreground">
                 {loading ? "Loading agents…" : agents.length === 0 ? "No agents yet." : "Nothing matches."}
               </p>
             ) : (
-              visibleAgents.map((a) => (
-                <AgentBranch
-                  key={a.id}
-                  agent={a}
-                  threads={visibleThreads(a)}
-                  totalThreads={(threadsByAgent[a.id] ?? []).length}
-                  threadsError={threadErrors[a.id] ?? null}
-                  onRetryThreads={onRetryThreads}
-                  expanded={expandedAgents.has(a.slug)}
-                  onToggle={() => toggleAgent(a.slug)}
-                  onExpand={() => expandAgent(a.slug)}
-                  onCollapse={() => collapseAgent(a.slug)}
-                  // One rule for every agent row: it opens a conversation.
-                  // The branch unfolds on the way — never folds, because the
-                  // click that opens something must not also hide it.
-                  onSelect={
-                    onOpenAgent
-                      ? () => {
-                          expandAgent(a.slug)
-                          onOpenAgent(a)
-                        }
-                      : () => toggleAgent(a.slug)
-                  }
-                  isActiveAgent={a.slug === activeAgentSlug}
-                  activeThreadId={activeThreadId}
-                  onOpenThread={onOpenThread}
-                />
-              ))
+              // `initial={false}`: the column must not perform a seven-row
+              // entrance every time the page mounts. Rows added or removed
+              // AFTER that — which is exactly the filter toggling — animate.
+              <AnimatePresence initial={false} mode="popLayout">
+                {visibleAgents.map((a) => (
+                  <motion.div key={a.id} {...branchMotion}>
+                    <AgentBranch
+                      agent={a}
+                      threads={visibleThreads(a)}
+                      totalThreads={(threadsByAgent[a.id] ?? []).length}
+                      threadsError={threadErrors[a.id] ?? null}
+                      onRetryThreads={onRetryThreads}
+                      expanded={expandedAgents.has(a.slug)}
+                      onToggle={() => toggleAgent(a.slug)}
+                      onExpand={() => expandAgent(a.slug)}
+                      onCollapse={() => collapseAgent(a.slug)}
+                      // The row is the filter. It never navigates and never
+                      // calls back — see pickAgent.
+                      onSelect={() => pickAgent(a.slug)}
+                      filtered={filterAgent?.slug === a.slug}
+                      // Only offered where the plain click no longer reaches:
+                      // an agent the reader has narrowed to that has nothing
+                      // to open. Anywhere else it would be a second, quieter
+                      // copy of the header's New session button.
+                      onStartConversation={onOpenAgent ? () => onOpenAgent(a) : undefined}
+                      isActiveAgent={a.slug === activeAgentSlug}
+                      activeThreadId={activeThreadId}
+                      onOpenThread={onOpenThread}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             )}
           </div>
         )}
@@ -789,8 +856,16 @@ interface AgentBranchProps {
   onExpand: () => void
   /** ArrowLeft. */
   onCollapse: () => void
-  /** The row was picked: open a conversation with this agent. */
+  /** The row was picked: toggle the filter onto (or off) this agent. */
   onSelect: () => void
+  /** True while this agent IS the filter — the reason the others are gone. */
+  filtered: boolean
+  /**
+   * Offered under a filtered agent with no threads, and nowhere else: the
+   * plain click is the filter now, so starting a conversation needs a row of
+   * its own. Undefined when the caller cannot start one.
+   */
+  onStartConversation?: () => void
   isActiveAgent: boolean
   activeThreadId: string | null
   /**
@@ -813,6 +888,8 @@ function AgentBranch({
   onExpand,
   onCollapse,
   onSelect,
+  filtered,
+  onStartConversation,
   isActiveAgent,
   activeThreadId,
   onOpenThread,
@@ -827,8 +904,8 @@ function AgentBranch({
 
   return (
     <>
-      {/* The row opens a conversation, so open/close needs a key of its own —
-          the same ←/→ the crews explorer's tree answers. It lives on a wrapper
+      {/* The row is the filter, so open/close needs a key of its own — the
+          same ←/→ the crews explorer's tree answers. It lives on a wrapper
           because the kit's row is a ListRow, whose prop surface is closed. */}
       <div
         onKeyDown={(e) => {
@@ -850,7 +927,10 @@ function AgentBranch({
           // disclosure state cannot ride an aria-expanded here. The accessible
           // name is pinned to the agent instead of drifting with the counts.
           aria-label={agent.name}
-          selected={isActiveAgent && activeThreadId === null}
+          // The row is a toggle, so it says so where a screen reader can hear
+          // it — ListRow already emits aria-pressed from `selected`, and the
+          // filter is the state this row actually toggles.
+          selected={filtered || (isActiveAgent && activeThreadId === null)}
           onSelect={onSelect}
         >
           {canExpand ? (
@@ -994,6 +1074,28 @@ function AgentBranch({
         <p className="ml-6 px-2 py-1.5 text-[11px] text-muted-foreground-soft">
           No sessions match the filter.
         </p>
+      )}
+
+      {/* The original defect, answered. An agent nobody has talked to has no
+          threads and no chevron, and now that the plain click belongs to the
+          filter it would once again be a row that does nothing — on the one
+          surface whose job is to make talking to it easy. So: an explicit row,
+          under the agent the reader has narrowed to, and a SidebarRow rather
+          than a bare link so it is tabbable and answers Enter/Space like every
+          other row in this column. */}
+      {filtered && !canExpand && !threadsError && onStartConversation && (
+        <SidebarRow
+          as="div"
+          indent
+          data-testid={`chat-tree-start-${agent.slug}`}
+          aria-label={`Start a conversation with ${agent.name}`}
+          onSelect={onStartConversation}
+        >
+          <MessageSquarePlus aria-hidden className="h-3 w-3 shrink-0 text-primary/70" />
+          <span className="min-w-0 flex-1 truncate text-xs text-foreground/80">
+            Start a conversation
+          </span>
+        </SidebarRow>
       )}
     </>
   )

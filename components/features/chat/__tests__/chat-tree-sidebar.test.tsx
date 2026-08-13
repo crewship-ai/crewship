@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, cleanup, fireEvent, within } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react"
 
 // =============================================================================
 // The agent tree — one left column for the whole chat surface.
@@ -80,20 +80,27 @@ const BASE = {
     "agent-bob": [thread("t-3", "Rebuild the index", 90)],
   } as Record<string, ChatTreeThread[]>,
   onOpenThread: vi.fn(),
-  // The agent row is a destination, not just a disclosure. Both callers pass
-  // these; the tree only ever reports the pick.
+  // "Start a conversation", NOT the agent row — that is the filter, and the
+  // filter reports nothing to anybody.
   onOpenAgent: vi.fn(),
-  onShowAllAgents: vi.fn(),
 }
 
 function resetBase() {
   BASE.onOpenThread.mockReset()
   BASE.onOpenAgent.mockReset()
-  BASE.onShowAllAgents.mockReset()
 }
 
 function agentRow(slug: string): HTMLElement {
   return screen.getByTestId(`chat-tree-agent-${slug}`)
+}
+
+/**
+ * Rows leave under a spring, so "gone" is a thing that happens rather than a
+ * thing that is true on the next line. Every assertion that an agent has been
+ * filtered out waits for the exit to finish.
+ */
+async function expectGone(slug: string): Promise<void> {
+  await waitFor(() => expect(screen.queryByTestId(`chat-tree-agent-${slug}`)).toBeNull())
 }
 
 function folderRows(): HTMLElement[] {
@@ -136,11 +143,13 @@ describe("<ChatTreeSidebar> — the tree", () => {
     expect(titles.join(" ")).not.toContain("Rebuild the index")
   })
 
-  it("has no Files, Asks or Memory row — those are the right rail's, the config tab's and the canvas's", () => {
+  it("has no Files, Asks or Memory row — those are the right rail's, the config tab's and the canvas's", async () => {
     render(<ChatTreeSidebar {...BASE} />)
 
-    fireEvent.click(agentRow("ada"))
-    fireEvent.click(agentRow("bob"))
+    // Opened from the keyboard, so the filter stays out of it and both
+    // branches are on screen at once.
+    fireEvent.keyDown(agentRow("ada"), { key: "ArrowRight" })
+    fireEvent.keyDown(agentRow("bob"), { key: "ArrowRight" })
 
     expect(folderRows()).toHaveLength(0)
     for (const gone of [/^files$/i, /^asks$/i, /^memory$/i, /^sessions$/i]) {
@@ -168,11 +177,16 @@ describe("<ChatTreeSidebar> — the tree", () => {
     expect(threadRows()).toHaveLength(0)
   })
 
-  // The defect: the row was `onSelect={onToggle}`, so an agent with no threads
-  // had `canExpand === false` and the row did nothing at all. Someone clicked
+  // The defect, and the reason the row cannot simply go back to being a
+  // disclosure: `onSelect={onToggle}` meant an agent with no threads had
+  // `canExpand === false` and the row did nothing at all. Someone clicked
   // "Alex" and the product did not move — on the one surface that is supposed
   // to make starting a conversation easy.
-  it("clicking an agent with NO conversations asks to open one with it", () => {
+  //
+  // It was answered by making the row navigate, which is what the owner then
+  // rejected. It is answered here by a row of its own, under the agent the
+  // reader has narrowed to.
+  it("offers a row to start one with an agent that has none, and reports only when it is used", async () => {
     const zed = agent("zed", "Zed Silent")
     render(
       <ChatTreeSidebar
@@ -182,27 +196,66 @@ describe("<ChatTreeSidebar> — the tree", () => {
       />,
     )
 
-    fireEvent.click(agentRow("zed"))
+    // Not offered in the wide view: six threadless agents would grow six of
+    // these, under a header that already has a New session button.
+    expect(screen.queryByTestId("chat-tree-start-zed")).toBeNull()
 
+    fireEvent.click(agentRow("zed"))
+    await expectGone("ada")
+
+    // Narrowing to an agent is not asking to talk to it.
+    expect(BASE.onOpenAgent).not.toHaveBeenCalled()
+
+    const start = screen.getByTestId("chat-tree-start-zed")
+    expect(start).toHaveAccessibleName(/start a conversation with zed silent/i)
+    // Keyboard-reachable, and it answers the same keys every row here does.
+    expect(start).toHaveAttribute("tabindex", "0")
+    fireEvent.keyDown(start, { key: "Enter" })
     expect(BASE.onOpenAgent).toHaveBeenCalledWith(expect.objectContaining({ slug: "zed" }))
-    // …and the tree does not pretend it has a list to show.
+
+    // …and the tree still does not pretend it has a list to show.
     expect(threadRows()).toHaveLength(0)
   })
 
-  it("clicking an agent that HAS conversations opens one too, and reveals the rest", () => {
+  it("clicking an agent hides the others and unfolds it; clicking it again brings them back", async () => {
     render(<ChatTreeSidebar {...BASE} />)
 
     fireEvent.click(agentRow("ada"))
-
-    // One rule for both cases: the row is a conversation, not a disclosure.
-    expect(BASE.onOpenAgent).toHaveBeenCalledWith(expect.objectContaining({ slug: "ada" }))
+    await expectGone("bob")
+    // Narrowing to an agent in order to show it closed would be a filter that
+    // hides what it was asked to reveal.
     expect(threadRows()).toHaveLength(2)
+    // It never asks anyone to open anything, and it never leaves the page.
+    expect(BASE.onOpenAgent).not.toHaveBeenCalled()
 
-    // Closing the branch again is the chevron's job, and closing is not
-    // opening — it must not ask for a conversation a second time.
+    fireEvent.click(agentRow("ada"))
+    await waitFor(() => expect(agentRow("bob")).toBeInTheDocument())
+    expect(BASE.onOpenAgent).not.toHaveBeenCalled()
+
+    // Closing the branch is still the chevron's job, and closing is not
+    // filtering — the column must not widen back out because a branch shut.
+    fireEvent.click(agentRow("ada"))
+    await expectGone("bob")
     fireEvent.click(screen.getByTestId("chat-tree-expander-ada"))
     expect(threadRows()).toHaveLength(0)
-    expect(BASE.onOpenAgent).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId("chat-tree-agent-bob")).toBeNull()
+  })
+
+  it("clears the filter from the section header too — one click, and it is a click, not a link", async () => {
+    render(<ChatTreeSidebar {...BASE} />)
+
+    expect(screen.queryByTestId("chat-tree-clear-filter")).toBeNull()
+
+    fireEvent.click(agentRow("ada"))
+    await expectGone("bob")
+
+    // This is NOT the "All agents" row it replaces: that one was a
+    // router.push("/chat"), and it is gone with the navigation.
+    const clear = screen.getByTestId("chat-tree-clear-filter")
+    expect(clear.tagName).toBe("BUTTON")
+    expect(clear).toHaveTextContent("2")
+    fireEvent.click(clear)
+    await waitFor(() => expect(agentRow("bob")).toBeInTheDocument())
   })
 
   it("expands and collapses from the keyboard, without opening anything", () => {
@@ -216,44 +269,38 @@ describe("<ChatTreeSidebar> — the tree", () => {
     expect(BASE.onOpenAgent).not.toHaveBeenCalled()
   })
 
-  // The clutter: seven agents, six of them with no threads and a role line
-  // each, around one conversation. The route already says which agent is in
-  // hand — /chat is everyone, /chat/<slug> is that one — so the tree follows
-  // the route rather than growing a mode of its own.
-  it("focuses on the agent the route names, and lists everyone again on /chat", () => {
-    const { rerender } = render(<ChatTreeSidebar {...BASE} activeAgentSlug="ada" />)
-
-    expect(agentRow("ada")).toBeInTheDocument()
-    expect(screen.queryByTestId("chat-tree-agent-bob")).toBeNull()
-    // Focused means open: the threads are the point of narrowing to one agent.
-    expect(screen.getByTestId("chat-tree-thread-t-1")).toBeInTheDocument()
-
-    // A tree that narrows without a way out is a trap, so the way out is a row
-    // of its own — reachable by pointer and by keyboard.
-    const back = screen.getByTestId("chat-tree-all-agents")
-    expect(back).toHaveAttribute("tabindex", "0")
-    fireEvent.keyDown(back, { key: "Enter" })
-    fireEvent.click(back)
-    expect(BASE.onShowAllAgents).toHaveBeenCalledTimes(2)
-
-    // …and /chat is everybody, with nothing to go back from.
-    rerender(<ChatTreeSidebar {...BASE} activeAgentSlug={null} />)
-    expect(agentRow("ada")).toBeInTheDocument()
-    expect(agentRow("bob")).toBeInTheDocument()
-    expect(screen.queryByTestId("chat-tree-all-agents")).toBeNull()
-  })
-
-  it("lets a search reach past the focus — a search that cannot see the other six is a lie", () => {
+  // The route USED to narrow this column: /chat listed everyone, /chat/<slug>
+  // listed that one agent. It cost no state and it cost a page transition per
+  // pick — every agent you looked at tore down and rebuilt the dashboard
+  // chrome. Naming an agent in the URL now selects it and opens it, and
+  // narrows nothing.
+  it("lists every agent on /chat/<slug> — the route selects, it does not narrow", () => {
     render(<ChatTreeSidebar {...BASE} activeAgentSlug="ada" />)
 
-    expect(screen.queryByTestId("chat-tree-agent-bob")).toBeNull()
+    expect(agentRow("ada")).toBeInTheDocument()
+    expect(agentRow("bob")).toBeInTheDocument()
+    // Selected means open: arriving somewhere and being shown a closed row is
+    // the tree hiding where you are.
+    expect(screen.getByTestId("chat-tree-thread-t-1")).toBeInTheDocument()
+    // Nothing narrows it, so there is nothing to undo.
+    expect(screen.queryByTestId("chat-tree-all-agents")).toBeNull()
+    expect(screen.queryByTestId("chat-tree-clear-filter")).toBeNull()
+  })
+
+  it("lets a search reach past the filter — a search that cannot see the other six is a lie", async () => {
+    render(<ChatTreeSidebar {...BASE} activeAgentSlug="ada" />)
+
+    fireEvent.click(agentRow("ada"))
+    await expectGone("bob")
 
     fireEvent.change(screen.getByRole("textbox", { name: /search/i }), { target: { value: "bob" } })
-    expect(screen.getByTestId("chat-tree-agent-bob")).toBeInTheDocument()
+    await waitFor(() => expect(agentRow("bob")).toBeInTheDocument())
 
-    // Clearing it returns to the one agent in hand.
+    // Suspended, not cleared — clearing the box returns to the one agent the
+    // reader had narrowed to, rather than silently widening the column.
     fireEvent.change(screen.getByRole("textbox", { name: /search/i }), { target: { value: "" } })
-    expect(screen.queryByTestId("chat-tree-agent-bob")).toBeNull()
+    await expectGone("bob")
+    expect(agentRow("ada")).toBeInTheDocument()
   })
 
   // "More sorted" was the whole of the request. There is no sort control here
@@ -412,13 +459,14 @@ describe("<ChatTreeSidebar> — kit chrome", () => {
     expect(screen.getByRole("button", { name: /expand sidebar/i })).toBeInTheDocument()
   })
 
-  it("searches across agents and threads", () => {
+  it("searches across agents and threads", async () => {
     render(<ChatTreeSidebar {...BASE} />)
 
     fireEvent.change(screen.getByRole("textbox", { name: /search/i }), { target: { value: "rebuild" } })
 
-    // Only the agent that owns a matching thread survives.
-    expect(screen.queryByTestId("chat-tree-agent-ada")).toBeNull()
+    // Only the agent that owns a matching thread survives — once it has
+    // finished animating out, which every row here now does.
+    await waitFor(() => expect(screen.queryByTestId("chat-tree-agent-ada")).toBeNull())
     expect(screen.getByTestId("chat-tree-agent-bob")).toBeInTheDocument()
   })
 })
@@ -463,13 +511,25 @@ describe("<ChatTreeSidebar> — status facets are counted from real data", () =>
     expect(screen.queryByText(/needs you/i)).toBeNull()
   })
 
-  // In the focused view the list below these numbers can only ever hold ONE
-  // agent's threads, so a workspace-wide count above it would be a number the
-  // view cannot act on. It counts what it can show — and says whose it is,
+  // While the filter is on, the list below these numbers can only ever hold
+  // ONE agent's threads, so a workspace-wide count above it would be a number
+  // the view cannot act on. It counts what it can show — and says whose it is,
   // because a number that changes meaning between two views without saying so
   // is worse than either meaning.
-  it("counts the facets over the agent in focus, and names the scope", () => {
-    render(<ChatTreeSidebar {...props} activeAgentSlug="ada" onShowAllAgents={vi.fn()} />)
+  //
+  // The scope used to be the ROUTE's agent. It is the filter's now, which is
+  // the only thing that narrows this column: `activeAgentSlug` alone must
+  // leave the counts workspace-wide, because the list beneath them is too.
+  it("counts the facets over the agent the FILTER is on, and names the scope", async () => {
+    render(<ChatTreeSidebar {...props} activeAgentSlug="ada" />)
+
+    // Named in the URL, nothing narrowed: three threads, and no name on the
+    // header claiming otherwise.
+    expect(within(statusRow("all")).getByText("3")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^status/i }).textContent).not.toContain("Ada Lovelace")
+
+    fireEvent.click(screen.getByTestId("chat-tree-agent-ada"))
+    await waitFor(() => expect(screen.queryByTestId("chat-tree-agent-cleo")).toBeNull())
 
     // Ada has two of the workspace's three threads; one of them is unread and
     // one is ended, and she is not the RUNNING agent.
@@ -481,19 +541,19 @@ describe("<ChatTreeSidebar> — status facets are counted from real data", () =>
     expect(screen.getByRole("button", { name: /^status/i }).textContent).toContain("Ada Lovelace")
   })
 
-  it("counts the whole workspace on /chat, and says nothing about an agent", () => {
+  it("counts the whole workspace while nothing is filtered, and says nothing about an agent", () => {
     render(<ChatTreeSidebar {...props} />)
 
     expect(within(statusRow("all")).getByText("3")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /^status/i }).textContent).not.toContain("Ada")
   })
 
-  it("picking a facet narrows the tree to the agents it matches", () => {
+  it("picking a facet narrows the tree to the agents it matches", async () => {
     render(<ChatTreeSidebar {...props} />)
 
     fireEvent.click(statusRow("running"))
 
     expect(screen.getByTestId("chat-tree-agent-cleo")).toBeInTheDocument()
-    expect(screen.queryByTestId("chat-tree-agent-ada")).toBeNull()
+    await waitFor(() => expect(screen.queryByTestId("chat-tree-agent-ada")).toBeNull())
   })
 })
