@@ -84,7 +84,11 @@ function renderSheet(form: AskForm, render_ = renderTemplate) {
   )
 }
 
-function attachReady(name = "IMG_4821.heic") {
+/** A finished upload. `owner` says which form field it answers; without one it
+ *  is the MESSAGE's own attachment — the composer's paperclip — which is what
+ *  every case below that does not name a field is about. Per-field ownership
+ *  itself is covered in ./ask-field-attachments.test.tsx. */
+function attachReady(name = "IMG_4821.heic", owner?: { formId: string; field: string }) {
   useComposerStore.setState({
     attachments: {
       "sess-1": [
@@ -96,6 +100,7 @@ function attachReady(name = "IMG_4821.heic") {
           status: "ready",
           url: `/output/riley/attachments/sess-1/${name}`,
           path: `attachments/sess-1/${name}`,
+          owner,
         },
       ],
     },
@@ -104,7 +109,7 @@ function attachReady(name = "IMG_4821.heic") {
 
 /** The same file, refused by the server. A chip in the list, no path behind
  *  it — which is exactly what a `required` attachment must NOT count as. */
-function attachFailed(name = "IMG_4821.heic") {
+function attachFailed(name = "IMG_4821.heic", owner?: { formId: string; field: string }) {
   useComposerStore.setState({
     attachments: {
       "sess-1": [
@@ -115,6 +120,7 @@ function attachFailed(name = "IMG_4821.heic") {
           type: "image/heic",
           status: "error",
           error: "create parent dir: permission denied",
+          owner,
         },
       ],
     },
@@ -227,7 +233,7 @@ describe("ask form sheet", () => {
       ],
     }
     renderSheet(withFileField)
-    attachFailed()
+    attachFailed("IMG_4821.heic", { formId: "receipt-file-field", field: "doc" })
     fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: "Vodafone" } })
 
     fireEvent.click(screen.getByTestId("ask-submit"))
@@ -286,7 +292,9 @@ describe("ask form sheet", () => {
   it("hands the renderer the value shape each field type is defined in", () => {
     const spy = vi.fn(() => "rendered")
     renderSheet(everyType, spy)
-    attachReady("page 1.heic")
+    // Into the `doc` field: an upload answers the field it was dropped into,
+    // so that is the only field whose value it becomes.
+    attachReady("page 1.heic", { formId: "kitchen-sink", field: "doc" })
 
     fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "Vodafone" } })
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1249" } })
@@ -311,8 +319,10 @@ describe("ask form sheet", () => {
     expect(values.paid).toBe(true)
     // A multiselect is an array, which the renderer joins with ", ".
     expect(values.tags).toEqual(["a"])
-    // Files are an array of the paths the upload already returned.
+    // Files are an array of the paths the upload already returned — the ones
+    // uploaded into THIS field, and no others.
     expect(values.doc).toEqual(["attachments/sess-1/page 1.heic"])
+    expect(values.shot).toEqual([])
   })
 
   it("an empty money field sends no bare currency", () => {
@@ -337,7 +347,7 @@ describe("ask form sheet", () => {
       ],
     }
     renderSheet(realForm, renderAskTemplate)
-    attachReady("IMG_4821.heic")
+    attachReady("IMG_4821.heic", { formId: "receipt", field: "document" })
     fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: "Vodafone" } })
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "1249" } })
 

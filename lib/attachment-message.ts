@@ -27,6 +27,27 @@
  * component where the next edit quietly changes them.
  */
 
+/**
+ * Which question an upload answers.
+ *
+ * Absent means the upload answers none: it is the MESSAGE's own attachment,
+ * the paperclip-and-drop case this module was written for, and the block below
+ * is the only thing that will ever name it.
+ *
+ * Present means the user dropped the file into a `file` / `photo` field of an
+ * ask form. That file is already named in the message — the form's template
+ * substitutes its path under the field that asked for it (§7.4) — so naming it
+ * again in the appended block would announce one file as two, and leaving it in
+ * the list after the form is abandoned would attach it to whatever ordinary
+ * message the user typed next.
+ */
+export interface AttachmentOwner {
+  /** The `AskForm.id` whose sheet the file was dropped into. */
+  formId: string
+  /** The `file` / `photo` field's `name`. */
+  field: string
+}
+
 /** An attachment as the composer store knows it, narrowed to what the wire
  *  format needs. `path` is the server-assigned relative path; it only exists
  *  once the upload has come back. */
@@ -36,6 +57,8 @@ export interface OutgoingAttachment {
   path?: string
   /** Only `"ready"` can be named in a message — see `sendableAttachments`. */
   status?: "uploading" | "ready" | "error"
+  /** The form field this upload answers, if any. See `AttachmentOwner`. */
+  owner?: AttachmentOwner
 }
 
 /** Control characters (C0 + DEL) are stripped from a path before it is named.
@@ -62,9 +85,19 @@ function cleanPath(path: string): string {
  * browser and expensive at the other end: the agent is told to read a file,
  * cannot, and reports back about the wrong thing. So the question is "did this
  * upload finish", and every other state answers no by default.
+ *
+ * The second question is "is this file the MESSAGE's". An upload carrying an
+ * `owner` answers an ask-form field, and the form's template already names its
+ * path — so it is not the message's to name, and the block must not repeat it.
+ * `isSendableAttachment` is the same finished-upload rule without that filter,
+ * for the sheet, which asks it per field.
  */
+export function isSendableAttachment(a: OutgoingAttachment): boolean {
+  return a.status === "ready" && !!a.path && !!cleanPath(a.path)
+}
+
 export function sendableAttachments(attachments: OutgoingAttachment[]): OutgoingAttachment[] {
-  return attachments.filter((a) => a.status === "ready" && !!a.path && !!cleanPath(a.path))
+  return attachments.filter((a) => isSendableAttachment(a) && !a.owner)
 }
 
 /** True while at least one upload is still running. The composer refuses to
@@ -114,6 +147,12 @@ function attachmentBlock(paths: string[]): string {
  * With attachments and no text (a photo with no caption) the block stands
  * alone: an attachment-only message is a real message, and dropping it was
  * the second half of the same bug.
+ *
+ * Files that answer an ask-form field are NOT in the block: the rendered
+ * template names them under the field that asked, and a file announced twice
+ * reads as two files. Passing the whole session list here is still correct —
+ * the filtering is `sendableAttachments`' job, in one place, so the composer
+ * and the sheet's preview cannot disagree about what is going out.
  */
 export function composeMessageWithAttachments(
   text: string,

@@ -5,13 +5,22 @@ import { ChevronRight, ClipboardList, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
-import { composeMessageWithAttachments, sendableAttachments } from "@/lib/attachment-message"
+import {
+  useComposerStore,
+  attachmentsForOwner,
+  messageOwnAttachments,
+  type ComposerAttachment,
+} from "@/stores/composer-store"
+import {
+  composeMessageWithAttachments,
+  hasPendingUploads,
+  isSendableAttachment,
+} from "@/lib/attachment-message"
 import { cn } from "@/lib/utils"
 
-import { AttachmentZone, AttachmentButton, CameraButton } from "../composer/attachment-zone"
 import { currencyPlaceholder } from "@/lib/ask-template"
 
+import { AskFieldAttachments, AskMessageAttachments } from "./field-attachments"
 import { FormField, fieldLabelText, splitMoney } from "./form-field"
 import {
   fieldType,
@@ -48,13 +57,15 @@ import {
  *      CLI preview with — both pinned to testdata/ask-templates.json. Two
  *      renderers that can silently disagree about what the user is sending is
  *      the defect that fixture exists to prevent.
- *   2. **Upload anything itself.** `file` / `photo` fields mount the composer's
- *      own AttachmentZone — the same `useAttachmentUpload`, the same 25 MB
- *      guard, the same abort-on-remove, the same per-session attachment list.
- *      Because the list is shared, the CHIPS are drawn in exactly one place at
- *      a time: while this sheet has an upload field, it is the one that draws
- *      them (the composer hides its own), and within the sheet it is the first
- *      upload field. Two views of one list read as two attachments.
+ *   2. **Upload anything itself.** `file` / `photo` fields route through the
+ *      composer's own `useAttachmentUpload` — the same endpoint, the same
+ *      25 MB guard, the same failure toast, the same Retry (./field-attachments
+ *      .tsx). What the sheet does own is WHICH upload answers which question:
+ *      each field reads only the attachments stamped with its own name, so a
+ *      contract cannot satisfy a request for an identity photo. While this
+ *      sheet shows an upload control it is also the only place chips are drawn
+ *      — the composer hides its own list, because two views of one list read
+ *      as two attachments.
  *   3. **Send anything itself.** It hands the rendered text to `onSubmit`,
  *      which is the composer's own `useMessageSubmit` path — so the size
  *      guard, the still-uploading refusal and the draft-survival rules all
@@ -116,29 +127,48 @@ function Sheet({
   const rootRef = useRef<HTMLDivElement>(null)
 
   const attachments = useComposerStore((s) => s.attachments[sessionId]) ?? NO_ATTACHMENTS
-  const ready = useMemo(() => sendableAttachments(attachments), [attachments])
+  const clearFormAttachments = useComposerStore((s) => s.clearFormAttachments)
 
-  // Which upload field draws the chips. There is one attachment list per
-  // session, and a form is allowed two upload fields (a receipt and a photo of
-  // it); every slot mounts an AttachmentZone over that same list, so without
-  // this the file would be listed once per slot. The first one shows it — all
-  // of them feed it, and the renderer's value for every `file` / `photo` field
-  // is the same list of paths anyway (toAskValues below).
-  const chipFieldName = useMemo(
-    () => form.fields.find(isAttachmentField)?.name ?? null,
-    [form.fields],
-  )
+  // Every upload field's own list, keyed by field name. This is the fix: the
+  // store holds one list per session, but each attachment now says which field
+  // it answers, so "the contract" and "the identity photo" are two answers and
+  // not two views of one.
+  const byField = useMemo(() => {
+    const out: Record<string, ComposerAttachment[]> = {}
+    for (const f of form.fields) {
+      if (isAttachmentField(f)) {
+        out[f.name] = attachmentsForOwner(attachments, { formId: form.id, field: f.name })
+      }
+    }
+    return out
+  }, [form.id, form.fields, attachments])
 
   // A `file` / `photo` field's value is not typed, it is uploaded. What the
   // template sees is the agent-visible relative path the upload already
   // returned; the renderer passes a value that is already prefixed straight
   // through, so the path in the template and the path in the attachment block
-  // are the same string (PRD §7.4).
-  const attachmentPaths = useMemo(() => ready.map((a) => a.path!), [ready])
+  // are the same string (PRD §7.4). Only a FINISHED upload has one — a refused
+  // one leaves its field empty, which is what makes it fail a `required` check
+  // instead of quietly sending a path to a file that is not on the agent.
+  const pathsByField = useMemo(() => {
+    const out: Record<string, string[]> = {}
+    for (const [name, list] of Object.entries(byField)) {
+      out[name] = list.filter(isSendableAttachment).map((a) => a.path!)
+    }
+    return out
+  }, [byField])
+
+  // Attachments that answer no question: the composer's paperclip, or a file
+  // dropped on the conversation while this sheet was open. They stay the
+  // MESSAGE's — named by the appended block, never by a field — and the sheet
+  // shows them (below) because the composer hides its own list while an upload
+  // control is on screen.
+  const messageAttachments = useMemo(() => messageOwnAttachments(attachments), [attachments])
+  const hasUploadField = useMemo(() => form.fields.some(isAttachmentField), [form.fields])
 
   const renderValues = useMemo<AskValues>(
-    () => toAskValues(form.fields, values, attachmentPaths),
-    [form.fields, values, attachmentPaths],
+    () => toAskValues(form.fields, values, pathsByField),
+    [form.fields, values, pathsByField],
   )
 
   const rendered = useMemo(() => {
@@ -173,20 +203,36 @@ function Sheet({
 
     // Required fields first, named. "Something is missing" is not a message.
     for (const f of form.fields) {
-      const value = isAttachmentField(f)
-        ? attachmentPaths.join("\n")
-        : values[f.name] ?? ""
-      if (f.required && value.trim() === "") {
-        toast.error(
-          isAttachmentField(f)
-            ? `${fieldLabelText(f)} is required — attach a file before sending.`
-            : `${fieldLabelText(f)} is required.`,
-        )
+      if (isAttachmentField(f)) {
+        // Per field, and per field only. An upload that is still in flight has
+        // no path yet and a refused one never will — neither can answer the
+        // question, and neither may be answered by the file the field NEXT to
+        // this one got.
+        if (hasPendingUploads(byField[f.name] ?? [])) {
+          toast.error(`${fieldLabelText(f)} is still uploading — wait for it to finish.`)
+          return
+        }
+        if (f.required && (pathsByField[f.name] ?? []).length === 0) {
+          toast.error(`${fieldLabelText(f)} is required — attach a file before sending.`)
+          return
+        }
+        continue
+      }
+      if (f.required && (values[f.name] ?? "").trim() === "") {
+        toast.error(`${fieldLabelText(f)} is required.`)
         return
       }
     }
 
-    if (form.attachment === "required" && ready.length === 0) {
+    // The form-level policy is about the message carrying a document at all,
+    // so anything that can actually go counts: a file answering one of this
+    // form's own fields, or one attached to the message beside it.
+    if (
+      form.attachment === "required" &&
+      !attachments.some(
+        (a) => isSendableAttachment(a) && (!a.owner || a.owner.formId === form.id),
+      )
+    ) {
       toast.error(
         `“${form.label}” needs a document — attach a file or take a photo before sending.`,
       )
@@ -210,8 +256,9 @@ function Sheet({
     disabled,
     form,
     values,
-    attachmentPaths,
-    ready.length,
+    byField,
+    pathsByField,
+    attachments,
     rendered,
     onSubmit,
     onClose,
@@ -226,6 +273,17 @@ function Sheet({
       onClose()
     }
   }
+
+  // A form's uploads are its answers, and they do not outlive it: closing the
+  // sheet — sent, cancelled or escaped — drops them, exactly as the typed
+  // answers above them are dropped. Leaving them in the store would mean an
+  // invisible file (the composer draws only the message's own chips) riding
+  // along in a session it was never meant for. The message's own attachments
+  // are untouched: nobody asked this sheet about them.
+  useEffect(
+    () => () => clearFormAttachments(sessionId, form.id),
+    [clearFormAttachments, sessionId, form.id],
+  )
 
   // Focus lands on the first control, so a keyboard user who clicked a chip is
   // already in the form. Not a focus TRAP: the conversation behind the sheet
@@ -282,11 +340,11 @@ function Sheet({
             testIdPrefix="ask-field"
             attachmentSlot={
               isAttachmentField(f) ? (
-                <AttachmentSlot
+                <AskFieldAttachments
                   agentId={agentId}
                   sessionId={sessionId}
+                  formId={form.id}
                   field={f}
-                  showChips={f.name === chipFieldName}
                 />
               ) : undefined
             }
@@ -298,7 +356,17 @@ function Sheet({
         <button type="submit" className="hidden" tabIndex={-1} aria-hidden="true" />
       </form>
 
-      <div className="shrink-0 border-t px-4 py-2">
+      <div className="shrink-0 space-y-2 border-t px-4 py-2">
+        {/* Only while this sheet is the one drawing chips — a form with no
+            upload control never hides the composer's own list, so repeating it
+            here would be the double chip this all exists to stop. */}
+        {hasUploadField && (
+          <AskMessageAttachments
+            agentId={agentId}
+            sessionId={sessionId}
+            attachments={messageAttachments}
+          />
+        )}
         <button
           type="button"
           data-testid="ask-preview-toggle"
@@ -363,58 +431,6 @@ function Sheet({
   return <div className="mx-auto w-full max-w-3xl px-3 pb-2 md:px-6">{body}</div>
 }
 
-/**
- * The upload control inside a `file` / `photo` field.
- *
- * Nothing here uploads. `AttachmentZone` is the composer's own drop zone and
- * chip list, `AttachmentButton` the paperclip and `CameraButton` the
- * `capture="environment"` input a phone opens the rear camera for — all three
- * already route through the one `useAttachmentUpload`. A form field is a
- * fourth entry point to that path, not a second implementation of it, so a
- * photo attached here lands in the same per-session list, with the same size
- * guard, and is named in the outgoing message by the same convention.
- *
- * A `photo` field leads with the camera; a `file` field leads with the
- * paperclip. Both offer both — a receipt is photographed on a phone and
- * dragged in from a folder on a desktop, and the field type is a hint about
- * which is likelier, not a restriction.
- */
-function AttachmentSlot({
-  agentId,
-  sessionId,
-  field,
-  showChips,
-}: {
-  agentId: string
-  sessionId: string
-  field: AskFormField
-  /** False for the second and later upload fields of the same form — see
-   *  `chipFieldName` above. */
-  showChips: boolean
-}) {
-  const isPhoto = field.type === "photo"
-  return (
-    <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={showChips}>
-      <div className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2.5">
-        {isPhoto ? (
-          <>
-            <CameraButton agentId={agentId} sessionId={sessionId} />
-            <AttachmentButton agentId={agentId} sessionId={sessionId} />
-          </>
-        ) : (
-          <>
-            <AttachmentButton agentId={agentId} sessionId={sessionId} />
-            <CameraButton agentId={agentId} sessionId={sessionId} />
-          </>
-        )}
-        <span className="text-xs text-muted-foreground">
-          {isPhoto ? "Take a photo, or drop a file here" : "Drop a file here, or pick one"}
-        </span>
-      </div>
-    </AttachmentZone>
-  )
-}
-
 /** A definition's `default` arrives as `unknown` (lib/ask-template.ts keeps it
  *  loose so a CLI body need not quote everything). The controls this sheet
  *  renders are all string-valued, so anything else is coerced once, here. */
@@ -435,15 +451,23 @@ function defaultString(field: AskFormField): string {
  *   · `multiselect` → an array, which the renderer joins with ", ".
  *   · `checkbox`    → a boolean; `true` reads "yes" and `false` is empty, so
  *     an unticked box drops its line instead of asserting "no".
- *   · `file`/`photo` → the uploaded paths, as an array, which the renderer
- *     turns into a newline list.
+ *   · `file`/`photo` → the paths uploaded into THAT field, as an array, which
+ *     the renderer turns into a newline list. Its own, never the form's: one
+ *     list for every upload field is how a contract came to answer a request
+ *     for an identity photo.
  *   · `money`       → two entries: the amount under the field's own name and
  *     the currency under `<name>_currency`.
+ *
+ * The renderer is unchanged by any of this. It has always taken one value per
+ * field and rendered `file`/`photo` as a path list; giving each field its own
+ * list is a change to the VALUES, not to the substitution — which is why
+ * lib/ask-template.ts and internal/askforms stay pinned to the one golden
+ * fixture without moving.
  */
 export function toAskValues(
   fields: AskFormField[],
   values: Record<string, string>,
-  attachmentPaths: string[],
+  pathsByField: Record<string, string[]>,
 ): AskValues {
   const out: AskValues = {}
   for (const field of fields) {
@@ -451,7 +475,7 @@ export function toAskValues(
     switch (fieldType(field)) {
       case "file":
       case "photo":
-        out[field.name] = attachmentPaths
+        out[field.name] = pathsByField[field.name] ?? []
         break
       case "multiselect":
         out[field.name] = raw
