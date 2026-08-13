@@ -552,7 +552,15 @@ function PanelCell({ panel, now }: { panel: PanelView; now?: Date }) {
       // a box-shadow follows the border radius of the box it is painted on,
       // and a square ring around a rounded card reads as a rendering bug.
       className={cn(
-        "@container/panel min-w-0 rounded-xl print:break-inside-avoid",
+        // self-start, and this is load-bearing rather than cosmetic. A grid
+        // cell stretches to the tallest panel in its row by default, while the
+        // card inside keeps its natural height — so the arrival ring, painted
+        // on the CELL, was drawn around the card plus whatever empty space the
+        // row's tallest neighbour created below it. A cue that says "this panel
+        // just received data" must not outline space that received nothing.
+        // Hugging the content also leaves the visible layout exactly as it was:
+        // the cards were never stretched, only the invisible cell was.
+        "@container/panel min-w-0 self-start rounded-xl print:break-inside-avoid",
         spanClass(panel.spec.span),
       )}
     >

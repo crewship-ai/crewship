@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { SectionCard } from "@/components/ui/section-card"
+import { PanelMotionStyles, panelMotion } from "@/components/features/pages/panel-motion"
 import { PanelActions } from "./panel-actions"
 import { isPanelIconName, resolvePanelIcon } from "./panel-icon"
 import {
@@ -92,6 +93,13 @@ export function PanelFrame({
   const sealed = panel.sealed === true
   const Icon = sealed ? schemaIcon : resolvePanelIcon(panel.icon, schemaIcon)
   const iconSource = !sealed && isPanelIconName(panel.icon) ? panel.icon : "schema"
+  // Whether anything inside this card is allowed to move (epic #1935). Decided
+  // HERE, once, for the same reason the icon and the action bar are: one place
+  // a panel's chrome comes from. Every CSS rule in `PANEL_MOTION_CSS` is scoped
+  // under this attribute, so a `stale`, `failed`, never-produced or sealed
+  // panel has no selector that could paint an animation on it — the freshness
+  // contract is enforced structurally rather than by each schema remembering.
+  const motion = panelMotion(panel, data)
   return (
     <SectionCard
       data-slot="panel"
@@ -99,6 +107,7 @@ export function PanelFrame({
       data-panel-schema={panel.schema}
       data-panel-icon={iconSource}
       data-panel-state={data.state}
+      data-panel-motion={motion.animatable ? "on" : "off"}
       className={cn("gap-3 py-4", className)}
       title={
         <span
@@ -116,6 +125,11 @@ export function PanelFrame({
       }
     >
       <div className="flex flex-col gap-3">
+        {/* Deduped by React 19 on its `href`, so every panel may declare the
+            rule and exactly one copy reaches the head — including on the public
+            page and the dashboard strip, which never mount the grid that hoists
+            the arrival flash. */}
+        <PanelMotionStyles />
         {children}
         {/*
          * The action bar (§8b). It lives in the FRAME rather than in each

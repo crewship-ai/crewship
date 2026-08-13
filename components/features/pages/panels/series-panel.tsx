@@ -3,6 +3,11 @@
 import * as React from "react"
 import { ChartColumn } from "lucide-react"
 
+import {
+  panelMotion,
+  useTweenedValues,
+  type TweenFrame,
+} from "@/components/features/pages/panel-motion"
 import { EM_DASH, defaultEmptyHint, panelGate, provenanceProducedAt } from "./freshness"
 import {
   FailedValue,
@@ -37,6 +42,36 @@ import type { PanelProps, SeriesEntry, SeriesPayload } from "./types"
  *    series cannot recolour the rest because nothing is looked up by index.
  *  - **Legend always; direct labels at ≤ 4 series.**
  *
+ * ## The bars grow (epic #1935)
+ *
+ * A bar's height is geometry, and geometry is the safest thing on a page to
+ * animate: a rectangle that is briefly the wrong height claims nothing a still
+ * frame would not also claim, because the rectangle is not the claim — the
+ * axis, the tooltip and the direct label are, and none of them move.
+ *
+ * So the split here is exact, and it is the reason nothing in this file needs
+ * an asterisk about truth:
+ *
+ *  · **Only the geometry travels.** The rects' `y`/`height`, and the zero line
+ *    and scale they are measured against, are computed from the tweened frame.
+ *  · **Every number printed on the chart is the payload's, from the first
+ *    frame.** The direct labels, the `<title>` tooltips and the `aria-label`
+ *    summary all read the payload, never the frame — a chart cannot show a
+ *    figure nobody measured, only a rectangle on its way to one.
+ *  · **A point that changed CATEGORY cuts.** `null` (no basis to compute, drawn
+ *    as an em dash) and a measured number are different claims (§9b.4), so a
+ *    bar never grows out of a gap and a gap never collapses out of a bar. That
+ *    falls out of the keying: a point only tweens when it carried a number in
+ *    both payloads. See `panel-motion.ts`.
+ *
+ * These are still plain `<rect>` elements with plain numeric attributes rather
+ * than `motion.rect`. That is not conservatism: `motion` renders an animated
+ * `height` through the CSS value-type map, which stamps it as `height="42px"`,
+ * and it takes `x`/`y` on an SVG child to mean a transform rather than the
+ * attribute. Driving the numbers and leaving the markup alone keeps the whole
+ * point of the header above — that the geometry is IN the exported HTML, in
+ * user units, with no client-side measurement.
+ *
  * ⚠ The palette itself is a known open dependency, recorded rather than worked
  * around. §3's fourth rule is *"status colours are reserved — green 'running'
  * must never also mean 'series 3'"*, and today it cannot hold: `app/globals.css`
@@ -61,6 +96,18 @@ export function SeriesPanel({ panel, data, now, publicView = false, className }:
   const unit = typeof payload.unit === "string" ? payload.unit.trim() : ""
   const drawn = mergeOverflow(Array.isArray(payload.series) ? payload.series : [], labels.length)
   const colors = assignSeriesColors(drawn.map((s) => s.name))
+
+  // The tween is keyed on (series NAME, label index), never on an ordinal into
+  // the payload's array — the same reason colour is. A producer that reorders
+  // its series must not make every bar travel to a neighbour's height.
+  const motion = panelMotion(panel, data)
+  const tweenTarget = new Map<string, number>()
+  for (const s of drawn) {
+    s.values.forEach((v, li) => {
+      if (v !== null) tweenTarget.set(pointKey(s.name, li), v)
+    })
+  }
+  const frames = useTweenedValues(tweenTarget, motion.tween)
 
   let body: React.ReactNode
   if (gate.kind === "failed") {
@@ -90,7 +137,13 @@ export function SeriesPanel({ panel, data, now, publicView = false, className }:
         ) : null}
         <PanelValue basis="measured" dimmed={gate.dimmed} className="flex flex-col gap-2">
           <div data-slot="panel-container" className="@container/panel flex flex-col gap-2">
-            <BarChart labels={labels} series={drawn} colors={colors} unit={unit} />
+            <BarChart
+              labels={labels}
+              series={drawn}
+              colors={colors}
+              unit={unit}
+              frames={frames}
+            />
             {/* Legend ALWAYS (§3) — the direct labels are an addition to it, never a
                 replacement, and they are the first thing a narrow panel loses. */}
             <ul
@@ -298,6 +351,17 @@ export function mergeOverflow(raw: SeriesEntry[], width: number): DrawnSeries[] 
 
 // ── the drawing ───────────────────────────────────────────────────────────
 
+/**
+ * A point's identity for the growth tween: the series' NAME and the category
+ * index, never a position in the payload's array.
+ *
+ * `\u0000` cannot occur in a JSON string a producer sends, so a series called
+ * `a` at index `1` can never collide with one called `a\u00001` at index `0`.
+ */
+function pointKey(name: string, labelIndex: number): string {
+  return `${name}\u0000${labelIndex}`
+}
+
 const VIEW_W = 320
 const VIEW_H = 150
 const PAD_L = 4
@@ -313,28 +377,47 @@ const GROUP_GAP = 6
  * sparkline can afford because it is a bare polyline — would squash the text
  * in this chart at every panel width.
  *
- * Nothing here measures anything. There is no `ResizeObserver`, no `useEffect`
- * and no state, so the whole chart is present in the server-rendered markup.
+ * Nothing here measures anything. There is no `ResizeObserver`, so the whole
+ * chart is present in the server-rendered markup: the tween is driven from the
+ * panel above and arrives as plain numbers, and with no tween in flight those
+ * numbers ARE the payload's.
  */
 function BarChart({
   labels,
   series,
   colors,
   unit,
+  frames,
 }: {
   labels: string[]
   series: DrawnSeries[]
   colors: Map<string, string>
   unit: string
+  frames: ReadonlyMap<string, TweenFrame>
 }) {
   // §3: direct labels at ≤ 4 series. Past that the numbers collide with each
   // other and the legend is doing the work anyway.
   const directLabels = series.length <= 4 && labels.length * series.length <= 24
 
+  // The geometry the bars are drawn AT this frame. A `null` stays `null` — a
+  // gap is not a magnitude and has nothing to travel towards (§9b.4).
+  const drawnAt = series.map((s) => ({
+    name: s.name,
+    values: s.values.map((v, li) =>
+      v === null ? null : (frames.get(pointKey(s.name, li))?.value ?? v),
+    ),
+  }))
+
   // The domain always includes zero, so a bar's LENGTH is its magnitude and a
   // negative value hangs below the same line a zero sits on. A chart whose
   // baseline is the smallest value exaggerates every difference on it.
-  const points = series.flatMap((s) => s.values).filter((v): v is number => v !== null)
+  //
+  // Computed from the FRAME, not from the payload: a bar growing past a scale
+  // that had already jumped to the final domain would visibly undershoot for
+  // 240 ms and then catch up, which reads as a rendering fault rather than as
+  // growth. With no tween in flight the frame is the payload, so the settled
+  // domain is unchanged.
+  const points = drawnAt.flatMap((s) => s.values).filter((v): v is number => v !== null)
   const max = Math.max(0, ...points)
   const min = Math.min(0, ...points)
   const span = max - min || 1
@@ -374,10 +457,14 @@ function BarChart({
         return (
           <g key={li} data-slot="series-group" data-label={label}>
             {series.map((s, si) => {
-              const v = s.values[li]
+              // `measured` is what the producer sent and is what every piece of
+              // TEXT below reads. `v` is where the rectangle is this frame, and
+              // is the only thing allowed to be an interpolation.
+              const measured = s.values[li]
+              const v = drawnAt[si].values[li]
               const x = gx + si * barW
               const cx = x + barW / 2
-              if (v === null) {
+              if (v === null || measured === null) {
                 // §9b.4 per data point: no bar, and an em dash where the
                 // number would have been. A gap that drew a zero-height bar
                 // would read as a measured zero, which is the one confusion
@@ -415,7 +502,9 @@ function BarChart({
                     rx={0.75}
                     fill={`var(${colors.get(s.name)})`}
                   >
-                    <title>{`${s.name} · ${label}: ${v}${unit ? ` ${unit}` : ""}`}</title>
+                    {/* `measured`, not `v`: the tooltip is a number a reader
+                        will quote, and it must be the producer's own. */}
+                    <title>{`${s.name} · ${label}: ${measured}${unit ? ` ${unit}` : ""}`}</title>
                   </rect>
                   {directLabels ? (
                     <text
@@ -429,7 +518,10 @@ function BarChart({
                       fill="currentColor"
                       className="text-muted-foreground tabular-nums"
                     >
-                      {formatPoint(v)}
+                      {/* Rides up with the bar, but says what was measured
+                          the whole way. A direct label that counted up is a
+                          number on a chart that nobody sent. */}
+                      {formatPoint(measured)}
                     </text>
                   ) : null}
                 </g>

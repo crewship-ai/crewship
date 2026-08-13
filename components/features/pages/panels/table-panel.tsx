@@ -4,6 +4,7 @@ import * as React from "react"
 import { Table2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { panelMotion, useKeyedChanges } from "@/components/features/pages/panel-motion"
 import { EM_DASH, defaultEmptyHint, panelGate, provenanceProducedAt } from "./freshness"
 import {
   FailedValue,
@@ -80,6 +81,21 @@ import type { PanelProps, TableAlign, TableCell, TableColumn, TablePayload, Tabl
  * small already); and hiding rows on this page (three workstations, and the
  * third one is the one you are looking for). A cap does exist — see
  * `CARD_CAP` — but it is a bound on the unbounded case, not a fix for this one.
+ *
+ * ## What moves (epic #1935), and the one thing that must not
+ *
+ * A CELL whose value changed is marked, briefly. That is the whole of it: the
+ * unit of change in a table is the cell, and marking the row would say that
+ * five values moved when one did.
+ *
+ * **Nothing here animates layout, and that is a hard rule rather than a
+ * preference.** A row appearing fades its ink in over 240 ms; it takes its full
+ * height from the first frame, so nothing below it moves. A row that goes away
+ * is gone in the same frame — an exit animation would keep a row on screen for
+ * a quarter-second after the producer stopped reporting it, which is the one
+ * thing this product's freshness contract is about. An animation that reflows
+ * the panel while somebody is reading it is worse than no animation, and both
+ * a height tween on enter and a fade-out on exit are exactly that.
  */
 export function TablePanel({ panel, data, now, publicView = false, className }: PanelProps) {
   const clock = resolveNow(now)
@@ -87,6 +103,16 @@ export function TablePanel({ panel, data, now, publicView = false, className }: 
   const payload = (data.payload ?? {}) as TablePayload
   const rows = Array.isArray(payload.rows) ? payload.rows : []
   const columns = resolveColumns(payload.columns, rows)
+
+  const motion = panelMotion(panel, data)
+  const rowKeys = tableRowKeys(rows, columns)
+  const cellSignatures = new Map<string, string>()
+  rows.forEach((row, i) => {
+    columns.forEach((col, ci) => {
+      cellSignatures.set(cellKey(rowKeys[i], col.key), cellSignature(cellOf(row, col.key, ci)))
+    })
+  })
+  const { changed, entered } = useKeyedChanges(cellSignatures, motion.animatable)
 
   let body: React.ReactNode
   if (gate.kind === "failed") {
@@ -142,13 +168,20 @@ export function TablePanel({ panel, data, now, publicView = false, className }: 
                   </thead>
                   <tbody>
                     {rows.map((row, i) => (
-                      <tr key={i} className="border-b border-border/40 last:border-0">
+                      <tr
+                        key={rowKeys[i]}
+                        data-panel-enter={
+                          isRowEntering(rowKeys[i], columns, entered) ? "new" : "idle"
+                        }
+                        className="border-b border-border/40 last:border-0"
+                      >
                         {columns.map((col, ci) => (
                           <Cell
                             key={col.key}
                             as="td"
                             column={col}
                             value={cellOf(row, col.key, ci)}
+                            marked={changed.has(cellKey(rowKeys[i], col.key))}
                           />
                         ))}
                       </tr>
@@ -158,7 +191,13 @@ export function TablePanel({ panel, data, now, publicView = false, className }: 
               </div>
 
               {/* The same rows, one card each, for a narrow panel. */}
-              <TableCards columns={columns} rows={rows} />
+              <TableCards
+                columns={columns}
+                rows={rows}
+                rowKeys={rowKeys}
+                changed={changed}
+                entered={entered}
+              />
             </div>
           )}
         </PanelValue>
@@ -208,7 +247,19 @@ const CARD_CAP = 8
  * part of this panel that holds state — the cap's disclosure — and because the
  * measurements it departs from PropertyRow on are worth one place to read.
  */
-function TableCards({ columns, rows }: { columns: TableColumn[]; rows: TableRow[] }) {
+function TableCards({
+  columns,
+  rows,
+  rowKeys,
+  changed,
+  entered,
+}: {
+  columns: TableColumn[]
+  rows: TableRow[]
+  rowKeys: string[]
+  changed: ReadonlySet<string>
+  entered: ReadonlySet<string>
+}) {
   const [showAll, setShowAll] = React.useState(false)
   const capped = rows.length > CARD_CAP && !showAll
   const visible = capped ? rows.slice(0, CARD_CAP) : rows
@@ -218,8 +269,9 @@ function TableCards({ columns, rows }: { columns: TableColumn[]; rows: TableRow[
       <ul data-slot="table-card-list" className="flex flex-col gap-2">
         {visible.map((row, i) => (
           <li
-            key={i}
+            key={rowKeys[i]}
             data-slot="table-card"
+            data-panel-enter={isRowEntering(rowKeys[i], columns, entered) ? "new" : "idle"}
             className="rounded-lg border border-border/60 bg-surface-subtle px-3 py-2"
           >
             {/*
@@ -248,6 +300,7 @@ function TableCards({ columns, rows }: { columns: TableColumn[]; rows: TableRow[
                     as="dd"
                     column={col}
                     value={cellOf(row, col.key, ci)}
+                    marked={changed.has(cellKey(rowKeys[i], col.key))}
                     className="py-1"
                   />
                 </React.Fragment>
@@ -307,11 +360,14 @@ function Cell({
   as: As,
   column,
   value,
+  marked = false,
   className,
 }: {
   as: "td" | "dd"
   column: TableColumn
   value: TableCell
+  /** This cell's value differs from the last payload's (epic #1935). */
+  marked?: boolean
   className?: string
 }) {
   const missing = value === null || value === undefined
@@ -320,6 +376,9 @@ function Cell({
       data-slot="table-cell"
       data-key={column.key}
       data-basis={missing ? "none" : "measured"}
+      // In both states, like `data-panel-arrival` on the cell above: the fact
+      // is in the DOM for every reader, and only the paint is negotiable.
+      data-panel-change={marked ? "marked" : "idle"}
       className={cn(
         "tabular-nums",
         As === "td" ? "px-2 py-1.5" : "type-page-value min-w-0 break-words text-foreground",
@@ -336,6 +395,68 @@ function Cell({
 function formatCell(value: TableCell): string {
   if (typeof value === "boolean") return value ? "yes" : "no"
   return String(value)
+}
+
+// ── row identity, and what "this cell changed" is allowed to mean ─────────
+
+/**
+ * A stable identity per row, used both as the React key and as the anchor for
+ * the change marks — one identity, so a mark and the `<td>` it lands on can
+ * never disagree.
+ *
+ * **The first column, when it is a key, and the position otherwise.** §3 gives
+ * `table.v1` no id field, so the panel has to infer one or say nothing. The
+ * first column is a key in practice and by convention — `klon` on the live
+ * `flotila` page is `crewship_1/2/3` — and using it means a table sorted by a
+ * value keeps its rows' identities when they swap places, which is precisely
+ * when a positional key would report five cells as "changed" because the rows
+ * moved. When the first column is not distinct across every row, or has a gap
+ * in it, the inference is refused outright and the index is used: a WRONG
+ * identity produces marks that are lies, and the index at least only produces
+ * marks that are uninformative.
+ */
+function tableRowKeys(rows: TableRow[], columns: TableColumn[]): string[] {
+  const first = columns[0]
+  if (first) {
+    const natural = rows.map((row) => {
+      const v = cellOf(row, first.key, 0)
+      if (v === null || v === undefined) return null
+      const text = formatCell(v)
+      return text === "" ? null : `${first.key}=${text}`
+    })
+    if (natural.every((k): k is string => k !== null) && new Set(natural).size === natural.length) {
+      return natural
+    }
+  }
+  return rows.map((_, i) => `#${i}`)
+}
+
+function cellKey(rowKey: string, columnKey: string): string {
+  return `${rowKey}\u0000${columnKey}`
+}
+
+/**
+ * What a cell has to change for the mark to fire: the text a reader sees, plus
+ * the em-dash boundary. `null` and `""` render differently and mean different
+ * things (§9b.4), so they must not share a signature.
+ */
+function cellSignature(value: TableCell): string {
+  if (value === null || value === undefined) return "\u0000none"
+  return formatCell(value)
+}
+
+/**
+ * A row is arriving only if EVERY one of its cells is new — which is what a
+ * row the previous payload did not contain looks like, and what a row that
+ * merely changed never does.
+ */
+function isRowEntering(
+  rowKey: string,
+  columns: TableColumn[],
+  entered: ReadonlySet<string>,
+): boolean {
+  if (columns.length === 0 || entered.size === 0) return false
+  return columns.every((col) => entered.has(cellKey(rowKey, col.key)))
 }
 
 function alignClass(align?: TableAlign | null): string {
