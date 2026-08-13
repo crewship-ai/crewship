@@ -19,6 +19,17 @@ import type { Attachment } from "@/components/ai-elements/attachments"
 export type ComposerAttachment = Attachment & {
   /** `attachments/<chatId>/<filename>` — set once the upload succeeds. */
   path?: string
+  /**
+   * The source File, kept only while the upload has not succeeded.
+   *
+   * It is what makes Retry possible on a failed chip: the bytes are still in
+   * the page, so a refused upload does not cost the user a second trip through
+   * the file picker (three screens on a phone, and the camera roll on the way
+   * back). Dropped the moment the upload lands, so a finished attachment is
+   * not holding 25 MB alive, and never persisted — `partialize` below writes
+   * only `modelId` and `drafts`, so nothing here is ever serialised.
+   */
+  file?: File
 }
 
 interface ComposerState {
@@ -29,6 +40,15 @@ interface ComposerState {
   setDraft: (sessionId: string, text: string) => void
   clearDraft: (sessionId: string) => void
   addAttachments: (sessionId: string, items: ComposerAttachment[]) => void
+  /** Patch one attachment in place — an upload finishing, failing, or being
+   *  retried. In place because remove+add moves the chip to the end of the
+   *  list: the message names paths in composer order, so a retried file would
+   *  quietly reorder what the user sees and what the agent is told. */
+  updateAttachment: (
+    sessionId: string,
+    id: string,
+    patch: Partial<ComposerAttachment>,
+  ) => void
   removeAttachment: (sessionId: string, id: string) => void
   clearAttachments: (sessionId: string) => void
 }
@@ -55,6 +75,17 @@ export const useComposerStore = create<ComposerState>()(
             [sessionId]: [...(s.attachments[sessionId] ?? []), ...items],
           },
         })),
+      updateAttachment: (sessionId, id, patch) =>
+        set((s) => {
+          const list = s.attachments[sessionId]
+          if (!list?.some((a) => a.id === id)) return s
+          return {
+            attachments: {
+              ...s.attachments,
+              [sessionId]: list.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+            },
+          }
+        }),
       removeAttachment: (sessionId, id) =>
         set((s) => ({
           attachments: {

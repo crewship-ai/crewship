@@ -57,6 +57,8 @@ The transcript renders assistant / `model` messages through the markdown ANSI re
 
 The upload is one multipart POST to `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments`. The server caps the body at 25 MB; the CLI assembles the multipart body in memory rather than streaming because the bound is small.
 
+**The crew has to be running.** The file lands in the agent's `/output` tree, which a provisioned crew owns as uid 1001 — the server cannot create `attachments/<chat-id>/` there itself, so it writes through the crew container as that uid. On a stopped crew the upload returns `409` with `failed to save attachment: the agent's output directory is owned by the crew runtime; … start the crew and retry`. Start the crew and re-run the attach; nothing partial is left behind, and no attachment metadata row is recorded for an upload that did not land.
+
 ### `chat read <chat-id>`
 
 | Flag | Default | Effect |

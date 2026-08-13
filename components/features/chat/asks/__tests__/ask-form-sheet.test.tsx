@@ -102,6 +102,25 @@ function attachReady(name = "IMG_4821.heic") {
   })
 }
 
+/** The same file, refused by the server. A chip in the list, no path behind
+ *  it — which is exactly what a `required` attachment must NOT count as. */
+function attachFailed(name = "IMG_4821.heic") {
+  useComposerStore.setState({
+    attachments: {
+      "sess-1": [
+        {
+          id: "att-1",
+          name,
+          size: 2100,
+          type: "image/heic",
+          status: "error",
+          error: "create parent dir: permission denied",
+        },
+      ],
+    },
+  })
+}
+
 describe("ask form sheet", () => {
   beforeEach(() => {
     useComposerStore.setState({ attachments: {}, drafts: {} })
@@ -178,6 +197,51 @@ describe("ask form sheet", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(toastError.mock.calls[0][0]).toMatch(/attach/i)
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  // A chip on screen is not a document on the agent. A form whose whole point
+  // is "send me the receipt" must not accept a receipt that never uploaded —
+  // it would go out as a receipt-shaped message with no receipt in it.
+  it("does not accept a FAILED upload as the required attachment", async () => {
+    renderSheet(receipt)
+    attachFailed()
+    fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: "Vodafone" } })
+
+    fireEvent.click(screen.getByTestId("ask-submit"))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(toastError.mock.calls[0][0]).toMatch(/attach/i)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("does not accept a failed upload for a required file FIELD either", async () => {
+    const withFileField: AskForm = {
+      ...receipt,
+      id: "receipt-file-field",
+      attachment: "optional",
+      template: "Zaúčtuj fakturu od {{supplier}}: {{doc}}",
+      fields: [
+        { name: "supplier", label: "Supplier", type: "text", required: true },
+        { name: "doc", label: "Document", type: "file", required: true },
+      ],
+    }
+    renderSheet(withFileField)
+    attachFailed()
+    fireEvent.change(screen.getByLabelText(/Supplier/), { target: { value: "Vodafone" } })
+
+    fireEvent.click(screen.getByTestId("ask-submit"))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(toastError.mock.calls[0][0]).toMatch(/document/i)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("keeps a failed upload out of the preview, which is what will go", () => {
+    renderSheet(receipt)
+    attachFailed()
+    fireEvent.click(screen.getByTestId("ask-preview-toggle"))
+    expect(screen.getByTestId("ask-preview").textContent).not.toContain("IMG_4821.heic")
   })
 
   it("submits the rendered template once every requirement is met", async () => {

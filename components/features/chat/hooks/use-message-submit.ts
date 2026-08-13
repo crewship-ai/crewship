@@ -128,7 +128,19 @@ export function useMessageSubmit({
 
       // An attachment with no caption is a real message. Requiring text here
       // is how a photo sent from a phone used to disappear without a trace.
-      if (!text && sendableAttachments(items).length === 0) return
+      if (!text && sendableAttachments(items).length === 0) {
+        // There IS something in the composer, it just cannot go: every
+        // attachment failed to upload. Returning silently is what made a
+        // refused upload look like a working one — the user presses Send on a
+        // composer that visibly holds a file and nothing happens at all.
+        if (items.length > 0) {
+          toast.error("Nothing to send — no attachment uploaded", {
+            description:
+              "Retry the failed attachment, or remove it and write a message instead.",
+          })
+        }
+        return
+      }
 
       const content = composeMessageWithAttachments(text, items)
 

@@ -47,6 +47,38 @@ describe("useComposerStore", () => {
     expect(useComposerStore.getState().attachments.s1.map((a: any) => a.id)).toEqual(["a2"])
   })
 
+  it("updateAttachment patches in place, keeping the list order", () => {
+    const store = useComposerStore.getState()
+    store.addAttachments("s1", [
+      { id: "a1", name: "a.pdf", size: 1, type: "application/pdf", status: "uploading" },
+      { id: "a2", name: "b.pdf", size: 2, type: "application/pdf", status: "uploading" },
+    ])
+    // The second one finishes first. It must NOT jump to the front or the
+    // back: the message names paths in the order the user attached them.
+    useComposerStore.getState().updateAttachment("s1", "a2", {
+      status: "ready",
+      path: "attachments/s1/b.pdf",
+    })
+    const list = useComposerStore.getState().attachments.s1
+    expect(list.map((a) => a.id)).toEqual(["a1", "a2"])
+    expect(list[1].status).toBe("ready")
+    expect(list[1].path).toBe("attachments/s1/b.pdf")
+    expect(list[0].status).toBe("uploading")
+  })
+
+  it("updateAttachment is a no-op for an id that is gone", () => {
+    const store = useComposerStore.getState()
+    store.addAttachments("s1", [
+      { id: "a1", name: "a.pdf", size: 1, type: "application/pdf", status: "uploading" },
+    ])
+    const before = useComposerStore.getState().attachments
+    // A user who deletes a chip mid-upload is authoritative: the response
+    // landing afterwards must not resurrect it.
+    useComposerStore.getState().updateAttachment("s1", "ghost", { status: "ready" })
+    useComposerStore.getState().updateAttachment("s-nope", "a1", { status: "ready" })
+    expect(useComposerStore.getState().attachments).toBe(before)
+  })
+
   it("clearAttachments wipes the session's list", () => {
     useComposerStore.getState().addAttachments("s1", [{ id: "a1" } as any])
     useComposerStore.getState().clearAttachments("s1")

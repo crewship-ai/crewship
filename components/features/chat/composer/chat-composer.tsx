@@ -10,7 +10,11 @@ import {
 } from "@/components/ai-elements/prompt-input"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { composeMessageWithAttachments } from "@/lib/attachment-message"
+import {
+  composeMessageWithAttachments,
+  hasPendingUploads,
+  sendableAttachments,
+} from "@/lib/attachment-message"
 import { useMessageSubmit } from "../hooks/use-message-submit"
 import { MentionAutocomplete, type CrewMember } from "./mention-autocomplete"
 import { AttachmentZone, AttachmentButton, CameraButton } from "./attachment-zone"
@@ -207,7 +211,17 @@ export function ChatComposer({
   const placeholder = agentName ? `Message ${agentName}...` : "Send a message..."
   // An attachment is content: a photo with no caption is a message, and
   // leaving Send disabled for it is how one used to be silently dropped.
-  const hasContent = !!input.trim() || sessionAttachments.length > 0
+  //
+  // But only an attachment that can actually go. Counting the raw list meant a
+  // chip whose upload had been REFUSED enabled Send on an empty draft, and
+  // pressing it did nothing whatsoever — useMessageSubmit has nothing to send,
+  // so it returns, and the user is left pressing a live-looking button. An
+  // upload still in flight does keep Send live on purpose: pressing it there
+  // gets the "still uploading, wait" toast, which is an answer.
+  const hasContent =
+    !!input.trim() ||
+    sendableAttachments(sessionAttachments).length > 0 ||
+    hasPendingUploads(sessionAttachments)
   const submitDisabled = !isStreaming && (!hasContent || connectionStatus !== "connected")
 
   if (variant === "mobile") {

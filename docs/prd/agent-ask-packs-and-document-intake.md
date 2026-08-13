@@ -256,6 +256,37 @@ New **Asks** section on the agent canvas's Configuration tab
   builder for forms, live preview of the rendered message with sample values;
 - *Test in chat* → opens a scratch session with only this pack bound.
 
+### 5.6 When an upload fails
+
+Observed on dev2: two files, both refused by the server
+(`create parent dir: … permission denied`), one toast on screen naming one of
+them, and two chips that read exactly like two attached documents. The user
+believed one had landed. Neither had.
+
+The rules, in the order they matter:
+
+1. **A path is named only for an upload that finished.**
+   `sendableAttachments` (`lib/attachment-message.ts`) is an allow-list on
+   `status === "ready"` plus a non-empty path — not "everything that is not an
+   error". A wrong chip costs a minute; a wrong path costs the agent a turn
+   reading a file that was never written, and it answers about the wrong thing.
+2. **A failed chip stays, and says so in words.** "Upload failed — not
+   attached", a destructive border, and a **Retry** that re-sends the same
+   `File` under the same chip id. It is not removed, because the toast expires
+   and the composer would then be indistinguishable from one that never had the
+   file; and a colour alone is not a statement.
+3. **One toast per file.** Keyed on the attachment id, so sonner can neither
+   collapse two files into one message nor stack a third on a second failed
+   retry. It says what is now true (the file is not on the agent) and what to
+   do (retry, or remove and send without it).
+4. **Nothing that cannot go counts as content.** Send is live for text, for a
+   sendable attachment, or while an upload is in flight (pressing it then
+   answers "still uploading"). A composer holding only failed chips leaves Send
+   disabled rather than live-and-inert.
+5. **`attachment: required` and a required `file`/`photo` field are satisfied
+   by uploads that landed** — a receipt-shaped message with no receipt in it is
+   the same defect one level up.
+
 ## 6. Data model
 
 New migration, `internal/database/migrations/<ts>_ask_packs_and_intake.sql`,
@@ -517,7 +548,13 @@ one; sha256 idempotency; cross-tenant 404; confinement of `target_path`
 `CODEX-WORK-ORDER-RELEASE-1-0.md` §0a).
 
 **Vitest** — chip resolution, ordering, overflow to `+N`; TS renderer against
-the *same* `testdata/ask-templates.json`; form validation; provenance badge.
+the *same* `testdata/ask-templates.json`; form validation; provenance badge;
+and §5.6 end to end from the upload call outwards
+(`composer/__tests__/attachment-upload-failure.test.tsx`): a 500, a 500 with no
+JSON body and a fetch that throws each leave a chip that says "Upload failed"
+and a message that names nothing; two failures produce two distinct toasts; a
+mixed batch composes exactly one path, asserted on
+`composeMessageWithAttachments` rather than on the DOM.
 
 **Playwright** — cold session → form chip → fill → attach → send → proposal
 card → File it → document appears in the Files panel; mobile viewport variant

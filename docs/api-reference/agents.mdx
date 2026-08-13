@@ -1634,6 +1634,17 @@ workspace. The endpoint returns the sidecar's attachment metadata and uses
 `400` for an invalid upload, `404` for an unknown or mis-nested chat, and
 `502` when the sidecar cannot be reached.
 
+The blob is written to `<crewID>/<agentSlug>/attachments/<chatId>/<filename>`,
+which the agent sees at `/output/<agentSlug>/attachments/<chatId>/<filename>`.
+A provisioned crew owns that tree as uid 1001, so the server cannot create the
+directory host-side; the write is replayed through the running crew container
+as that uid. **A stopped crew therefore returns `409`**, with the remedy in the
+message. The `attachments` metadata row is written only after the bytes land —
+a failed upload records nothing.
+
+Errors from the storage layer are forwarded as a single sentence prefixed with
+`failed to save attachment: `, not as a nested JSON document.
+
 **Auth:** Authenticated caller with create/write access to the agent chat.
 
 **Request:** `multipart/form-data` with required binary `file` field; no JSON
@@ -1642,7 +1653,10 @@ body.
 **Response:** `200 OK` or `201 Created` with attachment metadata.
 
 **Status:** `400` invalid upload, `401` unauthenticated, `403` denied, `404`
-unknown or mis-nested agent/chat, and `502` sidecar failure.
+unknown or mis-nested agent/chat, `409` the crew container is not running
+(start the crew and retry), `413` too large to write through the crew
+container, `503` no container runtime is configured, and `502` sidecar
+failure.
 
 ### Credential Bindings
 

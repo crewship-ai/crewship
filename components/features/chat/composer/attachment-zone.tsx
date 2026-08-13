@@ -95,6 +95,35 @@ async function uploadOne(
   return res.json()
 }
 
+function errorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  return raw.trim() || "the upload failed"
+}
+
+/**
+ * The toast for one refused file.
+ *
+ * Two rules, both learned from the dev2 report where two failed uploads
+ * produced one visible message:
+ *
+ *   · The id is the ATTACHMENT's. Sonner replaces a toast that reuses an id,
+ *     so a shared or absent id is how two files collapse into one statement —
+ *     and per-attachment means a second failed retry updates that file's toast
+ *     instead of stacking a third.
+ *   · It says what to do. "invoice.pdf: permission denied" tells a user what
+ *     broke and nothing about what is now true (the file is NOT attached) or
+ *     what they can do about it (retry it, or send without it).
+ *
+ * The toast is still only the announcement. The durable statement is the chip,
+ * which stays on screen saying "Upload failed" long after this has expired.
+ */
+function toastUploadFailure(sessionId: string, att: ComposerAttachment, reason: string) {
+  toast.error(`${att.name} was not attached`, {
+    id: `attachment-upload-failed:${sessionId}:${att.id}`,
+    description: `${reason}. The file is not on the agent — press Retry on the chip, or remove it and send without it.`,
+  })
+}
+
 /**
  * The one upload path for chat attachments.
  *
@@ -103,14 +132,70 @@ async function uploadOne(
  * AttachmentButton's onSelect); adding a third entry point for the camera is
  * exactly the moment to stop copying it, because the copies are what let the
  * abort registry, the size guard and the "user deleted the chip mid-upload"
- * check drift apart per entry point.
+ * check drift apart per entry point. Retry is a fourth entry point, and it
+ * runs the same `runUpload` below rather than a fifth copy.
+ *
+ * Returns both halves: `upload` for new files, `retry` for a chip whose upload
+ * was refused.
  */
 export function useAttachmentUpload(agentId: string, sessionId: string) {
   const addAttachments = useComposerStore((s) => s.addAttachments)
-  const removeAttachment = useComposerStore((s) => s.removeAttachment)
+  const updateAttachment = useComposerStore((s) => s.updateAttachment)
   const { workspaceId } = useWorkspace()
 
-  return useCallback(
+  /** One file, start to finish. The chip already exists in the store and is
+   *  patched IN PLACE — never removed and re-added, which would move it to the
+   *  end of the list and reorder both the chips and the paths the message
+   *  names. */
+  const runUpload = useCallback(
+    async (att: ComposerAttachment, file: File, wsId: string) => {
+      const key = abortKey(sessionId, att.id)
+      const ac = new AbortController()
+      abortRegistry.set(key, ac)
+      // User removal is authoritative — if the chip was deleted while the
+      // upload was in flight, neither outcome may put it back. `updateAttachment`
+      // is a no-op for an id that is gone, so this holds for both branches.
+      try {
+        const { path, agent_path } = await uploadOne(agentId, sessionId, wsId, file, ac.signal)
+        // `path` (relative to the agent's working directory) is what the
+        // outgoing message names — without it the file lands in the
+        // container and nothing ever tells the agent it is there.
+        updateAttachment(sessionId, att.id, {
+          status: "ready",
+          url: agent_path,
+          path,
+          error: undefined,
+          // The bytes are no longer needed: nothing left to retry, and a
+          // finished attachment must not pin a 25 MB File in memory.
+          file: undefined,
+        })
+      } catch (err) {
+        if (isAbortError(err)) return
+        const reason = errorMessage(err)
+        // No path and no url: a failed upload has no file behind it, so there
+        // is nothing for `sendableAttachments` to name even by accident. The
+        // File is KEPT — it is what Retry re-sends.
+        updateAttachment(sessionId, att.id, {
+          status: "error",
+          path: undefined,
+          url: undefined,
+          error: reason,
+          file,
+        })
+        // Only announce a failure for a chip the user can still see. A file
+        // they removed mid-upload failing afterwards is not news.
+        const stillThere = (useComposerStore.getState().attachments[sessionId] ?? []).some(
+          (a) => a.id === att.id,
+        )
+        if (stillThere) toastUploadFailure(sessionId, att, reason)
+      } finally {
+        abortRegistry.delete(key)
+      }
+    },
+    [agentId, sessionId, updateAttachment],
+  )
+
+  const upload = useCallback(
     async (files: File[]) => {
       if (!workspaceId) {
         toast.error("Workspace not loaded yet — try again in a moment")
@@ -134,43 +219,48 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
             size: f.size,
             type: f.type || "application/octet-stream",
             status: "uploading",
+            file: f,
           },
         })
       }
       if (queued.length === 0) return
       addAttachments(sessionId, queued.map(({ att }) => att))
       for (const { att, file } of queued) {
-        const ac = new AbortController()
-        abortRegistry.set(abortKey(sessionId, att.id), ac)
-        try {
-          const { path, agent_path } = await uploadOne(agentId, sessionId, workspaceId, file, ac.signal)
-          // User removal is authoritative — if the chip was deleted
-          // while the upload was in flight, the success/error path
-          // must not put it back. Re-read the latest store snapshot
-          // and only promote the chip if it still exists.
-          const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
-            .some((a) => a.id === att.id)
-          if (!stillThere) continue
-          removeAttachment(sessionId, att.id)
-          // `path` (relative to the agent's working directory) is what the
-          // outgoing message names — without it the file lands in the
-          // container and nothing ever tells the agent it is there.
-          addAttachments(sessionId, [{ ...att, status: "ready", url: agent_path, path }])
-        } catch (err) {
-          if (isAbortError(err)) continue
-          const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
-            .some((a) => a.id === att.id)
-          if (!stillThere) continue
-          removeAttachment(sessionId, att.id)
-          addAttachments(sessionId, [{ ...att, status: "error" }])
-          toast.error(`${att.name}: ${err instanceof Error ? err.message : String(err)}`)
-        } finally {
-          abortRegistry.delete(abortKey(sessionId, att.id))
-        }
+        await runUpload(att, file, workspaceId)
       }
     },
-    [agentId, sessionId, workspaceId, addAttachments, removeAttachment],
+    [sessionId, workspaceId, addAttachments, runUpload],
   )
+
+  /** Re-send a chip whose upload was refused, keeping its id and its place in
+   *  the list. Same guards, same endpoint, same failure handling — a retry
+   *  that fails is a failure again, not a silent no-op. */
+  const retry = useCallback(
+    async (id: string) => {
+      if (!workspaceId) {
+        toast.error("Workspace not loaded yet — try again in a moment")
+        return
+      }
+      const att = (useComposerStore.getState().attachments[sessionId] ?? []).find(
+        (a) => a.id === id,
+      )
+      // Already running — the Retry control is only rendered on an error chip,
+      // but two calls for one chip would mean two POSTs of the same file and
+      // two abort controllers under one key.
+      if (!att || att.status === "uploading") return
+      // No File means the page was reloaded out from under the chip. Say so
+      // rather than spinning: the user has to pick the file again.
+      if (!att.file) {
+        toast.error("Attach the file again — the browser no longer has it to retry.")
+        return
+      }
+      updateAttachment(sessionId, id, { status: "uploading", error: undefined })
+      await runUpload(att, att.file, workspaceId)
+    },
+    [sessionId, workspaceId, updateAttachment, runUpload],
+  )
+
+  return { upload, retry }
 }
 
 export function AttachmentZone({
@@ -186,7 +276,9 @@ export function AttachmentZone({
   const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const sessionAttachments = sessionAttachmentsRaw ?? []
 
-  const handleFiles = useAttachmentUpload(agentId, sessionId)
+  const { upload: handleFiles, retry } = useAttachmentUpload(agentId, sessionId)
+
+  const handleRetry = useCallback((id: string) => void retry(id), [retry])
 
   // Wrap user removal so an in-flight upload is aborted before the
   // chip disappears from the store. Without this, a deleted file can
@@ -208,6 +300,7 @@ export function AttachmentZone({
         <Attachments
           attachments={sessionAttachments}
           onRemove={handleRemove}
+          onRetry={handleRetry}
           className="px-2"
         />
       )}
@@ -216,7 +309,7 @@ export function AttachmentZone({
 }
 
 export function AttachmentButton({ agentId, sessionId }: { agentId: string; sessionId: string }) {
-  const handleFiles = useAttachmentUpload(agentId, sessionId)
+  const { upload: handleFiles } = useAttachmentUpload(agentId, sessionId)
   return (
     <AttachmentTrigger
       // No `accept` filter — chat attachments can be any file type
@@ -247,7 +340,7 @@ export function AttachmentButton({ agentId, sessionId }: { agentId: string; sess
  * attachment list, with the same size guard and the same abort-on-remove.
  */
 export function CameraButton({ agentId, sessionId }: { agentId: string; sessionId: string }) {
-  const handleFiles = useAttachmentUpload(agentId, sessionId)
+  const { upload: handleFiles } = useAttachmentUpload(agentId, sessionId)
   const inputRef = useRef<HTMLInputElement | null>(null)
   return (
     <>

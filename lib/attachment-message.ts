@@ -34,6 +34,7 @@ export interface OutgoingAttachment {
   name: string
   /** `attachments/<chatId>/<filename>`, from the upload response. */
   path?: string
+  /** Only `"ready"` can be named in a message — see `sendableAttachments`. */
   status?: "uploading" | "ready" | "error"
 }
 
@@ -48,11 +49,22 @@ function cleanPath(path: string): string {
   return path.replace(CONTROL_CHARS, "").trim()
 }
 
-/** The attachments that can actually be named in a message: the upload
- *  finished and the server gave us a path. An upload still in flight has no
- *  path yet, and a failed one has no file behind it. */
+/**
+ * The attachments that can actually be named in a message: the upload finished
+ * AND the server gave us a path.
+ *
+ * An ALLOW-list, not a deny-list. It used to read "not an error, and has a
+ * path", which is the same thing only for exactly the states that existed the
+ * day it was written: anything else — a status added later, a record built
+ * somewhere that does not set one, a chip mid-retry that still carries the
+ * path of an earlier attempt — passed the filter and put a path in the message
+ * for a file that is not on the agent. That failure mode is invisible from the
+ * browser and expensive at the other end: the agent is told to read a file,
+ * cannot, and reports back about the wrong thing. So the question is "did this
+ * upload finish", and every other state answers no by default.
+ */
 export function sendableAttachments(attachments: OutgoingAttachment[]): OutgoingAttachment[] {
-  return attachments.filter((a) => a.status !== "error" && !!a.path && !!cleanPath(a.path))
+  return attachments.filter((a) => a.status === "ready" && !!a.path && !!cleanPath(a.path))
 }
 
 /** True while at least one upload is still running. The composer refuses to
