@@ -93,6 +93,9 @@ var escalationListCmd = &cobra.Command{
 			ResolvedAt         *string `json:"resolved_at"`
 			CreatedAt          string  `json:"created_at"`
 			CredentialID       *string `json:"credential_id"`
+			// DeadlineAt is when an unanswered question stops being
+			// answerable. Null on rows raised before deadlines existed.
+			DeadlineAt *string `json:"deadline_at"`
 		}
 		if err := cli.ReadJSON(resp, &escalations); err != nil {
 			return err
@@ -115,12 +118,20 @@ var escalationListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"ID", "TYPE", "FROM", "REASON", "STATUS", "CREATED"}
+		// DEADLINE is on the table, not just in the JSON: "when does this stop
+		// being answerable" is the question an operator scanning a list of
+		// PENDING rows most needs answered, and a column nobody can see is
+		// indistinguishable from a deadline that does not exist.
+		headers := []string{"ID", "TYPE", "FROM", "REASON", "STATUS", "DEADLINE", "CREATED"}
 		var rows [][]string
 		for _, e := range escalations {
 			reason := e.Reason
 			if len(reason) > 50 {
 				reason = reason[:47] + "..."
+			}
+			deadline := "—"
+			if e.DeadlineAt != nil && *e.DeadlineAt != "" {
+				deadline = *e.DeadlineAt
 			}
 			// #1199: show the full ID. Escalation IDs are short cuids
 			// (~21 chars), not "absurdly long" — truncating them here
@@ -128,7 +139,7 @@ var escalationListCmd = &cobra.Command{
 			// `escalation resolve` at all (false 404), since the
 			// resolve endpoint requires an exact ID and there's no
 			// prefix-matching fallback like `mission get` has.
-			rows = append(rows, []string{e.ID, e.Type, e.FromSlug, reason, e.Status, e.CreatedAt})
+			rows = append(rows, []string{e.ID, e.Type, e.FromSlug, reason, e.Status, deadline, e.CreatedAt})
 		}
 		return f.Auto(escalations, headers, rows)
 	},
@@ -190,6 +201,106 @@ var escalationResolveCmd = &cobra.Command{
 	},
 }
 
+// escalationCancelCmd withdraws a question instead of deciding it.
+//
+// Deliberately not `resolve --action cancel`: an agent reading action=reject
+// has been told "no, do not do that", which it should act on. A cancellation
+// says the question stopped mattering — nobody ever considered it — and
+// collapsing the two would have the CLI lie to the agent on the operator's
+// behalf.
+var escalationCancelCmd = &cobra.Command{
+	Use:   "cancel <id>",
+	Short: "Withdraw an escalation without deciding it",
+	Long: `Withdraw a question an agent asked, without answering it.
+
+Use this when the question stopped mattering — the deploy was rolled back, the
+task was reassigned, the agent was restarted. The escalation reaches the
+terminal state CANCELLED, any agent still waiting is unblocked with an explicit
+"no answer" warning, and the withdrawal is journaled with your user id.
+
+To say NO to the agent, resolve it instead:
+  crewship escalation resolve <id> --action reject --resolution "..."
+
+Examples:
+  crewship escalation cancel esc_abc
+  crewship escalation cancel esc_abc --reason "the deploy was rolled back"`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		reason, _ := cmd.Flags().GetString("reason")
+		body := map[string]interface{}{}
+		if reason != "" {
+			body["reason"] = reason
+		}
+
+		client := newAPIClient()
+		resp, err := client.Post("/api/v1/escalations/"+args[0]+"/cancel", body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		cli.PrintSuccess(fmt.Sprintf("Escalation %s cancelled.", args[0]))
+		return nil
+	},
+}
+
+// escalationSweepExpiredCmd forces the deadline sweep now.
+//
+// The server runs this on a timer and every escalation read path triggers it
+// for its own workspace, so an operator rarely needs it. It exists because a
+// deadline that can only be observed by waiting is a deadline nobody can
+// verify — this is how you check the mechanism is alive, and how an
+// acceptance test drives it through the binary.
+var escalationSweepExpiredCmd = &cobra.Command{
+	Use:   "sweep-expired",
+	Short: "Expire every escalation whose deadline has passed",
+	Long: `Move every past-deadline PENDING escalation in this workspace to EXPIRED.
+
+An escalation that nobody answers before its deadline is terminal: the agent
+that asked has already continued WITHOUT the answer (with an explicit warning),
+so the row must stop claiming somebody might still decide it.
+
+The server sweeps on its own timer and on every escalation read, so this is a
+diagnostic and a forcing function, not routine maintenance. ADMIN+.
+
+  crewship escalation sweep-expired                # prints the number expired
+  crewship escalation sweep-expired --format json  # {"expired": N}`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Post("/api/v1/escalations/sweep-expired", map[string]interface{}{})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body struct {
+			Expired int `json:"expired"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		f := newFormatter()
+		return f.AutoHuman(body, func() { fmt.Println(strconv.Itoa(body.Expired)) })
+	},
+}
+
 // escalationPendingCountCmd hits the workspace-wide aggregator at
 // GET /api/v1/escalations/pending-count. Drives dashboard tiles and
 // alerting that needs "how many escalations are unresolved across all
@@ -233,7 +344,7 @@ Examples:
 
 func init() {
 	escalationListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
-	escalationListCmd.Flags().String("status", "", "Filter by status: PENDING|RESOLVED")
+	escalationListCmd.Flags().String("status", "", "Filter by status: PENDING|RESOLVED|EXPIRED|CANCELLED")
 	escalationListCmd.Flags().Int("limit", 0, "Cap rows returned client-side (0 = unbounded)")
 	escalationListCmd.Flags().String("since", "", "Only entries newer than this (RFC3339 or 1h/24h/7d duration)")
 
@@ -241,7 +352,11 @@ func init() {
 	escalationResolveCmd.Flags().String("action", "", "Resolution action: approve|reject|redirect (default approve)")
 	escalationResolveCmd.Flags().String("redirect-to", "", "Agent slug to redirect to (when --action redirect)")
 
+	escalationCancelCmd.Flags().String("reason", "", "Why the question is being withdrawn (recorded in the journal)")
+
 	escalationCmd.AddCommand(escalationListCmd)
 	escalationCmd.AddCommand(escalationResolveCmd)
+	escalationCmd.AddCommand(escalationCancelCmd)
+	escalationCmd.AddCommand(escalationSweepExpiredCmd)
 	escalationCmd.AddCommand(escalationPendingCountCmd)
 }

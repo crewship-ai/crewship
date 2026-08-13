@@ -111,6 +111,70 @@ See [Approvals API](/api-reference/approvals) for full schemas.
 
 On `ModeSync`, the sweeper AND the client-side deadline both try to flip the row -- whichever wins, the row is consistent. A race with a last-second decide is handled: if the UPDATE affects zero rows Gate re-reads the row and returns the human decision rather than misreporting a timeout.
 
+## Standing approvals leave a trail
+
+A [routine trust grant](/cli/routine#crewship-routine-trust) disarms a `wait:approval` gate for one step of one routine body — the "you have approved this same gate twelve times, stop asking me" surface. It is the bluntest decision in the HITL system, because it removes the human from the loop rather than answering one question in it.
+
+Granting and revoking therefore emit journal entries with the same shape every other decision uses (`harbormaster.AfterDecide`):
+
+| Entry type | When | Actor |
+|---|---|---|
+| `approval.trust_granted` | a gate stopped asking | the granting user |
+| `approval.trust_revoked` | a gate starts asking again | the revoking user |
+
+Both carry `refs.trust_grant_id`, `refs.pipeline_slug`, `refs.step_id` and `payload.definition_hash`. The hash is the load-bearing field: a grant only fires against that exact routine body, so an entry without it records that *something* was trusted but not *what*. Filter with `approval.*` to see one-off decisions and standing ones together — they are the same control at two levels, which is why they share a namespace rather than getting a `trust.*` family of their own.
+
+A revoke that changed no row (already revoked, wrong routine) emits nothing. An entry for a withdrawal that did not happen would make the journal disagree with the table, which is worse than an entry that is missing.
+
+## Escalations: the other human decision
+
+Harbormaster gates an action an agent is about to take. An **escalation** is the reverse direction — an agent asking a human a question and blocking on the answer (`internal/api/escalation_handler.go`, raised through the sidecar's `/escalate`). Both are human decisions, and until release 1.0 only one of them could end.
+
+### The state machine
+
+```
+PENDING → RESOLVED    a human decided; `action` is approve | reject | redirect
+        → EXPIRED     the deadline passed and no human decided
+        → CANCELLED   a human withdrew the question before deciding
+```
+
+Terminal is terminal: resolving or cancelling a row that already reached one of the three returns **409**, with a message naming the state it actually reached. `RESOLVED` was kept rather than renamed to `ANSWERED`, and rejection stays in the `action` column rather than becoming a fourth status — see `internal/database/migrations/20260813212851_escalation_deadline.sql` for why either change would have been a second spelling of "done".
+
+### The deadline is the server's
+
+Every escalation is written with a `deadline_at` (`created_at` + 300 s), and the create response publishes it as `deadline_at` + `timeout_seconds`. The sidecar bounds its long poll on **what the server told it**, not on a constant of its own.
+
+That is the fix for a real disagreement: the agent used to give up after a hardcoded 300 s and continue, while the row stayed `PENDING` forever because nothing told the server the question had been abandoned. Two clocks, one of them invisible to the other.
+
+Expiry is decided in two places, exactly as approval timeouts are:
+
+1. **The waiter.** The long poll the agent is blocked on knows the deadline, flips the row when it passes, and answers `status: EXPIRED`. The wait ending and the row going terminal are now the *same event*, so they cannot disagree.
+2. **The sweeper.** `QueryHandler.StartEscalationExpirySweeper` runs every 60 s for rows whose sidecar died mid-wait, and every escalation read path (`escalation list`, `pending-count`) sweeps its own workspace first so no surface can show a question as open past its deadline.
+
+Every path goes through one compare-and-swap on `status = 'PENDING'`, so the transition — and its journal entry — happens exactly once no matter how many observers notice at the same moment. Losing that CAS at the deadline means a human decided in the same instant, and the waiter returns *their* decision rather than a false expiry.
+
+Rows with a NULL `deadline_at` (raised before the column existed) never expire. Back-filling them would retro-expire questions somebody may still intend to answer.
+
+### What happens when nobody answers
+
+<Info>
+**The agent continues, with an explicit warning.** The run is not failed, it is not paused, and no default answer is invented.
+</Info>
+
+This was previously decided by omission — the client timed out and the agent proceeded in silence. It is now a stated policy with three visible parts:
+
+- the wait response carries `status: EXPIRED`, an empty `resolution`, and a **mandatory** `warning` telling the agent to continue without the answer, not to assume approval, to say in its result that the question went unanswered, and to avoid irreversible actions that depended on it;
+- the row is terminal, with `resolved_by = 'system'` and a resolution string that reads as an expiry rather than a decision;
+- the journal entry is `peer.escalation` with `payload.state = "expired"`, `payload.agent_outcome = "continued_with_warning"` and **severity `warn`**, so it surfaces in the default "needs attention" filter. An operator finds out that a decision they meant to make was made for them by a clock.
+
+Failing the run instead was considered and rejected: an agent blocked on a question can usually make progress without it, and failing runs because a human was at lunch makes the escalation tool too expensive for agents to use. What is not acceptable is doing any of that silently.
+
+The same warning discipline covers the degraded paths. If the sidecar loses the connection or gets a 5xx it answers `status: TIMEOUT` — it does not know the outcome, so it does not claim one — but it still carries a warning. `{"status":"TIMEOUT","resolution":""}` with nothing else reads to a model exactly like a question that was answered with silence.
+
+### Cancelling vs rejecting
+
+`POST /api/v1/escalations/{id}/cancel` withdraws a question that stopped mattering. It is deliberately not `resolve --action reject`: a rejection is a decision the agent should act on ("no, do not do that"), while a cancellation says nobody ever considered it. Collapsing them would tell an agent it was refused when it was not. Cancellation is MANAGER+, journaled with the operator's user id and reason, and unblocks any waiting agent with the same "no answer" warning.
+
 ## CLI
 
 ```bash
@@ -122,6 +186,17 @@ crewship approvals cancel <id> --comment "request is moot"   # withdraw, no deci
 ```
 
 See [`crewship approvals`](/cli/approvals) for the full command surface. Pending requests resolve by `approve`, `deny`, `cancel`, or the server-side timeout sweeper.
+
+The escalation side has the mirror set:
+
+```bash
+crewship escalation list --crew backend --status PENDING     # DEADLINE column shows the answer-by time
+crewship escalation resolve <id> --action approve --resolution "yes"
+crewship escalation cancel  <id> --reason "the deploy was rolled back"   # withdraw, no decision
+crewship escalation sweep-expired                            # force the deadline sweep now
+```
+
+See [`crewship escalation`](/cli/escalation).
 
 ## Hook integration
 
@@ -194,6 +269,7 @@ decision *is* the signal (no LLM judge needed).
 
 ## Related
 
-- [Crew Journal](/guides/crew-journal) -- `approval.requested`, `approval.granted`, `approval.denied`, `approval.timeout`, `approval.cancelled`.
+- [Crew Journal](/guides/crew-journal) -- `approval.requested`, `approval.granted`, `approval.denied`, `approval.timeout`, `approval.cancelled`, `approval.trust_granted`, `approval.trust_revoked`, and `peer.escalation` (with `payload.state` of `pending` | `resolved` | `expired` | `cancelled`).
 - [Hooks](/guides/hooks) -- `on_approval_requested` event.
 - [`crewship approvals`](/cli/approvals), [Approvals API](/api-reference/approvals).
+- [`crewship escalation`](/cli/escalation), [Crews API](/api-reference/crews#crew-escalations) -- the escalation lifecycle.

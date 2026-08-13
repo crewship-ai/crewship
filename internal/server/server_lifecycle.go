@@ -153,6 +153,17 @@ func (s *Server) Start(ctx context.Context) error {
 				"interval", stuckRunningSweepInterval.String(),
 				"stale_after", stuckRunningStaleAfter.String())
 		}
+		// Escalation expiry sweeper: the net for questions whose agent is no
+		// longer waiting. The long poll expires its own escalation at the
+		// deadline (internal/api/escalation_lifecycle.go), so this only ever
+		// catches rows whose sidecar died mid-wait — but without it those rows
+		// stay PENDING forever, which is the exact defect the deadline exists
+		// to close. Same handler instance as the HTTP routes, so an expiry it
+		// writes wakes any waiter that is still registered.
+		if queries := s.apiRouter.Queries(); queries != nil {
+			queries.StartEscalationExpirySweeper(ctx, 0) // 0 → package default
+			s.logger.Info("escalation expiry sweeper started")
+		}
 		// Async webhook dispatches (FireWebhook 202-then-run) derive
 		// their run context from the server lifecycle, not the HTTP
 		// request — a sender hanging up must not cancel an in-flight

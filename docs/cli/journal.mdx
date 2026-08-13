@@ -256,6 +256,7 @@ See the [Crew Journal guide](/guides/crew-journal#entry-type-catalog) for the fu
 | `peer.escalation` | Cross-agent handoffs (often tied to `approval.requested`). |
 | `budget.exceeded,budget.warning` | Cost oversight. |
 | `approval.requested,approval.granted,approval.denied,approval.timeout` | HITL audit. |
+| `approval.trust_granted,approval.trust_revoked` | Standing approvals — who disarmed which routine gate, and who took it back. |
 | `hook.fired,hook.blocked` | Lifecycle hook activity. |
 | `eval.regression_detected` | Eval surfaced regression. |
 | `run.started,run.completed,run.failed,run.cancelled,run.timeout` | Run lifecycle (`/runs` page is folded into `/journal` since PR #234). |

@@ -1507,6 +1507,23 @@ crewship routine trust revoke triage-inbound-issue wtg_ab12cd34 --reason "policy
 
 The gate blocks again on the next run. The grant row is kept and marked, not deleted.
 
+### The audit trail
+
+Granting and revoking each write a journal entry, because disarming a human gate is the bluntest decision the approval system offers and it used to be the only one that left no trace:
+
+| Entry type | Refs | Payload |
+|---|---|---|
+| `approval.trust_granted` | `trust_grant_id`, `pipeline_id`, `pipeline_slug`, `step_id` | `definition_hash`, `reason`, `prior_approvals`, `max_uses`, `expires_at` |
+| `approval.trust_revoked` | same | `definition_hash`, `reason` |
+
+Both are attributed to the deciding user (`actor_type: user`). `definition_hash` is the load-bearing field — a grant only fires against that exact routine body, so an entry without it records that *something* was trusted but not *what*.
+
+```bash
+crewship journal --type approval.trust_granted,approval.trust_revoked
+```
+
+Filtering on `approval.*` shows one-off decisions and standing ones together; they are the same control at two levels, which is why they share a namespace. A revoke that changed no row emits nothing — an entry for a withdrawal that did not happen would make the journal disagree with the table.
+
 ---
 
 ## Global flags

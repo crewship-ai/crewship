@@ -238,7 +238,9 @@ REST. The shapes below reflect what the server actually sends.
 | `assignment_queued` | Assignment was queued for dispatch | `{ ... }` |
 | `assignment_unqueued` | Assignment was removed from the queue | `{ ... }` |
 | `escalation.created` | An escalation was raised | `{ id, crew_id, from_slug, reason }` |
-| `escalation.resolved` | An escalation was resolved | `{ id, ... }` |
+| `escalation.resolved` | An escalation was resolved by a human | `{ id, crew_id, from_slug, action }` |
+| `escalation.expired` | An escalation's deadline passed with no answer; the agent continued without one | `{ id, crew_id, status }` |
+| `escalation.cancelled` | An escalation was withdrawn without being decided | `{ id, crew_id, from_slug }` |
 | `peer_conversation.updated` | Peer (agent-to-agent) conversation changed | `{ ... }` |
 
 #### Containers & provisioning
@@ -375,7 +377,9 @@ scoped to the originating chat session.
 | `assignment_queued` | Assignment queued | `{ ... }` |
 | `assignment_unqueued` | Assignment unqueued | `{ ... }` |
 | `escalation_created` | Escalation raised in this session | `{ id, from, reason }` |
-| `escalation_resolved` | Escalation resolved | `{ ... }` |
+| `escalation_resolved` | Escalation resolved by a human | `{ id, resolution, action }` |
+| `escalation_expired` | Escalation deadline passed unanswered — the agent continued with a warning | `{ id, status, warning }` |
+| `escalation_cancelled` | Escalation withdrawn without a decision | `{ id, status, reason }` |
 | `peer_query_running` | Peer query started | `{ ... }` |
 | `peer_query_completed` | Peer query completed | `{ ... }` |
 | `peer_query_failed` | Peer query failed | `{ ... }` |

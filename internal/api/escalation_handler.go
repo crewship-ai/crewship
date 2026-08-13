@@ -18,6 +18,13 @@ import (
 // PendingEscalationCount returns the number of unresolved escalations workspace-wide.
 func (h *QueryHandler) PendingEscalationCount(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Settle any question whose deadline has passed before counting. This is
+	// the "computed on read" half of the expiry design (see
+	// escalation_lifecycle.go): the background sweeper is what guarantees it
+	// eventually happens, and this is what guarantees no surface can show a
+	// stale number in the meantime. Both go through the same CAS-guarded
+	// transition, so the row still flips exactly once.
+	h.sweepExpiredEscalationsBestEffort(r.Context(), workspaceID)
 	var count int
 	err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM escalations e
@@ -86,7 +93,13 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	escalationID := generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339)
+	raisedAt := time.Now().UTC()
+	now := raisedAt.Format(time.RFC3339)
+	// Every question gets an answer-by time, written here and published in the
+	// response so the agent's wait is bounded by the SERVER's clock. The
+	// sidecar used to pick its own 300 s that merely happened to match; the
+	// two now come from one place (escalationTTL) and cannot drift apart.
+	deadlineAt := raisedAt.Add(escalationTTL).Format(time.RFC3339)
 
 	escalationType := body.Type
 	if escalationType == "" {
@@ -174,9 +187,9 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
-	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now)
+		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at, deadline_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt)
 	if err != nil {
 		h.logger.Error("create escalation", "error", err)
 		// Don't leave an orphaned PENDING_APPROVAL credential with no escalation
@@ -289,9 +302,16 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		"crew_id", body.CrewID,
 	)
 
-	writeJSON(w, http.StatusCreated, map[string]string{
+	writeJSON(w, http.StatusCreated, map[string]any{
 		"escalation_id": escalationID,
-		"status":        "PENDING",
+		"status":        escalationStatusPending,
+		// The contract the sidecar bounds its long poll on. Publishing both
+		// the absolute instant and the window means a caller with a skewed
+		// clock can still use the duration, and one without can use the
+		// instant — but neither has to guess, which is what the old hardcoded
+		// 300 s amounted to.
+		"deadline_at":     deadlineAt,
+		"timeout_seconds": int(escalationTTL.Seconds()),
 	})
 }
 
@@ -382,8 +402,11 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		replyInternalError(w, h.logger, "resolve escalation lookup", err)
 		return
 	}
-	if status != "PENDING" {
-		replyError(w, http.StatusConflict, "escalation already resolved")
+	// Terminal is terminal. The message names which terminal state, because
+	// "already resolved" told an operator whose escalation had EXPIRED that
+	// somebody had decided it — the opposite of what happened.
+	if status != escalationStatusPending {
+		replyError(w, http.StatusConflict, escalationTerminalError(status))
 		return
 	}
 
@@ -522,7 +545,9 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if n == 0 {
-		replyError(w, http.StatusConflict, "escalation already resolved")
+		// Lost the compare-and-swap: a cancel, an expiry or another resolve
+		// landed between the read above and this UPDATE.
+		replyError(w, http.StatusConflict, "escalation is no longer pending")
 		return
 	}
 
@@ -661,8 +686,20 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	h.sweepExpiredEscalationsBestEffort(r.Context(), workspaceID)
 
 	limit, offset := parsePagination(r, 50, 100)
+
+	// ?status= narrows to one lifecycle state. The CLI's `--status` flag and
+	// docs/cli/escalation.mdx have advertised this filter since they were
+	// written; the server ignored it, so `escalation list --status PENDING`
+	// quietly returned everything. With four states in the vocabulary that
+	// stopped being a cosmetic gap.
+	//
+	// An unrecognised value returns nothing rather than everything: a typo
+	// that silently widens a filter is how an operator concludes there are no
+	// expired escalations when there are.
+	statusFilter := r.URL.Query().Get("status")
 
 	type escalationItem struct {
 		ID                 string  `json:"id"`
@@ -684,6 +721,12 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		// PENDING_APPROVAL credential it created; non-null means "approve here
 		// activates it" (no secret to type).
 		CredentialID *string `json:"credential_id"`
+
+		// DeadlineAt is when an unanswered question stops being answerable.
+		// NULL on rows raised before deadlines existed, which is why it is a
+		// pointer and not a string: "no deadline" and "the epoch" are very
+		// different claims and the console must be able to tell them apart.
+		DeadlineAt *string `json:"deadline_at"`
 
 		// The four-eyes rule as it will be applied to THIS row (issue #1559).
 		// ResolveEscalation decides it from two inputs the console could not
@@ -714,17 +757,23 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	// LEFT JOIN, not JOIN: a CREDENTIAL escalation may carry no credential row
 	// (the legacy flow where the human supplies the secret), and those rows
 	// must still list.
-	rows, err := h.db.QueryContext(r.Context(), `
+	query := `
 		SELECT e.id, e.type, e.reason, e.context, e.metadata, e.peer_conversation_id, e.status,
 		       e.resolution, e.action, e.redirect_to, e.resolved_by, e.resolved_at, e.created_at,
-		       e.credential_id, from_a.name, from_a.slug, from_a.created_by_user_id, c.security_level
+		       e.credential_id, e.deadline_at, from_a.name, from_a.slug, from_a.created_by_user_id, c.security_level
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
 		LEFT JOIN credentials c ON c.id = e.credential_id AND c.workspace_id = e.workspace_id
-		WHERE e.crew_id = ? AND e.workspace_id = ?
-		ORDER BY e.created_at DESC
-		LIMIT ? OFFSET ?
-	`, crewID, workspaceID, limit, offset)
+		WHERE e.crew_id = ? AND e.workspace_id = ?`
+	args := []interface{}{crewID, workspaceID}
+	if statusFilter != "" {
+		query += ` AND e.status = ?`
+		args = append(args, statusFilter)
+	}
+	query += ` ORDER BY e.created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		replyInternalError(w, h.logger, "list escalations", err)
 		return
@@ -738,14 +787,19 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			&item.ID, &item.Type, &item.Reason, &item.Context, &item.Metadata,
 			&item.PeerConversationID, &item.Status, &item.Resolution, &item.Action,
 			&item.RedirectTo, &item.ResolvedBy, &item.ResolvedAt, &item.CreatedAt,
-			&item.CredentialID, &item.FromName, &item.FromSlug,
+			&item.CredentialID, &item.DeadlineAt, &item.FromName, &item.FromSlug,
 			&item.initiatorUserID, &item.securityLevel,
 		); err != nil {
 			replyInternalError(w, h.logger, "scan escalation", err)
 			return
 		}
-		// Never expose plaintext credential values to the list response
-		if item.Type == "CREDENTIAL" && item.Resolution != nil {
+		// Never expose credential material to the list response. The mask
+		// names what actually happened: only a RESOLVED row carries a secret
+		// (encrypted at rest by ResolveEscalation), and saying "[credential
+		// submitted]" over an EXPIRED or CANCELLED row would report a
+		// submission that never took place — the resolution text on those is
+		// the lifecycle's own plaintext note, which is safe to show.
+		if item.Type == "CREDENTIAL" && item.Resolution != nil && item.Status == escalationStatusResolved {
 			masked := "[credential submitted]"
 			item.Resolution = &masked
 		}
