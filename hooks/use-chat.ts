@@ -1234,6 +1234,33 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     return () => { sendRef.current?.({ type: "unsubscribe", channel }) }
   }, [sessionId, status, subscribeAndResume])
 
+  // …but that subscribe is DENIED for a draft session.
+  //
+  // A conversation the user has opened and not yet sent into has no `chats`
+  // row (the row appears on first send — PRD Step 3), and the channel
+  // authorizer resolves ownership by looking the chat up: isSessionOwner in
+  // internal/ws/channel_auth.go refuses a channel whose session does not
+  // exist, without an error the client can see. The first reply still lands,
+  // which is what hid this — a run started by this socket is written straight
+  // back to the sending client (internal/ws/client.go:470-474) and never
+  // touches the channel fan-out. Everything from another origin in the same
+  // session (a teammate in a group chat, a CLI run, a webhook) is lost until
+  // the socket reconnects or the user leaves the session and comes back.
+  //
+  // So the caller tells us when the row came into existence — ChatPanel calls
+  // this right after its ensureSession() POST succeeds — and we take the
+  // channel again. Once per session: `resume` asks the server to replay an
+  // in-flight run from our last seq, and firing it twice would replay it
+  // twice. The ref holds the session id it already re-subscribed for, so a
+  // later session gets its own single retry without needing a reset.
+  const resubscribedForRef = useRef<string | null>(null)
+  const resubscribeSession = useCallback(() => {
+    const sid = sessionIdRef.current
+    if (!sid || resubscribedForRef.current === sid) return
+    resubscribedForRef.current = sid
+    subscribeAndResume()
+  }, [subscribeAndResume])
+
   const sendMessage = useCallback(
     (content: string) => {
       if (!content.trim() || isStreaming) return
@@ -1423,6 +1450,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     editAndResend,
     loadHistory,
     markHistoryUnavailable,
+    resubscribeSession,
     isStreaming,
     connectionStatus: status as WSStatus,
   }

@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useRef } from "react"
+import { Camera } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -9,6 +10,7 @@ import {
   AttachmentTrigger,
   type Attachment,
 } from "@/components/ai-elements/attachments"
+import { Button } from "@/components/ui/button"
 import { useComposerStore } from "@/stores/composer-store"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
@@ -79,17 +81,22 @@ async function uploadOne(
   return res.json()
 }
 
-export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneProps) {
-  // Subscribe only to THIS session's attachment list — the whole-store
-  // subscription re-rendered every mounted zone on any session's draft or
-  // attachment write.
-  const sessionAttachmentsRaw = useComposerStore((s) => s.attachments[sessionId])
+/**
+ * The one upload path for chat attachments.
+ *
+ * Drop, paperclip and camera all land here. This used to be two verbatim
+ * copies of the same ~50 lines (one in AttachmentZone, one inlined in
+ * AttachmentButton's onSelect); adding a third entry point for the camera is
+ * exactly the moment to stop copying it, because the copies are what let the
+ * abort registry, the size guard and the "user deleted the chip mid-upload"
+ * check drift apart per entry point.
+ */
+export function useAttachmentUpload(agentId: string, sessionId: string) {
   const addAttachments = useComposerStore((s) => s.addAttachments)
   const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const { workspaceId } = useWorkspace()
-  const sessionAttachments = sessionAttachmentsRaw ?? []
 
-  const handleFiles = useCallback(
+  return useCallback(
     async (files: File[]) => {
       if (!workspaceId) {
         toast.error("Workspace not loaded yet — try again in a moment")
@@ -147,6 +154,17 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
     },
     [agentId, sessionId, workspaceId, addAttachments, removeAttachment],
   )
+}
+
+export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneProps) {
+  // Subscribe only to THIS session's attachment list — the whole-store
+  // subscription re-rendered every mounted zone on any session's draft or
+  // attachment write.
+  const sessionAttachmentsRaw = useComposerStore((s) => s.attachments[sessionId])
+  const removeAttachment = useComposerStore((s) => s.removeAttachment)
+  const sessionAttachments = sessionAttachmentsRaw ?? []
+
+  const handleFiles = useAttachmentUpload(agentId, sessionId)
 
   // Wrap user removal so an in-flight upload is aborted before the
   // chip disappears from the store. Without this, a deleted file can
@@ -176,61 +194,66 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
 }
 
 export function AttachmentButton({ agentId, sessionId }: { agentId: string; sessionId: string }) {
-  const addAttachments = useComposerStore((s) => s.addAttachments)
-  const removeAttachment = useComposerStore((s) => s.removeAttachment)
-  const { workspaceId } = useWorkspace()
+  const handleFiles = useAttachmentUpload(agentId, sessionId)
   return (
     <AttachmentTrigger
       // No `accept` filter — chat attachments can be any file type
       // the agent might want to inspect (logs, screenshots, configs,
       // CSVs, archives). Server enforces size; type is informational.
-      onSelect={async (files) => {
-        if (!workspaceId) {
-          toast.error("Workspace not loaded yet — try again in a moment")
-          return
-        }
-        const queued: Array<{ att: Attachment; file: File }> = []
-        for (const f of files) {
-          if (f.size > MAX_SIZE) {
-            toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
-            continue
-          }
-          queued.push({
-            file: f,
-            att: {
-              id: crypto.randomUUID(),
-              name: f.name,
-              size: f.size,
-              type: f.type || "application/octet-stream",
-              status: "uploading",
-            },
-          })
-        }
-        if (queued.length === 0) return
-        addAttachments(sessionId, queued.map(({ att }) => att))
-        for (const { att, file } of queued) {
-          const ac = new AbortController()
-          abortRegistry.set(abortKey(sessionId, att.id), ac)
-          try {
-            const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file, ac.signal)
-            const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
-              .some((a) => a.id === att.id)
-            if (!stillThere) continue
-            removeAttachment(sessionId, att.id)
-            addAttachments(sessionId, [{ ...att, status: "ready", url: agent_path }])
-          } catch (err) {
-            if (isAbortError(err)) continue
-            const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
-              .some((a) => a.id === att.id)
-            if (!stillThere) continue
-            removeAttachment(sessionId, att.id)
-            addAttachments(sessionId, [{ ...att, status: "error" }])
-            toast.error(`${att.name}: ${err instanceof Error ? err.message : String(err)}`)
-          } finally {
-            abortRegistry.delete(abortKey(sessionId, att.id))
-          }
-        }
-      }}
+      onSelect={handleFiles}
     />
+  )
+}
+
+/**
+ * Camera control. Mobile composer only.
+ *
+ * `capture="environment"` next to `accept="image/*"` is what makes a phone
+ * open the rear camera instead of the document picker — without it the
+ * composer's only route to a photo is camera app → gallery → file browser,
+ * which is three screens for the most obvious thing anyone does from a phone.
+ * The attribute is inert on a desktop browser (it falls back to a plain image
+ * picker), but the control is still rendered only in the mobile composer:
+ * a camera button on a desktop chat is noise, and the mobile composer is the
+ * one rendered below the 768px breakpoint.
+ *
+ * Deliberately not built on AttachmentTrigger: that component
+ * (components/ai-elements/attachments.tsx) forwards `accept` and `multiple`
+ * but not `capture`, and the whole point of this control is `capture`. The
+ * upload itself is NOT duplicated — it is the same useAttachmentUpload the
+ * paperclip and the drop zone use, so a photo lands in the same per-session
+ * attachment list, with the same size guard and the same abort-on-remove.
+ */
+export function CameraButton({ agentId, sessionId }: { agentId: string; sessionId: string }) {
+  const handleFiles = useAttachmentUpload(agentId, sessionId)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        multiple
+        className="hidden"
+        data-testid="camera-input"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? [])
+          if (files.length) void handleFiles(files)
+          // Reset so photographing the same thing twice still fires change.
+          e.target.value = ""
+        }}
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="h-7 w-7"
+        onClick={() => inputRef.current?.click()}
+      >
+        <Camera className="h-3.5 w-3.5" />
+        <span className="sr-only">Take a photo</span>
+      </Button>
+    </>
   )
 }

@@ -297,12 +297,15 @@ Each event triggers a REST re-fetch of the affected resource — the server-side
 
 ## Routes
 
-Two top-level routes serve chat:
+Three top-level routes serve chat:
 
 | Route | Purpose |
 |---|---|
+| `/chat` | The chat index, and the **Chat** entry in the left rail and the mobile nav sheet. Lists recent conversations across every agent — merged client-side from `GET /agents` plus a capped fan-out of `GET /agents/{id}/chats`, newest activity first — with the agent roster beneath it. It holds no WebSocket: picking a thread is what opens a live connection, on the page below. |
 | `/crews?crew=<slug>&agent=<slug>` | Selection-driven canvas. Click an agent in the canvas to open a chat panel inline. |
 | `/chat/<agentSlug>?session=<chatId>` | Full-page chat — the same agent, the same session model, the whole viewport for messages + composer + right panel. |
+
+The session is a **query parameter, never a path segment**. The static export serves `/chat/<slug>` through a one-level rewrite in `internal/api/static.go`, so a deeper `/chat/<agent>/<session>` would resolve to the wrong page shell.
 
 The `/chat/<agentSlug>` URL is **deep-linkable** — the `session` query parameter scopes to a specific chat history. Without `?session`, the route opens the agent's most recent chat. With a `session` ID, it scrolls to that chat's history and resumes the conversation in place.
 
@@ -323,6 +326,25 @@ A "session" is a `chats` row. Sessions persist across page reloads, browser sess
 Anything else (or empty) is stored as `NULL` so a rogue caller cannot shove arbitrary text into a UI-rendered chip. The Sessions sidebar renders a colored chip per origin — NULL rows show no chip. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
 
 Chat sessions honor the workspace `preferred_language` — the agent replies in it. Set it with `crewship workspace update --language <code>` (see [`crewship workspace`](/cli/workspace)).
+
+### Session names
+
+A session names itself from its **first message**. `chats.title` had been in the schema since the first migration with nothing writing it, so every thread in every list read "Untitled session" — which makes a list of conversations unusable the moment there is more than one. The chat page now derives a title from the opening message and writes it with [Rename Chat](/api-reference/agents#rename-chat).
+
+The derivation (`lib/chat-title.ts`) is deliberately dumb and local — no model call, no round trip before your message goes out:
+
+- whitespace collapses, the text is trimmed, control and invisible formatting characters are dropped (the same normalisation the server applies on write, so the value you see is the value stored);
+- it is cut to **60 characters at a word boundary**, with an ellipsis only when something was actually cut. A single token longer than that is the one case a word is broken, because the alternative is a base64 paste as the thread's name;
+- a message that is only an attachment is named after the **file**;
+- a message that yields nothing usable — empty, whitespace, `???` — leaves the session **untitled**. "Untitled session" is a poor name; a thread called `…` is worse.
+
+Three properties worth knowing:
+
+- **It fires once**, on the first message of a session that has no title. Rename a thread yourself and nothing will ever overwrite it — not the next message, not a reload.
+- **It never blocks the send.** The message goes out first and the title follows as a separate request. If that request fails the message is unaffected and nothing is reported; the session simply stays untitled, which is where it already was.
+- **A rename does not reorder the sidebar.** The server does not bump `last_activity_at` on a rename, and the client splices only the title into the row it already holds — so fixing a name never shoves a thread to the top.
+
+Rename by hand at any time with `crewship chat rename <chat-id> "<title>"` or the API. The new title is broadcast on the workspace channel as `chat_renamed` (`{agent_id, chat_id, title}`), so a session list open in another tab repaints without polling.
 
 ### Unread badges & last activity
 

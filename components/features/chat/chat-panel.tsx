@@ -61,6 +61,11 @@ interface ChatPanelProps {
   agentSlug: string
   /** Agent role / role_title. Used to pick role-aware suggestion packs. */
   agentRole?: string | null
+  /** The agent's own chat suggestions — the raw `agents.suggested_prompts`
+   *  column, one per line. When set it replaces the role pack's chips; when
+   *  null/empty (every agent nobody has configured) the role pack answers
+   *  exactly as before. */
+  suggestedPrompts?: string | null
   /** How this session was created — UI / CLI / WEBHOOK / CRON / AGENT.
    *  Rendered as a chip in the connection bar so the user knows where
    *  they are at a glance. Undefined = unknown (pre-migration). */
@@ -87,8 +92,8 @@ interface ChatPanelProps {
 const noopFileClick = () => {}
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
-  const suggestionPack = getSuggestions(agentRole)
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
+  const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
@@ -147,7 +152,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [historyReloadNonce, setHistoryReloadNonce] = useState(0)
   const requestHistoryReload = useCallback(() => setHistoryReloadNonce((n) => n + 1), [])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     getToken: getWsToken,
     sessionId,
@@ -286,6 +291,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return list
   }, [agentId, agentSlug, agentName, agentRole, participantNames, currentUserId])
 
+  // Creates the `chats` row for a draft session (PRD Step 3: arriving is not
+  // sending). `sessionReady` is the "this session exists on the server" flag —
+  // set from the history GET for a session that already existed, and set here
+  // for one that did not.
   const ensureSession = useCallback(async () => {
     if (sessionReady || !workspaceId || !sessionId) return
     try {
@@ -293,9 +302,18 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, origin: "UI" }) },
       )
-      if (res.ok) setSessionReady(true)
+      if (res.ok) {
+        setSessionReady(true)
+        // The mount-time `subscribe` for this session was refused — the
+        // channel authorizer needs the row, and until this POST there was no
+        // row (see the comment on resubscribeSession in hooks/use-chat.ts).
+        // Now there is, so take the channel before the message goes out.
+        // resubscribeSession is per-session idempotent and reuses the socket
+        // this panel already has; it never opens a second one.
+        resubscribeSession()
+      }
     } catch { /* ignore */ }
-  }, [agentId, workspaceId, sessionId, sessionReady])
+  }, [agentId, workspaceId, sessionId, sessionReady, resubscribeSession])
 
   // Fetch files only when the Files tab might be visible (drawer open + active)
   const filesVisible = drawerOpen && drawerActiveTab === "files"

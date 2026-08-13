@@ -143,7 +143,13 @@ describe("<ChatPageClient> — slug resolution from URL", () => {
     )
   })
 
-  it("creates a session and navigates with ?session= query when none provided", async () => {
+  it("navigates to the opened session with pushState, not the router", async () => {
+    // This case used to read "creates a session and navigates with ?session=",
+    // and the creating was the point. It is not any more: arriving at a chat
+    // no longer POSTs a chat into existence (see session-on-first-send.test.tsx
+    // for that contract), so the session opened here is an EXISTING one.
+    //
+    // What survives, and is still load-bearing, is how the URL gets written.
     // chat-page-client owns URL writes via window.history.pushState (see
     // the docstring on the selectSession callback) — NOT useRouter().replace.
     // We can't read the result off window.location because the beforeEach
@@ -158,6 +164,22 @@ describe("<ChatPageClient> — slug resolution from URL", () => {
     //   2. mockReplace was NOT called — proves we navigated via push, not
     //      via the router. If the component ever regresses back to
     //      router.replace this assertion catches it.
+    const existing = {
+      id: "session-1", title: null, status: "ACTIVE", message_count: 2,
+      started_at: new Date().toISOString(), ended_at: null,
+    }
+    const listing = global.fetch as unknown as ReturnType<typeof vi.fn>
+    listing.mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.includes("/api/v1/agents") && !u.includes("/chats")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockAgents) })
+      }
+      if (u.includes("/chats")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([existing]) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+
     const pushSpy = vi.spyOn(window.history, "pushState")
     render(<ChatPageClient />)
     await waitFor(

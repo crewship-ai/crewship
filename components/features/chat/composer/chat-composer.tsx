@@ -11,7 +11,7 @@ import {
 import { useComposerStore } from "@/stores/composer-store"
 import { useMessageSubmit } from "../hooks/use-message-submit"
 import { MentionAutocomplete, type CrewMember } from "./mention-autocomplete"
-import { AttachmentZone, AttachmentButton } from "./attachment-zone"
+import { AttachmentZone, AttachmentButton, CameraButton } from "./attachment-zone"
 
 interface ChatComposerProps {
   agentId: string
@@ -105,19 +105,32 @@ export function ChatComposer({
   const submitDisabled = !isStreaming && (!input.trim() || connectionStatus !== "connected")
 
   if (variant === "mobile") {
+    // The mobile branch used to be a bare input: no attachments at all, so a
+    // phone — the device that actually has a camera — was the one surface that
+    // could not send a picture. It now wraps the same AttachmentZone the
+    // desktop branch uses (which is also what renders the resulting chips, so
+    // an upload is visible rather than a black hole) and puts a camera next to
+    // the paperclip. Mention autocomplete stays desktop-only: it needs a
+    // keyboard-driven caret, and group chat is not a phone surface yet.
     return (
       <div className="p-3 shrink-0">
-        <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
-          <PromptInputTextarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={placeholder}
-            className="min-h-[44px]"
-          />
-          <PromptInputFooter className="justify-end p-2">
-            <PromptInputSubmit disabled={submitDisabled} status={chatStatus} onStop={stopGeneration} />
-          </PromptInputFooter>
-        </PromptInput>
+        <AttachmentZone agentId={agentId} sessionId={sessionId}>
+          <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
+            <PromptInputTextarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={placeholder}
+              className="min-h-[44px]"
+            />
+            <PromptInputFooter className="justify-between p-2 gap-2">
+              <div className="flex items-center gap-1">
+                <CameraButton agentId={agentId} sessionId={sessionId} />
+                <AttachmentButton agentId={agentId} sessionId={sessionId} />
+              </div>
+              <PromptInputSubmit disabled={submitDisabled} status={chatStatus} onStop={stopGeneration} />
+            </PromptInputFooter>
+          </PromptInput>
+        </AttachmentZone>
       </div>
     )
   }

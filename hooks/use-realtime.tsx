@@ -80,6 +80,11 @@ export type RealtimeEventType =
   // overview needed a Refresh button to see an agent's work.
   | "pipeline.saved"
   | "inbox.updated"
+  // A chat session was renamed — `{agent_id, chat_id, title}`. Emitted by
+  // PATCH /agents/{id}/chats/{chatId} (internal/api/agent_chats_rename.go) so
+  // a sidebar open elsewhere repaints the row instead of polling for it.
+  // snake_case matches the backend broadcast, like the assignment_* events.
+  | "chat_renamed"
   // Feed-relevant journal rows forwarded by the journal→WS bridge
   // (internal/server/journal_ws_bridge.go), carrying the same serialized shape
   // the SSE stream serves (lib/types/journal.ts). NOTE: this is opt-in
@@ -139,6 +144,10 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   "pipeline.waitpoint.created",
   "pipeline.saved",
   "inbox.updated",
+  // Without this in the allowlist handleMessage drops the rename and every
+  // sidebar but the one that issued the PATCH keeps the old title until a
+  // reload.
+  "chat_renamed",
   // Journal entries forwarded by the journal→WS bridge on the opt-in
   // `journal:{workspaceId}` channel. Allowlisted so a future consumer's
   // subscription dispatches them; nothing subscribes to that channel yet, so
