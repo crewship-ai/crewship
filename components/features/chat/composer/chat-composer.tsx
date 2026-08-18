@@ -15,7 +15,7 @@ import {
   hasPendingUploads,
   sendableAttachments,
 } from "@/lib/attachment-message"
-import { useMessageSubmit } from "../hooks/use-message-submit"
+import { useMessageSubmit, type SubmittedMessage } from "../hooks/use-message-submit"
 import { MentionAutocomplete, type CrewMember } from "./mention-autocomplete"
 import {
   AttachmentZone,
@@ -142,21 +142,25 @@ export function ChatComposer({
     })
   }, [])
 
-  // Set by handleSent, read by the ask sheet's submit. `useMessageSubmit`
-  // returns nothing either way, and the sheet must NOT close on a send the
-  // size guard refused — everything the user filled in has to still be there
-  // for them to trim and retry, which is the same rule the draft follows.
+  // Set by handleSent, read by both submits. `useMessageSubmit` returns nothing
+  // either way, and neither caller may act as though a message went out when it
+  // did not: the sheet must NOT close on a send the size guard refused —
+  // everything the user filled in has to still be there for them to trim and
+  // retry — and the typed path must not clear the box for the same reason.
   const sentRef = useRef(false)
 
   // Only fires when the message actually went out — a size-guard rejection
   // must leave the draft intact so the user can trim and resend.
+  //
+  // What it does NOT do is clear the textarea. This runs for BOTH submits, and
+  // the attachments are the only thing both of them consumed: the composer's
+  // per-session list is appended to whichever message went, typed or rendered.
+  // The typed text belongs to the typed path alone — see handleTypedSubmit.
   const handleSent = useCallback(() => {
     sentRef.current = true
-    setInput("")
-    clearDraft(sessionId)
     clearAttachments(sessionId)
     onSent?.()
-  }, [clearDraft, clearAttachments, sessionId, onSent])
+  }, [clearAttachments, sessionId, onSent])
 
   const handleSubmit = useMessageSubmit({
     sessionId,
@@ -167,6 +171,30 @@ export function ChatComposer({
     onSend,
     onSent: handleSent,
   })
+
+  /** The textarea's own submit — and the only thing allowed to empty it.
+   *
+   *  The ask sheet reaches `handleSubmit` too, and it renders ABOVE this
+   *  composer inside the same column rather than over it (asks/ask-form-sheet
+   *  .tsx), so the textarea stays live and visible the whole time a form is
+   *  being filled in. A note typed there is not part of what the form sends —
+   *  `handleAskSubmit` passes the rendered template as the text and nothing
+   *  else — so clearing on the form's behalf deleted a message the user had
+   *  never sent, with no undo and nothing on screen to say it had gone.
+   *
+   *  `sentRef` is the same "did it actually go out" signal the sheet reads: a
+   *  refused send (over the frame cap, still uploading, no session row) must
+   *  leave the draft exactly where it was. */
+  const handleTypedSubmit = useCallback(
+    async (message: SubmittedMessage) => {
+      sentRef.current = false
+      await handleSubmit(message)
+      if (!sentRef.current) return
+      setInput("")
+      clearDraft(sessionId)
+    },
+    [handleSubmit, clearDraft, sessionId],
+  )
 
   /** Submitting a form is submitting a message. Same hook, same guards, same
    *  attachment block — the only thing the form contributed is the text.
@@ -273,7 +301,7 @@ export function ChatComposer({
       {askSheet}
       <div className="p-3 shrink-0">
         <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>
-          <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
+          <PromptInput className="rounded-xl border" onSubmit={handleTypedSubmit}>
             <PromptInputTextarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -305,7 +333,7 @@ export function ChatComposer({
           members={mentionMembers ?? []}
           onPick={handleMentionPick}
         />
-        <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
+        <PromptInput className="rounded-xl border" onSubmit={handleTypedSubmit}>
           <PromptInputTextarea
             ref={mentionTextareaRef}
             value={input}

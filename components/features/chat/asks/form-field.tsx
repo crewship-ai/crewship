@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { useState } from "react"
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -333,43 +334,18 @@ export function FormField({
         </div>
       )
 
-    case "money": {
-      const currencies = field.currency?.length ? field.currency : DEFAULT_CURRENCIES
-      const { amount, currency } = splitMoney(value, currencies)
+    case "money":
       return (
-        <div className="space-y-1">
-          {label}
-          <div className="flex items-center gap-2">
-            <Input
-              id={id}
-              type="number"
-              inputMode="decimal"
-              className="flex-1"
-              value={amount}
-              placeholder={field.placeholder}
-              onChange={(e) => emit(joinMoney(e.target.value, currency))}
-            />
-            <Select value={currency} onValueChange={(c) => emit(joinMoney(amount, c))}>
-              <SelectTrigger
-                className="w-[92px]"
-                data-testid={`${testIdPrefix}-${field.name}-currency`}
-                aria-label={`${fieldLabelText(field)} currency`}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {currencies.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {help}
-        </div>
+        <MoneyField
+          field={field}
+          value={value}
+          emit={emit}
+          id={id}
+          label={label}
+          help={help}
+          testIdPrefix={testIdPrefix}
+        />
       )
-    }
 
     case "date":
       return (
@@ -502,4 +478,100 @@ export function FormField({
         </div>
       )
   }
+}
+
+/**
+ * A money field: two controls over ONE entry in the values map.
+ *
+ * Its own component because the currency needs a piece of state, and the value
+ * string cannot always hold it. `joinMoney` has nothing to hang a currency on
+ * until there is an amount — an empty amount encodes as `""` on purpose, so an
+ * unanswered money field renders no bare "CZK" into somebody's message
+ * (ask-form-sheet.tsx, `toAskValues`).
+ *
+ * Emitting that `""` used to throw the pick away: the next render split `""`
+ * back to the first currency in the list, the Select snapped from USD to CZK,
+ * and typing the amount afterwards then sent "1249 CZK" — in the rendered
+ * message AND in the submission envelope. Nothing said so; the choice was only
+ * kept if the amount happened to be typed first, and nobody is told which order
+ * to use on a form that opens with the amount focused.
+ *
+ * Which of the two the field shows:
+ *
+ *   · while the value NAMES a currency, the value wins — it is what is going to
+ *     be sent, and an external write (a `default`, a form reset) has to be
+ *     visible rather than overruled by a stale pick;
+ *   · while it cannot name one (no amount yet), the pick stands in. Seeded from
+ *     the value this field mounted with, so a default of "1249 EUR" whose
+ *     amount is then cleared comes back as EUR and not as the list's first
+ *     entry.
+ */
+function MoneyField({
+  field,
+  value,
+  emit,
+  id,
+  label,
+  help,
+  testIdPrefix,
+}: {
+  field: FormFieldSpec
+  value: string
+  emit: (next: string) => void
+  id: string
+  label: React.ReactNode
+  help: React.ReactNode
+  testIdPrefix: string
+}) {
+  const currencies = field.currency?.length ? field.currency : DEFAULT_CURRENCIES
+  const { amount, currency: encoded } = splitMoney(value, currencies)
+  const [picked, setPicked] = useState(encoded)
+  const currency = MONEY_RE.test(value)
+    ? encoded
+    : currencies.includes(picked)
+      ? picked
+      : (currencies[0] ?? DEFAULT_CURRENCIES[0])
+
+  return (
+    <div className="space-y-1">
+      {label}
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          type="number"
+          inputMode="decimal"
+          className="flex-1"
+          value={amount}
+          placeholder={field.placeholder}
+          onChange={(e) => emit(joinMoney(e.target.value, currency))}
+        />
+        <Select
+          value={currency}
+          onValueChange={(c) => {
+            setPicked(c)
+            // Still emitted with an empty amount, where it encodes to `""` and
+            // changes nothing on the wire — the field has been touched, and the
+            // sheet's onChange is what records that.
+            emit(joinMoney(amount, c))
+          }}
+        >
+          <SelectTrigger
+            className="w-[92px]"
+            data-testid={`${testIdPrefix}-${field.name}-currency`}
+            aria-label={`${fieldLabelText(field)} currency`}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {currencies.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {help}
+    </div>
+  )
 }

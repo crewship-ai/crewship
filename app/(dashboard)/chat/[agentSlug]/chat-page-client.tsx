@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { AnimatePresence, motion } from "motion/react"
 import {
@@ -185,6 +185,9 @@ type SessionRecord = ChatTreeThread & { ended_at: string | null }
  */
 export function ChatPageClient() {
   const searchParams = useSearchParams()
+  // Read as a NOTIFICATION that the app router navigated, never as the
+  // selection itself — see the URL-sync effect below, beside swapAgent.
+  const pathname = usePathname()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [slug, setSlug] = useAgentSlugFromUrl()
 
@@ -738,6 +741,67 @@ export function ChatPageClient() {
       window.history.pushState(null, "", url)
     }
   }, [slug, setSlug])
+
+  /**
+   * Follow a navigation this page did NOT make.
+   *
+   * Everything above writes the URL with `history.pushState` and syncs back on
+   * `popstate`, because a router-driven param change remounts the dashboard
+   * chrome on a static-export build. That decision covers every navigation this
+   * page starts. It covers none that arrive from outside it — and one now does:
+   * ⌘K's Conversations group opens a hit with
+   * `router.push("/chat/<slug>?session=<id>")` (components/command-palette.tsx).
+   * A `router.push` fires no `popstate`, and a segment whose only change is the
+   * query string is re-rendered rather than remounted, so the address bar moved
+   * and the conversation on screen did not. The commonest search of all is the
+   * worst case: the message being hunted is usually in the agent already open.
+   *
+   * Reading is not routing. This page still never calls the router; it only
+   * listens. And it listens for a CHANGE rather than for a value: the ref below
+   * holds the URL as `usePathname` / `useSearchParams` last reported it, and the
+   * effect does nothing until that string moves. That is what keeps the bypass
+   * intact. Next syncs a native `history.pushState` into those hooks, so this
+   * page's own writes surface here too — as a URL that already agrees with the
+   * state that wrote it, which is why every branch below re-checks against what
+   * is currently open and stops. Keyed off the values alone, an effect that
+   * re-ran for any other reason would re-apply a `?session=` the reader had
+   * already moved on from.
+   *
+   * `slug === null` is the pre-mount window — `useAgentSlugFromUrl` has not read
+   * the path yet, and treating that as "the agent changed" would swap the page
+   * onto its own agent, disarming the `?prompt=` handoff on the way.
+   */
+  const routerUrlRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const qs = searchParams.toString()
+    const reported = `${pathname}${qs ? `?${qs}` : ""}`
+    if (routerUrlRef.current === reported) return
+    // The first reading is the URL the page was opened on, and `sessionId` was
+    // seeded from it already.
+    const isFirst = routerUrlRef.current === null
+    routerUrlRef.current = reported
+    if (isFirst || slug === null) return
+
+    // What the hooks say has now CHANGED; what they say it changed TO is read
+    // off window.location, for the same reason useParams is banned at the top
+    // of this file — a static-export build resolves this segment from a
+    // prerendered placeholder. The address bar is the one thing both kinds of
+    // URL write agree on.
+    const m = window.location.pathname.match(/^\/chat\/([^/]+)\/?$/)
+    const urlSlug = m ? decodeURIComponent(m[1]) : null
+    const urlSession = new URLSearchParams(window.location.search).get("session")
+    // Another agent: the same in-place swap the tree does, carrying the thread.
+    // Opening it here instead would draw one agent's conversation under
+    // another's id, and send the next message to the wrong agent.
+    if (urlSlug && urlSlug !== slug) {
+      swapAgent(urlSlug, urlSession)
+      return
+    }
+    if (!urlSession || urlSession === sessionId) return
+    setSessionIdState(urlSession)
+    setDraftSessionId(null)
+  }, [searchParams, pathname, slug, sessionId, swapAgent])
 
   // Selecting inside this agent is local state plus a history write; another
   // agent's thread is the swap above, carrying the thread so the page lands on
