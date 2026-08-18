@@ -509,6 +509,9 @@ describe("regenerateLastTurn", () => {
     expect(result.current.isStreaming).toBe(true)
     expect(mockSend).toHaveBeenCalledWith({
       type: "send_message",
+      // Addressed to the session, so a server-side refusal of THIS send comes
+      // back on a channel the hook can attribute (see use-chat-failure-surfacing).
+      channel: "session:" + SESSION,
       payload: JSON.stringify({ session_id: SESSION, content: "question" }),
     })
   })
@@ -588,6 +591,9 @@ describe("editAndResend", () => {
     expect(result.current.isStreaming).toBe(true)
     expect(mockSend).toHaveBeenCalledWith({
       type: "send_message",
+      // Addressed to the session, so a server-side refusal of THIS send comes
+      // back on a channel the hook can attribute (see use-chat-failure-surfacing).
+      channel: "session:" + SESSION,
       payload: JSON.stringify({ session_id: SESSION, content: "edited question" }),
     })
   })

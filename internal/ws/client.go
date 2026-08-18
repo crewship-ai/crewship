@@ -62,6 +62,12 @@ func (c *Client) readPump() {
 			// broken/skewed client), not a silent no-op — WARN it with remote +
 			// agent context and hand the client a legible error frame instead of
 			// dropping the frame on the floor with no signal on either side (#1386).
+			//
+			// Channel is empty and stays empty: nothing about an unparseable
+			// frame says which conversation it concerned, so this error belongs
+			// to the CONNECTION, not to a chat. Readers that key on the channel
+			// (the browser's chat surface) ignore it for that reason; readers of
+			// the connection itself (the CLI's CloseReason) still get the text.
 			c.hub.logger.Warn("malformed message frame",
 				"user_id", c.userID, "remote_addr", c.remoteAddr(), "error", err)
 			c.sendError("", "malformed message frame")
@@ -88,6 +94,9 @@ func (c *Client) readPump() {
 			// newer/older client speaking a verb this server doesn't route. Log it
 			// WARN (with the type + remote + agent context) and tell the client so
 			// the mismatch is visible on both sides rather than silently ignored.
+			// Echoes whatever channel the frame carried, which is usually none —
+			// an unroutable verb is a connection-level fault like the malformed
+			// frame above, not a statement about any one chat.
 			c.hub.logger.Warn("unknown message type",
 				"type", msg.Type, "user_id", c.userID, "remote_addr", c.remoteAddr())
 			c.sendError(msg.Channel, "unknown message type: "+msg.Type)
@@ -406,10 +415,6 @@ func (c *Client) handleResume(msg ClientMessage) {
 
 func (c *Client) handleSendMessage(msg ClientMessage) {
 	c.hub.logger.Debug("handleSendMessage", "user_id", c.userID, "payload_len", len(msg.Payload))
-	if c.hub.chatHandler == nil {
-		c.sendError(msg.Channel, "chat not available")
-		return
-	}
 
 	var payload sendMessagePayload
 	// Handle double-encoded payload (frontend sends JSON.stringify'd string)
@@ -424,11 +429,29 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		return
 	}
 
+	// Every refusal below is ABOUT a specific chat, so address it to that chat's
+	// channel — taken from the decoded payload rather than from msg.Channel,
+	// which a client is not obliged to set on a send_message (the CLI does not).
+	// An error frame naming no channel belongs to no conversation and a chat
+	// surface cannot safely attribute it: hooks/use-chat.ts drops unaddressed
+	// error frames rather than render them against whichever chat is open. The
+	// decode failure above is the one case with nothing to name — the payload
+	// that would have carried the chat id is the thing that did not parse.
+	errCh := msg.Channel
+	if payload.ChatID != "" {
+		errCh = "session:" + payload.ChatID
+	}
+
+	if c.hub.chatHandler == nil {
+		c.sendError(errCh, "chat not available")
+		return
+	}
+
 	if payload.ChatID == "" || payload.Content == "" {
 		c.hub.logger.Warn("send_message missing fields",
 			"user_id", c.userID, "remote_addr", c.remoteAddr(),
 			"chat_id_empty", payload.ChatID == "", "content_empty", payload.Content == "")
-		c.sendError(msg.Channel, "session_id and content required")
+		c.sendError(errCh, "session_id and content required")
 		return
 	}
 
@@ -438,7 +461,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		// Grant path — authorizer errors fail closed.
 		if ok, err := c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, sessionCh); err != nil || !ok {
 			c.hub.logger.Warn("send_message denied: no access to session", "user_id", c.userID, "chat_id", payload.ChatID, "error", err)
-			c.sendError(msg.Channel, "access denied")
+			c.sendError(errCh, "access denied")
 			return
 		}
 	}

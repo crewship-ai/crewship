@@ -8,8 +8,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // only appears on the first send. The WS channel authorizer requires that row
 // to exist — `isSessionOwner` in internal/ws/channel_auth.go looks the chat up
 // and refuses the channel when it is missing — so the `subscribe` this hook
-// fires on mount for a draft id is rejected, silently, with no client-visible
-// error.
+// fires on mount for a draft id is rejected. The server does answer that with an
+// "access denied" error frame on the channel; the hook deliberately renders no
+// turn for a deny that terminates nothing in flight (see
+// use-chat-failure-surfacing.test.ts), so the rejection stays invisible.
 //
 // The first reply still arrives, which is why this went unnoticed: a run
 // started by this socket is served straight back to the sending client

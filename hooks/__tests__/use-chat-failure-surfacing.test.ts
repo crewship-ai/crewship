@@ -10,6 +10,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 //  - persisted system/error turns (bridge no-output turn, boot-recovery
 //    "interrupted by restart" turn) reload as error bubbles, not plain
 //    text.
+//
+// The mirror image of that is which failures must NOT be surfaced. A top-level
+// error frame becomes a visible turn only when it terminates work this chat has
+// in flight: an unaddressed frame belongs to no conversation, and an unsolicited
+// deny (the draft session's subscribe, refused until the `chats` row exists) is
+// expected and self-correcting. Neither belongs in the transcript.
 
 // Mock useWebSocket to avoid real WebSocket connections
 const mockSend = vi.fn()
@@ -116,6 +122,57 @@ describe("useChat failure surfacing", () => {
     expect(rejection.isStreaming).toBe(false)
     expect(rejection.parts).toHaveLength(1)
     expect(rejection.parts[0]).toMatchObject({ type: "error", content: "access denied" })
+  })
+
+  // The send frame names the channel it is about, so anything the server
+  // refuses about it (deny, invalid payload, chat handler unavailable) comes
+  // back addressed to this session instead of channel-less — which is what
+  // lets the rules below drop unaddressed frames without swallowing the
+  // rejection of a real send.
+  it("addresses its send frames to the session channel", () => {
+    const { result } = setup()
+    act(() => {
+      result.current.sendMessage("hi")
+    })
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "send_message", channel: "session:s1" }),
+    )
+  })
+
+  // A deny for a session the server has no row for is EXPECTED and
+  // self-correcting: an unsent conversation is a client-side draft (PRD step 3)
+  // and `isSessionOwner` refuses a channel whose chat does not exist yet, on
+  // mount and on every reconnect until the first send. Rendering it puts
+  // "access denied" — as an assistant turn, under a Regenerate button — into an
+  // empty chat the user has not typed into. Nothing of ours is in flight for it
+  // to terminate, so nothing is shown.
+  it("an unsolicited deny (no local send pending) renders no turn", () => {
+    const { result } = setup()
+    act(() => getOnMessage()({
+      type: "error",
+      channel: "session:s1",
+      payload: { message: "access denied", error: "access denied" },
+    }))
+    expect(result.current.turns).toHaveLength(0)
+    expect(result.current.isStreaming).toBe(false)
+  })
+
+  // An error frame with no channel belongs to no conversation: the server emits
+  // those for connection-level faults (a frame it could not parse, a verb it
+  // does not route — internal/ws/client.go), which say nothing about this chat.
+  // The open chat must not adopt them.
+  it("does not attribute a channel-less error frame to the open chat", () => {
+    const { result } = setup()
+    act(() => {
+      result.current.sendMessage("hi")
+    })
+    act(() => getOnMessage()({
+      type: "error",
+      payload: { message: "malformed message frame", error: "malformed message frame" },
+    }))
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].role).toBe("user")
+    expect(result.current.turns.flatMap((t) => t.parts).filter((p) => p.type === "error")).toHaveLength(0)
   })
 
   it("does not apply a top-level WebSocket error for another session", () => {

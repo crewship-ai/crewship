@@ -32,6 +32,13 @@ import (
 // generic-error copy style used elsewhere in the chat stream.
 const noOutputChatMessage = "The agent returned no output — try again"
 
+// ledgerWriteTimeout bounds the terminal bookkeeping writes that must outlive
+// the turn's own context — the paymaster ledger write, and the CANCELLED
+// branch's run-status/transcript writes. Both run after the agent has stopped,
+// on a context that may already be cancelled, so they get a fresh deadline
+// rather than an inherited (possibly dead) one.
+const ledgerWriteTimeout = 5 * time.Second
+
 // AgentStatusPendingReview is the agents.status sentinel set by the
 // hire endpoint when the per-crew autonomy policy returns
 // DecisionInboxApprove (guided autonomy). The chatbridge refuses to
@@ -869,11 +876,24 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// otherwise the requested one; ResultUsageForLedger returns ok=false when
 	// there is no usage to bill, so a run that never reached the API bills
 	// nothing.
+	//
+	// The write is DETACHED from ctx. ctx is the per-turn run context, and Stop
+	// cancels it (ws.Client.handleCancelMessage); IPCResolver.RecordCost builds
+	// its POST with http.NewRequestWithContext, so on a cancelled context the
+	// request dies before it leaves the process and the spend survives only as
+	// the WARN below — the very under-counting this hoist removed, moved from
+	// failed runs to cancelled ones. WithoutCancel keeps the values on ctx (the
+	// run id stamped above, trace/auth) and drops only the cancellation; the
+	// timeout bounds the now-unparented call. Same shape the CANCELLED branch
+	// below uses for its own writes, and the same one crew_sidecar_teardown.go
+	// uses for post-request cleanup.
 	if usage, ok := ResultUsageForLedger(info.WorkspaceID, info.CrewID, info.AgentID,
 		orchestrator.EffectiveModel(acc, info.LLMModel), acc.ResultMeta()); ok {
-		if err := b.resolver.RecordCost(ctx, usage); err != nil {
+		costCtx, costCancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
+		if err := b.resolver.RecordCost(costCtx, usage); err != nil {
 			b.logger.Warn("failed to record run cost usage", "run_id", runID, "error", err)
 		}
+		costCancel()
 	}
 	if runErr != nil {
 		// If context was cancelled (user pressed stop), don't emit error -- the hub
@@ -881,7 +901,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if ctx.Err() == context.Canceled {
 			b.logger.Info("run cancelled by user", "chat_id", chatID, "duration_ms", time.Since(startedAt).Milliseconds())
 			cancelMsg := "cancelled"
-			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 			defer cleanCancel()
 			if err := b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, terminalRunMeta(startedAt, acc, nil)); err != nil {
 				b.logger.Warn("failed to update run status", "run_id", runID, "status", "CANCELLED", "error", err)

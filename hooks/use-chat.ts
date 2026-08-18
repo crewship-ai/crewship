@@ -1184,8 +1184,28 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       // payloads, and an unavailable chat handler. These are not chat_event
       // payloads, but they still terminate an optimistic local send. Ignoring
       // one leaves the user turn showing "thinking" forever.
+      //
+      // Which of them the USER sees is a narrower question, and the answer is:
+      // only the ones that terminate something this chat has in flight.
+      //
+      //  - No channel → the frame belongs to no conversation. The server sends
+      //    those for connection-level faults (an unparseable frame, an unrouted
+      //    verb) that say nothing about this chat, and every chat open on this
+      //    socket would otherwise adopt them. Our own sends name their channel
+      //    (see sendMessage), so a refused send still comes back addressed.
+      //  - Another session's channel → not ours.
+      //  - Our channel, nothing in flight → an UNSOLICITED deny. The one that
+      //    actually happens is a draft session's subscribe: an unsent
+      //    conversation has no `chats` row (PRD step 3), isSessionOwner refuses
+      //    the channel until it exists, and ChatPanel re-subscribes the moment
+      //    ensureSession() creates it. Expected, self-correcting, and no reason
+      //    to put "access denied" — as an assistant turn under a Regenerate
+      //    button — into a chat the user has not typed into. A deny that is NOT
+      //    self-correcting (access genuinely revoked) shows up on the next send,
+      //    which is the point at which it stops the user and is surfaced.
       if (msg.type === "error") {
-        if (channelSessionId && channelSessionId !== sessionId) return
+        if (!channelSessionId || channelSessionId !== sessionId) return
+        if (!isStreamingRef.current) return
         const payload = msg.payload
         let reason = ""
         if (typeof payload === "string") {
@@ -1284,7 +1304,10 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
   // row (the row appears on first send — PRD Step 3), and the channel
   // authorizer resolves ownership by looking the chat up: isSessionOwner in
   // internal/ws/channel_auth.go refuses a channel whose session does not
-  // exist, without an error the client can see. The first reply still lands,
+  // exist. The server DOES answer that refusal — an "access denied" error
+  // frame on this very channel (internal/ws/client.go's subscribe) — but
+  // handleMessage deliberately does not surface an unsolicited deny, so
+  // nothing about it is visible in an empty chat. The first reply still lands,
   // which is what hid this — a run started by this socket is written straight
   // back to the sending client (internal/ws/client.go:470-474) and never
   // touches the channel fan-out. Everything from another origin in the same
@@ -1338,6 +1361,12 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
 
       send({
         type: "send_message",
+        // Name the channel this send is about. The server echoes it on any
+        // frame-level refusal (denied session, invalid payload, chat handler
+        // unavailable — internal/ws/client.go), which is what makes those
+        // rejections addressable: handleMessage above refuses to attribute an
+        // error frame that names no channel to whatever chat happens to be open.
+        channel: "session:" + sessionId,
         payload: JSON.stringify({
           session_id: sessionId,
           content: content.trim(),
@@ -1419,6 +1448,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
 
     send({
       type: "send_message",
+      channel: "session:" + sessionId,
       payload: JSON.stringify({
         session_id: sessionId,
         content: lastUserContent,
@@ -1468,6 +1498,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
 
       send({
         type: "send_message",
+        channel: "session:" + sessionId,
         payload: JSON.stringify({
           session_id: sessionId,
           content: trimmed,
