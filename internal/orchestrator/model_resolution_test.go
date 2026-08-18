@@ -52,7 +52,7 @@ func decodeLogLines(t *testing.T, buf *bytes.Buffer) []map[string]any {
 
 func TestLogResolvedModel_WarnOnFamilyFallback(t *testing.T) {
 	var buf bytes.Buffer
-	logResolvedModel(captureSlog(&buf), "agent_1", "claude-opus-4-8", "claude-sonnet-4-5")
+	logResolvedModel(captureSlog(&buf), "agent_1", "claude-opus-4-8", "claude-sonnet-4-5", "", "")
 
 	lines := decodeLogLines(t, &buf)
 	if len(lines) != 2 {
@@ -74,7 +74,7 @@ func TestLogResolvedModel_WarnOnFamilyFallback(t *testing.T) {
 func TestLogResolvedModel_WarnOnFableFallback(t *testing.T) {
 	var buf bytes.Buffer
 	// Asked for the premium Fable tier, subscription served Opus — loud warn.
-	logResolvedModel(captureSlog(&buf), "agent_1", "claude-fable-5", "claude-opus-4-8")
+	logResolvedModel(captureSlog(&buf), "agent_1", "claude-fable-5", "claude-opus-4-8", "", "")
 
 	lines := decodeLogLines(t, &buf)
 	if len(lines) != 2 {
@@ -88,7 +88,7 @@ func TestLogResolvedModel_WarnOnFableFallback(t *testing.T) {
 func TestLogResolvedModel_NoWarnWhenFamilyMatches(t *testing.T) {
 	var buf bytes.Buffer
 	// Requested opus, actually served opus (different point release) — no warn.
-	logResolvedModel(captureSlog(&buf), "agent_1", "claude-opus-4-8", "claude-opus-4-8-20260601")
+	logResolvedModel(captureSlog(&buf), "agent_1", "claude-opus-4-8", "claude-opus-4-8-20260601", "", "")
 
 	for _, l := range decodeLogLines(t, &buf) {
 		if l["level"] == "WARN" {
@@ -99,7 +99,7 @@ func TestLogResolvedModel_NoWarnWhenFamilyMatches(t *testing.T) {
 
 func TestLogResolvedModel_BlankActualIsNoop(t *testing.T) {
 	var buf bytes.Buffer
-	logResolvedModel(captureSlog(&buf), "agent_1", "claude-opus-4-8", "")
+	logResolvedModel(captureSlog(&buf), "agent_1", "claude-opus-4-8", "", "", "")
 	if buf.Len() != 0 {
 		t.Errorf("blank actual model should emit nothing, got %s", buf.String())
 	}
@@ -109,7 +109,7 @@ func TestLogResolvedModel_NoWarnWhenRequestedUnset(t *testing.T) {
 	var buf bytes.Buffer
 	// No requested override (subscription default) — we log the actual but
 	// cannot claim a fallback, so no WARN.
-	logResolvedModel(captureSlog(&buf), "agent_1", "", "claude-sonnet-4-5")
+	logResolvedModel(captureSlog(&buf), "agent_1", "", "claude-sonnet-4-5", "", "")
 	for _, l := range decodeLogLines(t, &buf) {
 		if l["level"] == "WARN" {
 			t.Errorf("unexpected WARN when requested model is empty: %+v", l)

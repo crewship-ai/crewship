@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,21 +24,40 @@ const endOfStreamEmitTimeout = 5 * time.Second
 // The format varies: top-level messages have "type" like "assistant", "result", "system";
 // stream events have type "stream_event" with nested "event" containing deltas.
 type streamJSONMessage struct {
-	Type    string          `json:"type"`
-	Subtype string          `json:"subtype,omitempty"`
+	// Type is deliberately the one field that is NOT tolerant, and it has to
+	// stay that way: parseClaudeCodeStreamJSON uses a decoded Type as its test
+	// of whether anything survived, so a tolerant Type would swallow the error
+	// that keeps a structurally broken line visible as raw text. See the
+	// comment on the unmarshal there.
+	Type string `json:"type"`
+	// Subtype is the second discriminator — the whole init branch and the
+	// error_max_turns classification hang off it. See tolerantSubtype.
+	Subtype tolerantSubtype `json:"subtype,omitempty"`
 	Message json.RawMessage `json:"message,omitempty"`
 	// For "assistant" type messages with content blocks at top level (legacy)
 	Content []contentBlock `json:"content,omitempty"`
-	// For "result" type
+	// For "result" type. IsError, TotalCostUSD and NumTurns are tolerant for a
+	// reason the isolation in parseClaudeCodeStreamJSON does not cover: keeping
+	// the LINE is not the same as keeping the FIELD, and a zeroed is_error is
+	// the same silent COMPLETED by a shorter route. See tolerantString.
 	Result       string          `json:"result,omitempty"`
 	DurationMs   float64         `json:"duration_ms,omitempty"`
 	DurationAPI  float64         `json:"duration_api_ms,omitempty"`
-	TotalCostUSD float64         `json:"total_cost_usd,omitempty"`
-	NumTurns     int             `json:"num_turns,omitempty"`
-	IsError      bool            `json:"is_error,omitempty"`
+	TotalCostUSD tolerantFloat   `json:"total_cost_usd,omitempty"`
+	NumTurns     tolerantInt     `json:"num_turns,omitempty"`
+	IsError      tolerantBool    `json:"is_error,omitempty"`
 	Usage        json.RawMessage `json:"usage,omitempty"`
 	ModelUsage   json.RawMessage `json:"modelUsage,omitempty"`
 	Errors       []string        `json:"errors,omitempty"`
+	// Also on "result": why the turn ended, and what the CLI refused. Not
+	// derivable from Subtype — a hard auth failure reports subtype "success"
+	// with IsError true and TerminalReason "api_error". Tolerant types for the
+	// same reason Skills is RawMessage below, and the result line is the
+	// costlier one to lose: see tolerantString.
+	TerminalReason    tolerantString  `json:"terminal_reason,omitempty"`
+	APIErrorStatus    tolerantInt     `json:"api_error_status,omitempty"`
+	StopReason        tolerantString  `json:"stop_reason,omitempty"`
+	PermissionDenials json.RawMessage `json:"permission_denials,omitempty"`
 	// For "system" type with subtype "init"
 	Model        string          `json:"model,omitempty"`
 	Tools        []string        `json:"tools,omitempty"`
@@ -44,6 +65,42 @@ type streamJSONMessage struct {
 	MCPSrvrs     json.RawMessage `json:"mcp_servers,omitempty"`
 	Plugins      json.RawMessage `json:"plugins,omitempty"`
 	PluginErrors json.RawMessage `json:"plugin_errors,omitempty"`
+	// Session provenance, all on system/init. ClaudeCodeVersion is the one
+	// that matters most: the adapter is pinned to an npm version in
+	// cli_adapter_versions_test.go while containers install latest, and
+	// without this field nothing in a run says which of the two answered.
+	// Capabilities is the CLI's own list of protocol behaviours (e.g.
+	// "interrupt_receipt_v1") — feature-detect on it rather than on a version
+	// string. Documented upstream as an array of strings, and carried
+	// tolerantly anyway: "documented" is the assurance that let a pinned
+	// adapter version drift for a hundred releases (#1932), and this field has
+	// no consumer that a dropped entry would break. MCPServerErrors
+	// (v2.1.219+) reports --mcp-config entries dropped by validation; the run
+	// continues and exits 0 without them.
+	ClaudeCodeVersion string          `json:"claude_code_version,omitempty"`
+	SessionID         string          `json:"session_id,omitempty"`
+	APIKeySource      string          `json:"apiKeySource,omitempty"`
+	PermissionMode    string          `json:"permissionMode,omitempty"`
+	Capabilities      tolerantStrings `json:"capabilities,omitempty"`
+	MCPServerErrors   json.RawMessage `json:"mcp_server_errors,omitempty"`
+	// The plain `string` provenance fields above — SessionID, APIKeySource,
+	// PermissionMode, ClaudeCodeVersion, and Model / Result / CWD elsewhere on
+	// this struct — stay strict on purpose, and the decode marker is what makes
+	// that safe. Every one of them is written into metadata behind an `if != ""`
+	// guard, so a field we could not read becomes an ABSENCE, not a false
+	// statement; that is the opposite of is_error, whose zero value actively
+	// asserts the run was fine. And there is no shape-preserving reading of
+	// {"id":"claude-opus-5"} as a model string — recovering one means guessing a
+	// key, which is how the wrong provenance gets recorded as fact. What was
+	// missing was any record that we could not read them, and that is what
+	// parseClaudeCodeStreamJSON's decode marker now supplies.
+	//
+	// Skills is RawMessage, not []string, deliberately: the field is not in
+	// the published stream reference, so its shape is not a promise. A typed
+	// field that stopped matching would fail the unmarshal of the ENTIRE init
+	// line and dump it to the UI as raw text — a large blast radius for a
+	// field we only pass through.
+	Skills json.RawMessage `json:"skills,omitempty"`
 	// For "system" type with subtype "api_retry" (Anthropic 2.1.x ships this
 	// as a separate event when auth/rate/billing/server retries kick in).
 	// Surface to journal so backoff investigations have data; pre-fix parser
@@ -60,6 +117,225 @@ type streamJSONMessage struct {
 	// thinking/tool activity under its parent instead of flattening it into the
 	// main stream. Empty on top-level (parent agent) lines.
 	ParentToolUseID string `json:"parent_tool_use_id,omitempty"`
+}
+
+// The tolerant scalar types below defend the same thing Skills defends by being
+// a RawMessage — but they defend the field's MEANING, which is a different job
+// from the one parseClaudeCodeStreamJSON's per-field isolation does.
+//
+// Isolation keeps the line: a field whose Go type stopped matching upstream is
+// skipped and everything else on the envelope still arrives. That is the whole
+// answer for a field we only pass through. It is NOT the answer for a field
+// somebody acts on, because "skipped" means "zero", and the zero of is_error is
+// false — inBandFailure.observe keys on meta["is_error"], so a run that failed
+// to authenticate is finalised COMPLETED just as surely as if the whole line
+// had been lost. Same for total_cost_usd (a run finalised at $0.00) and
+// api_error_status (401 vs 529 is the difference between "fix the credential"
+// and "retry"). Where the neighbouring shape still says the same thing —
+// "true" is true, "0.42" is 0.42, "401" is 401 — read it rather than drop it.
+//
+// These types never return an error, because an error from a custom
+// UnmarshalJSON aborts the whole decode and would put us back where we started.
+// They accept the documented shape, accept the neighbouring one where it still
+// means something, and reduce anything else to a zero value. Call sites keep
+// their typed use and convert back to the plain Go type on the way into event
+// metadata, which crosses into the journal and is type-asserted there.
+type tolerantString string
+
+func (s *tolerantString) UnmarshalJSON(b []byte) error {
+	*s = ""
+	t := strings.TrimSpace(string(b))
+	if t == "" || t == "null" {
+		return nil
+	}
+	if t[0] == '"' {
+		var str string
+		if json.Unmarshal(b, &str) == nil {
+			*s = tolerantString(str)
+		}
+		return nil
+	}
+	// A bare number or bool still reads as a label, so keep it verbatim. An
+	// object or array does not — dropping it beats pushing a JSON blob into a
+	// user-facing "failed run (...)" string.
+	if t[0] != '{' && t[0] != '[' {
+		*s = tolerantString(t)
+	}
+	return nil
+}
+
+// tolerantSubtype carries `subtype`, and it is a type of its own rather than
+// another tolerantString because subtype is not payload — it is the second
+// DISCRIMINATOR. Every field above costs one field when it cannot be read;
+// subtype costs a whole branch. Measured against the shipped parser:
+//
+//	{"type":"system","subtype":["init"],"model":"claude-opus-5",
+//	 "claude_code_version":"2.1.226",
+//	 "mcp_server_errors":[{"name":"crewship-memory","type":"invalid_config"}]}
+//	  -> the emitted event's entire metadata was  map[subtype:]
+//
+// Type decoded, so the line-level isolation correctly kept the line; Subtype
+// zeroed, so `switch msg.Subtype` matched nothing, the init branch never ran and
+// none of the provenance was copied — no session_init journal entry, and every
+// surface showing a healthy run while the CLI was reporting it had dropped an
+// MCP server. With no raw line in the transcript either, that is worse than the
+// pre-tolerance behaviour it replaced. On `result` the same field carries the
+// error_max_turns classification and the label inBandFailure.Err() shows a user.
+//
+// Two things follow from being a discriminator, and they are why tolerantString
+// is not enough:
+//
+//   - a one-element array is unwrapped. tolerantString drops arrays because a
+//     JSON blob rendered into "failed run (…)" reads worse than nothing; a
+//     discriminator has no such problem — ["init"] names exactly one branch, and
+//     the alternative is losing everything the branch would have copied. Two
+//     elements is not unwrapped: picking one would be a guess about which branch
+//     the CLI meant, and guessing a branch is how the wrong provenance gets
+//     recorded as fact.
+//   - anything still unreadable sets `unreadable`, which the parser turns into
+//     the decode marker. A tolerant type that quietly returns "" would just move
+//     the bug: "" is also what a CLI that sent no subtype produces, so silence
+//     here is indistinguishable from absence — the exact failure this whole
+//     round is about.
+type tolerantSubtype struct {
+	value      string
+	unreadable bool
+}
+
+func (s *tolerantSubtype) UnmarshalJSON(b []byte) error {
+	*s = tolerantSubtype{}
+	t := strings.TrimSpace(string(b))
+	// Absent and null are not failures: plenty of envelopes carry no subtype.
+	if t == "" || t == "null" {
+		return nil
+	}
+	if t[0] == '[' {
+		var elems []string
+		if json.Unmarshal(b, &elems) == nil && len(elems) == 1 {
+			s.value = elems[0]
+			return nil
+		}
+		s.unreadable = true
+		return nil
+	}
+	// A string, number or bool: tolerantString already keeps whichever of those
+	// arrives, verbatim, and it never errors. An explicit "" is a value the CLI
+	// sent, not a value we failed to read, so it is not flagged.
+	var label tolerantString
+	_ = label.UnmarshalJSON(b)
+	if label == "" && t != `""` {
+		s.unreadable = true
+		return nil
+	}
+	s.value = string(label)
+	return nil
+}
+
+// String is what every call site uses. The value lands in event metadata, which
+// crosses into the journal and is type-asserted as a plain string there —
+// inBandFailure.observe keys the failure classification off it and
+// NewBufferingHandler gates the session-init capture on it — so the wrapper must
+// never escape this package's decode step.
+func (s tolerantSubtype) String() string { return s.value }
+
+// tolerantNumber reads a number that may have arrived quoted. ParseFloat rather
+// than Atoi: JSON has one number type, so a status can legitimately arrive as
+// 401.0 or 4.01e2.
+func tolerantNumber(b []byte) (float64, bool) {
+	t := strings.TrimSpace(string(b))
+	if t == "" || t == "null" {
+		return 0, false
+	}
+	if t[0] == '"' {
+		var str string
+		if json.Unmarshal(b, &str) != nil {
+			return 0, false
+		}
+		t = strings.TrimSpace(str)
+	}
+	f, err := strconv.ParseFloat(t, 64)
+	if err != nil {
+		return 0, false
+	}
+	return f, true
+}
+
+type tolerantInt int
+
+func (n *tolerantInt) UnmarshalJSON(b []byte) error {
+	*n = 0
+	if f, ok := tolerantNumber(b); ok {
+		*n = tolerantInt(f)
+	}
+	return nil
+}
+
+// tolerantFloat carries total_cost_usd. A quoted amount is still the amount,
+// and this is the only field the run's cost is recorded from.
+type tolerantFloat float64
+
+func (n *tolerantFloat) UnmarshalJSON(b []byte) error {
+	*n = 0
+	if f, ok := tolerantNumber(b); ok {
+		*n = tolerantFloat(f)
+	}
+	return nil
+}
+
+// tolerantBool carries is_error — the one field on the result envelope that
+// decides whether a run is recorded as a failure at all.
+type tolerantBool bool
+
+func (v *tolerantBool) UnmarshalJSON(b []byte) error {
+	*v = false
+	t := strings.TrimSpace(string(b))
+	if t == "true" {
+		*v = true
+		return nil
+	}
+	if t != "" && t[0] == '"' {
+		// ParseBool so "true"/"True"/"1" all land where they obviously mean to.
+		var str string
+		if json.Unmarshal(b, &str) == nil {
+			if parsed, err := strconv.ParseBool(strings.TrimSpace(str)); err == nil {
+				*v = tolerantBool(parsed)
+			}
+		}
+		return nil
+	}
+	// A number reads the way C reads one: nonzero is the failure. Everything
+	// else — null, an object, a word we do not recognise — stays false, and
+	// that direction is deliberate: an ABSENT is_error is the normal success
+	// case, so defaulting the unknown to true would fail every healthy run.
+	if f, ok := tolerantNumber(b); ok {
+		*v = f != 0
+	}
+	return nil
+}
+
+type tolerantStrings []string
+
+func (s *tolerantStrings) UnmarshalJSON(b []byte) error {
+	*s = nil
+	var raw []json.RawMessage
+	if json.Unmarshal(b, &raw) != nil {
+		// Not an array at all — the field is gone, the line survives.
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, el := range raw {
+		var str string
+		// An entry that grew into an object is skipped rather than guessed at:
+		// this is a pass-through list, and inventing a key to read would be a
+		// second guess about a shape we already got wrong once.
+		if json.Unmarshal(el, &str) == nil {
+			out = append(out, str)
+		}
+	}
+	if len(out) > 0 {
+		*s = out
+	}
+	return nil
 }
 
 // nestedMessage extracts content blocks from the "message" field if present.

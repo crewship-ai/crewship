@@ -3958,6 +3958,17 @@
         },
         "type": "object"
       },
+      "DeniedTool": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "tool_name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DryRunStep": {
         "properties": {
           "agent_slug": {
@@ -7321,6 +7332,20 @@
         },
         "type": "object"
       },
+      "MCPServerError": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "MemoryHybridSearchRequest": {
         "properties": {
           "crew_id": {
@@ -9874,7 +9899,15 @@
             "nullable": true,
             "type": "string"
           },
+          "api_key_source": {
+            "nullable": true,
+            "type": "string"
+          },
           "chat_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "cli_version": {
             "nullable": true,
             "type": "string"
           },
@@ -9900,11 +9933,40 @@
           "id": {
             "type": "string"
           },
+          "mcp_server_error_count": {
+            "type": "integer"
+          },
+          "mcp_server_errors": {
+            "items": {
+              "$ref": "#/components/schemas/MCPServerError"
+            },
+            "type": "array"
+          },
+          "mcp_server_errors_truncated": {
+            "type": "boolean"
+          },
           "metadata": {
             "additionalProperties": true,
             "type": "object"
           },
           "model": {
+            "nullable": true,
+            "type": "string"
+          },
+          "permission_denials": {
+            "items": {
+              "$ref": "#/components/schemas/DeniedTool"
+            },
+            "type": "array"
+          },
+          "permission_denials_truncated": {
+            "type": "boolean"
+          },
+          "permission_mode": {
+            "nullable": true,
+            "type": "string"
+          },
+          "session_id": {
             "nullable": true,
             "type": "string"
           },

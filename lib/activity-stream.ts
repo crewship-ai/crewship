@@ -58,6 +58,10 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "exec.output_chunk",
       "run.agent_span",
       "agent.error",
+      // Provenance of the CLI session the run happened inside. It belongs
+      // beside the run it describes, not under System: "this run started
+      // without crewship-memory" is a fact about that run.
+      "run.session_init",
     ],
   },
   {

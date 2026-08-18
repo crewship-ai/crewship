@@ -245,6 +245,10 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "memory.skill_rejected": XCircle,
 
   // ── Agent ─────────────────────────────────────────────────────────
+  // The session-init row is read for one thing above all — which MCP servers
+  // plugged in, and which were skipped — so it takes the plug glyph rather
+  // than a generic run icon. Severity, not the icon, says whether any were.
+  "run.session_init": PlugZap,
   "run.agent_span": Activity,
   "agent.error": AlertTriangle,
 }

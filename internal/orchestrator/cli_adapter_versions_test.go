@@ -28,12 +28,21 @@ func TestAdapterArgvMatchesUpstreamRef(t *testing.T) {
 		{
 			adapter: "CLAUDE_CODE",
 			docURL:  "https://code.claude.com/docs/en/cli-reference",
-			// --bare: clean container isolation (Anthropic-recommended for SDK).
+			// --setting-sources "": the isolation flag. Blocks a cloned repo's
+			// .claude/settings.json hooks and its CLAUDE.md (both verified
+			// against 2.1.226), which is what --bare used to cover for us.
 			// --strict-mcp-config: only load MCP from --mcp-config, no inheritance.
+			// --tools: without it the model gets the whole harness catalogue —
+			// Task, Workflow, Cron*, TaskCreate, … — none of which Crewship backs.
 			// --no-session-persistence: clean container reuse, no leftover state.
 			// --max-turns: runaway loop killer at the Claude side.
-			mustHave:         []string{"--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--system-prompt", "--bare", "--strict-mcp-config", "--no-session-persistence", "--max-turns"},
-			pinnedNpmVersion: "@anthropic-ai/claude-code@2.1.126",
+			mustHave: []string{"--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--system-prompt", "--setting-sources", "--strict-mcp-config", "--tools", "--no-session-persistence", "--max-turns"},
+			// --bare also REPLACES the built-in tool catalogue with
+			// {Bash, Edit, Read}; --tools can only subtract from that set. Both
+			// flags together mean the allowlist above silently means nothing —
+			// see adapter_claude.go and #1932 for the measurements.
+			mustNotHave:      []string{"--bare"},
+			pinnedNpmVersion: "@anthropic-ai/claude-code@2.1.226",
 		},
 		{
 			adapter: "CODEX_CLI",
