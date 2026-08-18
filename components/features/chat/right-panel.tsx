@@ -29,7 +29,7 @@ import {
   getChatFileIcon,
   getEditorLanguage,
 } from "./chat-tree-row"
-import { useFileEditor } from "./hooks/use-file-editor"
+import { useFileEditor, type EditorScope } from "./hooks/use-file-editor"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { ScopeSection } from "./files/scope-section"
 import { CrewFilesScope } from "./files/crew-files-scope"
@@ -42,8 +42,12 @@ import type { DrawerTab } from "@/stores/drawer-store"
 
 interface ChatFileTreeState {
   expandedPaths: string[]
+  /** Agent-scoped only — see the persistence effect for why. */
   lastOpenedPath: string | null
 }
+
+/** This panel's agent tree. The crew scope carries its own crew id instead. */
+const AGENT_SCOPE: EditorScope = { kind: "agent" }
 
 const FileEditor = dynamic(
   () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
@@ -135,17 +139,22 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     }
     if (saved.lastOpenedPath) {
       const name = saved.lastOpenedPath.split("/").pop() ?? ""
-      openFileEditor({ path: saved.lastOpenedPath, name })
+      openFileEditor({ path: saved.lastOpenedPath, name }, AGENT_SCOPE)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId, files, workspaceId])
 
   // Persist current state. Debounced inside the useUserPreference hook.
+  //
+  // Only an agent-scoped file is remembered: the replay above reopens through
+  // the agent routes, and a crew path replayed there is a read of the wrong
+  // tree (403 at best). Rather than teach the stored shape a second scope for
+  // a convenience, a crew file simply is not the thing this panel reopens.
   useEffect(() => {
     if (replayedForAgentRef.current !== agentId) return
     setSavedTreeState({
       expandedPaths: Array.from(expanded),
-      lastOpenedPath: editorFile?.path ?? null,
+      lastOpenedPath: editorFile?.scope.kind === "agent" ? editorFile.path : null,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded, editorFile?.path, agentId])
@@ -175,6 +184,17 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
         .finally(() => setLoadingDirs((p) => { const n = new Set(p); n.delete(path); return n }))
     }
   }, [tree, expanded, workspaceId, basePrefix, agentId, loadingDirs])
+
+  // Two scopes, two trees, and the tree is named at the click — the editor
+  // reads and later writes whichever one it is handed here.
+  const openAgentFile = useCallback(
+    (node: TreeNode) => openFileEditor(node, AGENT_SCOPE),
+    [openFileEditor],
+  )
+  const openCrewFile = useCallback(
+    (node: TreeNode, crewId: string) => openFileEditor(node, { kind: "crew", crewId }),
+    [openFileEditor],
+  )
 
   const toggleFolder = useCallback((path: string) => {
     setExpanded((prev) => {
@@ -232,9 +252,9 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                       depth={0}
                       expanded={expanded}
                       loadingDirs={loadingDirs}
-                      selectedFile={editorFile?.path ?? null}
+                      selectedFile={editorFile?.scope.kind === "agent" ? editorFile.path : null}
                       onToggle={toggleFolder}
-                      onFileClick={openFileEditor}
+                      onFileClick={openAgentFile}
                     />
                   ))}
                 </div>
@@ -249,13 +269,17 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                 so "loaded on demand" is the mechanism rather than a caption.
                 CrewFilesScope owns its own loading / failed / no-crew / empty
                 states — see the note at the top of that file for why a failed
-                fetch must never render as an empty crew. */}
+                fetch must never render as an empty crew.
+                A file clicked here is opened against /crews/{crewId}/files/*:
+                its keys are `<crewId>/…`, which the agent routes reject as
+                "path not scoped to this agent" — and would, on a save, have
+                written into the agent's own tree. */}
             <ScopeSection icon={Users} title="Crew" defaultOpen={false}>
               <CrewFilesScope
                 agentId={agentId}
                 workspaceId={workspaceId}
-                selectedFile={editorFile?.path ?? null}
-                onFileClick={openFileEditor}
+                selectedFile={editorFile?.scope.kind === "crew" ? editorFile.path : null}
+                onFileClick={openCrewFile}
               />
             </ScopeSection>
             <ScopeSection

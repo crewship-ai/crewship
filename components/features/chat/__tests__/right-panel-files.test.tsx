@@ -31,6 +31,31 @@ vi.mock("@/hooks/use-user-preference", () => ({
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }))
 
+const toastError = vi.fn()
+const toastSuccess = vi.fn()
+vi.mock("sonner", () => ({
+  toast: {
+    error: (...a: unknown[]) => toastError(...a),
+    success: (...a: unknown[]) => toastSuccess(...a),
+  },
+}))
+
+// The editor is code-split behind next/dynamic; the stub stands in for
+// CodeMirror and exposes the bytes it was handed plus a way to save them.
+vi.mock("next/dynamic", () => ({
+  default: () =>
+    function StubFileEditor({ code, onSave }: { code: string; onSave: (next: string) => void }) {
+      return (
+        <div>
+          <pre data-testid="editor-code">{code}</pre>
+          <button type="button" onClick={() => onSave(`${code} EDITED`)}>
+            stub-save
+          </button>
+        </div>
+      )
+    },
+}))
+
 import { RightPanel } from "../right-panel"
 
 // ---------------------------------------------------------------- helpers
@@ -65,6 +90,8 @@ async function openCrewScope() {
 beforeEach(() => {
   workspaceId = "ws-1"
   apiFetch.mockReset()
+  toastError.mockReset()
+  toastSuccess.mockReset()
 })
 afterEach(() => cleanup())
 
@@ -149,6 +176,141 @@ describe("RightPanel — the Files tab is honest about the crew scope", () => {
     await waitFor(() =>
       expect(apiFetch.mock.calls.some((c) => url(c).includes("/api/v1/crews/"))).toBe(false),
     )
+  })
+})
+
+// =============================================================================
+// A file is read from a tree, and it must be written back to THAT tree.
+//
+// The crew scope lists `/crews/{crewId}/files`, whose keys are shaped
+// `<crewId>/<name>`, and used to hand the click to the AGENT editor. The read
+// was a guaranteed 403 (proxy_files.go rejects a `<crewId>/` path that is not
+// under `<crewId>/<slug>/`), and the save — had a path ever slipped past that
+// prefix test — would have PUT a crew file into the agent's own tree. The read
+// failing loudly is the mild half; the write landing in the wrong tree is not.
+// =============================================================================
+
+/** A download/save response: the editor reads bytes with .text(). */
+function okBytes(body: string) {
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    text: () => Promise.resolve(body),
+    json: () => Promise.resolve({}),
+  })
+}
+
+const agentFile = {
+  path: "crew-1/casey/main.py",
+  name: "main.py",
+  size: 20,
+  is_dir: false,
+  mod_time: "2026-08-01T10:00:00Z",
+}
+
+/** Every URL requested, in order. */
+function requested(): string[] {
+  return apiFetch.mock.calls.map((c) => url(c))
+}
+
+describe("RightPanel — a crew file is read and written in the crew's tree", () => {
+  beforeEach(() => {
+    apiFetch.mockImplementation((...args: unknown[]) => {
+      const u = url(args)
+      if (u.includes("/api/v1/agents/agent-1?")) return ok({ id: "agent-1", crew_id: "crew-1" })
+      if (u.includes("/files/download")) return okBytes("shared bytes")
+      if (u.includes("/files/save")) return okBytes("{}")
+      if (u.includes("/api/v1/crews/crew-1/files")) return ok([file("handbook.md", "crew-1")])
+      return ok([])
+    })
+  })
+
+  it("opens a shared crew file through the crew route and shows its bytes", async () => {
+    panel()
+    await openCrewScope()
+
+    fireEvent.click(await screen.findByRole("button", { name: /handbook\.md/i }))
+
+    const download = await waitFor(() => {
+      const d = requested().find((u) => u.includes("/files/download"))
+      expect(d).toBeDefined()
+      return d!
+    })
+    expect(download).toContain("/api/v1/crews/crew-1/files/download")
+    expect(download).toContain("path=crew-1%2Fhandbook.md")
+    // The agent editor is the wrong reader for this tree: it 403s on any
+    // `<crewId>/` path that is not under `<crewId>/<slug>/`.
+    expect(download).not.toContain("/api/v1/agents/")
+
+    expect(await screen.findByTestId("editor-code")).toHaveTextContent("shared bytes")
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("saves it back to the crew tree — never into the agent's own", async () => {
+    panel()
+    await openCrewScope()
+    fireEvent.click(await screen.findByRole("button", { name: /handbook\.md/i }))
+    await screen.findByTestId("editor-code")
+
+    fireEvent.click(screen.getByRole("button", { name: /stub-save/i }))
+
+    const save = await waitFor(() => {
+      const s = requested().find((u) => u.includes("/files/save"))
+      expect(s).toBeDefined()
+      return s!
+    })
+    expect(save).toContain("/api/v1/crews/crew-1/files/save")
+    expect(save).toContain("path=crew-1%2Fhandbook.md")
+    expect(save).not.toContain("/api/v1/agents/")
+    // Read and write are the same tree, which is the whole assertion.
+    expect(requested().every((u) => !/\/agents\/[^/]+\/files\/(save|download)/.test(u))).toBe(true)
+  })
+
+  it("still reads and writes an agent file through the agent routes", async () => {
+    panel({ files: [agentFile] })
+
+    fireEvent.click(await screen.findByRole("button", { name: /main\.py/i }))
+    const download = await waitFor(() => {
+      const d = requested().find((u) => u.includes("/files/download"))
+      expect(d).toBeDefined()
+      return d!
+    })
+    expect(download).toContain("/api/v1/agents/agent-1/files/download")
+    expect(download).toContain("path=crew-1%2Fcasey%2Fmain.py")
+
+    await screen.findByTestId("editor-code")
+    fireEvent.click(screen.getByRole("button", { name: /stub-save/i }))
+    const save = await waitFor(() => {
+      const s = requested().find((u) => u.includes("/files/save"))
+      expect(s).toBeDefined()
+      return s!
+    })
+    expect(save).toContain("/api/v1/agents/agent-1/files/save")
+    expect(save).not.toContain("/api/v1/crews/")
+  })
+
+  it("keeps the tree straight when a crew file is opened after an agent one", async () => {
+    panel({ files: [agentFile] })
+
+    fireEvent.click(await screen.findByRole("button", { name: /main\.py/i }))
+    await screen.findByTestId("editor-code")
+
+    await openCrewScope()
+    fireEvent.click(await screen.findByRole("button", { name: /handbook\.md/i }))
+    await waitFor(() =>
+      expect(
+        requested().some((u) => u.includes("/api/v1/crews/crew-1/files/download")),
+      ).toBe(true),
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /stub-save/i }))
+
+    const saves = await waitFor(() => {
+      const s = requested().filter((u) => u.includes("/files/save"))
+      expect(s.length).toBe(1)
+      return s
+    })
+    expect(saves[0]).toContain("/api/v1/crews/crew-1/files/save")
   })
 })
 
