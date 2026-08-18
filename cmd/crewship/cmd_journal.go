@@ -77,6 +77,24 @@ Examples:
 		if err := validateCSV("priority", priorityFilter, validPriorities); err != nil {
 			return err
 		}
+		// --type / --exclude-type are deliberately NOT validated against an
+		// allowlist: there are 116 entry types and new ones ship with the
+		// features that emit them, so an allowlist here would reject a valid
+		// filter every time the server got ahead of the CLI.
+		//
+		// A wildcard is the one thing worth refusing. entry_type compiles to
+		// `entry_type IN (...)` (internal/journal/queries.go) — there is no
+		// LIKE, prefix or glob path — so `--type approval.*` matches nothing
+		// and exits 0. The operator asking "who disarmed this gate" then reads
+		// an empty page as "nobody ever did", which is the worst possible
+		// wrong answer from an audit surface. `-q` is no escape either;
+		// fts5Phrase strips `*` before it reaches FTS5.
+		if err := rejectTypeWildcard("type", typeFilter); err != nil {
+			return err
+		}
+		if err := rejectTypeWildcard("exclude-type", excludeType); err != nil {
+			return err
+		}
 		if lines < 1 || lines > 500 {
 			return fmt.Errorf("--lines must be between 1 and 500 (got %d)", lines)
 		}

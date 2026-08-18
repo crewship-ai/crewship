@@ -19,7 +19,7 @@ func TestBuildOpenURL(t *testing.T) {
 		{"activity", "http://localhost:8080", []string{"activity"}, "http://localhost:8080/activity", false},
 		{"agents list", "http://localhost:8080", []string{"agents"}, "http://localhost:8080/agents", false},
 		{"agent detail", "http://localhost:8080", []string{"agent", "viktor"}, "http://localhost:8080/crews?agent=viktor", false},
-		{"crew detail", "http://localhost:8080", []string{"crew", "backend-team"}, "http://localhost:8080/crews/backend-team", false},
+		{"crew detail", "http://localhost:8080", []string{"crew", "backend-team"}, "http://localhost:8080/crews?crew=backend-team", false},
 		{"chat by agent slug", "http://localhost:8080", []string{"chat", "viktor"}, "http://localhost:8080/chat/viktor", false},
 		{"mission timeline", "http://localhost:8080", []string{"mission", "MIS-42"}, "http://localhost:8080/missions/MIS-42/timeline", false},
 		{"journal", "http://localhost:8080", []string{"journal"}, "http://localhost:8080/journal", false},
@@ -37,7 +37,9 @@ func TestBuildOpenURL(t *testing.T) {
 		{"chat missing id", "http://localhost:8080", []string{"chat"}, "", true},
 		{"unknown resource", "http://localhost:8080", []string{"bogus"}, "", true},
 		{"trailing slash trimmed", "http://localhost:8080/", []string{"agents"}, "http://localhost:8080/agents", false},
-		{"escapes special chars", "http://localhost:8080", []string{"crew", "weird:slug"}, "http://localhost:8080/crews/weird:slug", false},
+		// Path-segment escaping still has a subject: `mission` is now one of
+		// the resources that interpolates into a path rather than a query.
+		{"escapes special chars", "http://localhost:8080", []string{"mission", "weird:slug"}, "http://localhost:8080/missions/weird:slug/timeline", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -115,6 +117,101 @@ func TestBuildOpenURL_AgentTargetsTheCrewsCanvas(t *testing.T) {
 			// Whatever it builds, it must never be the dead /agents/<x> shape.
 			if strings.HasPrefix(got, "http://localhost:8080/agents/") {
 				t.Errorf("got %q — /agents/<x> has no route and falls through to the SPA root", got)
+			}
+		})
+	}
+}
+
+// `crewship open crew <slug>` had the identical defect to `open agent`, one
+// line below the fix for it: it built `<server>/crews/<id>`, and there is no
+// such page. app/(dashboard)/crews/ holds page.tsx and nothing else — no
+// `[id]` segment — so the export has crews.html and nothing under crews/,
+// and StaticFileHandler's SPA fallback served the DASHBOARD under a URL that
+// said crews. Same class, same repair: the /crews canvas selects a crew from
+// `?crew=<slug>` (hooks/use-crews-selection.tsx, whose selectCrew writes that
+// param and clears ?agent).
+//
+// The three properties pinned for `agent` hold here for the same reasons:
+//
+//   - the list resource, `open crews`, still points at bare /crews — a real
+//     page, and the canvas with nothing selected is exactly what it means;
+//   - the argument is query-escaped, not path-escaped, because `&` and `=`
+//     are legal in a path segment and PathEscape would leave either one to
+//     split the query string;
+//   - an id is not rejected by shape. cmd_helpers.go's looksLikeCUID carries
+//     the #1075 scar: a real slug can be 21+ lowercase-alphanumeric
+//     characters starting with 'c', so a shape test refuses legitimate crews
+//     to catch a case whose only penalty is the canvas opening unselected.
+//     `open` resolves URLs offline and without auth, so it cannot translate
+//     an id either; the contract narrows in the help text and docs instead.
+func TestBuildOpenURL_CrewTargetsTheCrewsCanvas(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"slug selects on the canvas", []string{"crew", "backend-team"}, "http://localhost:8080/crews?crew=backend-team"},
+		{
+			"query-escaped, not path-escaped",
+			[]string{"crew", "a&b=c"},
+			"http://localhost:8080/crews?crew=a%26b%3Dc",
+		},
+		{
+			// The #1075 case a shape test would have refused.
+			"a slug that looks like an id is still a slug",
+			[]string{"crew", "customersuccessemea42"},
+			"http://localhost:8080/crews?crew=customersuccessemea42",
+		},
+		// The list is a separate resource and keeps the bare route.
+		{"crew list unchanged", []string{"crews"}, "http://localhost:8080/crews"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := buildOpenURL("http://localhost:8080", c.args)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+			// Whatever it builds, it must never be the dead /crews/<x> shape.
+			if strings.HasPrefix(got, "http://localhost:8080/crews/") {
+				t.Errorf("got %q — /crews/<x> has no route and falls through to the SPA root", got)
+			}
+		})
+	}
+}
+
+// Neither dead shape may come back through any resource in the map. This is
+// the guard that would have caught `crew` when `agent` was repaired: it walks
+// every resource the command accepts rather than the two anybody thought to
+// re-check.
+func TestBuildOpenURL_NoResourceBuildsADeadDetailRoute(t *testing.T) {
+	// Every resource in buildOpenURL's switch, with an argument where one is
+	// required. Keep in step with the switch — a new resource belongs here.
+	resources := [][]string{
+		{"dashboard"}, {"home"}, {"inbox"}, {"activity"},
+		{"agents"}, {"agent", "viktor"},
+		{"crews"}, {"crew", "backend-team"},
+		{"chat", "viktor"}, {"mission", "MIS-42"},
+		{"journal"}, {"approvals"}, {"integrations"}, {"routines"},
+		{"issues"}, {"issues", "ENG-7"},
+		{"runs"}, {"settings"}, {"admin"}, {"audit"}, {"credentials"},
+	}
+	// The export has agents.html and crews.html and no directory under
+	// either, so anything below those prefixes hits the SPA fallback.
+	dead := []string{"http://x/agents/", "http://x/crews/"}
+	for _, args := range resources {
+		t.Run(strings.Join(args, "-"), func(t *testing.T) {
+			got, err := buildOpenURL("http://x", args)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			for _, prefix := range dead {
+				if strings.HasPrefix(got, prefix) {
+					t.Errorf("open %v built %q — %s<x> has no route and falls through to the SPA root",
+						args, got, strings.TrimPrefix(prefix, "http://x"))
+				}
 			}
 		})
 	}

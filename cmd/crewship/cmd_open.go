@@ -30,7 +30,7 @@ Resources:
   agents                    Agent list
   agent     <agent-slug>    Agent selected on the crews canvas
   crews                     Crew list
-  crew      <slug-or-id>    Crew detail page
+  crew      <crew-slug>     Crew selected on the crews canvas
   chat      <agent-slug>    Chat with a specific agent
   mission   <mission-id>    Mission timeline
   journal                   Live journal page
@@ -139,7 +139,28 @@ func buildOpenURL(base string, args []string) (string, error) {
 		if err := requireExact(1); err != nil {
 			return "", err
 		}
-		path = "/crews/" + esc(rest[0])
+		// Identical defect to `agent` above, one case earlier in this switch,
+		// and it survived that repair because nobody re-checked the neighbour.
+		// There is no crew detail PAGE either: app/(dashboard)/crews/ holds
+		// page.tsx and nothing else — no `[id]` segment — so the export has
+		// crews.html and nothing under crews/, and `/crews/<id>` fell through
+		// StaticFileHandler's SPA fallback to render the dashboard under a URL
+		// that said crews.
+		//
+		// The canvas selects a crew from `?crew=<slug>`
+		// (hooks/use-crews-selection.tsx; selectCrew writes that param and
+		// clears ?agent, because focus is on the crew).
+		//
+		// A SLUG, not an id, for the reason spelled out under `agent`: the
+		// canvas matches on slug, and `open` resolves URLs offline and without
+		// auth so it cannot translate an id. Not rejected by shape either —
+		// looksLikeCUID's #1075 scar applies unchanged, and the worst case is
+		// the canvas opening with nothing selected, which is a real page.
+		//
+		// QueryEscape for the same reason as `agent`: this is a query value,
+		// and PathEscape leaves `&` and `=` alone because both are legal in a
+		// path segment, so either would split the query string.
+		path = "/crews?crew=" + url.QueryEscape(rest[0])
 	case "chat":
 		if err := requireExact(1); err != nil {
 			return "", err

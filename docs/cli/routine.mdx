@@ -1522,7 +1522,19 @@ Both are attributed to the deciding user (`actor_type: user`). `definition_hash`
 crewship journal --type approval.trust_granted,approval.trust_revoked
 ```
 
-Filtering on `approval.*` shows one-off decisions and standing ones together; they are the same control at two levels, which is why they share a namespace. A revoke that changed no row emits nothing — an entry for a withdrawal that did not happen would make the journal disagree with the table.
+One-off decisions and standing ones share the `approval.` namespace because they are the same control at two levels, so listing both families together answers "who let this through, by any route":
+
+```bash
+crewship journal --type approval.requested,approval.granted,approval.denied,approval.timeout,approval.cancelled,approval.trust_granted,approval.trust_revoked
+```
+
+<Warning>
+Name every type. `--type` is matched **exactly** — there is no prefix or glob syntax — so `--type approval.*` is not a shorthand for the line above. The CLI rejects a wildcard rather than forwarding it, because a filter that matches nothing exits 0 with an empty page, and an empty page on this question reads as "nobody ever disarmed a gate".
+</Warning>
+
+A revoke that changed no row emits nothing — an entry for a withdrawal that did not happen would make the journal disagree with the table.
+
+Neither entry sets `crew_id`, `agent_id`, `mission_id` or `trace_id`, so `crewship journal --crew`/`--agent`/`--mission`/`--trace-id` cannot narrow to them. `--since` and `--actor-type user` can. The refs (`trust_grant_id` and friends) are **not** searchable: `-q` searches `summary` and `payload` only, and refs are in neither — but the routine slug and step id are repeated into the summary, so `-q <slug>` does find a gate's decisions. `crewship journal get <entry-id>` is what prints refs and payload; the list view shows neither.
 
 ---
 

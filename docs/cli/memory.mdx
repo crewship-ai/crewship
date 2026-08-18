@@ -140,6 +140,31 @@ crewship memory versions restore "crew:<crew_id>/learned-x.md" <sha> <canonical-
 
 `restore` requires OWNER/ADMIN, prompts for confirmation (`--yes` skips), and the server confines `<canonical-path>` to its configured memory root.
 
+`list` columns: `SHA256`, `WRITTEN`, `BYTES`, `WRITTEN BY`. `--limit` defaults to 20 and the server clamps it to 1–1000.
+
+#### Projection state — "nothing here" vs "we could not look"
+
+`list` leads with a **projection state** whenever it changes how the list should be read. An empty version history has two completely different meanings and they used to print the same empty table:
+
+| State | Meaning | How to read an empty list |
+|---|---|---|
+| `recorded` | A writer records this path into the audit chain. | Nothing has been written to it yet. This is a fact. |
+| `unrecorded` | No writer records this path. | Says nothing about what is on disk — the file may have changed a hundred times. |
+| `unavailable` | The server has no blob root configured, so no write of any tier is recorded. | Same as `unrecorded`, different cause. |
+
+Recorded paths are `agent:<slug>/…` or `crew:<crew_id>/…` ending in `AGENT.md`, `CREW.md`, `pins.md`, `learned-*.md`, or `daily/*.md`. Everything else — `lessons.md`, `PERSONA.md`, `peers/*` — is `unrecorded` and has its own history surface; the `reason` text names it.
+
+The state and its `reason` are printed above the table in human output and carried verbatim in `--format json`:
+
+```bash
+crewship memory versions list "agent:martin/lessons.md" --format json | jq .projection
+# { "state": "unrecorded", "reason": "Lessons are written by consolidate.WriteLesson, ..." }
+```
+
+<Note>
+A server predating this field answers without it. The CLI reads that as `recorded` — the state every path had when the only writers were recording ones — so an older server is never reported as having versioning switched off.
+</Note>
+
 ### log
 
 List the `memory_versions` audit chain for a path, newest-first. **Reads the local DB directly** (`openAdminDB` — same DB the server uses) rather than going through the API; that means it works without a running server but the binary must run on the same host as the data dir.
