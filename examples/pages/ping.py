@@ -99,7 +99,17 @@ def push(panel: str, payload: dict) -> None:
         # a 4xx here means the payload broke the panel's contract and the
         # message names which field and why.
         print(f"  {panel}: {e.code} {e.read()[:200].decode(errors='replace')}", file=sys.stderr, flush=True)
-    except urllib.error.URLError as e:
+    except OSError as e:
+        # OSError, not URLError. This ran for five days and then died here:
+        # the server took longer than the timeout to answer a push, urllib
+        # raised a bare TimeoutError, and TimeoutError is not a URLError — so
+        # the one exception a long-running producer is guaranteed to meet was
+        # the one this handler did not catch.
+        #
+        # OSError is the parent of both URLError and TimeoutError, so this is
+        # the same width `measure()` above already uses. Nothing about a
+        # transient network failure should end a process whose whole job is to
+        # still be running tomorrow.
         print(f"  {panel}: {e}", file=sys.stderr, flush=True)
 
 
@@ -114,57 +124,80 @@ def main() -> int:
     history: dict[str, list[float | None]] = {name: [] for name, _ in TARGETS}
 
     while True:
-        print(time.strftime("%H:%M:%S") + " push → sit", flush=True)
-        rows = []
-        for name, url in TARGETS:
-            ms = measure(url)
-            hist = history[name]
-            hist.append(ms)
-            del hist[:-HISTORY]
-            rows.append(
-                {
-                    "cil": name,
-                    # A null cell is "we could not measure", rendered as an em
-                    # dash. An empty string would be measured emptiness, which
-                    # is a different and wrong claim.
-                    "odezva": ms,
-                    "stav": "ok" if ms is not None else "nedostupné",
-                }
-            )
-
-        push(
-            "http",
-            {
-                "unit": "ms",
-                # Twenty-four points, four names. A tick this producer does not
-                # want named is null — NOT "", which the schema still refuses,
-                # because an empty string is what a broken f-string produces
-                # and a blank you meant has to be distinguishable from a blank
-                # you shipped. (Same distinction as null vs 0 in `values`.)
-                "labels": [axis_label(HISTORY - i - 1) for i in range(HISTORY)],
-                "series": [
-                    {"name": name, "values": ([None] * (HISTORY - len(history[name]))) + history[name]}
-                    for name, _ in TARGETS
-                ],
-            },
-        )
-
-        push(
-            "cile",
-            {
-                "columns": [
-                    {"key": "cil", "label": "Cíl"},
-                    {"key": "odezva", "label": "Odezva ms", "align": "right"},
-                    {"key": "stav", "label": "Stav"},
-                ],
-                "rows": rows,
-            },
-        )
+        try:
+            one_pass(history)
+        except Exception as e:  # noqa: BLE001 — see below
+            # A producer's job is to still be running tomorrow, so the loop
+            # outlives anything one pass can raise. This is deliberately
+            # broader than the handlers inside push() and measure(): those
+            # name the failures we predicted, and this one exists for the
+            # failures we did not.
+            #
+            # Nothing is swallowed — the panel is what reports the outage. A
+            # producer that stops pushing goes stale on its own SLA and the
+            # page says so, which is exactly what happened here and is the
+            # freshness contract working, not failing.
+            print(f"pass failed: {e!r}", file=sys.stderr, flush=True)
 
         # Five seconds is clear of the server's floor: §10b.3 allows 12 pushes
         # a minute per panel with a burst of 30, and the write itself refuses
         # anything inside two seconds. A tighter loop buys 429s, not data.
         time.sleep(5)
+
+
+def one_pass(history: dict[str, list[float | None]]) -> None:
+    """Measure every target once and write both panels."""
+    print(time.strftime("%H:%M:%S") + " push → sit", flush=True)
+    rows = []
+    for name, url in TARGETS:
+        ms = measure(url)
+        hist = history[name]
+        hist.append(ms)
+        del hist[:-HISTORY]
+        rows.append(
+            {
+                "cil": name,
+                # A null cell is "we could not measure", rendered as an em
+                # dash. An empty string would be measured emptiness, which
+                # is a different and wrong claim.
+                "odezva": ms,
+                "stav": "ok" if ms is not None else "nedostupné",
+            }
+        )
+
+    push(
+        "http",
+        {
+            "unit": "ms",
+            # Twenty-four points, four names. A tick this producer does not
+            # want named is null — NOT "", which the schema still refuses,
+            # because an empty string is what a broken f-string produces
+            # and a blank you meant has to be distinguishable from a blank
+            # you shipped. (Same distinction as null vs 0 in `values`.)
+            "labels": [axis_label(HISTORY - i - 1) for i in range(HISTORY)],
+            "series": [
+                {"name": name, "values": ([None] * (HISTORY - len(history[name]))) + history[name]}
+                for name, _ in TARGETS
+            ],
+        },
+    )
+
+    push(
+        "cile",
+        {
+            "columns": [
+                {"key": "cil", "label": "Cíl"},
+                {"key": "odezva", "label": "Odezva ms", "align": "right"},
+                {"key": "stav", "label": "Stav"},
+            ],
+            "rows": rows,
+        },
+    )
+
+    # Five seconds is clear of the server's floor: §10b.3 allows 12 pushes
+    # a minute per panel with a burst of 30, and the write itself refuses
+    # anything inside two seconds. A tighter loop buys 429s, not data.
+    time.sleep(5)
 
 
 if __name__ == "__main__":
