@@ -277,9 +277,23 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 		g.Live = live == 1
 		if strings.TrimSpace(panelIDs) != "" {
 			var ids []string
-			if err := json.Unmarshal([]byte(panelIDs), &ids); err == nil {
-				g.PanelIDs = ids
+			if err := json.Unmarshal([]byte(panelIDs), &ids); err != nil {
+				// A grant whose panel scope cannot be read is DROPPED, not
+				// widened. nil PanelIDs means "every panel" (pages_authz.go
+				// covers), so silently keeping the row on a decode failure
+				// turned a produce grant on three named panels into one on the
+				// whole page — an ACL that opens when its own storage becomes
+				// unreadable.
+				//
+				// Dropping is the closed end of that: the subject loses a
+				// permission they should have, which shows up as a 403 somebody
+				// reports, rather than gaining one nobody sees.
+				h.logger.Error("pages: grant dropped, panel scope unreadable",
+					"page", onPage, "subject_type", g.SubjectType, "subject", g.SubjectID,
+					"error", err)
+				continue
 			}
+			g.PanelIDs = ids
 		}
 		out[onPage] = append(out[onPage], g)
 	}

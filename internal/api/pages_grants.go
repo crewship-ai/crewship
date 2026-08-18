@@ -334,9 +334,13 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subjectID, subjectRef, ok := h.resolveGrantSubjectQuietly(r.Context(), wsID, subjectType, subject)
-	if !ok {
+	subjectID, subjectRef, resolveErr := h.resolveGrantSubjectQuietly(r.Context(), wsID, subjectType, subject)
+	switch {
+	case errors.Is(resolveErr, sql.ErrNoRows):
 		subjectID, subjectRef = "", subject
+	case resolveErr != nil:
+		replyInternalError(w, h.logger, "resolve grant subject for revoke", resolveErr)
+		return
 	}
 
 	// The journal entry names the level that was actually removed, and "removed
@@ -618,15 +622,17 @@ func (h *PageHandler) journalGrantChange(ctx context.Context, entryType journal.
 // answers "who is this, if anyone" and lets the caller decide what an
 // unresolvable subject means. Issuing a grant needs the refusal;
 // revoking one needs the fallback.
-func (h *PageHandler) resolveGrantSubjectQuietly(ctx context.Context, wsID, subjectType, ref string) (string, string, bool) {
-	var id, label string
-	var err error
+func (h *PageHandler) resolveGrantSubjectQuietly(ctx context.Context, wsID, subjectType, ref string) (id, label string, err error) {
 	switch subjectType {
 	case pageSubjectUser:
+		// lower(...) on both sides, matching the ISSUING path exactly. users.email
+		// carries no COLLATE NOCASE, so a grant issued as `Alice@Example.com`
+		// could not be revoked with that same string — the asymmetry between
+		// issue and revoke being the very failure this function exists to end.
 		err = h.db.QueryRowContext(ctx, `
 			SELECT u.id, u.email FROM users u
 			JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = ?
-			WHERE u.id = ? OR u.email = ?`, wsID, ref, ref).Scan(&id, &label)
+			WHERE u.id = ? OR lower(u.email) = lower(?)`, wsID, ref, ref).Scan(&id, &label)
 	case pageSubjectCrew:
 		err = h.db.QueryRowContext(ctx, `
 			SELECT id, slug FROM crews
@@ -636,12 +642,14 @@ func (h *PageHandler) resolveGrantSubjectQuietly(ctx context.Context, wsID, subj
 			SELECT id, slug FROM agents
 			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label)
 	default:
-		return "", "", false
+		return "", "", sql.ErrNoRows
 	}
-	if err != nil {
-		return "", "", false
-	}
-	return id, label, true
+	// sql.ErrNoRows means genuinely unresolvable — a departed user, a deleted
+	// crew — and the caller falls back to matching the stored subject verbatim.
+	// Any OTHER error is a failure to look, not an answer: collapsing the two
+	// turns a transient database fault into a confident 404 telling an owner
+	// they hold no grant for somebody they can see in the list.
+	return id, label, err
 }
 
 // grantRowMatchesSubject decides whether a stored grant is the one the caller

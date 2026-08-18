@@ -226,9 +226,14 @@ export function useApiMutation<TVariables = void, TData = unknown>(
   // instance) to slip a second request out before the first re-render
   // lands. This ref is set/cleared synchronously around the actual call.
   const inFlightRef = useRef<Promise<ApiMutationOutcome<TData>> | null>(null)
-  // The click the in-flight promise belongs to, so the guard below can tell
-  // "the same submit twice" from "a different submit while one is pending".
-  const inFlightClickRef = useRef<Click<TVariables> | null>(null)
+  // EVERY in-flight click, not just the most recent one.
+  //
+  // A single ref was the first fix and it had two holes of its own: with
+  // A(x) → B(y) → A(x) the ref held B by the time the third call arrived, so x
+  // went twice; and if B settled first it cleared the shared promise ref while
+  // A was still in flight, after which nothing was guarded at all. A list keyed
+  // by the click's own variables has neither.
+  const inFlightClicksRef = useRef<Array<{ click: Click<TVariables>; p: Promise<ApiMutationOutcome<TData>> }>>([])
 
   const mutation = useMutation<ApiMutationOutcome<TData>, unknown, Click<TVariables>>({
     // This hook owns retrying explicitly via retry()/retryAsync(), which
@@ -301,7 +306,6 @@ export function useApiMutation<TVariables = void, TData = unknown>(
 
   const run = useCallback(
     (click: Click<TVariables>): Promise<ApiMutationOutcome<TData>> => {
-      const inFlight = inFlightRef.current
       // Dedupe the SAME click, not merely "a click while one is pending".
       //
       // This guard exists for the double-submit — one button, pressed twice
@@ -316,12 +320,14 @@ export function useApiMutation<TVariables = void, TData = unknown>(
       // behaviour this guard always had. `mutate` mints a fresh idempotency
       // key per call, so issuing on doubt means two real writes, and a
       // duplicated write is worse than a UI that has to be clicked again.
-      if (inFlight && sameVariables(inFlightClickRef.current, click)) return inFlight
-      inFlightClickRef.current = click
+      const twin = inFlightClicksRef.current.find((c) => sameVariables(c.click, click))
+      if (twin) return twin.p
       lastClickRef.current = click
       const p = mutationMutateAsync(click).finally(() => {
+        inFlightClicksRef.current = inFlightClicksRef.current.filter((c) => c.p !== p)
         if (inFlightRef.current === p) inFlightRef.current = null
       })
+      inFlightClicksRef.current = [...inFlightClicksRef.current, { click, p }]
       inFlightRef.current = p
       return p
     },
@@ -386,7 +392,7 @@ export function useApiMutation<TVariables = void, TData = unknown>(
  * historical behaviour was to collapse, and collapsing on doubt costs a click
  * while issuing on doubt costs a duplicate write. */
 function sameVariables<T>(a: Click<T> | null, b: Click<T>): boolean {
-  if (!a) return true
+  if (!a) return false
   if (a.variables === b.variables) return true
   try {
     return JSON.stringify(a.variables) === JSON.stringify(b.variables)

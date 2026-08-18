@@ -581,7 +581,13 @@ function PanelActionBar({
             workspaceId={workspaceId}
             hidden={ctx.hidden}
             onToggle={ctx.toggleHidden}
-            running={activeRun !== null && ack?.actionId === action.id}
+            // liveRun, NOT activeRun. `activeRun` deliberately remembers a
+            // finished run so the progress rail survives it — feeding that to
+            // `running` left the button disabled reading "Running…" forever,
+            // because the receipt is never cleared and so the remembered run
+            // never goes away. The rail is about what HAPPENED; the button is
+            // about what is happening.
+            running={liveRun !== null && ack?.actionId === action.id}
             onAccepted={(next) => setAck({ ...next, actionId: action.id, label: action.label })}
           />
         ))}

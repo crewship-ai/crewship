@@ -67,3 +67,35 @@ spec:
 		}
 	})
 }
+
+// A trailing separator is not a second document.
+//
+// yaml.v3 returns a ZERO Document with a nil error for the nothing after a
+// final `---`, so a naive "did a second Decode succeed" check refused ordinary
+// one-page files — including the ones `crewship export page` writes, since it
+// ends every document it emits with its own separator.
+func TestParseDocument_ATrailingSeparatorIsNotASecondDocument(t *testing.T) {
+	one := `apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Flotila
+  slug: flotila
+spec:
+  panels:
+    - id: sluzby
+      schema: status.v1
+      owner: crew/lookout
+      producer: script/watch.sh
+      sla: 30s
+      span: 12
+`
+	for name, doc := range map[string]string{
+		"trailing separator":             one + "---\n",
+		"leading and trailing separator": "---\n" + one + "---\n",
+		"trailing separator and blanks":  one + "---\n\n  \n",
+	} {
+		if _, err := ParseDocument([]byte(doc)); err != nil {
+			t.Errorf("%s: refused a one-page file: %v", name, err)
+		}
+	}
+}

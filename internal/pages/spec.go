@@ -343,11 +343,20 @@ func ParseDocument(raw []byte) (*Document, error) {
 	// the first, so a single-page export — which is also `---`-prefixed — still
 	// parses. Only a genuine second document reaches this branch.
 	var trailing Document
-	if err := dec.Decode(&trailing); err == nil {
+	err := dec.Decode(&trailing)
+	switch {
+	case err == nil && !trailingIsEmpty(trailing):
+		// A real second document. An EMPTY one is not: yaml.v3 hands back a
+		// zero Document with a nil error for the nothing after a trailing
+		// `---`, and refusing that would reject a perfectly ordinary one-page
+		// file — including one `crewship export page` wrote, since it ends
+		// every document with its own separator.
 		return nil, newError(CodeInvalidSpec, "",
 			"this file carries more than one YAML document and a page spec is one page; "+
 				"split the stream and create each page separately")
-	} else if !errors.Is(err, io.EOF) {
+	case err == nil:
+		// Empty trailing document: treated as end of stream.
+	case !errors.Is(err, io.EOF):
 		// Not EOF and not a document either: the bytes after the first document
 		// are malformed. Saying so beats accepting the first half of a file the
 		// author believes was read whole.
@@ -358,6 +367,18 @@ func ParseDocument(raw []byte) (*Document, error) {
 		return nil, err
 	}
 	return &doc, nil
+}
+
+// trailingIsEmpty reports whether a decoded trailing document carries nothing.
+//
+// Document holds a slice, so it is not comparable and `== Document{}` will not
+// build. Checking the four fields a real page always has is enough and is more
+// honest than reflect.DeepEqual: what we are asking is "did the author write a
+// second PAGE here", and a document with no apiVersion, no kind, no name and no
+// panels is not one.
+func trailingIsEmpty(d Document) bool {
+	return d.APIVersion == "" && d.Kind == "" &&
+		d.Metadata == (Metadata{}) && len(d.Spec.Panels) == 0
 }
 
 // Validate checks the document's shape and every declared limit. It resolves

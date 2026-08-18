@@ -310,11 +310,17 @@ func decodeStrict(raw []byte, into any) error {
 	// it: a payload written exactly the way our own published contract
 	// describes was rejected by the validator that contract belongs to.
 	//
-	// Dropped, not stored. It is a pointer to the contract, not data the panel
-	// renders, so it must not reach a payload struct or the bytes a reader
-	// sees. Every OTHER unknown field is still refused, which is the property
-	// this function exists for: a producer misspelling `sparkline` learns so
-	// at the push instead of watching a panel quietly render nothing.
+	// Dropped HERE, on the way to the decoder, and nowhere else. The push path
+	// stores the ORIGINAL request bytes (pages_data.go), so a `$schema` a
+	// producer sent is kept and served back — which is harmless, since no
+	// renderer reads it, and honest, since it is what the producer wrote.
+	// An earlier version of this comment claimed the key never reaches a
+	// reader; it does, and saying otherwise would send the next person looking
+	// for a stripping step that does not exist.
+	//
+	// Every OTHER unknown field is still refused, which is the property this
+	// function exists for: a producer misspelling `sparkline` learns so at the
+	// push instead of watching a panel quietly render nothing.
 	raw, err := dropSchemaKey(raw)
 	if err != nil {
 		return err

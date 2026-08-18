@@ -327,6 +327,15 @@ func pagePublicExpiry(w http.ResponseWriter, days *int, now time.Time) (time.Tim
 				"expires_in_days must be at least 1: every public link expires (§7.3.2 rule 4), and there is no value here that means 'never'")
 			return time.Time{}, false
 		}
+		// Bound the DAYS before converting. time.Duration is int64 nanoseconds,
+		// so *days * 24h overflows past ~106 751 days and wraps NEGATIVE — the
+		// ceiling check below then passes, and now.Add(negative) mints a 201
+		// for a link that expired before it was created.
+		if maxDays := int(PagePublicTokenMaxTTL / (24 * time.Hour)); *days > maxDays {
+			replyError(w, http.StatusBadRequest, fmt.Sprintf(
+				"expires_in_days is %d; the maximum is %d (one year, §7.3.2 rule 4)", *days, maxDays))
+			return time.Time{}, false
+		}
 		ttl = time.Duration(*days) * 24 * time.Hour
 		if ttl > PagePublicTokenMaxTTL {
 			replyError(w, http.StatusBadRequest, fmt.Sprintf(
@@ -585,80 +594,155 @@ func (h *PageHandler) publicPanelIDs(ctx context.Context, pageID string) ([]stri
 	return out, nil
 }
 
-// attesterVisiblePanels is the set of panels the page's newest human author
-// could see when they saved it.
+// attesterVisiblePanels answers, per panel, whether the human who PUBLISHED it
+// could see it.
 //
-// Membership is read as it stands NOW rather than as it stood at the save, and
-// that is the safer of the two: an author who has since left the crew stops
-// publishing its panel, which fails closed. The alternative — trusting a
-// membership that has since lapsed — is the same mistake §7.1b avoids for
-// grants, where reach is recomputed at use time rather than frozen at issue.
+// The first version of this asked a simpler question — could the author of the
+// page's newest human version see the panel — and that was wrong in a way that
+// only shows up later. `pagePatchBody` drops `panels`, so renaming a page
+// leaves every panel's `public: true` in place while making the renamer the
+// newest author. A MEMBER with a `write` grant renaming a page would therefore
+// have silently unpublished a panel an admin had published weeks earlier, with
+// nothing said to anyone and a live external link going blank.
+//
+// So the attester for a panel is the author of the version in which that panel
+// BECAME public — found by walking human-authored versions newest-first while
+// the flag holds, and taking the author of the oldest one in that unbroken run.
+// Publishing is a per-panel human act (§7.3.2 rule 2); who may vouch for it is
+// therefore also per-panel.
+//
+// Membership is read as it stands NOW rather than as it stood at the save: an
+// author who has since left the crew stops publishing its panel, which fails
+// closed and matches §7.1b's use-time narrowing of grants.
 func (h *PageHandler) attesterVisiblePanels(ctx context.Context, pageID string) (map[string]bool, error) {
-	var wsID, authorID string
-	err := h.db.QueryRowContext(ctx, `
-		SELECT p.workspace_id, v.author_user_id
-		  FROM page_versions v JOIN pages p ON p.id = v.page_id
+	var wsID string
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT workspace_id FROM pages WHERE id = ?`, pageID).Scan(&wsID); err != nil {
+		return nil, err
+	}
+
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT v.author_user_id, v.spec_json
+		  FROM page_versions v
 		 WHERE v.page_id = ? AND v.author_user_id IS NOT NULL
-		 ORDER BY v.seq DESC LIMIT 1`, pageID).Scan(&wsID, &authorID)
-	if errors.Is(err, sql.ErrNoRows) {
-		// No human-authored version: nothing is published, which is the rule
-		// read from the other end and is already what the caller concludes.
-		return map[string]bool{}, nil
-	}
+		 ORDER BY v.seq DESC`, pageID)
 	if err != nil {
 		return nil, err
 	}
-
-	// The attester's own role, read from the workspace rather than taken from
-	// the ambient context. loadViewer fills Role from RoleFromContext, which is
-	// whoever is ASKING — here that would apply the current caller's role to a
-	// different person, and it is wrong in both directions: an admin opening a
-	// public link would publish panels its author could never see, and an
-	// anonymous reader would unpublish panels the author legitimately marked.
-	var role string
-	err = h.db.QueryRowContext(ctx,
-		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
-		wsID, authorID).Scan(&role)
-	if errors.Is(err, sql.ErrNoRows) {
-		// The author has left the workspace. Fail closed: nothing they marked
-		// is published, which is the same use-time narrowing §7.1b applies to
-		// grants when their issuer loses reach.
-		return map[string]bool{}, nil
+	type humanVersion struct {
+		author string
+		public map[string]bool
 	}
-	if err != nil {
-		return nil, err
-	}
-
-	viewer := &pageViewer{UserID: authorID, Role: role, Crews: map[string]bool{}}
-	crewRows, err := h.db.QueryContext(ctx, `
-		SELECT cm.crew_id FROM crew_members cm
-		  JOIN crews c ON c.id = cm.crew_id
-		 WHERE cm.user_id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`, authorID, wsID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = crewRows.Close() }()
-	for crewRows.Next() {
-		var id string
-		if err := crewRows.Scan(&id); err != nil {
+	var versions []humanVersion
+	for rows.Next() {
+		var author, specJSON string
+		if err := rows.Scan(&author, &specJSON); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
-		viewer.Crews[id] = true
+		versions = append(versions, humanVersion{author: author, public: publicSetFromSpecJSON(specJSON)})
 	}
-	if err := crewRows.Err(); err != nil {
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return nil, err
 	}
+	_ = rows.Close()
+	if len(versions) == 0 {
+		return map[string]bool{}, nil
+	}
+
 	panels, err := h.loadPanels(ctx, wsID, pageID)
 	if err != nil {
 		return nil, err
 	}
+
+	viewers := map[string]*pageViewer{}
 	out := make(map[string]bool, len(panels))
 	for _, p := range panels {
-		// The same predicate the read path uses, so "sealed to you on screen"
-		// and "not publishable by you" cannot drift apart.
-		out[p.PanelID] = h.canSeePanel(viewer, p)
+		// Walk back while this panel is public; the last one still marking it
+		// is where it was published.
+		publisher := ""
+		for _, v := range versions {
+			if !v.public[p.PanelID] {
+				break
+			}
+			publisher = v.author
+		}
+		if publisher == "" {
+			continue
+		}
+		viewer, ok := viewers[publisher]
+		if !ok {
+			viewer, err = h.publishingViewer(ctx, wsID, publisher)
+			if err != nil {
+				return nil, err
+			}
+			viewers[publisher] = viewer
+		}
+		// nil viewer = the publisher has left the workspace. Fail closed.
+		out[p.PanelID] = viewer != nil && h.canSeePanel(viewer, p)
 	}
 	return out, nil
+}
+
+// publishingViewer builds the viewer for a publisher, with the role read from
+// the workspace rather than from the ambient request context.
+//
+// loadViewer fills Role from RoleFromContext — whoever is ASKING — which here
+// would apply the current caller's role to a different person, and is wrong in
+// both directions: an admin opening a public link would publish panels its
+// author could never see, and an anonymous reader would unpublish panels the
+// author legitimately marked. Returns nil when they are no longer a member.
+func (h *PageHandler) publishingViewer(ctx context.Context, wsID, userID string) (*pageViewer, error) {
+	var role string
+	err := h.db.QueryRowContext(ctx,
+		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
+		wsID, userID).Scan(&role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	v := &pageViewer{UserID: userID, Role: role, Crews: map[string]bool{}}
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT cm.crew_id FROM crew_members cm
+		  JOIN crews c ON c.id = cm.crew_id
+		 WHERE cm.user_id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`, userID, wsID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		v.Crews[id] = true
+	}
+	return v, rows.Err()
+}
+
+// publicSetFromSpecJSON reads which panels one stored spec marks public.
+func publicSetFromSpecJSON(specJSON string) map[string]bool {
+	out := map[string]bool{}
+	var doc struct {
+		Spec struct {
+			Panels []struct {
+				ID     string `json:"id"`
+				Public bool   `json:"public"`
+			} `json:"panels"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal([]byte(specJSON), &doc); err != nil {
+		return out
+	}
+	for _, p := range doc.Spec.Panels {
+		if p.Public {
+			out[p.ID] = true
+		}
+	}
+	return out
 }
 
 // specPublicPanels is one spec's answer to "which panels are marked public",
