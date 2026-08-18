@@ -57,19 +57,23 @@ job_body() {
   ' "$WORKFLOW"
 }
 
-require_job() {
-  local src
-  src="$(job_body "$1")"
-  if [ -z "$src" ]; then
+JOB_SRC="$(job_body scheduled-report)"
+VULN_JOB_SRC="$(job_body govulncheck)"
+
+# Called at top level ON PURPOSE. Folding this into a `$(job_body ...)` wrapper
+# puts the `exit 1` inside a command substitution, where it kills the subshell
+# and lets the script run on with an empty job body — reaching the marker check
+# below and reporting "markers gone" for a job that was merely renamed.
+require_job_found() {
+  if [ -z "$2" ]; then
     echo "FATAL: could not find the '$1' job in $WORKFLOW" >&2
     echo "       (renamed? then this test is covering nothing — fix the name here)" >&2
     exit 1
   fi
-  printf '%s\n' "$src"
 }
 
-JOB_SRC="$(require_job scheduled-report)"
-VULN_JOB_SRC="$(require_job govulncheck)"
+require_job_found scheduled-report "$JOB_SRC"
+require_job_found govulncheck "$VULN_JOB_SRC"
 
 # Print the lines between `# <name>:begin` and `# <name>:end` within a job
 # body, dedented out of the YAML block scalar. Empty if the markers are absent.
