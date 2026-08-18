@@ -28,7 +28,7 @@ Resources:
   inbox                     Daily-driver inbox (default landing)
   activity                  Activity feed
   agents                    Agent list
-  agent     <slug-or-id>    Agent detail page
+  agent     <agent-slug>    Agent selected on the crews canvas
   crews                     Crew list
   crew      <slug-or-id>    Crew detail page
   chat      <agent-slug>    Chat with a specific agent
@@ -46,6 +46,7 @@ Resources:
 
 Examples:
   crewship open inbox
+  crewship open agent viktor
   crewship open chat viktor
   crewship open mission MIS-42
   crewship open --print-only mission MIS-42   # print URL, don't open`,
@@ -103,7 +104,35 @@ func buildOpenURL(base string, args []string) (string, error) {
 		if err := requireExact(1); err != nil {
 			return "", err
 		}
-		path = "/agents/" + esc(rest[0])
+		// There is no agent detail PAGE. The route was folded into the /crews
+		// canvas, which selects an agent from `?agent=<slug>`
+		// (hooks/use-crews-selection.tsx); the export has agents.html and
+		// nothing under agents/, so the old `/agents/<id>` fell through
+		// StaticFileHandler's SPA fallback and rendered the dashboard under a
+		// URL that said agents.
+		//
+		// A SLUG, not an id — which is why the documented argument narrowed
+		// from <slug-or-id> to <agent-slug> here and in docs/cli/open.mdx. The
+		// canvas matches on slug and ignores anything else, so an id opens the
+		// roster with nothing selected.
+		//
+		// NOT rejected by shape, deliberately. `open` resolves URLs offline and
+		// without auth (see RunE), so the only way to refuse an id would be to
+		// guess from its shape — and cmd_helpers.go's looksLikeCUID carries the
+		// scar from that guess: a real slug can be 21+ lowercase-alphanumeric
+		// characters starting with 'c' ("customersuccessemea42", #1075), so a
+		// shape test refuses legitimate agents. Worst case here is the roster
+		// with no selection, which is a real page a step away from the agent;
+		// worst case there is a working slug the command will not open at all.
+		//
+		// The resolve step is the other road, and it costs more than the defect:
+		// a round trip, an auth requirement, and a network failure mode, on the
+		// one command whose contract is that it has none of those.
+		//
+		// QueryEscape, not PathEscape: this is a query value now, and
+		// PathEscape leaves `&` and `=` untouched because both are legal in a
+		// path segment — either one would split the query string.
+		path = "/crews?agent=" + url.QueryEscape(rest[0])
 	case "crews":
 		path = "/crews"
 	case "crew":

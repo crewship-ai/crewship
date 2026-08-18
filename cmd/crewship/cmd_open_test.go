@@ -18,7 +18,7 @@ func TestBuildOpenURL(t *testing.T) {
 		{"inbox", "http://localhost:8080", []string{"inbox"}, "http://localhost:8080/inbox", false},
 		{"activity", "http://localhost:8080", []string{"activity"}, "http://localhost:8080/activity", false},
 		{"agents list", "http://localhost:8080", []string{"agents"}, "http://localhost:8080/agents", false},
-		{"agent detail", "http://localhost:8080", []string{"agent", "viktor"}, "http://localhost:8080/agents/viktor", false},
+		{"agent detail", "http://localhost:8080", []string{"agent", "viktor"}, "http://localhost:8080/crews?agent=viktor", false},
 		{"crew detail", "http://localhost:8080", []string{"crew", "backend-team"}, "http://localhost:8080/crews/backend-team", false},
 		{"chat by agent slug", "http://localhost:8080", []string{"chat", "viktor"}, "http://localhost:8080/chat/viktor", false},
 		{"mission timeline", "http://localhost:8080", []string{"mission", "MIS-42"}, "http://localhost:8080/missions/MIS-42/timeline", false},
@@ -37,7 +37,7 @@ func TestBuildOpenURL(t *testing.T) {
 		{"chat missing id", "http://localhost:8080", []string{"chat"}, "", true},
 		{"unknown resource", "http://localhost:8080", []string{"bogus"}, "", true},
 		{"trailing slash trimmed", "http://localhost:8080/", []string{"agents"}, "http://localhost:8080/agents", false},
-		{"escapes special chars", "http://localhost:8080", []string{"agent", "weird:slug"}, "http://localhost:8080/agents/weird:slug", false},
+		{"escapes special chars", "http://localhost:8080", []string{"crew", "weird:slug"}, "http://localhost:8080/crews/weird:slug", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -53,6 +53,68 @@ func TestBuildOpenURL(t *testing.T) {
 			}
 			if got != c.want {
 				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// `crewship open agent <slug>` used to build `<server>/agents/<slug>`, and
+// there is no such page: the agent detail route was folded into the /crews
+// canvas, so the export has agents.html and nothing under agents/ — no
+// `[id]` segment, no `agents/_.html` placeholder. StaticFileHandler's last
+// resort is the SPA fallback, so the URL served the DASHBOARD under a path
+// that says agents. That is the dead-link class already repaired twice on
+// this branch (app/(dashboard)/agents/page.tsx documents the last one).
+//
+// The live convention is /crews?agent=<slug>. Three things are pinned:
+//
+//	· the roster, `open agents`, still points at /agents — a real route whose
+//	  only remaining job is to redirect to /crews for this command's sake;
+//	· the argument is query-escaped, not path-escaped. url.PathEscape leaves
+//	  `&` and `=` alone because they are legal in a path segment, and one of
+//	  those in a slug would silently split the query string;
+//	· the argument reaches the canvas as a SLUG. An id is not rejected by
+//	  shape: cmd_helpers.go's looksLikeCUID documents that a real slug can be
+//	  21+ lowercase-alphanumeric characters starting with 'c' (#1075), so a
+//	  shape test would refuse legitimate agents to catch a case whose only
+//	  penalty is the roster opening with nothing selected. The contract narrows
+//	  in the help text and docs/cli/open.mdx instead.
+func TestBuildOpenURL_AgentTargetsTheCrewsCanvas(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"slug selects on the canvas", []string{"agent", "viktor"}, "http://localhost:8080/crews?agent=viktor"},
+		{"hyphenated slug", []string{"agent", "data-analyst"}, "http://localhost:8080/crews?agent=data-analyst"},
+		{
+			"query-escaped, not path-escaped",
+			[]string{"agent", "a&b=c"},
+			"http://localhost:8080/crews?agent=a%26b%3Dc",
+		},
+		{
+			// A CUID-shaped slug must still build a URL. This is the #1075 case
+			// the shape test would have refused.
+			"a slug that looks like an id is still a slug",
+			[]string{"agent", "customersuccessemea42"},
+			"http://localhost:8080/crews?agent=customersuccessemea42",
+		},
+		// The roster is a separate resource and keeps its own route — /agents
+		// exists solely to redirect there (app/(dashboard)/agents/page.tsx).
+		{"roster unchanged", []string{"agents"}, "http://localhost:8080/agents"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := buildOpenURL("http://localhost:8080", c.args)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+			// Whatever it builds, it must never be the dead /agents/<x> shape.
+			if strings.HasPrefix(got, "http://localhost:8080/agents/") {
+				t.Errorf("got %q — /agents/<x> has no route and falls through to the SPA root", got)
 			}
 		})
 	}
