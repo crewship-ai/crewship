@@ -1,0 +1,151 @@
+# Demo pages for `crewship seed`.
+#
+# One page, five panels, one per schema — because a Pages section that opens
+# empty teaches nothing about a feature whose entire value is what it shows.
+#
+# Every panel carries a `demo` payload alongside its spec. Seeding the spec
+# without pushing data would leave five panels reading "never produced", which
+# is the state the freshness contract uses to mean "nobody wired this up" —
+# exactly the wrong first impression, and indistinguishable from a broken seed.
+#
+# Producers are all `script/…` deliberately. §7.1 rule 4 lets a page's owner
+# push to a script-produced panel, so the seed can fill the page as the account
+# it just created, without minting a token or standing anything up. A
+# `routine/…` producer would need a run, and there is none at seed time.
+#
+# Owners are seeded crews (crews.yaml). Panels owned by DIFFERENT crews on one
+# page is the point, not decoration: it is what makes the sealed placeholder
+# visible to anyone who logs in as a member of only one of them.
+pages:
+  - slug: prehled-provozu
+    name: Přehled provozu
+    description: Co běží, co stojí, a co s tím kdo udělal — jedna stránka, pět tvarů dat.
+    panels:
+      - id: sluzby
+        schema: status.v1
+        title: Jede to?
+        icon: container
+        owner: crew/ops
+        producer: script/watch-services.sh
+        sla: 60s
+        span: 12
+        demo:
+          items:
+            - name: api
+              state: ok
+              label: 200 OK · 41 ms
+            - name: worker
+              state: ok
+              label: fronta prázdná
+            - name: nightly-export
+              state: warning
+              label: doběhl o 12 min později
+            - name: legacy-sync
+              state: critical
+              label: neběží od 04:20
+
+      - id: fronta
+        schema: metric.v1
+        title: Hloubka fronty
+        icon: queue
+        owner: crew/ops
+        producer: script/queue-depth.sh
+        sla: 60s
+        span: 4
+        demo:
+          value: 18
+          unit: úloh
+          delta: -7
+          # Fewer queued jobs is the good direction. Without this the arrow
+          # renders muted, because a green arrow pointing down is a lie on a
+          # metric where down is bad, and only the payload knows which this is.
+          delta_good: down
+          target: 50
+          sparkline: [64, 58, 61, 47, 39, 44, 31, 25, 18]
+
+      - id: odezva
+        schema: series.v1
+        title: Odezva podle služby
+        icon: clock
+        owner: crew/engineering
+        producer: script/latency.sh
+        sla: 120s
+        span: 8
+        demo:
+          unit: ms
+          # Four names on nine categories. A tick this producer does not want
+          # named is null — the renderer decides how many of the named ones it
+          # can draw, because only it knows the width.
+          labels: ["-40m", null, null, "-20m", null, null, "-10m", null, "teď"]
+          series:
+            - name: api
+              values: [44, 41, 47, 39, 42, 40, 38, 41, 39]
+            - name: worker
+              values: [120, 118, 131, 115, 109, 112, 108, 111, 104]
+
+      - id: nasazeni
+        schema: table.v1
+        title: Poslední nasazení
+        icon: deploy
+        owner: crew/engineering
+        producer: script/deploys.sh
+        sla: 1h
+        span: 12
+        demo:
+          columns:
+            - key: kdy
+              label: Kdy
+            - key: co
+              label: Komponenta
+            - key: verze
+              label: Verze
+            - key: trvani
+              label: Trvání
+              align: right
+            - key: kdo
+              label: Kdo
+          rows:
+            - kdy: "14:02"
+              co: api
+              verze: v1.42.0
+              trvani: 96
+              kdo: engineering
+            - kdy: "11:37"
+              co: worker
+              verze: v1.41.3
+              trvani: 41
+              kdo: engineering
+            # A cell nobody could read is null — an em dash on screen. An empty
+            # string would claim we measured emptiness, which is a different
+            # and wrong statement.
+            - kdy: "09:14"
+              co: legacy-sync
+              verze: v0.9.8
+              trvani: null
+              kdo: ops
+
+      - id: rozbor
+        schema: narrative.v1
+        title: Co se stalo v noci
+        icon: alert
+        owner: crew/ops
+        producer: script/nightly-review.sh
+        sla: 12h
+        span: 12
+        demo:
+          verdict: Jedna služba stojí
+          blocks:
+            - kind: paragraph
+              text: >-
+                legacy-sync neběží od 04:20. Fronta mezitím klesla z 64 na 18 úloh,
+                takže výpadek zatím nic nebrzdí — ale nikdo se k němu zatím nedostal.
+            - kind: list
+              text: >-
+                Co ví tahle stránka: stav čtyř služeb, hloubku fronty, odezvu dvou
+                komponent, tři poslední nasazení. Co neví: proč legacy-sync spadl.
+                Na to se musí někdo podívat.
+            - kind: paragraph
+              text: >-
+                Tenhle text napsal skript, ne agent. Kdyby ho psal agent, platila by
+                pro něj stejná schémata — a proto v nich není pole pro odkaz ani pro
+                obrázek.

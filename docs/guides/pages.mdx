@@ -1005,6 +1005,26 @@ already strip provenance for a smaller version of the same reason.
   browser.
 </Note>
 
+## Seeing one without building one
+
+`crewship seed` creates a page called **Přehled provozu** with five panels — one
+per schema — and pushes a payload into each, so a fresh workspace opens on a
+page that shows something rather than on five panels reading "never produced".
+
+Its panels are owned by different seeded crews on purpose. Log in as a member of
+only one of them and the rest arrive as sealed placeholders, which is the
+per-panel permission model doing its job rather than a rendering fault.
+
+The definition is `cmd/crewship/seeddata/builtin/pages.yaml`, and it is a
+readable example of the authoring format: five schemas, a sparse series axis, an
+em-dash cell, a `delta_good`, and the icons. Every payload in it is validated
+against its panel's schema at build time, so a demo that would refuse to load
+fails the test suite instead.
+
+`crewship seed --nuke` removes pages before crews, because a panel's owning crew
+carries `ON DELETE RESTRICT` — a workspace still holding pages cannot have its
+crews deleted.
+
 ## Related
 
 - [Page commands](/cli/page) — the full CLI reference, including the producer

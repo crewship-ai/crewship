@@ -49,7 +49,7 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	}))
 	empty := clitest.JSONResponse(200, []map[string]string{})
 	for _, p := range []string{
-		"/api/v1/issues", "/api/v1/projects", "/api/v1/labels",
+		"/api/v1/issues", "/api/v1/pages", "/api/v1/projects", "/api/v1/labels",
 		"/api/v1/agents", "/api/v1/crews", "/api/v1/integrations/crews",
 		"/api/v1/workspaces/" + covSeedWSID + "/pipeline-webhooks",
 		"/api/v1/workspaces/" + covSeedWSID + "/pipeline-schedules",
@@ -66,6 +66,13 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	// than a stderr notice next to a zero exit code (#1829) — so this stub is
 	// what makes --with-users actually exercised here instead of tolerated.
 	s.OnGet(adminUsers, clitest.JSONResponse(200, fixtureRoster()))
+	// Page seeding: the spec POST, then one payload PUT per panel. Both are
+	// wildcarded because the panel path carries the page slug and the panel id.
+	s.OnPost("/api/v1/pages", clitest.JSONResponse(201, map[string]string{"slug": "prehled-provozu"}))
+	for _, panel := range []string{"sluzby", "fronta", "odezva", "nasazeni", "rozbor"} {
+		s.OnPut("/api/v1/pages/prehled-provozu/panels/"+panel+"/data",
+			clitest.JSONResponse(200, map[string]any{"accepted": true}))
+	}
 
 	covSetupRunSeed(t, s)
 	covSetFlag(t, seedCmd, "nuke", "true")
