@@ -46,10 +46,26 @@ agent's source documentation.
 >   could not survive §7.1 with two money fields on one form.
 >
 > Per-agent caps as shipped: 4 forms, 6 fields each, 48-character labels,
-> 2000-character templates. `crewship export` and `crewship apply` now carry
-> `ask_forms` byte-for-byte, including the follow-up PATCH required because the
-> agent create endpoint ignores this update-only column. The intake pipeline of
-> §8 remains unbuilt.
+> 2000-character templates (`internal/askforms/forms.go:43,47,51,53`). Each is
+> a `400` that names the offending form or placeholder and writes nothing —
+> none of them is a silent cap. `crewship export` and `crewship apply` now
+> carry `ask_forms` byte-for-byte, including the follow-up PATCH required
+> because the agent create endpoint ignores this update-only column. The intake
+> pipeline of §8 remains unbuilt.
+
+> **Amended 2026-08-18, against `ef815a5f`.** The sections the shipped code
+> disagreed with are corrected in place, with the original kept: §5.6 (the
+> upload-failure rules, and the crew-running sentence that was wrong), §6.1
+> (field types, and the unknown-type fallback, which now has three verdicts and
+> not two), §7 (the line-drop rule and the attachment path shape), §8 (entry
+> condition restated) and §12 (the telemetry baseline). Two things to read
+> before anything else here is planned:
+>
+> - **Nothing in §12 is instrumented.** `grep ask_chip_` across the tree still
+>   returns only this document and the work order.
+> - **The submission envelope reaches a local ledger and not the message.**
+>   §7's rendering is finished and pinned in two languages; the *provenance*
+>   half is half-wired. §7.2.
 
 ---
 
@@ -102,10 +118,31 @@ Two consequences worth stating out loud:
 - **The form engine is already written.** `SlashFormField` is
   `{name, type, required?, default?}` and the modal maps types onto primitives
   with a text fallback. Ask forms extend that shape; they do not introduce a
-  second one.
-- **The upload path is already correct and already audited.** Nothing in this
-  PRD changes where a chat attachment lands. Intake is a *record about* that
-  file, not a new copy of it.
+  second one. *(Held up. The field renderer was extracted from the slash modal
+  rather than rewritten, and the proof it did not regress is a characterisation
+  test written against the ORIGINAL component and run green BEFORE the
+  extraction.)*
+- ~~**The upload path is already correct and already audited.**~~ **False, and
+  it was the most expensive sentence in this document.** Four P0s lived on that
+  path: a brand-new conversation could not accept a file at all (the chats row
+  did not exist yet); the filename *was* the storage identity, so two uploads
+  of `evidence.pdf` overwrote one blob while leaving two metadata rows; the
+  metadata insert was best-effort and ran after the bytes, so a `201` could
+  mean bytes with no row; and the whole family sat outside any listing, delete
+  or reclaim contract. All four are fixed — the key is now
+  `attachments/<chatId>/<attachmentId>/<filename>`, the row is written before
+  the bytes, and list/delete exist as routes and CLI commands — but the lesson
+  is the sentence itself: "already audited" was written from the existence of
+  generic file APIs, not from opening the handler. Nothing in this PRD changes
+  where a chat attachment lands, and that was never the same claim as the path
+  being correct.
+
+Two rows of the table above have also moved: `files/three-tier-files.tsx` was
+**deleted** (its only caller was a chat pane that was itself deleted; it
+swallowed a failed crew fetch into `[]` and rendered "No shared crew files"),
+and the honest three-state fetch that replaced it lives at
+`components/features/chat/files/crew-files-scope.tsx` behind
+`components/features/chat/scope-fetch.tsx`.
 
 ## 3. Goals / non-goals
 
@@ -181,6 +218,11 @@ follow-ups. Concretely, above the composer:
 Desktop: a card that grows **above the composer inside the same column**, max
 560px tall, conversation still visible behind/above it. Mobile: a bottom sheet
 at 90vh.
+
+**Shipped, with one thing worth knowing:** "mobile" here follows the chat
+page's own compact breakpoint — 900 px, not the global 768 — rather than a
+third media query that could disagree with the layout it sits in. See
+`chat-as-a-primary-surface.md` §10.1.
 
 Deliberately **not** the centred `Dialog` that `slash-action-modal.tsx` uses.
 The reason is drag-and-drop: a centred modal over a chat is a drop target that
@@ -269,10 +311,13 @@ believed one had landed. Neither had.
 The rules, in the order they matter:
 
 1. **A path is named only for an upload that finished.**
-   `sendableAttachments` (`lib/attachment-message.ts`) is an allow-list on
+   `sendableAttachments` (`lib/attachment-message.ts:99`) is an allow-list on
    `status === "ready"` plus a non-empty path — not "everything that is not an
    error". A wrong chip costs a minute; a wrong path costs the agent a turn
    reading a file that was never written, and it answers about the wrong thing.
+   **Since amended:** the allow-list also excludes anything with an `owner`,
+   because a file that answers a form field is announced by the template's own
+   `{{field}}` and would otherwise be named twice — see rule 6.
 2. **A failed chip stays, and says so in words.** "Upload failed — not
    attached", a destructive border, and a **Retry** that re-sends the same
    `File` under the same chip id. It is not removed, because the toast expires
@@ -289,12 +334,49 @@ The rules, in the order they matter:
 5. **`attachment: required` and a required `file`/`photo` field are satisfied
    by uploads that landed** — a receipt-shaped message with no receipt in it is
    the same defect one level up.
+6. **An upload answers one question, and knows which.** Added after the fact,
+   and it is the rule this section was missing. Every `file`/`photo` field read
+   one attachment list keyed only by the session, so a single upload satisfied
+   *every* required upload field, each field was handed the whole path list,
+   and the sheet drew chips for only the first of them: a form asking for a
+   contract **and** an identity photo could not tell which file answered which
+   question. An attachment record now carries an `owner` — the form id and the
+   field name, so a `document` field in one form is not answered by a
+   `document` uploaded into another. The store stays keyed by session (one
+   session, one place a file can be, so the abort registry, Retry and the
+   removed-mid-upload check keep working over one list) and ownership rides on
+   the record; unowned is the plain composer's case, so every path that existed
+   before keeps working by writing nothing. Files are claimed by `File`
+   identity rather than by position or "everything new", so a concurrent
+   composer drop cannot be swept into a field — and if that matching ever
+   fails, the file stays unowned, which means it satisfies no required field
+   and *is* named by the appended block. It is never silently lost.
 
-The upload endpoint currently requires the crew container to be running. A
+   Three defects fell out of it that no review had named, all from the same
+   root: a file uploaded into a form field was announced twice (template plus
+   appended block), an abandoned form's upload leaked into the next unrelated
+   message, and sending an ordinary message silently wiped an open form's
+   uploads.
+
+~~The upload endpoint currently requires the crew container to be running. A
 stopped crew returns an actionable 409 because only the running sidecar can
-write the agent-visible output path. The composer does not yet disable file
-selection up front; deciding whether it should is still product work, not an
-error-code substitute.
+write the agent-visible output path.~~
+
+**Corrected: the precondition is ownership of the output tree, not a running
+crew.** The endpoint writes host-side first and answers `200` if that succeeds
+(`internal/server/routes_files.go:221-236`); only `fs.ErrPermission` routes the
+write through the container, and only there does a stopped crew become the
+`409` (`:307`, `:614-624`). The host write fails because the crew's trees are
+chowned to `1001:1001` when the container is created — and when that chown
+itself fails the provider falls back to `chmod 0777`, after which a host write
+succeeds with the crew stopped. So a stopped crew usually blocks the upload and
+does not always, and the difference is invisible from the frontend.
+
+The composer still does not disable file selection up front, and it now has a
+concrete reason beyond "product work": there is no endpoint that answers *is
+this agent's output tree writable*, and "crew is running" is a proxy for it
+that is wrong in both directions. Deciding this is O16, and it is a backend
+contract before it is a UI change.
 
 ## 6. Data model
 
@@ -380,11 +462,61 @@ Extending `SlashFormField` — `{name, type, required?, default?}` — with
 
 `text` · `textarea` · `number` · `money` (amount + currency) · `date` ·
 `month` · `select` · `multiselect` · `checkbox` · `file` · `photo` ·
-`agent_file` (picker over the agent's existing files).
+~~`agent_file` (picker over the agent's existing files)~~.
 
-The unknown-type→text fallback from `slash-action-modal.tsx:31-34` is kept
-verbatim. It is what lets the server add a field type without a coordinated
-frontend release, and the ask sheet inherits the property for free.
+**As shipped** (`internal/askforms/fieldtypes.go:79-91`, mirrored by the switch
+in `components/features/chat/asks/form-field.tsx` and pinned to
+`testdata/ask-field-types.json` from both directions): every type above **except
+`agent_file`**, which needs a file-picker over the agent's tree and has no
+control yet. The field shape also gained `currency[]` (the picker offered
+beside a `money` amount) and made `multiple` a **pointer**, because absent and
+`false` are different answers: an upload field says nothing about arity by
+default — several photos of one invoice are one answer — while
+`"multiple": false` is an author deliberately capping it at one, and that is a
+constraint the submit path enforces.
+
+~~The unknown-type→text fallback from `slash-action-modal.tsx:31-34` is kept
+verbatim.~~ **Kept, and split in three.** Two verdicts were not enough. The
+fallback is what lets the server ship a field type without a coordinated
+frontend release, and it is also a way to lie: a definition using a secret-like
+type — `password`, `api_key`, `client_secret` — renders as an ordinary input in
+a console that has not learned the type yet, and the value lands verbatim in a
+durable chat message, in the transcript, in the search mirror, and in whatever
+the agent does with it. The user reasonably believed the field had special
+handling. It had none. So:
+
+| Verdict | Meaning | Behaviour |
+|---|---|---|
+| `known` | this release has a control for it | render the control |
+| `open` | never heard of it, and the **name** is inert | render a text input — the property that keeps the list open |
+| `unsafe` | the name says the value is a secret, or is shaped so nothing can be trusted to render it | refused **on save**; the sheet renders no input and refuses to submit, naming the field |
+
+The guarantee is the save-time refusal — it means the server may never ship a
+type the client would mishandle. The renderer's refusal is defence for the one
+case a validator cannot reach: a row written before the rule existed, or edited
+straight in the database. The rule is stated once, in
+`testdata/ask-field-types.json`, and read by both languages' tests; the
+sensitive-name matcher is deliberately broad, because a false positive costs an
+author a rename and a false negative costs a credential in somebody's
+transcript.
+
+**The gate lives in the ask layer and not in the shared field renderer.** The
+slash palette's secret field is a real password input into the vault — same
+type name, opposite destination. Moving the check down into the shared
+component would have broken the one place where a secret field is correct.
+
+**Constraints are checked where they are given.** `min`, `max`, `pattern` and
+`multiple` were validated when a form was *saved* and never enforced when a
+person *answered* it. They are now, with the meaning fixed per type — a value
+range on a number, a length on text, a count on an upload or a multiselect
+(`boundsFor`, `internal/askforms/forms.go:387-402`) — and any combination
+outside that table is refused on save, along with `min > max` and a pattern
+that does not compile. A rule the submit path could not check must not be
+storable. Patterns compile under RE2 on save, which is what makes running them
+in the browser safe. Answers are checked in the client and the CLI rather than
+at an endpoint, because a submission **is** an ordinary chat message (decision
+2) and that decision is not reopened for a validator; the server owns the
+definition instead.
 
 ## 7. Template rendering
 
@@ -393,17 +525,53 @@ expressions. Rules:
 
 1. Unknown placeholder → **rejected at save time**, not at render time. The
    author finds out while authoring; the user never meets a broken template.
-2. Empty optional value → the whole line is dropped if the placeholder was the
-   only dynamic content on it. This is the one piece of magic and it must be
+   Refused with it: a form with no fields, a duplicate field name, a `select`
+   with no options, a colliding form id, an unknown key.
+2. Empty optional value → the whole line is dropped. **Stated precisely, as
+   implemented** (`internal/askforms/render.go:88-124`): a line is dropped if
+   and only if it holds **at least one** placeholder and **every** placeholder
+   on it renders empty. The earlier wording — "if the placeholder was the only
+   dynamic content on it" — describes a different rule and gets the interesting
+   case backwards. So `Category: {{category}}` disappears when the category is
+   blank, while `Amount: {{amount}} {{amount_currency}}` **survives on the
+   currency alone**. A line with no placeholder at all is static text and is
+   never dropped, including when it is blank: the blank lines in a template are
+   the author's paragraph breaks. This is the one piece of magic and it must be
    documented in the authoring UI.
 3. Values are inserted verbatim. The result is a *user message*, so no markdown
    escaping — but control characters are stripped, each value caps at 2 000
-   characters, and the rendered message caps at 32 000.
-4. `file`/`photo` fields render as the agent-visible path
-   (`attachments/<chatId>/<name>`); multiple files render as a newline list.
+   characters, and the rendered message caps at 32 000. **Runes, not bytes**
+   (`truncateRunes`, `render.go:294-304` and `lib/ask-template.ts:286-290`), so
+   a Czech author does not get a third of the field; the `len(s) <= max` first
+   branch is a fast path and not a byte cap. Both caps truncate **silently** —
+   the only two caps on this surface that do — which is reachable only by a very
+   long `textarea` answer, and `crewship agent ask-preview` shows the truncated
+   result exactly, so an author can see it before a user does. A character
+   counter on the field would be a better fix than this paragraph.
+4. `file`/`photo` fields render as the agent-visible path; multiple files
+   render as a newline list, unquoted, because spaces, quotes and brackets are
+   common in filenames and the line break is the only delimiter none of them
+   can forge. ~~`attachments/<chatId>/<name>`~~ — **the path gained a segment.**
+   An attachment's storage key is now
+   `attachments/<chatId>/<attachmentId>/<filename>`, so that a delete unlinks
+   its own directory and two uploads of the same filename cannot overwrite each
+   other. The renderer does not build that path: a value that already starts
+   with `attachments/` is passed through verbatim
+   (`attachmentPath`, `render.go:246-254`), and the sheet supplies the path the
+   upload response returned. The `<chatId>/<name>` construction survives only as
+   the fallback for a caller that passes a bare filename — `crewship agent
+   ask-preview`, for one.
 5. A `money` field named `amount` exposes `{{amount}}` and
    `{{amount_currency}}`. There is no bare `{{currency}}`: that name collides
    when a form contains two money fields and therefore cannot pass rule 1.
+   The suffix `_currency` is **reserved** for this, and it is derived from the
+   field name rather than chosen by the author precisely so two money fields on
+   one form cannot fight over one placeholder. This rule was written into the
+   staging note first, where a reader planning a form would not look; it
+   belongs here, and it is the reason the §5.2 wireframe shows an amount and a
+   currency picker as one field rather than two.
+
+### 7.1 Two renderers, one fixture
 
 **The renderer exists twice** — `internal/askforms/render.go` for the CLI and
 server preview, `lib/ask-template.ts` for the composer — and both are tested
@@ -412,12 +580,85 @@ implementations that can silently disagree about what the user is sending is
 exactly the class of defect `docs/prd/documentation-contract-testing.md` was
 written about.
 
+The fixture was **mutation-checked rather than trusted**, which is the only
+reason to believe it: disabling the line-drop rule reddens two Go cases, and
+swapping rune truncation for bytes in Go and `String.slice` in TS each reddens
+the emoji case in its own language. A rule implemented on one side only is the
+exact defect the fixture exists to catch, and it demonstrably catches it. Note
+that the message cap trims `" \t\n"` explicitly rather than calling
+`TrimSpace`/`String.trim`, which do not agree on what whitespace is — the two
+languages would have diverged on the one line meant to keep them together.
+
+### 7.2 The submission envelope, and the half of it that is not wired
+
+Rendering is finished. **Provenance is not**, and this section records where it
+stops as of `ef815a5f`, because the gap is invisible from either end.
+
+The badge under a submitted message used to be looked up from a bounded
+in-memory map keyed by the **rendered message content**. Content is not an
+identity: two identical submissions collided, the second silently relabelling
+the first; a reload lost every entry; and the values the user filled in were
+never recorded anywhere at all, because they were component state and the sheet
+unmounted. A submission now mints an id and an envelope — form id, form
+version, values, which upload answered which field, and the rendered text
+(`components/features/chat/asks/ask-envelope.ts`, mirrored by
+`internal/askforms/envelope.go` under one shared metadata key).
+
+Two lookups, in this order:
+
+1. **The turn's own metadata.** `conversation.Message.Metadata` already exists
+   and is persisted with the message, so this is the path that survives a
+   reload, a second tab, and a colleague opening the same shared chat. It is
+   also the only one that cannot collide, because the id is on the turn.
+2. **A local ledger** in `sessionStorage`, bounded per session, so the answers
+   survive a reload of the tab that sent them even before the send path carries
+   the envelope end to end.
+
+**Only (2) is live at `ef815a5f`.** The sheet builds the envelope and records
+it (`asks/ask-form-sheet.tsx:288-295`), then hands it to `onSubmit` as a third
+argument — and the composer's handler takes two
+(`composer/chat-composer.tsx:164-181`), so the envelope stops there and the
+message goes out without it. Three edits in files owned elsewhere carry it the
+rest of the way: the composer forwarding it, `use-chat` putting it in the send
+payload and `messagesToTurns` no longer dropping `msg.metadata`, and
+`chatbridge` persisting it on the human turn. Until then the envelope is
+durable in the tab that sent it and absent from the transcript. *(All three
+are in the working tree, unfinished, as this was written — check before acting
+on it.)*
+
+The old content-keyed lookup is still in place because ChatPanel and the
+composer call it, but it no longer guesses: when one piece of content has been
+recorded under two different forms it returns **nothing** rather than the most
+recent label. A missing badge is a courtesy not offered; a wrong one is the
+transcript telling the user something untrue.
+
 ## 8. Intake pipeline
 
-This section remains unbuilt. It starts only when users actually file
-documents and requires, as one coherent slice, the `intake_documents` state
-table, the sidecar propose/file tools, and a confined memory write path. An
-attachment upload by itself is not intake and must not be described as one.
+**Unbuilt, and it is the largest unbuilt piece in either PRD.** Confirmed at
+`ef815a5f`: `intake_documents` exists in no migration, `intake.propose` and
+`intake.status` exist in no sidecar tool descriptor, and nothing in the tree
+mentions either outside this document.
+
+**The entry condition, restated so it is not read as a schedule.** This section
+starts when someone actually files documents — not when the composer can accept
+a file, which it already could, and not when attachments became durable, which
+they now are. An attachment upload by itself **is not intake** and must not be
+described as one: intake is a *record about* a file with a state machine, a
+human decision and an audited write into the agent's documentation.
+
+It also has a hard technical precondition that was not visible when this was
+written: it must not start before attachment identity and structured form
+submissions are sound, because intake inherits both. Attachment identity landed
+(§2), the submission envelope is half-wired (§7.2). Building intake on top of a
+content-keyed provenance map would have reproduced every defect §7.2 describes,
+one layer up and with an audit trail attached to it.
+
+When it starts, it starts as **one coherent slice** — the `intake_documents`
+state table, the two sidecar tools, and a confined memory write path — because
+any two of the three without the third is a surface that can accept a document
+and cannot finish with it. The narrowest useful version is one real uploaded
+document keeping its source identity through extraction, clarification, the
+memory-write decision and the output; a pack library waits for repeated use.
 
 ### 8.1 States
 
@@ -471,6 +712,14 @@ auditable. Text in, structure out.
 
 House rule: every endpoint gets a CLI command, and the acceptance test drives
 the binary (`cli_route_contract_test.go` already enforces the pairing).
+
+> **None of the endpoints below exist**, and that is the staging note working
+> as intended rather than a gap. Both shipped halves ride the agent PATCH:
+> `crewship agent update --suggested-prompts`, `--ask-forms @forms.json`, and
+> `crewship agent ask-preview` to render a form without a browser. A repeated
+> `--var` with the same name accumulates into a list, so a multi-page invoice
+> photographed page by page keeps its pages. This table becomes real when a
+> second agent wants to share a pack.
 
 | Endpoint | CLI |
 |---|---|
@@ -538,17 +787,53 @@ workspaces, off for existing ones until the first pack is installed.
 
 ## 12. Telemetry & success
 
-Events: `ask_chip_shown`, `ask_chip_clicked`, `ask_form_opened`,
-`ask_form_submitted`, `ask_form_abandoned` (with last-touched field, which is
-where a bad form shows itself), `intake_uploaded/proposed/filed/rejected`,
-`intake_proposal_edited` (field-level).
+**None of this is instrumented at `ef815a5f`. The baseline is gone, and it was
+lost rather than deferred.**
+
+> **In flight.** A `lib/telemetry.ts` and its call-site tests are in the
+> working tree, unfinished. Whoever lands them owns the paragraphs below:
+> replace "none emitted" with the event names that are, and write the
+> measurement start date into this section rather than leaving it to be
+> reconstructed.
+
+Say it plainly, because the distinction is the whole finding: the staging note
+deferred the *library*. It did not defer the *measurement*. Per-agent chips and
+then questionnaires shipped with **no instrumentation at all** — `grep
+ask_chip_` across the tree returns this document and the work order and nothing
+else — so every event below is still a proposal, and the "≥ 35 % of sessions
+start from a chip" target has nothing to compare against. The pre-change
+population (every agent showing the same four hardcoded chips) no longer
+exists anywhere in the product, and no event was ever emitted from it. There is
+no reconstruction: no journal entry, no log line, no client event stream to
+mine after the fact.
+
+**What this means for the target.** It cannot be a before/after. It has to
+become a cohort comparison measured **from a named start date**, recorded here
+when instrumentation lands, and any claim of improvement that predates that
+date is unsupportable and should be refused in review.
+
+**And a mechanism has to be chosen before an event can be named.** There is no
+product-analytics transport in this repo. The journal
+(`internal/journal/types.go`) is server-side and models durable domain events,
+not UI interactions — `ask_chip_shown` has no business in an audit trail — and
+the only existing client-side telemetry is Sentry crash reporting behind an
+explicit consent gate (`crewship telemetry on/off`,
+`GET /api/v1/system/telemetry`). Whatever carries these events must respect
+that gate. Inventing a second mechanism beside it is the wrong answer; deciding
+which one carries product events is O17.
+
+Events (proposed, none emitted): `ask_chip_shown`, `ask_chip_clicked`,
+`ask_form_opened`, `ask_form_submitted`, `ask_form_abandoned` (with
+last-touched field, which is where a bad form shows itself),
+`intake_uploaded/proposed/filed/rejected`, `intake_proposal_edited`
+(field-level). The chat surface wants four more on the same transport:
+attachment uploaded / failed, session titled, and ⌘K conversation hit opened.
 
 Targets, 30 days after rollout:
 
-- ≥ 35 % of sessions start from a chip. The pre-change baseline is gone:
-  per-agent chips shipped before any event was emitted, so there is no valid
-  generic-chip comparison left to reconstruct. Instrumentation must compare
-  cohorts after measurement begins and record its start date explicitly.
+- ≥ 35 % of sessions start from a chip — **as a cohort measurement from the
+  instrumentation start date**, not as a comparison against the generic-chip
+  era, which is unmeasurable. See above.
 - ≥ 70 % form completion once opened
 - ≥ 60 % of proposals filed without a field edit
 - median photo → filed under 45 s on mobile
@@ -622,6 +907,14 @@ Observations from the running dev3 UI and the code behind it, worst first:
 Items 1, 2, 5 and 8 are inside this feature's scope. 3, 4, 6, 7 are separate
 tickets and should not be smuggled in.
 
+**Where they got to.** 4 (`Untitled session`) and 6 (the unlabelled rail icons)
+were fixed on `feat/chat-primary-surface` — sessions name themselves from the
+first message, and the rail's three icons read tooltip, drawer name and panel
+heading from one map, with `aria-keyshortcuts` for the shortcut the tooltip
+draws. 5 gained the camera and a named size cap on rejection. 8 is fixed as
+described. 1, 2, 3 and 7 are open, and 1 is the one worth doing next: the two
+rails still come from the same pack and still look like different features.
+
 ## 16. Open questions
 
 1. **O1** — Locale. Chips carry `label_cs` (the slash catalogue already does),
@@ -659,3 +952,17 @@ tickets and should not be smuggled in.
 15. **O15** — The Pages feature (client-facing presentation) is being built in
     parallel. Do filed documents need to be Pages-addressable from day one, or
     is that a later join?
+16. **O16** — Should the composer refuse a file up front when the agent's
+    output tree is not writable? Today it accepts the file and surfaces the
+    server's `409` as a failed chip with a Retry. Refusing up front needs an
+    endpoint that answers *is this tree writable*; "is the crew running" is a
+    proxy that is wrong in both directions (§5.6). A backend contract before it
+    is a UI change. Same question as `chat-as-a-primary-surface.md` O8 — one
+    question, two documents; answer it in one place.
+17. **O17** — What carries product telemetry? The journal is server-side and
+    models durable domain events; the only client-side transport is
+    consent-gated crash reporting. Every event in §12 waits on this answer, and
+    a second mechanism beside the consent gate is the wrong one.
+18. **O18** — `agent_file` is in §6.1's type list and is the one type that did
+    not ship, because it needs a picker over the agent's tree. Is it wanted, or
+    does `file` plus a path in the template cover it?

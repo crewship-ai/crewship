@@ -199,6 +199,40 @@ rule is *no silent caps — log what was dropped*, and none of these do.
 
 **Acceptance:** each cap is documented, and where it can bite, visible.
 
+> **Corrected 2026-08-18 — half of this premise was wrong, and the wrong half
+> is worth more than the right one.**
+>
+> "None of these do" swept in every cap on the surface. Opened one at a time,
+> most of them already refuse loudly and name the offender, and a `400` that
+> says *which* prompt was too long is not a silent cap at all:
+>
+> | Cap | Value | Boundary behaviour | Verdict |
+> |---|---|---|---|
+> | Chat attachment size | 25 MB | `400 invalid multipart form or file too large (max 25MB)` — `internal/api/proxy_attachments.go:115-118`; the browser rejects and names the file first (`composer/attachment-zone.tsx:20`) | **Not silent** |
+> | Suggested prompts / length | 8 / 120 runes | `400`, naming the line: *"prompt 3 exceeds 120 characters (it has 137)"* — `internal/api/agents_suggested_prompts.go:25,29,55-56` | **Not silent** |
+> | Ask forms / fields / label / template | 4 / 6 / 48 / 2000 | `400` naming the form and the placeholder; nothing is written — `internal/askforms/forms.go:43,47,51,53,225-226` | **Not silent** |
+> | Workspace search | 400 agents | Newest 400 searched, the rest omitted — `internal/api/conversation_search.go:67,110` | **Documented, unlogged** |
+> | Tree fan-out | 12 agents × 10 chats → 25 rows | Nothing — `chat-tree-sidebar.tsx:212,215,218`, sliced at `:299` | **Genuinely silent** |
+>
+> So the documentation debt is **one cap wide, not four**. The 400-agent cap was
+> already documented twice on this branch (`docs/api-reference/conversations.mdx`,
+> `docs/guides/conversation-search.mdx`); what it still lacks is an operator log
+> line, because a user cannot act on it and an operator asking "why did search
+> not find it" absolutely must be able to.
+>
+> The fan-out is the one that needs a screen affordance, and it is worse than
+> "loses threads". An agent past the twelfth enters neither `threadsByAgent`
+> **nor** `threadErrors`, so it misses the honest-failure path the same file
+> already implements: a failed fetch renders an em dash and a `ScopeFailure`
+> panel saying *this is not an empty history*, while the thirteenth agent
+> renders a confident `0` with no chevron, and filtering to it offers **Start a
+> conversation** with an agent that may have a year of them. Same "we could not
+> ask" → "there is nothing" collapse WP-1 names as the house defect, in the
+> product's primary navigation.
+>
+> Documented since, in `docs/guides/chat-surface-limits.mdx`. The affordance is
+> still owed.
+
 ### WP-7 — Test integrity
 
 - `e2e/onboarding-wizard.spec.ts` is repaired but runs **only** in a nightly /
@@ -228,6 +262,52 @@ merge, or state in the PRD that it does not and why that is acceptable.
    outside the content-addressed tree and outside the reclaim machinery
    (`internal/api/attachments_gc.go` says so deliberately).
 
+> **Corrected 2026-08-18. All three premises moved; two of them were wrong when
+> written.** Kept rather than deleted, because each was wrong in a way a reader
+> can learn from.
+>
+> **(1) is not an invariant, it is a consequence of who owns a directory.**
+> I wrote "requires a running crew" into a commit message and the sentence
+> travelled into two PRDs. The upload does not ask whether a crew is running.
+> It writes host-side first (`internal/server/routes_files.go:221-236`), and
+> only an `fs.ErrPermission` sends it through the container
+> (`saveViaContainer`, `:307`), where a stopped crew becomes the `409`
+> (`containerSaveErrorResponse`, `:614-624`). The host write fails because
+> `fixBindMountOwnership` chowns the crew's trees to `1001:1001` at container
+> creation (`internal/provider/docker/docker_container.go:1146-1154`) while
+> `crewshipd` runs as another uid — and when that chown itself fails, the same
+> function falls back to `chmod 0777` (`:1196-1199`), after which a host write
+> succeeds with the crew stopped. A crew that was never provisioned has no such
+> owner either. So the truthful statement is: **an upload needs a writable
+> output tree; when the crew runtime owns that tree, that means a running
+> crew.** The product decision (should the composer refuse up front?) still
+> stands, and it now has a precondition the frontend cannot read from any
+> endpoint — which is the actual work.
+>
+> **(2) is right about attachments and wrong about drafts.** `partialize`
+> really does persist `drafts` (`stores/composer-store.ts:209`) and really does
+> drop the `File` handles (`:32-35`). But **`setDraft` has no caller anywhere in
+> the app** — the composer holds its text in `useState`
+> (`components/features/chat/composer/chat-composer.tsx:107`) and only ever
+> calls `clearDraft` (`:117,147`). The persisted draft map is written by nothing
+> and cleared on send. So a reload loses the text *and* the file references;
+> "keeps the text" describes a capability the store has and the chat path never
+> uses. Fixing (2) is two jobs, not one, and the cheaper job was invisible
+> because the store's type signature implied it was already done.
+>
+> **(3) is stale — it shipped.** `GET …/chats/{chatId}/attachments` and
+> `DELETE …/attachments/{attachmentId}` are registered at
+> `internal/api/router_orchestration.go:743-744`, with
+> `crewship chat attachments list` / `delete` (`cmd/crewship/cmd_chat.go:382,452`)
+> and doc sections in `docs/api-reference/agents.mdx`. The blob layout changed
+> underneath it: the storage key is now
+> `attachments/<chatId>/<attachmentId>/<filename>`, so an upload owns its own
+> directory and a delete unlinks its own bytes with nothing to arbitrate
+> (`chatAttachmentUnlinkTarget`, `internal/api/proxy_attachments.go:410-416`).
+> The reclaim exclusion in `internal/api/attachments_gc.go` now needs a *new*
+> justification: it was excluded because nothing could delete these blobs, and
+> something can.
+
 ### WP-9 — The memory surface tells the truth about itself; the older one does not
 
 The chat panes built and then deleted on this branch established which memory
@@ -243,12 +323,73 @@ nothing. `parseMemoryPath` (`internal/memory/audit_watcher.go:449`) matches only
 `daily/`, `lessons.md` and `learned-*.md` have related gaps — enumerate them
 honestly in the PRD rather than fixing them blind.
 
+> **Corrected 2026-08-18 — the premise is false, and the task it implies would
+> have made things worse.**
+>
+> `CREW.md` has a writer. Two, in fact. The native dispatcher's `memory.write`
+> takes tier `CREW` and resolves it to `CrewMemoryDir/CREW.md`
+> (`internal/memory/tools.go:1156-1160`, with the crew cap at `:66`), and the
+> legacy sidecar route `POST /memory/write` accepts `scope: "crew"` with
+> `CREW.md` in its allowlist (`internal/sidecar/memory_write.go:20-38,66-69`).
+> Building a third writer — the obvious reading of "give that tier a writer" —
+> would have duplicated a capability and left the real defect untouched.
+>
+> **The real defect is the projection.** The panel reads version rows at the
+> path `crew:<crewId>/CREW.md`
+> (`components/features/crews/agent-canvas-tabs/memory-tab.tsx:388`). Nothing
+> in the tree ever writes a row at **that** path — which is the trap, because
+> the `crew:` prefix is a real convention with real producers: the consolidator
+> writes `crew:<crewID>/pins.md` and `crew:<crewID>/learned-*.md`
+> (`canonicalAuditPath`, `internal/consolidate/consolidator.go:707-712`). The
+> panel's guess was a reasonable extrapolation from a convention that happens
+> not to cover this file, which is exactly why nobody checked it.
+>
+> The audit watcher is the only producer of direct-write version rows, and
+> `parseMemoryPath` requires the shape `crews/{id}/agents/{slug}/.memory/…` —
+> `parts[2] != "agents"` is a hard reject
+> (`internal/memory/audit_watcher.go:449`) — while the shared tier lives at
+> `crews/{id}/shared/.memory/CREW.md`
+> (`internal/orchestrator/memory_persona.go:61-63`). Its canonical path is also
+> built as `agent:{slug}/{rel}` (`:471-473`), a shape `crew:` can never match.
+> So a real crew-scoped write lands on disk, is read back correctly by the
+> agent, and is invisible to every version and journal surface.
+>
+> **Rewritten task.** Make the shared tier parse: extend `parseMemoryPath` to
+> the `shared/.memory` shape and emit `crew:{crewID}/{rel}`, then prove a real
+> `memory.write` with `tier: "CREW"` reaches the rows `memory-tab.tsx` reads.
+> The acceptance test is end-to-end through the writer, not a unit test of the
+> parser — a parser test would pass against a path no writer produces, which is
+> the same mistake one level down.
+>
+> **In flight as this correction was written.** `internal/memory/projection.go`
+> and a shared-tier watcher test are in the working tree at `ef815a5f`,
+> unfinished by anyone who signed this. The correction above is a reading of
+> the committed code; check the tree before acting on it.
+>
+> The three related gaps stand as written and were enumerated on the branch:
+> `daily/YYYY-MM-DD.md` is recorded but not enumerable (the member endpoint
+> takes one exact path; prefix listing is admin-only), `lessons.md` has no row
+> and no endpoint because `parseMemoryPath` does not map it at all, and
+> `learned-<topic>.md` is recorded with undiscoverable topic names. Also
+> corrected while here: `pins.md` **is** reachable, contrary to the brief that
+> started this — with the caveat that the consolidator skips recording when
+> `BlobRoot` is empty, so the file can exist on disk with no row.
+
 ---
 
 ## 4. The PRD amendments — a required deliverable, not a courtesy
 
 The two PRDs are behind the code in specific, listed ways. Produce a diff for
 each, containing at least:
+
+> **Delivered 2026-08-18**, against `ef815a5f`. Item 1 below undercounted: the
+> branch added **five** endpoints, not one. Steps 1–7 added exactly one (the
+> chat rename); the audit follow-ups added four more — the two attachment
+> lifecycle routes from WP-8(3) and the two escalation routes from WP-4(b).
+> Every one has a CLI command; the four mutating ones have a `route-roles.txt`
+> row and the read-only listing correctly has none, because the manifest covers
+> `mutationRoutes` (`internal/api/route_roles_manifest_test.go:29-41`). See
+> `chat-as-a-primary-surface.md` §9.
 
 **`chat-as-a-primary-surface.md`**
 1. §4 Step 4 claims "Steps 1–7 add no endpoints". They added one:
