@@ -74,7 +74,10 @@ const pageManifestSchemaHint = "# yaml-language-server: $schema=https://schemas.
 
 // pageExportCaveat is decision 3 above, in the words an operator needs at
 // the moment they have just created the file.
-const pageExportCaveat = "note: a panel's authored half — `public`, `actions`, `wake`, `on_failure`, `refresh` —\n" +
+const pageExportCaveat = "note: a page manifest cannot carry the page's OWNER — `kind: Page` has no field\n" +
+	"      for one — so applying this file elsewhere makes the applying account the owner,\n" +
+	"      even where a crew owned it here. Re-assign after apply (#1974).\n" +
+	"note: a panel's authored half — `public`, `actions`, `wake`, `on_failure`, `refresh` —\n" +
 	"      is echoed only to an account that may EDIT the page. Exported by anyone else, this\n" +
 	"      file is the grid alone and re-applying it removes those panels' buttons and gates.\n" +
 	"      The absent field looks the same either way, so check the file before you apply it.\n"

@@ -313,22 +313,41 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subjectID, subjectRef, ok := h.resolveGrantSubject(w, r, wsID, subjectType, subject)
-	if !ok {
-		return
-	}
-
-	// Read the rows first: the journal entry names the level that was actually
-	// removed, and "removed nothing" has to be distinguishable from "removed
-	// three levels" in the response as well as in the audit trail.
+	// Read the stored rows BEFORE resolving the subject, because a revoke must
+	// work on a subject that no longer resolves.
+	//
+	// resolveGrantSubject answers "who in this workspace is this", which is the
+	// right question when ISSUING a grant and the wrong one when removing it: a
+	// user JOINs workspace_members, a crew and an agent require deleted_at IS
+	// NULL. So the moment the subject left, the grant became un-revocable — the
+	// owner asking to remove it got a 400 saying no such member, the row stayed,
+	// it still reported live because liveness is derived from the ISSUER, and
+	// re-adding that user at any role restored their access immediately.
+	//
+	// Cleaning up after somebody who has gone is exactly when an owner reaches
+	// for this endpoint. It resolves if it can — the label is nicer in the
+	// journal and the 404 — and falls back to matching the stored subject
+	// verbatim when it cannot.
 	records, err := h.loadPageGrantRecords(r.Context(), wsID, rec)
 	if err != nil {
 		replyInternalError(w, h.logger, "load page grants for revoke", err)
 		return
 	}
+
+	subjectID, subjectRef, ok := h.resolveGrantSubjectQuietly(r.Context(), wsID, subjectType, subject)
+	if !ok {
+		subjectID, subjectRef = "", subject
+	}
+
+	// The journal entry names the level that was actually removed, and "removed
+	// nothing" has to be distinguishable from "removed three levels" in the
+	// response as well as in the audit trail.
 	var removed []pageGrantRecord
 	for _, g := range records {
-		if g.SubjectType != subjectType || g.SubjectID != subjectID {
+		if g.SubjectType != subjectType {
+			continue
+		}
+		if !grantRowMatchesSubject(g, subjectID, subject) {
 			continue
 		}
 		if level != "" && g.Level != level {
@@ -342,8 +361,11 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	args := []any{rec.ID, subjectType, subjectID}
+	// Delete the rows that actually matched, by their stored subject_id, rather
+	// than by a subject the resolver may not have been able to name. `removed`
+	// is non-empty here, so this cannot become an unbounded delete.
 	stmt := `DELETE FROM page_grants WHERE page_id = ? AND subject_type = ? AND subject_id = ?`
+	args := []any{rec.ID, subjectType, removed[0].SubjectID}
 	if level != "" {
 		stmt += ` AND level = ?`
 		args = append(args, level)
@@ -590,4 +612,57 @@ func (h *PageHandler) journalGrantChange(ctx context.Context, entryType journal.
 		h.logger.Warn("pages: grant change was not journalled",
 			"page", rec.Slug, "type", string(entryType), "subject", subjectType+"/"+subjectRef, "error", err)
 	}
+}
+
+// resolveGrantSubjectQuietly is resolveGrantSubject without the HTTP reply: it
+// answers "who is this, if anyone" and lets the caller decide what an
+// unresolvable subject means. Issuing a grant needs the refusal;
+// revoking one needs the fallback.
+func (h *PageHandler) resolveGrantSubjectQuietly(ctx context.Context, wsID, subjectType, ref string) (string, string, bool) {
+	var id, label string
+	var err error
+	switch subjectType {
+	case pageSubjectUser:
+		err = h.db.QueryRowContext(ctx, `
+			SELECT u.id, u.email FROM users u
+			JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = ?
+			WHERE u.id = ? OR u.email = ?`, wsID, ref, ref).Scan(&id, &label)
+	case pageSubjectCrew:
+		err = h.db.QueryRowContext(ctx, `
+			SELECT id, slug FROM crews
+			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label)
+	case pageSubjectAgent:
+		err = h.db.QueryRowContext(ctx, `
+			SELECT id, slug FROM agents
+			WHERE workspace_id = ? AND (id = ? OR slug = ?) AND deleted_at IS NULL`, wsID, ref, ref).Scan(&id, &label)
+	default:
+		return "", "", false
+	}
+	if err != nil {
+		return "", "", false
+	}
+	return id, label, true
+}
+
+// grantRowMatchesSubject decides whether a stored grant is the one the caller
+// asked to revoke.
+//
+// Two ways in, and the second is the point: by the resolved id when the subject
+// still exists, and by the raw string the caller typed when it does not. A
+// departed user is revoked by the id or email the grant was issued under —
+// which is what an owner has in front of them, since it is what `page grants`
+// prints.
+func grantRowMatchesSubject(g pageGrantRecord, resolvedID, raw string) bool {
+	if resolvedID != "" && g.SubjectID == resolvedID {
+		return true
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	// The record carries only the stored id — the human label is resolved for
+	// display and is not on the row — so an id is what a fallback can match.
+	// `page grants` prints it, which is where an owner cleaning up after a
+	// departure gets it from.
+	return strings.EqualFold(g.SubjectID, raw)
 }

@@ -1,7 +1,9 @@
 package pages
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -326,6 +328,32 @@ func ParseDocument(raw []byte) (*Document, error) {
 	if err := dec.Decode(&doc); err != nil {
 		return nil, newError(CodeInvalidSpec, "", "%v", err)
 	}
+
+	// A YAML stream can carry more than one document, and decoding the first
+	// while ignoring the rest is the quietest way this function could lose
+	// somebody's work: `crewship page create --file` would exit zero, print
+	// nothing, and create one page out of four.
+	//
+	// That is reachable, and by our own hand — `crewship export page` with no
+	// slug emits every page in the workspace as one `---`-separated stream, and
+	// this is the documented way back in. Refusing costs nothing anyone wanted:
+	// nobody hands `page create` four pages and means one.
+	//
+	// A LEADING `---` is not a second document. yaml reads it as the start of
+	// the first, so a single-page export — which is also `---`-prefixed — still
+	// parses. Only a genuine second document reaches this branch.
+	var trailing Document
+	if err := dec.Decode(&trailing); err == nil {
+		return nil, newError(CodeInvalidSpec, "",
+			"this file carries more than one YAML document and a page spec is one page; "+
+				"split the stream and create each page separately")
+	} else if !errors.Is(err, io.EOF) {
+		// Not EOF and not a document either: the bytes after the first document
+		// are malformed. Saying so beats accepting the first half of a file the
+		// author believes was read whole.
+		return nil, newError(CodeInvalidSpec, "", "after the page document: %v", err)
+	}
+
 	if err := doc.Validate(); err != nil {
 		return nil, err
 	}

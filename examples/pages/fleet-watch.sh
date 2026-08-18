@@ -134,7 +134,7 @@ collect_clones() {
     up=$(systemctl show "crewship-ws@$n" -p ActiveEnterTimestamp --value 2>/dev/null || echo "")
     rows=$(jq -c \
       --arg c "crewship_$n" \
-      --arg p "80${n}$((8+0))" \
+      --arg p "808${n}" \
       --argjson h "$([ -n "$head" ]   && jq -Rn --arg x "$head"   '$x' || echo null)" \
       --argjson b "$([ -n "$branch" ] && jq -Rn --arg x "$branch" '$x' || echo null)" \
       --argjson u "$([ -n "$up" ]     && jq -Rn --arg x "$up"     '$x' || echo null)" \

@@ -826,6 +826,17 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// it cannot predict.
 	now := h.evaluator().Now().UTC().Format(time.RFC3339)
 
+	// What each panel's shape is BEFORE this edit. Read here rather than inside
+	// the transaction, and for the same reason the rollback path reads it here:
+	// livePanelShapes goes through h.db, and a read on the pool while this
+	// goroutine holds a write transaction is how SQLite deadlocks.
+	live, err := h.livePanelShapes(r.Context(), rec.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read live panel shapes", err)
+		return
+	}
+	dimmed := panelsToDim(base, resolved, live)
+
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin page update", err)
@@ -842,6 +853,26 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := reconcilePanels(r.Context(), tx, rec.ID, base, resolved, now); err != nil {
 		replyInternalError(w, h.logger, "reconcile page panels", err)
 		return
+	}
+	// A panel whose schema, producer or OWNING CREW changed keeps its row and
+	// loses its payloads — the same rule, through the same two functions, that
+	// a rollback has always applied (pages_versions.go).
+	//
+	// Owner is the one that is not merely tidiness: owner_crew_id IS the ACL
+	// (pages_authz.go), so re-pointing it re-points who may read every payload
+	// already in the ring. An edit that moved a panel from crew A to crew B
+	// handed B everything A had produced, and the page said nothing. Schema is
+	// the correctness half — a status.v1 payload under a metric.v1 panel is a
+	// panel rendering something its own contract does not describe.
+	//
+	// The two paths had two answers to one question, which is how this
+	// survived: the rollback path was written knowing it, the edit path was
+	// not, and each had passing tests.
+	if len(dimmed) > 0 {
+		if err := clearPanelRings(r.Context(), tx, rec.ID, dimmed); err != nil {
+			replyInternalError(w, h.logger, "clear payloads of redefined panels", err)
+			return
+		}
 	}
 	// A gate removed from the spec loses its rule here, in the same
 	// transaction that removed it. The rules are derived state; the spec is

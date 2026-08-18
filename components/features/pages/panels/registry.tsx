@@ -71,7 +71,21 @@ export function PanelRenderer(props: PanelProps) {
   const Component = sealed ? SealedPanel : resolvePanelComponent(props.panel?.schema)
   return (
     <ErrorBoundary
-      resetKeys={[props.panel?.id, props.panel?.schema, props.data?.state, sealed]}
+      // The payload's IDENTITY has to be in here, not just its state.
+      //
+      // A panel that threw once stayed broken: the id and schema never change,
+      // a live page pushes `state: "fresh"` over and over, and PanelCell keys
+      // the instance by panel id — so none of the four keys moved when a good
+      // payload replaced the bad one. The reader saw "This panel could not be
+      // rendered" until a full reload, long after the producer had fixed it.
+      resetKeys={[
+        props.panel?.id,
+        props.panel?.schema,
+        props.data?.state,
+        props.data?.provenance?.produced_at,
+        props.data?.provenance?.run_id,
+        sealed,
+      ]}
       fallbackRender={() => <PanelErrorPanel {...props} />}
     >
       <Component {...props} />

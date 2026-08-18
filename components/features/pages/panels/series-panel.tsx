@@ -595,13 +595,23 @@ function BarChart({
   const points = drawnAt.flatMap((s) => s.values).filter((v): v is number => v !== null)
   const max = Math.max(0, ...points)
   const min = Math.min(0, ...points)
-  const span = max - min || 1
+  // An all-zero series — "no errors in any bucket", an entirely ordinary push —
+  // makes max and min both 0. The old `|| 1` guard kept the arithmetic safe and
+  // put the answer in the wrong place: yOf(0) became PAD_TOP, so the zero line
+  // and every bar sat at the TOP of the chart with the plot empty beneath them.
+  // Same for an all-null payload.
+  //
+  // A degenerate domain has no shape to draw, so the honest rendering is a flat
+  // baseline on the floor with nothing above it.
+  const degenerate = max === min
+  const span = degenerate ? 1 : max - min
 
   const plotH = VIEW_H - PAD_TOP - AXIS_H
   const plotW = VIEW_W - PAD_L - PAD_R
   const groupW = plotW / labels.length
   const barW = Math.max(1, (groupW - GROUP_GAP) / series.length)
-  const yOf = (v: number) => PAD_TOP + ((max - v) / span) * plotH
+  const yOf = (v: number) =>
+    degenerate ? PAD_TOP + plotH : PAD_TOP + ((max - v) / span) * plotH
   const zeroY = yOf(0)
 
   return (

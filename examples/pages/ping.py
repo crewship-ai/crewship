@@ -194,10 +194,6 @@ def one_pass(history: dict[str, list[float | None]]) -> None:
         },
     )
 
-    # Five seconds is clear of the server's floor: §10b.3 allows 12 pushes
-    # a minute per panel with a burst of 30, and the write itself refuses
-    # anything inside two seconds. A tighter loop buys 429s, not data.
-    time.sleep(5)
 
 
 if __name__ == "__main__":

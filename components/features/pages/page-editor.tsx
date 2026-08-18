@@ -796,7 +796,15 @@ export function PageEditor({
   // way to lose a spec that was never on disk.
   const [confirmDiscard, setConfirmDiscard] = React.useState(false)
   const requestClose = () => {
-    if (dirty && !save.isPending) {
+    // `dirty || save.isPending`, not `dirty && !save.isPending`.
+    //
+    // The guard was skipped during a save — the one moment it is most needed.
+    // The Save button is disabled while pending, but the backdrop and Cancel
+    // are not, so: type a spec, Save, click Cancel, and the editor unmounts
+    // with the request still in flight. If the server then refuses it,
+    // setRefusal runs on an unmounted component (a no-op) and the buffer the
+    // author would have edited is gone — the #1563 rule this block cites.
+    if (dirty || save.isPending) {
       setConfirmDiscard(true)
       return
     }
