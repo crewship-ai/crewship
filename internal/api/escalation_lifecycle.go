@@ -11,11 +11,42 @@ package api
 // and the database disagreed on every timed-out escalation the system had ever
 // raised, and neither side said so.
 //
+// ── Two clocks, not one ───────────────────────────────────────────────────
+//
+// The first version of this file collapsed the agent's wait and the human's
+// answerability into ONE 300 s deadline, which made the approval queue expire
+// five minutes after it was raised: an operator who walked off to fetch an API
+// key came back to 409 for a question nobody had ever answered. They are two
+// different questions and they now have two different columns.
+//
+//	deadline_at         the AGENT's wait window (escalationAgentWait, 300 s).
+//	                    Bounds the sidecar's long poll and nothing else. When it
+//	                    passes, agent_gave_up_at is stamped, the agent is told to
+//	                    continue with an explicit warning, and THE ROW STAYS
+//	                    PENDING. An agent giving up is not a decision.
+//
+//	answer_deadline_at  the HUMAN's answerability window (escalationAnswerTTL,
+//	                    7 days). When THIS passes with no decision the row goes
+//	                    EXPIRED and any staged credential is disposed of.
+//
+// What happens to a late answer — a human resolving after the agent gave up —
+// is stated in ResolveEscalation and in docs/guides/harbormaster.mdx: the
+// resolution is recorded, an approved credential is activated so the NEXT run
+// has it, and the response says `agent_still_waiting: false` so the operator is
+// not left believing they unblocked the run that asked. The run is not resumed;
+// it ended minutes or days ago having been told, in writing, that it was
+// continuing without the answer.
+//
 // ── The vocabulary ────────────────────────────────────────────────────────
 //
 //	PENDING → RESOLVED    a human decided; `action` says approve/reject/redirect
-//	        → EXPIRED     the deadline passed and no human decided
+//	        → EXPIRED     the ANSWER deadline passed and no human decided
 //	        → CANCELLED   a human withdrew the question before deciding
+//
+// UNANSWERED is not in that list. It is a WIRE status only
+// (escalationWireUnanswered), the answer the long poll gives an agent whose
+// window closed while the question stayed open. Making it a row status would be
+// a fourth spelling of "still waiting for a human".
 //
 // RESOLVED is kept, not renamed to the audit's proposed ANSWERED, and
 // rejection stays in `action` rather than becoming a REJECTED status — see the
@@ -29,14 +60,15 @@ package api
 // question for approvals (internal/harbormaster/gate.go's deadline branch plus
 // internal/harbormaster/store_sweep.go):
 //
-//	1. THE WAITER. The long poll the sidecar is already blocked on knows the
-//	   deadline and flips the row when it passes, then answers EXPIRED. This is
-//	   what makes the agent's give-up and the row's state the SAME event rather
-//	   than two events that happen to agree.
-//	2. THE SWEEPER. A crashed sidecar leaves nobody waiting, so a background
-//	   ticker catches those rows, and the escalation read paths (list,
-//	   pending-count) sweep their own workspace first so no surface can show a
-//	   question as open past its deadline.
+//	1. THE WAITER. The long poll knows the AGENT's deadline, stamps
+//	   agent_gave_up_at when it passes and answers UNANSWERED. That records the
+//	   agent's give-up as the same event that ends its wait — which is the half
+//	   of the original design worth keeping — WITHOUT taking the question away
+//	   from the human.
+//	2. THE SWEEPER. The HUMAN's deadline is nobody's long poll, so it belongs to
+//	   a background ticker; the escalation read paths (list, pending-count) sweep
+//	   their own workspace first so no surface can show a question as open past
+//	   the point where it can still be answered.
 //
 // Every path funnels through expireEscalationRow, whose UPDATE is guarded on
 // status='PENDING'. The transition therefore happens exactly once no matter how
@@ -52,10 +84,13 @@ package api
 // blocked on a question is usually able to make progress without it, and
 // failing runs because a human was at lunch would make the escalation tool too
 // expensive to use. What is NOT acceptable is the old behaviour of doing that
-// silently, so the warning is mandatory on the wire, the row is terminal, and
-// the journal entry is severity=warn so it surfaces in the default
-// attention filter. Stated in docs/guides/harbormaster.mdx and
-// docs/cli/escalation.mdx.
+// silently, so the warning is mandatory on the wire and the journal entry is
+// severity=warn so it surfaces in the default attention filter. Stated in
+// docs/guides/harbormaster.mdx and docs/cli/escalation.mdx.
+//
+// What changed with the second clock is only what the ROW says while that
+// happens: the agent is told the same thing it was always told, and the
+// question stays open behind it.
 
 import (
 	"context"
@@ -79,26 +114,62 @@ const (
 	escalationStatusCancelled = "CANCELLED"
 )
 
+// escalationWireUnanswered is what the long poll tells an agent whose wait
+// window closed on a question that is STILL OPEN. It is deliberately not a row
+// status: nothing transitioned, so nothing may claim a transition. EXPIRED is
+// reserved for the row, and an agent handed "EXPIRED" for a question an
+// operator can still see and answer in the inbox would be reporting a state the
+// system is not in.
+const escalationWireUnanswered = "UNANSWERED"
+
 // escalationOutcomeContinuedWithWarning names what the agent does when its
 // question expires. It is a constant rather than a literal so the wire, the
 // journal and the docs cannot drift into describing different policies.
 const escalationOutcomeContinuedWithWarning = "continued_with_warning"
 
-// escalationExpiredWarning is the text handed to the agent in place of an
-// answer. It is deliberately imperative: an agent reading it should treat the
-// absence of a decision as a fact about the world, not as permission.
+// escalationExpiredWarning is the text handed to the agent when the row itself
+// reached a terminal state without a decision. It is deliberately imperative:
+// an agent reading it should treat the absence of a decision as a fact about
+// the world, not as permission.
 const escalationExpiredWarning = "No human answered before the deadline. Continue WITHOUT the answer you asked for: " +
 	"do not assume approval, state in your result that this question went unanswered, and avoid irreversible actions " +
 	"that depended on it."
 
-// escalationTTL is how long a raised escalation stays answerable. A var, not a
-// const, so tests can shrink it; production never reassigns it.
+// escalationUnansweredWarning is the text handed to the agent when ITS wait
+// window closed but the question is still open. Same instruction — continue,
+// do not assume approval — and one extra fact the agent needs: an answer may
+// still arrive, but not to this run. Without that sentence an agent that is
+// told "no answer yet" reasonably infers it should poll again or wait, which is
+// exactly the wait we just ended.
+const escalationUnansweredWarning = "No human answered within this agent's wait window. The question is still open " +
+	"for a human, but THIS run will not receive the answer — do not wait for it and do not ask again. Continue " +
+	"WITHOUT it: do not assume approval, state in your result that the question went unanswered, and avoid " +
+	"irreversible actions that depended on it."
+
+// escalationAgentWait is how long the AGENT waits — the bound on the sidecar's
+// long poll, and nothing else. A var, not a const, so tests can shrink it;
+// production never reassigns it.
 //
-// 300 s matches what internal/sidecar/query.go has always waited — but the
-// agreement is now structural rather than coincidental: the server writes
+// 300 s matches what internal/sidecar/query.go has always waited, and the
+// agreement is structural rather than coincidental: the server writes
 // deadline_at from this value and RETURNS it, and the sidecar bounds its poll
 // on what it was told. Changing this number moves both sides at once.
-var escalationTTL = 300 * time.Second
+var escalationAgentWait = 300 * time.Second
+
+// escalationAnswerTTL is how long the QUESTION stays answerable by a human —
+// the bound on the inbox item, not on the poll. A var for the same reason.
+//
+// 7 days is chosen against a person's calendar: a weekend plus a day either
+// side. It is three orders of magnitude larger than the agent's window because
+// it is measuring something else entirely, and the regression this replaced is
+// what a system looks like when those two numbers are the same number.
+//
+// Note the interaction with crewship_escalation_cap.go: PENDING rows now
+// persist for days rather than minutes, so a crew's backlog budget is consumed
+// until an operator actually answers. That is the behaviour that cap was
+// designed against ("unanswered demands on a person", self-healing as they are
+// resolved) — the five-minute window had been quietly refunding it.
+var escalationAnswerTTL = 7 * 24 * time.Hour
 
 // escalationSweepInterval is the background sweeper's tick. Generous on
 // purpose: the waiter already handles every escalation someone is actually
@@ -115,12 +186,19 @@ type expirableEscalation struct {
 	chatID      string
 	fromAgentID string
 	reason      string
-	// deadlineAt is the row's own deadline, carried so the expiry describes
-	// the deadline this question actually had rather than whatever
-	// escalationTTL happens to be when the sweep runs. A row raised under a
-	// different TTL must not be recorded as having expired under the current
+	// deadlineAt is the row's own ANSWER deadline, carried so the expiry
+	// describes the deadline this question actually had rather than whatever
+	// escalationAnswerTTL happens to be when the sweep runs. A row raised under
+	// a different TTL must not be recorded as having expired under the current
 	// one.
 	deadlineAt string
+	// credentialID is the staged PENDING_APPROVAL credential this question was
+	// raised to get approved, if any. Carried because a terminal transition MUST
+	// dispose of it: the resolve path is the only route that can activate or
+	// reject that row, and once the escalation is terminal that route answers
+	// 409 forever. Leaving it behind stranded an encrypted secret in the vault
+	// AND jammed its name against every later proposal.
+	credentialID string
 }
 
 // escalationTerminalError describes a refused transition out of a terminal
@@ -128,12 +206,96 @@ type expirableEscalation struct {
 func escalationTerminalError(status string) string {
 	switch status {
 	case escalationStatusExpired:
-		return "escalation expired — nobody answered before its deadline and the agent has already continued without it; raise a new one"
+		// Names the ANSWER deadline specifically. An operator who hits this
+		// after the agent's 300 s window would otherwise reasonably assume the
+		// two are the same deadline — which is exactly the confusion the second
+		// clock exists to remove.
+		return "escalation expired — nobody answered before its answer deadline and any staged credential has been discarded; raise a new one"
 	case escalationStatusCancelled:
 		return "escalation was cancelled — the question was withdrawn before it was decided"
 	default:
 		return "escalation already resolved"
 	}
+}
+
+// ─── disposing of a staged credential ─────────────────────────────────────
+
+// disposeStagedCredential retires the PENDING_APPROVAL credential a CREDENTIAL
+// escalation staged, when that escalation reaches a terminal state WITHOUT an
+// approval. It performs exactly what ResolveEscalation's reject arm performs —
+// status REJECTED plus deleted_at — because the outcome is the same outcome:
+// the secret was never approved and will never be usable.
+//
+// This exists because that reject arm used to be the ONLY disposal in the
+// system. Expiry and cancellation flipped the escalation and left the credential
+// alone, which produced the worst kind of leftover: an encrypted secret in the
+// vault that no route could activate (resolve answers 409 on a terminal row) and
+// no route could reject (same 409), while the live-name probe in
+// createPendingCredential counted it as a name in use — so every later proposal
+// of that name was refused and the agent was told to have a human type it in.
+// One unanswered question jammed auto-staging for that name permanently.
+//
+// Best-effort by design and idempotent through its status guard: the escalation
+// has already transitioned by the time this runs, so a missing or
+// already-disposed credential is a log line, never a failed transition. `reason`
+// names which terminal path did it, so the audit trail can tell a withdrawn
+// question from an unanswered one.
+func (h *QueryHandler) disposeStagedCredential(ctx context.Context, workspaceID, credentialID, reason string) {
+	if credentialID == "" {
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := h.db.ExecContext(ctx, `
+		UPDATE credentials
+		   SET status = 'REJECTED', deleted_at = ?, updated_at = ?
+		 WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL`,
+		now, now, credentialID, workspaceID)
+	if err != nil {
+		h.logger.Error("dispose staged credential", "error", err,
+			"credential_id", credentialID, "reason", reason)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Already approved, already disposed of, or never staged. Not a fault.
+		return
+	}
+	recordCredentialEventBestEffort(ctx, h.db, h.logger, credentialID,
+		AuditEventRejected, "", "", map[string]any{
+			"rejected_by": "system",
+			// The distinction an incident review needs: nobody decided against
+			// this secret, the question it was attached to stopped being
+			// answerable.
+			"disposed_reason": reason,
+		})
+	h.logger.Info("staged credential disposed with its escalation",
+		"credential_id", credentialID, "reason", reason)
+}
+
+// ─── the agent's clock: giving up is not a decision ───────────────────────
+
+// markAgentGaveUp stamps agent_gave_up_at on a still-PENDING escalation, then
+// reports whether this call was the one that stamped it.
+//
+// The stamp is the record that the agent stopped waiting — the honest half of
+// what the single-deadline design was trying to achieve. It is NOT a status
+// transition: the question is still open, still in the inbox, and still
+// answerable. Guarded on status='PENDING' and on the column still being NULL so
+// that a human who resolved in the same instant wins (no stamp is written for a
+// question that WAS answered) and a retried long poll cannot rewrite the
+// instant the agent actually left.
+func (h *QueryHandler) markAgentGaveUp(ctx context.Context, escalationID string, at time.Time) (bool, error) {
+	res, err := h.db.ExecContext(ctx, `
+		UPDATE escalations SET agent_gave_up_at = ?
+		 WHERE id = ? AND status = ? AND agent_gave_up_at IS NULL`,
+		at.UTC().Format(time.RFC3339), escalationID, escalationStatusPending)
+	if err != nil {
+		return false, fmt.Errorf("mark escalation %s agent-gave-up: %w", escalationID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("mark escalation %s agent-gave-up rows: %w", escalationID, err)
+	}
+	return n > 0, nil
 }
 
 // ─── the one transition function ──────────────────────────────────────────
@@ -169,6 +331,12 @@ func (h *QueryHandler) expireEscalationRow(ctx context.Context, row expirableEsc
 	if n == 0 {
 		return false, nil
 	}
+
+	// The question is terminal, so its staged secret can never be approved and
+	// can never be rejected through the resolve path. Dispose of it here, the
+	// same way a rejection would, or it becomes an unreachable encrypted row
+	// holding its name against every later proposal.
+	h.disposeStagedCredential(ctx, row.workspaceID, row.credentialID, "escalation expired unanswered")
 
 	// Drop the row out of "needs action". resolved_by is 'system' and the
 	// action is the expiry itself, so the inbox does not claim a human acted.
@@ -218,14 +386,21 @@ func (h *QueryHandler) expireEscalationRow(ctx context.Context, row expirableEsc
 
 // escalationDuePredicate is the SQL that finds questions whose time is up.
 //
-// datetime() on both sides rather than a bare string comparison: deadline_at is
+// answer_deadline_at, NOT deadline_at. The sweep is the HUMAN's clock: it
+// closes questions nobody is going to answer any more. deadline_at only ever
+// bounded the agent's poll, and sweeping on it is precisely the regression this
+// file was rewritten to remove — it expired the operator's inbox five minutes
+// after the agent asked.
+//
+// datetime() on both sides rather than a bare string comparison: the column is
 // TEXT, this package writes RFC3339 ('…T…Z') and other writers on this table
 // use SQLite's datetime('now') shape ('… …'). Those two orderings disagree
-// lexically — 'T' sorts after ' ' — so a raw `deadline_at <= ?` would silently
-// skip rows depending on who wrote them, which is a deadline that never fires.
-// It costs the index's range half; the leading status equality is what keeps
-// the scan proportional to what is still open rather than to all history.
-const escalationDuePredicate = `status = ? AND deadline_at IS NOT NULL AND datetime(deadline_at) <= datetime(?)`
+// lexically — 'T' sorts after ' ' — so a raw `answer_deadline_at <= ?` would
+// silently skip rows depending on who wrote them, which is a deadline that
+// never fires. It costs the index's range half; the leading status equality is
+// what keeps the scan proportional to what is still open rather than to all
+// history.
+const escalationDuePredicate = `status = ? AND answer_deadline_at IS NOT NULL AND datetime(answer_deadline_at) <= datetime(?)`
 
 // sweepExpiredEscalations expires every past-deadline PENDING escalation and
 // returns how many rows THIS call transitioned.
@@ -235,7 +410,8 @@ const escalationDuePredicate = `status = ? AND deadline_at IS NOT NULL AND datet
 // empty workspaceID sweeps everything and is the background sweeper's mode.
 func (h *QueryHandler) sweepExpiredEscalations(ctx context.Context, workspaceID string) (int, error) {
 	now := time.Now().UTC()
-	query := `SELECT id, workspace_id, crew_id, chat_id, from_agent_id, reason, COALESCE(deadline_at, '')
+	query := `SELECT id, workspace_id, crew_id, chat_id, from_agent_id, reason,
+			COALESCE(answer_deadline_at, ''), COALESCE(credential_id, '')
 		FROM escalations WHERE ` + escalationDuePredicate
 	args := []interface{}{escalationStatusPending, now.Format(time.RFC3339)}
 	if workspaceID != "" {
@@ -255,7 +431,8 @@ func (h *QueryHandler) sweepExpiredEscalations(ctx context.Context, workspaceID 
 	var due []expirableEscalation
 	for rows.Next() {
 		var e expirableEscalation
-		if err := rows.Scan(&e.id, &e.workspaceID, &e.crewID, &e.chatID, &e.fromAgentID, &e.reason, &e.deadlineAt); err != nil {
+		if err := rows.Scan(&e.id, &e.workspaceID, &e.crewID, &e.chatID, &e.fromAgentID, &e.reason,
+			&e.deadlineAt, &e.credentialID); err != nil {
 			rows.Close()
 			return 0, fmt.Errorf("sweep escalations scan: %w", err)
 		}
@@ -392,13 +569,13 @@ func (h *QueryHandler) CancelEscalation(w http.ResponseWriter, r *http.Request) 
 	// An absent body is fine — a reason is good manners, not a precondition.
 	_ = readJSON(r, &body)
 
-	var status, crewID, chatID, fromAgentID, fromSlug string
+	var status, crewID, chatID, fromAgentID, fromSlug, credentialID string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT e.status, e.crew_id, e.chat_id, e.from_agent_id, a.slug
+		SELECT e.status, e.crew_id, e.chat_id, e.from_agent_id, a.slug, COALESCE(e.credential_id, '')
 		FROM escalations e
 		JOIN agents a ON a.id = e.from_agent_id
 		WHERE e.id = ? AND e.workspace_id = ?`,
-		escalationID, workspaceID).Scan(&status, &crewID, &chatID, &fromAgentID, &fromSlug)
+		escalationID, workspaceID).Scan(&status, &crewID, &chatID, &fromAgentID, &fromSlug, &credentialID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// A foreign id is the same 404 as an unknown one — the
@@ -434,6 +611,12 @@ func (h *QueryHandler) CancelEscalation(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusConflict, "escalation is no longer pending")
 		return
 	}
+
+	// Withdrawing the question withdraws the proposal attached to it. Same
+	// disposal as an expiry and as a rejection, for the same reason: the resolve
+	// path is the only thing that can activate or reject a staged credential,
+	// and it now answers 409 for this row forever.
+	h.disposeStagedCredential(r.Context(), workspaceID, credentialID, "escalation cancelled by operator")
 
 	inbox.ResolveBySource(r.Context(), h.db, h.logger, "escalation", escalationID, "cancelled", actorID)
 

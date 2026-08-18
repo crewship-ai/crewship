@@ -140,20 +140,30 @@ PENDING → RESOLVED    a human decided; `action` is approve | reject | redirect
 
 Terminal is terminal: resolving or cancelling a row that already reached one of the three returns **409**, with a message naming the state it actually reached. `RESOLVED` was kept rather than renamed to `ANSWERED`, and rejection stays in the `action` column rather than becoming a fourth status — see `internal/database/migrations/20260813212851_escalation_deadline.sql` for why either change would have been a second spelling of "done".
 
-### The deadline is the server's
+### Two clocks: the agent's wait and the human's answer
 
-Every escalation is written with a `deadline_at` (`created_at` + 300 s), and the create response publishes it as `deadline_at` + `timeout_seconds`. The sidecar bounds its long poll on **what the server told it**, not on a constant of its own.
+An escalation is bounded twice, because it contains two different questions.
 
-That is the fix for a real disagreement: the agent used to give up after a hardcoded 300 s and continue, while the row stayed `PENDING` forever because nothing told the server the question had been abandoned. Two clocks, one of them invisible to the other.
+| Column | Bounds | Default | What running out means |
+|---|---|---|---|
+| `deadline_at` | the **agent's** long poll | 300 s | the agent stops waiting and continues with a warning; `agent_gave_up_at` is stamped. **The row stays `PENDING`.** |
+| `answer_deadline_at` | the **human's** answerability | 7 days | the row goes `EXPIRED`, and any staged credential is disposed of |
 
-Expiry is decided in two places, exactly as approval timeouts are:
+The create response publishes `deadline_at` + `timeout_seconds` (the agent's window — the sidecar bounds its long poll on **what the server told it**, not on a constant of its own) and `answer_deadline_at` separately, for the console and the CLI.
 
-1. **The waiter.** The long poll the agent is blocked on knows the deadline, flips the row when it passes, and answers `status: EXPIRED`. The wait ending and the row going terminal are now the *same event*, so they cannot disagree.
-2. **The sweeper.** `QueryHandler.StartEscalationExpirySweeper` runs every 60 s for rows whose sidecar died mid-wait, and every escalation read path (`escalation list`, `pending-count`) sweeps its own workspace first so no surface can show a question as open past its deadline.
+<Warning>
+An earlier build of this feature wrote **one** deadline and used it for both. The approval queue then expired 300 s after the agent asked: an operator saw the inbox item, walked off to fetch the API key, came back seven minutes later, clicked Approve — and got **409 expired** for a question nobody had ever answered. Do not collapse these two numbers. They measure a poll and a person.
+</Warning>
+
+The agent's clock is still server-owned, which was the real fix in the first version and is kept: the agent used to give up after a hardcoded 300 s while the row stayed `PENDING` forever because nothing told the server the question had been abandoned. Now the long poll ends on `deadline_at`, and the same event stamps `agent_gave_up_at` — a fact about the *run*, not a decision about the *question*.
+
+Expiry — the human's clock — is swept, exactly as approval timeouts are: `QueryHandler.StartEscalationExpirySweeper` runs every 60 s, and every escalation read path (`escalation list`, `pending-count`) sweeps its own workspace first so no surface can show a question as open past the point where it can still be answered.
 
 Every path goes through one compare-and-swap on `status = 'PENDING'`, so the transition — and its journal entry — happens exactly once no matter how many observers notice at the same moment. Losing that CAS at the deadline means a human decided in the same instant, and the waiter returns *their* decision rather than a false expiry.
 
-Rows with a NULL `deadline_at` (raised before the column existed) never expire. Back-filling them would retro-expire questions somebody may still intend to answer.
+Rows with a NULL `answer_deadline_at` (raised before the column existed) never expire. Back-filling them would retro-expire questions somebody may still intend to answer.
+
+One knock-on worth knowing: `PENDING` rows now persist for days rather than minutes, so a crew's routine-escalation backlog budget (`escalation.max_pending_per_crew`, default 10) is consumed until an operator actually answers. That is what that cap was designed against; the five-minute window had been quietly refunding it.
 
 ### What happens when nobody answers
 
@@ -161,19 +171,61 @@ Rows with a NULL `deadline_at` (raised before the column existed) never expire. 
 **The agent continues, with an explicit warning.** The run is not failed, it is not paused, and no default answer is invented.
 </Info>
 
-This was previously decided by omission — the client timed out and the agent proceeded in silence. It is now a stated policy with three visible parts:
+This was previously decided by omission — the client timed out and the agent proceeded in silence. It is now a stated policy, with two distinct wire answers because there are two distinct situations:
 
-- the wait response carries `status: EXPIRED`, an empty `resolution`, and a **mandatory** `warning` telling the agent to continue without the answer, not to assume approval, to say in its result that the question went unanswered, and to avoid irreversible actions that depended on it;
-- the row is terminal, with `resolved_by = 'system'` and a resolution string that reads as an expiry rather than a decision;
-- the journal entry is `peer.escalation` with `payload.state = "expired"`, `payload.agent_outcome = "continued_with_warning"` and **severity `warn`**, so it surfaces in the default "needs attention" filter. An operator finds out that a decision they meant to make was made for them by a clock.
+| Wire `status` | When | Row |
+|---|---|---|
+| `UNANSWERED` | the agent's window closed, the question is still open | `PENDING`, `still_open: true` |
+| `EXPIRED` | the answer deadline passed | terminal, `resolved_by = 'system'` |
+| `CANCELLED` | a human withdrew the question | terminal, `resolved_by = 'user'` |
+
+All three carry an empty `resolution` and a **mandatory** `warning` telling the agent to continue without the answer, not to assume approval, to say in its result that the question went unanswered, and to avoid irreversible actions that depended on it. `UNANSWERED` adds one more instruction — *do not wait for it and do not ask again* — because an agent told "no answer yet" would otherwise reasonably infer that it should keep waiting, which is the wait that just ended.
+
+`UNANSWERED` is a wire status only. It is deliberately **not** a row status: nothing transitioned, so nothing claims a transition, and an agent handed `EXPIRED` for a question an operator can still see and answer in their inbox would be reporting a state the system is not in.
+
+An expiry writes a `peer.escalation` journal entry with `payload.state = "expired"`, `payload.agent_outcome = "continued_with_warning"` and **severity `warn`**, so it surfaces in the default "needs attention" filter. An operator finds out that a decision they meant to make was made for them by a clock.
 
 Failing the run instead was considered and rejected: an agent blocked on a question can usually make progress without it, and failing runs because a human was at lunch makes the escalation tool too expensive for agents to use. What is not acceptable is doing any of that silently.
 
 The same warning discipline covers the degraded paths. If the sidecar loses the connection or gets a 5xx it answers `status: TIMEOUT` — it does not know the outcome, so it does not claim one — but it still carries a warning. `{"status":"TIMEOUT","resolution":""}` with nothing else reads to a model exactly like a question that was answered with silence.
 
+### Answering after the agent gave up
+
+This is the case the single-deadline design avoided by making everything expire at once, and it is now explicit. Resolving a `PENDING` escalation whose `agent_gave_up_at` is set **succeeds** — 200, not 409 — and the response says what it did and did not accomplish:
+
+```json
+{
+  "id": "esc_abc",
+  "status": "RESOLVED",
+  "action": "approve",
+  "agent_still_waiting": false,
+  "agent_gave_up_at": "2026-08-18T09:14:02Z",
+  "note": "Recorded, but nela stopped waiting at 2026-08-18T09:14:02Z and continued without this answer — that run will not receive it. The credential is now active in the vault, so the next run has it."
+}
+```
+
+**The run that asked is not resumed.** It was told in writing, minutes or days earlier, that it was continuing without the answer, and it has since finished; there is nothing left to deliver to, and reviving it would be a second, unannounced execution of work an operator already saw complete.
+
+What a late answer *does* accomplish is why it is still worth giving:
+
+- a `CREDENTIAL` approval activates the staged credential, so the **next** run has the secret and the agent does not have to ask again — which is exactly what the operator walking to the password manager was trying to achieve;
+- the decision is on the record, journaled with `payload.agent_still_waiting: false`, so "why did that agent proceed without my approval" is answerable from the resolution entry rather than only from a give-up hours earlier.
+
+The console and the CLI get `agent_gave_up_at` on every listed escalation for the same reason. A surface that shows the agent's deadline as the operator's countdown recreates the bug in the UI after it was fixed in the server.
+
 ### Cancelling vs rejecting
 
 `POST /api/v1/escalations/{id}/cancel` withdraws a question that stopped mattering. It is deliberately not `resolve --action reject`: a rejection is a decision the agent should act on ("no, do not do that"), while a cancellation says nobody ever considered it. Collapsing them would tell an agent it was refused when it was not. Cancellation is MANAGER+, journaled with the operator's user id and reason, and unblocks any waiting agent with the same "no answer" warning.
+
+### Staged credentials do not outlive their question
+
+A `CREDENTIAL` escalation may carry an agent's *proposal*: the value is encrypted into the vault up front as a `PENDING_APPROVAL` credential, and approving the escalation is one click rather than a human retyping a secret.
+
+That row is reachable through exactly one route — the escalation's resolve path (approve → `ACTIVE`, reject → `REJECTED` + `deleted_at`). So **every** terminal transition has to dispose of it, not just rejection. Expiry and cancellation now do, with the same `REJECTED` + `deleted_at` disposal and a `REJECTED` credential-audit event carrying `disposed_reason`.
+
+Before that, an expired or cancelled credential escalation left an encrypted secret that no route could activate and no route could reject, while the name-conflict probe counted it as a live name — so every later proposal of that name came back as a conflict and the agent was told to have a human type the value in by hand. One unanswered question jammed auto-staging for that name permanently.
+
+The probe itself is now keyed on reachability rather than on the row merely existing: a `PENDING_APPROVAL` credential conflicts only while a `PENDING` escalation still links it. A proposal whose question is still open genuinely is live and must still conflict; a proposal whose question is terminal is dead and is retired in passing.
 
 ## CLI
 
@@ -190,7 +242,7 @@ See [`crewship approvals`](/cli/approvals) for the full command surface. Pending
 The escalation side has the mirror set:
 
 ```bash
-crewship escalation list --crew backend --status PENDING     # DEADLINE column shows the answer-by time
+crewship escalation list --crew backend --status PENDING     # DEADLINE column shows the agent's wait window
 crewship escalation resolve <id> --action approve --resolution "yes"
 crewship escalation cancel  <id> --reason "the deploy was rolled back"   # withdraw, no decision
 crewship escalation sweep-expired                            # force the deadline sweep now

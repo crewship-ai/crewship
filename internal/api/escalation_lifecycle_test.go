@@ -47,9 +47,16 @@ func escLifecycleRig(t *testing.T) (*QueryHandler, *recordingEmitter, string, st
 	return h, rec, userID, wsID, crewID, agentID
 }
 
-// seedEscalationWithDeadline inserts one escalation in a chosen status with a
-// chosen deadline. A nil deadline is the legacy shape (pre-migration rows,
-// which must never expire).
+// seedEscalationWithDeadline inserts one escalation in a chosen status with
+// BOTH clocks set to the same instant — the agent's wait window and the human's
+// answerability window (see escalation_lifecycle.go). A nil deadline is the
+// legacy shape (pre-migration rows, which must never expire).
+//
+// Collapsing the two here is a deliberate choice for the cases below, which are
+// about what happens once a question is dead by every measure. The cases where
+// the two clocks DISAGREE — which is the normal production shape, 300 s against
+// 7 days — live in escalation_two_clocks_test.go, and that separation is why
+// this helper may keep its one argument.
 func seedEscalationWithDeadline(t *testing.T, h *QueryHandler, id, wsID, crewID, agentID, status string, deadline *time.Time) {
 	t.Helper()
 	var dl interface{}
@@ -57,9 +64,10 @@ func seedEscalationWithDeadline(t *testing.T, h *QueryHandler, id, wsID, crewID,
 		dl = deadline.UTC().Format(time.RFC3339)
 	}
 	execOrFatal(t, h.db, `INSERT INTO escalations
-		(id, workspace_id, crew_id, chat_id, from_agent_id, reason, type, status, deadline_at, created_at)
-		VALUES (?, ?, ?, 'lc-chat', ?, 'need a decision', 'TEXT', ?, ?, ?)`,
-		id, wsID, crewID, agentID, status, dl, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339))
+		(id, workspace_id, crew_id, chat_id, from_agent_id, reason, type, status,
+		 deadline_at, answer_deadline_at, created_at)
+		VALUES (?, ?, ?, 'lc-chat', ?, 'need a decision', 'TEXT', ?, ?, ?, ?)`,
+		id, wsID, crewID, agentID, status, dl, dl, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339))
 }
 
 func escStatus(t *testing.T, h *QueryHandler, id string) string {
@@ -634,9 +642,10 @@ func TestListEscalationsDoesNotClaimAnExpiredCredentialWasSubmitted(t *testing.T
 	h, _, userID, wsID, crewID, agentID := escLifecycleRig(t)
 	past := time.Now().UTC().Add(-time.Minute)
 	execOrFatal(t, h.db, `INSERT INTO escalations
-		(id, workspace_id, crew_id, chat_id, from_agent_id, reason, type, status, deadline_at, created_at)
-		VALUES ('lc-cred', ?, ?, 'lc-chat', ?, 'need STRIPE_API_KEY', 'CREDENTIAL', 'PENDING', ?, datetime('now'))`,
-		wsID, crewID, agentID, past.Format(time.RFC3339))
+		(id, workspace_id, crew_id, chat_id, from_agent_id, reason, type, status,
+		 deadline_at, answer_deadline_at, created_at)
+		VALUES ('lc-cred', ?, ?, 'lc-chat', ?, 'need STRIPE_API_KEY', 'CREDENTIAL', 'PENDING', ?, ?, datetime('now'))`,
+		wsID, crewID, agentID, past.Format(time.RFC3339), past.Format(time.RFC3339))
 
 	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/crews/"+crewID+"/escalations", nil), userID, wsID, "OWNER")
 	req.SetPathValue("crewId", crewID)
@@ -698,8 +707,10 @@ func TestSweepMatchesTheStoredTimestampFormat(t *testing.T) {
 		time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05"), // datetime('now') shape
 	} {
 		id := fmt.Sprintf("lc-fmt-%d", i)
+		// answer_deadline_at is the column the sweep predicate compares — the
+		// human's clock, not the agent's. Both shapes must be readable there.
 		execOrFatal(t, h.db, `INSERT INTO escalations
-			(id, workspace_id, crew_id, chat_id, from_agent_id, reason, type, status, deadline_at, created_at)
+			(id, workspace_id, crew_id, chat_id, from_agent_id, reason, type, status, answer_deadline_at, created_at)
 			VALUES (?, ?, ?, 'lc-chat', ?, 'r', 'TEXT', 'PENDING', ?, datetime('now'))`,
 			id, wsID, crewID, agentID, dl)
 	}

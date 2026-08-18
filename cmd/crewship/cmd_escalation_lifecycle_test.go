@@ -168,18 +168,28 @@ func TestAcceptance_EscalationList_StatusHelpNamesEveryState(t *testing.T) {
 	}
 }
 
-// The DEADLINE column: "when does this stop being answerable" is the question a
-// PENDING list is scanned for, and a null deadline (a row raised before
-// deadlines existed) must be visibly different from one that has passed.
-func TestAcceptance_EscalationList_ShowsDeadline(t *testing.T) {
+// The ANSWER BY column: "when does this stop being answerable" is the question
+// a PENDING list is scanned for, and the answer is `answer_deadline_at` — NOT
+// `deadline_at`, which bounds the agent's long poll and runs out in 300 s.
+// Printing the agent's clock in the operator's column is the console half of
+// the regression the two clocks fixed in the server, so this test pins that the
+// table shows the human's number and never the agent's.
+//
+// A null answer deadline (a row raised before the column existed) must be
+// visibly different from one that has passed.
+func TestAcceptance_EscalationList_ShowsAnswerDeadlineNotAgentDeadline(t *testing.T) {
 	bin := buildCrewshipBinary(t)
 	s := &escStub{listBody: `[
 		{"id":"esc_with","type":"DECISION","from_name":"Atlas","from_slug":"atlas",
 		 "reason":"ship it?","status":"PENDING","created_at":"2026-08-01T10:00:00Z",
-		 "deadline_at":"2026-08-01T10:05:00Z"},
+		 "deadline_at":"2026-08-01T10:05:00Z","answer_deadline_at":"2026-08-08T10:00:00Z"},
+		{"id":"esc_gone","type":"DECISION","from_name":"Atlas","from_slug":"atlas",
+		 "reason":"still open, agent left","status":"PENDING","created_at":"2026-08-01T09:00:00Z",
+		 "deadline_at":"2026-08-01T09:05:00Z","answer_deadline_at":"2026-08-08T09:00:00Z",
+		 "agent_gave_up_at":"2026-08-01T09:05:00Z"},
 		{"id":"esc_without","type":"DECISION","from_name":"Atlas","from_slug":"atlas",
 		 "reason":"older row","status":"PENDING","created_at":"2026-07-01T10:00:00Z",
-		 "deadline_at":null}
+		 "deadline_at":null,"answer_deadline_at":null}
 	]`}
 	srv := s.start(t)
 	defer srv.Close()
@@ -189,11 +199,21 @@ func TestAcceptance_EscalationList_ShowsDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "DEADLINE") {
-		t.Errorf("no DEADLINE column:\n%s", out)
+	if !strings.Contains(out, "ANSWER BY") {
+		t.Errorf("no ANSWER BY column:\n%s", out)
 	}
-	if !strings.Contains(out, "2026-08-01T10:05:00Z") {
-		t.Errorf("the deadline value is not rendered:\n%s", out)
+	if !strings.Contains(out, "2026-08-08T10:00:00Z") {
+		t.Errorf("the answer deadline is not rendered:\n%s", out)
+	}
+	// The agent's 300 s window must not appear as the operator's countdown.
+	if strings.Contains(out, "2026-08-01T10:05:00Z") {
+		t.Errorf("the table printed the AGENT's deadline as the operator's answer-by time:\n%s", out)
+	}
+	// A row the agent stopped waiting on is still PENDING and still worth
+	// answering, and the table must say which it is.
+	if !strings.Contains(out, "agent moved on") {
+		t.Errorf("a row with agent_gave_up_at is not marked, so an operator cannot tell that "+
+			"answering it will not reach the run that asked:\n%s", out)
 	}
 	// The null case must render as an explicit placeholder, not as an empty
 	// cell that reads like a deadline of "".

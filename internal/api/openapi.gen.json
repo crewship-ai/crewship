@@ -41680,6 +41680,14 @@
                         "nullable": true,
                         "type": "string"
                       },
+                      "agent_gave_up_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "answer_deadline_at": {
+                        "nullable": true,
+                        "type": "string"
+                      },
                       "context": {
                         "nullable": true,
                         "type": "string"
@@ -53379,7 +53387,16 @@
                     "action": {
                       "type": "string"
                     },
+                    "agent_gave_up_at": {
+                      "type": "string"
+                    },
+                    "agent_still_waiting": {
+                      "type": "boolean"
+                    },
                     "id": {
+                      "type": "string"
+                    },
+                    "note": {
                       "type": "string"
                     },
                     "status": {

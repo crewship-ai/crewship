@@ -336,11 +336,19 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 	// the client gave up, the agent proceeded without an answer, and the row
 	// stayed PENDING forever because nothing told crewshipd the question had
 	// been abandoned. The server now owns the deadline (escalations.deadline_at,
-	// returned as timeout_seconds/deadline_at on the create), expires the row
-	// when it passes, and answers this poll with status=EXPIRED plus an
-	// explicit warning. Giving the client a grace margin over the server's
-	// window is what makes the server's answer the one the agent hears —
-	// racing it would put us back to a silent client-side timeout.
+	// returned as timeout_seconds/deadline_at on the create), records the
+	// give-up when it passes, and answers this poll with an explicit warning.
+	// Giving the client a grace margin over the server's window is what makes
+	// the server's answer the one the agent hears — racing it would put us back
+	// to a silent client-side timeout.
+	//
+	// Nothing on this side changed when the server grew a SECOND clock. The
+	// window published on the create is still the agent's, this poll is still
+	// bounded by it, and the wait body is passed through verbatim — so the
+	// server's `status: UNANSWERED` (the question is still open for a human,
+	// but not for this run) reaches the agent without a client-side change.
+	// What did change is what the server does to the ROW at this instant: it no
+	// longer expires it. See internal/api/escalation_lifecycle.go.
 	waitTimeout := serverWaitWindow(createResult) + escalateWaitGrace
 	waitCtx, waitCancel := context.WithTimeout(r.Context(), waitTimeout)
 	defer waitCancel()
@@ -357,16 +365,19 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 	waitResp, err := escalateWaitClient.Do(waitReq)
 	if err != nil {
 		// The connection failed or this client gave up before the server
-		// answered. The server still owns the row and its sweeper will expire
-		// it, so this is TIMEOUT (we do not know the outcome) rather than
-		// EXPIRED (we do) — but the agent is told what that means either way.
+		// answered. The server still owns the row — and, since the two clocks
+		// split, it keeps the question OPEN for a human rather than expiring it
+		// on the agent's window. So this is TIMEOUT (we do not know the outcome)
+		// rather than a claim about the row's state, and the agent is told what
+		// that means either way.
 		writeJSONResponse(w, http.StatusOK, escalateGaveUp(escalationID))
 		return
 	}
 	defer waitResp.Body.Close()
 
-	// Non-200 (408, 404, 500). The server answers EXPIRED with a 200, so this
-	// is no longer the ordinary end of a wait — it is a genuine fault.
+	// Non-200 (408, 404, 500). The server answers UNANSWERED (and EXPIRED, and
+	// CANCELLED) with a 200, so this is no longer the ordinary end of a wait —
+	// it is a genuine fault.
 	if waitResp.StatusCode != http.StatusOK {
 		writeJSONResponse(w, http.StatusOK, escalateGaveUp(escalationID))
 		return

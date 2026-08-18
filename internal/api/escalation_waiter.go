@@ -131,7 +131,8 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 	scoped := func() (escalationWaitRow, error) {
 		var row escalationWaitRow
 		query := `SELECT status, type, resolution, action, redirect_to, deadline_at,
-			         workspace_id, crew_id, chat_id, from_agent_id, reason
+			         workspace_id, crew_id, chat_id, from_agent_id, reason,
+			         COALESCE(answer_deadline_at, ''), COALESCE(credential_id, '')
 			  FROM escalations WHERE id = ?`
 		args := []interface{}{escalationID}
 		if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" {
@@ -143,9 +144,13 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 		}
 		err := h.db.QueryRowContext(r.Context(), query, args...).
 			Scan(&row.status, &row.escalationType, &row.resolution, &row.action, &row.redir, &row.deadline,
-				&row.scope.workspaceID, &row.scope.crewID, &row.scope.chatID, &row.scope.fromAgentID, &row.scope.reason)
+				&row.scope.workspaceID, &row.scope.crewID, &row.scope.chatID, &row.scope.fromAgentID, &row.scope.reason,
+				&row.scope.deadlineAt, &row.scope.credentialID)
 		row.scope.id = escalationID
-		row.scope.deadlineAt = row.deadline.String
+		// row.deadline is the AGENT's window (what this poll waits on);
+		// row.scope.deadlineAt is the HUMAN's (what an expiry would describe).
+		// They are different columns and conflating them here is how the
+		// regression got written in the first place.
 		return row, err
 	}
 
@@ -207,14 +212,17 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// The server's own deadline, not the client's. Before this, the only clock
+	// The server's own deadline, not the client's, and specifically the AGENT's
+	// deadline_at — never answer_deadline_at. Before this existed the only clock
 	// in the picture was the sidecar's 300 s context: it expired, the agent
 	// proceeded without an answer, and the row stayed PENDING forever because
 	// nothing on this side ever learned that the question had been abandoned.
 	//
-	// Now the deadline is a column, the wait ends on it, and the SAME event
-	// that ends the wait writes the terminal status. The agent's belief and the
-	// database cannot disagree because there is only one event.
+	// Now the wait ends on a column, and the SAME event that ends the wait
+	// records the give-up (agent_gave_up_at). What that event does NOT do any
+	// more is close the question: the human's clock is a different column with
+	// days on it, and the version of this file that expired the row here made
+	// the approval queue unusable — 409 for questions nobody had answered.
 	//
 	// A row with no deadline (raised before the column existed) keeps the old
 	// shape: block until the client gives up, and answer TIMEOUT. That is not a
@@ -247,32 +255,67 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 			"redirect_to": result.RedirectTo,
 		})
 	case <-deadlineC:
-		// Flip the row, then answer whatever actually happened. Losing the CAS
-		// means a human decided in the same instant, and reporting an expiry
-		// for a question that WAS answered would corrupt the trail in exactly
-		// the direction this change exists to fix — so re-read and hand back
-		// their decision instead.
+		// The AGENT's window closed. Re-read FIRST: a human may have decided in
+		// the same instant, and `select` picks at random between a ready channel
+		// and a ready timer, so reporting "no answer" without looking would
+		// throw away a decision that had already been made. If the row is
+		// terminal, hand back whatever it actually holds.
 		//
 		// The write runs on a detached, bounded context: r.Context() may be
-		// cancelled the moment we answer, and a transition that half-committed
-		// because the client hung up is the failure mode the sweeper would
-		// then have to clean up.
+		// cancelled the moment we answer, and a half-committed stamp because the
+		// client hung up is a failure mode nothing would clean up.
 		bgCtx, bgCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 		defer bgCancel()
-		flipped, expErr := h.expireEscalationRow(bgCtx, row.scope, time.Now())
-		if expErr != nil {
-			h.logger.Error("wait escalation: expire at deadline", "error", expErr, "escalation_id", escalationID)
-		}
-		if flipped {
-			writeJSON(w, http.StatusOK, escalationNoAnswerBody(escalationStatusExpired))
-			return
-		}
+
 		settled, rerr := scoped()
 		if rerr != nil {
 			replyInternalError(w, h.logger, "wait escalation deadline re-read", rerr)
 			return
 		}
-		h.replyWithSettledEscalation(w, escalationID, settled)
+		if settled.status != escalationStatusPending {
+			h.replyWithSettledEscalation(w, escalationID, settled)
+			return
+		}
+
+		// Still PENDING — but is it still ANSWERABLE? A row whose human
+		// deadline has also passed is one the sweeper has not reached yet (it
+		// ticks at 60 s and the read paths only sweep on a read). Telling the
+		// agent the question is still open would be false, so settle it here on
+		// the same CAS every other observer uses, and disposal of any staged
+		// credential comes along with it.
+		if answerDue(settled.scope.deadlineAt, time.Now()) {
+			flipped, expErr := h.expireEscalationRow(bgCtx, settled.scope, time.Now())
+			if expErr != nil {
+				h.logger.Error("wait escalation: expire at answer deadline", "error", expErr, "escalation_id", escalationID)
+			}
+			if flipped {
+				writeJSON(w, http.StatusOK, escalationNoAnswerBody(escalationStatusExpired))
+				return
+			}
+			// Lost the CAS: somebody decided in the same instant. Their answer,
+			// not our expiry.
+			if again, aerr := scoped(); aerr == nil {
+				h.replyWithSettledEscalation(w, escalationID, again)
+				return
+			}
+		}
+
+		// Still open. Record that this agent stopped waiting — a fact about the
+		// run, not a decision about the question — and tell it so. The row stays
+		// PENDING and stays in the operator's inbox; whoever comes back from the
+		// password manager in seven minutes can still click Approve, and their
+		// approval will still put the credential in the vault. It just will not
+		// reach this run, which is what escalationUnansweredWarning says.
+		//
+		// The stamp is CAS-guarded on status='PENDING', so a human who resolved
+		// between the re-read and here wins and no give-up is recorded for a
+		// question that was in fact answered.
+		if _, markErr := h.markAgentGaveUp(bgCtx, escalationID, time.Now()); markErr != nil {
+			h.logger.Error("wait escalation: mark agent gave up", "error", markErr, "escalation_id", escalationID)
+		}
+		h.logger.Info("escalation wait window closed; question stays open",
+			"escalation_id", escalationID, "crew_id", row.scope.crewID)
+		writeJSON(w, http.StatusOK, escalationNoAnswerBody(escalationWireUnanswered))
 	case <-r.Context().Done():
 		writeJSON(w, http.StatusRequestTimeout, map[string]string{
 			"status": "TIMEOUT",
@@ -284,10 +327,22 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 // escalationNoAnswerBody is what an agent gets instead of an answer. The
 // warning is mandatory: continuing without a human decision is allowed, doing
 // so silently is the defect.
+//
+// Three shapes, and the difference between them matters to the model reading
+// it. EXPIRED and CANCELLED are terminal — the question is gone, nothing more
+// is coming, and a later run asking again is asking something new. UNANSWERED
+// is not terminal: the question is still in a human's inbox and may well be
+// answered, just not to this run. `still_open` carries that so an agent (or a
+// CLI rendering the response) does not have to infer it from the status string.
 func escalationNoAnswerBody(status string) map[string]interface{} {
 	warning := escalationExpiredWarning
-	if status == escalationStatusCancelled {
+	stillOpen := false
+	switch status {
+	case escalationStatusCancelled:
 		warning = "The question was withdrawn by a human before it was decided. Continue without an answer and do not assume approval."
+	case escalationWireUnanswered:
+		warning = escalationUnansweredWarning
+		stillOpen = true
 	}
 	return map[string]interface{}{
 		"status":       status,
@@ -295,7 +350,23 @@ func escalationNoAnswerBody(status string) map[string]interface{} {
 		"action":       "",
 		"warning":      warning,
 		"agent_action": escalationOutcomeContinuedWithWarning,
+		"still_open":   stillOpen,
 	}
+}
+
+// answerDue reports whether a human answer deadline has passed. An empty or
+// unparseable value is NOT due: "no deadline" and "a deadline I cannot read"
+// must both leave the question answerable, because the alternative is expiring
+// a row on the strength of a string nobody could interpret.
+func answerDue(answerDeadline string, now time.Time) bool {
+	if answerDeadline == "" {
+		return false
+	}
+	at, err := parseEscalationDeadline(answerDeadline)
+	if err != nil {
+		return false
+	}
+	return !at.After(now)
 }
 
 // parseEscalationDeadline accepts both timestamp shapes this table carries:

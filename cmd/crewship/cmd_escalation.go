@@ -93,9 +93,14 @@ var escalationListCmd = &cobra.Command{
 			ResolvedAt         *string `json:"resolved_at"`
 			CreatedAt          string  `json:"created_at"`
 			CredentialID       *string `json:"credential_id"`
-			// DeadlineAt is when an unanswered question stops being
-			// answerable. Null on rows raised before deadlines existed.
-			DeadlineAt *string `json:"deadline_at"`
+			// The two clocks. DeadlineAt bounds the AGENT's long poll;
+			// AnswerDeadlineAt is when the question stops being answerable
+			// by a human, and AgentGaveUpAt says the asking run already
+			// continued without an answer. Null on rows raised before the
+			// respective columns existed.
+			DeadlineAt       *string `json:"deadline_at"`
+			AnswerDeadlineAt *string `json:"answer_deadline_at"`
+			AgentGaveUpAt    *string `json:"agent_gave_up_at"`
 		}
 		if err := cli.ReadJSON(resp, &escalations); err != nil {
 			return err
@@ -118,11 +123,14 @@ var escalationListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		// DEADLINE is on the table, not just in the JSON: "when does this stop
-		// being answerable" is the question an operator scanning a list of
-		// PENDING rows most needs answered, and a column nobody can see is
-		// indistinguishable from a deadline that does not exist.
-		headers := []string{"ID", "TYPE", "FROM", "REASON", "STATUS", "DEADLINE", "CREATED"}
+		// ANSWER BY, not DEADLINE. "When does this stop being answerable" is
+		// the question an operator scanning PENDING rows most needs answered,
+		// and the column used to print `deadline_at` — which bounds the
+		// AGENT's long poll and runs out in 300 s. An operator reading that as
+		// their own countdown is the console half of the bug the two clocks
+		// fixed in the server, so the table shows the human's clock and the
+		// agent's give-up is annotated on the status instead.
+		headers := []string{"ID", "TYPE", "FROM", "REASON", "STATUS", "ANSWER BY", "CREATED"}
 		var rows [][]string
 		for _, e := range escalations {
 			reason := e.Reason
@@ -130,8 +138,14 @@ var escalationListCmd = &cobra.Command{
 				reason = reason[:47] + "..."
 			}
 			deadline := "—"
-			if e.DeadlineAt != nil && *e.DeadlineAt != "" {
-				deadline = *e.DeadlineAt
+			if e.AnswerDeadlineAt != nil && *e.AnswerDeadlineAt != "" {
+				deadline = *e.AnswerDeadlineAt
+			}
+			// Still answerable, and answering is still worth doing — but the
+			// run that asked has moved on and will not receive it.
+			status := e.Status
+			if e.AgentGaveUpAt != nil && *e.AgentGaveUpAt != "" && e.Status == "PENDING" {
+				status += " (agent moved on)"
 			}
 			// #1199: show the full ID. Escalation IDs are short cuids
 			// (~21 chars), not "absurdly long" — truncating them here
@@ -139,7 +153,7 @@ var escalationListCmd = &cobra.Command{
 			// `escalation resolve` at all (false 404), since the
 			// resolve endpoint requires an exact ID and there's no
 			// prefix-matching fallback like `mission get` has.
-			rows = append(rows, []string{e.ID, e.Type, e.FromSlug, reason, e.Status, deadline, e.CreatedAt})
+			rows = append(rows, []string{e.ID, e.Type, e.FromSlug, reason, status, deadline, e.CreatedAt})
 		}
 		return f.Auto(escalations, headers, rows)
 	},
@@ -194,9 +208,21 @@ var escalationResolveCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
+		// The server says whether the answer reached the run that asked. A
+		// decision made after the agent's wait window closed is still recorded
+		// and a staged credential is still activated — but the operator must
+		// not walk away thinking they unblocked that run, so the note is
+		// printed rather than swallowed with the body.
+		var out struct {
+			AgentStillWaiting *bool  `json:"agent_still_waiting"`
+			Note              string `json:"note"`
+		}
+		_ = cli.ReadJSON(resp, &out)
 
 		cli.PrintSuccess(fmt.Sprintf("Escalation %s resolved.", args[0]))
+		if out.Note != "" {
+			fmt.Println(out.Note)
+		}
 		return nil
 	},
 }
@@ -262,12 +288,19 @@ Examples:
 // acceptance test drives it through the binary.
 var escalationSweepExpiredCmd = &cobra.Command{
 	Use:   "sweep-expired",
-	Short: "Expire every escalation whose deadline has passed",
-	Long: `Move every past-deadline PENDING escalation in this workspace to EXPIRED.
+	Short: "Expire every escalation whose answer deadline has passed",
+	Long: `Move every PENDING escalation past its ANSWER deadline in this workspace to EXPIRED.
 
-An escalation that nobody answers before its deadline is terminal: the agent
-that asked has already continued WITHOUT the answer (with an explicit warning),
-so the row must stop claiming somebody might still decide it.
+An escalation carries two clocks: deadline_at bounds the agent's long poll
+(300 s), and answer_deadline_at is how long a human can still answer (7 days).
+Only the second one is swept. An agent giving up on a poll is not a human
+declining to answer, and expiring on the first is what once made "Approve"
+return 409 five minutes after an agent asked.
+
+A question nobody answers before its ANSWER deadline is terminal: the row must
+stop claiming somebody might still decide it, and a CREDENTIAL escalation
+disposes of its staged credential on the way out so no unreachable secret is
+left in the vault.
 
 The server sweeps on its own timer and on every escalation read, so this is a
 diagnostic and a forcing function, not routine maintenance. ADMIN+.

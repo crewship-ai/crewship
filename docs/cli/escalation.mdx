@@ -16,13 +16,28 @@ An escalation is a question an agent asked a human and blocked on. It has one no
 
 ```
 PENDING → RESOLVED    a human decided; --action says approve | reject | redirect
-        → EXPIRED     the deadline passed and no human decided
+        → EXPIRED     the ANSWER deadline passed and no human decided
         → CANCELLED   a human withdrew the question before deciding
 ```
 
 Terminal is terminal. Resolving or cancelling a row that already reached one of the three returns **409** naming the state it actually reached — an `EXPIRED` escalation no longer reports itself as "already resolved", which used to tell an operator somebody had decided it when nobody had.
 
-Every escalation is raised with a **deadline** (300 s), and the agent's wait is bounded by that deadline rather than by a timeout of its own. When it passes with no answer, the row becomes `EXPIRED` and the agent **continues without the answer, having been explicitly told so** — see [Harbormaster → What happens when nobody answers](/guides/harbormaster#what-happens-when-nobody-answers) for the full policy and why the run is not failed instead.
+### Two deadlines, and only one of them is yours
+
+Every escalation carries two:
+
+| Field | Bounds | Default |
+|---|---|---|
+| `deadline_at` | how long the **agent** waits on its long poll | 300 s |
+| `answer_deadline_at` | how long **you** can still answer | 7 days |
+
+When `deadline_at` passes, the agent stops waiting and continues without the answer, having been explicitly told so — see [Harbormaster → What happens when nobody answers](/guides/harbormaster#what-happens-when-nobody-answers). **The row stays `PENDING` and you can still answer it.** Only `answer_deadline_at` makes it `EXPIRED`.
+
+<Warning>
+An earlier build used the agent's 300 s for both, so the approval queue expired five minutes after an agent asked and `escalation resolve` answered **409 expired** for questions nobody had ever answered. If you see that on an old row, it is that bug, not a decision.
+</Warning>
+
+`agent_gave_up_at` (in `--format json`) tells you the agent already moved on. Answering is still worthwhile — an approved credential proposal lands in the vault for the next run — but the run that asked will not receive it. `escalation resolve` prints that as a note.
 
 ## `crewship escalation list`
 
@@ -37,7 +52,7 @@ Lists escalations under one crew via `GET /api/v1/crews/{crewId}/escalations`. `
 
 Table columns: `ID`, `TYPE`, `FROM`, `REASON` (50-char truncated), `STATUS`, `DEADLINE`, `CREATED`. `DEADLINE` prints `—` for rows raised before deadlines existed; those never expire.
 
-Listing also settles any past-deadline question in the workspace before it answers, so the list can never show a row as `PENDING` past its own deadline.
+Listing also settles any past-**answer**-deadline question in the workspace before it answers, so the list can never show a row as `PENDING` past the point where you could still act on it. A row past its *agent* deadline is untouched — it is still yours to answer.
 
 ```bash
 crewship escalation list --crew backend-team
@@ -65,6 +80,8 @@ crewship escalation resolve esc_abc --action redirect --redirect-to viktor
 ```
 
 Prints `Escalation <id> resolved.` on success.
+
+Resolving works even after the agent stopped waiting — that is the point of the two deadlines. When it does, the response carries `agent_still_waiting: false` and a note naming what the answer did and did not accomplish: the decision is recorded and an approved credential proposal is activated in the vault for the next run, but the run that asked has already finished without it and is not resumed.
 
 Resolving a `CREDENTIAL` escalation is refused with **403** when the caller is
 recorded as the owner of the agent that raised it — including a workspace OWNER,
@@ -102,7 +119,9 @@ Any agent still waiting is unblocked immediately with an explicit "no answer" wa
 
 ## `crewship escalation sweep-expired`
 
-`POST /api/v1/escalations/sweep-expired`. Moves every past-deadline `PENDING` escalation in this workspace to `EXPIRED`, and prints how many moved. **ADMIN+** — it writes terminal states.
+`POST /api/v1/escalations/sweep-expired`. Moves every `PENDING` escalation in this workspace past its **`answer_deadline_at`** to `EXPIRED`, and prints how many moved. **ADMIN+** — it writes terminal states.
+
+The agent's `deadline_at` is not swept and never was grounds to expire a row: an agent giving up on a poll is not a human declining to answer. A `CREDENTIAL` escalation that does expire here disposes of its staged credential the way a rejection does, so no unreachable secret is left in the vault.
 
 ```bash
 crewship escalation sweep-expired                   # prints "2"

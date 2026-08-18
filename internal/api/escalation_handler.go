@@ -95,11 +95,19 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	escalationID := generateCUID()
 	raisedAt := time.Now().UTC()
 	now := raisedAt.Format(time.RFC3339)
-	// Every question gets an answer-by time, written here and published in the
-	// response so the agent's wait is bounded by the SERVER's clock. The
-	// sidecar used to pick its own 300 s that merely happened to match; the
-	// two now come from one place (escalationTTL) and cannot drift apart.
-	deadlineAt := raisedAt.Add(escalationTTL).Format(time.RFC3339)
+	// Two clocks, written here, because they answer two different questions
+	// (see escalation_lifecycle.go):
+	//
+	//   deadlineAt       how long the AGENT waits. Published in the response so
+	//                    the sidecar's poll is bounded by the SERVER's clock —
+	//                    it used to pick its own 300 s that merely happened to
+	//                    match, and the two now come from one place.
+	//   answerDeadlineAt how long a HUMAN may still answer. Days, not minutes:
+	//                    this is the one an operator who walked off to fetch an
+	//                    API key is racing, and making it the agent's number is
+	//                    what turned "Approve" into 409.
+	deadlineAt := raisedAt.Add(escalationAgentWait).Format(time.RFC3339)
+	answerDeadlineAt := raisedAt.Add(escalationAnswerTTL).Format(time.RFC3339)
 
 	escalationType := body.Type
 	if escalationType == "" {
@@ -187,9 +195,9 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at, deadline_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
-	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt)
+		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, credential_id, status, created_at, deadline_at, answer_deadline_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, credentialID, now, deadlineAt, answerDeadlineAt)
 	if err != nil {
 		h.logger.Error("create escalation", "error", err)
 		// Don't leave an orphaned PENDING_APPROVAL credential with no escalation
@@ -311,7 +319,12 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		// instant — but neither has to guess, which is what the old hardcoded
 		// 300 s amounted to.
 		"deadline_at":     deadlineAt,
-		"timeout_seconds": int(escalationTTL.Seconds()),
+		"timeout_seconds": int(escalationAgentWait.Seconds()),
+		// The human's clock, published for the console and the CLI rather than
+		// for the sidecar — an operator looking at an inbox item needs to know
+		// how long it stays actionable, and the number they must NOT be shown is
+		// the agent's poll window.
+		"answer_deadline_at": answerDeadlineAt,
 	})
 }
 
@@ -364,18 +377,22 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 
 	var status, chatID, crewID, fromSlug, escalationType string
 	var credentialID, initiatorUserID sql.NullString
+	// agentGaveUpAt is set when the agent's wait window closed before a human
+	// answered. It does NOT block the resolve — that is the whole point of the
+	// two clocks — but it changes what the operator is told about the effect.
+	var agentGaveUpAt sql.NullString
 	// fromAgentID/fromAgentName: the agent that raised the escalation. Needed by
 	// the #1373 lease mint below — approving an agent-proposed credential is an
 	// approval, and an approval is what issues a lease.
 	var fromAgentID, fromAgentName string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type, e.credential_id, a.created_by_user_id,
-		       e.from_agent_id, COALESCE(a.name, '')
+		       e.from_agent_id, COALESCE(a.name, ''), e.agent_gave_up_at
 		FROM escalations e
 		JOIN agents a ON a.id = e.from_agent_id
 		WHERE e.id = ? AND e.workspace_id = ?
 	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType, &credentialID, &initiatorUserID,
-		&fromAgentID, &fromAgentName)
+		&fromAgentID, &fromAgentName, &agentGaveUpAt)
 
 	// Validate redirect_to agent exists in the same crew (after we know crew_id).
 	if err == nil && body.Action == "redirect" && body.RedirectTo != "" {
@@ -640,6 +657,12 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			"redirect_to":     body.RedirectTo,
 			"state":           "resolved",
 			"escalation_type": escalationType,
+			// Whether the decision reached the run that asked for it. An
+			// operator reconstructing "why did that agent proceed without my
+			// approval" needs this on the resolution entry, not only on the
+			// give-up that happened hours earlier.
+			"agent_still_waiting": agentGaveUpAt.String == "",
+			"agent_gave_up_at":    agentGaveUpAt.String,
 		},
 		Refs: map[string]any{"escalation_id": escalationID},
 	})
@@ -675,11 +698,40 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		"action", body.Action,
 	)
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"id":     escalationID,
-		"status": "RESOLVED",
-		"action": body.Action,
-	})
+	// What a LATE answer means, said out loud.
+	//
+	// The agent's wait and the human's answerability are two clocks now, so a
+	// decision can legitimately arrive after the run that asked has already
+	// continued without it. That resolve succeeds — refusing it was the
+	// regression — but the operator must not walk away believing they unblocked
+	// that run. They did not: it was told in writing, minutes or days ago, that
+	// it was proceeding without the answer, and it has since finished.
+	//
+	// What a late approval DOES accomplish is not nothing, and this is why the
+	// answer is still worth giving: the staged credential is now ACTIVE in the
+	// vault (above), so the next run has it and the agent does not have to ask
+	// again. For a TEXT or LINK escalation the record of the decision is the
+	// value — the next agent to ask the same question finds it answered.
+	agentStillWaiting := !agentGaveUpAt.Valid || agentGaveUpAt.String == ""
+	resp := map[string]any{
+		"id":                  escalationID,
+		"status":              "RESOLVED",
+		"action":              body.Action,
+		"agent_still_waiting": agentStillWaiting,
+	}
+	if !agentStillWaiting {
+		resp["agent_gave_up_at"] = agentGaveUpAt.String
+		note := fmt.Sprintf(
+			"Recorded, but %s stopped waiting at %s and continued without this answer — that run will not receive it.",
+			fromSlug, agentGaveUpAt.String)
+		if credentialID.Valid && credentialID.String != "" && body.Action == "approve" {
+			note += " The credential is now active in the vault, so the next run has it."
+		} else {
+			note += " The decision stands on the record for the next time it is asked."
+		}
+		resp["note"] = note
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ListEscalations handles GET /api/v1/crews/{crewId}/escalations.
@@ -722,11 +774,23 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		// activates it" (no secret to type).
 		CredentialID *string `json:"credential_id"`
 
-		// DeadlineAt is when an unanswered question stops being answerable.
-		// NULL on rows raised before deadlines existed, which is why it is a
-		// pointer and not a string: "no deadline" and "the epoch" are very
-		// different claims and the console must be able to tell them apart.
-		DeadlineAt *string `json:"deadline_at"`
+		// The two clocks, and the stamp that says which of them has run out.
+		//
+		// DeadlineAt bounds the AGENT's wait — the console should never present
+		// it as the operator's countdown, which is what the single-deadline
+		// version of this branch effectively did.
+		// AnswerDeadlineAt is when THIS question stops being answerable and the
+		// Approve button really will start refusing.
+		// AgentGaveUpAt, when set, means the asking run already continued
+		// without an answer: still answerable, but answering it will not reach
+		// that run. A console that shows the two as the same thing recreates the
+		// bug in the UI after it was fixed in the server.
+		//
+		// All pointers: NULL on rows raised before the columns existed, and "no
+		// deadline" and "the epoch" are very different claims.
+		DeadlineAt       *string `json:"deadline_at"`
+		AnswerDeadlineAt *string `json:"answer_deadline_at"`
+		AgentGaveUpAt    *string `json:"agent_gave_up_at"`
 
 		// The four-eyes rule as it will be applied to THIS row (issue #1559).
 		// ResolveEscalation decides it from two inputs the console could not
@@ -760,7 +824,8 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT e.id, e.type, e.reason, e.context, e.metadata, e.peer_conversation_id, e.status,
 		       e.resolution, e.action, e.redirect_to, e.resolved_by, e.resolved_at, e.created_at,
-		       e.credential_id, e.deadline_at, from_a.name, from_a.slug, from_a.created_by_user_id, c.security_level
+		       e.credential_id, e.deadline_at, e.answer_deadline_at, e.agent_gave_up_at,
+		       from_a.name, from_a.slug, from_a.created_by_user_id, c.security_level
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
 		LEFT JOIN credentials c ON c.id = e.credential_id AND c.workspace_id = e.workspace_id
@@ -787,7 +852,8 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			&item.ID, &item.Type, &item.Reason, &item.Context, &item.Metadata,
 			&item.PeerConversationID, &item.Status, &item.Resolution, &item.Action,
 			&item.RedirectTo, &item.ResolvedBy, &item.ResolvedAt, &item.CreatedAt,
-			&item.CredentialID, &item.DeadlineAt, &item.FromName, &item.FromSlug,
+			&item.CredentialID, &item.DeadlineAt, &item.AnswerDeadlineAt, &item.AgentGaveUpAt,
+			&item.FromName, &item.FromSlug,
 			&item.initiatorUserID, &item.securityLevel,
 		); err != nil {
 			replyInternalError(w, h.logger, "scan escalation", err)
