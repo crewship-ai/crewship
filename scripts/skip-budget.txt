@@ -68,5 +68,17 @@
 #                    SKIP-WAIVER(#1929); walIndexUnbuildable, the decision they
 #                    drive, now has a permission-free direct test that does run
 #                    as root.
+#
+# 2026-08-18  +8      The chat-surface branch (#1975). Seven guard a chmod 0555
+#                    that root ignores, so as uid 0 they would pass while
+#                    proving nothing; they exist because the container-write
+#                    fallback hangs on errors.Is(err, fs.ErrPermission) for the
+#                    error localfs really returns on EACCES, and until this
+#                    branch nothing tested that boolean. Two of the defects the
+#                    branch fixes were invisible for exactly that reason. The
+#                    eighth runs the real container delete script through the
+#                    host shell — the only way to catch `rm -f` refusing a
+#                    directory, which a mock exec reports as success. All eight
+#                    carry SKIP-WAIVER(#1977).
 
-125
+133

@@ -25,7 +25,7 @@
     "manifest_kinds": 20,
     "manifest_kinds_missing": 0,
     "docs_commands_missing": 0,
-    "docs_api_paths_missing": 1,
+    "docs_api_paths_missing": 0,
     "docs_environment_variables_missing": 0,
     "docs_manifest_kinds_missing": 0,
     "docs_flags_missing": 0
@@ -14753,6 +14753,7 @@
       "test_signals": [
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_journal_cov_test.go",
+        "cmd/crewship/cmd_journal_type_glob_test.go",
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/helper_parsed_params_test.go",
         "cmd/gen-openapi/query_params_test.go",
@@ -14778,6 +14779,7 @@
           "test_signals": [
             "cmd/crewship/cmd_format_sweep_batch4_test.go",
             "cmd/crewship/cmd_journal_cov_test.go",
+            "cmd/crewship/cmd_journal_type_glob_test.go",
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/helper_parsed_params_test.go",
             "cmd/gen-openapi/query_params_test.go",
@@ -14899,6 +14901,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_journal_cov_test.go",
+        "cmd/crewship/cmd_journal_type_glob_test.go",
         "cmd/crewship/cmd_watch_cov_test.go",
         "cmd/gen-openapi/helper_parsed_params_test.go",
         "internal/api/journal_handler_cov_test.go",
@@ -14924,6 +14927,7 @@
           "source_file": "cmd/gen-openapi/main.go",
           "test_signals": [
             "cmd/crewship/cmd_journal_cov_test.go",
+            "cmd/crewship/cmd_journal_type_glob_test.go",
             "cmd/crewship/cmd_watch_cov_test.go",
             "cmd/gen-openapi/helper_parsed_params_test.go",
             "internal/api/journal_handler_cov_test.go",
@@ -27559,6 +27563,7 @@
         "cmd/crewship/cmd_consolidate_test.go",
         "cmd/crewship/cmd_keeper_review_test.go",
         "cmd/crewship/cmd_pipeline_cov_test.go",
+        "cmd/crewship/cmd_run_yaml_metadata_test.go",
         "cmd/crewship/cmd_slash_fastpath_test.go"
       ],
       "flags": [
@@ -29984,7 +29989,7 @@
     {
       "path": "escalation sweep-expired",
       "use": "sweep-expired",
-      "short": "Expire every escalation whose deadline has passed",
+      "short": "Expire every escalation whose answer deadline has passed",
       "root": "escalation",
       "exact_docs": [
         "docs/cli/escalation.mdx"
@@ -35214,13 +35219,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_provision_cov_test.go",
+        "cmd/crewship/cmd_journal_type_glob_test.go",
         "cmd/crewship/cmd_keeper_auto_lease_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_eval_test.go",
         "cmd/crewship/cmd_keeper_foureyes_test.go",
         "cmd/crewship/cmd_keeper_hint_test.go",
-        "cmd/crewship/cmd_keeper_history_test.go",
         "…"
       ]
     },
@@ -39927,8 +39932,8 @@
         "cmd/crewship/cmd_doctor_test.go",
         "cmd/crewship/cmd_eval_compare_cov_test.go",
         "cmd/crewship/cmd_inspect_cov_test.go",
+        "cmd/crewship/cmd_journal_type_glob_test.go",
         "cmd/crewship/cmd_keeper_eval_test.go",
-        "cmd/crewship/cmd_keeper_hint_test.go",
         "…"
       ],
       "flags": [
@@ -41959,6 +41964,7 @@
         "cmd/crewship/cmd_run_insights_test.go",
         "cmd/crewship/cmd_run_metadata_test.go",
         "cmd/crewship/cmd_run_provenance_cov_test.go",
+        "cmd/crewship/cmd_run_yaml_metadata_test.go",
         "cmd/crewship/cmd_runtimes_cov_test.go",
         "cmd/crewship/cmd_runtimes_test.go"
       ]
@@ -41981,6 +41987,7 @@
         "cmd/crewship/cmd_run_insights_test.go",
         "cmd/crewship/cmd_run_metadata_test.go",
         "cmd/crewship/cmd_run_provenance_cov_test.go",
+        "cmd/crewship/cmd_run_yaml_metadata_test.go",
         "cmd/crewship/cmd_runtimes_cov_test.go",
         "cmd/crewship/cmd_runtimes_test.go"
       ],
@@ -44166,6 +44173,7 @@
       "exact_docs": [
         "docs/cli/activity.mdx",
         "docs/cli/ai-workflows.mdx",
+        "docs/cli/journal.mdx",
         "docs/cli/overview.mdx",
         "docs/cli/tui.mdx",
         "docs/cli/wait.mdx",
@@ -44177,6 +44185,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_provision_cov_test.go",
+        "cmd/crewship/cmd_journal_type_glob_test.go",
         "cmd/crewship/cmd_presence_cov_test.go",
         "cmd/crewship/cmd_watch_cov_test.go",
         "cmd/crewship/watch_wrap_cov_test.go"
@@ -46503,23 +46512,15 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4158,
-    "api_path_references": 2076,
+    "command_references": 4160,
+    "api_path_references": 2075,
     "environment_references": 421,
     "manifest_kind_references": 209,
     "flag_references": 1927,
     "missing_commands": 0,
-    "missing_api_paths": 1,
+    "missing_api_paths": 0,
     "missing_environment_variables": 0,
     "missing_manifest_kinds": 0,
-    "missing_flags": 0,
-    "missing": [
-      {
-        "kind": "API path",
-        "symbol": "/api/v1/internal/escalations",
-        "doc": "docs/api-reference/crews.mdx",
-        "line": 1151
-      }
-    ]
+    "missing_flags": 0
   }
 }

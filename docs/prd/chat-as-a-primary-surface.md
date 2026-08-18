@@ -909,6 +909,26 @@ answered is rendered as something that is not there.
   `components/features/chat/scope-fetch.tsx` so they cannot drift, a count that
   could not be read shows an em dash rather than a confident zero, and the
   error renders under the agent row without needing to expand it.
+- **A crew folder opened onto nothing, permanently.** The crew scope drew the
+  listing with `loadingDirs={new Set()}` and a toggle that only wrote to
+  `expanded` — nothing ever fetched a directory's children, and
+  `buildTopLevelTree` marks every directory `childrenLoaded: false`. The top
+  level of `<crewId>/` is mostly directories, one per agent slug, so this was
+  the common case: chevron turns, zero rows, no spinner, no error. It now
+  fetches on expand through the same watcher shape the agent scope uses
+  (`files/crew-files-scope.tsx`), and a directory whose fetch fails closes again
+  with the status named rather than sitting open looking empty — the empty-crew
+  lie one level down.
+- **A file was read from one tree and would have been written to another.** The
+  crew scope listed `/crews/{crewId}/files` (keys `<crewId>/…`) and handed the
+  click to the *agent* editor, so every shared file toasted "Failed to load
+  file": `proxy_files.go` rejects a `<crewId>/` path that is not under
+  `<crewId>/<slug>/`. The read failing loudly was the mild half — a path that
+  had passed that prefix test would have been saved into the agent's private
+  tree. The editor now takes the tree as a required argument, stores it with the
+  open file, and builds both URLs from that one stored value
+  (`hooks/use-file-editor.ts`), so there is no code path left that can read one
+  tree and write another.
 - **The tree's fan-out cap does it on purpose.** An agent past the twelfth
   enters neither the thread map nor the error map
   (`chat-tree-sidebar.tsx:299`), so it misses the honest-failure path the same
