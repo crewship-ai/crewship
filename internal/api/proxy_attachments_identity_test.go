@@ -47,6 +47,11 @@ type fakeCrewFileStore struct {
 	// deletes records every ?path= the delete route asked for, so a test can
 	// assert WHAT was unlinked and not merely that something was.
 	deletes []string
+	// deleteStatus, when >= 400, is what the delete half answers instead of
+	// removing anything — the storage layer refusing the unlink (a provisioned
+	// tree the server uid cannot write, a stopped crew that owns it).
+	deleteStatus int
+	deleteBody   string
 }
 
 func newFakeCrewFileStore() *fakeCrewFileStore {
@@ -65,18 +70,27 @@ func (s *fakeCrewFileStore) handler() http.Handler {
 			s.mu.Unlock()
 			writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/files/delete"):
-			// RemoveAll semantics, like the storage provider behind the real
-			// route: a path that names a directory takes everything under it,
-			// and a path that names nothing is still a success.
 			s.mu.Lock()
-			delete(s.files, p)
-			for k := range s.files {
-				if strings.HasPrefix(k, p+"/") {
-					delete(s.files, k)
+			status, errBody := s.deleteStatus, s.deleteBody
+			// Recorded whatever the answer is, so a test can tell a removal
+			// that was REFUSED from one that was never attempted.
+			s.deletes = append(s.deletes, p)
+			if status < 400 {
+				// RemoveAll semantics, like the storage provider behind the
+				// real route: a path that names a directory takes everything
+				// under it, and a path that names nothing is still a success.
+				delete(s.files, p)
+				for k := range s.files {
+					if strings.HasPrefix(k, p+"/") {
+						delete(s.files, k)
+					}
 				}
 			}
-			s.deletes = append(s.deletes, p)
 			s.mu.Unlock()
+			if status >= 400 {
+				writeJSON(w, status, map[string]string{"error": errBody})
+				return
+			}
 			writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		default:
 			http.Error(w, "unexpected IPC call "+r.Method+" "+r.URL.Path, http.StatusNotImplemented)

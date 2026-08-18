@@ -87,6 +87,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -261,9 +262,11 @@ const chatAttachmentPublishGrace = time.Hour
 // half of the population that has no file at all. The table is the authority, so
 // the table is the enumeration.
 //
-// Best-effort throughout, and ordered bytes-then-row for the same reason the
-// delete endpoint is: a row that outlives its bytes is visible and retryable, a
-// blob that outlives its row is neither.
+// Ordered bytes-then-row for the same reason the delete endpoint is, and GATED
+// on the unlink rather than merely sequenced after it: a row that outlives its
+// bytes is visible and retryable, a blob that outlives its row is neither. The
+// count returned is what was actually reclaimed — an attachment whose bytes
+// survived is not one of them.
 //
 // One limit, stated rather than discovered: it runs only where the collector
 // runs, and the collector needs a storage root (StartAttachmentBlobGC). On an
@@ -308,7 +311,15 @@ func reclaimUnpublishedChatAttachments(ctx context.Context, db *sql.DB, logger *
 		if err := ctx.Err(); err != nil {
 			return removed
 		}
-		removeChatAttachmentBlob(root, p.key, logger)
+		// The row is the ONLY thing that names these bytes — they are outside
+		// the content-addressed tree sweepAttachmentBlobs walks — so a failed
+		// unlink must stop here. Deleting the row anyway would turn a leak the
+		// next pass retries into one nothing can ever find. The blob stays, the
+		// row stays `pending` (invisible to every reader), and the hourly pass
+		// tries again; the warning is already logged one level down.
+		if err := removeChatAttachmentBlob(root, p.key, logger); err != nil {
+			continue
+		}
 		if _, err := db.ExecContext(ctx,
 			`DELETE FROM attachments WHERE id = ? AND state <> ?`, p.id, attachmentStateStored); err != nil {
 			if logger != nil && !errors.Is(err, context.Canceled) {
@@ -328,21 +339,45 @@ func reclaimUnpublishedChatAttachments(ctx context.Context, db *sql.DB, logger *
 // removeChatAttachmentBlob unlinks one chat attachment's bytes from the local
 // storage root, and the directory that held them if it is now empty.
 //
+// It REPORTS whether the bytes are gone, and that answer is what the caller
+// gates the row delete on. Anything else inverts the ordering the whole reclaim
+// rests on: the row is the only name these bytes have, so a collector that logs
+// a failed unlink and deletes the row regardless is the one thing that can make
+// them permanently unreachable. nil means "there are no bytes at this key any
+// more", which includes the case where there never were any — half the
+// unpublished population died before its PUT — and the case of a row that names
+// nothing at all.
+//
 // The storage key is a value this process computed, but it is re-validated
 // against the root before it is used as a path: a corrupted row must never be
-// able to make the collector unlink something outside the storage tree. Same
-// defence-in-depth as cleanupChatAttachments, and the same limitation — this
-// walks the local filesystem, so a non-local StorageProvider would need the
-// removal routed through its Delete (TODO(#1768), tracked there).
+// able to make the collector unlink something outside the storage tree. That
+// refusal is an error rather than a shrug, for the same reason: nothing was
+// removed, so nothing may be forgotten. Same defence-in-depth as
+// cleanupChatAttachments, and the same limitation — this walks the local
+// filesystem, so a non-local StorageProvider would need the removal routed
+// through its Delete (TODO(#1768), tracked there).
 //
 // The parent is removed with Remove, not RemoveAll: for a current key the parent
 // is the attachment's own <attachmentId>/ directory and removing it is exactly
 // right, while for a LEGACY key (uploaded before the id segment existed) the
 // parent is the chat's shared directory — and Remove on a non-empty directory
-// fails harmlessly, which is what makes one call correct for both.
-func removeChatAttachmentBlob(root, storageKey string, logger *slog.Logger) {
-	if root == "" || storageKey == "" {
-		return
+// fails harmlessly, which is what makes one call correct for both. It stays
+// best-effort: an empty directory is not what the row was accounting for.
+func removeChatAttachmentBlob(root, storageKey string, logger *slog.Logger) error {
+	if storageKey == "" {
+		// A row that names no bytes has none to lose.
+		return nil
+	}
+	if root == "" {
+		// Nothing local to remove from, so nothing was removed. The collector
+		// does not run without a root (StartAttachmentBlobGC), so this is a
+		// direct caller, not the hourly pass — logged all the same, so that
+		// every path out of here that keeps a row also says why.
+		if logger != nil {
+			logger.Warn("chat attachment GC: no storage root to unlink from",
+				"storage_key", storageKey)
+		}
+		return errors.New("no storage root configured")
 	}
 	full := filepath.Clean(filepath.Join(root, storageKey))
 	base := filepath.Clean(root)
@@ -351,13 +386,14 @@ func removeChatAttachmentBlob(root, storageKey string, logger *slog.Logger) {
 			logger.Warn("chat attachment GC: refusing to unlink outside the storage root",
 				"storage_key", storageKey)
 		}
-		return
+		return fmt.Errorf("storage key %q resolves outside the storage root", storageKey)
 	}
 	if err := os.Remove(full); err != nil && !os.IsNotExist(err) {
 		if logger != nil {
 			logger.Warn("chat attachment GC: unlink failed", "path", full, "error", err)
 		}
-		return
+		return err
 	}
 	_ = os.Remove(filepath.Dir(full))
+	return nil
 }

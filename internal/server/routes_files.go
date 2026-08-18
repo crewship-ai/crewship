@@ -391,10 +391,14 @@ func (c *captureReader) replay() ([]byte, bool) {
 	return c.buf.Bytes(), true
 }
 
-// handleFileDelete removes a single file from a crew's shared/output tree.
+// handleFileDelete removes one key from a crew's shared/output tree.
 // Path routing and traversal rejection are identical to save/download
 // (resolveCrewFileKey). Delete is idempotent — localfs RemoveAll treats a
 // missing key as success — so a repeat delete still returns 200.
+//
+// A key naming a DIRECTORY removes it and what is under it, host-side and
+// through the container replay alike (crewFileDeleteScript). Chat attachments
+// depend on that: one attachment is one directory.
 func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
 	filePath := r.URL.Query().Get("path")
@@ -432,7 +436,7 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 	if replayable && s.container != nil && errors.Is(err, fs.ErrPermission) {
 		if cerr := s.deleteCrewFileViaContainer(r.Context(), crewID, cpath, fence); cerr != nil {
 			s.logger.Error("file delete via container failed", "path", sanitizeLogPath(filePath), "error", cerr)
-			status, msg := containerSaveErrorResponse(cerr, fence)
+			status, msg := containerDeleteErrorResponse(cerr, fence)
 			writeJSON(w, status, map[string]string{"error": msg})
 			return
 		}
@@ -601,11 +605,28 @@ const crewFileWriteScript = `set -eu; d=$(dirname "$DEST"); mkdir -p "$d"; ` +
 	`tmp=$(mktemp "$d/.crewship-save.XXXXXX"); cat > "$tmp"; ` +
 	`chmod 0664 "$tmp"; mv -f "$tmp" "$DEST"`
 
-// crewFileDeleteScript is the same fence in front of an unlink.
+// crewFileDeleteScript is the same fence in front of a removal.
+//
+// It removes RECURSIVELY, because the host half it replays does: storage.Delete
+// is localfs's RemoveAll, so a key naming a directory takes the directory. The
+// script used to run `rm -f`, which exits non-zero on a directory and — under
+// `set -eu` — failed the whole exec. That made the replay strictly less capable
+// than the operation it stands in for, so one request succeeded or 5xx'd purely
+// on whether the crew was provisioned. A chat attachment is exactly a directory
+// key (attachments/<chatId>/<attachmentId>/<filename>, and the delete removes
+// the <attachmentId> directory so no empty directory is left in a tree the agent
+// reads), which made every attachment on a provisioned crew undeletable.
+//
+// The one thing the host half will do and this deliberately will not is remove a
+// tree ROOT: /output and /crew/shared are the mount points themselves, nothing
+// addresses them as a file to delete, and `rm -rf` aimed at one would take a
+// crew's entire shared tree or an agent's whole output namespace. `rm -rf` on a
+// missing path is still a success — deletion is idempotent on both halves.
 const crewFileDeleteScript = `set -eu; d=$(dirname "$DEST"); ` +
 	`rp=$(realpath "$d"); case "$rp" in "$FENCE"|"$FENCE"/*) ;; ` +
 	`*) echo "refuse: destination escapes $FENCE" >&2; exit 3 ;; esac; ` +
-	`rm -f "$DEST"`
+	`case "$DEST" in "$FENCE"|"$FENCE"/) echo "refuse: will not remove the tree root $FENCE" >&2; exit 4 ;; esac; ` +
+	`rm -rf "$DEST"`
 
 // containerSaveErrorResponse maps a container-write failure to an HTTP status
 // and a message the CLI (and the chat composer, which forwards it) can relay.
@@ -625,6 +646,21 @@ func containerSaveErrorResponse(err error, fence string) (int, string) {
 	default:
 		return http.StatusInternalServerError, "failed to save file"
 	}
+}
+
+// containerDeleteErrorResponse is the same mapping for the removal half. The
+// crew-ownership diagnoses are identical — the tree that cannot be written
+// cannot be unlinked either, and "start the crew and retry" is the remedy for
+// both — but the fallback message names the operation that actually failed. The
+// API layer prefixes this text with "failed to delete attachment: " and shows it
+// to a user (attachmentDeleteErrorMessage), so a delete reporting "failed to
+// save file" is a sentence that describes something nobody asked for.
+func containerDeleteErrorResponse(err error, fence string) (int, string) {
+	status, msg := containerSaveErrorResponse(err, fence)
+	if status == http.StatusInternalServerError {
+		return status, "failed to delete file"
+	}
+	return status, msg
 }
 
 // readerEqualsBytes reports whether the stream r is byte-for-byte equal to

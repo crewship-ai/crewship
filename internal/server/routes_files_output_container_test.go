@@ -1,15 +1,21 @@
 package server
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 )
 
@@ -34,6 +40,12 @@ import (
 // server's reaction to an unwritable agent tree. What it does not prove is that
 // uid 1001 is what made it unwritable.
 func TestHandleFileSave_AttachmentIntoCrewOwnedOutputTree(t *testing.T) {
+	// SKIP-WAIVER(#1977): the setup is a chmod 0555 that root ignores, so as
+
+	// uid 0 this test would pass while proving nothing — the assertion needs a
+
+	// real kernel EACCES to have anything to observe.
+
 	if os.Getuid() == 0 {
 		t.Skip("permission bits are advisory for root")
 	}
@@ -263,6 +275,12 @@ func (e *errReader) Read([]byte) (int, error) { return 0, e.err }
 // resolve a container name. A save for a crew that isn't there is a 404, not a
 // 500 — the same mapping the shared tree already used.
 func TestHandleFileSave_OutputTreeCrewMissing(t *testing.T) {
+	// SKIP-WAIVER(#1977): the setup is a chmod 0555 that root ignores, so as
+
+	// uid 0 this test would pass while proving nothing — the assertion needs a
+
+	// real kernel EACCES to have anything to observe.
+
 	if os.Getuid() == 0 {
 		t.Skip("permission bits are advisory for root")
 	}
@@ -298,6 +316,12 @@ func TestHandleFileSave_OutputTreeCrewMissing(t *testing.T) {
 // has to be an honest error naming the limit, not a silent truncation and not a
 // bare "failed to save file".
 func TestHandleFileSave_OutputTooLargeToReplay(t *testing.T) {
+	// SKIP-WAIVER(#1977): the setup is a chmod 0555 that root ignores, so as
+
+	// uid 0 this test would pass while proving nothing — the assertion needs a
+
+	// real kernel EACCES to have anything to observe.
+
 	if os.Getuid() == 0 {
 		t.Skip("permission bits are advisory for root")
 	}
@@ -332,5 +356,311 @@ func TestHandleFileSave_OutputTooLargeToReplay(t *testing.T) {
 	}
 	if ctr.gotStdin != nil {
 		t.Errorf("a body that cannot be replayed must not reach the container")
+	}
+}
+
+// ── the delete half of the same replay ─────────────────────────────────────
+
+// permDeleteStorage delegates to a real localfs but forces an EACCES on Delete
+// for one key — the #922 ownership handoff seen from the removal side. After a
+// crew is provisioned the /output tree is owned by uid 1001, and unlinking an
+// entry needs write on its PARENT directory, which 1001 now owns; the server uid
+// gets permission denied without ever touching the entry itself.
+type permDeleteStorage struct {
+	provider.StorageProvider
+	failKey string
+}
+
+func (p *permDeleteStorage) Delete(ctx context.Context, path string) error {
+	if path == p.failKey {
+		return &fs.PathError{Op: "unlinkat", Path: path, Err: fs.ErrPermission}
+	}
+	return p.StorageProvider.Delete(ctx, path)
+}
+
+// shellExecContainer runs the container half of the replay FOR REAL: it takes
+// the script the server sends, maps the two container-absolute paths onto a host
+// directory standing in for the bind mount, and executes it with /bin/sh.
+//
+// recordingContainer cannot answer the question these tests ask. It reports exit
+// 0 for whatever it is handed, so a script that could not possibly remove the
+// destination still looks like a success — which is exactly the shape of the bug
+// (`rm -f` on a directory exits non-zero, `set -eu` propagates, the endpoint
+// 5xxs and the caller can never delete the attachment). What the shell double
+// does not reproduce is the uid: it runs as the test's own user, so it proves
+// what the SCRIPT does, not what 1001 is allowed to do.
+type shellExecContainer struct {
+	*mockContainer
+	// roots maps a container fence root (/output, /crew/shared) to the host
+	// directory that stands in for what is bound there.
+	roots    map[string]string
+	gotCfg   provider.ExecConfig
+	output   string
+	exitCode int
+}
+
+func (c *shellExecContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	c.gotCfg = cfg
+	env := map[string]string{}
+	for _, e := range cfg.Env {
+		k, v, _ := strings.Cut(e, "=")
+		env[k] = v
+	}
+	fence, dest := env["FENCE"], env["DEST"]
+	host, ok := c.roots[fence]
+	if !ok {
+		return nil, fmt.Errorf("test double has no host tree for fence %q", fence)
+	}
+	if dest != fence && !strings.HasPrefix(dest, fence+"/") {
+		return nil, fmt.Errorf("DEST %q is not under FENCE %q", dest, fence)
+	}
+	hostDest := host + strings.TrimPrefix(dest, fence)
+
+	cmd := exec.Command(cfg.Cmd[0], cfg.Cmd[1:]...) // #nosec G204 — the script under test
+	cmd.Env = append(os.Environ(), "DEST="+hostDest, "FENCE="+host)
+	if cfg.Stdin != nil {
+		cmd.Stdin = cfg.Stdin
+	}
+	out, err := cmd.CombinedOutput()
+	c.output = string(out)
+	if cmd.ProcessState == nil {
+		// The shell never started — that is a broken test host, not a verdict
+		// on the script, so it must not read as "the removal failed".
+		return nil, fmt.Errorf("run %v: %w", cfg.Cmd, err)
+	}
+	c.exitCode = cmd.ProcessState.ExitCode()
+	return &provider.ExecResult{ExecID: "e-shell", Reader: io.NopCloser(bytes.NewReader(out))}, nil
+}
+
+func (c *shellExecContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
+	return false, c.exitCode, nil
+}
+
+// A chat attachment lives at attachments/<chatId>/<attachmentId>/<filename>, so
+// deleting one removes the attachment's own DIRECTORY — that is what leaves no
+// empty directory behind in a tree the agent reads. Host-side that is a
+// RemoveAll and it works; on a provisioned crew the host is refused and the
+// removal is replayed through the container, and the replay has to be able to
+// remove the same thing the host would have.
+//
+// It could not: the in-container script ran `rm -f "$DEST"`, which exits 1 on a
+// directory, `set -eu` turned that into a failed exec, and the endpoint answered
+// 5xx. The attachment was undeletable and every retry failed identically.
+func TestHandleFileDelete_ReplayRemovesWhatTheHostWouldHave(t *testing.T) {
+	requireShellTools(t)
+
+	const (
+		chatDirKey = "crewX/alex/attachments/chat-1"
+		attDirKey  = chatDirKey + "/att-9"
+		legacyKey  = chatDirKey + "/old-report.pdf"
+	)
+
+	cases := []struct {
+		name string
+		// key is both the storage key the host is refused on and the ?path=
+		// the route is asked for.
+		key        string
+		wantStatus int
+		gone       []string // relative to the storage root
+		kept       []string
+	}{
+		{
+			name:       "the attachment's own directory",
+			key:        attDirKey,
+			wantStatus: http.StatusOK,
+			gone:       []string{attDirKey},
+			kept:       []string{chatDirKey, chatDirKey + "/att-8/other.pdf"},
+		},
+		{
+			name:       "a legacy attachment, which is a plain file",
+			key:        legacyKey,
+			wantStatus: http.StatusOK,
+			gone:       []string{legacyKey},
+			kept:       []string{chatDirKey, attDirKey + "/book.xlsx"},
+		},
+		{
+			name:       "bytes that are already gone stay a success",
+			key:        chatDirKey + "/att-never",
+			wantStatus: http.StatusOK,
+			kept:       []string{attDirKey + "/book.xlsx"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			seedCrewTreeForDelete(t, root)
+			base, err := localfs.New(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctr := &shellExecContainer{
+				mockContainer: &mockContainer{},
+				roots: map[string]string{
+					containerOutputRoot:     filepath.Join(root, "crewX"),
+					containerCrewSharedRoot: filepath.Join(root, "crews", "crewX", "shared"),
+				},
+			}
+			s := newContainerFallbackServer(t,
+				&permDeleteStorage{StorageProvider: base, failKey: tc.key}, ctr)
+
+			req := httptest.NewRequest("DELETE", "/crews/crewX/files/delete?path="+tc.key, nil)
+			rec := httptest.NewRecorder()
+			s.ipcMux.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s; container said: %s",
+					rec.Code, tc.wantStatus, rec.Body.String(), ctr.output)
+			}
+			if ctr.gotCfg.User != "1001:1001" {
+				t.Fatalf("exec User = %q, want 1001:1001 (the owner of the provisioned tree)", ctr.gotCfg.User)
+			}
+			for _, rel := range tc.gone {
+				if _, err := os.Stat(filepath.Join(root, rel)); !os.IsNotExist(err) {
+					t.Errorf("%s survived the replay (%v) — the row that names it is about to go, "+
+						"and nothing else walks this tree", rel, err)
+				}
+			}
+			for _, rel := range tc.kept {
+				if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+					t.Errorf("the replay removed %s, which was not asked for: %v", rel, err)
+				}
+			}
+		})
+	}
+}
+
+// The widening above has a floor: the replay removes a subtree, so it must never
+// be handed the tree ROOT. Host-side a delete of `shared` is a RemoveAll of the
+// crew's whole shared tree; through the container that would now be one `rm -rf`
+// away, so the script refuses it by name.
+func TestHandleFileDelete_ReplayRefusesTheTreeRoot(t *testing.T) {
+	requireShellTools(t)
+
+	root := t.TempDir()
+	seedCrewTreeForDelete(t, root)
+	base, err := localfs.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctr := &shellExecContainer{
+		mockContainer: &mockContainer{},
+		roots: map[string]string{
+			containerOutputRoot:     filepath.Join(root, "crewX"),
+			containerCrewSharedRoot: filepath.Join(root, "crews", "crewX", "shared"),
+		},
+	}
+	s := newContainerFallbackServer(t,
+		&permDeleteStorage{StorageProvider: base, failKey: "crews/crewX/shared"}, ctr)
+
+	req := httptest.NewRequest("DELETE", "/crews/crewX/files/delete?path=shared", nil)
+	rec := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusOK {
+		t.Fatalf("removing the shared tree root through the container reported success")
+	}
+	// And what the caller reads names the operation it asked for: this text is
+	// forwarded verbatim into the composer's toast.
+	if !strings.Contains(rec.Body.String(), "delete") {
+		t.Errorf("body %s should say which operation failed", rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "crews", "crewX", "shared", "scripts", "probe.sh")); err != nil {
+		t.Errorf("the crew's shared tree was removed through the replay: %v", err)
+	}
+}
+
+// requireShellTools skips a test that runs the container script for real when
+// the host cannot run it. The script is POSIX sh plus realpath — what the crew
+// image has — and a host missing either says nothing about the script.
+func requireShellTools(t *testing.T) {
+	t.Helper()
+	for _, bin := range []string{"sh", "realpath"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			// SKIP-WAIVER(#1977): this test runs the real container script through
+			// the host's shell, which is the only way to catch what a mock cannot —
+			// `rm -f` refusing a directory. A host without sh or realpath can say
+			// nothing about a script that runs inside the crew image.
+			t.Skipf("%s is not available: %v", bin, err)
+		}
+	}
+}
+
+// seedCrewTreeForDelete lays out both crew trees as a provisioned crew has them:
+// two chat attachments in their own per-id directories, one legacy attachment
+// beside them at the old two-segment path, and a file in the shared tree.
+func seedCrewTreeForDelete(t *testing.T, root string) {
+	t.Helper()
+	for _, f := range []struct{ path, content string }{
+		{"crewX/alex/attachments/chat-1/att-9/book.xlsx", "PK\x03\x04"},
+		{"crewX/alex/attachments/chat-1/att-8/other.pdf", "%PDF-1.4"},
+		{"crewX/alex/attachments/chat-1/old-report.pdf", "%PDF-1.3"},
+		{"crews/crewX/shared/scripts/probe.sh", "#!/bin/sh\n"},
+	} {
+		full := filepath.Join(root, filepath.FromSlash(f.path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(f.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// The premise the replay rests on, with real permission bits rather than a
+// double: on a tree the server uid cannot write, removing an attachment's
+// directory fails with a PERMISSION error — which is what routes the delete
+// through the container in the first place. Nothing else in this file proves the
+// host actually refuses; a different errno would leave the fallback unreachable
+// and the 500 would be the only thing anyone saw.
+func TestHandleFileDelete_HostRefusalIsWhatTriggersTheReplay(t *testing.T) {
+	// SKIP-WAIVER(#1977): the setup is a chmod 0555 that root ignores, so as
+
+	// uid 0 this test would pass while proving nothing — the assertion needs a
+
+	// real kernel EACCES to have anything to observe.
+
+	if os.Getuid() == 0 {
+		t.Skip("permission bits are advisory for root")
+	}
+	root := t.TempDir()
+	seedCrewTreeForDelete(t, root)
+	base, err := localfs.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatDir := filepath.Join(root, "crewX", "alex", "attachments", "chat-1")
+	if err := os.Chmod(chatDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(chatDir, 0o755) })
+
+	// The host attempt on its own: this is the error handleFileDelete sees.
+	hostErr := base.Delete(context.Background(), "crewX/alex/attachments/chat-1/att-9")
+	if !errors.Is(hostErr, fs.ErrPermission) {
+		t.Fatalf("host delete of a per-attachment directory under an unwritable parent = %v, "+
+			"want a permission error — the container fallback is gated on fs.ErrPermission", hostErr)
+	}
+
+	ctr := &recordingContainer{mockContainer: &mockContainer{}}
+	s := newContainerFallbackServer(t, base, ctr)
+	req := httptest.NewRequest("DELETE",
+		"/crews/crewX/files/delete?path=crewX%2Falex%2Fattachments%2Fchat-1%2Fatt-9", nil)
+	rec := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	env := map[string]string{}
+	for _, e := range ctr.gotCfg.Env {
+		k, v, _ := strings.Cut(e, "=")
+		env[k] = v
+	}
+	if env["DEST"] != "/output/alex/attachments/chat-1/att-9" {
+		t.Errorf("DEST = %q, want the attachment's directory inside the container", env["DEST"])
+	}
+	if env["FENCE"] != containerOutputRoot {
+		t.Errorf("FENCE = %q, want %s", env["FENCE"], containerOutputRoot)
 	}
 }

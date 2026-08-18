@@ -308,3 +308,180 @@ func TestRemoveChatAttachmentBlob_StaysInsideRoot(t *testing.T) {
 		t.Fatalf("a traversing storage_key unlinked a file outside the storage root: %v", err)
 	}
 }
+
+// The collector must not delete a row whose bytes it could not remove.
+//
+// The GC runs as the server uid against a tree that belongs to uid 1001 once the
+// crew is provisioned, so an unlink there is refused — and a chat blob lives
+// outside the content-addressed tree sweepAttachmentBlobs walks, so the row is
+// the only thing that names it. Reclaiming the row in front of surviving bytes
+// converts a recoverable leak (a row the next pass will retry) into a permanent
+// one: the bytes are then unreachable from every table, every route and every
+// sweep.
+//
+// The count has to say the same thing: an attachment that was not reclaimed must
+// not be reported as reclaimed.
+func TestReclaimUnpublishedChatAttachments_KeepsRowsWhoseBytesSurvive(t *testing.T) {
+	// SKIP-WAIVER(#1977): the setup is a chmod 0555 that root ignores, so as
+
+	// uid 0 this test would pass while proving nothing — the assertion needs a
+
+	// real kernel EACCES to have anything to observe.
+
+	if os.Getuid() == 0 {
+		t.Skip("permission bits are advisory for root")
+	}
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	root := t.TempDir()
+
+	for _, q := range []string{
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew-gcy', ?, 'Crew', 'crew-gcy')`,
+		`INSERT INTO agents (id, workspace_id, crew_id, name, slug, status) VALUES ('agent-gcy', ?, 'crew-gcy', 'A', 'alex', 'IDLE')`,
+	} {
+		if _, err := db.Exec(q, wsID); err != nil {
+			t.Fatalf("seed: %v\nquery: %s", err, q)
+		}
+	}
+	if _, err := db.Exec(
+		`INSERT INTO chats (id, agent_id, workspace_id, created_by, status) VALUES ('chat-gcy', 'agent-gcy', ?, ?, 'ACTIVE')`,
+		wsID, userID); err != nil {
+		t.Fatalf("seed chat: %v", err)
+	}
+
+	old := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339)
+	// One filename and one digest per row: the de-duplication index is on
+	// (chat_id, sha256, filename), and three identical files in one chat are one
+	// attachment by construction.
+	seed := func(id, key string) {
+		t.Helper()
+		if _, err := db.Exec(`
+			INSERT INTO attachments
+				(id, workspace_id, owner_type, chat_id, filename, content_type, size_bytes,
+				 sha256, storage_key, state, created_at)
+			VALUES (?, ?, 'chat', 'chat-gcy', ?, 'application/pdf', 5, ?, ?, 'pending', ?)`,
+			id, wsID, id+".pdf", attachmentDigest([]byte("bytes-"+id)), key, old); err != nil {
+			t.Fatalf("seed attachment %s: %v", id, err)
+		}
+	}
+	writeBlob := func(key string) string {
+		t.Helper()
+		full := filepath.Join(root, key)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("bytes"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return full
+	}
+
+	// (1) The bytes are there and cannot be unlinked: the directory that holds
+	// them is not writable by this uid, the same refusal uid 1001's ownership
+	// produces on a provisioned crew.
+	lockedKey := "crew-gcy/alex/attachments/chat-gcy/att-locked/att-locked.pdf"
+	lockedBlob := writeBlob(lockedKey)
+	lockedDir := filepath.Dir(lockedBlob)
+	if err := os.Chmod(lockedDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+	seed("att-locked", lockedKey)
+
+	// (2) A row whose key does not resolve inside the storage root. The
+	// collector refuses to follow it — so it has removed nothing, and the row
+	// still names whatever is out there.
+	seed("att-escaped", "../../elsewhere/att-escaped.pdf")
+
+	// (3) An ordinary abandoned reservation, to prove the pass still collects.
+	cleanKey := "crew-gcy/alex/attachments/chat-gcy/att-clean/att-clean.pdf"
+	cleanBlob := writeBlob(cleanKey)
+	seed("att-clean", cleanKey)
+
+	n := reclaimUnpublishedChatAttachments(context.Background(), db, newTestLogger(), root, time.Hour)
+	if n != 1 {
+		t.Errorf("reported %d attachment(s) reclaimed, want 1 — only one of the three had its bytes "+
+			"removed, and a count that includes the other two says space was freed that was not", n)
+	}
+	for _, id := range []string{"att-locked", "att-escaped"} {
+		var rows int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE id = ?`, id).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		if rows != 1 {
+			t.Errorf("%s was deleted although its bytes were not removed — nothing names them now, "+
+				"and no sweep walks this tree", id)
+		}
+	}
+	if _, err := os.Stat(lockedBlob); err != nil {
+		t.Fatalf("the blob this test needs kept was removed: %v", err)
+	}
+	var cleanRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE id = 'att-clean'`).Scan(&cleanRows); err != nil {
+		t.Fatal(err)
+	}
+	if cleanRows != 0 {
+		t.Errorf("the collectable reservation survived — gating the row on the unlink must not stop " +
+			"the pass doing its job")
+	}
+	if _, err := os.Stat(cleanBlob); !os.IsNotExist(err) {
+		t.Errorf("the collectable reservation's bytes are still on disk: %v", err)
+	}
+}
+
+// removeChatAttachmentBlob reports whether the bytes are gone, because that is
+// what the caller gates the row delete on. "Already gone" is success — half the
+// unpublished population never had a file — and a row that names nothing has
+// nothing to unlink.
+func TestRemoveChatAttachmentBlob_ReportsWhetherTheBytesAreGone(t *testing.T) {
+	// SKIP-WAIVER(#1977): the setup is a chmod 0555 that root ignores, so as
+
+	// uid 0 this test would pass while proving nothing — the assertion needs a
+
+	// real kernel EACCES to have anything to observe.
+
+	if os.Getuid() == 0 {
+		t.Skip("permission bits are advisory for root")
+	}
+	root := t.TempDir()
+	present := filepath.Join(root, "crew", "alex", "attachments", "chat", "att-1", "evidence.pdf")
+	if err := os.MkdirAll(filepath.Dir(present), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(present, []byte("bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lockedDir := filepath.Join(root, "crew", "alex", "attachments", "chat", "att-2")
+	if err := os.MkdirAll(lockedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lockedDir, "evidence.pdf"), []byte("bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(lockedDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+
+	for _, tc := range []struct {
+		name    string
+		root    string
+		key     string
+		wantErr bool
+	}{
+		{name: "the bytes are removed", root: root, key: "crew/alex/attachments/chat/att-1/evidence.pdf"},
+		{name: "there were never any bytes", root: root, key: "crew/alex/attachments/chat/att-9/evidence.pdf"},
+		{name: "the row names nothing", root: root, key: ""},
+		{name: "the unlink is refused", root: root, key: "crew/alex/attachments/chat/att-2/evidence.pdf", wantErr: true},
+		{name: "the key leaves the storage root", root: root, key: "../../elsewhere/evidence.pdf", wantErr: true},
+		{name: "no storage root to remove from", root: "", key: "crew/alex/x.pdf", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := removeChatAttachmentBlob(tc.root, tc.key, newTestLogger())
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("removeChatAttachmentBlob(%q, %q) = %v, wantErr = %v", tc.root, tc.key, err, tc.wantErr)
+			}
+		})
+	}
+}

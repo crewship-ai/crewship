@@ -32,6 +32,12 @@ import (
 // ("create parent dir: mkdirat <crew>/<agent>/attachments: permission denied").
 func TestWrite_EACCESSatisfiesErrPermission(t *testing.T) {
 	t.Parallel()
+	// SKIP-WAIVER(#1977): the setup is a chmod 0555 that root ignores, so as
+
+	// uid 0 this test would pass while proving nothing — the assertion needs a
+
+	// real kernel EACCES to have anything to observe.
+
 	if os.Getuid() == 0 {
 		t.Skip("permission bits are advisory for root")
 	}

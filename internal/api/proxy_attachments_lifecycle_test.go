@@ -332,3 +332,143 @@ func TestChatAttachments_LegacyPathRowsStillWork(t *testing.T) {
 		t.Errorf("delete left the legacy row behind")
 	}
 }
+
+// A delete that could not remove the bytes must not remove the row that names
+// them.
+//
+// This is the ordering the whole surface rests on. A chat blob sits outside the
+// content-addressed tree the sweep walks, so a row deleted in front of surviving
+// bytes makes them permanently unreachable — nothing left names them and no
+// route can. Keeping the row is the recoverable failure: it is visible in the
+// list, and retrying the same call is the repair.
+func TestDeleteChatAttachment_UnlinkFailureKeepsTheRow(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		ipcStatus  int
+		ipcBody    string
+		wantStatus int
+		wantParts  []string
+	}{
+		{
+			// The provisioned crew, stopped: the tree is owned by the crew
+			// runtime and only it can unlink there.
+			name:       "the crew runtime owns the tree and is not running",
+			ipcStatus:  http.StatusConflict,
+			ipcBody:    "the agent's output directory is owned by the crew runtime; files can only be written there while the crew container is running — start the crew and retry",
+			wantStatus: http.StatusConflict,
+			wantParts:  []string{"attachment", "owned by the crew runtime", "start the crew and retry"},
+		},
+		{
+			name:       "the removal failed for a reason the storage layer cannot name",
+			ipcStatus:  http.StatusInternalServerError,
+			ipcBody:    "failed to delete file",
+			wantStatus: http.StatusInternalServerError,
+			wantParts:  []string{"attachment", "failed to delete file"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, store, userID, wsID, agentID, chatID := newChatAttachmentFixture(t)
+			code, resp, body := uploadChatAttachment(t, h, userID, wsID, agentID, chatID, "evidence.pdf", "bytes-A")
+			if code != http.StatusCreated {
+				t.Fatalf("upload: status=%d body=%s", code, body)
+			}
+			attID := attachmentIDForPath(t, h, chatID, resp.Path)
+
+			store.mu.Lock()
+			store.deleteStatus, store.deleteBody = tc.ipcStatus, tc.ipcBody
+			store.mu.Unlock()
+
+			code, body = deleteChatAttachment(t, h, userID, wsID, agentID, chatID, attID)
+			if code != tc.wantStatus {
+				t.Fatalf("delete status = %d, want %d; body=%s", code, tc.wantStatus, body)
+			}
+			for _, part := range tc.wantParts {
+				if !strings.Contains(body, part) {
+					t.Errorf("body %s should contain %q — the caller has to know the bytes are still there", body, part)
+				}
+			}
+			var rows int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE id = ?`, attID).Scan(&rows); err != nil {
+				t.Fatal(err)
+			}
+			if rows != 1 {
+				t.Errorf("the row was deleted although its bytes were not — nothing names them now, "+
+					"and the content-addressed sweep never walks this tree (rows=%d)", rows)
+			}
+			if _, ok := store.get(storageKeyForRelPath(resp.Path)); !ok {
+				t.Fatalf("the fixture removed the bytes; this test needs the unlink to have failed")
+			}
+			// The removal was ATTEMPTED and refused, not skipped: the row is
+			// kept because the bytes are still there, not because the handler
+			// gave up before asking.
+			wantTarget := "crew-ipc/alex/attachments/" + chatID + "/" + attID
+			if got := store.deletedPaths(); len(got) != 1 || got[0] != wantTarget {
+				t.Errorf("asked the storage layer for %v, want exactly [%s]", got, wantTarget)
+			}
+
+			// And the repair is the same call again, once the tree is writable.
+			store.mu.Lock()
+			store.deleteStatus = 0
+			store.mu.Unlock()
+			if code, body := deleteChatAttachment(t, h, userID, wsID, agentID, chatID, attID); code != http.StatusNoContent {
+				t.Fatalf("retry after the failure: status=%d body=%s", code, body)
+			}
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE id = ?`, attID).Scan(&rows); err != nil {
+				t.Fatal(err)
+			}
+			_, bytesLeft := store.get(storageKeyForRelPath(resp.Path))
+			if rows != 0 || bytesLeft {
+				t.Errorf("the retry did not complete the delete (rows=%d, bytes present=%v)", rows, bytesLeft)
+			}
+		})
+	}
+}
+
+// A promotion that updates no row is not a 201.
+//
+// The handler's contract is that a 201 means there is a `stored` row AND bytes
+// at its storage_key. The UPDATE that promotes the reservation can match nothing
+// — the row can have gone underneath the request, which is exactly what a
+// concurrent delete of the same attachment does — and an UPDATE matching zero
+// rows is not an error to the driver. Answering 201 for it would tell the
+// composer an attachment exists that no row records.
+//
+// The seam is the IPC save: the fake removes the reservation while the bytes are
+// being published, which is the same interleaving without the timing.
+func TestChatAttachment_PromotionThatMatchesNoRowIsNotSuccess(t *testing.T) {
+	var h *ProxyHandler
+	var deleted int
+	sock := newUnixIPCServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		res, err := h.db.Exec(`DELETE FROM attachments WHERE state = ?`, attachmentStatePending)
+		if err != nil {
+			t.Errorf("remove the reservation mid-flight: %v", err)
+		} else {
+			n, _ := res.RowsAffected()
+			deleted += int(n)
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	}))
+	h = newProxyHandlerForTest(t, sock)
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+	agentID, chatID := seedChatForAttachment(t, h, wsID, userID)
+
+	code, _, body := uploadChatAttachment(t, h, userID, wsID, agentID, chatID, "evidence.pdf", "bytes")
+	if deleted != 1 {
+		t.Fatalf("the seam removed %d reservation(s); this test needs exactly 1", deleted)
+	}
+	if code == http.StatusCreated {
+		t.Fatalf("upload answered 201 after a promotion that updated no row — a 201 means there is a "+
+			"`stored` row and bytes at its storage_key, and there is no row at all; body=%s", body)
+	}
+	if code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500 (the promotion failed); body=%s", code, body)
+	}
+	var rows int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE chat_id = ?`, chatID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Errorf("recorded %d row(s) for an upload that failed to publish", rows)
+	}
+}

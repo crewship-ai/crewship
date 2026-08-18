@@ -407,6 +407,12 @@ func chatAttachmentAgentPath(slug, relPath string) string {
 // conversation with it. The id check is what tells the two apart, and it is a
 // comparison rather than a count of segments so a filename containing the id,
 // or a chat id that looks like one, cannot fool it.
+//
+// Sending a directory is only safe because BOTH halves of the storage layer
+// remove one: localfs.Delete is a RemoveAll host-side, and the container replay
+// that a provisioned crew forces the removal through is recursive too
+// (crewFileDeleteScript). It was not — `rm -f` cannot remove a directory — and
+// that made every attachment on a provisioned crew undeletable, at 5xx, for ever.
 func chatAttachmentUnlinkTarget(storageKey, attachmentID string) string {
 	dir := path.Dir(storageKey)
 	if attachmentID != "" && path.Base(dir) == attachmentID {
@@ -533,11 +539,32 @@ func (h *ProxyHandler) reserveChatAttachment(r *http.Request, workspaceID, chatI
 // in place. storage_key is written again in the same statement so the row and
 // the blob cannot disagree even in the adoption case above; for every ordinary
 // upload it is the value that is already there.
+//
+// An UPDATE that matches NOTHING is a failure, not a no-op. It is not an error
+// to the driver — zero rows changed is a perfectly ordinary result — so the
+// row count has to be read, or the one thing this function exists to guarantee
+// ("a 201 means there is a `stored` row") would hold only when nothing went
+// wrong. The way it matches nothing is the reservation disappearing underneath
+// the request: a concurrent DELETE of the same attachment, or an operator
+// clearing the table. The caller turns this into a 500, which is the truthful
+// answer — the bytes are published but no row records them, and this arc has no
+// refcount to arbitrate a compensating unlink (the next upload of the same file
+// re-publishes over them, and a chat delete takes the whole tree).
 func (h *ProxyHandler) publishChatAttachment(r *http.Request, ref chatAttachmentRef) error {
-	_, err := h.db.ExecContext(r.Context(),
+	res, err := h.db.ExecContext(r.Context(),
 		`UPDATE attachments SET state = ?, storage_key = ? WHERE id = ?`,
 		attachmentStateStored, ref.storageKey, ref.id)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("promote attachment %s: %w", ref.id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("promote attachment %s: the reservation is gone", ref.id)
+	}
+	return nil
 }
 
 // abandonChatAttachment removes a reservation whose bytes never landed.
