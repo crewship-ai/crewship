@@ -141,6 +141,7 @@ func ExportCrew(ctx context.Context, c *Client, slug string, opts ExportOptions)
 			// scalar. Without this line `crewship export` → `crewship apply`
 			// silently dropped every configured prompt.
 			SuggestedPrompts: deref(a.SuggestedPrompts),
+			AskForms:         deref(a.AskForms),
 		}
 		// Best-effort: a failure here loses bindings for this one
 		// agent but the rest of the crew still exports. We write a

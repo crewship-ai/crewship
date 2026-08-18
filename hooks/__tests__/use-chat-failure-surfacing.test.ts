@@ -94,6 +94,40 @@ describe("useChat failure surfacing", () => {
     expect(result.current.isStreaming).toBe(false)
   })
 
+  it("surfaces a top-level WebSocket rejection and settles the pending send", () => {
+    const { result } = setup()
+    act(() => {
+      result.current.sendMessage("hi")
+    })
+
+    // Authorization and malformed-send failures are ServerMessage error
+    // frames, not chat_event payloads. Dropping this frame leaves the local
+    // optimistic send in its infinite "thinking" state.
+    act(() => getOnMessage()({
+      type: "error",
+      channel: "session:s1",
+      payload: { message: "access denied", error: "access denied" },
+    }))
+
+    expect(result.current.isStreaming).toBe(false)
+    expect(result.current.turns).toHaveLength(2)
+    const rejection = result.current.turns[1]
+    expect(rejection.role).toBe("assistant")
+    expect(rejection.isStreaming).toBe(false)
+    expect(rejection.parts).toHaveLength(1)
+    expect(rejection.parts[0]).toMatchObject({ type: "error", content: "access denied" })
+  })
+
+  it("does not apply a top-level WebSocket error for another session", () => {
+    const { result } = setup()
+    act(() => getOnMessage()({
+      type: "error",
+      channel: "session:someone-else",
+      payload: { message: "access denied" },
+    }))
+    expect(result.current.turns).toHaveLength(0)
+  })
+
   it("done with no reply turn surfaces an explicit no-output error instead of an empty transcript", () => {
     const { result } = setup()
     act(() => {

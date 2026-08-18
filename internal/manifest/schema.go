@@ -580,6 +580,12 @@ type Agent struct {
 	// agentBodyDiffers in plan.go.
 	SuggestedPrompts string `yaml:"suggested_prompts,omitempty" json:"suggested_prompts,omitempty"`
 
+	// AskForms is the canonical JSON array stored in agents.ask_forms. It is
+	// intentionally a string rather than a second manifest-only model: export
+	// and apply must preserve the server-normalised document byte-for-byte.
+	// Empty means the field is not declared and must not clear remote state.
+	AskForms string `yaml:"ask_forms,omitempty" json:"ask_forms,omitempty"`
+
 	// Skills and EnvRefs are slug-level references to entries in
 	// the surrounding CrewSpec/WorkspaceSpec. Apply resolves the
 	// slugs to IDs after the underlying objects are created.

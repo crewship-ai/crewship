@@ -262,6 +262,9 @@ type AgentResponse struct {
 	// already normalised by the server on write. NULL (nil here) and ""
 	// both mean "not configured"; deref collapses the two.
 	SuggestedPrompts *string `json:"suggested_prompts"`
+	// AskForms is the canonical JSON questionnaire document stored on the
+	// agent. nil and empty both mean not configured.
+	AskForms *string `json:"ask_forms"`
 }
 
 // FindLeadAgentByCrew returns the LEAD-role agent of a crew, or

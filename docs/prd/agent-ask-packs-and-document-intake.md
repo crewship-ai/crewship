@@ -46,7 +46,10 @@ agent's source documentation.
 >   could not survive §7.1 with two money fields on one form.
 >
 > Per-agent caps as shipped: 4 forms, 6 fields each, 48-character labels,
-> 2000-character templates. The intake pipeline of §8 remains unbuilt.
+> 2000-character templates. `crewship export` and `crewship apply` now carry
+> `ask_forms` byte-for-byte, including the follow-up PATCH required because the
+> agent create endpoint ignores this update-only column. The intake pipeline of
+> §8 remains unbuilt.
 
 ---
 
@@ -287,6 +290,12 @@ The rules, in the order they matter:
    by uploads that landed** — a receipt-shaped message with no receipt in it is
    the same defect one level up.
 
+The upload endpoint currently requires the crew container to be running. A
+stopped crew returns an actionable 409 because only the running sidecar can
+write the agent-visible output path. The composer does not yet disable file
+selection up front; deciding whether it should is still product work, not an
+error-code substitute.
+
 ## 6. Data model
 
 New migration, `internal/database/migrations/<ts>_ask_packs_and_intake.sql`,
@@ -392,8 +401,11 @@ expressions. Rules:
    characters, and the rendered message caps at 32 000.
 4. `file`/`photo` fields render as the agent-visible path
    (`attachments/<chatId>/<name>`); multiple files render as a newline list.
+5. A `money` field named `amount` exposes `{{amount}}` and
+   `{{amount_currency}}`. There is no bare `{{currency}}`: that name collides
+   when a form contains two money fields and therefore cannot pass rule 1.
 
-**The renderer exists twice** — `internal/askpacks/render.go` for the CLI and
+**The renderer exists twice** — `internal/askforms/render.go` for the CLI and
 server preview, `lib/ask-template.ts` for the composer — and both are tested
 against the same golden fixture, `testdata/ask-templates.json`. Two
 implementations that can silently disagree about what the user is sending is
@@ -401,6 +413,11 @@ exactly the class of defect `docs/prd/documentation-contract-testing.md` was
 written about.
 
 ## 8. Intake pipeline
+
+This section remains unbuilt. It starts only when users actually file
+documents and requires, as one coherent slice, the `intake_documents` state
+table, the sidecar propose/file tools, and a confined memory write path. An
+attachment upload by itself is not intake and must not be described as one.
 
 ### 8.1 States
 
@@ -528,8 +545,10 @@ where a bad form shows itself), `intake_uploaded/proposed/filed/rejected`,
 
 Targets, 30 days after rollout:
 
-- ≥ 35 % of sessions start from a chip (baseline today: unmeasured, chips are
-  generic — instrument before shipping so the comparison exists)
+- ≥ 35 % of sessions start from a chip. The pre-change baseline is gone:
+  per-agent chips shipped before any event was emitted, so there is no valid
+  generic-chip comparison left to reconstruct. Instrumentation must compare
+  cohorts after measurement begins and record its start date explicitly.
 - ≥ 70 % form completion once opened
 - ≥ 60 % of proposals filed without a field edit
 - median photo → filed under 45 s on mobile

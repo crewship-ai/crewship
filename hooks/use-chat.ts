@@ -1157,6 +1157,27 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         return
       }
 
+      // The server uses a top-level error frame for failures that happen
+      // before a chat run exists: denied subscriptions/sends, malformed
+      // payloads, and an unavailable chat handler. These are not chat_event
+      // payloads, but they still terminate an optimistic local send. Ignoring
+      // one leaves the user turn showing "thinking" forever.
+      if (msg.type === "error") {
+        if (channelSessionId && channelSessionId !== sessionId) return
+        const payload = msg.payload
+        let reason = ""
+        if (typeof payload === "string") {
+          reason = payload
+        } else if (payload && typeof payload === "object") {
+          const details = payload as Record<string, unknown>
+          if (typeof details.message === "string") reason = details.message
+          else if (typeof details.error === "string") reason = details.error
+        }
+        flushPendingText()
+        handleErrorEvent(reason)
+        return
+      }
+
       if (msg.type !== "chat_event") return
       // Drop deltas arriving after a local cancel so the cancelled stream
       // can't resurrect itself. The server's cancel ack races against
@@ -1185,6 +1206,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       flushPendingText,
       ingestChatEvent,
       drainPending,
+      handleErrorEvent,
     ],
   )
 

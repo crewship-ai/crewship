@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/crewship-ai/crewship/internal/askforms"
 )
 
 // slugFormat mirrors api.validSlugFormat: lowercase letters, digits,
@@ -182,6 +184,7 @@ func (v *validator) checkCrewSpec(meta Metadata, spec *CrewSpec, wsCreds map[str
 			v.errf("%s: tool_profile %q invalid (want FULL, CODING, MINIMAL)", label, a.ToolProfile)
 		}
 		v.checkSuggestedPrompts(label, a.SuggestedPrompts)
+		v.checkAskForms(label, a.AskForms)
 
 		for _, sk := range a.Skills {
 			if _, ok := skills[sk]; !ok {
@@ -193,6 +196,18 @@ func (v *validator) checkCrewSpec(meta Metadata, spec *CrewSpec, wsCreds map[str
 				v.errf("%s references unknown credential env %q", label, env)
 			}
 		}
+	}
+}
+
+// checkAskForms mirrors the server-side askforms contract at the offline
+// manifest boundary. Keeping this validation in the shared Go package means a
+// form accepted by `crewship validate` cannot later be rejected by the PATCH.
+func (v *validator) checkAskForms(label, raw string) {
+	if raw == "" {
+		return
+	}
+	if _, err := askforms.Parse(raw); err != nil {
+		v.errf("%s: %v", label, err)
 	}
 }
 

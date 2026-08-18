@@ -477,7 +477,9 @@ independent of any UI.
 **Note:** `AskUserCard` (`assistant-turn.tsx:138-171`) renders options as
 non-clickable spans for a tool agents are not even granted
 (`internal/orchestrator/tool_profiles.go:12`). Fix it or delete it — it
-currently renders a lie.
+currently renders a lie. **Resolved:** the special card was deleted. A legacy
+or imported `AskUserQuestion` tool call renders only as an ordinary,
+non-interactive tool record; no choices are presented as controls.
 
 ### 6.2 Routine from this conversation
 **Unlocked by:** §0 answering that routines do get used.
@@ -578,5 +580,27 @@ current `main`. Two rules specific to this work:
   about whether a phone opens the camera.
 
 Every new endpoint gets a CLI command and the acceptance test drives the binary
-(`cli_route_contract_test.go` enforces the pairing). Steps 1–7 add no endpoints,
-so this applies only from §6 onward.
+(`cli_route_contract_test.go` enforces the pairing). Steps 1–7 added one
+endpoint, `PATCH /api/v1/agents/{agentId}/chats/{chatId}`, for session titles;
+its CLI pairing and route-roles manifest were added with it. The remaining
+steps add no endpoint, so the rule applies again to work from §6 onward.
+
+## 10. Shipped constraints and implementation findings
+
+- Chat attachments require a running crew. A stopped crew returns 409 because
+  the sidecar is the writer for the agent-visible output directory.
+- This page switches to its compact layout below 900 px, not at the global
+  768 px mobile breakpoint. At `/chat` no conversation panel is mounted before
+  a thread is chosen, so the route opens no chat WebSocket merely by arriving.
+- Silent failure is a recurring defect class on this surface: a rejected
+  top-level WebSocket frame was previously discarded because it was not a
+  `chat_event`, leaving the optimistic user turn thinking forever. Such frames
+  now terminate the pending send and render the server's reason.
+- Filesystem permission checks must use `errors.Is(err, fs.ErrPermission)`.
+  `os.IsPermission` does not recognize the wrapped error returned by `localfs`
+  and silently disables the container-write fallback.
+- A mock must reproduce the server contract, not the client's assumption.
+  The first-send test once had its `ChatPanel` stub perform the POST and used a
+  fake history response to infer row existence; the real server returns an
+  empty message list for an unknown chat, so the passing test bypassed the
+  broken implementation.

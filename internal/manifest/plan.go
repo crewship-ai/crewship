@@ -840,7 +840,7 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 					// the bindings run.
 					if follow := buildAgentPostCreateBody(&agentCopy); len(follow) > 0 {
 						if _, err := client.UpdateAgent(ctx, created.ID, follow); err != nil {
-							return fmt.Errorf("agent %q created but its suggested_prompts could not be set: %w", agentCopy.Slug, err)
+							return fmt.Errorf("agent %q created but its update-only fields could not be set: %w", agentCopy.Slug, err)
 						}
 					}
 					return applyAgentRefs(ctx, client, created.ID, &agentCopy, wsCreds, wsSkills)
@@ -1132,6 +1132,9 @@ func agentBodyDiffers(existing *AgentResponse, a *Agent) bool {
 	if a.SuggestedPrompts != "" && a.SuggestedPrompts != deref(existing.SuggestedPrompts) {
 		return true
 	}
+	if a.AskForms != "" && a.AskForms != deref(existing.AskForms) {
+		return true
+	}
 	return false
 }
 
@@ -1206,6 +1209,9 @@ func buildAgentPostCreateBody(a *Agent) map[string]any {
 	body := map[string]any{}
 	if a.SuggestedPrompts != "" {
 		body["suggested_prompts"] = a.SuggestedPrompts
+	}
+	if a.AskForms != "" {
+		body["ask_forms"] = a.AskForms
 	}
 	return body
 }
