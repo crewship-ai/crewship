@@ -732,14 +732,39 @@ run. What shipped instead is a CI step asserting `out/chat.html` and
 proven by deleting each and watching it fail. That is the cheapest honest check
 and it is not a browser test; the rule above is still owed a real one.
 
-**And the flagship repair is unguarded on the path that would catch a
-regression.** `e2e/onboarding-wizard.spec.ts` — the spec that walks a new
-user's first click, and the one that used to assert the 404 it was meant to
-kill — needs a never-bootstrapped database, so it runs only under
-`playwright.fresh.config.ts` in the e2e-devcontainer **nightly**, never on a
-PR (`playwright.config.ts:13-29`). Eight further specs sit in the same
-`testIgnore` list for the deleted `/crews/agents/*` family; that bucket exists
-to keep the rot visible and must not be widened to make a failure go away.
+**What now gates a merge, and what does not.** The flagship repair is no longer
+nightly-only: `e2e/onboarding-wizard.spec.ts` — the spec that walks a new user's
+first click, and the one that used to assert the 404 it was meant to kill — runs
+on every pull request in ci.yml's `onboarding-journey` job, which stands up a
+throwaway server on a never-bootstrapped database and drives it through
+`playwright.fresh.config.ts`; it stays in `playwright.config.ts`'s `testIgnore`
+for a precondition the main config cannot give it, not as rot, and
+`scripts/onboarding-gate-test.sh` fails the build if that job is deleted, given
+an `if:`, or moved back behind a schedule. It costs ~3.5 min on its own runner
+and adds nothing to a PR's wall-clock, which is set by `Go Race` at ~24 min; the
+nightly copy was removed rather than kept, so there is one definition to drift.
+Folding it into `playwright-pr` was rejected on a fact, not a preference: that
+job seeds its fixture with `crewship seed`, the wizard consumes the one-shot
+bootstrap seed needs, and because the wizard bootstraps through the browser no
+CLI token is ever written — seed's already-initialised fallback is
+`requireAuth()` (`cmd/crewship/main.go:283`), which only reads a stored token and
+never logs in, so seed would die on "not logged in" and take the PR browser gate
+with it. The `out/chat.html` assertion added for rule 1 does run on pull requests
+(the `frontend` job; ci.yml triggers on `pull_request`), and a third gate
+predates both: `app/(onboarding)/onboarding/__tests__/dead-agent-routes.test.ts`
+scans `app/`, `components/`, `hooks/`, `lib/` and `stores/` on every PR through
+Vitest, so re-pointing the wizard at `/crews/agents/*` fails statically in
+seconds. What still does **not** gate: nothing mechanically blocks a merge at all
+— the active `main-branch-protection` ruleset carries only deletion,
+non-fast-forward and linear-history rules and **no required status checks**, so
+every check here, this one included, is enforced by the "never merge on red CI"
+rule in `CLAUDE.md` and by a human reading the checks; the static scan cannot see
+the wizard silently falling back to the dashboard when `GET /agents/<id>` yields
+no slug (only the browser journey catches that); provider-backed chat send and
+receive remain nightly; and seven specs sit in `testIgnore` for the deleted
+`/crews/agents/*` and `/crews/new` families — all seven still reference those
+routes and none was touched by this branch, so that bucket is still honest rot
+and must not be widened to make a failure go away.
 
 ### 9.1 The endpoints this work added
 

@@ -18,14 +18,23 @@ name: E2E Devcontainer
 #
 # Also runs nightly at 02:30 UTC against main.
 #
+# The onboarding-wizard spec used to run here, in a parallel
+# `e2e-onboarding-wizard` job. It has MOVED to the `onboarding-journey` job in
+# ci.yml, which runs on every pull request — the spec guards a repair (the
+# wizard's last click used to land on a deleted route) that a nightly cannot
+# protect, because by the time a nightly is red the regression is already on
+# main. It is not duplicated back here on purpose: two copies of that job would
+# drift, and the drifted copy would be the one nobody reads. ci.yml also runs on
+# push to main, so main keeps per-commit coverage rather than daily coverage.
+#
 # TODO(a11y-ci): e2e/a11y.spec.ts (axe wcag2a+wcag2aa scan of the nine
 # dashboard surfaces) is NOT wired into any CI workflow yet — it runs
 # manually on the dev VM via
 #     pnpm exec playwright test e2e/a11y.spec.ts
-# against a seeded instance. The embed half of the blocker is gone — the
-# onboarding job now exports the real UI over the placeholder before `go build`
-# (see "Build web UI into the embed dir"), so an a11y job can copy that
-# step. What it still needs is an onboarded + seeded workspace
+# against a seeded instance. The embed half of the blocker is gone — see the
+# "Build web UI into the embed dir" step in ci.yml's `onboarding-journey` job,
+# which exports the real UI over the placeholder before `go build`; an a11y job
+# can copy that step. What it still needs is an onboarded + seeded workspace
 # (`crewship seed`) plus E2E_EMAIL/E2E_PASSWORD for playwright.config.ts
 # globalSetup. Until that lands, a11y scans stay dev-VM manual.
 
@@ -49,125 +58,6 @@ env:
   PNPM_VERSION: "10"
 
 jobs:
-  # ── Onboarding wizard E2E ─────────────────────────────────────────
-  # First-run flow: empty DB → /bootstrap → 3-step wizard → Launch.
-  # Runs in a parallel job (own runner, own DB) so it doesn't fight
-  # the devcontainer test for the bootstrap one-shot. Total ~5-8 min.
-  e2e-onboarding-wizard:
-    name: E2E Onboarding Wizard
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: ./.github/actions/setup-go-embed
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - uses: ./.github/actions/setup-node-pnpm
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          pnpm-version: ${{ env.PNPM_VERSION }}
-
-      - name: Build web UI into the embed dir
-        # A bare checkout carries only web/out/.placeholder.html, which is
-        # enough for `go:embed` to compile (#1567) and fine for the API-only
-        # jobs — but this job drives the UI with a browser, and against the
-        # placeholder every UI route answers 503, so the client-side redirect
-        # to /bootstrap never happens and the first spec times out. Export the
-        # real UI (same two steps as `make build`) before the binary is built.
-        run: |
-          pnpm build
-          ./scripts/embed-web-out.sh sync
-
-      - name: Build CLI
-        run: go build -o crewship ./cmd/crewship
-
-      - name: Generate ephemeral test secrets
-        # Same rationale — and same ::add-mask:: requirement — as the
-        # devcontainer job below.
-        run: |
-          nextauth="$(openssl rand -hex 32)"
-          enckey="$(openssl rand -hex 32)"
-          echo "::add-mask::$nextauth"
-          echo "::add-mask::$enckey"
-          {
-            echo "NEXTAUTH_SECRET=$nextauth"
-            echo "ENCRYPTION_KEY=$enckey"
-          } >> "$GITHUB_ENV"
-
-      - name: Install Playwright browsers
-        # `--with-deps` pulls the apt packages chromium needs on the
-        # GitHub-hosted ubuntu runner. Without it, the headless launch
-        # fails with cryptic .so lookups.
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Start crewship server in background
-        env:
-          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
-          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
-          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
-          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
-          CREWSHIP_NEXTJS_URL: http://localhost:8080
-          CREWSHIP_SKIP_SIDECAR: "1"
-          # Short-circuits the live api.anthropic.com probe in
-          # internal/api/onboarding.go so the wizard's Launch step
-          # accepts a fake sk-ant-oat token. Without this the test
-          # would either need a real Anthropic secret in GH or flake
-          # whenever Anthropic has a hiccup. See the spec header.
-          CREWSHIP_E2E_SKIP_TOKEN_PROBE: "1"
-        run: |
-          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
-          ./crewship start >/tmp/crewship.log 2>&1 &
-          echo $! > /tmp/crewship.pid
-          for i in $(seq 1 60); do
-            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
-              echo "server up after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "server failed to start" >&2
-          cat /tmp/crewship.log >&2
-          exit 1
-
-      - name: Confirm fresh-DB precondition
-        # Sanity check before Playwright spins up — if needs_bootstrap
-        # comes back false the spec would skip silently and CI would
-        # turn green with zero real assertions, which is worse than
-        # red. Fail fast with a clear message instead.
-        run: |
-          body=$(curl -sf http://localhost:8080/api/v1/system/setup-status)
-          echo "setup-status: $body"
-          echo "$body" | grep -q '"needs_bootstrap":true' || {
-            echo "::error::Expected needs_bootstrap=true on a fresh CI DB, got $body"
-            exit 1
-          }
-
-      - name: Run onboarding-wizard Playwright spec
-        env:
-          PLAYWRIGHT_BASE_URL: http://localhost:8080
-        run: pnpm exec playwright test --config=playwright.fresh.config.ts
-
-      - name: Upload Playwright report on failure
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: playwright-report-onboarding
-          path: |
-            playwright-report/
-            test-results/
-          retention-days: 7
-
-      - name: Dump server log on failure
-        if: failure()
-        run: cat /tmp/crewship.log || true
-
-      - name: Stop server
-        if: always()
-        run: |
-          [ -f /tmp/crewship.pid ] && kill "$(cat /tmp/crewship.pid)" 2>/dev/null || true
-
   e2e-devcontainer:
     name: E2E Devcontainer Provisioning
     runs-on: ubuntu-latest

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
 import {
   Bot,
+  Command,
   Wifi,
   WifiOff,
   Users,
@@ -49,6 +50,7 @@ import type { FileEntry } from "./chat-tree-row"
 import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch } from "@/lib/api-fetch"
 import { resolveWsBase } from "@/lib/server-base"
+import { emitChatEvent } from "@/lib/telemetry"
 
 function getWsUrl(): string {
   const base = resolveWsBase()
@@ -110,6 +112,13 @@ interface ChatPanelProps {
 }
 
 const noopFileClick = () => {}
+
+/** How the chat palette's key is written for a human. The binding itself is
+ *  `mod+slash` on the palette's own useHotkeys call; this is the label, and it
+ *  lives here because this panel is the only thing that shows it. Kept out of
+ *  slash-palette.tsx on purpose: half a dozen suites stub that module wholesale
+ *  to mount this panel, and a second export would break every one of them. */
+const CHAT_PALETTE_SHORTCUT = "⌘/"
 
 /** Cold-start rail cap: two rows at 1280px (PRD §5.1). The rest collapses
  *  into `+N`. Follow-ups keep their own cap of 3, inside FollowUps. */
@@ -399,6 +408,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         )
         if (!res.ok) return false
         confirmedRowsRef.current.add(sid)
+        // The conversation begins here, not at mount: a draft session is a URL
+        // and a text box until this POST gives it a row. `composer` because
+        // typing (or attaching) is what asked for it — the explicit "New
+        // session" control emits `sidebar` from chat-page-client.tsx. A create
+        // that failed emits nothing: there is no conversation to have started.
+        emitChatEvent("chat_session_created", { session_id: sid, agent_id: agentId, source: "composer" })
         // The mount-time `subscribe` for this session was refused — the
         // channel authorizer needs the row, and until this POST there was no
         // row (see the comment on resubscribeSession in hooks/use-chat.ts).
@@ -582,6 +597,17 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // until it is handled here.
   const [searchOpen, setSearchOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+
+  // The palette's open state is held here rather than inside the palette,
+  // because the panel is what puts a BUTTON on screen for it (below). It had
+  // no button, and its only key was ⌘K — which the toolbar's global palette
+  // also answers to, so the two used to open together. The key moved to ⌘/;
+  // the button is what stops the surface from being reachable only by people
+  // who already knew.
+  const [slashPaletteOpen, setSlashPaletteOpen] = useState(false)
+  // A palette is about one conversation, same rule as the ask sheet and the
+  // action modal below it.
+  useEffect(() => { setSlashPaletteOpen(false) }, [sessionId])
 
   const handleSlashCommand = useCallback((id: string) => {
     if (id === "regenerate") regenerateWithPin()
@@ -798,9 +824,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         <div className="flex items-center gap-2 px-4 md:px-6 h-[41px] border-b shrink-0">
           <ConnectionBadge status={connectionStatus} />
           <OriginChip origin={sessionOrigin} />
-          <span className="text-micro text-muted-foreground ml-auto font-mono">
-            {sessionId.slice(0, 8)}
-          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
+            <span className="text-micro text-muted-foreground font-mono">
+              {sessionId.slice(0, 8)}
+            </span>
+          </div>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
@@ -868,6 +897,8 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         onCommand={handleSlashCommand}
         onAction={setSlashAction}
         disabledCommands={slashDisabledCommands}
+        open={slashPaletteOpen}
+        onOpenChange={setSlashPaletteOpen}
       />
       {workspaceId && (
         <SlashActionModal
@@ -886,6 +917,40 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 }
 
 /* ---- Small shared sub-components extracted to reduce duplication ---- */
+
+/**
+ * The chat palette's visible door.
+ *
+ * Until this existed the palette had exactly one entry point — ⌘K — which is
+ * also the toolbar's global palette, so the two opened together and the
+ * shortcut appeared nowhere on screen. The key is now ⌘/, and a key that
+ * nothing announces is a key nobody presses, so it is spelled out here: in the
+ * label a screen reader gets, in the tooltip a mouse gets, and in a <kbd>
+ * matching the one the toolbar's search button wears two rows up.
+ *
+ * It is also the only way in for anyone whose layout does not put Slash on a
+ * bare key — react-hotkeys-hook matches the PHYSICAL key — and for anyone
+ * driving this surface with a pointer.
+ */
+function CommandsButton({ onClick }: { onClick: () => void }) {
+  const label = `Chat commands (${CHAT_PALETTE_SHORTCUT})`
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      data-testid="chat-commands-trigger"
+      className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-micro text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <Command className="h-3 w-3" aria-hidden="true" />
+      <span className="hidden sm:inline">Commands</span>
+      <kbd className="pointer-events-none hidden select-none rounded border border-white/[0.08] bg-white/[0.03] px-1 font-mono text-[10px] leading-none sm:inline">
+        {CHAT_PALETTE_SHORTCUT}
+      </kbd>
+    </button>
+  )
+}
 
 function ConnectionBadge({ status }: { status: string }) {
   return (

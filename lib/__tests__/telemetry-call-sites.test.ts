@@ -18,16 +18,16 @@ import { CHAT_EVENT_NAMES } from "@/lib/telemetry"
 const ROOTS = ["components", "app", "hooks"]
 
 /**
- * Events with no call site yet, and the reason. Each names a file this change
- * did not own — the chat surface is being worked on by several people at once
- * and the emit is a one-liner in somebody else's file.
+ * Events with no call site yet, and the reason.
+ *
+ * The two session events came off this list when their files came free:
+ * `chat_session_created` fires from chat-panel.tsx (`ensureSession`, source
+ * `composer`) and from chat-page-client.tsx (`handleNewSession` → `sidebar`,
+ * `openInitialSession` → `deeplink`); `chat_session_titled` fires from
+ * `autoTitleSession` once the server accepts the PATCH. What is left is not a
+ * to-do about ownership but a surface that does not exist.
  */
 const PENDING_WIRING: Record<string, string> = {
-  chat_session_created:
-    "the POST that creates a session lives in chat-panel.tsx (ensureSession) and " +
-    "chat/[agentSlug]/chat-page-client.tsx (handleNewSession) — neither owned here",
-  chat_session_titled:
-    "autoTitleSession lives in chat/[agentSlug]/chat-page-client.tsx — not owned here",
   chat_approval_shown:
     "the chat surface has no interactive approval card today: AskUserQuestion renders " +
     "deliberately inert (assistant-turn.test.tsx pins that), and approvals are decided " +
@@ -81,7 +81,7 @@ describe("every declared event is emitted, or says why not", () => {
   })
 
   it("keeps the pending list small enough to be a to-do and not a design", () => {
-    expect(Object.keys(PENDING_WIRING).length).toBeLessThanOrEqual(4)
+    expect(Object.keys(PENDING_WIRING).length).toBeLessThanOrEqual(2)
   })
 })
 
@@ -91,6 +91,12 @@ describe("the guide documents the vocabulary", () => {
   it("names every event", () => {
     const missing = CHAT_EVENT_NAMES.filter((n) => !guide.includes(n))
     expect(missing, "events shipped without a line in the guide").toEqual([])
+  })
+
+  it("says how to read an event", () => {
+    // A vocabulary nobody can observe is what this page used to document. The
+    // reader is the answer, so the page has to name it.
+    expect(guide).toContain("__CREWSHIP_CHAT_TELEMETRY__")
   })
 
   it("documents no event that does not exist", () => {

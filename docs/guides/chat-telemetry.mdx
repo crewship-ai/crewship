@@ -99,6 +99,11 @@ under 64 characters, so it is perfectly id-shaped. No identifier here needs an
 6. **Question chips are fingerprinted, not carried.** A suggested question has
    no row of its own, so `chip_id` is `q_<fnv1a hex>` of its text
    (`hashedId`). The text never reaches an event.
+7. **The reader adds no shape.** The dev-only console binding
+   ([below](#reading-the-events)) returns copies of the same sanitised buffer
+   and is absent from production builds;
+   `lib/__tests__/telemetry-dev-bridge.test.ts` re-runs the whole-vocabulary
+   sweep through it and asserts no transport is reached.
 
 ## The vocabulary
 
@@ -163,7 +168,24 @@ can never show.
 | `chat_session_titled` | `session_id`, `source` (`auto` \| `manual`) |
 
 A session title is derived from the first message, so it is content and it is
-not recorded — only whether the title was derived or typed.
+not recorded — only whether the title was derived or typed. `auto` is emitted
+by `autoTitleSession` **after the server accepts the PATCH**: a refused rename
+leaves the session untitled, and an event saying otherwise would disagree with
+the sidebar the user is looking at. Nothing emits `manual` yet — renaming by
+hand is a different surface.
+
+`source` names the door, and there are three:
+
+| `source` | Emitted by | Which is |
+|---|---|---|
+| `composer` | `chat-panel.tsx`, `ensureSession` | a draft session becoming real because somebody typed or attached a file — the row does not exist until then |
+| `sidebar` | `chat-page-client.tsx`, `handleNewSession` | the **New session** control in the chat page's session chrome |
+| `deeplink` | `chat-page-client.tsx`, `openInitialSession` | arriving with `?prompt=` — `routine-create-dialog` mints a session this way |
+
+A create the server refused emits nothing, from any of the three: there is no
+conversation, and a funnel that counts refusals as starts is worse than no
+funnel, because it is believed. `chip`, `palette` and `home` are declared for
+doors that do not exist here yet.
 
 ### Conversation search
 
@@ -194,7 +216,7 @@ it.
 
 ## Declared but not yet emitted
 
-Four events have no call site. This is tracked mechanically in
+Two events have no call site. This is tracked mechanically in
 `lib/__tests__/telemetry-call-sites.test.ts`, which scans the UI source and
 fails if an event is neither wired nor on its pending list — and fails just as
 loudly if a pending event has quietly been wired without this table being
@@ -202,21 +224,72 @@ updated.
 
 | Event | Why not yet |
 |---|---|
-| `chat_session_created` | the POST that creates a session lives in `chat-panel.tsx` (`ensureSession`) and `chat/[agentSlug]/chat-page-client.tsx` (`handleNewSession`) |
-| `chat_session_titled` | `autoTitleSession` lives in `chat/[agentSlug]/chat-page-client.tsx` |
 | `chat_approval_shown` | the chat surface has no interactive approval card. `AskUserQuestion` renders deliberately inert — `assistant-turn.test.tsx` pins that it must not look clickable — and approvals are decided on `/approvals` |
 | `chat_approval_decided` | same: no approve/deny handler exists inside chat |
 
-The first two are one-line calls in files another workstream owns. The last two
-are declared so that whoever builds the in-chat approval card emits the agreed
-name rather than inventing a second one.
+Both are declared so that whoever builds the in-chat approval card emits the
+agreed name rather than inventing a second one. Neither is a wiring to-do:
+there is nothing to wire them to.
+
+## Reading the events
+
+The buffer used to be write-only. `peekChatEvents()` and `drainChatEvents()`
+were exports attached to nothing — no console, no CLI and no UI could read a
+single event, which is how the gap was found: somebody tried to demonstrate the
+funnel and had nowhere to look.
+
+Both people who need to read these are sitting at the machine that produced
+them: a developer demonstrating or debugging the funnel, and a maintainer
+asking whether a surface is used at all. Neither needs a request, so the reader
+is a **development-only binding on `window`**.
+
+```
+1. pnpm dev, or a dev build of the binary — NOT a production build
+2. open /chat/<agent>, open the browser console
+3. > __CREWSHIP_CHAT_TELEMETRY__.summary()
+     { ask_chip_shown: 4, ask_chip_clicked: 1, …, chat_approval_shown: 0 }
+4. click a chip, send a message
+5. > __CREWSHIP_CHAT_TELEMETRY__.peek()
+     [ { name: "ask_chip_clicked", payload: {…}, ts: 1765… }, … ]
+```
+
+| Call | What it gives you |
+|---|---|
+| `.peek()` | every buffered event, oldest first — copies, so editing them changes nothing |
+| `.summary()` | a count per **declared** event, zeros included |
+| `.json()` | the buffer as pasteable JSON, for a bug report |
+| `.drain()` | `peek()` and empty |
+| `.reset()` | forget the buffer and the impression dedupe — "clear, then click" |
+| `.names` / `.schema` | the vocabulary, so the console can say what a field is allowed to be |
+| `.help` | the above, printed |
+
+`summary()` is the one that answers "is this surface used at all", and it lists
+every declared event rather than only the ones seen — otherwise *never used*
+and *never declared* look identical.
+
+<Note>
+**It is not in a production build.** The binding is installed behind a bare
+`process.env.NODE_ENV === "production"` guard, which Next inlines at build
+time, so the branch — and the reader with it — is dropped from the production
+bundle. `window.__CREWSHIP_CHAT_TELEMETRY__` is `undefined` there, not a
+disabled stub. `lib/__tests__/telemetry-dev-bridge.test.ts` asserts both the
+absence and the shape of the guard.
+</Note>
+
+The reader does not weaken the privacy guarantee, because it reads the same
+sanitised buffer `emitChatEvent` writes and adds no shape of its own: the
+whole-vocabulary poison sweep is run a second time **through** the reader
+(`describe("privacy: the reader is not a second way out")`), and the same file
+asserts that emitting the entire vocabulary and reading it back makes no
+`fetch`, `sendBeacon`, `XMLHttpRequest` or `WebSocket` call, on top of a scan
+of the module's own source for those names.
 
 ## Where the events go
 
-By default: an in-memory ring buffer, capped at 500 events, readable with
-`peekChatEvents()` / `drainChatEvents()`. That is enough for a Playwright flow
-to assert a funnel end to end, and it is deliberately not enough to answer a
-30-day question.
+By default: an in-memory ring buffer, capped at 500 events, read with the dev
+binding above (or with `peekChatEvents()` / `drainChatEvents()` from a test).
+That is enough for a Playwright flow to assert a funnel end to end, and it is
+deliberately not enough to answer a 30-day question.
 
 To send them somewhere, register a sink once, high in the tree:
 
@@ -239,8 +312,9 @@ The ask-packs PRD sets four targets. Three are computable from this
 vocabulary today:
 
 - **≥ 35 % of sessions start from a chip** — `ask_chip_clicked` grouped by
-  `session_id`, over sessions. Needs `chat_session_created`, and needs
-  `chat-panel.tsx` to pass `sessionId` into `AskRail`. Note that the
+  `session_id`, over sessions. `chat_session_created` is wired now; what is
+  still missing is `chat-panel.tsx` passing `sessionId` into `AskRail`, without
+  which a chip click cannot be attributed to the session it started. Note that the
   pre-change baseline **is gone**: per-agent chips shipped before any event
   existed, so there is no generic-chip cohort left to compare against. Record
   the date measurement starts and compare cohorts after it, not before.

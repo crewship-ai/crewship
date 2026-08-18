@@ -37,6 +37,7 @@ import {
 import { httpError, scopeErrorMessage, useRetry } from "@/components/features/chat/scope-fetch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
+import { emitChatEvent } from "@/lib/telemetry"
 
 /**
  * Read the agent slug from the live URL after client hydration, and let the
@@ -434,6 +435,15 @@ export function ChatPageClient() {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const created: { id: string } = await res.json()
+      // The third door: arriving with ?prompt= mints a session of its own
+      // (routine-create-dialog sends people here). Counting only the button
+      // and the composer would make every handoff conversation look like it
+      // started nowhere.
+      emitChatEvent("chat_session_created", {
+        session_id: created.id,
+        agent_id: agent.id,
+        source: "deeplink",
+      })
       const nowIso = new Date().toISOString()
       setSessions((prev) =>
         prev.some((s) => s.id === created.id)
@@ -514,6 +524,13 @@ export function ChatPageClient() {
         if (!res.ok) return
         const row: { title?: string | null } = await res.json()
         if (typeof row?.title !== "string" || !row.title) return
+        // A name was written, and nobody typed it. The name itself is derived
+        // from the first message, so it is content and it is not here — the
+        // event says `auto` and stops. Emitted only once the server has
+        // ACCEPTED the title: a refused PATCH leaves the session untitled, and
+        // a metric that disagrees with the sidebar the user is looking at is
+        // worse than no metric.
+        emitChatEvent("chat_session_titled", { session_id: sid, source: "auto" })
         // Render the SERVER's normalised title, not the one we derived, and
         // take only the title: the response's last_activity_at is deliberately
         // not bumped by a rename (internal/api/agent_chats_rename.go), so
@@ -621,6 +638,16 @@ export function ChatPageClient() {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const created: { id: string } = await res.json()
+      // Somebody asked for a fresh conversation outright, rather than a draft
+      // becoming one because they typed into it (chat-panel.tsx, `composer`).
+      // Which door gets used is the question the pair answers, so both fire —
+      // and neither fires for a create the server refused, which is why this
+      // sits after the throw above.
+      emitChatEvent("chat_session_created", {
+        session_id: created.id,
+        agent_id: agent.id,
+        source: "sidebar",
+      })
       // Refetch the sessions list (POST returns only {id}, not the full
       // record, so we'd otherwise show a partial entry in the sidebar).
       // Force-read the session the user is leaving AND the one being

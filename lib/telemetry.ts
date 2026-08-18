@@ -34,6 +34,15 @@
  * form answer, a filename or a search query can be expressed. `emitChatEvent`
  * drops anything that does not fit rather than passing it through.
  * `lib/__tests__/telemetry.test.ts` sweeps the whole vocabulary and proves it.
+ *
+ * ## Reading what was recorded
+ *
+ * A buffer nobody can read answers no question, so in development this
+ * module binds a reader to `window.__CREWSHIP_CHAT_TELEMETRY__` — see
+ * `installChatTelemetryDevBridge` below and `docs/guides/chat-telemetry`.
+ * It is absent from production builds, it hands out copies of the same
+ * sanitised events, and it adds no transport: the vocabulary sweep is run
+ * a second time through it in `lib/__tests__/telemetry-dev-bridge.test.ts`.
  */
 
 import { devWarn } from "@/lib/client-log"
@@ -297,6 +306,128 @@ export function drainChatEvents(): ChatEvent[] {
   buffer = []
   return out
 }
+
+/* ------------------------------------------------------------------ *
+ *  The reader
+ * ------------------------------------------------------------------ */
+
+/**
+ * `peekChatEvents` and `drainChatEvents` were exports attached to nothing:
+ * no console, no CLI and no UI could read a single event, which is how the
+ * gap was found — somebody tried to demonstrate the funnel and had nowhere
+ * to look.
+ *
+ * The reader is this object, bound to `window.__CREWSHIP_CHAT_TELEMETRY__`
+ * in development. Both people who need to read events are sitting at the
+ * machine that produced them — a developer demonstrating or debugging the
+ * funnel, and a maintainer asking whether a surface is used at all — so
+ * neither needs a request, a page or a build flag. The browser console is
+ * already open, and `json()` is the pasteable form for a bug report.
+ *
+ * It reads the same sanitised buffer `emitChatEvent` writes, and hands out
+ * copies: a console session cannot write back into it.
+ */
+export interface ChatTelemetryDevBridge {
+  /** Everything buffered, oldest first. Copies — editing them changes nothing. */
+  peek(): ChatEvent[]
+  /** Same, and empties the buffer. */
+  drain(): ChatEvent[]
+  /** Forget the buffer and the impression dedupe — "clear, then click". */
+  reset(): void
+  /**
+   * A count per declared event, zeros included. "Is this surface used at
+   * all" is the question; an absent key would make *never used* and *never
+   * declared* look the same.
+   */
+  summary(): Record<ChatEventName, number>
+  /** The buffer as pasteable JSON. */
+  json(): string
+  names: readonly ChatEventName[]
+  /** The vocabulary, so the console can say what a field is allowed to be. */
+  schema: typeof CHAT_EVENT_SCHEMA
+  /** Printed when the object is inspected — the reader documents itself. */
+  help: string
+}
+
+declare global {
+  interface Window {
+    /**
+     * Dev-only reader for the chat event buffer. Absent from production
+     * builds — `installChatTelemetryDevBridge` returns before creating it
+     * and the bundler folds the branch away.
+     */
+    __CREWSHIP_CHAT_TELEMETRY__?: ChatTelemetryDevBridge
+  }
+}
+
+/** Anything the bridge can be attached to. `window`, in practice. */
+type ChatTelemetryBridgeHost = { __CREWSHIP_CHAT_TELEMETRY__?: ChatTelemetryDevBridge }
+
+const HELP = [
+  "window.__CREWSHIP_CHAT_TELEMETRY__ — chat interaction events, development only.",
+  "  .peek()     every buffered event, oldest first",
+  "  .summary()  count per declared event, zeros included",
+  "  .json()     the buffer as pasteable JSON",
+  "  .drain()    peek + empty",
+  "  .reset()    forget everything (buffer and impression dedupe)",
+  "  .schema     what each payload field is allowed to be",
+  "Nothing here leaves the machine: this module has no network transport.",
+  "See docs/guides/chat-telemetry.",
+].join("\n")
+
+/** Copy an event so the caller holds no reference into the ring buffer. */
+function copyEvent(e: ChatEvent): ChatEvent {
+  return { name: e.name, ts: e.ts, payload: { ...e.payload } }
+}
+
+/**
+ * Attach the reader to `host` (default: `window`).
+ *
+ * Returns whether it attached. Two ways it does not:
+ *
+ *  - **production.** The guard is a bare `process.env.NODE_ENV` comparison
+ *    so Next inlines it and drops the branch — in a production bundle the
+ *    binding does not exist, which is a stronger statement than a binding
+ *    that exists and says it should not be used. Same mechanism as
+ *    `devWarn` (lib/client-log.ts).
+ *  - **no window.** Client components are rendered on the server too; the
+ *    module-scope call below must be a no-op there, not a crash.
+ */
+export function installChatTelemetryDevBridge(host?: ChatTelemetryBridgeHost | null): boolean {
+  if (process.env.NODE_ENV === "production") return false
+  // `undefined` means "use the default host"; an explicit `null` means there
+  // is no host, which is what a server render hands in.
+  const target =
+    host === undefined ? (typeof window === "undefined" ? null : (window as ChatTelemetryBridgeHost)) : host
+  if (!target) return false
+  target.__CREWSHIP_CHAT_TELEMETRY__ = {
+    peek: () => buffer.map(copyEvent),
+    drain: () => drainChatEvents().map(copyEvent),
+    // Not `resetChatTelemetry`: that also drops the sink, and a console
+    // command meaning "clear the screen" must not silently unregister the
+    // host's destination.
+    reset: () => {
+      buffer = []
+      seenOnce = new Set<string>()
+    },
+    summary: () => {
+      const out = {} as Record<ChatEventName, number>
+      for (const name of CHAT_EVENT_NAMES) out[name] = 0
+      for (const e of buffer) if (e.name in out) out[e.name] += 1
+      return out
+    },
+    json: () => JSON.stringify(buffer.map(copyEvent), null, 2),
+    names: CHAT_EVENT_NAMES,
+    schema: CHAT_EVENT_SCHEMA,
+    help: HELP,
+  }
+  return true
+}
+
+// Attaching at import is what makes the reader discoverable without anybody
+// remembering to mount anything: the module is imported by every instrumented
+// surface, so opening the console on a chat page is enough.
+installChatTelemetryDevBridge()
 
 function sanitizeValue(field: FieldSpec, raw: unknown): string | number | boolean | undefined {
   switch (field.kind) {
