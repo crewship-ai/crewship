@@ -24,6 +24,12 @@ keeping that true without making it a place where things get lost.
 Forms are configured per agent and ride the ordinary agent PATCH; see
 [`crewship agent`](/cli/agent) for the command and the JSON.
 
+A worked example ships with the demo data: `crewship seed` gives Casey, the
+Test & Review Engineer, a **Report a bug** form — what went wrong, steps to
+reproduce, severity, first seen, and a screenshot. Render it with `crewship
+agent ask-preview casey bug-report`, or read it at
+`cmd/crewship/seeddata/askforms/casey.json`.
+
 ## What a submission produces
 
 Two things, not one:
