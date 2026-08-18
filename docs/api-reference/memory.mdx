@@ -307,7 +307,11 @@ Returns the audit chain for one canonical memory path, newest-first.
       "written_by": "audit-watcher",
       "payload_ref": "/var/lib/crewship/memory/versions/de/def..."
     }
-  ]
+  ],
+  "projection": {
+    "state": "recorded",
+    "reason": "Recorded by the memory audit watcher on every write, and by the consolidator for the files it maintains."
+  }
 }
 ```
 
@@ -316,6 +320,8 @@ Returns the audit chain for one canonical memory path, newest-first.
 | `path` | string | Echo of the request's `path`. |
 | `count` | integer | `len(entries)` -- handy when paging is bounded by `limit`. |
 | `entries[]` | array | Newest-first list of `memory_versions` rows for this path in the caller's workspace. |
+| `projection.state` | string | `recorded`, `unrecorded`, or `unavailable` -- see below. |
+| `projection.reason` | string | Human-readable explanation, safe to render to an operator verbatim. |
 | `entries[].tier` | string | `agent`, `crew`, `workspace`, `pins`, or `learned`. |
 | `entries[].parent_sha` | string? | sha256 of the prior version in the chain. **Omitted** (not `null`) on the root version — the field carries `omitempty` and the column is COALESCE'd to `""`. |
 | `entries[].payload_ref` | string | On-disk path to the content-addressed blob. |
@@ -325,6 +331,16 @@ Returns the audit chain for one canonical memory path, newest-first.
 | `400` | Missing `path` query parameter, or a `limit` that is non-positive / non-numeric. |
 | `401` | No workspace context in the session. |
 | `500` | Underlying `memory.LogVersions` query failed. |
+
+**`projection` -- whether an empty `entries` may be read as a fact.**
+
+`memory_versions` is a projection of the `.memory` tree, not the tree itself: a file appears only if some writer records it. An unprojected path and a path nobody has written to both answer `{"entries": []}`, and a client cannot tell them apart -- so the server says which it is. Clients must not hard-code the list of projected tiers; it is a property of the writers and it changes.
+
+| `state` | Means | How a UI should render an empty list |
+|---|---|---|
+| `recorded` | Some writer records this path. | "Nothing has been written yet" -- a fact. |
+| `unrecorded` | No writer records this path (e.g. `lessons.md`, `PERSONA.md`, peer cards). | "This cannot be read here", plus `reason`. Never as an empty history. |
+| `unavailable` | Versioning is off on this server (no blob root), so no path of any tier is recorded. | "The trail is not being collected", plus `reason`. |
 
 ### `GET /api/v1/memory/versions/{sha}`
 
