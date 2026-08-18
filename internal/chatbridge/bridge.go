@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/admission"
+	"github.com/crewship-ai/crewship/internal/askforms"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -371,6 +372,26 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("agent %s pending review: hire not approved", info.AgentID)
 	}
 
+	// What the client attached TO this message rather than inside it. Today
+	// that is the ask-form submission envelope: which form was answered, at
+	// what version, with what values, and which upload answered which field.
+	//
+	// It is REBUILT rather than copied. msgOpt.Metadata is a raw map straight
+	// off an untrusted socket, and storing it verbatim would let any client
+	// write arbitrary structure into a durable conversation record. Reading it
+	// back through askforms.EnvelopeFromMetadata means exactly one shape can
+	// survive the hop — a valid envelope — and anything else (junk, a partial
+	// envelope, a metadata map with no envelope in it) leaves the message
+	// exactly as it would have been persisted before any of this existed.
+	//
+	// Nothing here touches Content. A form submission is an ordinary user
+	// message; strip the metadata and the conversation reads identically,
+	// which is what lets every CLI adapter stay unaware of forms.
+	var userMsgMetadata any
+	if env, ok := askforms.EnvelopeFromMetadata(msgOpt.Metadata); ok {
+		userMsgMetadata = map[string]any{askforms.EnvelopeMetadataKey: env}
+	}
+
 	// The human turn is recorded and fanned out to the other participants
 	// regardless of whether the agent will respond. streamFn's BroadcastExcept
 	// skips the sender (who already rendered it optimistically); harmless in a
@@ -381,6 +402,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			AgentID:      info.AgentID,
 			Role:         conversation.RoleUser,
 			Content:      content,
+			Metadata:     userMsgMetadata,
 			AuthorUserID: userID,
 			Timestamp:    time.Now().UTC(),
 		})

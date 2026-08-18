@@ -307,6 +307,15 @@ type sendMessagePayload struct {
 	// flag). 0/omitted leaves the adapter default in place. Clamped via
 	// clampMaxTurns before use — this arrives from an untrusted client.
 	MaxTurns int `json:"max_turns,omitempty"`
+	// Metadata rides WITH the message instead of inside it: the ask-form
+	// submission envelope (internal/askforms) is the only thing that uses it
+	// today. Content is untouched by its presence, which is what keeps a form
+	// submission an ordinary message to every CLI adapter.
+	//
+	// Untrusted, and deliberately not validated here — this is a transport
+	// hop. The chat handler decides what, if anything, is worth persisting;
+	// see chatbridge.HandleChatMessage.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // maxAllowedTurns is the hard ceiling on a client-supplied turn cap. The whole
@@ -490,7 +499,10 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			payload.ChatID,
 			payload.Content,
 			streamFn,
-			ChatMessageOption{MaxTurns: clampMaxTurns(payload.MaxTurns)},
+			ChatMessageOption{
+				MaxTurns: clampMaxTurns(payload.MaxTurns),
+				Metadata: payload.Metadata,
+			},
 		)
 		if err != nil {
 			// Don't emit error if context was cancelled (user requested stop)

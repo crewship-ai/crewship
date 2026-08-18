@@ -65,13 +65,20 @@ export interface ChatTurn {
    *  attribute a teammate's message (avatar/name) and distinguish it from the
    *  local user's own turns. Undefined for the local user / private chats. */
   authorUserId?: string
-  /** Per-turn metadata. Currently only `trace_id` is consumed (by the
-   *  feedback store to link signals back to the OTel trace that
-   *  produced the message). Backend wiring is not yet shipped — see
-   *  the open follow-up in the feedback guide — so this field is
-   *  populated only when the WebSocket event carries it, and is
-   *  always optional for downstream readers. */
-  metadata?: { trace_id?: string }
+  /** Per-turn metadata — whatever rode WITH the message rather than inside it.
+   *
+   *  Two readers today. `trace_id` is stamped by the `done` event and consumed
+   *  by the feedback store to link signals back to the OTel trace that produced
+   *  the message. The ask-form submission envelope
+   *  (components/features/chat/asks/ask-envelope.ts) arrives under its own key
+   *  on a user turn — set optimistically by sendMessage, and recovered from
+   *  `conversation.Message.Metadata` by messagesToTurns on reload, which is the
+   *  path that makes a badge survive a refresh.
+   *
+   *  Open-ended by design: this map is the message's metadata, and narrowing it
+   *  to the keys that happen to have readers is what silently dropped the
+   *  envelope. */
+  metadata?: { trace_id?: string } & Record<string, unknown>
 }
 
 // --- Legacy types (kept for history loading compatibility) ---
@@ -214,7 +221,19 @@ function historyPartToTurnPart(part: HistoryPart, id: string, timestamp: Date): 
   }
 }
 
-/** Convert flat ChatMessage history into turns for display */
+/** Convert flat ChatMessage history into turns for display.
+ *
+ *  A persisted message's own `metadata` is carried onto the turn it becomes.
+ *  It used to be dropped on every 1:1 message→turn branch, and that drop is
+ *  why a reloaded conversation could not show which form a turn came out of
+ *  even when the server had the answer sitting on the row: the renderer reads
+ *  `turn.metadata` (asks/ask-provenance.ts, via `askProvenanceForTurn`) and
+ *  there was never anything there.
+ *
+ *  The legacy assistant-grouping branch at the bottom is left alone — it
+ *  already forwards `msg.metadata` onto the PART, which the same reader also
+ *  looks at, and several such messages can share one turn, so there is no
+ *  single message whose metadata the turn could honestly claim. */
 export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = []
   for (const msg of messages) {
@@ -226,6 +245,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         isStreaming: false,
         timestamp: msg.timestamp,
         authorUserId: msg.authorUserId,
+        metadata: msg.metadata,
       })
     } else if (msg.role === "system") {
       // Persisted system turns may carry structured parts (e.g. the error
@@ -241,6 +261,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         parts,
         isStreaming: false,
         timestamp: msg.timestamp,
+        metadata: msg.metadata,
       })
     } else if (msg.parts && msg.parts.length > 0) {
       // Modern message: rebuild the turn from its structured parts so the
@@ -253,6 +274,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         parts: msg.parts.map((p, i) => historyPartToTurnPart(p, `${msg.id}-${i}`, msg.timestamp)),
         isStreaming: false,
         timestamp: msg.timestamp,
+        metadata: msg.metadata,
       })
     } else {
       // assistant/tool messages: group consecutive ones into a single turn
@@ -1283,8 +1305,20 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     subscribeAndResume()
   }, [subscribeAndResume])
 
+  /** Send a message.
+   *
+   *  `metadata` rides WITH the message, never inside it: `content` is
+   *  byte-identical to what a plain send of the same text produces, and the
+   *  payload omits the key entirely when there is nothing to carry, so a plain
+   *  composer message, a suggestion chip and `?prompt=` all serialize to the
+   *  exact bytes they did before any of this existed. Today the only occupant
+   *  is the ask-form submission envelope, forwarded by useMessageSubmit.
+   *
+   *  It is also stamped on the optimistic turn, so the "via <form>" badge is
+   *  on screen the moment the message is — the reload path recovers the same
+   *  thing from the persisted message (messagesToTurns above). */
   const sendMessage = useCallback(
-    (content: string) => {
+    (content: string, metadata?: Record<string, unknown>) => {
       if (!content.trim() || isStreaming) return
 
       const userTurn: ChatTurn = {
@@ -1293,6 +1327,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         parts: [{ id: uuid(), type: "text", content: content.trim(), timestamp: new Date() }],
         isStreaming: false,
         timestamp: new Date(),
+        metadata,
       }
 
       setTurns((prev) => [...prev, userTurn])
@@ -1306,6 +1341,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         payload: JSON.stringify({
           session_id: sessionId,
           content: content.trim(),
+          ...(metadata ? { metadata } : {}),
         }),
       })
     },
@@ -1370,7 +1406,11 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       return
     }
 
-    // Remove all turns after (and including) the last assistant turn
+    // Remove all turns after (and including) the last assistant turn. The user
+    // turn itself is kept as-is, badge and all — a regenerate re-asks the same
+    // question. What it deliberately does NOT do is put the envelope back on
+    // the wire: a submission id is minted once per press of Send, and
+    // re-sending it would record a second submission the user never made.
     setTurns((prev) => prev.slice(0, lastUserIdx + 1))
     setIsStreaming(true)
     textBufferRef.current = ""
@@ -1407,9 +1447,17 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         return
       }
 
-      // Replace the user turn content and remove everything after
+      // Replace the user turn content and remove everything after.
+      //
+      // The metadata goes with it. An ask envelope claims "the user answered
+      // this form this way, and this is the text it rendered" — once the text
+      // has been edited by hand that is no longer true, so the badge must not
+      // survive the edit. Nothing is sent in its place either (the payload
+      // below carries no metadata), so the local turn and the persisted one
+      // agree: this is a typed message now.
+      const { metadata: _replacedEnvelope, ...priorTurn } = turns[turnIdx]
       const editedTurn: ChatTurn = {
-        ...turns[turnIdx],
+        ...priorTurn,
         parts: [{ id: uuid(), type: "text", content: trimmed, timestamp: new Date() }],
       }
       setTurns(turns.slice(0, turnIdx).concat(editedTurn))

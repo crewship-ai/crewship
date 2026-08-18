@@ -24,6 +24,7 @@ import {
   EnsureChatSessionProvider,
 } from "./attachment-zone"
 import { AskFormSheet } from "../asks/ask-form-sheet"
+import { ASK_SUBMISSION_METADATA_KEY, type AskSubmissionEnvelope } from "../asks/ask-envelope"
 import { recordAskProvenance } from "../asks/ask-provenance"
 import { isAttachmentField, type AskForm, type RenderAskTemplate } from "../asks/types"
 
@@ -48,7 +49,15 @@ interface ChatComposerProps {
    *  converse, so it creates the row exactly as the first message does — one
    *  creation path, idempotent per session. */
   ensureSession: () => Promise<boolean>
-  sendMessage: (text: string) => void
+  /** useChat's send. The second argument is metadata that rides WITH the
+   *  message rather than inside it (the ask-form submission envelope today);
+   *  `text` is identical whether or not it is present.
+   *
+   *  Declared with both parameters on purpose. TypeScript accepts a
+   *  one-parameter function here either way, so a narrower prop type would
+   *  typecheck a caller that silently drops the envelope — which is exactly
+   *  the failure this feature is fixing, one layer up. */
+  sendMessage: (text: string, metadata?: Record<string, unknown>) => void
   onSend?: (sessionId: string, text: string) => void
   /** Called after a message actually went out (size guard passed) — the
    *  parent bumps its pin-to-top nonce. Input/draft/attachment clearing is
@@ -160,11 +169,22 @@ export function ChatComposer({
   })
 
   /** Submitting a form is submitting a message. Same hook, same guards, same
-   *  attachment block — the only thing the form contributed is the text. */
+   *  attachment block — the only thing the form contributed is the text.
+   *
+   *  …and the envelope, which is the sheet's third argument and rides WITH the
+   *  message as metadata rather than in it (asks/ask-envelope.ts). The text
+   *  handed to `handleSubmit` is byte-for-byte what it was before the envelope
+   *  existed, which is what keeps a form submission an ordinary message to
+   *  every CLI adapter. From here it is the send path's business:
+   *  useMessageSubmit sizes it into the frame guard and passes it to
+   *  useChat's sendMessage, which puts it in the `send_message` payload and
+   *  stamps it on the optimistic turn. */
   const handleAskSubmit = useCallback(
-    async (form: AskForm, text: string): Promise<boolean> => {
+    async (form: AskForm, text: string, envelope: AskSubmissionEnvelope): Promise<boolean> => {
       sentRef.current = false
-      // Provenance is keyed by the content that will actually be on the turn,
+      // The legacy content-keyed provenance map, still recorded because the
+      // turn-renderer falls back to it for anything that reaches it without an
+      // envelope. Keyed by the content that will actually be on the turn,
       // which is the COMPOSED string (rendered template + attachment block),
       // not the template output on its own.
       recordAskProvenance(
@@ -175,7 +195,11 @@ export function ChatComposer({
       // `files` is PromptInput's own (unused) attachment channel — this
       // composer's attachments live in the store and are read by
       // useMessageSubmit, so the field is present and empty.
-      await handleSubmit({ text, files: [] })
+      await handleSubmit({
+        text,
+        files: [],
+        metadata: { [ASK_SUBMISSION_METADATA_KEY]: envelope },
+      })
       return sentRef.current
     },
     [handleSubmit, sessionId, sessionAttachments],

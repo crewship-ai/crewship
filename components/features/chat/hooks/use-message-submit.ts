@@ -35,15 +35,31 @@ function formatKB(bytes: number): string {
  *  internal/ws/hub.go) — not JS string length, which undercounts every
  *  multi-byte character.
  *
+ *  `metadata` is part of that payload when a message carries any — today, an
+ *  ask-form submission envelope, which is unbounded in principle (a long-answer
+ *  field, a form with many fields, a list of upload paths). It MUST be measured:
+ *  the guard's whole job is to know what the server will be asked to accept, and
+ *  a guard that sized the text alone would pass a frame the socket then dies on.
+ *  Omitted from the sized payload when absent, exactly as sendMessage omits it,
+ *  so a plain message is measured against the same bytes as before.
+ *
  *  Without this guard, a paste over the server's 64 KiB frame cap doesn't
  *  get rejected gracefully: readPump treats the oversize frame as a read
  *  error and tears down the whole connection, silently dropping the
  *  message and every other in-flight subscription.
  */
-export function checkChatMessageSize(sessionId: string, content: string): MessageSizeCheck {
+export function checkChatMessageSize(
+  sessionId: string,
+  content: string,
+  metadata?: Record<string, unknown>,
+): MessageSizeCheck {
   const frame = JSON.stringify({
     type: "send_message",
-    payload: JSON.stringify({ session_id: sessionId, content }),
+    payload: JSON.stringify({
+      session_id: sessionId,
+      content,
+      ...(metadata ? { metadata } : {}),
+    }),
   })
   const sizeBytes = encodedByteLength(frame)
   const limitBytes = WS_MAX_OUTBOUND_FRAME_BYTES
@@ -58,6 +74,26 @@ export function checkChatMessageSize(sessionId: string, content: string): Messag
   }
 }
 
+/** What this hook's submit handler accepts.
+ *
+ *  A superset of `PromptInputMessage`, because the handler is BOTH the
+ *  `<PromptInput onSubmit>` callback and the path the ask-form sheet submits
+ *  through, and only the second one has anything extra to say. The extra field
+ *  goes on the message rather than into a second parameter for a blunt reason:
+ *  PromptInput already occupies the second argument with the form's
+ *  `FormEvent`, so a `(message, metadata)` signature would silently receive a
+ *  DOM event as the metadata on every typed message.
+ *
+ *  PromptInput never sets `metadata`, so a typed message arrives with it
+ *  undefined and everything downstream behaves as it did before it existed.
+ */
+export type SubmittedMessage = PromptInputMessage & {
+  /** Structured data to carry WITH the message, not inside it — the ask-form
+   *  submission envelope (asks/ask-envelope.ts), keyed by
+   *  `ASK_SUBMISSION_METADATA_KEY`. `content` is unaffected by its presence. */
+  metadata?: Record<string, unknown>
+}
+
 export interface UseMessageSubmitOptions {
   sessionId: string
   isStreaming: boolean
@@ -68,8 +104,9 @@ export interface UseMessageSubmitOptions {
    *  message on the floor while the UI acted as though it had been saved. */
   ensureSession: () => Promise<boolean>
   /** useWebSocket-backed send, exposed via useChat's sendMessage. Receives
-   *  the COMPOSED content — the user's text plus the attachment block. */
-  sendMessage: (text: string) => void
+   *  the COMPOSED content — the user's text plus the attachment block — and,
+   *  when the submission carried one, the metadata that rides beside it. */
+  sendMessage: (text: string, metadata?: Record<string, unknown>) => void
   /** This session's composer attachments, in the order the user added them.
    *  Passed in rather than read from the store here so the hook stays a pure
    *  function of its inputs and the store stays the composer's business. */
@@ -113,10 +150,11 @@ export function useMessageSubmit({
   onSent,
 }: UseMessageSubmitOptions) {
   return useCallback(
-    async (message: PromptInputMessage) => {
+    async (message: SubmittedMessage) => {
       if (isStreaming) return
       const text = message.text?.trim() ?? ""
       const items = attachments ?? []
+      const metadata = message.metadata
 
       // An upload still in flight has no path yet. Sending now would produce
       // a message that names some of the files the user attached and stays
@@ -144,7 +182,7 @@ export function useMessageSubmit({
 
       const content = composeMessageWithAttachments(text, items)
 
-      const sizeCheck = checkChatMessageSize(sessionId, content)
+      const sizeCheck = checkChatMessageSize(sessionId, content, metadata)
       if (!sizeCheck.ok) {
         toast.error(sizeCheck.message)
         return
@@ -156,7 +194,16 @@ export function useMessageSubmit({
       // a chat that isn't there), and no `onSent` — so the draft and the
       // attachments survive for a retry. The caller has already told the user.
       if (!(await ensureSession())) return
-      sendMessage(content)
+      // Called with ONE argument when there is nothing to carry, not with a
+      // trailing `undefined`. A plain composer message, a suggestion chip and
+      // `?prompt=` all come through here, and "the send path is untouched for
+      // them" has to mean the call itself too — `arguments.length` is
+      // observable, to a spy in a test and to any wrapper a caller passes in.
+      if (metadata) {
+        sendMessage(content, metadata)
+      } else {
+        sendMessage(content)
+      }
       onSend?.(sessionId, text)
       onSent()
     },

@@ -237,6 +237,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       content: string
       parts?: HistoryPart[]
       ts: string
+      // The server has always returned this and this type has never named it,
+      // so every reload dropped it here — the last hop of a chain that is
+      // otherwise complete. An ask-form submission carries its envelope
+      // (which form, which version, which answers, which file answered which
+      // field) in message metadata; the renderer reads it through
+      // askProvenanceForTurn. Without this field the reader was looking for
+      // something no code path could ever hand it.
+      metadata?: Record<string, unknown>
     }
 
     // Fetch history with a couple of retries on transient failures. The old
@@ -297,6 +305,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         content: m.content,
         parts: m.parts,
         timestamp: new Date(m.ts),
+        metadata: m.metadata,
       })))
       setHistoryLoading(false)
     }
@@ -410,16 +419,30 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
   /** ensureSession, plus the one thing the user has to be told about.
    *
-   *  A create that fails means the message cannot be sent, and a message that
-   *  cannot be sent must not look sent — the composer keeps the draft (onSent
-   *  never runs), the sidebar gets no phantom row (onSend never runs), and
-   *  this says why. It is deliberately the ONLY toast on this path: it fires
-   *  when a send is actually refused, not on a background probe or a retry, so
-   *  it cannot become the noise nobody reads. */
+   *  A create that fails means nothing can be added to this conversation, and
+   *  work that could not be added must not look added — the composer keeps the
+   *  draft (onSent never runs), the sidebar gets no phantom row (onSend never
+   *  runs), and this says why. It fires only when the create is actually
+   *  refused, never on a background probe or a retry, so it cannot become the
+   *  noise nobody reads.
+   *
+   *  It says WHAT FAILED and not what did not happen next, because it has two
+   *  callers and only one of them is a send. The composer takes a single
+   *  ensureSession prop and gives the same function to both paths — the send
+   *  (useMessageSubmit) and the attachment upload, which creates the row for
+   *  the same reason before it uploads a byte (EnsureChatSessionProvider,
+   *  composer/attachment-zone.tsx). It used to end "your message wasn't sent",
+   *  which was a second toast about a message the user never wrote whenever a
+   *  file was what failed to attach.
+   *
+   *  So the consequence is stated by the caller that knows it: the upload path
+   *  already names the file, says it is not on the agent and offers Retry
+   *  (toastUploadFailure), and the send path leaves the draft in the box where
+   *  the user can see it. */
   const ensureSessionForSend = useCallback(async (): Promise<boolean> => {
     const ok = await ensureSession()
     if (!ok) {
-      toast.error("Couldn't start this conversation — your message wasn't sent. Check your connection and try again.")
+      toast.error("Couldn't start this conversation. Check your connection and try again.")
     }
     return ok
   }, [ensureSession])
