@@ -16,6 +16,7 @@ import {
   hasPendingUploads,
   isSendableAttachment,
 } from "@/lib/attachment-message"
+import { emitChatEvent } from "@/lib/telemetry"
 import { cn } from "@/lib/utils"
 
 import { currencyPlaceholder } from "@/lib/ask-template"
@@ -222,8 +223,82 @@ function Sheet({
     [rendered, attachments],
   )
 
+  /* ---------------------------------------------------------------- *
+   *  Measurement (lib/telemetry.ts)
+   *
+   *  A questionnaire is either finished or abandoned, and when it is
+   *  abandoned the only fact worth having is WHERE. So the sheet keeps
+   *  three things: when it opened, which field was touched last, and
+   *  whether it has already reported an outcome — exactly one terminal
+   *  event per sheet, whichever of the five exits was taken.
+   *
+   *  Field IDENTIFIERS only. `values` is what the user typed and it is
+   *  never read by any of this except to be counted.
+   * ---------------------------------------------------------------- */
+  const openedAtRef = useRef(Date.now())
+  const lastFieldRef = useRef<string | null>(null)
+  const terminalRef = useRef(false)
+  const valuesRef = useRef(values)
+  useEffect(() => {
+    valuesRef.current = values
+  }, [values])
+
+  const filledCount = useCallback(
+    () => Object.values(valuesRef.current).filter((v) => String(v).trim() !== "").length,
+    [],
+  )
+
+  useEffect(() => {
+    emitChatEvent("ask_form_opened", {
+      session_id: sessionId,
+      agent_id: agentId,
+      template_id: form.id,
+      field_count: form.fields.length,
+    })
+    // Once per sheet. The component is keyed on the form id upstream, so a
+    // different form is a different mount and gets its own open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const abandon = useCallback(
+    (reason: "dismissed" | "cancelled" | "navigated") => {
+      if (terminalRef.current) return
+      terminalRef.current = true
+      emitChatEvent("ask_form_abandoned", {
+        session_id: sessionId,
+        template_id: form.id,
+        field_count: form.fields.length,
+        filled_count: filledCount(),
+        last_field_id: lastFieldRef.current ?? undefined,
+        reason,
+        duration_ms: Date.now() - openedAtRef.current,
+      })
+    },
+    [sessionId, form.id, form.fields.length, filledCount],
+  )
+
+  /** Close, and say which of the four exits was taken. */
+  const closeWith = useCallback(
+    (reason: "dismissed" | "cancelled") => {
+      abandon(reason)
+      onClose()
+    },
+    [abandon, onClose],
+  )
+
+  // A sheet that simply went away — a session swap, a route change — is an
+  // abandonment too, and it is the one nobody would otherwise count. Held in a
+  // ref so the cleanup runs on unmount only, and not every time a dependency
+  // of `abandon` gets a new identity.
+  const abandonRef = useRef(abandon)
+  useEffect(() => {
+    abandonRef.current = abandon
+  }, [abandon])
+  useEffect(() => () => abandonRef.current("navigated"), [])
+
   const setField = useCallback(
     (name: string) => (e: { target: { value: string } }) => {
+      lastFieldRef.current = name
       setValues((prev) => ({ ...prev, [name]: e.target.value }))
     },
     [],
@@ -297,11 +372,26 @@ function Sheet({
     setSubmitting(true)
     try {
       const sent = await onSubmit(form, rendered, envelope)
-      if (sent) onClose()
+      if (sent) {
+        // Only a message that actually went is a completed form. A refused
+        // send leaves the sheet open with everything still in it, and counting
+        // it here is how "≥ 70 % completion once opened" would quietly inflate.
+        terminalRef.current = true
+        emitChatEvent("ask_form_submitted", {
+          session_id: sessionId,
+          template_id: form.id,
+          field_count: form.fields.length,
+          filled_count: filledCount(),
+          attachment_count: Object.values(pathsByField).reduce((n, l) => n + l.length, 0),
+          duration_ms: Date.now() - openedAtRef.current,
+        })
+        onClose()
+      }
     } finally {
       setSubmitting(false)
     }
   }, [
+    filledCount,
     submitting,
     disabled,
     form,
@@ -321,7 +411,7 @@ function Sheet({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.stopPropagation()
-      onClose()
+      closeWith("dismissed")
     }
   }
 
@@ -367,7 +457,7 @@ function Sheet({
           size="icon-sm"
           className="h-7 w-7"
           data-testid="ask-close"
-          onClick={onClose}
+          onClick={() => closeWith("dismissed")}
         >
           <X className="h-3.5 w-3.5" />
           <span className="sr-only">Close</span>
@@ -454,7 +544,7 @@ function Sheet({
           variant="outline"
           size="sm"
           data-testid="ask-cancel"
-          onClick={onClose}
+          onClick={() => closeWith("cancelled")}
           disabled={submitting}
         >
           Cancel
@@ -477,7 +567,11 @@ function Sheet({
       <div className="fixed inset-0 z-50 flex flex-col justify-end" data-testid="ask-sheet-mobile">
         {/* Tapping away closes, like every other bottom sheet on the phone.
             It sends nothing — the same contract as Escape and Cancel. */}
-        <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden="true" />
+        <div
+          className="absolute inset-0 bg-black/40"
+          onClick={() => closeWith("dismissed")}
+          aria-hidden="true"
+        />
         <div className="relative">{body}</div>
       </div>
     )

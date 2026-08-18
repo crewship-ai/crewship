@@ -12,7 +12,7 @@ import {
   type ComposerAttachment,
 } from "@/stores/composer-store"
 
-import { useAttachmentUpload } from "../composer/attachment-zone"
+import { useAttachmentUpload, type AttachmentSource } from "../composer/attachment-zone"
 import type { AskFormField } from "./types"
 
 /**
@@ -86,8 +86,8 @@ export function AskFieldAttachments({
    * answering a question it was never dropped into.
    */
   const handleFiles = useCallback(
-    (files: File[]) => {
-      const done = upload(files)
+    (files: File[], source?: AttachmentSource) => {
+      const done = upload(files, source)
       claim(sessionId, owner, files)
       void done.catch(() => {})
     },
@@ -100,7 +100,7 @@ export function AskFieldAttachments({
       testId={`ask-camera-${field.name}`}
       label="Take a photo"
       icon={<Camera className="h-3.5 w-3.5" />}
-      onFiles={handleFiles}
+      onFiles={(files) => handleFiles(files, "camera")}
       // `capture="environment"` is what makes a phone open the rear camera
       // instead of the document picker — the one control a receipt-shaped
       // question actually needs on the device people photograph receipts with
@@ -114,13 +114,13 @@ export function AskFieldAttachments({
       testId={`ask-upload-${field.name}`}
       label="Attach files"
       icon={<Paperclip className="h-3.5 w-3.5" />}
-      onFiles={handleFiles}
+      onFiles={(files) => handleFiles(files, "picker")}
     />
   )
 
   return (
     <div className="flex flex-col gap-2">
-      <AttachmentDropZone onFiles={handleFiles} className="rounded-xl">
+      <AttachmentDropZone onFiles={(files) => handleFiles(files, "drop")} className="rounded-xl">
         <div className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2.5">
           {/* A `photo` field leads with the camera and a `file` field with the
               paperclip. Both offer both: a receipt is photographed on a phone

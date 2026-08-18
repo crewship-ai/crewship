@@ -73,6 +73,7 @@ vi.mock("sonner", () => ({
 }))
 
 import { ChatPanel } from "../chat-panel"
+import { useComposerStore } from "@/stores/composer-store"
 
 const panelProps = {
   agentId: "agent-1",
@@ -204,6 +205,70 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     // session with no row, and the user would be left believing it was saved.
     expect(sendMessage).not.toHaveBeenCalled()
     expect(resubscribeSession).not.toHaveBeenCalled()
+  })
+
+  // The create is reached by TWO callers, and only one of them is a send.
+  //
+  // Attaching a file creates the row the same way the first message does —
+  // composer/attachment-zone.tsx runs ensureSession before it uploads a byte,
+  // because the attachments endpoint 404s without the row. So a failed create
+  // during an upload produced the accurate per-file toast ("receipt.pdf was not
+  // attached … press Retry") AND this one, which said "your message wasn't
+  // sent" about a message the user never wrote.
+  //
+  // The composer takes ONE ensureSession prop and hands the same function to
+  // both paths (composer/chat-composer.tsx: useMessageSubmit and
+  // EnsureChatSessionProvider), so the panel cannot word it per caller. The
+  // wording therefore has to be true for both: the conversation could not be
+  // started. What did not happen next — no message, no attachment — is said by
+  // the caller that knows, which for the upload is the per-file toast and the
+  // error chip.
+  it("does not claim a message was sent when the create fails during an upload", async () => {
+    createStatus = 500
+    useComposerStore.setState({ attachments: {}, drafts: {} })
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(chatStub.loadHistory).toHaveBeenCalled())
+
+    const input = document.querySelector<HTMLInputElement>(
+      'input[type="file"]:not([aria-label])',
+    )!
+    const file = new File(["payload"], "receipt.pdf", { type: "application/pdf" })
+    Object.defineProperty(input, "files", { value: [file], configurable: true })
+    fireEvent.change(input)
+
+    // The create was attempted and refused — this is the upload path reaching
+    // ensureSession, not a send.
+    await waitFor(() => expect(creates).toHaveLength(1))
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+
+    const said = toastError.mock.calls
+      .map(([title, opts]) => `${title} ${JSON.stringify(opts ?? {})}`)
+      .join("\n")
+
+    // Nothing may describe a message. The user attached a file.
+    expect(said).not.toMatch(/message/i)
+    expect(said).not.toMatch(/wasn't sent|was not sent/i)
+    // And the thing that DID fail is still named.
+    expect(said).toMatch(/conversation/i)
+    expect(said).toContain("receipt.pdf")
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  // The send path keeps its own toast, and it must still be one the user can
+  // act on — the create is the only thing that failed, so that is what it says.
+  it("says the conversation could not be started when a send is refused", async () => {
+    createStatus = 500
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(chatStub.loadHistory).toHaveBeenCalled())
+
+    fireEvent.click(await firstChip())
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1))
+    const [title, opts] = toastError.mock.calls[0]
+    const said = `${title} ${JSON.stringify(opts ?? {})}`
+    expect(said).toMatch(/conversation/i)
+    expect(said).toMatch(/try again/i)
+    expect(said).not.toMatch(/message/i)
   })
 
   it("retries the create on the next send after a failure", async () => {

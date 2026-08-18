@@ -13,6 +13,7 @@ import { MCPLogo } from "@/components/icons/mcp-logos"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { paletteFilter } from "@/lib/palette-filter"
 import { routineHref } from "@/lib/routine-href"
+import { emitChatEvent } from "@/lib/telemetry"
 import {
   CONVERSATION_SEARCH_DEBOUNCE_MS,
   CONVERSATION_SEARCH_MIN_QUERY,
@@ -385,6 +386,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       void searchConversations(trimmed, { workspaceId, signal: ac.signal }).then((hits) => {
         if (ac.signal.aborted) return
         setConversations(hits)
+        // One event per request that actually ran, so the count is searches
+        // and not keystrokes. The terms are not recorded — what somebody types
+        // into ⌘K is as private as the message they are hunting for — and a
+        // search returning nothing is the most informative row in the table.
+        emitChatEvent("conversation_search_run", {
+          result_count: hits.length,
+          has_results: hits.length > 0,
+          source: "palette",
+        })
       })
     }, CONVERSATION_SEARCH_DEBOUNCE_MS)
     return () => {
@@ -541,7 +551,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             heading={<GroupLabel>Conversations</GroupLabel>}
             className={PALETTE_GROUP_CLASS}
           >
-            {conversationRows.map(({ hit, href }) => {
+            {conversationRows.map(({ hit, href }, position) => {
               const snippet = conversationHitSnippet(hit)
               const who = hit.agent_name || hit.agent_slug || ""
               return (
@@ -554,7 +564,18 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   value={`${snippet} ${who} conversation ${hit.id}`}
                   className={PALETTE_ITEM_CLASS}
                   data-href={href}
-                  onSelect={() => go(href, snippet, "Conversations")}
+                  onSelect={() => {
+                    // The RANK, not the row. A search whose answer is always
+                    // opened at position 4 is a ranking bug, and nothing else
+                    // in the product can see it.
+                    emitChatEvent("conversation_search_result_opened", {
+                      session_id: hit.session_id,
+                      position,
+                      result_count: conversationRows.length,
+                      source: "palette",
+                    })
+                    go(href, snippet, "Conversations")
+                  }}
                 >
                   <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="type-row flex-1 truncate">{snippet}</span>

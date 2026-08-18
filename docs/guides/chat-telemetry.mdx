@@ -1,0 +1,254 @@
+---
+title: "Chat interaction events"
+description: "The measurement behind the chat surface — the event vocabulary, what a payload may and may not contain, why these are not journal entries, and where the sink is wired."
+icon: "activity"
+stability: experimental
+tag: Experimental
+---
+
+# Chat interaction events
+
+The `/chat` surface — per-agent chips, questionnaires, attachments, ⌘K
+conversation search — shipped with no measurement at all. This page is
+the vocabulary that fixes that, and the rules it is held to.
+
+<Note>
+This is **not** crash reporting. `crewship telemetry on|off` and the
+[Telemetry](/guides/telemetry) guide are about anonymous Sentry crash
+reports, which leave your machine when you allow them. Chat interaction
+events never leave: `lib/telemetry.ts` has no network transport, and no
+`fetch` call exists anywhere in it. Same English word, different concern.
+</Note>
+
+## Why these are not journal entries
+
+The [journal](/guides/crew-journal) is the obvious home — it is typed,
+durable, workspace-scoped and already mirrored into the frontend. It was
+rejected for three reasons.
+
+- **The journal is written by the server, not the browser.** The client can
+  only `GET /api/v1/journal`. Emitting from the chat UI would mean opening an
+  ingest endpoint so a browser can assert rows into the table the product
+  audits through — the same table that holds credential reveals, keeper
+  decisions and approvals. A chip being displayed is not an audited fact, and
+  mixing the two devalues every claim the audit trail makes.
+- **The volume is wrong.** `ask_chip_shown` fires on impression. A journal row
+  is durable, FTS-indexed, broadcast over SSE to every open activity feed and
+  carried in `crewship backup`. Nobody wants "a chip was displayed" in the feed
+  they read to find out what their crew did.
+- **The cost per event is a product decision.** Each new entry type touches
+  `internal/journal/types.go`, `lib/types/journal.ts`, `lib/journal-icons.ts`
+  and `lib/activity-stream.ts`, each with a parity test — and each needs an
+  icon, a colour and a filter group, because those files describe a **human**
+  surface. Thirteen funnel events would demand thirteen icons for something no
+  operator will ever read one row of.
+
+What was chosen instead is a client-side channel with one owner of the
+vocabulary (`lib/telemetry.ts`), a schema per event, and an in-memory buffer.
+The objection to a client analytics channel — "what does a message contain" —
+is answered structurally below rather than by policy.
+
+## The privacy rule, and why it is not a promise
+
+`PRIVACY.md` says the install sends **no usage analytics or product metrics**.
+That is kept by construction: this module cannot make a network request.
+
+Within the payload, the guarantee is that a value can only be
+
+| Kind | Accepts |
+|---|---|
+| `num` | a finite number — counts, durations, byte sizes, ranks |
+| `bool` | `true` / `false` |
+| `enum` | one of a closed set written down in `CHAT_EVENT_SCHEMA` |
+| `id` | an opaque token matching `^[A-Za-z0-9_.:-]{1,64}$` |
+
+There is deliberately **no free-string kind**. A message, a form answer, a
+filename or a search query has no shape it can be expressed in, and
+`emitChatEvent` drops anything that does not fit rather than passing it
+through — undeclared keys included, because the sanitiser iterates the schema
+and never the input.
+
+The `id` charset excludes `@`. It was included in one draft and the
+whole-vocabulary sweep in `lib/__tests__/telemetry.test.ts` immediately pushed
+`jana@example.com` through an id field: an email has no whitespace and is well
+under 64 characters, so it is perfectly id-shaped. No identifier here needs an
+`@`.
+
+### What a privacy reviewer should check
+
+1. **No transport.** `grep -n "fetch\|XMLHttpRequest\|sendBeacon" lib/telemetry.ts`
+   returns nothing. Any sink is registered by the host through
+   `setChatTelemetrySink`, which is the single place a destination could ever
+   be introduced.
+2. **The vocabulary sweep.** `lib/__tests__/telemetry.test.ts`, `describe("privacy:
+   no event can carry user content")` — it poisons **every declared key of
+   every event** with content-bearing strings, adds undeclared keys
+   (`message_text`, `file_name`, `answers`), and asserts nothing recognisable
+   reaches a sink. It runs over `CHAT_EVENT_NAMES`, so a new event is covered
+   the moment it is declared.
+3. **The key-name audit.** The same file asserts that no payload key matches a
+   content-shaped name (`*_text`, `*_body`, `*_value`, `*_title`, `*_query`, …).
+4. **Per-surface leak tests.** Each instrumented component has its own
+   "carries no text into telemetry" block asserting the specific strings that
+   surface handles: the chip label, the form answers, the filename, the search
+   terms.
+5. **The one author-supplied string.** `ask_form_abandoned.last_field_id` is a
+   *field name* from the form definition — the key the pack author wrote, e.g.
+   `supplier`. It is never the value the user typed. It is the only
+   author-controlled string in the vocabulary and it is id-validated.
+6. **Question chips are fingerprinted, not carried.** A suggested question has
+   no row of its own, so `chip_id` is `q_<fnv1a hex>` of its text
+   (`hashedId`). The text never reaches an event.
+
+## The vocabulary
+
+Payload keys marked `?` are optional.
+
+### Ask chips
+
+| Event | Payload |
+|---|---|
+| `ask_chip_shown` | `chip_id`, `chip_kind` (`question` \| `form`), `position`, `source` (`pack` \| `fallback` \| `followup`), `session_id?`, `agent_id?` |
+| `ask_chip_clicked` | same |
+
+`chip_kind` is the point of the pair. A question chip **sends**; a form chip
+**opens**. Folding them into one number answers nothing.
+
+Impressions are deduped per chip per page load (`emitChatEventOnce`) — React
+re-renders the rail on every keystroke in the composer below it, and without
+the dedupe the "shown" number would be a render count. Chips hidden behind
+`+N` do not count as shown until the catalogue is opened.
+
+### Ask forms
+
+| Event | Payload |
+|---|---|
+| `ask_form_opened` | `template_id`, `field_count`, `session_id?`, `agent_id?` |
+| `ask_form_submitted` | `template_id`, `field_count`, `filled_count`, `attachment_count?`, `duration_ms?`, `session_id?` |
+| `ask_form_abandoned` | `template_id`, `field_count`, `filled_count`, `last_field_id?`, `reason` (`dismissed` \| `cancelled` \| `navigated`), `duration_ms?`, `session_id?` |
+
+Exactly one terminal event per sheet, whichever of the five exits was taken
+(Cancel, the header ✕, Escape, the mobile scrim, or the sheet simply going
+away — which is `navigated`). A send the composer refused is **not** a
+submission: the sheet stays open with everything still in it, and counting it
+would inflate the completion rate the PRD sets a target on.
+
+`last_field_id` is where a bad form shows itself. An aggregate completion rate
+tells you a form is being abandoned; only this tells you everyone stops on the
+same question.
+
+### Attachments
+
+| Event | Payload |
+|---|---|
+| `attachment_uploaded` | `mime_kind`, `size_bytes`, `source` (`picker` \| `drop` \| `paste` \| `camera`), `duration_ms?`, `session_id?` |
+| `attachment_upload_failed` | `mime_kind`, `size_bytes`, `source?`, `reason`, `status?`, `session_id?` |
+
+`reason` is `http_error`, `network`, `too_large`, `unsupported_type`,
+`rate_limited` or `unknown` — a classification, never the server's error body,
+which the composer already keeps out of the DOM because it can echo paths and
+driver errors. `mime_kind` is a coarse class (`image`, `pdf`, `text`, `audio`,
+`archive`, `other`) derived from the MIME type and never from the filename.
+
+A file refused by the 25 MB cap before it reached the network still emits
+`attachment_upload_failed` with `reason: "too_large"` — it is a failed
+attachment to the person holding the phone, and it is the one the server logs
+can never show.
+
+### Sessions
+
+| Event | Payload |
+|---|---|
+| `chat_session_created` | `session_id`, `agent_id?`, `source` (`sidebar` \| `chip` \| `palette` \| `composer` \| `home` \| `deeplink`) |
+| `chat_session_titled` | `session_id`, `source` (`auto` \| `manual`) |
+
+A session title is derived from the first message, so it is content and it is
+not recorded — only whether the title was derived or typed.
+
+### Conversation search
+
+| Event | Payload |
+|---|---|
+| `conversation_search_run` | `result_count`, `has_results`, `source` (`palette` \| `sidebar`) |
+| `conversation_search_result_opened` | `position`, `result_count`, `source`, `session_id?` |
+
+Nothing about the search **terms** is recorded — not the text, not its length.
+What somebody types into ⌘K is as private as the message they are hunting for.
+
+The two sources are two doors onto one question. The ⌘K palette asks the server
+about message bodies; the chat tree's search box filters titles it already has.
+Somebody who searches the tree, finds nothing, and then reaches for ⌘K is
+telling you the tree's scope is too narrow — which is only legible because both
+emit the same event under a different `source`.
+
+`position` is the rank of the row that was opened. A search whose answer is
+always at position 4 is a ranking bug, and nothing else in the product can see
+it.
+
+### Approvals in chat
+
+| Event | Payload |
+|---|---|
+| `chat_approval_shown` | `approval_id`, `approval_kind` (`approval` \| `escalation`), `session_id?` |
+| `chat_approval_decided` | `approval_id`, `approval_kind`, `decision` (`approved` \| `denied` \| `dismissed`), `latency_ms?`, `session_id?` |
+
+## Declared but not yet emitted
+
+Four events have no call site. This is tracked mechanically in
+`lib/__tests__/telemetry-call-sites.test.ts`, which scans the UI source and
+fails if an event is neither wired nor on its pending list — and fails just as
+loudly if a pending event has quietly been wired without this table being
+updated.
+
+| Event | Why not yet |
+|---|---|
+| `chat_session_created` | the POST that creates a session lives in `chat-panel.tsx` (`ensureSession`) and `chat/[agentSlug]/chat-page-client.tsx` (`handleNewSession`) |
+| `chat_session_titled` | `autoTitleSession` lives in `chat/[agentSlug]/chat-page-client.tsx` |
+| `chat_approval_shown` | the chat surface has no interactive approval card. `AskUserQuestion` renders deliberately inert — `assistant-turn.test.tsx` pins that it must not look clickable — and approvals are decided on `/approvals` |
+| `chat_approval_decided` | same: no approve/deny handler exists inside chat |
+
+The first two are one-line calls in files another workstream owns. The last two
+are declared so that whoever builds the in-chat approval card emits the agreed
+name rather than inventing a second one.
+
+## Where the events go
+
+By default: an in-memory ring buffer, capped at 500 events, readable with
+`peekChatEvents()` / `drainChatEvents()`. That is enough for a Playwright flow
+to assert a funnel end to end, and it is deliberately not enough to answer a
+30-day question.
+
+To send them somewhere, register a sink once, high in the tree:
+
+```ts
+import { setChatTelemetrySink } from "@/lib/telemetry"
+
+setChatTelemetrySink((event) => {
+  // event = { name, payload, ts }
+})
+```
+
+A sink that throws cannot break the interaction that produced the event —
+`emitChatEvent` catches everything and reports to the dev console only. That
+is asserted per surface: a throwing sink must still open the form, send the
+message and finish the upload.
+
+## Reading the ask-packs targets off these events
+
+The ask-packs PRD sets four targets. Three are computable from this
+vocabulary today:
+
+- **≥ 35 % of sessions start from a chip** — `ask_chip_clicked` grouped by
+  `session_id`, over sessions. Needs `chat_session_created`, and needs
+  `chat-panel.tsx` to pass `sessionId` into `AskRail`. Note that the
+  pre-change baseline **is gone**: per-agent chips shipped before any event
+  existed, so there is no generic-chip cohort left to compare against. Record
+  the date measurement starts and compare cohorts after it, not before.
+- **≥ 70 % form completion once opened** — `ask_form_submitted` over
+  `ask_form_opened`, per `template_id`. `ask_form_abandoned.last_field_id`
+  says which question to fix.
+- **median photo → filed under 45 s on mobile** — `attachment_uploaded`
+  `duration_ms` with `source: "camera"` is the upload half.
+
+The fourth (`≥ 60 % of proposals filed without a field edit`) belongs to the
+intake pipeline and is not part of this vocabulary.

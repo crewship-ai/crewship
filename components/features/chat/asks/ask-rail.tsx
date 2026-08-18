@@ -6,6 +6,7 @@ import { ClipboardList } from "lucide-react"
 
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { spring, stagger } from "@/lib/motion"
+import { emitChatEvent, emitChatEventOnce, hashedId } from "@/lib/telemetry"
 import { cn } from "@/lib/utils"
 
 import { MAX_ASK_LABEL_LENGTH, truncateAskLabel, type AskForm } from "./types"
@@ -57,6 +58,20 @@ export interface AskRailProps {
    *  rail has never done it, and this feature is not the place to change
    *  either of them. */
   animateChips?: boolean
+
+  /* -- Measurement (lib/telemetry.ts). None of it changes what renders. ---- */
+
+  /** Context for the chip events. Optional because the rail is mounted by
+   *  chat-panel.tsx, which owns these ids and does not pass them yet; without
+   *  them the events still carry chip identity, kind and position, which is
+   *  the funnel. See docs/guides/chat-telemetry. */
+  sessionId?: string
+  agentId?: string
+  /** Which list these chips came from. The cold-start rail and the follow-ups
+   *  rail are two different offers at two different moments, and the whole
+   *  question "do chips start conversations" is unanswerable if they are
+   *  counted as one. */
+  chipSource?: "pack" | "fallback" | "followup"
 }
 
 const CHIP_VARIANTS = {
@@ -68,6 +83,16 @@ type RailItem =
   | { kind: "question"; key: string; index: number; label: string; text: string }
   | { kind: "form"; key: string; label: string; form: AskForm }
 
+/**
+ * What a chip is called in telemetry.
+ *
+ * A form has a row and therefore an id. A question is only ever a string an
+ * author wrote, so it is fingerprinted rather than carried: the same question
+ * is the same chip across sessions and machines, and the question itself never
+ * reaches an event. Never the label, which is the same text truncated.
+ */
+const chipId = (item: RailItem) => (item.kind === "form" ? item.form.id : hashedId("q", item.text))
+
 export function AskRail({
   questions,
   forms,
@@ -77,6 +102,9 @@ export function AskRail({
   disabled,
   className,
   animateChips,
+  sessionId,
+  agentId,
+  chipSource = "pack",
 }: AskRailProps) {
   const [overflowOpen, setOverflowOpen] = useState(false)
   const overflowRef = useRef<HTMLDivElement | null>(null)
@@ -106,12 +134,41 @@ export function AskRail({
     setOverflowOpen(false)
   }, [items.length])
 
-  if (items.length === 0) return null
-
   const shown = items.slice(0, limit)
   const hiddenCount = items.length - shown.length
 
+  // What a person could actually see: the rail, plus the catalogue while it is
+  // open. Counting the chips behind `+N` as shown would put every configured
+  // ask in the denominator of "shown vs clicked" and make the rate meaningless.
+  const visible = overflowOpen ? items : shown
+
+  // One impression per chip per page, not per render. React renders the rail
+  // on every keystroke in the composer below it; without the dedupe the
+  // numerator of the chip funnel would be a render count.
+  useEffect(() => {
+    visible.forEach((item, position) => {
+      emitChatEventOnce(`${sessionId ?? "-"}:${item.key}`, "ask_chip_shown", {
+        session_id: sessionId,
+        agent_id: agentId,
+        chip_id: chipId(item),
+        chip_kind: item.kind,
+        position,
+        source: chipSource,
+      })
+    })
+  }, [visible, sessionId, agentId, chipSource])
+
+  if (items.length === 0) return null
+
   const pick = (item: RailItem) => {
+    emitChatEvent("ask_chip_clicked", {
+      session_id: sessionId,
+      agent_id: agentId,
+      chip_id: chipId(item),
+      chip_kind: item.kind,
+      position: items.indexOf(item),
+      source: chipSource,
+    })
     setOverflowOpen(false)
     if (item.kind === "form") onPickForm(item.form)
     else onPickQuestion(item.text)

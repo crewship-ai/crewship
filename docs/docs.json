@@ -151,7 +151,8 @@
                   "observability/otlp-setup",
                   "observability/metrics",
                   "guides/feedback",
-                  "guides/telemetry"
+                  "guides/telemetry",
+                  "guides/chat-telemetry"
                 ]
               },
               "guides/scheduling",

@@ -14,6 +14,7 @@ import type { LucideIcon } from "lucide-react"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { prefersReducedMotion, spring } from "@/lib/motion"
+import { emitChatEvent } from "@/lib/telemetry"
 import { formatDateTime, timeAgo } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -33,6 +34,10 @@ import { cn } from "@/lib/utils"
 
 import { parseSessionTimestamp, sortSessionsByActivity } from "./session-sort"
 import { ScopeFailure, httpError, scopeErrorMessage, useRetry } from "./scope-fetch"
+
+/** How long the search box has to be still before a keystroke counts as a
+ *  search. Roughly the ⌘K debounce, so the two doors are comparable. */
+const SEARCH_TELEMETRY_DEBOUNCE_MS = 250
 
 /**
  * chat-tree-sidebar — the ONE left column of the chat surface.
@@ -647,6 +652,58 @@ export function ChatTreeSidebar({
     return sortAgentsByActivity(matching, threadsByAgent)
   }, [agents, filterAgent, threadsByAgent, visibleThreads, facet, origins, q])
 
+  /* ------------------------------------------------------------------ *
+   *  Measurement (lib/telemetry.ts)
+   *
+   *  This box and ⌘K are two doors onto one question — "where was that
+   *  conversation" — and they answer it differently: this one filters titles
+   *  already in hand, ⌘K asks the server about message bodies. Somebody who
+   *  searches here, finds nothing, and then reaches for ⌘K is saying this
+   *  scope is too narrow, and that is only legible if both doors emit the
+   *  same event under a different `source`.
+   *
+   *  A session title is derived from its first message, so it is content
+   *  wearing a label's clothes. What is recorded is how many rows survived
+   *  and which rank was opened — never which row, and never the search text.
+   * ------------------------------------------------------------------ */
+  const searchResultIds = useMemo(() => {
+    if (!q) return []
+    return visibleAgents.flatMap((a) => visibleThreads(a).map((t) => t.id))
+  }, [q, visibleAgents, visibleThreads])
+
+  // Debounced, because the list re-filters on every keystroke and "rebuild"
+  // typed out is one search, not seven.
+  useEffect(() => {
+    if (!q) return
+    const timer = setTimeout(() => {
+      emitChatEvent("conversation_search_run", {
+        result_count: searchResultIds.length,
+        has_results: searchResultIds.length > 0,
+        source: "sidebar",
+      })
+    }, SEARCH_TELEMETRY_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [q, searchResultIds])
+
+  const handleOpenThread = useCallback(
+    (owner: ChatTreeAgent, threadId: string) => {
+      const position = searchResultIds.indexOf(threadId)
+      // Only while a search is running. Opening a thread from the unfiltered
+      // tree is navigation, not a search result, and counting it as one would
+      // put a ceiling of 100 % on every ranking question worth asking.
+      if (position >= 0) {
+        emitChatEvent("conversation_search_result_opened", {
+          session_id: threadId,
+          position,
+          result_count: searchResultIds.length,
+          source: "sidebar",
+        })
+      }
+      onOpenThread(owner, threadId)
+    },
+    [searchResultIds, onOpenThread],
+  )
+
   if (collapsed) {
     return (
       <aside
@@ -827,7 +884,7 @@ export function ChatTreeSidebar({
                       onStartConversation={onOpenAgent ? () => onOpenAgent(a) : undefined}
                       isActiveAgent={a.slug === activeAgentSlug}
                       activeThreadId={activeThreadId}
-                      onOpenThread={onOpenThread}
+                      onOpenThread={handleOpenThread}
                     />
                   </motion.div>
                 ))}

@@ -13,6 +13,38 @@ import { Button } from "@/components/ui/button"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
+import { emitChatEvent, mimeKind, uploadFailureReason } from "@/lib/telemetry"
+
+/** Where the bytes came from. Four controls, one upload path. */
+export type AttachmentSource = "picker" | "drop" | "paste" | "camera"
+
+type UploadFailureReason =
+  | "http_error"
+  | "network"
+  | "too_large"
+  | "unsupported_type"
+  | "rate_limited"
+  | "unknown"
+
+/**
+ * A refused upload, carrying the CLASS of refusal alongside the sentence the
+ * user is shown.
+ *
+ * The two are deliberately different things and only one of them is recorded:
+ * `message` is the server's own words and can name a path or echo a driver
+ * error, which is why the composer already keeps it out of the DOM. `reason`
+ * is a closed set, and it is what telemetry gets.
+ */
+class UploadFailure extends Error {
+  constructor(
+    message: string,
+    readonly reason: UploadFailureReason,
+    readonly status?: number,
+  ) {
+    super(message)
+    this.name = "UploadFailure"
+  }
+}
 
 // 25 MB cap — best practice for chat attachments. Bigger than the
 // previous 10 MB which was too small for screenshots / log dumps but
@@ -136,7 +168,11 @@ async function uploadOne(
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-    throw new Error(typeof body.error === "string" ? body.error : "upload failed")
+    throw new UploadFailure(
+      typeof body.error === "string" ? body.error : "upload failed",
+      uploadFailureReason(res.status),
+      res.status,
+    )
   }
   return res.json()
 }
@@ -195,10 +231,11 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
    *  end of the list and reorder both the chips and the paths the message
    *  names. */
   const runUpload = useCallback(
-    async (att: ComposerAttachment, file: File, wsId: string) => {
+    async (att: ComposerAttachment, file: File, wsId: string, source?: AttachmentSource) => {
       const key = abortKey(sessionId, att.id)
       const ac = new AbortController()
       abortRegistry.set(key, ac)
+      const startedAt = Date.now()
       // User removal is authoritative — if the chip was deleted while the
       // upload was in flight, neither outcome may put it back. `updateAttachment`
       // is a no-op for an id that is gone, so this holds for both branches.
@@ -211,7 +248,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
         // reads as an attached file — and the endpoint is never called with a
         // chat id it would 404 on.
         if (ensureChatSession && !(await ensureChatSession())) {
-          throw new Error("the conversation could not be started")
+          throw new UploadFailure("the conversation could not be started", "unknown")
         }
         const { path, agent_path } = await uploadOne(agentId, sessionId, wsId, file, ac.signal)
         // `path` (relative to the agent's working directory) is what the
@@ -226,9 +263,26 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
           // finished attachment must not pin a 25 MB File in memory.
           file: undefined,
         })
+        emitChatEvent("attachment_uploaded", {
+          session_id: sessionId,
+          mime_kind: mimeKind(file.type),
+          size_bytes: file.size,
+          source,
+          duration_ms: Date.now() - startedAt,
+        })
       } catch (err) {
         if (isAbortError(err)) return
         const reason = errorMessage(err)
+        // The classification, never `reason` — that string is the server's and
+        // it is the thing this component works to keep off the screen.
+        emitChatEvent("attachment_upload_failed", {
+          session_id: sessionId,
+          mime_kind: mimeKind(file.type),
+          size_bytes: file.size,
+          source,
+          reason: err instanceof UploadFailure ? err.reason : "network",
+          status: err instanceof UploadFailure ? err.status : undefined,
+        })
         // No path and no url: a failed upload has no file behind it, so there
         // is nothing for `sendableAttachments` to name even by accident. The
         // File is KEPT — it is what Retry re-sends.
@@ -253,7 +307,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
   )
 
   const upload = useCallback(
-    async (files: File[]) => {
+    async (files: File[], source?: AttachmentSource) => {
       if (!workspaceId) {
         toast.error("Workspace not loaded yet — try again in a moment")
         return
@@ -266,6 +320,16 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       for (const f of files) {
         if (f.size > MAX_SIZE) {
           toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
+          // A refusal that never reached the network is still a failed
+          // attachment to the person holding the phone, and it is the one the
+          // server-side logs can never show.
+          emitChatEvent("attachment_upload_failed", {
+            session_id: sessionId,
+            mime_kind: mimeKind(f.type),
+            size_bytes: f.size,
+            source,
+            reason: "too_large",
+          })
           continue
         }
         queued.push({
@@ -283,7 +347,7 @@ export function useAttachmentUpload(agentId: string, sessionId: string) {
       if (queued.length === 0) return
       addAttachments(sessionId, queued.map(({ att }) => att))
       for (const { att, file } of queued) {
-        await runUpload(att, file, workspaceId)
+        await runUpload(att, file, workspaceId, source)
       }
     },
     [sessionId, workspaceId, addAttachments, runUpload],
@@ -333,8 +397,9 @@ export function AttachmentZone({
   const removeAttachment = useComposerStore((s) => s.removeAttachment)
   const sessionAttachments = sessionAttachmentsRaw ?? []
 
-  const { upload: handleFiles, retry } = useAttachmentUpload(agentId, sessionId)
+  const { upload, retry } = useAttachmentUpload(agentId, sessionId)
 
+  const handleFiles = useCallback((files: File[]) => void upload(files, "drop"), [upload])
   const handleRetry = useCallback((id: string) => void retry(id), [retry])
 
   // Wrap user removal so an in-flight upload is aborted before the
@@ -366,13 +431,13 @@ export function AttachmentZone({
 }
 
 export function AttachmentButton({ agentId, sessionId }: { agentId: string; sessionId: string }) {
-  const { upload: handleFiles } = useAttachmentUpload(agentId, sessionId)
+  const { upload } = useAttachmentUpload(agentId, sessionId)
   return (
     <AttachmentTrigger
       // No `accept` filter — chat attachments can be any file type
       // the agent might want to inspect (logs, screenshots, configs,
       // CSVs, archives). Server enforces size; type is informational.
-      onSelect={handleFiles}
+      onSelect={(files: File[]) => upload(files, "picker")}
     />
   )
 }
@@ -397,7 +462,7 @@ export function AttachmentButton({ agentId, sessionId }: { agentId: string; sess
  * attachment list, with the same size guard and the same abort-on-remove.
  */
 export function CameraButton({ agentId, sessionId }: { agentId: string; sessionId: string }) {
-  const { upload: handleFiles } = useAttachmentUpload(agentId, sessionId)
+  const { upload } = useAttachmentUpload(agentId, sessionId)
   const inputRef = useRef<HTMLInputElement | null>(null)
   return (
     <>
@@ -411,7 +476,7 @@ export function CameraButton({ agentId, sessionId }: { agentId: string; sessionI
         data-testid="camera-input"
         onChange={(e) => {
           const files = Array.from(e.target.files ?? [])
-          if (files.length) void handleFiles(files)
+          if (files.length) void upload(files, "camera")
           // Reset so photographing the same thing twice still fires change.
           e.target.value = ""
         }}
