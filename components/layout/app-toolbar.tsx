@@ -138,6 +138,25 @@ export function AppToolbar() {
   const { role } = useAbilities()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
 
+  // ⌘K opens the global palette, on every route, and it is the ONLY listener
+  // for that key in the product.
+  //
+  // It used to share it. The chat surface's own palette bound `mod+k` too
+  // (composer/slash-palette.tsx), neither listener stopped the other, and both
+  // are on `document` — where `stopPropagation` cannot order two listeners on
+  // the same node in the same phase into a winner. So one press inside a
+  // conversation opened two stacked dialogs.
+  //
+  // The key stayed here because this toolbar PRINTS it: the search button a few
+  // lines down carries "⌘K" in a <kbd>, on screen on every route including
+  // chat. A binding that changes meaning depending on where focus happens to be
+  // would make that label wrong exactly where the cursor usually is. The chat
+  // palette moved to ⌘/ and gained a button of its own; see the note on its
+  // useHotkeys call.
+  //
+  // components/features/chat/__tests__/chat-hotkey-ownership.test.tsx is what
+  // keeps this a single owner — it fails if pressing ⌘K in a conversation
+  // reaches anything else.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {

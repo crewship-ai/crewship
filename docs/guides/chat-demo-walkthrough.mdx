@@ -432,9 +432,11 @@ pipeline worker
 ```
 
 <Note>
-Run this from `/chat` rather than from inside a conversation. On
-`/chat/<agent>` the chat's own slash palette binds the same key, and the two are
-separate listeners.
+This works from inside a conversation too. It did not use to: `/chat/<agent>`
+mounts the chat's own command palette, that palette bound `⌘K` as well, and
+neither listener stopped the other — so one press opened both dialogs stacked.
+The chat palette is `⌘/` now (or the **Commands** button in the chat header),
+and `⌘K` means the same thing on every route.
 </Note>
 
 A **Conversations** group appears: the matched snippet, the agent that said it,

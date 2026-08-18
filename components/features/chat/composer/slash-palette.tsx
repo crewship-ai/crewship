@@ -57,7 +57,7 @@ interface SlashPaletteProps {
    *  the runtime half of the honesty contract below; the static half is
    *  CLIENT_ACTION_CONTRACT. */
   disabledCommands?: Record<string, string>
-  /** Controlled open state. Omit to let the palette own it (⌘K). */
+  /** Controlled open state. Omit to let the palette own it (⌘/). */
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
@@ -346,20 +346,64 @@ export function SlashPalette({
   // by a chat-only user.
   const { data: actions = [] } = useSlashCommands(workspaceId)
 
+  // ── ⌘/ — deliberately not ⌘K ────────────────────────────────────────────
+  //
+  // This was `mod+k`, and so is AppToolbar's plain `document` keydown for the
+  // GLOBAL palette. Neither stopped the other, so one press inside a
+  // conversation opened both dialogs, stacked, and the typing went to whichever
+  // had mounted last. Two document-level listeners on the same key cannot be
+  // ordered into a winner — `stopPropagation` does not separate listeners on
+  // the same node in the same phase — so the fix is that only one of them
+  // exists.
+  //
+  // ⌘K went to the global palette because the product already says so, out
+  // loud, on every route including this one: the toolbar renders a permanent
+  // "Search… ⌘K" button with the key in a <kbd>. The alternative — ⌘K meaning
+  // the chat palette while the composer has focus — was rejected because
+  // "the composer has focus" is not a state a user can see here (nothing on
+  // this surface draws a focus ring, and focus moves to a turn, a chip or the
+  // rail on any click), so it would make a visible label wrong exactly where
+  // the cursor usually is.
+  //
+  // react-hotkeys-hook matches on `event.code`, not `event.key`, so the key is
+  // named for the physical one: "mod+slash" matches `code: "Slash"`, and
+  // "mod+/" would never match anything. That also means a layout where Slash
+  // sits behind a modifier does not get this binding — which is the other
+  // reason the host puts a button on screen for it (CommandsButton in
+  // chat-panel.tsx, which is where the "⌘/" the user reads is written).
   useHotkeys(
-    ["mod+k"],
+    ["mod+slash"],
     () => setOpen(!open),
     { preventDefault: true, enableOnFormTags: true, enableOnContentEditable: true },
     [open, openProp],
   )
 
+  // ── Escape belongs to the topmost surface, and only to it ────────────────
+  //
+  // Same defect as ⌘K, one key over. This palette is a modal dialog, so while
+  // it is up it IS the top layer — but RightDrawer binds `esc` through
+  // react-hotkeys-hook (a bubble-phase listener on `document`), so one Escape
+  // closed the palette AND the panel underneath it, which the user never asked
+  // to lose.
+  //
+  // Capture phase on `document` is where Radix's own dismiss hook listens too
+  // (@radix-ui/react-use-escape-keydown registers with `capture: true`).
+  // stopPropagation() there leaves same-node, same-phase listeners alone — so
+  // the dialog still dismisses itself — while ending the journey before
+  // anything bubbling can see the key. setOpen(false) is stated anyway so this
+  // does not silently depend on that Radix internal.
+  //
+  // ask-form-sheet.tsx does the same thing one layer down, by stopping the
+  // React synthetic event on its own root.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false)
+      if (e.key !== "Escape") return
+      e.stopPropagation()
+      setOpen(false)
     }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    document.addEventListener("keydown", onKey, { capture: true })
+    return () => document.removeEventListener("keydown", onKey, { capture: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, openProp])
 
@@ -381,8 +425,18 @@ export function SlashPalette({
   }, {})
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen} title="Command palette" description="Run a command">
-      <CommandInput placeholder="Type a command or search…" />
+    // Named for what it is. It used to be "Command palette" while the global
+    // one is "Command Palette" — two dialogs a case difference apart, on a
+    // surface that could show you either. The name is the only thing a screen
+    // reader gets (CommandDialog renders the title sr-only), so the visible
+    // half of the same job is done by the placeholder.
+    <CommandDialog
+      open={open}
+      onOpenChange={setOpen}
+      title="Chat commands"
+      description="Run a command in this conversation"
+    >
+      <CommandInput placeholder="Search chat commands…" />
       <CommandList>
         <CommandEmpty>No commands match.</CommandEmpty>
         {/* Server-driven actions group — renders first so capability-

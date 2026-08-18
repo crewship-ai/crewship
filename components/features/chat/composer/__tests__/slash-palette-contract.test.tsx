@@ -301,17 +301,32 @@ describe("slash palette — the three states, as rendered", () => {
     expect(onCommand).not.toHaveBeenCalled()
   })
 
-  it("opens on ⌘K / ctrl+K", () => {
+  // ⌘/, not ⌘K. ⌘K is the toolbar's global palette — the one whose key is
+  // printed in the search button's <kbd> on every route — and this palette
+  // used to answer to it as well, so a conversation opened both dialogs at
+  // once. Which surface a keystroke reaches is pinned in
+  // components/features/chat/__tests__/chat-hotkey-ownership.test.tsx; this
+  // case only holds the palette's own end of it.
+  it("opens on ⌘/ / ctrl+/", () => {
     render(<SlashPalette agentSlug="riley" workspaceId="ws-1" onCommand={vi.fn()} onAction={vi.fn()} />)
     expect(screen.queryByTestId("slash-item-clear")).toBeNull()
 
     // react-hotkeys-hook matches on `code`, not `key`, unless useKey is set —
     // an event without one never matches anything. `mod` is meta on a Mac and
     // ctrl everywhere else, so both are fired: one of them is this platform's.
+    fireEvent.keyDown(document, { key: "/", code: "Slash", metaKey: true })
+    fireEvent.keyDown(document, { key: "/", code: "Slash", ctrlKey: true })
+
+    expect(screen.getByTestId("slash-item-clear")).toBeInTheDocument()
+  })
+
+  it("no longer answers to ⌘K, which belongs to the global palette", () => {
+    render(<SlashPalette agentSlug="riley" workspaceId="ws-1" onCommand={vi.fn()} onAction={vi.fn()} />)
+
     fireEvent.keyDown(document, { key: "k", code: "KeyK", metaKey: true })
     fireEvent.keyDown(document, { key: "k", code: "KeyK", ctrlKey: true })
 
-    expect(screen.getByTestId("slash-item-clear")).toBeInTheDocument()
+    expect(screen.queryByTestId("slash-item-clear")).toBeNull()
   })
 })
 
