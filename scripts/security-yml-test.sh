@@ -129,10 +129,21 @@ for pair in \
   var="${pair%%:*}"
   rest="${pair#*:}"
   job="${rest#*:}"
+  # Every block token is an explicit arm. A catch-all that fell through to one
+  # of the real blocks would make a mistyped token silently self-satisfying:
+  # count_assign returns 0 for a variable that does not appear in the block it
+  # was wrongly pointed at, 0 == 0 passes, and the guard reports green while
+  # covering nothing — the exact shape of the bypass this loop exists to catch.
   case "${rest%%:*}" in
     GATE)      marked="$GATE_SRC"      ; job_src="$JOB_SRC" ;;
     LOOKUP)    marked="$LOOKUP_SRC"    ; job_src="$JOB_SRC" ;;
-    *)         marked="$ALLOWLIST_SRC" ; job_src="$VULN_JOB_SRC" ;;
+    ALLOWLIST) marked="$ALLOWLIST_SRC" ; job_src="$VULN_JOB_SRC" ;;
+    *)
+      echo "FATAL: unknown block token '${rest%%:*}' for variable '$var'." >&2
+      echo "       Add an explicit arm — the catch-all is a hard error on" >&2
+      echo "       purpose, because a typo here guards nothing but looks green." >&2
+      exit 1
+      ;;
   esac
   in_job="$(count_assign "$var" "$job_src")"
   in_marked="$(count_assign "$var" "$marked")"
@@ -387,6 +398,35 @@ expect_allowlist() {
 echo
 echo "govulncheck allowlist (non-empty 'unexpected' fails the build):"
 
+# Both halves of the behaviour are tested against a DERIVED copy of the block —
+# one with the allowlist forced empty, one with it forced to a known ID —
+# rather than against whatever is committed today.
+#
+# Binding the fixtures to the committed value would make this suite the thing
+# that blocks the workflow's own documented escape hatch: the job header tells a
+# maintainer facing an unfixable advisory to add an ID with a dated
+# justification, and the moment they did, hard-coded "empty allowlist"
+# expectations would start asserting the wrong thing and the `shell` job would
+# go red on a legitimate change. A test that punishes the documented procedure
+# is worse than no test.
+#
+# What stays pinned to the real file is the assignment's SHAPE: if
+# `accepted_pattern=` stops existing in the marked block, both derivations are
+# meaningless and that is fatal below.
+seed_allowlist() {
+  printf '%s\n' "$ALLOWLIST_SRC" | sed "s/^accepted_pattern=.*/accepted_pattern='$1'/"
+}
+
+if ! printf '%s\n' "$ALLOWLIST_SRC" | grep -qE "^accepted_pattern="; then
+  echo "FATAL: no 'accepted_pattern=' assignment in the marked allowlist block." >&2
+  echo "       The derivations below would test nothing — fix this test to" >&2
+  echo "       match the block's new shape." >&2
+  exit 1
+fi
+
+ALLOWLIST_EMPTY="$(seed_allowlist '')"
+ALLOWLIST_SEEDED="$(seed_allowlist 'GO-2026-6218')"
+
 # A govulncheck log in the shape the real tool emits.
 VULN_LOG='=== Symbol Results ===
 
@@ -403,7 +443,7 @@ Your code is affected by 1 vulnerability from the Go standard library.
 # The resting state, and the whole point of emptying the list: with nothing
 # accepted, a reported vulnerability reaches `unexpected` and reddens the gate.
 expect_allowlist "empty allowlist + one finding -> reported, not swallowed" \
-  0 'GO-2026-6218' "$VULN_LOG"
+  0 'GO-2026-6218' "$VULN_LOG" "$ALLOWLIST_EMPTY"
 
 # The eight advisories this branch actually cleared. If the empty pattern were
 # matching every line, this fixture would come back empty and the build would
@@ -418,7 +458,7 @@ Vulnerability #5: GO-2026-6089
 Vulnerability #6: GO-2026-6088
 Vulnerability #7: GO-2026-5972
 Vulnerability #8: GO-2026-5026
-'
+' "$ALLOWLIST_EMPTY"
 
 # The same ID appears on the "Vulnerability #N" line and again in the More-info
 # URL. `sort -u` must collapse them, or the error output double-reports.
@@ -426,46 +466,47 @@ expect_allowlist "an ID repeated in the log -> deduplicated" \
   0 'GO-2026-6218' \
   'Vulnerability #1: GO-2026-6218
   More info: https://pkg.go.dev/vuln/GO-2026-6218
-'
+' "$ALLOWLIST_EMPTY"
 
 # Defensive branch: exit 3 with nothing parseable means govulncheck changed its
 # output format. Allowlisting against IDs we failed to read is not safe, so the
 # step must abort rather than fall through to an empty `unexpected`.
 expect_allowlist "exit 3 but no parseable IDs -> hard fail, no silent pass" \
   1 '' 'govulncheck: some unrecognised output format
-'
+' "$ALLOWLIST_EMPTY"
 
 # A malformed ID must not be silently accepted by being unparseable — the
 # regex requires GO-YYYY-N+, so a truncated one reads as "nothing parseable"
 # and takes the defensive branch above rather than passing.
 expect_allowlist "malformed ID only -> hard fail" \
   1 '' 'Vulnerability #1: GO-26-1
-'
+' "$ALLOWLIST_EMPTY"
 
-# The else-branch still has to work the day someone legitimately adds an ID.
-# Nothing in the workflow sets a non-empty pattern today, so this case runs the
-# extracted block with the assignment substituted — a mutation, stated as one,
-# covering logic that is otherwise unreachable from the file as committed.
-ALLOWLIST_SEEDED="${ALLOWLIST_SRC/accepted_pattern=\'\'/accepted_pattern=\'GO-2026-6218\'}"
-if [ "$ALLOWLIST_SEEDED" = "$ALLOWLIST_SRC" ]; then
-  fail "could not seed accepted_pattern (the assignment changed shape — update this test)"
-else
-  expect_allowlist "seeded allowlist filters its own ID" \
-    0 '' "$VULN_LOG" "$ALLOWLIST_SEEDED"
+# The else-branch has to work the day someone legitimately adds an ID — today
+# it is unreachable from the file as committed, and it is the branch a
+# maintainer will lean on under time pressure.
+expect_allowlist "seeded allowlist filters its own ID" \
+  0 '' "$VULN_LOG" "$ALLOWLIST_SEEDED"
 
-  expect_allowlist "seeded allowlist still reports an ID it does not cover" \
-    0 'GO-2026-9999' \
-    'Vulnerability #1: GO-2026-6218
+expect_allowlist "seeded allowlist still reports an ID it does not cover" \
+  0 'GO-2026-9999' \
+  'Vulnerability #1: GO-2026-6218
 Vulnerability #2: GO-2026-9999
 ' "$ALLOWLIST_SEEDED"
 
-  # Substring matching would let GO-2026-621 accept GO-2026-6218; the anchors
-  # are what stop a short entry from covering a longer, unrelated ID.
-  expect_allowlist "allowlist entry does not match by prefix" \
-    0 'GO-2026-62180' \
-    'Vulnerability #1: GO-2026-62180
+# Substring matching would let GO-2026-621 accept GO-2026-6218; the anchors
+# are what stop a short entry from covering a longer, unrelated ID.
+expect_allowlist "allowlist entry does not match by prefix" \
+  0 'GO-2026-62180' \
+  'Vulnerability #1: GO-2026-62180
 ' "$ALLOWLIST_SEEDED"
-fi
+
+# Whatever is committed, a finding outside it must still be reported. This is
+# the one case that reads the REAL block, so the suite keeps saying something
+# about production rather than only about its own two derivations.
+expect_allowlist "as committed: an ID outside the allowlist is reported" \
+  0 'GO-2026-9999' 'Vulnerability #1: GO-2026-9999
+'
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

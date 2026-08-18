@@ -124,6 +124,16 @@ jobs:
   #
   # Known accepted vulnerabilities (as of 2026-08-18): NONE.
   #
+  # "None" is about THIS allowlist, which is not the same set as
+  # THIRD-PARTY-NOTICES.md §Known accepted vulnerabilities. That section still
+  # documents GO-2026-5932 (x/crypto/openpgp, no upstream fix, never imported).
+  # It needs no entry here because govulncheck reports it as informational —
+  # "modules you require, but your code doesn't appear to call" — which is a
+  # COUNT with no GO-id in the default output, so the `grep -oE` below never
+  # sees it and it cannot reach `unexpected`. Verified against a real exit-3
+  # run: the eight ids parsed did not include it. An id belongs here only once
+  # it is reachable enough for govulncheck to name it.
+  #
   # The five docker/docker advisories this list used to carry (GO-2026-4887,
   # -4883, -5746, -5668, -5617) are gone with the module: the container
   # provider moved to github.com/moby/moby, and `go mod why -m
