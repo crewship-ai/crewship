@@ -313,9 +313,22 @@ function compilePattern(pattern: string): RegExp | null {
   }
 }
 
+/**
+ * CLEANED against CLEANED. `chosen` has already been through `answerList`,
+ * which trims the edges and strips control characters, so the options have to
+ * make the same trip — otherwise an option stored as `"Travel "` refuses the
+ * `"Travel"` the sheet renders and the user picks, and the message blames
+ * their choice for a defect in the definition.
+ *
+ * `internal/askforms` canonicalises the options when a form is SAVED, so a
+ * definition written through the API cannot arrive here misspelled. This is
+ * the row that predates the rule or was edited around the API — answerable
+ * rather than failed closed, exactly as the uncompilable-pattern case above.
+ * Pinned to the Go half by testdata/ask-field-types.json.
+ */
 function inOptions(field: AskFormField, chosen: string[]): boolean {
   if (!field.options || field.options.length === 0) return true
-  const allowed = new Set(field.options)
+  const allowed = new Set(field.options.map(cleanAnswer))
   return chosen.every((c) => allowed.has(c))
 }
 

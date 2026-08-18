@@ -202,8 +202,13 @@ does not know yet — **except** one whose name says the value is a secret
 renders no input in the chat. A form submit is an ordinary chat message that is
 stored, searchable and read by the agent; there is no field type that makes
 that safe. Put the credential in the vault and reference it by name.
-`select` and `multiselect` need `options`. A `money` field named `amount`
-answers to **two** placeholders: `{{amount}}` and `{{amount_currency}}`.
+`select` and `multiselect` need `options`. Options are trimmed on save, exactly
+as an answer is on its way into the message — `"Travel "` is stored as
+`"Travel"`, because an option spelled differently from the answer it produces
+is a choice the form renders and then refuses. Two options that differ only by
+whitespace are therefore the same option, and are refused as a duplicate rather
+than silently merged. A `money` field named `amount` answers to **two**
+placeholders: `{{amount}}` and `{{amount_currency}}`.
 
 A field may also carry `min`, `max`, `pattern` and `multiple`, all of which are
 checked when a user submits — `min`/`max` are a value on `number`/`money`, a

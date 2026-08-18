@@ -676,6 +676,16 @@ func buildCountQuery(cmd *cobra.Command, client *cli.Client) (url.Values, error)
 	if err := validateCSV("priority", priorityFilter, validPriorities); err != nil {
 		return nil, err
 	}
+	// The same refusal the list view makes, for the same reason and then some:
+	// `journal count` prints a bare number, so an unmatchable filter answers
+	// `0` with no empty page to give the reader pause — and a number is what
+	// gets quoted into an audit answer. See rejectTypeWildcard.
+	if err := rejectTypeWildcard("type", typeFilter); err != nil {
+		return nil, err
+	}
+	if err := rejectTypeWildcard("exclude-type", excludeType); err != nil {
+		return nil, err
+	}
 
 	q := url.Values{}
 	if crewFlag != "" {

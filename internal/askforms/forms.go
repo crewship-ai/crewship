@@ -177,10 +177,42 @@ func Parse(raw string) ([]Form, error) {
 		return nil, fmt.Errorf("ask_forms is not valid JSON: %w", err)
 	}
 
+	canonicalizeOptions(forms)
 	if err := Validate(forms); err != nil {
 		return nil, err
 	}
 	return forms, nil
+}
+
+// canonicalizeOptions rewrites every option to the text an ANSWER will be
+// compared against.
+//
+// An answer reaches this package through coerceValue → cleanValue, which
+// trims the edges and strips control characters. Nothing did that to the
+// option list, so `["Travel ", "Food"]` stored fine and then refused the only
+// answer the form renders: the sheet shows "Travel", the user picks "Travel",
+// the cleaned answer is compared against the raw "Travel " and the error says
+// their choice is not one of the listed options. The definition was at fault
+// and the message pointed at the user.
+//
+// Trimming on the way in rather than refusing is the same call Normalize
+// already makes for a missing `attachment`: the author's intent is
+// unambiguous, and a refusal over an invisible trailing space is a puzzle,
+// not a correction. What trimming may NOT do is merge two options the author
+// wrote as different ones — Validate's duplicate check reads them the same
+// way, so `["Travel", "Travel "]` is refused rather than silently collapsed.
+//
+// This runs before Validate rather than inside Normalize so that every reader
+// of a stored document sees the same option list, including one written
+// before this rule existed.
+func canonicalizeOptions(forms []Form) {
+	for i := range forms {
+		for j := range forms[i].Fields {
+			for k, o := range forms[i].Fields[j].Options {
+				forms[i].Fields[j].Options[k] = cleanValue(o)
+			}
+		}
+	}
 }
 
 // Normalize returns the canonical JSON to store, or "" for "not configured"
@@ -341,15 +373,23 @@ func Validate(forms []Form) error {
 					return fmt.Errorf("%s: field %q is a %s with no options — it would "+
 						"open as a picker with nothing to pick", where, fl.Name, fl.Type)
 				}
+				// Compared as the options will be STORED and RENDERED, not as
+				// they were typed: Parse canonicalises them (cleanValue), so
+				// "Travel" and "Travel " are one option wearing two spellings
+				// and a picker would show the same choice twice. Reading the
+				// raw text here is what let that through — and Validate is
+				// callable on a hand-built form, so the rule lives here rather
+				// than only on the way in.
 				seenOpt := map[string]bool{}
 				for _, o := range fl.Options {
-					if strings.TrimSpace(o) == "" {
+					clean := cleanValue(o)
+					if clean == "" {
 						return fmt.Errorf("%s: field %q has a blank option", where, fl.Name)
 					}
-					if seenOpt[o] {
-						return fmt.Errorf("%s: field %q lists the option %q twice", where, fl.Name, o)
+					if seenOpt[clean] {
+						return fmt.Errorf("%s: field %q lists the option %q twice", where, fl.Name, clean)
 					}
-					seenOpt[o] = true
+					seenOpt[clean] = true
 				}
 			case "money":
 				cur := CurrencyPlaceholder(fl.Name)

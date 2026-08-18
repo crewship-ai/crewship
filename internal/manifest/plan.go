@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/askforms"
 )
 
 // Action enumerates the per-resource operations a plan can describe.
@@ -1129,13 +1131,71 @@ func agentBodyDiffers(existing *AgentResponse, a *Agent) bool {
 	// round-tripped empty agent would report drift forever — the PATCH
 	// body below only carries the key when it is non-empty, so the diff
 	// would never settle.
-	if a.SuggestedPrompts != "" && a.SuggestedPrompts != deref(existing.SuggestedPrompts) {
+	//
+	// Compared CANONICALISED, not literally. Both of these columns are
+	// rewritten by the server on write, so the manifest's spelling and the
+	// stored spelling are routinely two forms of the same value — and a diff
+	// that reports those as drift makes `apply` a command that never
+	// converges: it PATCHes on every invocation and drift-detection CI never
+	// settles. See canonicalSuggestedPrompts and canonicalAskForms.
+	if a.SuggestedPrompts != "" &&
+		canonicalSuggestedPrompts(a.SuggestedPrompts) != canonicalSuggestedPrompts(deref(existing.SuggestedPrompts)) {
 		return true
 	}
-	if a.AskForms != "" && a.AskForms != deref(existing.AskForms) {
+	if a.AskForms != "" &&
+		canonicalAskForms(a.AskForms) != canonicalAskForms(deref(existing.AskForms)) {
 		return true
 	}
 	return false
+}
+
+// canonicalSuggestedPrompts is what the server will store for a given raw
+// value: the manifest-side mirror of normalizeSuggestedPrompts in
+// internal/api/agents_suggested_prompts.go (CRLF folded, each line trimmed,
+// blank lines dropped, joined with "\n" and no trailing newline).
+//
+// It exists because the documented authoring form is a YAML block scalar
+// (schema.go), and `suggested_prompts: |` unmarshals WITH a trailing newline
+// while the column never holds one. Comparing the two literally is true on
+// every run for every manifest written the documented way.
+//
+// The caps are deliberately NOT applied here — checkSuggestedPrompts reports
+// those, with the offending position named, and a diff is not the place a
+// manifest finds out it has nine prompts.
+func canonicalSuggestedPrompts(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	folded := strings.ReplaceAll(raw, "\r\n", "\n")
+	folded = strings.ReplaceAll(folded, "\r", "\n")
+
+	prompts := make([]string, 0, 8)
+	for _, line := range strings.Split(folded, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			prompts = append(prompts, line)
+		}
+	}
+	return strings.Join(prompts, "\n")
+}
+
+// canonicalAskForms is what the server will store for a given raw ask_forms
+// document — askforms.Normalize, the same function the write path calls.
+//
+// Hand-written JSON is near-certain to differ from the canonical form by key
+// order and indentation alone, so before this the only manifests that ever
+// converged were the ones `crewship export` produced. A document that does not
+// parse has no canonical form and is returned untouched: `crewship validate`
+// refuses it with a real message, and a diff must not quietly call it equal to
+// whatever the server holds.
+func canonicalAskForms(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	normalized, err := askforms.Normalize(raw)
+	if err != nil {
+		return raw
+	}
+	return normalized
 }
 
 func mcpBodyDiffers(existing *MCPServerResponse, m *MCPServer) bool {

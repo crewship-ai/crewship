@@ -239,13 +239,24 @@ func truthy(v any) bool {
 	return false
 }
 
+// inOptions compares CLEANED against CLEANED. `chosen` has already been
+// through coerceValue → cleanValue (answerList), so the options have to make
+// the same trip or an option stored as "Travel " would refuse the "Travel"
+// that the sheet renders and the user picks — an unanswerable form, with the
+// error blaming their choice.
+//
+// The write path canonicalises the options (Parse), so a definition saved
+// through the API cannot reach here misspelled. This is for the row that
+// predates the rule or was edited around the API: the same call the
+// uncompilable-pattern branch above makes, and for the same reason — refusing
+// every answer would leave a user with a form nobody but a DBA can fix.
 func inOptions(field Field, chosen []string) bool {
 	if len(field.Options) == 0 {
 		return true
 	}
 	allowed := make(map[string]bool, len(field.Options))
 	for _, o := range field.Options {
-		allowed[o] = true
+		allowed[cleanValue(o)] = true
 	}
 	for _, c := range chosen {
 		if !allowed[c] {

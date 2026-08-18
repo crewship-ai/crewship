@@ -196,6 +196,25 @@
       "errors": [{ "code": "options", "message": "Category must be one of its listed options." }]
     },
     {
+      "name": "an option carrying stray whitespace is still answerable",
+      "$why": "every answer is trimmed on its way through (see the '  ab  ' case above), so a raw option compared against a cleaned answer never matches: the form renders 'Travel', the user picks 'Travel', and the sheet refuses it while blaming their choice. Such a definition cannot be SAVED any more (Normalize trims the options), so this is the row that predates the rule — it has to stay answerable rather than fail closed, the same call the uncompilable-pattern case makes",
+      "field": { "name": "category", "label": "Category", "type": "select", "options": ["Travel ", " Food"] },
+      "value": "Travel",
+      "errors": []
+    },
+    {
+      "name": "trimming the options does not widen them",
+      "field": { "name": "category", "label": "Category", "type": "select", "options": ["Travel ", " Food"] },
+      "value": "Trave",
+      "errors": [{ "code": "options", "message": "Category must be one of its listed options." }]
+    },
+    {
+      "name": "a multiselect option carrying stray whitespace is answerable too",
+      "field": { "name": "tags", "label": "Tags", "type": "multiselect", "options": ["a ", "\tb"] },
+      "value": ["a", "b"],
+      "errors": []
+    },
+    {
       "name": "file min is a count of uploads",
       "field": { "name": "document", "label": "Document", "type": "file", "min": 2 },
       "value": ["attachments/c1/a.pdf"],
@@ -258,6 +277,12 @@
     { "name": "a pattern that does not compile", "field": { "name": "vat", "label": "VAT", "type": "text", "pattern": "CZ[0-9" }, "want": "not a valid regular expression" },
     { "name": "a pattern on a type nothing matches it against", "field": { "name": "paid", "label": "Paid", "type": "checkbox", "pattern": "yes" }, "want": "pattern" },
     { "name": "a bound on a date, which the submit path would not check", "field": { "name": "issued", "label": "Issued", "type": "date", "min": 1 }, "want": "min" },
-    { "name": "multiple on a field that is not an upload", "field": { "name": "note", "label": "Note", "type": "text", "multiple": true }, "want": "multiple" }
+    { "name": "multiple on a field that is not an upload", "field": { "name": "note", "label": "Note", "type": "text", "multiple": true }, "want": "multiple" },
+    {
+      "name": "two options that differ only by whitespace are the same option",
+      "$why": "the options are trimmed on write, so these two would be stored identically and render as the same choice twice — the duplicate check has to see them the way the user will",
+      "field": { "name": "category", "label": "Category", "type": "select", "options": ["Travel", "Travel "] },
+      "want": "twice"
+    }
   ]
 }
