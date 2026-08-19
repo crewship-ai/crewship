@@ -20813,6 +20813,7 @@
         "docs/manifest/skill.md",
         "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
         "docs/prd/agent-ask-packs-and-document-intake.md",
+        "docs/prd/pages.md",
         "docs/security/container-isolation.mdx"
       ],
       "resource_docs": [
@@ -20896,6 +20897,7 @@
         "docs/manifest/skill.md",
         "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
         "docs/prd/agent-ask-packs-and-document-intake.md",
+        "docs/prd/pages.md",
         "docs/security/container-isolation.mdx"
       ],
       "resource_docs": [
@@ -45940,6 +45942,7 @@
         "docs/prd/agent-memory-on-wake.md",
         "docs/prd/chat-as-a-primary-surface.md",
         "docs/prd/model-scoped-credentials.md",
+        "docs/prd/pages.md",
         "docs/production-checklist.mdx",
         "docs/security/container-isolation.mdx",
         "docs/security/gdpr.mdx",
@@ -46091,6 +46094,7 @@
         "docs/prd/HANDOFF-2026-08-02.md",
         "docs/prd/agent-identity-signing.md",
         "docs/prd/crew-runtime-capacity.md",
+        "docs/prd/pages.md",
         "docs/production-checklist.mdx",
         "docs/quickstart.mdx",
         "docs/security/audit.mdx",
@@ -46108,7 +46112,8 @@
         "docs/manifest/README.md",
         "docs/manifest/connector.md",
         "docs/manifest/crew.md",
-        "docs/manifest/crew_template.md"
+        "docs/manifest/crew_template.md",
+        "docs/prd/pages.md"
       ],
       "status": "documented"
     },
@@ -46202,7 +46207,8 @@
         "docs/manifest/connector.md",
         "docs/manifest/issue.md",
         "docs/manifest/recurring_issue.md",
-        "docs/prd/agent-identity-signing.md"
+        "docs/prd/agent-identity-signing.md",
+        "docs/prd/pages.md"
       ],
       "status": "documented"
     },
@@ -46299,7 +46305,8 @@
         "docs/manifest/connector.md",
         "docs/manifest/integration.md",
         "docs/manifest/recipe.md",
-        "docs/prd/agent-ask-packs-and-document-intake.md"
+        "docs/prd/agent-ask-packs-and-document-intake.md",
+        "docs/prd/pages.md"
       ],
       "status": "documented"
     },
@@ -46365,7 +46372,8 @@
         "docs/manifest/project.md",
         "docs/manifest/saved_view.md",
         "docs/manifest/triage_rule.md",
-        "docs/manifest/workflow_template.md"
+        "docs/manifest/workflow_template.md",
+        "docs/prd/pages.md"
       ],
       "status": "documented"
     },
@@ -46505,6 +46513,7 @@
         "docs/prd/CHAT-SURFACE-CODE-AUDIT-2026-08-13.md",
         "docs/prd/CHAT-SURFACE-CONTRACT-SWEEP.md",
         "docs/prd/CODEX-WORK-ORDER-CHAT-1-0.md",
+        "docs/prd/pages.md",
         "docs/security/audit.mdx",
         "docs/security/rbac.mdx"
       ],
