@@ -3,6 +3,7 @@ package fileserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -18,22 +19,61 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// eventDeadline bounds how long a test waits for a filesystem event.
+// The registration race these tests have to survive
+// -------------------------------------------------
 //
-// This is a HANG guard, not a latency assertion: nothing here measures how
-// fast the watcher is, so the budget only has to be larger than the worst
-// plausible fsnotify delivery on a contended machine. The old 3s was not —
-// on a loaded macos-arm64 runner it fired as a false negative and reddened
-// unrelated PRs (#1464). A generous value costs nothing on a healthy run
-// (the event arrives in milliseconds and the select returns immediately)
-// and only ever delays a genuine failure.
-const eventDeadline = 60 * time.Second
+// fsnotify's kqueue backend (macOS, the BSDs) watches a file *descriptor* per
+// file, not a path. When a file appears inside a watched directory the backend
+// emits Create first and only then opens and registers that file's descriptor
+// — sendCreateIfNew calls sendEvent before internalWatch (backend_kqueue.go).
+// Its Events channel is unbuffered, so the Create is handed to our reader, and
+// to whatever test goroutine that wakes, while the registration is still
+// pending on fsnotify's own goroutine.
+//
+// A write issued inside that window lands on a file kqueue is not yet
+// watching. kqueue is edge-triggered and never replays, so the file_modified
+// event for that write is not late — it does not exist, and no amount of
+// waiting produces it. That is why #1464 failed identically at the original 3s
+// bound and at the 60s bound that replaced it: `3.00s` and `60.01s`, the
+// deadline firing in both cases, on a test whose work takes milliseconds.
+//
+// inotify (Linux) has no such window. A directory watch already reports writes
+// to the files inside it, so there is no per-file registration to race, which
+// is why every linux leg of those runs passed while the macos leg went red.
+//
+// The remedy is to stop betting the test on a single edge. Where the stimulus
+// can be re-applied, driveForEvent re-applies it until the watcher reports it,
+// so a lost edge costs one retry interval instead of the whole run. Waits that
+// ride a watch registered synchronously inside Watch (the crew directory
+// itself, and any subtree addAllDirs walked at startup) are not exposed to the
+// race and can still wait plainly — that is what waitForEvent is for.
 
-// collectEvent waits (bounded) for the next FileEvent matching the given
-// event name and relative path.
+// eventAbandonAfter is how long a FAILING wait takes to say so.
+//
+// It is a hang guard, not a latency assertion, and nothing in any pass
+// condition depends on its value: a healthy run leaves these helpers in
+// milliseconds and never reads this timer. It exists so a genuine regression
+// reports its own diagnosis instead of hanging until the package -timeout
+// kills every other test's output along with it.
+//
+// Raising it is not a remedy for a flake. #1464 raised it 20× and failed at
+// exactly the new number, because the event it waited for was never coming.
+const eventAbandonAfter = 30 * time.Second
+
+// eventRetryInterval is how long driveForEvent gives the watcher to report a
+// stimulus before assuming the edge was dropped and re-applying it.
+const eventRetryInterval = 50 * time.Millisecond
+
+// waitForEvent waits (bounded) for the next FileEvent matching the given event
+// name and relative path.
+//
+// Only for stimuli that cannot be repeated, or that ride a watch registered
+// synchronously by Watch. If the stimulus is repeatable and targets a watch
+// that may still be registering, use driveForEvent — see the note above.
 func waitForEvent(t *testing.T, ch <-chan FileEvent, event, relPath string) FileEvent {
 	t.Helper()
-	deadline := time.After(eventDeadline)
+	deadline := time.After(eventAbandonAfter)
+	var seen []FileEvent
 	for {
 		select {
 		case fe := <-ch:
@@ -42,9 +82,142 @@ func waitForEvent(t *testing.T, ch <-chan FileEvent, event, relPath string) File
 			}
 			// Different event for the same churn (e.g. a Write right after
 			// Create) — keep draining.
+			seen = append(seen, fe)
 		case <-deadline:
-			t.Fatalf("timed out waiting for %s %s", event, relPath)
+			t.Fatalf("timed out after %s waiting for %s %s; %s",
+				eventAbandonAfter, event, relPath, describeEvents(seen))
 		}
+	}
+}
+
+// driveForEvent re-applies stimulus until the watcher reports an event
+// satisfying match, and returns that event.
+//
+// stimulus must be repeatable and must re-produce the same observable each
+// time it runs, because it will run again for every retry interval that goes
+// by without a match. That is the whole point: an edge dropped by a watch that
+// had not finished registering (see the note above) is retried rather than
+// waited out, so the pass condition no longer contains a bet on when the
+// registration lands.
+//
+// The reported events are drained continuously while waiting, so the caller's
+// channel cannot fill up with the retries' own churn.
+func driveForEvent(
+	t *testing.T,
+	ch <-chan FileEvent,
+	stimulus func() error,
+	match func(FileEvent) bool,
+	what string,
+) FileEvent {
+	t.Helper()
+
+	abandon := time.After(eventAbandonAfter)
+	var seen []FileEvent
+	attempts := 0
+
+	for {
+		attempts++
+		if err := stimulus(); err != nil {
+			t.Fatalf("applying stimulus for %s (attempt %d): %v", what, attempts, err)
+		}
+
+		retry := time.After(eventRetryInterval)
+		for {
+			select {
+			case fe := <-ch:
+				if match(fe) {
+					return fe
+				}
+				seen = append(seen, fe)
+				continue
+			case <-retry:
+				// Nothing matched in time. The stimulus may have landed on a
+				// file the backend had not registered yet, in which case its
+				// event will never arrive — re-apply rather than wait.
+			case <-abandon:
+				t.Fatalf("timed out after %s waiting for %s; re-applied the stimulus %d times; %s",
+					eventAbandonAfter, what, attempts, describeEvents(seen))
+			}
+			break
+		}
+	}
+}
+
+// describeEvents renders what a failing wait actually observed.
+//
+// #1464 was reopened because the old message could not tell "no events at all"
+// (the watch never registered, or the path is wrong) from "events, but never
+// the one we wanted" (the projection is wrong) — it reported only the last
+// size it had seen. Those are different bugs and the failure line should name
+// which one it is looking at.
+func describeEvents(seen []FileEvent) string {
+	if len(seen) == 0 {
+		return "no other events were delivered at all, so the watch never fired for this path"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d other event(s) were delivered:", len(seen))
+	for _, fe := range seen {
+		fmt.Fprintf(&b, "\n\t%s %s (agent %q, size %d)", fe.Event, fe.Path, fe.Agent, fe.Size)
+	}
+	return b.String()
+}
+
+// TestDriveForEvent_SurvivesADroppedEdge pins the property #1464 needed and a
+// single-shot wait does not have: when the event source silently swallows a
+// stimulus — precisely what kqueue does to a write issued before it has
+// registered the file — the helper must re-apply and still succeed, rather
+// than wait out a bound for an event that is never coming.
+//
+// The real race is macos-only and cannot be reproduced on linux, so the drop
+// is modelled directly here. This is the mechanism under test, not the
+// platform.
+func TestDriveForEvent_SurvivesADroppedEdge(t *testing.T) {
+	ch := make(chan FileEvent, 8)
+	attempts := 0
+
+	got := driveForEvent(t, ch,
+		func() error {
+			attempts++
+			// The first two stimuli vanish, like a write to a descriptor the
+			// backend has not registered yet. Only the third is observed.
+			if attempts > 2 {
+				ch <- FileEvent{Event: "file_modified", Path: "report.md", Size: 9}
+			}
+			return nil
+		},
+		func(fe FileEvent) bool {
+			return fe.Event == "file_modified" && fe.Path == "report.md" && fe.Size == 9
+		},
+		"file_modified report.md",
+	)
+
+	if got.Path != "report.md" || got.Size != 9 {
+		t.Errorf("matched event = %+v, want file_modified report.md size 9", got)
+	}
+	if attempts < 3 {
+		t.Errorf("stimulus applied %d time(s); the helper has to re-apply a dropped one", attempts)
+	}
+}
+
+// TestDriveForEvent_IgnoresNonMatchingChurn pins the drain: unrelated events
+// on the channel must not satisfy the wait, and must not stall it either.
+func TestDriveForEvent_IgnoresNonMatchingChurn(t *testing.T) {
+	ch := make(chan FileEvent, 8)
+	ch <- FileEvent{Event: "file_created", Path: "report.md", Size: 2}
+	ch <- FileEvent{Event: "file_modified", Path: "other.md", Size: 9}
+
+	got := driveForEvent(t, ch,
+		func() error {
+			ch <- FileEvent{Event: "file_modified", Path: "report.md", Size: 9}
+			return nil
+		},
+		func(fe FileEvent) bool {
+			return fe.Event == "file_modified" && fe.Path == "report.md" && fe.Size == 9
+		},
+		"file_modified report.md",
+	)
+	if got.Size != 9 {
+		t.Errorf("matched event = %+v, want size 9", got)
 	}
 }
 
@@ -82,24 +255,33 @@ func TestWatch_EmitsLifecycleEvents(t *testing.T) {
 		t.Error("event timestamp not set")
 	}
 
-	if err := os.WriteFile(target, []byte("v2-longer"), 0o640); err != nil {
-		t.Fatalf("modify: %v", err)
+	// This is the wait that flaked in #1464, and the reason it is driven
+	// rather than merely awaited: report.md was created a moment ago, so on
+	// kqueue the write below can land before its descriptor is registered and
+	// produce no event at all (see the note at the top of this file). Each
+	// rewrite is another chance once the registration completes.
+	//
+	// The content is fixed, so every attempt performs the identical
+	// modification and the size stays an exact assertion rather than a
+	// "whatever we ended up with" one.
+	//
+	// Draining non-matching events matters on Linux too: the initial create
+	// emits CREATE+MODIFY, both at the v1 size, so a stale file_modified for
+	// v1 can arrive before the v2 write's event.
+	const v2 = "v2-longer"
+	wantSize := int64(len(v2))
+	modified := driveForEvent(t, events,
+		func() error { return os.WriteFile(target, []byte(v2), 0o640) },
+		func(fe FileEvent) bool {
+			return fe.Event == "file_modified" && fe.Path == "report.md" && fe.Size == wantSize
+		},
+		fmt.Sprintf("file_modified report.md at size %d", wantSize),
+	)
+	if modified.Agent != "report.md" {
+		t.Errorf("modified agent slug = %q, want report.md (first path segment)", modified.Agent)
 	}
-	// On Linux, the initial create emits CREATE+MODIFY (both at the v1 size),
-	// so a stale file_modified for v1 can arrive before the v2 write's event.
-	// Drain file_modified events until one reports the new size.
-	wantSize := int64(len("v2-longer"))
-	var modified FileEvent
-	mdeadline := time.After(eventDeadline)
-	for modified.Size != wantSize {
-		select {
-		case fe := <-events:
-			if fe.Event == "file_modified" && fe.Path == "report.md" {
-				modified = fe
-			}
-		case <-mdeadline:
-			t.Fatalf("timed out waiting for file_modified report.md size %d, last size %d", wantSize, modified.Size)
-		}
+	if modified.Timestamp.IsZero() {
+		t.Error("modified event timestamp not set")
 	}
 
 	if err := os.Remove(target); err != nil {
@@ -129,13 +311,30 @@ func TestWatch_NewSubdirGetsWatched(t *testing.T) {
 	}
 	waitForEvent(t, events, "file_created", "claude-dev")
 
-	// Give fsnotify a beat to register the new directory watch.
-	time.Sleep(50 * time.Millisecond)
-
-	if err := os.WriteFile(filepath.Join(agentDir, "out.txt"), []byte("hi"), 0o640); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	fe := waitForEvent(t, events, "file_created", filepath.Join("claude-dev", "out.txt"))
+	// A fixed sleep used to sit here — "give fsnotify a beat to register the
+	// new directory watch" — which is the same bet #1464 lost, just with a
+	// smaller number. The watch on a directory created after Watch starts is
+	// registered *after* its Create is delivered (by our own loop on Linux, by
+	// fsnotify's on kqueue), so a file written before that lands unwatched and
+	// emits nothing; 50ms is a guess at how long that takes on the busiest
+	// runner we will ever have.
+	//
+	// Removing and re-creating the file instead makes every attempt a genuine
+	// create, so file_created and the exact path both stay exact assertions,
+	// and the test stops caring when the registration lands.
+	out := filepath.Join(agentDir, "out.txt")
+	fe := driveForEvent(t, events,
+		func() error {
+			if err := os.Remove(out); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return os.WriteFile(out, []byte("hi"), 0o640)
+		},
+		func(fe FileEvent) bool {
+			return fe.Event == "file_created" && fe.Path == filepath.Join("claude-dev", "out.txt")
+		},
+		"file_created claude-dev/out.txt",
+	)
 	if fe.Agent != "claude-dev" {
 		t.Errorf("agent slug = %q, want claude-dev", fe.Agent)
 	}
