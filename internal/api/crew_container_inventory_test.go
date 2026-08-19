@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +23,10 @@ import (
 // embedded mockContainerExec) plus provider.CrewContainerLister, so it
 // satisfies the type assertion in Containers. It also overrides
 // ContainerStats, which the embedded mock answers (nil, nil) to.
+// Every field below the mutex is touched from the handler's stats goroutines,
+// so the fake needs its own synchronisation — the concurrency under test is
+// real concurrency, and a fake that raced would report the race instead of the
+// behaviour.
 type fakeCrewContainerLister struct {
 	*mockContainerExec
 	containers []provider.CrewContainerInfo
@@ -28,7 +34,11 @@ type fakeCrewContainerLister struct {
 
 	stats    map[string]*provider.ContainerMetrics
 	statsErr error
+	// statsFunc, when set, replaces the canned answers entirely — used to
+	// hold calls at a barrier and observe how many run at once.
+	statsFunc func(context.Context, string) (*provider.ContainerMetrics, error)
 
+	mu          sync.Mutex
 	lastCrewID  string
 	lastSlug    string
 	statsAsked  []string
@@ -36,20 +46,38 @@ type fakeCrewContainerLister struct {
 }
 
 func (f *fakeCrewContainerLister) ListCrewContainers(_ context.Context, crewID, slug string) ([]provider.CrewContainerInfo, error) {
+	f.mu.Lock()
 	f.lastCrewID, f.lastSlug = crewID, slug
 	f.listerCalls++
+	f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.containers, nil
 }
 
-func (f *fakeCrewContainerLister) ContainerStats(_ context.Context, id string) (*provider.ContainerMetrics, error) {
+func (f *fakeCrewContainerLister) ContainerStats(ctx context.Context, id string) (*provider.ContainerMetrics, error) {
+	f.mu.Lock()
 	f.statsAsked = append(f.statsAsked, id)
-	if f.statsErr != nil {
-		return nil, f.statsErr
+	metrics := f.stats[id]
+	statsFunc, statsErr := f.statsFunc, f.statsErr
+	f.mu.Unlock()
+
+	if statsFunc != nil {
+		return statsFunc(ctx, id)
 	}
-	return f.stats[id], nil
+	if statsErr != nil {
+		return nil, statsErr
+	}
+	return metrics, nil
+}
+
+// statsRequests returns the container ids stats were asked for, copied under
+// the lock so a caller can read it while goroutines may still be appending.
+func (f *fakeCrewContainerLister) statsRequests() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.statsAsked...)
 }
 
 func newFakeCrewContainerLister(containers []provider.CrewContainerInfo, err error) *fakeCrewContainerLister {
@@ -182,7 +210,7 @@ func TestCrewContainers_RuntimeAndSidecars(t *testing.T) {
 	if sidecar.CPUPercent != nil || sidecar.MemoryMB != nil {
 		t.Errorf("stopped sidecar reported usage: cpu=%v mem=%v", sidecar.CPUPercent, sidecar.MemoryMB)
 	}
-	for _, asked := range lister.statsAsked {
+	for _, asked := range lister.statsRequests() {
 		if asked == "pg-cid" {
 			t.Errorf("stats were requested for a stopped container")
 		}
@@ -226,6 +254,111 @@ func TestCrewContainers_StatsFailureIsSoft(t *testing.T) {
 	}
 	if out.Containers[0].Status != "running" {
 		t.Errorf("status = %q, want running", out.Containers[0].Status)
+	}
+}
+
+// TestCrewContainers_StatsAreConcurrentAndJoinedBeforeReturn holds up the two
+// claims the handler's spawn site makes, because one of them is why that site
+// is allowed to skip beginBackgroundWork.
+//
+// CONCURRENT, because the reason for spawning at all is that docker's stats
+// call collects two samples a second apart: serial reads cost one second per
+// running container. Asserted with a barrier rather than a stopwatch — each
+// stats call waits for its peers to arrive, so genuinely concurrent reads
+// release each other immediately, and a serialized fan-out deadlocks its way
+// to a clean, named failure instead of a timing flake on a loaded box.
+//
+// JOINED BEFORE RETURN, because that is the entry in unregisteredSpawnSites
+// (background_guard_test.go): these goroutines are request-scoped, so they
+// cannot outlive the test and race its teardown (#1596). The guard is
+// syntactic — it checks that the site is accounted for, not that the reason
+// given is true. This is what makes the reason true rather than asserted.
+// Delete the wg.Wait() and the guard still passes; this fails.
+func TestCrewContainers_StatsAreConcurrentAndJoinedBeforeReturn(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at)
+		VALUES (?, ?, 'Acct', 'acct', ?, ?)`, "crew-conc", wsID, now, now); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+
+	const running = 3
+	lister := newFakeCrewContainerLister([]provider.CrewContainerInfo{
+		{ID: "team-cid", Name: "team", Image: "img", Kind: provider.CrewContainerKindCrew, State: "running"},
+		{ID: "pg-cid", Name: "svc-postgres", Image: "postgres:16", Kind: provider.CrewContainerKindSidecar, State: "running"},
+		{ID: "redis-cid", Name: "svc-redis", Image: "redis:7", Kind: provider.CrewContainerKindSidecar, State: "running"},
+		// Stopped: never asked, so it must not be counted at the barrier.
+		{ID: "old-cid", Name: "svc-old", Image: "mysql:8", Kind: provider.CrewContainerKindSidecar, State: "stopped"},
+	}, nil)
+
+	// arrived closes once every running container's stats call is in flight
+	// at the same moment. A serial pass can never close it.
+	var mu sync.Mutex
+	inFlight := 0
+	arrived := make(chan struct{})
+	var finished atomic.Int32
+	var timedOut atomic.Int32
+
+	lister.statsFunc = func(ctx context.Context, id string) (*provider.ContainerMetrics, error) {
+		mu.Lock()
+		inFlight++
+		if inFlight == running {
+			close(arrived)
+		}
+		mu.Unlock()
+
+		select {
+		case <-arrived:
+		case <-time.After(5 * time.Second):
+			// Serialized: this call is waiting for peers that will not start
+			// until it returns.
+			timedOut.Add(1)
+		}
+		finished.Add(1)
+		return &provider.ContainerMetrics{CPUPercent: 1.5, MemoryUsed: 100 * 1024 * 1024}, nil
+	}
+
+	h := NewCrewHandler(db, newTestLogger())
+	h.SetContainer(lister)
+
+	w := doContainers(h, wsID, "crew-conc")
+
+	// Read WITHOUT synchronising against the goroutines: if the handler
+	// returned while any of them were still running, -race reports it here,
+	// and the counts below are short.
+	if got := timedOut.Load(); got != 0 {
+		t.Fatalf("%d stats read(s) waited 5s for peers that never arrived — the fan-out is "+
+			"serialized, which is the ~1s-per-container draw time the goroutines exist to avoid", got)
+	}
+	if got := finished.Load(); got != running {
+		t.Fatalf("Containers returned with %d of %d stats reads finished — the goroutines outlived "+
+			"the request, which is exactly the detached work unregisteredSpawnSites says this is not",
+			got, running)
+	}
+	if got := len(lister.statsRequests()); got != running {
+		t.Errorf("stats asked for %d containers, want %d (the stopped one must not be asked)", got, running)
+	}
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d body=%s", w.Code, w.Body.String())
+	}
+	out := decodeContainers(t, w)
+	if len(out.Containers) != 4 {
+		t.Fatalf("expected 4 rows, got %d", len(out.Containers))
+	}
+	// Every running row carries the numbers its goroutine produced — the join
+	// is what makes them present, not a lucky schedule.
+	for _, c := range out.Containers {
+		if c.Status != "running" {
+			continue
+		}
+		if c.CPUPercent == nil || c.MemoryMB == nil {
+			t.Errorf("row %q has no usage: the response was written before its read finished", c.Name)
+		}
 	}
 }
 

@@ -152,10 +152,19 @@ func (h *CrewHandler) Containers(w http.ResponseWriter, r *http.Request) {
 	// pass costs one second per running container — a crew with a runtime and
 	// three sidecars would take four seconds to draw a panel.
 	//
-	// These goroutines are joined before the handler returns, so they never
-	// outlive the request and need no beginBackgroundWork registration. The
-	// bound keeps a crew with many sidecars from opening a burst of daemon
-	// connections at once.
+	// These goroutines are joined by the wg.Wait() below, before the response
+	// is written, so they are request-scoped fan-out rather than the detached
+	// work beginBackgroundWork exists for: they cannot outlive the request,
+	// so they cannot outlive the test that drove it, so a drain would have
+	// nothing to catch (#1596). The spawn site is listed in
+	// unregisteredSpawnSites with that reason, and
+	// TestCrewContainers_StatsAreConcurrentAndJoinedBeforeReturn holds the
+	// claim up: it fails if the join is removed OR if the fan-out is
+	// serialized. Keep all three together — if this ever becomes detached
+	// work, it needs the registration, not a bigger comment.
+	//
+	// The bound keeps a crew with many sidecars from opening a burst of
+	// daemon connections at once.
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, statsFanout)
 	for i, c := range live {
