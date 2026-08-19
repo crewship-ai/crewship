@@ -66,6 +66,12 @@ Examples (typed at the prompt):
 		repl := cli.NewREPL()
 		repl.Prompt = shellPromptString(activeAgent)
 
+		// Filled after the built-ins, by the server-catalog load below.
+		// /help closes over it so the list it prints is the list the
+		// shell actually has — a hardcoded help that omits half the
+		// commands is how a user concludes the feature is missing.
+		var serverActionNames []string
+
 		repl.Register("help", func(_ context.Context, _ []string) (bool, error) {
 			fmt.Fprintln(os.Stdout, `Commands:
   /agent <slug>       switch active agent
@@ -75,6 +81,10 @@ Examples (typed at the prompt):
   /think              toggle --show-thinking
   /clear              clear the screen
   /quit, /exit        leave`)
+			if len(serverActionNames) > 0 {
+				fmt.Fprintf(os.Stdout, "\nWorkspace actions (from this workspace, filtered to your grants):\n  /%s\n",
+					strings.Join(serverActionNames, "\n  /"))
+			}
 			return true, nil
 		})
 		repl.Register("quit", func(_ context.Context, _ []string) (bool, error) { return false, nil })
@@ -133,6 +143,17 @@ Examples (typed at the prompt):
 			return true, nil
 		})
 
+		// Server-driven actions, loaded AFTER the built-ins above so a
+		// routine can never take /exit or /help — LoadServerSlashCommands
+		// skips a name already registered and warns. This is what makes
+		// `/msn-etn-podklady obdobi=2026-07` work at this prompt: the
+		// capability-filtered catalog arrives from
+		// GET /api/v1/slash-commands and each entry becomes a command.
+		//
+		// Non-fatal by construction: a network blip returns 0 and logs,
+		// and the shell opens as it always did.
+		serverActionNames = cli.LoadServerSlashCommands(cmd.Context(), repl, client)
+
 		repl.BareHandler = func(_ context.Context, line string) error {
 			if activeAgent == "" {
 				return fmt.Errorf("no active agent. Set one with /agent <slug>")
@@ -162,6 +183,14 @@ Examples (typed at the prompt):
 		fmt.Println(strings.TrimSpace(`
 crewship shell — type /help for commands, Ctrl-D to exit.
 `))
+		if n := len(serverActionNames); n > 0 {
+			// Worth a line: these commands are workspace-specific and
+			// capability-filtered, so they are in no static help text and
+			// the difference is not otherwise discoverable. It points at
+			// /help rather than at a bare "/", which dispatches to
+			// nothing and prints nothing.
+			fmt.Printf("%d workspace action(s) loaded — /help lists them.\n", n)
+		}
 		return repl.Run(cmd.Context())
 	},
 }

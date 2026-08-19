@@ -15,9 +15,29 @@ import { apiFetch } from "@/lib/api-fetch"
 
 export interface SlashFormField {
   name: string
+  /** The widget to draw: text, textarea, cron, timezone, secret, slug,
+   *  priority, number, boolean, … It says what the user sees, not what
+   *  the server receives. */
   type: string
   required?: boolean
+  /** Always a string — a form field's value is a string. A non-string
+   *  default is formatted into one server-side and parsed back out via
+   *  `value_type`. */
   default?: string
+  /**
+   * The JSON type the server expects back for this field: string |
+   * integer | number | boolean | array | object. Absent means string,
+   * which is every field in the static catalog.
+   *
+   * `type` cannot answer this. A routine's `array` input and an issue's
+   * `description` both draw a textarea, and one of them has to reach the
+   * server as a parsed JSON array while the other must not — so the wire
+   * carries both. See lib/routine-inputs.ts for the conversion.
+   */
+  value_type?: string
+  /** Rendered under the field. Server-supplied for a routine input that
+   *  declares a description; the static catalog carries none. */
+  help?: string
 }
 
 /**

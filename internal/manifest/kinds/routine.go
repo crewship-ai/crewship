@@ -41,6 +41,19 @@ type RoutineSpec struct {
 	MaxCostUSD               float64       `yaml:"max_cost_usd,omitempty"               json:"max_cost_usd,omitempty"`
 	EgressTargets            []string      `yaml:"egress_targets,omitempty"             json:"egress_targets,omitempty"`
 
+	// Slash offers this routine as /<slug> in chat and the CLI repl,
+	// opening a form built from `inputs`. Part of the DSL, not a
+	// manifest-only field, so definitionJSONShape passes it through to
+	// pipeline.Parse and ExportRoutines decodes it back.
+	//
+	// It has to be modelled here rather than ride through as an unknown
+	// key: RoutineSpec is a closed struct with no inline catch-all (only
+	// RoutineStep has one), so an unmodelled top-level key is dropped
+	// silently by `crewship apply` AND stripped from a routine on
+	// export → edit → apply. A palette entry that disappears when
+	// somebody round-trips the manifest is the worse of the two.
+	Slash *RoutineSlash `yaml:"slash,omitempty" json:"slash,omitempty"`
+
 	// Schedules are nested cron triggers; each entry will become one
 	// pipeline_schedules row when applied. Zero schedules = no triggers
 	// (the routine can still be invoked manually via /run).
@@ -50,6 +63,17 @@ type RoutineSpec struct {
 	// webhook per routine (the pipeline_webhooks store enforces this
 	// at apply time; the manifest mirrors the cardinality).
 	Webhook *RoutineWebhook `yaml:"webhook,omitempty" json:"webhook,omitempty"`
+}
+
+// RoutineSlash mirrors pipeline.SlashSpec — the routine's entry in the
+// slash-command palette. Declared here (rather than as an `any`) so
+// `crewship plan` can show the block and a typo in a field name is a
+// parse error at the author's desk rather than a key the server drops.
+type RoutineSlash struct {
+	Enabled bool   `yaml:"enabled"            json:"enabled,omitempty"`
+	Label   string `yaml:"label,omitempty"    json:"label,omitempty"`
+	LabelCS string `yaml:"label_cs,omitempty" json:"label_cs,omitempty"`
+	Icon    string `yaml:"icon,omitempty"     json:"icon,omitempty"`
 }
 
 // RoutineStep is a thin pass-through of the routine.v1.json Step
@@ -605,6 +629,9 @@ func definitionJSONShape(d *RoutineDocument) map[string]any {
 	}
 	if len(d.Spec.EgressTargets) > 0 {
 		out["egress_targets"] = d.Spec.EgressTargets
+	}
+	if d.Spec.Slash != nil {
+		out["slash"] = d.Spec.Slash
 	}
 	return out
 }

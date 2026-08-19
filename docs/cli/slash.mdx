@@ -65,8 +65,42 @@ Once saved, you invoke it like a built-in: `crewship review staged 'auth refacto
 
 `$args` in the body is replaced with everything the user typed after the command name. Variables from `vars:` are bound positionally in order.
 
+## Workspace actions in `crewship shell`
+
+The commands above are **local** — files under `~/.crewship/commands/`, mounted
+as cobra subcommands. `crewship shell` additionally loads the **server-driven**
+catalog for the active workspace (`GET /api/v1/slash-commands`, filtered to your
+capability grants) and registers each entry at the REPL prompt:
+
+```
+crewship shell
+crewship shell — type /help for commands, Ctrl-D to exit.
+5 workspace action(s) loaded — /help lists them.
+crewship [riley] › /msn-etn-podklady obdobi=2026-07
+[/msn-etn-podklady] ✓
+```
+
+A routine appears here when it carries a
+[`slash` block](/manifest/routine#slash-offering-a-routine-as-a-command) and you
+hold `routine.run` **or** are `MANAGER` and above, who clear the run gate on role
+alone. Arguments are `key=value`, quoted for spaces, and each value
+is sent as the type the routine declared — a number unquoted, a boolean as
+`true`/`yes`/`on` or `false`/`no`/`off`. A value that cannot be restored to its
+declared type is refused at the prompt with the field named, before anything is
+sent.
+
+`/help` lists what actually loaded, which is not a fixed list: it is
+workspace-specific and depends on your grants.
+
+**Built-ins win, here too.** The same policy as the file-based catalog above: a
+workspace action whose name collides with `/help`, `/exit`, `/agent` … is
+skipped with a `[slash] <name> shadows a built-in command — skipping` warning
+rather than silently taking the name.
+
 ## See also
 
 - [`crewship prompt`](/cli/prompt) — local prompt library, lower-cost than a full slash command.
+- [Slash Commands API](/api-reference/slash-commands) — the server-driven catalog these load from.
+- [`kind: Routine`](/manifest/routine#slash-offering-a-routine-as-a-command) — opting a routine into the palette.
 - [`crewship ask`](/cli/ask) — the dispatch target for every slash command.
 - [`crewship plan`](/cli/plan) — what `plan: true` in frontmatter activates.
