@@ -37,6 +37,7 @@
 import type { AskForm, AskValues } from "@/lib/ask-template"
 import { currencyPlaceholder } from "@/lib/ask-template"
 import { isAskAttachmentType, isSafeAskFieldType } from "@/lib/ask-validate"
+import { randomUUIDv4 } from "@/lib/random-id"
 
 /** The key the envelope occupies in a message's metadata map. Spelled once
  *  here and once in internal/askforms/envelope.go; a second spelling is a
@@ -77,15 +78,11 @@ export interface AskSubmissionEnvelope {
 }
 
 /** A fresh submission id. `crypto.randomUUID` where it exists (every browser
- *  this app supports, and jsdom/happy-dom in tests); the fallback is only for
- *  an insecure context, where the id still only has to be unique within one
- *  conversation. */
+ *  this app supports, and jsdom/happy-dom in tests); in an insecure context —
+ *  the dev clones over HTTP — lib/random-id falls back to
+ *  crypto.getRandomValues rather than to Math.random. */
 export function newAskSubmissionId(): string {
-  const uuid =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-  return `sub_${uuid}`
+  return `sub_${randomUUIDv4()}`
 }
 
 export interface BuildAskEnvelopeArgs {

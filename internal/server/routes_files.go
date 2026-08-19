@@ -622,10 +622,21 @@ const crewFileWriteScript = `set -eu; d=$(dirname "$DEST"); mkdir -p "$d"; ` +
 // addresses them as a file to delete, and `rm -rf` aimed at one would take a
 // crew's entire shared tree or an agent's whole output namespace. `rm -rf` on a
 // missing path is still a success — deletion is idempotent on both halves.
-const crewFileDeleteScript = `set -eu; d=$(dirname "$DEST"); ` +
-	`rp=$(realpath "$d"); case "$rp" in "$FENCE"|"$FENCE"/*) ;; ` +
+// The fence is resolved before it is compared, because the destination's
+// parent is: realpath on one side and the caller's spelling on the other are
+// only equal when no component of the fence is a symlink, and the moment one
+// is, every removal inside the tree is refused for escaping it. macOS CI found
+// this — /var is a symlink to /private/var — but a bind mount reached through
+// a link would do the same to a real install.
+//
+// Resolving it costs nothing in containment: FENCE is ours, not the caller's,
+// and DEST is still judged by where its parent actually lands. DEST itself is
+// never resolved — it is allowed not to exist, and `set -eu` would turn that
+// into an error rather than the success "already gone" has to be.
+const crewFileDeleteScript = `set -eu; f=$(realpath "$FENCE"); d=$(dirname "$DEST"); ` +
+	`rp=$(realpath "$d"); case "$rp" in "$f"|"$f"/*) ;; ` +
 	`*) echo "refuse: destination escapes $FENCE" >&2; exit 3 ;; esac; ` +
-	`case "$DEST" in "$FENCE"|"$FENCE"/) echo "refuse: will not remove the tree root $FENCE" >&2; exit 4 ;; esac; ` +
+	`case "$DEST" in "$FENCE"|"$FENCE"/|"$f"|"$f"/) echo "refuse: will not remove the tree root $FENCE" >&2; exit 4 ;; esac; ` +
 	`rm -rf "$DEST"`
 
 // containerSaveErrorResponse maps a container-write failure to an HTTP status

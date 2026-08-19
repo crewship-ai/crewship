@@ -38,6 +38,7 @@ import { httpError, scopeErrorMessage, useRetry } from "@/components/features/ch
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { apiFetch } from "@/lib/api-fetch"
 import { emitChatEvent } from "@/lib/telemetry"
+import { randomUUIDv4 } from "@/lib/random-id"
 
 /**
  * Read the agent slug from the live URL after client hydration, and let the
@@ -85,17 +86,10 @@ function useAgentSlugFromUrl(): [string | null, (slug: string) => void] {
  * creating a row merely because someone opened a URL.
  *
  * crypto.randomUUID is unavailable in non-secure (HTTP) contexts, which is
- * how the dev clones are reached; same fallback as hooks/use-chat.ts.
+ * how the dev clones are reached; lib/random-id carries the fallback, shared
+ * with hooks/use-chat.ts and the ask envelope.
  */
-function newDraftSessionId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID()
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0
-    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16)
-  })
-}
+const newDraftSessionId = randomUUIDv4
 
 interface AgentRecord extends ChatTreeAgent {
   role_title: string | null

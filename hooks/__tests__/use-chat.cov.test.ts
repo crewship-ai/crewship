@@ -88,8 +88,19 @@ function setup(sessionId = SESSION) {
 }
 
 describe("uuid fallback (no crypto.randomUUID)", () => {
-  it("generates a v4-shaped uuid via Math.random when crypto.randomUUID is unavailable", () => {
-    vi.stubGlobal("crypto", {}) // typeof crypto.randomUUID !== "function"
+  // An insecure context — the dev clones over HTTP — has no crypto.randomUUID
+  // but does have crypto.getRandomValues, which is what lib/random-id falls
+  // back to. This used to assert a Math.random fallback; CodeQL was right that
+  // a session id should not come from there (js/insecure-randomness), so the
+  // stub now describes the context that actually occurs rather than an empty
+  // crypto object no browser ships.
+  it("generates a v4-shaped uuid from the CSPRNG when crypto.randomUUID is unavailable", () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: (arr: Uint8Array) => {
+        for (let i = 0; i < arr.length; i++) arr[i] = (i * 37 + 11) & 0xff
+        return arr
+      },
+    })
     const { result } = setup()
     act(() => {
       result.current.sendMessage("hi")

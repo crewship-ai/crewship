@@ -664,3 +664,142 @@ func TestHandleFileDelete_HostRefusalIsWhatTriggersTheReplay(t *testing.T) {
 		t.Errorf("FENCE = %q, want %s", env["FENCE"], containerOutputRoot)
 	}
 }
+
+// The fence check compared a RESOLVED path against an UNRESOLVED one.
+//
+// crewFileDeleteScript resolves the destination's parent with realpath, then
+// tests that result against $FENCE as it was handed in. Those are only
+// comparable when no component of the fence is a symlink. The moment one is,
+// realpath returns the link's target, the target does not begin with the fence
+// as spelled, and the script refuses a removal that is squarely inside the
+// tree — every removal, permanently, not an edge case.
+//
+// macOS CI is where it surfaced: t.TempDir() there sits under /var, which is a
+// symlink to /private/var, so `Go (macos-arm64)` failed all three replay cases
+// with "refuse: destination escapes ...". Nothing about that is macOS-specific
+// — this test builds the same shape on any platform by pointing the fence at a
+// symlink — and nothing about it is test-only either: a deployment whose bind
+// mount is reached through a link would have had an undeletable attachment
+// tree, with the refusal blaming the destination for the fence's spelling.
+func TestCrewFileDeleteScript_FenceReachedThroughSymlink(t *testing.T) {
+	requireShellTools(t)
+
+	tmp := t.TempDir()
+	real := filepath.Join(tmp, "real")
+	link := filepath.Join(tmp, "link")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// `link` stands in for /var -> /private/var: same tree, spelled through a
+	// symlink, which is what the fence is handed.
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err) // SKIP-WAIVER(#1977)
+	}
+	seedCrewTreeForDelete(t, real)
+
+	const attDirKey = "crewX/alex/attachments/chat-1/att-9"
+
+	base, err := localfs.New(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctr := &shellExecContainer{
+		mockContainer: &mockContainer{},
+		// The fence points at the symlinked spelling; the bytes are the same.
+		roots: map[string]string{
+			containerOutputRoot:     filepath.Join(link, "crewX"),
+			containerCrewSharedRoot: filepath.Join(link, "crews", "crewX", "shared"),
+		},
+	}
+	s := newContainerFallbackServer(t,
+		&permDeleteStorage{StorageProvider: base, failKey: attDirKey}, ctr)
+
+	req := httptest.NewRequest("DELETE", "/crews/crewX/files/delete?path="+attDirKey, nil)
+	rec := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s; container said: %s",
+			rec.Code, rec.Body.String(), ctr.output)
+	}
+	if _, err := os.Stat(filepath.Join(real, attDirKey)); !os.IsNotExist(err) {
+		t.Errorf("%s survived the replay (%v)", attDirKey, err)
+	}
+	// The siblings the removal had no business touching.
+	for _, rel := range []string{
+		"crewX/alex/attachments/chat-1",
+		"crewX/alex/attachments/chat-1/att-8/other.pdf",
+	} {
+		if _, err := os.Stat(filepath.Join(real, rel)); err != nil {
+			t.Errorf("%s should have survived: %v", rel, err)
+		}
+	}
+}
+
+// The tree root stays unremovable when the fence is spelled through a symlink.
+//
+// Resolving the fence must not cost the guard that keeps `rm -rf` off the root
+// itself: a DEST equal to the fence — by either spelling — is refused, and the
+// tree is still there afterwards.
+func TestCrewFileDeleteScript_RootRefusedThroughSymlink(t *testing.T) {
+	requireShellTools(t)
+
+	tmp := t.TempDir()
+	real := filepath.Join(tmp, "real")
+	link := filepath.Join(tmp, "link")
+	if err := os.MkdirAll(filepath.Join(real, "keep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "keep", "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err) // SKIP-WAIVER(#1977)
+	}
+
+	for _, dest := range []string{link, link + "/", real} {
+		cmd := exec.Command("sh", "-c", crewFileDeleteScript) // #nosec G204 — the script under test
+		cmd.Env = append(os.Environ(), "DEST="+dest, "FENCE="+link)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatalf("DEST=%q was accepted; the script must never remove the tree root (output: %s)", dest, out)
+		}
+		if _, serr := os.Stat(filepath.Join(real, "keep", "f.txt")); serr != nil {
+			t.Fatalf("DEST=%q removed the tree: %v", dest, serr)
+		}
+	}
+}
+
+// A destination that resolves OUTSIDE the fence is still refused after the
+// fence itself is resolved — the containment property the script exists for.
+func TestCrewFileDeleteScript_EscapeStillRefused(t *testing.T) {
+	requireShellTools(t)
+
+	tmp := t.TempDir()
+	fence := filepath.Join(tmp, "fence")
+	outside := filepath.Join(tmp, "outside")
+	for _, d := range []string{fence, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A symlinked component inside the fence that leads out of it — the attack
+	// the in-container realpath check is there to stop.
+	if err := os.Symlink(outside, filepath.Join(fence, "escape")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err) // SKIP-WAIVER(#1977)
+	}
+
+	cmd := exec.Command("sh", "-c", crewFileDeleteScript) // #nosec G204 — the script under test
+	cmd.Env = append(os.Environ(), "DEST="+filepath.Join(fence, "escape", "secret.txt"), "FENCE="+fence)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("a destination outside the fence was accepted (output: %s)", out)
+	}
+	if _, serr := os.Stat(secret); serr != nil {
+		t.Fatalf("the file outside the fence was removed: %v", serr)
+	}
+}

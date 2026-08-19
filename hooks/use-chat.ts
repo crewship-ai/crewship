@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
 import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
+import { randomUUIDv4 } from "@/lib/random-id"
 
 /** Upper bound on out-of-order events held during reassembly. Past this, a gap
  *  is assumed permanently lost and the stream skips ahead so it never freezes.
@@ -17,17 +18,10 @@ const MAX_PENDING_EVENTS = 1000
  *  never left silently empty. */
 export const NO_OUTPUT_ERROR = "The agent returned no output — try again"
 
-/** uuid() is unavailable in non-secure (HTTP) contexts.
- *  Fall back to a simple Math.random-based UUID when needed. */
-function uuid(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID()
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0
-    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16)
-  })
-}
+/** crypto.randomUUID is unavailable in non-secure (HTTP) contexts, which is
+ *  how the dev clones are reached. lib/random-id falls back to
+ *  crypto.getRandomValues, which has no such gate. */
+const uuid = randomUUIDv4
 
 // --- Turn-based model types ---
 
