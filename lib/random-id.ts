@@ -40,11 +40,11 @@ export function randomUUIDv4(): string {
   b[6] = (b[6] & 0x0f) | 0x40
   b[8] = (b[8] & 0x3f) | 0x80
 
-  return (
-    HEX[b[0]] + HEX[b[1]] + HEX[b[2]] + HEX[b[3]] + "-" +
-    HEX[b[4]] + HEX[b[5]] + "-" +
-    HEX[b[6]] + HEX[b[7]] + "-" +
-    HEX[b[8]] + HEX[b[9]] + "-" +
-    HEX[b[10]] + HEX[b[11]] + HEX[b[12]] + HEX[b[13]] + HEX[b[14]] + HEX[b[15]]
-  )
+  // Assembled with join rather than `+`. The concatenation was string
+  // concatenation and introduced no bias, but `+` applied to a value that came
+  // from getRandomValues is indistinguishable from arithmetic to a reader and
+  // to CodeQL, which flagged it as js/biased-cryptographic-random. Rewriting
+  // it costs nothing and leaves no operator here that could ever skew a byte.
+  const hex = Array.from(b, (byte) => HEX[byte]).join("")
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-")
 }
