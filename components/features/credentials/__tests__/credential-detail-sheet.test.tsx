@@ -82,7 +82,19 @@ function openSettingsTab() {
   /* no tabs: the section is already rendered */
 }
 
+// Every knob the mocked hooks read is reset here, so no test inherits one from
+// whichever test ran before it. `capabilities` and `apiFetch` were already
+// reset; `role` was not, and the tier and readiness describes below are the
+// two that never assign it — they ran against whatever the previous describe
+// happened to leave behind.
+//
+// Measured, not assumed: forcing a prior describe to leak VIEWER leaves both
+// of them green, because neither asserts anything role-dependent. So this is
+// the reset being complete rather than a bug being fixed — it stops the next
+// role-sensitive assertion added to either describe from depending on file
+// order, which is the point at which it would have become one.
 beforeEach(() => {
+  h.role = "OWNER"
   h.capabilities = []
   h.apiFetch.mockReset()
   h.apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
