@@ -113,7 +113,16 @@ function Form({
   // six turns pasted into it, over the top of the default its author
   // declared. Running a routine is not authoring something from the
   // conversation, so it does not take the conversation.
-  const preFill = routineSlugFromSlashId(command.id) ? undefined : contextPreFill
+  const isRoutineRun = Boolean(routineSlugFromSlashId(command.id))
+  // The four platform labels are verb phrases — "Add credential", "Create
+  // issue from this conversation" — so using the label as the button reads
+  // as an instruction. A routine's label is whatever its author called the
+  // routine, which is a noun: a button reading "Účetní podklady za měsíc"
+  // names the thing and never says what pressing it does. Routines get the
+  // verb; everything else keeps the label it has always had.
+  const submitLabel = isRoutineRun ? "Run" : command.label
+  const submittingLabel = isRoutineRun ? "Running…" : "Submitting…"
+  const preFill = isRoutineRun ? undefined : contextPreFill
   const [values, setValues] = useState<Record<string, string>>(() => {
     const seed: Record<string, string> = {}
     for (const f of fields) {
@@ -204,7 +213,7 @@ function Form({
           Cancel
         </Button>
         <Button type="submit" disabled={submitting}>
-          {submitting ? "Submitting…" : command.label}
+          {submitting ? submittingLabel : submitLabel}
         </Button>
       </DialogFooter>
     </form>

@@ -116,7 +116,7 @@ describe("slash action modal — running a routine", () => {
   it("posts to the routine's run endpoint, addressed by its slug", async () => {
     render(<SlashActionModal command={msn} workspaceId="ws-1" onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText(/obdobi/i), { target: { value: "2026-07" } })
-    fireEvent.click(screen.getByRole("button", { name: msn.label }))
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
     expect(apiFetch.mock.calls[0][0]).toBe("/api/v1/workspaces/ws-1/pipelines/msn-etn-podklady/run")
@@ -132,7 +132,7 @@ describe("slash action modal — running a routine", () => {
   it("omits a field the user left empty so the routine's own default applies", async () => {
     render(<SlashActionModal command={msn} workspaceId="ws-1" onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText(/vypis odesilatel/i), { target: { value: "" } })
-    fireEvent.click(screen.getByRole("button", { name: msn.label }))
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
     const inputs = lastBody().inputs as Record<string, unknown>
@@ -146,7 +146,7 @@ describe("slash action modal — running a routine", () => {
     render(<SlashActionModal command={typed} workspaceId="ws-1" onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText(/count/i), { target: { value: "42" } })
     fireEvent.change(screen.getByLabelText(/opts/i), { target: { value: '{"k":"v"}' } })
-    fireEvent.click(screen.getByRole("button", { name: typed.label }))
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
     // A `code` step sees inputs with their original types, so an
@@ -157,7 +157,7 @@ describe("slash action modal — running a routine", () => {
   it("refuses a value it cannot restore, without sending anything", async () => {
     render(<SlashActionModal command={typed} workspaceId="ws-1" onClose={vi.fn()} />)
     fireEvent.change(screen.getByLabelText(/opts/i), { target: { value: "{not json" } })
-    fireEvent.click(screen.getByRole("button", { name: typed.label }))
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     // The form stays open with the offending field named — posting the
@@ -165,7 +165,7 @@ describe("slash action modal — running a routine", () => {
     expect(toastError.mock.calls[0][0]).toMatch(/opts/)
     expect(apiFetch).not.toHaveBeenCalled()
     // And the modal is usable again rather than stuck mid-submit.
-    expect(screen.getByRole("button", { name: typed.label })).not.toBeDisabled()
+    expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled()
   })
 
   it("still refuses an empty required field before building a body", async () => {
@@ -174,7 +174,7 @@ describe("slash action modal — running a routine", () => {
       form_schema: [{ name: "obdobi", type: "text", value_type: "string", required: true }],
     }
     render(<SlashActionModal command={required} workspaceId="ws-1" onClose={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: required.label }))
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("obdobi is required"))
     expect(apiFetch).not.toHaveBeenCalled()
@@ -186,7 +186,7 @@ describe("slash action modal — running a routine", () => {
     render(
       <SlashActionModal command={msn} workspaceId="ws-1" onClose={onClose} onSuccess={onSuccess} />,
     )
-    fireEvent.click(screen.getByRole("button", { name: msn.label }))
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(toastSuccess).toHaveBeenCalled()
@@ -210,7 +210,7 @@ describe("slash action modal — running a routine", () => {
       json: async () => ({}),
     })
     render(<SlashActionModal command={msn} workspaceId="ws-1" onClose={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: msn.label }))
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(toastError.mock.calls[0][0]).toMatch(message)
@@ -229,7 +229,7 @@ describe("slash action modal — running a routine", () => {
       json: async () => ({}),
     })
     render(<SlashActionModal command={msn} workspaceId="ws-1" onClose={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: msn.label }))
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(toastError.mock.calls[0][0]).toMatch(/permission/i)
