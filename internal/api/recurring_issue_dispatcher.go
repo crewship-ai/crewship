@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -15,20 +13,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
-
-// scheduledFireIdempotencyKey derives the durable fire key
-// sha256(kind‖id‖occurrence-bucket) that dedupes a single scheduled fire
-// across replicas — the exact scheme #788 established for the pipeline
-// scheduler. The bucket is the occurrence's next_run timestamp, so each
-// occurrence gets a distinct key while retries of the same occurrence
-// collide.
-//
-// TODO(#1883): consolidate with pipeline.ScheduledFireIdempotencyKey; the
-// sibling now exports the identical scheme.
-func scheduledFireIdempotencyKey(kind, id, bucket string) string {
-	sum := sha256.Sum256([]byte(kind + "\x00" + id + "\x00" + bucket))
-	return hex.EncodeToString(sum[:])
-}
 
 // RecurringIssueDispatcher fires due recurring_issues rows: it stamps a new
 // issue from each due template and advances the schedule. Mirrors
@@ -182,6 +166,17 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 	// it due — stable across restart, distinct per occurrence). Reuse the
 	// existing pipeline_run_idempotency table (no new migration); the row id
 	// stands in for the synthetic run/pipeline labels.
+	//
+	// The key comes from pipeline.ScheduledFireIdempotencyKey — the one scheme
+	// (#788) every scheduled firing path shares: the pipeline cron scheduler,
+	// the deferred/pending dispatchers, and the agent scheduler. It hashes
+	// kind‖id‖occurrence-bucket, so retries of one occurrence collide while the
+	// next occurrence gets a fresh key. This file used to carry its own copy of
+	// that hash; #1883 deleted it. The copy rendered the SAME digest as the
+	// bare 64-hex string, where the shared form is kind-prefixed and truncated
+	// ("recurring_issue-<32 hex>"), so keys reserved by a pre-#1883 binary do
+	// not collide with these — see the note on
+	// TestRecurringIssueFireKey_SharedKeyIsNotByteIdenticalToLegacy.
 	// releaseReservation frees the occurrence key. It MUST be called on any
 	// failure path that returns WITHOUT advancing next_run — otherwise the
 	// reservation persists for its 24h TTL while the row stays due, so every
@@ -191,7 +186,7 @@ func (d *RecurringIssueDispatcher) fireOne(ctx context.Context, row recurringDue
 	// owner's reservation.
 	var reserved bool
 	idemStore := pipeline.NewIdempotencyStore(d.db)
-	idemKey := scheduledFireIdempotencyKey("recurring_issue", row.id, row.nextRunBucket)
+	idemKey := pipeline.ScheduledFireIdempotencyKey("recurring_issue", row.id, row.nextRunBucket)
 	releaseReservation := func() {
 		if !reserved || row.nextRunBucket == "" {
 			return
