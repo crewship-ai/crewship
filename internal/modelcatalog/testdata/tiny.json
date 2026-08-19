@@ -1,0 +1,55 @@
+{
+  "": {
+    "id": "ghost",
+    "name": "Unaddressable Provider",
+    "models": {
+      "never-reachable": { "id": "never-reachable" }
+    }
+  },
+  " ACME ": {
+    "id": "acme-corp-legacy-id",
+    "name": "Acme",
+    "env": ["ACME_API_KEY"],
+    "doc": "https://example.invalid/acme",
+    "models": {
+      "  ": {
+        "id": "blank-key",
+        "name": "Dropped Because Its Key Is Blank"
+      },
+      "Rocket-1": {
+        "id": "rocket-one-legacy-id",
+        "name": "Rocket 1",
+        "family": "rocket",
+        "attachment": true,
+        "reasoning": true,
+        "tool_call": true,
+        "structured_output": true,
+        "temperature": false,
+        "knowledge": "2026-01-31",
+        "release_date": "2026-04-14",
+        "modalities": { "input": ["text", "image"], "output": ["text"] },
+        "limit": { "context": 1000000, "output": 128000 },
+        "cost": { "input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25 }
+      },
+      "anvil-2": {
+        "release_date": "2026-06-02",
+        "modalities": { "input": ["text"], "output": ["text"] },
+        "limit": { "context": 200000, "output": 64000 },
+        "cost": { "input": 2, "output": 8 }
+      },
+      "freefall": {
+        "name": "Freefall",
+        "release_date": "2026-06-02",
+        "cost": { "input": 1, "output": 3, "cache_read": 0, "cache_write": 0 }
+      },
+      "undated": {
+        "name": "Undated",
+        "unknown_upstream_field": { "nested": [1, 2, 3] }
+      }
+    }
+  },
+  "Hollow": {
+    "name": "Hollow Gateway",
+    "models": {}
+  }
+}

@@ -135,11 +135,20 @@ func RateCard(provider, model string) modelPrice {
 }
 
 // lookupPrice resolves (provider, model) to a rate. Lookup order:
-//  1. exact "<provider>/<model>" match
-//  2. provider-wildcard "<provider>/*" match (used by ollama/local)
-//  3. providerFallback for the provider
-//  4. zero (returned if even the provider is unknown — we never invent a rate
+//  1. exact "<provider>/<model>" match in priceTable
+//  2. exact match in the embedded models.dev snapshot (catalog_pricing.go)
+//  3. provider-wildcard "<provider>/*" match (used by ollama/local)
+//  4. providerFallback for the provider
+//  5. zero (returned if even the provider is unknown — we never invent a rate
 //     for a totally unknown vendor; the operator should see $0 and notice)
+//
+// The snapshot's position in that list is the whole design. It sits AFTER the
+// exact hand-written match, because priceTable carries verified corrections a
+// bulk import must never overwrite — Opus 4.7 was billed 3× over until someone
+// checked, and alias rows like "openai/gpt-5" have no catalogue equivalent at
+// all. And it sits BEFORE the wildcard, because "ollama/*" and "local/*" have
+// to keep zeroing out every local model no matter what a catalogue thinks a
+// same-named hosted model costs.
 func lookupPrice(provider, model string) modelPrice {
 	prov := strings.ToLower(strings.TrimSpace(provider))
 	mod := strings.ToLower(strings.TrimSpace(model))
@@ -148,6 +157,9 @@ func lookupPrice(provider, model string) modelPrice {
 	}
 
 	if p, ok := priceTable[prov+"/"+mod]; ok {
+		return p
+	}
+	if p, ok := catalogPrice(prov, mod); ok {
 		return p
 	}
 	if p, ok := priceTable[prov+"/*"]; ok {

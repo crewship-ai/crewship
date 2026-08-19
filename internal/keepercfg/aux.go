@@ -83,17 +83,22 @@ func KnownAuxSlot(s string) bool {
 	return false
 }
 
-// auxProviders are the providers an evaluator can actually be BUILT from — the
-// llm.BuildAuxProviderAt switch, in lowercase as llm.AuxModel stores it.
+// auxProviders are the providers an evaluator can actually be BUILT from, read
+// straight off the llm provider registry that llm.BuildAuxProviderAt resolves
+// against — in lowercase as llm.AuxModel stores it, and in the registry's
+// declaration order, which is the order this list has always been in and the
+// order the console's picker renders.
 //
-// Google is absent on purpose: the model catalogue offers Gemini ids, but this
-// package has no Provider implementation for them, so accepting one would give
-// the operator a slot that saves cleanly and then fails at first use. Rejecting
-// it with a reason is the honest surface. "ollama" means the instance judge's
-// endpoint, so pointing a slot there costs nothing per call.
-func auxProviders() []string {
-	return []string{"anthropic", "openai", "ollama"}
-}
+// It used to be a literal here, which meant the validator and the builder could
+// disagree: a provider added to one was not added to the other, and the
+// operator found out at first use. Now there is one table.
+//
+// Google is absent on purpose: the model catalogue offers Gemini ids, but the
+// llm package has no Provider implementation for them, so accepting one would
+// give the operator a slot that saves cleanly and then fails at first use.
+// Rejecting it with a reason is the honest surface. "ollama" means the instance
+// judge's endpoint, so pointing a slot there costs nothing per call.
+func auxProviders() []string { return llm.RegisteredProviders() }
 
 // AuxProviders is the provider vocabulary a picker may offer, served to the
 // console so it cannot hardcode a list that drifts from what the server accepts.
