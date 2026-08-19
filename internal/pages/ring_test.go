@@ -191,17 +191,22 @@ func TestEvictRingWithin_HonoursAPerWorkspaceWindow(t *testing.T) {
 		t.Fatalf("evicted %v under a 1-day window, want [1 2] — the last known value outlives every age cut", got)
 	}
 
-	// A longer window than the default is equally a workspace's business.
-	if got := seqs(EvictRingWithin(entries, now, RetentionAge(30))); len(got) != 0 {
-		t.Fatalf("evicted %v under a 30-day window", got)
-	}
+	// Named subtests from here, like the rest of this file: these two are
+	// separate claims about the retention window, and as bare statements
+	// neither could be selected with -run nor named by a failure.
+	t.Run("a longer window than the default is the workspace's business", func(t *testing.T) {
+		if got := seqs(EvictRingWithin(entries, now, RetentionAge(30))); len(got) != 0 {
+			t.Fatalf("evicted %v under a 30-day window", got)
+		}
+	})
 
-	// And the count bound is NOT configurable: it still fires inside any window.
-	dense := ring(1, now, RingMaxPayloads+1, time.Second)
-	if got := seqs(EvictRingWithin(dense, now, RetentionAge(30))); len(got) != 1 || got[0] != 1 {
-		t.Fatalf("evicted %v with 201 payloads inside a 30-day window, want [1]: "+
-			"a longer window must not turn the ring into a time-series database", got)
-	}
+	t.Run("the count bound is not configurable", func(t *testing.T) {
+		dense := ring(1, now, RingMaxPayloads+1, time.Second)
+		if got := seqs(EvictRingWithin(dense, now, RetentionAge(30))); len(got) != 1 || got[0] != 1 {
+			t.Fatalf("evicted %v with 201 payloads inside a 30-day window, want [1]: "+
+				"a longer window must not turn the ring into a time-series database", got)
+		}
+	})
 }
 
 // The eviction is a plan, not an effect: it returns the rows to delete and

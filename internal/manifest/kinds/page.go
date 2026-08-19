@@ -67,9 +67,11 @@ const pagesEndpoint = "/api/v1/pages"
 // pages.Document.Validate, and is SENT by writeBody. That last clause is
 // the one that was false: actions validated here and were dropped on the
 // way out, so a manifest declaring buttons applied with exit 0 and
-// produced a page with none. `refresh:` is still v1.1 (§12) and is not a
-// field on the type; a manifest naming it fails at validate rather than
-// being silently ignored, which is what §6 asks for.
+// produced a page with none. `refresh:` (§12 v1.1) joined that list and
+// took the same road: a field on pages.PanelSpec, validated by
+// pages.Document.Validate — which refuses a value outside the closed set,
+// a producer the server cannot run, and an `on:wake` this page has no
+// gate for — and SENT by writeBody.
 type PageSpec struct {
 	Panels []pages.PanelSpec `yaml:"panels" json:"panels"`
 }
@@ -103,6 +105,13 @@ type PageRemote struct {
 	Description string            `json:"description,omitempty"`
 	Owner       string            `json:"owner"`
 	Panels      []PagePanelRemote `json:"panels"`
+
+	// Authored says the panels carry their authored half. False means this
+	// account may not edit the page, so `public`, `actions`, `wake`,
+	// `on_failure` and `refresh` are absent-because-unsent rather than
+	// absent-because-undeclared — a distinction nothing on this side can make
+	// for itself. See pagePanelsDiffer.
+	Authored bool `json:"authored,omitempty"`
 }
 
 // PagePanelRemote is one entry of the remote `panels` array, which is
@@ -115,12 +124,24 @@ type PageRemote struct {
 // is deliberately absent: it is server-computed and no manifest declares
 // it, so modelling it here would invite a diff against it.
 //
-// `public`, `actions`, `wake` and `on_failure` are absent for the
-// opposite reason: they ARE declared, and the read path does not send
-// them back (pages_handler.go:132-149). Adding fields for them would
-// model them as always-empty and every page that declares one would read
-// as drifted. The consequence is stated where it costs something —
-// pagePanelsDiffer, and pageDocumentFromRemote below.
+// `public`, `actions`, `wake`, `on_failure` and `refresh` — the AUTHORED
+// half — are here, and the history of why they were not is worth keeping.
+//
+// They were omitted on the stated grounds that "the read path does not send
+// them back". That was true when it was written and stopped being true when
+// attachAuthoredHalf landed (pages_handler.go): the read path now echoes all
+// five to a caller who may edit the page's spec. Nothing failed when the
+// premise expired, because a struct with no field for something cannot
+// notice that the something arrived — the export simply kept dropping five
+// declared fields, silently, and the first command built on top of it
+// shipped a caveat blaming the server for it.
+//
+// The old comment's actual worry survives and is real: the half is echoed
+// only to an EDITOR, so for anyone else these fields are absent-because-
+// unsent, which is indistinguishable from absent-because-undeclared. That
+// makes them safe to EXPORT (pageDocumentFromRemote carries what arrived)
+// and unsafe to DIFF — see pagePanelsDiffer, which still leaves them out and
+// says why.
 type PagePanelRemote struct {
 	// Full-panel fields.
 	ID     string `json:"id"`
@@ -147,6 +168,13 @@ type PagePanelRemote struct {
 	PanelID       string `json:"panel_id,omitempty"`
 	Sealed        bool   `json:"sealed,omitempty"`
 	OwnerCrewName string `json:"owner_crew_name,omitempty"`
+
+	// The authored half, echoed only to a caller who may edit the spec.
+	Public    bool                  `json:"public,omitempty"`
+	Actions   []pages.PanelAction   `json:"actions,omitempty"`
+	Wake      []pages.PanelWake     `json:"wake,omitempty"`
+	OnFailure *pages.PanelOnFailure `json:"on_failure,omitempty"`
+	Refresh   string                `json:"refresh,omitempty"`
 }
 
 // panelID returns the panel's address whichever shape the row arrived in.
@@ -437,6 +465,15 @@ func (d *PageDocument) writeBody() (map[string]any, error) {
 		if len(p.Wake) > 0 {
 			panel["wake"] = p.Wake
 		}
+		// The trigger that runs the panel's producer
+		// (internal/pages/refresh.go). On the same terms as `wake:`: sent
+		// verbatim because the server owns the rules — it is the side that
+		// knows whether this page has a gate for `on:wake` to fire from — and
+		// not diffable from here, for the reason spelled out in
+		// pagePanelsDiffer.
+		if refresh := strings.TrimSpace(string(p.Refresh)); refresh != "" {
+			panel["refresh"] = refresh
+		}
 		if p.OnFailure != nil {
 			panel["on_failure"] = p.OnFailure
 		}
@@ -469,7 +506,7 @@ func (d *PageDocument) driftFields(remote *PageRemote) []string {
 	if d.Metadata.Description != "" && d.Metadata.Description != remote.Description {
 		changed = append(changed, "description")
 	}
-	if pagePanelsDiffer(d.Spec.Panels, remote.Panels) {
+	if pagePanelsDiffer(d.Spec.Panels, remote.Panels, remote.Authored) {
 		changed = append(changed, "panels")
 	}
 	return changed
@@ -491,18 +528,25 @@ func (d *PageDocument) driftFields(remote *PageRemote) []string {
 // here for a case an admin-run apply does not hit. Documented in
 // docs/manifest/page.md.
 //
-// `public`, `actions`, `wake` and `on_failure` are not compared at all:
-// the read path serialises none of them (pages_handler.go panelWire
-// builds the spec fields it can echo and stops there), so the remote
-// value is always the zero one on the wire and diffing it would report
-// drift forever on any page that declares a button or a gate. They are
-// still SENT on create and update — the write path reads all four — so
-// the declared value lands; it just cannot be verified from here, which
-// means a manifest whose ONLY change is to a gate or a button plans as
-// "unchanged". That is a known hole with one honest fix (echo the
-// authored half to a caller who may edit the spec) and it lives on the
-// server side of the wire, not here.
-func pagePanelsDiffer(declared []pages.PanelSpec, remote []PagePanelRemote) bool {
+// `public`, `actions`, `wake`, `on_failure` and `refresh` are not compared,
+// and the reason is now narrower than it used to be.
+//
+// The read path DOES echo them, to a caller who may edit the page's spec
+// (attachAuthoredHalf). PagePanelRemote carries them and the export writes
+// them out. What is still missing is a way to tell the two absences apart:
+// a panel that declares no actions and a panel whose actions were not echoed
+// because this account may only read are the same bytes. Comparing them would
+// therefore report permanent drift to every reader running `apply --dry-run`
+// — a plan that plausibly proposes deleting buttons the reader cannot see.
+//
+// So the server states which case it is in: `authored` on the page wire says
+// the half was attached. With it, the five ARE compared — a manifest whose
+// only change is a button now plans as a change — and without it they are
+// skipped, so a reader's `--dry-run` never proposes deleting what it was not
+// shown. The flag reports what was sent, not what is permitted: an editor
+// looking at a page with no actions still gets it, and an empty list there
+// means exactly what it says.
+func pagePanelsDiffer(declared []pages.PanelSpec, remote []PagePanelRemote, authored bool) bool {
 	if len(declared) != len(remote) {
 		return true
 	}
@@ -553,8 +597,58 @@ func pagePanelsDiffer(declared []pages.PanelSpec, remote []PagePanelRemote) bool
 		if int(sla.Seconds()) != r.SLASeconds {
 			return true
 		}
+		// The authored half, compared only when the server said it sent it.
+		// Skipping it for a reader is not leniency — it is the only honest
+		// answer available, since the fields are absent either way.
+		if !authored {
+			continue
+		}
+		if d.Public != r.Public {
+			return true
+		}
+		if strings.TrimSpace(string(d.Refresh)) != r.Refresh {
+			return true
+		}
+		if pageAuthoredJSON(d.Actions) != pageAuthoredJSON(r.Actions) {
+			return true
+		}
+		if pageAuthoredJSON(d.Wake) != pageAuthoredJSON(r.Wake) {
+			return true
+		}
+		if pageAuthoredJSON(d.OnFailure) != pageAuthoredJSON(r.OnFailure) {
+			return true
+		}
 	}
 	return false
+}
+
+// pageAuthoredJSON renders one authored field for comparison.
+//
+// Marshalling rather than reaching into each struct is deliberate. These three
+// are nested vocabularies that grow — an action gained `inputs`, a gate gained
+// `for` — and a hand-written comparison is the same "enumerate the fields and
+// forget one" defect that has already cost this feature six separate bugs. The
+// difference here is the failure is silent in the other direction: a forgotten
+// field makes `apply` report "unchanged" for a change the operator can see on
+// their screen.
+//
+// Both sides are the same Go types marshalled by the same encoder, so field
+// order is fixed and this is a real equality rather than a formatting
+// coincidence. An error yields "" on both sides, which reads as equal — the
+// safe answer, since a spec that cannot be marshalled fails earlier and louder
+// in Validate.
+func pageAuthoredJSON(v any) string {
+	if v == nil {
+		return ""
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	if string(raw) == "null" {
+		return ""
+	}
+	return string(raw)
 }
 
 // pageSpanOrDefault applies the grid default a panel that declares no
@@ -612,15 +706,14 @@ func LookupPageRemoteBySlug(ctx context.Context, c internalapi.Client, slug stri
 // ExportPages fetches every page in the workspace and renders each as a
 // PageDocument suitable for re-applying — the inverse of Plan.
 //
-// NOTE ON REACHABILITY: this function has no non-test caller today, and
-// that is a known and recorded state rather than an oversight.
-// `crewship export` knows only Crew and Workspace
-// (cmd/crewship/cmd_export_manifest.go:89,122), so every per-kind
-// Export* in this package — ExportSavedViews, ExportRoutines,
-// ExportProjects — is in the same position; PRD §13 obstacle 6 names it
-// and schedules the CLI's kinds path for v1.2. It ships written and
-// tested so that the day the CLI grows that path, Page is not the one
-// kind missing from it.
+// REACHABILITY: this is what `crewship export page` (no slug) calls —
+// cmd/crewship/cmd_export_page.go. It was dead code until then, exactly
+// as PRD §13 obstacle 6 predicted, and the sibling exporters in this
+// package still are: ExportSavedViews, ExportRoutines and ExportProjects
+// have no non-test caller. The CLI command that opened this door is
+// deliberately shaped so the same door fits them (one command per kind
+// under `export`, rendering documents `apply` reads back); giving them
+// one is a separate change and not this one.
 //
 // Two round trips per page (the index, then the document) because the
 // index carries counts, not panels — a page list that shipped every
@@ -655,6 +748,30 @@ func ExportPages(ctx context.Context, c internalapi.Client) ([]*PageDocument, er
 	return out, nil
 }
 
+// ExportPage renders ONE page, by slug — the single-page half of the same
+// door ExportPages opens for the whole workspace.
+//
+// It is not ExportPages filtered down to one entry: the slug IS the page's
+// address on the server, so asking for it directly costs one GET instead
+// of the index plus a document fetch per page in the workspace.
+//
+// The one behavioural difference from ExportPages is deliberate: a page
+// that is not there is an ERROR here, where the walk skips it. The two are
+// answers to different questions. "Export everything" must not fail because
+// one page was deleted between the index and the fetch; "export
+// weekly-close" that emitted nothing and exited 0 would truncate whatever
+// the operator redirected it into.
+func ExportPage(ctx context.Context, c internalapi.Client, slug string) (*PageDocument, error) {
+	remote, err := LookupPageRemoteBySlug(ctx, c, slug)
+	if err != nil {
+		return nil, err
+	}
+	if remote == nil {
+		return nil, fmt.Errorf("export page %q: no page with that slug in this workspace", slug)
+	}
+	return pageDocumentFromRemote(remote)
+}
+
 // pageDocumentFromRemote rebuilds an authored document from a fetched
 // page.
 //
@@ -667,7 +784,7 @@ func ExportPages(ctx context.Context, c internalapi.Client) ([]*PageDocument, er
 //
 // KNOWN GAP, same class, no fix available at this layer: the fields
 // below are enumerated by hand because PageRemote is all this function
-// has, and PageRemote cannot carry `public`, `actions`, `wake` or
+// has, and PageRemote cannot carry `public`, `actions`, `wake`, `refresh` or
 // `on_failure` — the read path does not send them. An exported document
 // is therefore complete in its panels and INCOMPLETE in their authored
 // halves, and re-applying it would delete a page's buttons and gates for
@@ -676,8 +793,14 @@ func ExportPages(ctx context.Context, c internalapi.Client) ([]*PageDocument, er
 // that has none (the overwhelming majority) from one that has some:
 // there is no evidence to refuse on, only an absent field. Closing this
 // needs the read path to echo the authored half to a caller who may edit
-// the spec; until then ExportPages has no non-test caller (see the note
-// on ExportPages), so nothing ships on top of the gap.
+// the spec.
+//
+// Something DOES ship on top of the gap now — `crewship export page` —
+// so the gap is disclosed where it can be acted on rather than only
+// here: the command prints the four missing keys on stderr on every run
+// and docs/cli/export.mdx says to merge the output into the YAML you
+// authored rather than replace it. An unconditional note is the honest
+// shape precisely because the exporter has no way to detect the case.
 func pageDocumentFromRemote(remote *PageRemote) (*PageDocument, error) {
 	panels := make([]pages.PanelSpec, 0, len(remote.Panels))
 	for i := range remote.Panels {
@@ -698,6 +821,14 @@ func pageDocumentFromRemote(remote *PageRemote) (*PageDocument, error) {
 			Producer: p.Producer,
 			SLA:      pageFormatSLA(p.SLASeconds),
 			Span:     p.Span,
+			// Carried, not compared. What arrived is what this account was
+			// entitled to see; a reader exporting a page gets the grid and
+			// the caveat says so.
+			Public:    p.Public,
+			Actions:   p.Actions,
+			Wake:      p.Wake,
+			OnFailure: p.OnFailure,
+			Refresh:   pages.PanelRefresh(p.Refresh),
 		})
 	}
 	return &PageDocument{

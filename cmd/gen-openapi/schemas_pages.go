@@ -47,7 +47,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits."},
 		"schema": map[string]any{"type": "string",
 			"enum":        []string{"metric.v1", "series.v1", "status.v1", "table.v1", "narrative.v1", "embed.v1"},
-			"description": "The set is CLOSED — a new panel kind is a server release. series.v1, narrative.v1 and embed.v1 are reserved and not yet producible."},
+			"description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one."},
 		"title": str(),
 		"icon": map[string]any{"type": "string",
 			"enum": []string{"memory", "cpu", "disk", "network", "container",
@@ -120,11 +120,13 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"created_at": timeString(), "updated_at": timeString(),
 	})
 
-	// The write half carries two fields the read half does not echo: the
-	// sensor (§5, §4 rule 4). They are stored in the page spec and read from
-	// there by the gate compiler and the freshness sweeper; a panel document
-	// coming BACK does not repeat them, and documenting them on the response
-	// would promise a round-trip that `page export` is the door for.
+	// The write half carries three fields the read half does not echo to an
+	// ordinary reader: the sensor (§5, §4 rule 4) and the refresh trigger
+	// (§12 v1.1). They are stored in the page spec and read from there by the
+	// rule compiler and the freshness sweeper; a panel document coming BACK
+	// repeats them only for a caller who may edit the spec, so the in-app
+	// editor is not a lossy copy of the page. Documenting them on the response
+	// would promise every reader a round-trip they do not get.
 	writePanelSpec := mergeProps(panelSpec, map[string]any{
 		"wake": map[string]any{"type": "array",
 			"items": obj(map[string]any{
@@ -142,6 +144,13 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"issue": map[string]any{"type": "string",
 				"description": "`crew/<slug>` — the crew an SLA lapse or a producer failure opens an issue on, once per lapse (§4 rule 4)."},
 		}),
+		"refresh": map[string]any{"type": "string",
+			"enum": []string{"on:wake", "on:panels-changed"},
+			"description": "Optional, and CLOSED. The event that RUNS this panel's producer — a trigger, not a hint: a page holds no query, so nothing polls and a refresh that does not run the producer refreshes nothing. " +
+				"`on:wake` fires when a wake gate ANYWHERE on this page fires; `on:panels-changed` fires when the page's panel list changes (a rename is not a panel change). " +
+				"Each compiles to an `automations` row with `action_kind: routine`, so the producer run is debounced, coalesced, rate-capped and priced against the chain-depth budget like any other automation. " +
+				"Refused at save time: a value outside the set; a producer that is not `routine/<slug>` (the server cannot run a script, call a webhook producer, or dispatch an agent — an agent is woken by a gate's `writes:`); " +
+				"`on:wake` on a page that declares no gate; and `on:wake` on a panel that declares its own gate, which is a loop."},
 	})
 
 	writeBody := obj(map[string]any{

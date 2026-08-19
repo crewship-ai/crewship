@@ -9,8 +9,9 @@
  *   · A grant drawn as though it worked, when the server has already declared
  *     it inert, is the exact failure `inertReason()` exists to prevent —
  *     somebody believes access was granted. The reason must arrive verbatim.
- *   · `read` decides nothing today. Drawing it like `produce` and `write`
- *     would be the UI resolving an open product decision by implication.
+ *   · `read` opens the page and unseals nothing. A card that warned it decided
+ *     nothing would now be lying about a working grant; a card that drew it as
+ *     full access would be lying the other way.
  *   · A revoke that fires on the first click is one misclick away from
  *     locking a crew out of a page.
  *   · A refused write that clears the form, or removes the row it failed to
@@ -202,18 +203,16 @@ describe("the Access card", () => {
     expect(live.textContent).not.toContain("inert")
   })
 
-  it("does not draw `read` as though it granted something", async () => {
+  it("draws a `read` row as an ordinary live grant, with no warning beside it", async () => {
     mount(CREW_OWNED)
     await waitFor(() => expect(grantRows()).toHaveLength(2))
 
     const read = grantRows().find((r) => r.dataset.level === "read")!
-    const caveat = read.querySelector("[data-slot='grant-read-caveat']")
-    expect(caveat).toBeTruthy()
-    expect(caveat!.textContent).toContain("it decides nothing today")
-    expect(caveat!.textContent).toContain("workspace membership")
-    expect(caveat!.textContent).toContain("crew membership")
-    // The row is still there — an open decision (§15) is not settled by a UI
-    // that hides the level.
+    // The warning that used to sit here said `read` decided nothing. It decides
+    // page reach now, and a card still carrying that sentence would tell an
+    // owner their working grant is dead.
+    expect(read.querySelector("[data-slot='grant-read-caveat']")).toBeNull()
+    expect(read.textContent).not.toContain("decides nothing")
     expect(read.textContent).toContain("lookout")
   })
 

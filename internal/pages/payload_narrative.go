@@ -3,6 +3,8 @@ package pages
 import (
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/schemas"
 )
@@ -198,7 +200,7 @@ func checkAgentText(schema PanelSchema, field, text string) error {
 	}
 	lower := strings.ToLower(text)
 	for _, p := range urlishPrefixes {
-		if strings.Contains(lower, p) {
+		if containsSchemeAtABoundary(lower, p) {
 			return newError(CodeInconsistentPayload, schema,
 				"%s carries %q, which is a URL; §8 rule 3 gives a block no field for one — "+
 					"reference the entity with `ref` and let the renderer build the link", field, p)
@@ -210,6 +212,41 @@ func checkAgentText(schema PanelSchema, field, text string) error {
 				"itself on screen does not say what was stored", field, r)
 	}
 	return nil
+}
+
+// containsSchemeAtABoundary reports whether needle appears in text as a scheme
+// rather than as the tail of a word.
+//
+// A bare substring match is what this replaced, and it refused prose: "Profile:
+// 42 active users" carries "file:", "Metadata: 3 tables" carries "data:",
+// "Hotel: 5 free rooms" carries "tel:". narrative.v1 is the panel an AGENT
+// writes and the refusal is a hard 400, so an incident summary could be
+// rejected for containing an ordinary English word.
+//
+// A scheme is only a scheme at a boundary: start of string, or after something
+// that is not a letter or a digit. "see https://x" still matches, "Profile:"
+// does not. The needles that are not schemes — "://", "//", "www." — are left
+// as plain substring matches, because they have no leading word to be confused
+// with and "x://y" must still be caught.
+func containsSchemeAtABoundary(text, needle string) bool {
+	if !strings.HasSuffix(needle, ":") {
+		return strings.Contains(text, needle)
+	}
+	for i := 0; ; {
+		j := strings.Index(text[i:], needle)
+		if j < 0 {
+			return false
+		}
+		at := i + j
+		if at == 0 {
+			return true
+		}
+		prev, _ := utf8.DecodeLastRuneInString(text[:at])
+		if !unicode.IsLetter(prev) && !unicode.IsDigit(prev) {
+			return true
+		}
+		i = at + 1
+	}
 }
 
 // firstUnsafeRune finds a character that changes what a rendered sentence says

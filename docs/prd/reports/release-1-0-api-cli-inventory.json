@@ -4,9 +4,9 @@
     "api_exact_docs": 576,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 774,
-    "cli_exact_docs": 774,
-    "cli_root_docs_present": 774,
+    "cli_operations": 775,
+    "cli_exact_docs": 775,
+    "cli_root_docs_present": 775,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 431,
     "api_with_concrete_response_schemas": 562,
@@ -15,12 +15,12 @@
     "api_with_concrete_json_requests": 239,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 759,
-    "cli_with_flags": 367,
-    "cli_with_all_flags_documented": 367,
+    "cli_with_test_signals": 760,
+    "cli_with_flags": 368,
+    "cli_with_all_flags_documented": 368,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
-    "environment_variables": 101,
+    "environment_variables": 102,
     "environment_variables_missing": 0,
     "manifest_kinds": 21,
     "manifest_kinds_missing": 0,
@@ -5332,6 +5332,7 @@
         "internal/api/auth_recovery_cov_test.go",
         "internal/api/auth_recovery_test.go",
         "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
       "concrete_response_schema": true,
@@ -5354,6 +5355,7 @@
             "internal/api/auth_recovery_cov_test.go",
             "internal/api/auth_recovery_test.go",
             "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go",
             "internal/api/unauth_reachability_test.go"
           ]
         }
@@ -5479,7 +5481,8 @@
       "test_signals": [
         "cmd/crewship/cmd_login_cov_test.go",
         "internal/api/cli_pair_test.go",
-        "internal/api/openapi_unauthenticated_set_test.go"
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -5500,7 +5503,8 @@
           "test_signals": [
             "cmd/crewship/cmd_login_cov_test.go",
             "internal/api/cli_pair_test.go",
-            "internal/api/openapi_unauthenticated_set_test.go"
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -5569,7 +5573,8 @@
         "internal/api/auth_recovery_sec_test.go",
         "internal/api/auth_recovery_test.go",
         "internal/api/openapi_unauthenticated_set_test.go",
-        "internal/api/provision_takeover_test.go"
+        "internal/api/provision_takeover_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -5592,7 +5597,8 @@
             "internal/api/auth_recovery_sec_test.go",
             "internal/api/auth_recovery_test.go",
             "internal/api/openapi_unauthenticated_set_test.go",
-            "internal/api/provision_takeover_test.go"
+            "internal/api/provision_takeover_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -17064,7 +17070,8 @@
       ],
       "status": "documented_exact",
       "test_signals": [
-        "internal/api/openapi_unauthenticated_set_test.go"
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -17082,7 +17089,8 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
-            "internal/api/openapi_unauthenticated_set_test.go"
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -17105,14 +17113,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
-        "cmd/crewship/cmd_page_webhook_test.go",
-        "cmd/gen-openapi/handler_resolution_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -17132,14 +17140,14 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_page.go",
           "test_signals": [
+            "cmd/crewship/cmd_export_page_test.go",
             "cmd/crewship/cmd_page_action_test.go",
             "cmd/crewship/cmd_page_grants_test.go",
             "cmd/crewship/cmd_page_publish_test.go",
+            "cmd/crewship/cmd_page_refresh_test.go",
             "cmd/crewship/cmd_page_test.go",
             "cmd/crewship/cmd_page_transfer_test.go",
             "cmd/crewship/cmd_page_wake_test.go",
-            "cmd/crewship/cmd_page_webhook_test.go",
-            "cmd/gen-openapi/handler_resolution_test.go",
             "…"
           ]
         }
@@ -17163,14 +17171,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
-        "cmd/crewship/cmd_page_webhook_test.go",
-        "cmd/gen-openapi/handler_resolution_test.go",
         "…"
       ],
       "concrete_response_schema": true,
@@ -17190,14 +17198,14 @@
           "openapi_operation": true,
           "source_file": "cmd/crewship/cmd_page.go",
           "test_signals": [
+            "cmd/crewship/cmd_export_page_test.go",
             "cmd/crewship/cmd_page_action_test.go",
             "cmd/crewship/cmd_page_grants_test.go",
             "cmd/crewship/cmd_page_publish_test.go",
+            "cmd/crewship/cmd_page_refresh_test.go",
             "cmd/crewship/cmd_page_test.go",
             "cmd/crewship/cmd_page_transfer_test.go",
             "cmd/crewship/cmd_page_wake_test.go",
-            "cmd/crewship/cmd_page_webhook_test.go",
-            "cmd/gen-openapi/handler_resolution_test.go",
             "…"
           ]
         }
@@ -18630,6 +18638,7 @@
       "status": "documented_exact",
       "test_signals": [
         "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go",
         "internal/api/route_read_scope_invariant_test.go"
       ],
       "concrete_response_schema": true,
@@ -18649,6 +18658,7 @@
           "openapi_operation": true,
           "test_signals": [
             "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go",
             "internal/api/route_read_scope_invariant_test.go"
           ]
         }
@@ -18664,7 +18674,8 @@
       ],
       "status": "documented_exact",
       "test_signals": [
-        "internal/api/openapi_unauthenticated_set_test.go"
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -18682,7 +18693,8 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "test_signals": [
-            "internal/api/openapi_unauthenticated_set_test.go"
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -21080,7 +21092,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-        "internal/api/openapi_unauthenticated_set_test.go"
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -21099,7 +21112,8 @@
           "openapi_operation": true,
           "test_signals": [
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-            "internal/api/openapi_unauthenticated_set_test.go"
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -21122,7 +21136,8 @@
       "test_signals": [
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "internal/api/openapi_conformance_test.go",
-        "internal/api/openapi_unauthenticated_set_test.go"
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -21142,7 +21157,8 @@
           "test_signals": [
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "internal/api/openapi_conformance_test.go",
-            "internal/api/openapi_unauthenticated_set_test.go"
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -21172,7 +21188,8 @@
       "test_signals": [
         "cmd/gen-openapi/schemas_final_auth_integrations_credentials_notifications_users_webhooks_test.go",
         "internal/api/openapi_unauthenticated_set_test.go",
-        "internal/api/pipeline_webhooks_async_test.go"
+        "internal/api/pipeline_webhooks_async_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -21192,7 +21209,8 @@
           "test_signals": [
             "cmd/gen-openapi/schemas_final_auth_integrations_credentials_notifications_users_webhooks_test.go",
             "internal/api/openapi_unauthenticated_set_test.go",
-            "internal/api/pipeline_webhooks_async_test.go"
+            "internal/api/pipeline_webhooks_async_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -30852,6 +30870,7 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_export_cov_test.go",
         "cmd/crewship/cmd_export_manifest_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_export_perms_sec_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_routine_extra_cov2_test.go"
@@ -30881,6 +30900,7 @@
       "test_signals": [
         "cmd/crewship/cmd_export_cov_test.go",
         "cmd/crewship/cmd_export_manifest_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_export_perms_sec_test.go"
       ],
       "flags": [
@@ -30891,6 +30911,31 @@
       "documented_flags": [
         "no-credentials",
         "no-skill-bodies",
+        "output"
+      ]
+    },
+    {
+      "path": "export page",
+      "use": "page [slug]",
+      "short": "Export pages as kind=Page manifests (YAML)",
+      "root": "export",
+      "exact_docs": [
+        "docs/cli/export.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/export.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_export_cov_test.go",
+        "cmd/crewship/cmd_export_manifest_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
+        "cmd/crewship/cmd_export_perms_sec_test.go"
+      ],
+      "flags": [
+        "output"
+      ],
+      "documented_flags": [
         "output"
       ]
     },
@@ -33387,13 +33432,13 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_chain_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_issue_attachments_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
         "cmd/crewship/cmd_issue_workflow_cov_test.go",
-        "cmd/crewship/cmd_page_action_test.go",
         "…"
       ]
     },
@@ -35823,12 +35868,12 @@
       "test_signals": [
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
-        "cmd/crewship/cmd_label_cov_test.go",
         "…"
       ]
     },
@@ -36344,12 +36389,12 @@
       "test_signals": [
         "cmd/crewship/cmd_activity_cov_test.go",
         "cmd/crewship/cmd_crew_config_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_memory_cov_test.go",
         "cmd/crewship/cmd_memory_health_test.go",
         "cmd/crewship/cmd_memory_port_test.go",
         "cmd/crewship/cmd_memory_remote_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
-        "cmd/crewship/cmd_memory_versions_test.go",
         "…"
       ],
       "flags": [
@@ -38057,6 +38102,7 @@
       "short": "Author and feed Pages — panel dashboards fed by producers, not queries",
       "root": "page",
       "exact_docs": [
+        "docs/cli/export.mdx",
         "docs/cli/page.mdx"
       ],
       "root_docs": [
@@ -38065,13 +38111,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_audit_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
-        "cmd/crewship/cmd_page_wake_test.go",
-        "cmd/crewship/cmd_page_webhook_test.go"
+        "…"
       ]
     },
     {
@@ -38090,6 +38137,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38120,6 +38168,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38132,6 +38181,7 @@
       "short": "Create a page from a YAML (or JSON) page document",
       "root": "page",
       "exact_docs": [
+        "docs/cli/export.mdx",
         "docs/cli/page.mdx"
       ],
       "root_docs": [
@@ -38172,6 +38222,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38190,6 +38241,7 @@
       "short": "Export a page as a portable bundle (no workspace ids, references declared)",
       "root": "page",
       "exact_docs": [
+        "docs/cli/export.mdx",
         "docs/cli/page.mdx"
       ],
       "root_docs": [
@@ -38200,6 +38252,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38222,6 +38275,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38244,6 +38298,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38280,6 +38335,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38292,6 +38348,7 @@
       "short": "Install a page bundle, binding its declared references to local ones",
       "root": "page",
       "exact_docs": [
+        "docs/cli/export.mdx",
         "docs/cli/page.mdx"
       ],
       "root_docs": [
@@ -38302,6 +38359,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38332,6 +38390,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38378,6 +38437,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38410,6 +38470,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38444,6 +38505,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38474,6 +38536,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38504,6 +38567,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38534,6 +38598,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38562,6 +38627,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38588,7 +38654,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
-        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "…"
       ]
     },
@@ -38608,6 +38674,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38638,6 +38705,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -38660,6 +38728,7 @@
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_page_wake_test.go",
@@ -40373,12 +40442,12 @@
       "test_signals": [
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_commands_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_root_headless_multiarg_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
-        "cmd/crewship/cmd_routine_bench_test.go",
         "…"
       ]
     },
@@ -41932,6 +42001,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
@@ -41939,7 +42009,6 @@
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
         "…"
       ],
       "flags": [
@@ -46446,6 +46515,14 @@
       "status": "documented"
     },
     {
+      "name": "CREWSHIP_PAGES_EMBED_SOURCES",
+      "docs": [
+        "docs/configuration/environment.mdx",
+        "docs/guides/pages.mdx"
+      ],
+      "status": "documented"
+    },
+    {
       "name": "CREWSHIP_PASSWORD",
       "docs": [
         "docs/cli/login.mdx",
@@ -47253,6 +47330,7 @@
         "docs/api-reference/runs.mdx",
         "docs/cli/activity.mdx",
         "docs/cli/credential.mdx",
+        "docs/cli/export.mdx",
         "docs/cli/page.mdx",
         "docs/guides/automations.mdx",
         "docs/guides/pages.mdx",
@@ -47524,11 +47602,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4164,
-    "api_path_references": 2114,
-    "environment_references": 421,
-    "manifest_kind_references": 225,
-    "flag_references": 1939,
+    "command_references": 4186,
+    "api_path_references": 2116,
+    "environment_references": 424,
+    "manifest_kind_references": 228,
+    "flag_references": 1944,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

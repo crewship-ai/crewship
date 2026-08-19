@@ -1,7 +1,9 @@
 package pages
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -130,6 +132,18 @@ type PanelSpec struct {
 	// A page that quietly goes stale must generate work for a human rather
 	// than sit there looking plausible.
 	OnFailure *PanelOnFailure `json:"on_failure,omitempty" yaml:"on_failure,omitempty"`
+
+	// Refresh names the event that RUNS this panel's producer (§12 v1.1, and
+	// the worked example at §6). It is a TRIGGER declaration, not a hint: a
+	// page holds no query and no datasource, so the only way a panel's
+	// contents change is a producer pushing to it, and a `refresh:` that does
+	// not run the producer cannot refresh anything.
+	//
+	// Closed, and refused at save time with the vocabulary named — the whole
+	// reasoning, and the four things it refuses, are in refresh.go. Like the
+	// gates it rides on, it is compiled into an `automations` row rather than
+	// into a second eventing path.
+	Refresh PanelRefresh `json:"refresh,omitempty" yaml:"refresh,omitempty"`
 
 	// Wake gates turn this panel from a display into a sensor (§5, §0.1): a
 	// threshold on the pushed payload wakes an agent, which writes its
@@ -314,10 +328,57 @@ func ParseDocument(raw []byte) (*Document, error) {
 	if err := dec.Decode(&doc); err != nil {
 		return nil, newError(CodeInvalidSpec, "", "%v", err)
 	}
+
+	// A YAML stream can carry more than one document, and decoding the first
+	// while ignoring the rest is the quietest way this function could lose
+	// somebody's work: `crewship page create --file` would exit zero, print
+	// nothing, and create one page out of four.
+	//
+	// That is reachable, and by our own hand — `crewship export page` with no
+	// slug emits every page in the workspace as one `---`-separated stream, and
+	// this is the documented way back in. Refusing costs nothing anyone wanted:
+	// nobody hands `page create` four pages and means one.
+	//
+	// A LEADING `---` is not a second document. yaml reads it as the start of
+	// the first, so a single-page export — which is also `---`-prefixed — still
+	// parses. Only a genuine second document reaches this branch.
+	var trailing Document
+	err := dec.Decode(&trailing)
+	switch {
+	case err == nil && !trailingIsEmpty(trailing):
+		// A real second document. An EMPTY one is not: yaml.v3 hands back a
+		// zero Document with a nil error for the nothing after a trailing
+		// `---`, and refusing that would reject a perfectly ordinary one-page
+		// file — including one `crewship export page` wrote, since it ends
+		// every document with its own separator.
+		return nil, newError(CodeInvalidSpec, "",
+			"this file carries more than one YAML document and a page spec is one page; "+
+				"split the stream and create each page separately")
+	case err == nil:
+		// Empty trailing document: treated as end of stream.
+	case !errors.Is(err, io.EOF):
+		// Not EOF and not a document either: the bytes after the first document
+		// are malformed. Saying so beats accepting the first half of a file the
+		// author believes was read whole.
+		return nil, newError(CodeInvalidSpec, "", "after the page document: %v", err)
+	}
+
 	if err := doc.Validate(); err != nil {
 		return nil, err
 	}
 	return &doc, nil
+}
+
+// trailingIsEmpty reports whether a decoded trailing document carries nothing.
+//
+// Document holds a slice, so it is not comparable and `== Document{}` will not
+// build. Checking the four fields a real page always has is enough and is more
+// honest than reflect.DeepEqual: what we are asking is "did the author write a
+// second PAGE here", and a document with no apiVersion, no kind, no name and no
+// panels is not one.
+func trailingIsEmpty(d Document) bool {
+	return d.APIVersion == "" && d.Kind == "" &&
+		d.Metadata == (Metadata{}) && len(d.Spec.Panels) == 0
 }
 
 // Validate checks the document's shape and every declared limit. It resolves
@@ -428,5 +489,12 @@ func (d *Document) Validate() error {
 	// is not on the page has to fail at parse time. Otherwise `crewship apply`
 	// and the editor accept it and the server refuses it later, which is the
 	// same document being valid in one door and invalid in the next.
-	return ValidateGates(d)
+	if err := ValidateGates(d); err != nil {
+		return err
+	}
+	// Refresh AFTER the gates, and not by accident: `refresh: on:wake` is a
+	// declaration ABOUT the gates — it is refused on a page that declares none,
+	// and refused on a panel that declares its own — so it can only be checked
+	// once the gates on this document are known to compile (refresh.go).
+	return ValidateRefresh(d)
 }

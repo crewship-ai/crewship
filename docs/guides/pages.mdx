@@ -122,6 +122,50 @@ colour. `target` is a ceiling, rendered as a ratio meter. `sparkline` points
 are evenly spaced by contract — a producer that pushes irregularly should use
 `series.v1` instead, not stretch `metric.v1`'s sparkline to fit.
 
+## The x axis of a `series.v1` panel — name the ticks that matter
+
+A `series.v1` payload carries one label per category, and a label may be
+`null`: a tick you are deliberately not naming. The category is still there —
+it keeps its place in every series' `values`, its bars and its tooltips — it
+just carries no word under it.
+
+```json
+{
+  "unit": "ms",
+  "labels": ["-90s", null, null, null, null, null, "-60s", null, null, null, null, null, "now"],
+  "series": [{ "name": "google.com", "values": [41, 39, 44, 40, 38, 43, 39, 45, 42, 40, 41, 39, 40] }]
+}
+```
+
+The split is the point. **You decide which ticks mean something; the panel
+decides how many of those names it can draw.** A producer cannot know the
+panel's width — the same payload lands on a half-width tile and on a printed
+page — so a producer that names all 24 points of a rolling window is not being
+thorough, it is guessing. Name the ends and the round numbers, pass `null` for
+the rest.
+
+The panel then thins what is left if even that does not fit: it drops whole
+labels at an even stride, anchored on the last named tick, rather than
+truncating every one of them into `-1…`. It never thins a data point. Every
+category you send is drawn, and the name of a tick that lost its place on the
+axis is still on that tick's own bars, in the tooltip.
+
+Two rules survive from before:
+
+- `""` is refused, and so is a label of nothing but spaces. An empty string is
+  what a broken format expression produces, so a blank you meant has to look
+  different from a blank you shipped — the same reason `null` and `0` are
+  different claims in `values`. (A label of spaces used to slip past the
+  length check and draw an empty tick. It is now refused with a message that
+  names the field; `null` is how you ask for an unnamed tick.)
+- At least one label must be named. The panel may thin the names down to one;
+  it may not be handed zero, because an axis with no name anywhere states no x
+  meaning at all.
+
+Fully named axes are unaffected: with the one exception named above, every
+payload that validated before this still validates, so nothing already pushing
+has to change.
+
 ## Tabs — several screens, one page
 
 A page is a fixed structure you return to, and past about six panels it stops
@@ -455,6 +499,102 @@ shows them.
 Those rows are owned by the page spec. Every save rewrites them, deleting the
 page deletes them, and editing one by hand does not stick.
 
+## `refresh` — the panel that pulls itself
+
+A wake gate tells a *human* something happened. `refresh:` tells a *routine*.
+It names the event that **runs this panel's producer**:
+
+```yaml
+- id: sluzby
+  schema: status.v1
+  owner: crew/lookout
+  producer: script/watch-services.sh
+  sla: 60s
+  wake:
+    - when: any(state == "critical")
+      agent: crew/devops
+      writes: incident
+
+- id: incident
+  schema: narrative.v1
+  owner: crew/devops
+  producer: routine/incident-rozbor
+  refresh: on:wake          # run incident-rozbor when a gate on this page fires
+  sla: 1h
+```
+
+The cheap script notices `critical`, the gate opens an issue on crew/devops,
+and `incident-rozbor` runs — so the analysis is already on the page when the
+human arrives, instead of starting when they get there.
+
+**It is a trigger, not a hint.** A page holds no query and no datasource, so
+nothing polls: the only way a panel's contents change is a producer pushing to
+it. A `refresh:` that did not *run* the producer could not refresh anything, so
+it runs it.
+
+**The vocabulary is closed — two values:**
+
+| Value | Fires when |
+|---|---|
+| `on:wake` | a `wake:` gate **anywhere on this page** fires |
+| `on:panels-changed` | the page's **panel list** changes — added, removed, reordered, or edited |
+
+`on:wake` is page-scoped rather than gate-scoped because the panel being
+refreshed is rarely the panel being watched — in the example above they are two
+different panels. `on:panels-changed` is for a producer whose output is *about*
+the page ("what is on this board"), which is stale the moment somebody edits it.
+A **rename is not a panel change**: correcting a title does not run anything.
+
+**Under the covers it is an automation**, exactly like a wake gate. Each
+declaration compiles at save time to a row in `automations` named
+`page <slug>/<panel> refresh <value>`, with `action_kind: routine` pointing at
+the panel's own producer. So a refresh inherits everything that table already
+does — debounce, coalescing, the hourly burst brake, chain-depth pricing against
+composition loops — and `crewship automation list` shows it. The rows are owned
+by the page spec: every save rewrites them, removing `refresh:` deletes the
+rule, and deleting the page deletes it.
+
+The routine is handed the context it needs as inputs: `page`, `panel` (the
+panel it is expected to write), `refresh`, `reason`, and — on `on:wake` —
+`trigger_panel` and `issue`.
+
+**Four things are refused when you save the page**, each because it would
+otherwise be a declaration that is stored, believed and never acts:
+
+- **a value outside the two.** `refresh: on:push` is a routine that never runs
+  and never says why.
+- **a producer Crewship cannot run.** `refresh:` requires
+  `producer: routine/<slug>`. A `script/` producer is a path inside somebody's
+  container and Crewship never executes it — the script pushes to us, we do not
+  call it. A `webhook/` producer is a door *into* Crewship with nothing on the
+  other side to call. An `agent/` producer is woken by a gate's `writes:`, which
+  is the mechanism for asking an agent to write a panel. The refusal names all
+  three.
+- **`on:wake` on a page that declares no gate.** Nothing on the page could ever
+  fire it.
+- **`on:wake` on a panel that declares its own `wake:` gate.** That is a loop:
+  the producer runs, pushes to the panel, the push arms the panel's own gate,
+  the gate fires, and the producer runs again. Put the gate on the panel being
+  *watched* and the refresh on the panel being *written*.
+
+<Warning>
+  **One cycle is not statically visible, and is not refused.** Nothing in a
+  spec says what a routine writes, so panel A declaring a gate, panel B
+  declaring `refresh: on:wake`, and B's routine pushing to A is an arrangement
+  Crewship cannot see. It is bounded rather than prevented: a gate fires once
+  per *open* alert rather than once per push, every enqueued run is priced
+  against the composition-depth budget, and `max_per_hour` (60) caps the rest.
+  If a routine is running far more often than you expect, that shape is the
+  first thing to check.
+</Warning>
+
+<Note>
+  `refresh:` does **not** travel in an export bundle, alongside `wake:`,
+  `actions:` and `on_failure:` — and it could not travel alone, because
+  `refresh: on:wake` is refused on a page with no gate on it. Re-declare it
+  after importing, or apply the page from a manifest, which does carry it.
+</Note>
+
 ## Actions — the interactive half
 
 A page that cannot *do* anything is a report. A panel may declare **actions**:
@@ -572,18 +712,33 @@ dashboard products (Grafana, Looker, Tableau, Power BI, Metabase, Superset)
 deliberately stop short of, and it is why one page can render differently for
 different viewers.
 
+### Who reaches a page
+
+Two questions, decided separately, and the confusion between them is the one
+thing worth reading this section slowly for:
+
+- **Can you open the page?** You can if you own it, if you are a workspace
+  ADMIN/OWNER, if one of your crews owns a panel on it, or if a grant names
+  you. Otherwise the page is not in your `crewship page list` and opening it
+  by slug answers *not found* — the same answer as a page that was never
+  created, so the endpoint cannot be walked to learn what exists.
+- **Can you read a panel on it?** Only if you are in that panel's owning crew
+  (or are an admin). Nothing else opens a panel — not ownership of the page,
+  and not any grant.
+
 ### Panel visibility is crew membership
 
 **A panel's visibility is its owning crew's visibility.** `owner` on a panel
 is not decoration; it is the access-control list. If you are not a member of
-that crew, and hold no explicit grant, the panel is **omitted from the
-response** — filtered server-side, before serialisation. It never renders as
+that crew, the panel arrives as a **sealed placeholder** — its id, its slot
+and its owning crew's name, and nothing else. No schema, no producer, no SLA,
+no data. It is filtered server-side, before serialisation; it never renders as
 an error, and it is never delivered to a client that then hides it — a
-hidden-but-delivered panel would be a data leak, so the omission happens on
-the server.
+hidden-but-delivered panel would be a data leak.
 
-A page therefore has the same *shape* for everyone (the grid reflows around
-what is missing), even when its *content* differs by viewer.
+A page therefore has the same *shape* for everyone — the placeholder holds the
+slot, the grid never reflows — even when its *content* differs by viewer. "Look
+at the panel top right" has to mean the same thing to two people on a call.
 
 ### The three verbs
 
@@ -592,12 +747,18 @@ independent verbs:
 
 | Verb | Means | Typical holder |
 |---|---|---|
-| `read` | May see the page and the panels their own access already permits | humans, crews, an agent that summarises the page |
-| `produce` | May push payloads into named panels | the routine or script that owns those panels |
-| `write` | May edit the page spec — add, remove, and rearrange panels | the agent or human in charge of the page |
+| `read` | Opens the page, and nothing more — the panels on it are still only the ones the grantee's own crew membership already permits | humans, crews, an agent that summarises the page |
+| `produce` | Opens the page, and may push payloads into named panels | the routine or script that owns those panels |
+| `write` | Opens the page, and may edit its spec — add, remove, and rearrange panels | the agent or human in charge of the page |
 
 `produce` can be scoped to specific panel ids, so an agent granted `produce`
 on one panel cannot overwrite another agent's panel on the same page.
+
+Every level opens the page, so `read` is the floor the other two are built on
+rather than a separate thing you also have to issue. The alternative reads
+absurdly in both directions: a `write` grantee who may rewrite a page but
+cannot open it, or a `produce` grantee who must be told its panel ids out of
+band because the page they push to is invisible to them.
 
 ### A grant widens reach to the page, never to a crew's data
 
@@ -609,6 +770,13 @@ their crew's panel to somebody outside it. (A workspace ADMIN sees the crew's
 panels anyway, since an admin's effective role is already the max of their
 workspace and crew role — so this rule costs an admin nothing, and it closes
 the escalation path for everyone else.)
+
+The visible consequence: grant somebody `read` on a page whose panels all
+belong to crews they are not in, and they get the page with **every panel
+sealed**. That is the grant working. They were given the board, not the numbers
+on it — and if you meant them to read the numbers, the answer is crew
+membership, not a wider grant. Where even the existence of a panel is
+sensitive, move it to its own page.
 
 ### Producer authority is separate from viewer authority
 
@@ -670,11 +838,10 @@ rather than hidden, because "the grant you added is doing nothing" is exactly
 what a page owner needs to be told. Revoking asks first.
 
 <Note>
-`read` is accepted, stored and journalled, and today it decides nothing:
-page visibility is workspace membership and panel visibility is crew
-membership. The UI says so next to every `read` grant rather than drawing it
-as access. Use `produce` to let something push, and `write` to let it edit
-the spec.
+"Inert" now means exactly one thing: the human who issued the grant no longer
+has the standing to issue it. It is not a comment on the level — `read`,
+`produce` and `write` all decide something for as long as their issuer stands
+behind them.
 </Note>
 
 ### What a page is, and what changed it
@@ -745,6 +912,98 @@ does not distinguish "wrong password" from "unknown token."
 
 No public actions, no public writes, no public streaming, and no embedding a
 public page inside a third-party site.
+
+## The `embed` panel — the escape hatch, and everything it refuses
+
+Five schemas cannot draw everything, so there is exactly one hatch:
+`embed.v1`, a cross-origin sandboxed iframe. There is no plugin system, and
+there is not going to be one — Grafana's open panel-plugin ecosystem produced
+130 plugins in fifteen years, and Perses' cleaner runtime-pluggable design
+produced about twenty.
+
+**It is off unless an operator turns it on.** An instance with no vetted
+destinations refuses an `embed.v1` panel in the page spec, refuses every push
+to one, and renders one that already exists as a sentence explaining why. That
+is the default, and it is the state every Crewship is in until somebody
+changes it.
+
+```bash
+# One entry per destination: name=url, comma separated. https only.
+CREWSHIP_PAGES_EMBED_SOURCES="grafana-fleet=https://grafana.example.com/d/abc/fleet,status=https://status.example.com/"
+```
+
+Each URL is checked when it is read, not when it is used: `https` only, no
+`user:pass@`, no fragment, no literal address in a private or link-local range
+— and **never this Crewship's own origin**, because a same-origin frame shares
+cookies and storage with the page that framed it and would be a sandbox in
+name only. One bad entry refuses the whole list rather than being skipped.
+
+### The payload names a destination; it never carries one
+
+```json
+{ "source": "grafana-fleet", "caption": "eu-west · since the 12:40 incident" }
+```
+
+That is the entire schema. There is no `url`, `src`, `html`, `srcdoc`,
+`sandbox`, `allow`, `width` or `height` field, and none is coming — they are
+absent from the schema rather than stripped from the payload, the same way
+`narrative.v1` has no image field.
+
+The reason is worth stating plainly, because "it's just a link to a dashboard"
+is the intuition it contradicts. **An iframe `src` is fetched by the reader's
+browser, from the reader's network, at the moment the page is opened.** A URL a
+producer could change on every push is therefore an outbound channel: encode a
+panel's numbers into the path, push, wait for someone to open the page, and the
+data has left the workspace with a colleague's IP on the request. That is the
+shape of the two incidents this product's panel rules are written from — a
+leak through a trusted image proxy, and a leak through a rendered link — and an
+iframe is worse than either, because it fetches *and* it executes. No sandbox
+attribute and no CSP closes it; the only `frame-src` that does is one naming
+origins a human already approved, which is the same statement as "a human
+authored the URL."
+
+So a human authors it and a machine selects from it — the same split the
+action allow-list already uses. A producer's whole influence over what the
+browser fetches is *which of the approved destinations is showing*. An
+undeclared name is refused and named back to you, never fetched to find out
+what it was:
+
+```
+$ echo '{"source":"whatever"}' | crewship page set fleet-201/board --data -
+"whatever" is not a declared embed source on this instance; the vetted set is: grafana-fleet, status
+```
+
+### How the frame is drawn
+
+`sandbox="allow-scripts"` and nothing else. Not `allow-same-origin` — the two
+together are the documented way for a framed document to reach its own frame
+element and delete the sandbox attribute. Not `allow-top-navigation`, so an
+embed cannot steer the tab somewhere else; not `allow-forms` or
+`allow-popups`, so a credential prompt cannot be drawn inside Crewship's
+chrome; not `allow-modals`, `allow-downloads`, `allow-pointer-lock` or
+`allow-presentation`.
+
+Alongside it: `allow=""` denies every delegated permission (camera,
+microphone, geolocation, payment), `referrerpolicy="no-referrer"` keeps the
+page's own URL — which carries an internal slug — out of the embedded site's
+logs, and `credentialless` keeps the reader's cookies for that site out of the
+frame. Size is the panel's, never the payload's: a producer-supplied height is
+a panel that can cover the page it sits in.
+
+**An embed never renders on a public page.** A public link that framed a third
+party would report every anonymous reader — their IP, their timing, the fact
+that the link exists — to a site the reader never chose to visit. Public pages
+already strip provenance for a smaller version of the same reason.
+
+<Note>
+  The frame also has to be permitted by the app's own
+  `Content-Security-Policy`. Crewship's UI policy has no `frame-src`
+  directive, so it falls back to `default-src 'self'` and the browser blocks
+  every cross-origin frame — including a correctly configured embed. Until
+  that policy is widened to the configured origins, `CREWSHIP_PAGES_EMBED_SOURCES`
+  enables the panel on the server side and the frame is still blocked in the
+  browser.
+</Note>
 
 ## Related
 

@@ -487,6 +487,18 @@ read and write to others.
    — `effectiveRole` takes the max of workspace and crew role,
    `internal/api/helpers.go:481-486` — so this rule costs an admin nothing and closes the
    privilege-escalation path for everyone else.)
+
+   ⚠ **This rule states the panel ACL precisely and left the PAGE rule implicit, and the first
+   build filled the gap with "every workspace member reaches every page" — under which a `read`
+   grant widens nothing and the three verbs of §7.1b collapse into two.** Settled 2026-08-13
+   during implementation, since neither this rule's own "who may look at this page" nor §7's
+   requirement sentence ("the owner can grant read and write to **others**") is satisfiable
+   otherwise. **A page is reached by its owner, by a workspace ADMIN/OWNER, by a member of any
+   crew that owns one of its panels, and by whoever a live grant names — every level, since a
+   `write` grantee who cannot open the page they may edit is two paths disagreeing.** Nobody else,
+   and "nobody else" answers 404 rather than 403, so the endpoint is not an existence oracle. The
+   panel rule is untouched by this: a grantee with no crew membership on the page reaches it and
+   is served a grid of sealed placeholders, which is §7.1b rule 2's own description one level up.
 4. **Producer authority is separate from viewer authority.** Only the declared producer may write
    a panel's payload. A crew member who can *see* a panel cannot *write* it.
 5. **Everything is decided server-side.** The client receives only panels it may see. There is no

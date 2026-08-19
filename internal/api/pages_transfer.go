@@ -113,6 +113,14 @@ type pageBundlePage struct {
 // `tab` travels for the same reason as the icon and as `span`: it is the
 // page's shape, authored into the document, and a bundle that dropped it would
 // install one long scroll where the author drew four screens.
+//
+// `refresh` does NOT travel, and that is a decision rather than an omission.
+// It rides with `wake:`, `actions:` and `on_failure:`, which this struct has
+// never carried — and it could not travel alone even if it wanted to:
+// `refresh: on:wake` is refused on a page that declares no gate
+// (internal/pages/refresh.go), so a bundle carrying the trigger without the
+// gates that fire it would be a bundle no import could accept. Stated in
+// docs/guides/pages.mdx, where the person exporting a page will read it.
 type pageBundlePanel struct {
 	ID         string `json:"id"`
 	Schema     string `json:"schema"`

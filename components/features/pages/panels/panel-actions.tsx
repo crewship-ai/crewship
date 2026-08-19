@@ -548,7 +548,26 @@ function PanelActionBar({
   // The receipt names the routine the SERVER chose, and `bySlug` is the
   // app-wide answer to "is that routine running right now" (§8b.4). Neither
   // half is new infrastructure and neither is a poll of our own.
-  const activeRun = ack?.routine ? (bySlug.get(ack.routine) ?? null) : null
+  //
+  // But `bySlug` holds only ACTIVE runs, and the receipt is never cleared. So a
+  // run that FINISHED dropped out of the map, `run` went back to null, and the
+  // rail was replaced by "queued. It has not started yet." — a sentence that
+  // was false, at the exact moment the reader wanted the outcome. The run this
+  // dispatch resolved to is therefore remembered for as long as its receipt is
+  // on screen; PipelineRunActivity renders a finished run perfectly well.
+  //
+  // Still keyed on the routine slug, which is the receipt's only handle on the
+  // work: a cron-triggered run of the SAME routine, already in flight when the
+  // button was pressed, is shown as this click's progress. Closing that needs a
+  // run id on the receipt, which the 202 does not carry today.
+  const liveRun = ack?.routine ? (bySlug.get(ack.routine) ?? null) : null
+  const ackKey = ack ? `${ack.actionId}:${ack.pendingId ?? ""}` : ""
+  const seenRunRef = React.useRef<{ key: string; run: { id: string; pipeline_slug: string } } | null>(null)
+  if (liveRun) {
+    seenRunRef.current = { key: ackKey, run: liveRun }
+  }
+  const remembered = seenRunRef.current?.key === ackKey ? seenRunRef.current.run : null
+  const activeRun = liveRun ?? remembered
 
   return (
     <div data-slot="panel-actions" className="flex flex-col gap-2 border-t border-border/60 pt-2">
@@ -562,7 +581,13 @@ function PanelActionBar({
             workspaceId={workspaceId}
             hidden={ctx.hidden}
             onToggle={ctx.toggleHidden}
-            running={activeRun !== null && ack?.actionId === action.id}
+            // liveRun, NOT activeRun. `activeRun` deliberately remembers a
+            // finished run so the progress rail survives it — feeding that to
+            // `running` left the button disabled reading "Running…" forever,
+            // because the receipt is never cleared and so the remembered run
+            // never goes away. The rail is about what HAPPENED; the button is
+            // about what is happening.
+            running={liveRun !== null && ack?.actionId === action.id}
             onAccepted={(next) => setAck({ ...next, actionId: action.id, label: action.label })}
           />
         ))}

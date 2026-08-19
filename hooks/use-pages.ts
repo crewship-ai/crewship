@@ -112,6 +112,19 @@ export interface WirePanel {
    * action id, and the SERVER resolves what it runs.
    */
   actions?: unknown
+  /**
+   * §12 v1.1: the event that RUNS this panel's producer — `on:wake` or
+   * `on:panels-changed` (internal/pages/refresh.go). A trigger, not a hint:
+   * the client does nothing with it except show it, because the server owns
+   * the firing and a page holds nothing to poll.
+   *
+   * It arrives only for a caller who may EDIT the spec, alongside `wake` and
+   * `actions` — the authored half. It is here rather than left off the type
+   * because the editor round-trips this document, and a field the client
+   * cannot see is a field the next save deletes, taking the `automations` row
+   * that makes the trigger real with it.
+   */
+  refresh?: string | null
 }
 
 export interface WirePage {
@@ -212,6 +225,20 @@ export interface PanelView {
    * it; nothing inside a panel is allowed to care.
    */
   tab: string | null
+  /**
+   * The panel's declared refresh trigger, or null — `on:wake` /
+   * `on:panels-changed` (§12 v1.1).
+   *
+   * On `PanelView` rather than on `spec`, for the reason `tab` is: the panel
+   * components never see it. It is not a rendering instruction and it is not
+   * state; it says what makes the producer run, which is a fact about the page
+   * an editor and a footer can show and nothing inside a panel may act on.
+   *
+   * Null on a SEALED panel whatever the wire said, like `actions`: the
+   * placeholder's shape is fixed at `{panel_id, span, sealed, owner_crew_name,
+   * tab}` (§11b.14), and a trigger arriving beside one is a serialisation bug.
+   */
+  refresh: string | null
   /** Server-computed, or null when this build could not read one. */
   state: PanelState | null
   /**
@@ -284,6 +311,7 @@ export function toPanelView(raw: WirePanel, index = 0): PanelView {
     },
     producer: trimmed(raw.producer),
     tab: trimmed(raw.tab),
+    refresh: sealed ? null : trimmed(raw.refresh),
     state,
     actions: sealed ? [] : normalizePanelActions(raw.actions),
   }

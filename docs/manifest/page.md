@@ -78,6 +78,7 @@ spec:
 | `actions` | no | The buttons this panel offers. Declared here, by a human, and nowhere else — a click posts an action **id** and the server resolves it against this stored list. See [`spec.panels[].actions[]`](#spec-panels-actions). Max 6 per panel. |
 | `wake` | no | Thresholds that turn this panel from a display into a sensor. See [`spec.panels[].wake[]`](#spec-panels-wake). Max 4 per panel. |
 | `on_failure` | no | `{issue: crew/<slug>}`. When the panel's SLA lapses or its producer reports a failure, an issue is opened on that crew — once per lapse, not once per check. |
+| `refresh` | no | `on:wake` or `on:panels-changed`, and nothing else. The event that RUNS this panel's producer — a trigger, not a rendering hint, because a page holds no query and nothing polls. `on:wake` fires when a `wake` gate anywhere on this page fires; `on:panels-changed` fires when the page's panel list changes (a rename is not a panel change). It requires `producer: routine/<slug>`: the server cannot execute a `script/`, call a `webhook/` producer, or dispatch an `agent/` — an agent is woken by a gate's `writes:`. `on:wake` is additionally refused on a page that declares no gate (nothing could fire it) and on a panel that declares its own gate (that is a loop: the producer pushes, the push arms the gate, the gate fires, the producer runs). |
 
 Panel ORDER is the layout. The grid is declared, never dragged, so two
 pages with the same panels in a different order are two different
@@ -133,11 +134,17 @@ Each gate compiles, at save time, to a row in `automations` named
 spec owns them, every save rewrites them, and deleting the page deletes
 them. Editing one directly does not stick.
 
+`refresh` compiles the same way, to a row named
+`page <slug>/<panel> refresh <value>` whose action runs the panel's own
+producer routine — so a refresh inherits that table's debounce, hourly
+burst brake and loop pricing rather than getting a second eventing path.
+
 Neither `wake` nor `on_failure` is echoed by the read path — nor is
-`actions` — so, exactly like `public`, the plan cannot diff any of them.
-All four are sent on every create and update, so a change to a gate or a
-button lands as soon as anything else on the page changes; changing only
-a gate and nothing else reports no drift.
+`actions`, nor `refresh` — so, exactly like `public`, the plan cannot
+diff any of them. All five are sent on every create and update, so a
+change to a gate, a button or a trigger lands as soon as anything else
+on the page changes; changing only one of them and nothing else reports
+no drift.
 
 ## Examples
 

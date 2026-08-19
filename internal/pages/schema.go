@@ -73,7 +73,21 @@ func (s PanelSchema) Known() bool { return knownSchemas[s] }
 // Producible reports whether a producer may push a payload to a panel of this
 // schema today. A reserved-but-unbuilt schema is Known and not Producible:
 // accepting its payloads would fill the ring with data nothing can render.
-func (s PanelSchema) Producible() bool { return producibleSchemas[s] }
+//
+// embed.v1 is the one whose answer is not a constant, and it is the only place
+// in the vocabulary where that is true. The other five need a renderer, which
+// either shipped or did not; embed.v1 additionally needs a set of destinations
+// a human has vetted, and an instance with none has nothing a panel could be
+// pointed at. So it is Known everywhere (a page carrying one is a valid page)
+// and Producible only where CREWSHIP_PAGES_EMBED_SOURCES declares something —
+// which also means a page spec cannot declare an embed panel on an instance
+// that could only draw it as a refusal.
+func (s PanelSchema) Producible() bool {
+	if s == SchemaEmbed {
+		return EmbedEnabled()
+	}
+	return producibleSchemas[s]
+}
 
 func (s PanelSchema) String() string { return string(s) }
 

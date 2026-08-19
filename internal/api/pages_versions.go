@@ -292,6 +292,25 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The sensor half of the same gate. A rollback is a SAVE (§10b.1 says so in
+	// as many words, and this handler appends a version rather than truncating
+	// one), so it owes the same reconcile every other save does: the compiled
+	// `automations` rows are DERIVED from the spec, and a rollback that restored
+	// the spec without them would leave the page wired to the gates and refreshes
+	// of a version nobody can see any more. `refresh:` made that visible —
+	// restoring a spec that declares one produced no rule at all — but the same
+	// was already true of `wake:`.
+	gates, ok := h.resolveGates(w, r, wsID, &doc)
+	if !ok {
+		return
+	}
+
+	// The arrangement being replaced, read before anything is written.
+	current, ok := h.currentDocument(w, rec)
+	if !ok {
+		return
+	}
+	beforeArrangement := pageArrangementFingerprint(current)
 
 	live, err := h.livePanelShapes(r.Context(), rec.ID)
 	if err != nil {
@@ -329,6 +348,10 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "clear restored panel rings", err)
 		return
 	}
+	if err := reconcileWakeAutomations(r.Context(), tx, wsID, rec.ID, rec.Slug, gates, user.ID, now); err != nil {
+		replyInternalError(w, h.logger, "compile page rules for rollback", err)
+		return
+	}
 
 	var seq int64
 	if err := tx.QueryRowContext(r.Context(),
@@ -358,6 +381,13 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		replyInternalError(w, h.logger, "reload rolled-back panels", err)
 		return
+	}
+	h.refreshAutomations(r.Context())
+	// A rollback that restores a different panel list IS an arrangement change,
+	// and the fingerprint decides: rolling back to a version whose panels are
+	// identical (a title was edited and edited back) emits nothing.
+	if after := pageArrangementFingerprint(&doc); after != beforeArrangement {
+		h.emitPageSpecChanged(r.Context(), wsID, updated, &doc, false, after)
 	}
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated",
 		map[string]any{"page_id": updated.ID, "slug": updated.Slug})

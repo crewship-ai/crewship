@@ -1,7 +1,13 @@
-// Command gen-openapi extracts the registered HTTP routes from
-// internal/api/router_*.go and writes a minimal OpenAPI 3.0 document to
-// internal/api/openapi.gen.json, embedded and served at GET /openapi.json
-// (internal/api/openapi.go, internal/server/routes.go).
+// Command gen-openapi extracts the registered HTTP routes from internal/api
+// and writes a minimal OpenAPI 3.0 document to internal/api/openapi.gen.json,
+// embedded and served at GET /openapi.json (internal/api/openapi.go,
+// internal/server/routes.go).
+//
+// Which FILES it scans is decided by content, not by filename (#1953): every
+// non-test .go file in internal/api that contains a route-registration call is
+// read. It used to glob router_*.go, which made the naming convention
+// load-bearing — a registrar under any other name contributed nothing to the
+// spec and nothing said so.
 //
 // This is a source scan, not a reflection- or runtime-based generator: it
 // regex-matches the handful of call shapes this codebase actually uses to
@@ -94,7 +100,7 @@ func main() {
 }
 
 func run() error {
-	files, err := filepath.Glob(filepath.Join(routerDir, "router_*.go"))
+	files, err := routeSourceFiles()
 	if err != nil {
 		return err
 	}
@@ -104,15 +110,13 @@ func run() error {
 		if wd, _ := os.Getwd(); filepath.Base(wd) == "api" {
 			routerDir = "../../internal/api"
 			outputPath = "../../internal/api/openapi.gen.json"
-			files, err = filepath.Glob(filepath.Join(routerDir, "router_*.go"))
+			cachedSourceFiles = nil
+			files, err = routeSourceFiles()
 			if err != nil {
 				return err
 			}
 		}
 	}
-	// router.go itself (not router_*.go) registers no routes directly today,
-	// but scan it too in case that changes — cheap and future-proof.
-	files = append(files, filepath.Join(routerDir, "router.go"))
 
 	seen := map[route]bool{}
 	var routes []route
@@ -1391,6 +1395,38 @@ func resolveHandlerRefs(call, src string) (inline []inlineHandler, targets []han
 		}
 	}
 	return nil, nil, false
+}
+
+// routeRegistrationCall matches a route registration on the router, in any of
+// the five call shapes this codebase uses. It is deliberately looser than
+// combinedPattern / splitPattern — no literal method or path — because its
+// only job is to decide whether a FILE registers routes at all.
+//
+// #1953: route discovery used to be `router_*.go`, so a registrar with any
+// other filename contributed nothing to the spec, silently. Two invariants
+// were built on that glob; the other one (internal/api's
+// route_authz_invariant_test.go) is the security-relevant half, and
+// internal/api/pages_internal.go was the file both of them could not see.
+var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin)\(`)
+
+// routeSourceFiles lists the non-test Go files in routerDir that register at
+// least one route. A file that registers none is skipped only because it has
+// nothing to contribute, never because of what it is called.
+func routeSourceFiles() ([]string, error) {
+	var files []string
+	for _, file := range sourceFiles() {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("read %s: %w", file, err)
+		}
+		if routeRegistrationCall.Match(data) {
+			files = append(files, file)
+		}
+	}
+	return files, nil
 }
 
 // sourceFiles lists the package's non-test Go files. _test.go is excluded

@@ -72,7 +72,9 @@ GET /api/v1/pages
 ```
 
 **Authentication:** session cookie or CLI token. Any workspace member may list;
-the response is scoped to what the caller can see.
+the response holds the pages the caller can reach — their own, their crews', and
+the ones a grant names ([Issue a grant](#issue-a-grant)). A page outside that
+set is absent, not present-and-locked.
 
 **Query parameters:** `workspace_id` (required when the caller's context does
 not supply one).
@@ -154,6 +156,16 @@ the server never parses YAML:
 column count on a 12-column grid; **there is no height field**, a panel is as
 tall as its content.
 
+A panel may also carry `refresh` — `"on:wake"` or `"on:panels-changed"`, and
+nothing else. It is the event that **runs that panel's producer**, not a
+rendering hint, so it requires `producer: "routine/<slug>"`: the server cannot
+execute a `script/`, call a `webhook/` producer, or dispatch an `agent/`. It
+compiles to an `automations` row with `action_kind: routine`. `"on:wake"` is
+additionally refused on a page that declares no `wake` gate — it could never
+fire — and on a panel that declares its own gate, which is a loop. Every one of
+those is a 400 naming the rule; see the
+[Pages guide](/guides/pages#refresh-the-panel-that-pulls-itself).
+
 **Response 201** — the created page, in the same shape [`GET
 /api/v1/pages/{slug}`](#get-a-page) returns.
 
@@ -214,9 +226,9 @@ for everyone, and carries no data and no provenance. This is decided server-side
 — nothing is hidden in the client.
 
 An **editor** additionally receives the authored half of each panel — its
-declared `actions`, `wake` gates and `on_failure` — because that is what an edit
-form has to round-trip. A reader does not, and an absent authored half is
-absent, not an empty array.
+declared `actions`, `wake` gates, `on_failure` and `refresh` — because that is
+what an edit form has to round-trip. A reader does not, and an absent authored
+half is absent, not an empty array.
 
 **Statuses:**
 
@@ -226,7 +238,7 @@ absent, not an empty array.
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
 | 403 | Caller is not a member of the workspace. |
-| 404 | No page with that slug in this workspace. |
+| 404 | No page with that slug in this workspace, **or** the caller has no reach to it — see [Issue a grant](#issue-a-grant). The two are deliberately indistinguishable, so this endpoint cannot be walked to learn which pages exist. |
 
 ---
 
@@ -374,6 +386,8 @@ ADMIN/OWNER.
 `live` is not stored. A grant is only as wide as the human who issued it: if
 that human loses access to the crew the grant names, the grant reports `live:
 false` with an `inert_reason` saying so, and stops working at the same moment.
+That is the only thing that makes a row inert — every level, `read` included,
+decides something while its issuer still stands behind it.
 
 **Statuses:**
 
@@ -414,8 +428,31 @@ still cannot widen who reaches it, not even to another agent in its own crew.
 | `level` | string | `read`, `produce`, or `write`. |
 | `panels` | string[] | Optional. Restricts a `produce` grant to named panels; omitted means every panel on the page. |
 
+### What each level decides
+
+| Level | Opens the page | Also |
+|---|---|---|
+| `read` | yes | nothing else |
+| `produce` | yes | may push payloads into the panels it names |
+| `write` | yes | may add, remove and re-arrange panels, and read the page's version history |
+
+`read` is what the other two are built on: a principal who may rewrite a page
+has to be able to open it, so every level reaches the page and the levels differ
+only in what they add.
+
 A grant widens reach to the **page**, never to a crew's data: granting a crew
 `produce` on a panel does not give the grantee anything else that crew owns.
+
+Concretely, a `read` grant makes a page appear in [`GET
+/api/v1/pages`](#list-pages) and open at [`GET
+/api/v1/pages/{slug}`](#get-a-page) for a subject who would otherwise get a
+404 — and changes nothing else. Every panel on it stays sealed unless the
+grantee's own crew membership already opened it, so a grantee can be shown a
+page of nothing but sealed placeholders. That is the grant working, not
+failing: they were given the board, not the numbers on it.
+
+Without any grant a page is reached by its owner, by a workspace ADMIN/OWNER,
+and by members of the crews that own its panels.
 
 **Statuses:**
 

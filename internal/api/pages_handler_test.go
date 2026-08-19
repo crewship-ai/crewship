@@ -618,6 +618,12 @@ func TestPagesGet_ForeignCrewPanelIsSealed(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm-outsider', ?, 'outsider', 'MEMBER')`, wsID); err != nil {
 		t.Fatalf("insert membership: %v", err)
 	}
+	// The `read` grant is what puts the outsider in front of this page at all
+	// (pageReachRule, pages_grants_authz.go) — membership of the workspace is
+	// not reach. What it must NOT do is unseal crew/lookout's panel, which is
+	// the whole of what this test asserts below.
+	pagesGrant(t, h, wsID, userID, "fleet-201",
+		`{"subject_type":"user","subject":"outsider@example.com","level":"read"}`)
 
 	doc := pagesGet(t, h, wsID, "outsider", "MEMBER", "fleet-201")
 	panels, _ := doc["panels"].([]any)

@@ -129,6 +129,10 @@ type pagePanelWire struct {
 	Span       int    `json:"span"`
 	Public     bool   `json:"public,omitempty"`
 
+	// Embed is the server-resolved URL for an embed.v1 panel, and nothing
+	// else ever carries one. See embedWire.
+	Embed *pageEmbedWire `json:"embed,omitempty"`
+
 	// Icon is the author's glyph for this panel, from the closed set in
 	// internal/pages/icons.go. It rides on BOTH halves of this struct, unlike
 	// the actions and the gates below: the client draws the header, so a
@@ -166,6 +170,16 @@ type pagePanelWire struct {
 	// half the spec back would invite a client to treat it as the whole of it.
 	Wake      []pages.PanelWake     `json:"wake,omitempty"`
 	OnFailure *pages.PanelOnFailure `json:"on_failure,omitempty"`
+
+	// Refresh is the event that runs this panel's producer (§12 v1.1,
+	// internal/pages/refresh.go). It rides on the WRITE half exactly like the
+	// gates: it is authored, it is stored in spec_json, and it is read from
+	// there by the rule compiler. It comes BACK only under `authored`, through
+	// attachAuthoredHalf — the same narrowing the gates got, and for the same
+	// reason: an editor that reads a document without it and saves that
+	// document back would delete the trigger, and with it the `automations`
+	// row that makes the trigger real.
+	Refresh string `json:"refresh,omitempty"`
 
 	State      string          `json:"state,omitempty"`
 	Reason     string          `json:"reason,omitempty"`
@@ -218,6 +232,25 @@ type pageWire struct {
 	Panels      []any  `json:"panels"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
+
+	// Authored says the panels below carry their authored half — `public`,
+	// `actions`, `wake`, `on_failure`, `refresh` — because this caller may
+	// edit the page's spec (attachAuthoredHalf).
+	//
+	// It exists because absence is ambiguous and something downstream has to
+	// break the tie. A panel that declares no actions and a panel whose
+	// actions were withheld from a reader are the same bytes, and
+	// `crewship apply --dry-run` cannot tell them apart: comparing the five
+	// without this flag makes every reader's plan propose deleting buttons
+	// they were never shown, and not comparing them makes a manifest whose
+	// only change IS a button plan as "unchanged". Both are wrong, and no
+	// amount of care in the client fixes it — the missing fact is on the
+	// server, so the server states it.
+	//
+	// The flag says what was SENT, never what is permitted: a caller who may
+	// edit a page with no actions on it still gets true here, and an empty
+	// actions list then means exactly what it says.
+	Authored bool `json:"authored,omitempty"`
 }
 
 // pageListWire is one row of the index. It carries counts rather than panels:
@@ -340,10 +373,12 @@ func (p *panelRecord) ownerRef() string    { return "crew/" + p.OwnerCrew }
 
 // ── 1. List — GET /api/v1/pages ────────────────────────────────────────────
 
-// List returns every page in the workspace the caller may see, newest edit
-// first. Panels the caller may not see are counted out of the rollup as well
-// as out of the document: a state count that includes a panel the viewer will
-// never be shown is a leak of that panel's existence and its health.
+// List returns every page in the workspace the caller may REACH, newest edit
+// first — theirs, their crews', and the ones a live grant names (canSeePage,
+// pages_authz.go). Panels the caller may not see are counted out of the rollup
+// as well as out of the document: a state count that includes a panel the
+// viewer will never be shown is a leak of that panel's existence and its
+// health.
 func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -386,6 +421,18 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Every grant in the workspace, in ONE query, with its use-time verdict
+	// already decided by the single reader (pages_grants_authz.go). Asking per
+	// row would make the ACL check cost one statement per page, and a listing
+	// whose permission check is the slow part is a permission check somebody
+	// deletes later.
+	grantsByPage, err := h.loadPageGrantRecordsIn(r.Context(), wsID, "")
+	if err != nil {
+		replyInternalError(w, h.logger, "load page grants", err)
+		return
+	}
+	mine := pageViewerGrantMatch(viewer)
+
 	out := make([]pageListWire, 0, len(records))
 	for i := range records {
 		rec := &records[i]
@@ -393,6 +440,14 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			replyInternalError(w, h.logger, "load page panels", err)
 			return
+		}
+		// A page this caller cannot reach is not listed as a locked row — it is
+		// not listed at all, the same "sealed rather than visible-but-denied"
+		// posture §11b decision 14 takes for panels, and the same verdict Get
+		// reaches through canSeePage.
+		if !h.pageReachedWithoutGrant(rec, panels, viewer) &&
+			!anyGrantReachesPage(liveGrantsIn(grantsByPage[rec.ID], mine)) {
+			continue
 		}
 		row := pageListWire{
 			ID:          rec.ID,
@@ -480,6 +535,21 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 	viewer, err := h.loadViewer(r.Context(), wsID, user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "load page viewer", err)
+		return
+	}
+
+	// Reach before content. A page nobody has given this caller — not by
+	// ownership, not by a crew that owns a panel on it, not by a grant —
+	// answers with the SAME 404 as a slug that was never authored, so the
+	// endpoint cannot be walked to learn which pages exist (pageReachRule,
+	// pages_grants_authz.go).
+	reachable, err := h.canSeePage(r.Context(), wsID, rec, panels, viewer)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve page reach", err)
+		return
+	}
+	if !reachable {
+		replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", slug))
 		return
 	}
 
@@ -661,6 +731,11 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// A gate authored in this save must fire on the NEXT push, not up to a
 	// minute later (§5).
 	h.refreshAutomations(r.Context())
+	// AFTER the reload, never before: `refresh: on:panels-changed` matches this
+	// entry in memory, so an entry emitted while the registry still held the
+	// old rule set would be the one arrangement change a page never sees — its
+	// first (pages_refresh.go).
+	h.emitPageSpecChanged(r.Context(), wsID, rec, doc, true, pageArrangementFingerprint(doc))
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
 	writeJSON(w, http.StatusCreated, h.pageDocument(r.Context(), rec, panels, nil))
 }
@@ -710,6 +785,11 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The arrangement as it stands, taken BEFORE the patch is applied to it —
+	// `base` is mutated in place below. Comparing this against the fingerprint
+	// of what is saved is what makes `refresh: on:panels-changed` fire on an
+	// edit to the panels and stay quiet on a rename (pages_refresh.go).
+	beforeArrangement := pageArrangementFingerprint(base)
 	if req.Name != nil {
 		base.Metadata.Name = *req.Name
 	}
@@ -746,6 +826,17 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// it cannot predict.
 	now := h.evaluator().Now().UTC().Format(time.RFC3339)
 
+	// What each panel's shape is BEFORE this edit. Read here rather than inside
+	// the transaction, and for the same reason the rollback path reads it here:
+	// livePanelShapes goes through h.db, and a read on the pool while this
+	// goroutine holds a write transaction is how SQLite deadlocks.
+	live, err := h.livePanelShapes(r.Context(), rec.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read live panel shapes", err)
+		return
+	}
+	dimmed := panelsToDim(base, resolved, live)
+
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin page update", err)
@@ -762,6 +853,26 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := reconcilePanels(r.Context(), tx, rec.ID, base, resolved, now); err != nil {
 		replyInternalError(w, h.logger, "reconcile page panels", err)
 		return
+	}
+	// A panel whose schema, producer or OWNING CREW changed keeps its row and
+	// loses its payloads — the same rule, through the same two functions, that
+	// a rollback has always applied (pages_versions.go).
+	//
+	// Owner is the one that is not merely tidiness: owner_crew_id IS the ACL
+	// (pages_authz.go), so re-pointing it re-points who may read every payload
+	// already in the ring. An edit that moved a panel from crew A to crew B
+	// handed B everything A had produced, and the page said nothing. Schema is
+	// the correctness half — a status.v1 payload under a metric.v1 panel is a
+	// panel rendering something its own contract does not describe.
+	//
+	// The two paths had two answers to one question, which is how this
+	// survived: the rollback path was written knowing it, the edit path was
+	// not, and each had passing tests.
+	if len(dimmed) > 0 {
+		if err := clearPanelRings(r.Context(), tx, rec.ID, dimmed); err != nil {
+			replyInternalError(w, h.logger, "clear payloads of redefined panels", err)
+			return
+		}
 	}
 	// A gate removed from the spec loses its rule here, in the same
 	// transaction that removed it. The rules are derived state; the spec is
@@ -804,6 +915,14 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.refreshAutomations(r.Context())
+	// Only when the PANELS moved. A page whose title was corrected has not
+	// changed its arrangement, and a producer re-running for that is the noise
+	// that would make `on:panels-changed` a feature people turn off. It is also
+	// the loop guard: a routine that re-applies the spec it was handed changes
+	// nothing, emits nothing, and the circle closes after one lap.
+	if after := pageArrangementFingerprint(base); after != beforeArrangement {
+		h.emitPageSpecChanged(r.Context(), wsID, updated, base, false, after)
+	}
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": updated.ID, "slug": updated.Slug})
 	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, nil))
 }
@@ -1077,8 +1196,43 @@ func (h *PageHandler) panelWire(p *panelRecord) pagePanelWire {
 			RunID:      pushReference(p),
 			ProducedAt: p.ProducedAt.UTC().Format(time.RFC3339),
 		}
+		out.Embed = h.embedWire(p)
 	}
 	return out
+}
+
+// embedWire resolves an embed.v1 panel's URL, on the READ path, from the
+// operator's allow-list — and it is the ONLY place a URL enters an embed
+// panel (§3.1, §8 rules 2 and 3).
+//
+// The payload carries a source NAME, never a URL, and the reason is worth
+// keeping next to the code that honours it. An iframe's `src` is fetched by
+// the READER's browser, from the reader's network, when the page is opened. A
+// URL a producer could set per push is therefore an outbound channel: encode
+// the panel's numbers into the path, push, and wait for a human to open the
+// page. `sandbox` constrains what the framed document may DO; it has never had
+// anything to say about whether the request is MADE. So a producer's entire
+// influence is which of n human-vetted destinations is showing.
+//
+// A name with no entry resolves to nothing and the panel renders a refusal.
+// That case is reachable in normal operation — an operator removing a source
+// from the allow-list is exactly how an embed is meant to be switched off —
+// so it is not an error, and it must never fall back to a previous URL.
+func (h *PageHandler) embedWire(p *panelRecord) *pageEmbedWire {
+	if pages.PanelSchema(p.Schema) != pages.SchemaEmbed {
+		return nil
+	}
+	var payload struct {
+		Source string `json:"source"`
+	}
+	if err := json.Unmarshal([]byte(p.Payload), &payload); err != nil {
+		return nil
+	}
+	src, ok := pages.ResolveEmbedSource(payload.Source)
+	if !ok {
+		return nil
+	}
+	return &pageEmbedWire{URL: src.URL}
 }
 
 // pushReference is the `run_id` half of §4 rule 5's provenance triple.
@@ -1132,6 +1286,7 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 		Panels:      make([]any, 0, len(panels)),
 		CreatedAt:   rec.CreatedAt,
 		UpdatedAt:   rec.UpdatedAt,
+		Authored:    authored,
 	}
 	for _, p := range panels {
 		if viewer != nil && !h.canSeePanel(viewer, p) {
@@ -1175,6 +1330,7 @@ func (h *PageHandler) attachAuthoredHalf(ctx context.Context, pageID, panelID st
 	wire.Actions = spec.Actions
 	wire.Wake = spec.Wake
 	wire.OnFailure = spec.OnFailure
+	wire.Refresh = string(spec.Refresh)
 }
 
 // ownerRef renders the page's owner as `user/<id>` or `crew/<slug>` — exactly
@@ -1273,13 +1429,18 @@ func panelSpecsFrom(w http.ResponseWriter, in []pagePanelWire) ([]pages.PanelSpe
 			// Untrusted in the same way, and normalised and refused by
 			// validatePageTabs: a blank or unreadable tab name would draw
 			// nothing on the bar while still hiding the panels under it.
-			Tab:       p.Tab,
-			Owner:     p.Owner,
-			Producer:  p.Producer,
-			SLA:       fmt.Sprintf("%ds", p.SLASeconds),
-			Span:      p.Span,
-			Public:    p.Public,
-			Actions:   p.Actions,
+			Tab:      p.Tab,
+			Owner:    p.Owner,
+			Producer: p.Producer,
+			SLA:      fmt.Sprintf("%ds", p.SLASeconds),
+			Span:     p.Span,
+			Public:   p.Public,
+			Actions:  p.Actions,
+			// Untrusted like the icon and the tab, and refused by name in
+			// Validate: a `refresh:` outside the closed set must never reach
+			// spec_json, because from there it is a trigger the compiler
+			// silently declines to build a rule for.
+			Refresh:   pages.PanelRefresh(p.Refresh),
 			Wake:      p.Wake,
 			OnFailure: p.OnFailure,
 		})
@@ -1493,4 +1654,13 @@ func insertPageVersion(ctx context.Context, tx *sql.Tx, pageID string, seq int64
 		INSERT INTO page_versions (page_id, seq, spec_json, author_user_id, created_at)
 		VALUES (?, ?, ?, ?, ?)`, pageID, seq, specJSON, userID, now)
 	return err
+}
+
+// pageEmbedWire carries the one field an embed.v1 panel needs from the server
+// and deliberately nothing else: no sandbox attribute, no geometry, no allow
+// list. Every one of those is the client's to decide from a constant, because
+// a value on the wire is a value something upstream could be persuaded to
+// change (§3.1).
+type pageEmbedWire struct {
+	URL string `json:"url"`
 }

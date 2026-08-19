@@ -147,6 +147,27 @@ is refused here rather than accepted and silently never matched. See
 [`page get`](#crewship-page-get-slug) plus `crewship automation list` for
 seeing what a gate became.
 
+A panel produced by a **routine** may also declare `refresh:` — `on:wake` or
+`on:panels-changed`, and nothing else. It is the event that *runs* that panel's
+producer, so the analysis is already on the page when a human arrives instead of
+starting when they get there:
+
+```yaml
+    - id: incident
+      schema: narrative.v1
+      owner: crew/devops
+      producer: routine/incident-rozbor
+      refresh: on:wake             # run when a gate anywhere on this page fires
+      sla: 1h
+```
+
+The CLI refuses a value outside those two before it sends anything, and the
+server refuses a `refresh:` whose producer is not a `routine/` (it cannot run a
+script, call a webhook producer, or dispatch an agent), an `on:wake` on a page
+that declares no gate, and an `on:wake` on a panel that declares its own gate —
+which is a loop. Like a gate, it compiles to a row `crewship automation list`
+shows. See [Pages → `refresh`](/guides/pages#refresh-the-panel-that-pulls-itself).
+
 Backed by `POST /api/v1/pages`.
 
 ---

@@ -116,21 +116,12 @@ type pageGrantRecord struct {
 // currently worth nothing. An ACL row that silently does nothing is worse than
 // no row: somebody believes access was granted.
 //
-// The `read` case (issue C5, §7.1b's verb table: "`read` — may see the page
-// and its panels") is checked FIRST, ahead of the liveness verdict, and it is
-// unconditional — a `read` grant is inert even when its issuer is fully live.
-// That is deliberate, not an oversight: liveness answers "could this human
-// still issue this grant right now", and for `read` the honest answer to a
-// different question — "does issuing it change anything" — is no, in THIS
-// build, regardless of who issued it or how current their standing is. See
-// the long comment below for why, and what would have to change to make it
-// stop being true.
+// Liveness is now the ONLY thing that can make a row inert. It used to have a
+// second arm — an unconditional one for `read`, because the verb decided
+// nothing anywhere in the package — and that arm is gone at the same commit
+// the behaviour changed (see pageReachRule below). A grant is either live and
+// deciding something, or inert with the reason its issuer's standing gives.
 func (g pageGrantRecord) inertReason() string {
-	if g.Level == pageGrantRead {
-		return "read grants are accepted, stored and journalled, but no authorization " +
-			"decision in this build consults them — see the comment on pageReadGrantOpenDecision " +
-			"in this file for the two ways to resolve that and what each would touch"
-	}
 	if g.Live {
 		return ""
 	}
@@ -140,151 +131,198 @@ func (g pageGrantRecord) inertReason() string {
 	return "the human who issued it no longer owns or administers this page"
 }
 
-// pageReadGrantOpenDecision is not a function that runs; it is where the
-// open question C5 raised lives, so it has one findable name instead of being
+// reachesPage reports whether holding this level is enough to OPEN the page.
+//
+// All three verbs qualify, which is the answer to the question the file used to
+// leave open — "is `read` implied by `produce` and `write`". It is, and the
+// alternative is indefensible in both directions:
+//
+//   - A `write` grantee may add, remove and re-arrange panels (mayEditSpec) and
+//     is served the authored half of the document by Get. A principal who may
+//     rewrite a page but gets 404 when opening it is not a permission model,
+//     it is two paths disagreeing — the same disagreement canSeePanel's ADMIN
+//     carve-out exists to avoid.
+//   - A `produce` grantee pushes payloads into panels BY NAME. The names come
+//     from the page. Refusing them the page while accepting their pushes would
+//     mean the only way to learn the address is to be told it out of band.
+//
+// Making it one predicate rather than an implication table is deliberate: a
+// table has to be kept in agreement with itself, and the thing being decided
+// here — "does any live grant name you" — has no ordering in it.
+func reachesPage(level string) bool {
+	switch level {
+	case pageGrantRead, pageGrantProduce, pageGrantWrite:
+		return true
+	}
+	return false
+}
+
+// pageReachRule is not a function that runs; it is the RESOLUTION of the open
+// question C5 raised, kept under one findable name so the reasoning is not
 // scattered across commit messages. Nothing below this comment executes.
 //
-// THE GAP: §7.1b's verb table states plainly that `read` "may see the page
-// and its panels". validPageGrantLevel (above) accepts it, pages_grants.go
-// stores it, journals it, and lists it back as Live=true — every surface an
-// administrator looks at says the grant succeeded. But grantsFor (this file)
-// is consulted by exactly two callers — mayEditSpec's `write` check and
-// mayProduce's `produce` check (pages_authz.go) — and neither one, nor
-// canSeePanel, nor PageHandler.List/Get (pages_handler.go), nor anything else
-// in this package, ever asks "does a live `read` grant cover this caller".
-// Page reachability today is decided entirely by workspace membership
-// (pages_authz.go's header comment pins this reading and explains why: §7
-// states the PANEL rule precisely — panel.owner_crew_id is the ACL — and
-// leaves the PAGE rule implicit, and "every member reaches the page's
-// structure" is the reading that makes §7.1b's "sealed placeholder for a
-// panel it cannot read" sentence make sense). Under that reading a `read`
-// grant has nothing left to widen: everyone already in the workspace can
-// already reach the page. So the grant is accepted into a schema that has no
-// use for it — which is worse than rejecting it, because a human who issued
-// one believes they changed something.
+// THE GAP, as it stood: §7.1b's verb table states plainly that `read` "may see
+// the page and its panels". validPageGrantLevel accepts it, pages_grants.go
+// stores it, journals it and lists it back — every surface an administrator
+// looks at said the grant succeeded. But grantsFor was consulted by exactly two
+// callers, mayEditSpec's `write` check and mayProduce's `produce` check, and
+// page reachability was decided entirely by workspace membership. Under that
+// reading a `read` grant had nothing left to widen: everyone in the workspace
+// could already reach every page. The grant was accepted into a schema with no
+// use for it — worse than rejecting it, because a human who issued one believed
+// they had changed something.
 //
-// This file does NOT resolve the gap by picking a behaviour. §7 never states
-// who may reach a PAGE (only a panel), so both readings below are consistent
-// with the PRD as written, and they behave very differently. Whoever owns
-// docs/prd/pages.md §7.1 decides; this comment exists so that decision is
-// between two described options, not a re-derivation from scratch.
+// THE DECISION (2026-08-13): §7.1b is titled "three verbs, not one" and §7's
+// own requirement sentence is "the owner can grant read and write to OTHERS".
+// Neither is satisfiable while every colleague already reaches every page, so
+// the implicit rule "membership of the workspace reaches the page" is the thing
+// that had to give. It is now:
 //
-// ── Reading A: keep the status quo (workspace membership reaches the page,
-//    exactly as pages_authz.go's header comment already documents; `read`
-//    grants exist for a subject that isn't a colleague — §7.3's public
-//    token, once it exists) ──
+//	A page is reachable by its OWNER, by a workspace ADMIN/OWNER, by a member
+//	of any crew that owns one of its panels, and by a caller a LIVE grant
+//	names. Nobody else — and "nobody else" looks exactly like a page that does
+//	not exist.
 //
-//   Changes required: none. This is what the code already does. The only
-//   change under this reading is the one this file makes: inertReason()
-//   above tells the truth about it, so the grants-listing endpoint
-//   (pages_grants.go GET, which already surfaces InertReason for the
-//   liveness case) shows an administrator the same honesty for `read` that
-//   it already shows for a revoked issuer, instead of reporting Live=true
-//   for a grant that changes no decision.
+// The three properties that decision is constrained by, each of which was a way
+// to get it wrong:
 //
-// ── Reading B: a page is reachable only by (1) its owner — isPageOwner,
-//    pages_authz.go, (2) a member of any crew that owns one of its panels —
-//    i.e. viewer.Crews intersects the page's panels' owner_crew_id set, and
-//    (3) a caller named by a live `read` grant — grantsFor, this file ──
+//  1. REACH IS TO THE PAGE, NEVER TO A CREW'S DATA (§7.1 rule 3). canSeePanel
+//     is untouched and no grant appears in it. A `read` grantee on a page whose
+//     panels all belong to crews they are not in reaches the page and is served
+//     a grid of sealed placeholders — that is the correct outcome, not a
+//     degraded one, and TestPageGrants_ReadGrantReachesThePageAndNotTheData
+//     pins it.
 //
-//   Changes required, all in this package:
+//  2. ONE READER DECIDES LIVENESS. Reachability asks livePageGrants, the same
+//     function mayEditSpec and mayProduce ask, so a grant issued by a human who
+//     has since lost standing stops opening the page at the same instant it
+//     stops authorising a push. No second query, in Go or in SQL, knows what
+//     "live" means — the rule at the top of this file had two implementations
+//     for a few hours once, with two definitions and two sets of passing tests,
+//     and that is the mistake this constraint exists to prevent.
 //
-//     - pages_authz.go gains a new function, e.g. canSeePage(ctx, wsID,
-//       userID, rec, viewer) bool, mirroring canSeePanel's shape: owner OR
-//       any crew overlap with the page's panels OR a live read grant via
-//       grantsFor. canRole(role, "manage") still short-circuits to true, for
-//       the same reason canSeePanel's ADMIN carve-out exists — effectiveRole
-//       already takes the max of workspace and crew role, so denying ADMIN
-//       here would only make two paths disagree.
+//  3. THE VERBS NEST. reachesPage (above) accepts all three levels: `read` is
+//     implied by `produce` and by `write`, because a principal who may rewrite
+//     a page and cannot open it is two paths disagreeing rather than a
+//     narrower permission.
 //
-//     - PageHandler.List (pages_handler.go) currently lists every page in
-//       `WHERE p.workspace_id = ?` unconditionally. It would need to load
-//       each page's panels' owner_crew_id set (or join it in SQL) before
-//       filtering, and drop the ones where canSeePage is false — a page a
-//       caller cannot reach must not even appear as a locked row, the same
-//       "sealed rather than visible-but-denied" posture §11b decision 14
-//       already takes for panels.
-//
-//     - PageHandler.Get (pages_handler.go) would call canSeePage right after
-//       loadPage and, on false, return 404 rather than 403 — matching how a
-//       page a caller cannot reach should look identical to one that does
-//       not exist, so the endpoint is not an existence oracle for pages
-//       outside the caller's reach.
-//
-//     - Any other call site that loads a page for a viewer-scoped response —
-//       at minimum pages_versions.go's history endpoints and
-//       pages_wake.go's wake-gate listing — would need the same gate. Each
-//       one currently trusts "loaded within this workspace" as sufficient;
-//       Reading B removes that assumption everywhere, not just in List/Get.
-//
-//     - grantsFor itself needs no change — it already loads live `read`
-//       grants correctly. Reading B is entirely about finally calling it
-//       from a page-reachability check, not about how it resolves grants.
-//
-//   Reading B is a strictly larger and more invasive change than Reading A,
-//   and it is the one that makes the currently-dead `read` level start doing
-//   something. It is also the one most likely to change who can see what for
-//   existing workspaces the moment it ships, which is exactly why it should
-//   not be picked implicitly inside a fix for a conformance audit.
+// WHERE THE GATE IS, and why it is not everywhere. Only two endpoints serve a
+// page to a viewer whose reach was previously assumed: PageHandler.List and
+// PageHandler.Get. Every other read of a page was already gated at least as
+// tightly and needs no change — pages_versions.go's history and
+// pages_transfer.go's export require mayEditSpec (owner, admin or `write`),
+// pages_actions.go resolves through canSeePanel, pages_grants.go through
+// mayAdministerGrants, and the public-token surface (pages_public.go) resolves
+// its own subject and never builds a pageViewer. That was verified endpoint by
+// endpoint rather than assumed; a new viewer-scoped page read is the one thing
+// that must remember to call canSeePage.
 
 // grant narrows the record to what the permission checks read.
 func (g pageGrantRecord) grant() pageGrant {
 	return pageGrant{Level: g.Level, PanelIDs: g.PanelIDs}
 }
 
-// loadPageGrantRecords returns EVERY grant on the page with its use-time
-// verdict attached. It is the single reader of page_grants.
+// loadPageGrantRecordsIn returns EVERY grant on the named page — or, when
+// pageID is empty, on every page in the workspace — with its use-time verdict
+// attached, keyed by page id. It is the single reader of page_grants.
 //
 // The CASE is the rule documented at the top of this file. It is expressed in
 // the statement rather than in Go so that no caller can load grants without
 // also loading the verdict — a Go-side helper is one `if` away from being
 // forgotten, and the forgotten `if` is the escalation.
-func (h *PageHandler) loadPageGrantRecords(ctx context.Context, wsID string, rec *pageRecord) ([]pageGrantRecord, error) {
+//
+// WHY THE WHOLE-WORKSPACE FORM EXISTS. PageHandler.List has to decide
+// reachability for every page it returns (see pageReachRule). Asking this
+// function once per row would be a grants query per page, and a listing whose
+// cost is linear in rows is how a permission check gets removed later for being
+// slow. The page's OWNER columns come from the join rather than from a
+// pageRecord parameter precisely so the batch form can exist at all — one
+// statement, one CASE, one definition of live, two entry points.
+func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID string) (map[string][]pageGrantRecord, error) {
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT g.subject_type, g.subject_id, g.level, COALESCE(g.panel_ids, ''),
+		SELECT g.page_id, g.subject_type, g.subject_id, g.level, COALESCE(g.panel_ids, ''),
 		       g.granted_by_user_id, g.granted_at,
 		       COALESCE(wm.role, ''),
 		       CASE
 		         WHEN wm.user_id IS NULL                                THEN 0
 		         WHEN wm.role IN ('OWNER', 'ADMIN')                     THEN 1
-		         WHEN ? <> '' AND g.granted_by_user_id = ?              THEN 1
-		         WHEN ? <> '' AND EXISTS (
+		         WHEN p.owner_user_id IS NOT NULL
+		              AND g.granted_by_user_id = p.owner_user_id        THEN 1
+		         WHEN p.owner_crew_id IS NOT NULL AND EXISTS (
 		              SELECT 1 FROM crew_members cm
-		               WHERE cm.crew_id = ? AND cm.user_id = g.granted_by_user_id) THEN 1
+		               WHERE cm.crew_id = p.owner_crew_id AND cm.user_id = g.granted_by_user_id) THEN 1
 		         ELSE 0
 		       END
 		FROM page_grants g
+		JOIN pages p ON p.id = g.page_id
 		LEFT JOIN workspace_members wm
 		       ON wm.user_id = g.granted_by_user_id AND wm.workspace_id = ?
-		WHERE g.page_id = ?
+		WHERE p.workspace_id = ? AND (? = '' OR g.page_id = ?)
 		ORDER BY g.subject_type, g.subject_id, g.level`,
-		rec.OwnerUserID, rec.OwnerUserID,
-		rec.OwnerCrewID, rec.OwnerCrewID,
-		wsID, rec.ID)
+		wsID, wsID, pageID, pageID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []pageGrantRecord
+	out := map[string][]pageGrantRecord{}
 	for rows.Next() {
 		var g pageGrantRecord
-		var panelIDs string
+		var onPage, panelIDs string
 		var live int
-		if err := rows.Scan(&g.SubjectType, &g.SubjectID, &g.Level, &panelIDs,
+		if err := rows.Scan(&onPage, &g.SubjectType, &g.SubjectID, &g.Level, &panelIDs,
 			&g.GrantedBy, &g.GrantedAt, &g.IssuerRole, &live); err != nil {
 			return nil, err
 		}
 		g.Live = live == 1
 		if strings.TrimSpace(panelIDs) != "" {
 			var ids []string
-			if err := json.Unmarshal([]byte(panelIDs), &ids); err == nil {
-				g.PanelIDs = ids
+			if err := json.Unmarshal([]byte(panelIDs), &ids); err != nil {
+				// A grant whose panel scope cannot be read is DROPPED, not
+				// widened. nil PanelIDs means "every panel" (pages_authz.go
+				// covers), so silently keeping the row on a decode failure
+				// turned a produce grant on three named panels into one on the
+				// whole page — an ACL that opens when its own storage becomes
+				// unreadable.
+				//
+				// Dropping is the closed end of that: the subject loses a
+				// permission they should have, which shows up as a 403 somebody
+				// reports, rather than gaining one nobody sees.
+				h.logger.Error("pages: grant dropped, panel scope unreadable",
+					"page", onPage, "subject_type", g.SubjectType, "subject", g.SubjectID,
+					"error", err)
+				continue
 			}
+			g.PanelIDs = ids
 		}
-		out = append(out, g)
+		out[onPage] = append(out[onPage], g)
 	}
 	return out, rows.Err()
+}
+
+// loadPageGrantRecords is the one-page form of the reader above.
+func (h *PageHandler) loadPageGrantRecords(ctx context.Context, wsID string, rec *pageRecord) ([]pageGrantRecord, error) {
+	byPage, err := h.loadPageGrantRecordsIn(ctx, wsID, rec.ID)
+	if err != nil {
+		return nil, err
+	}
+	return byPage[rec.ID], nil
+}
+
+// liveGrantsIn filters already-loaded records down to the ones that are live
+// AND match the caller. It takes records rather than a page so that a caller
+// which loaded the whole workspace's grants in one query still narrows them
+// through this function and not through a hand-rolled loop with its own idea of
+// what live means.
+func liveGrantsIn(records []pageGrantRecord, match func(pageGrantRecord) bool) []pageGrant {
+	var out []pageGrant
+	for _, g := range records {
+		if !g.Live || !match(g) {
+			continue
+		}
+		out = append(out, g.grant())
+	}
+	return out
 }
 
 // livePageGrants loads the grants that are live AND match the caller. The
@@ -296,26 +334,26 @@ func (h *PageHandler) livePageGrants(ctx context.Context, wsID string, rec *page
 	if err != nil {
 		return nil, err
 	}
-	var out []pageGrant
-	for _, g := range records {
-		if !g.Live || !match(g) {
-			continue
-		}
-		out = append(out, g.grant())
-	}
-	return out, nil
+	return liveGrantsIn(records, match), nil
 }
 
-// grantsFor loads the live grants that apply to a HUMAN caller: their own user
-// grants plus any grant to a crew they belong to.
+// pageViewerGrantMatch names the subjects a HUMAN caller answers to: their own
+// user grants plus any grant to a crew they belong to.
 //
-// Agent grants are deliberately not consulted here, and that is not tidiness.
-// A grant to an agent is authority delegated to a token in a container; a
-// human who happens to sit in the same crew borrowing it would be exactly the
+// Agent grants are deliberately not matched here, and that is not tidiness. A
+// grant to an agent is authority delegated to a token in a container; a human
+// who happens to sit in the same crew borrowing it would be exactly the
 // escalation §7.1b closes. The agent surface reads its own grants through
 // agentGrants, from an identity the token proves.
-func (h *PageHandler) grantsFor(ctx context.Context, wsID string, rec *pageRecord, viewer *pageViewer) ([]pageGrant, error) {
-	return h.livePageGrants(ctx, wsID, rec, func(g pageGrantRecord) bool {
+//
+// It is a predicate rather than a body inside grantsFor because PageHandler.List
+// applies the same match to records it loaded in bulk. Two spellings of "is
+// this grant mine" is the drift this file exists to prevent.
+func pageViewerGrantMatch(viewer *pageViewer) func(pageGrantRecord) bool {
+	return func(g pageGrantRecord) bool {
+		if viewer == nil {
+			return false
+		}
 		switch g.SubjectType {
 		case pageSubjectUser:
 			return g.SubjectID == viewer.UserID
@@ -324,7 +362,12 @@ func (h *PageHandler) grantsFor(ctx context.Context, wsID string, rec *pageRecor
 		default:
 			return false
 		}
-	})
+	}
+}
+
+// grantsFor loads the live grants that apply to a HUMAN caller.
+func (h *PageHandler) grantsFor(ctx context.Context, wsID string, rec *pageRecord, viewer *pageViewer) ([]pageGrant, error) {
+	return h.livePageGrants(ctx, wsID, rec, pageViewerGrantMatch(viewer))
 }
 
 // ── The agent side of §7.1b ────────────────────────────────────────────────

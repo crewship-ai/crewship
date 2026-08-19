@@ -29,14 +29,12 @@
  *     was granted. The reason is the server's sentence, not a paraphrase,
  *     because the paraphrase is where the two copies drift.
  *
- *  3. **`read` is shown with the truth beside it.** A conformance audit of
- *     this release found `pageGrantRead` has no reader outside validation:
- *     page visibility is workspace membership, panel visibility is crew
- *     membership. The level is not hidden and not removed from the form —
- *     that is an open product decision (§15), and a UI must not settle it by
- *     omission — but it is never drawn as though it granted something.
- *     `PAGE_GRANT_READ_CAVEAT` is the sentence, and it lives beside the
- *     constant it describes.
+ *  3. **Every level says what it does, `read` included.** All three verbs open
+ *     the page and none of them unseal a panel, so the meaning shown under the
+ *     level select says both halves — `PAGE_GRANT_LEVEL_MEANING`, beside the
+ *     vocabulary it describes. This card used to carry a warning that `read`
+ *     decided nothing; the server decides page reach on it now, and the
+ *     warning left with the behaviour it described.
  *
  *  4. **Both destructive verbs confirm, and every write goes through
  *     `useApiMutation`.** Revoke and rollback ask first through the shared
@@ -87,7 +85,6 @@ import { cn } from "@/lib/utils"
 import {
   PAGE_GRANT_LEVELS,
   PAGE_GRANT_LEVEL_MEANING,
-  PAGE_GRANT_READ_CAVEAT,
   PAGE_SUBJECT_TYPES,
   pagePanelCount,
   toPageOwner,
@@ -266,12 +263,6 @@ function GrantRow({
               to fix, and "inert" alone tells them something is wrong without
               telling them what. */}
           inert{grant.inertReason ? ` — ${grant.inertReason}` : ""}
-        </span>
-      )}
-
-      {grant.level === "read" && (
-        <span data-slot="grant-read-caveat" className="type-page-meta text-warn">
-          {PAGE_GRANT_READ_CAVEAT}
         </span>
       )}
     </div>
@@ -498,7 +489,7 @@ function AccessCard({
             )}
 
             <span className="type-page-meta text-muted-foreground-soft">
-              {level === "read" ? PAGE_GRANT_READ_CAVEAT : PAGE_GRANT_LEVEL_MEANING[level]}
+              {PAGE_GRANT_LEVEL_MEANING[level]}
             </span>
           </form>
         )}

@@ -14,6 +14,7 @@ export {
   SERIES_COLOR_TOKENS,
   type DrawnSeries,
 } from "./series-panel"
+export { EmbedPanel, embedGate, EMBED_SANDBOX, type EmbedGate } from "./embed-panel"
 export { SealedPanel } from "./sealed-panel"
 export { PanelErrorPanel, PendingSchemaPanel, UnknownSchemaPanel } from "./fallback-panel"
 export { entityHref, ENTITY_ROUTES, isEntityRefKind } from "./entity-href"

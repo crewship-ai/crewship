@@ -17,12 +17,14 @@ import { render, within } from "@testing-library/react"
 
 import { PanelRenderer } from "../registry"
 import {
+  AXIS_MIN_LABEL_CHARS,
   MAX_RENDERABLE_SERIES,
   OVERFLOW_SERIES_NAME,
   SERIES_COLOR_TOKENS,
   SeriesPanel,
   assignSeriesColors,
   mergeOverflow,
+  planAxis,
 } from "../series-panel"
 import { EM_DASH } from "../freshness"
 import { FIXTURE_NOW, seriesFixtures } from "../fixtures"
@@ -439,6 +441,199 @@ describe("negative values hang off a visible zero line", () => {
     const [negative, , positive] = bars
     expect(Number(negative.getAttribute("y"))).toBeGreaterThanOrEqual(zeroY)
     expect(Number(positive.getAttribute("y"))).toBeLessThan(zeroY)
+  })
+})
+
+// ── the sparse axis ───────────────────────────────────────────────────────
+//
+// The finding this covers came off a live producer: 24 points on a half-width
+// panel, and every one of the 24 labels drawn as "-1…". The producer could not
+// fix it — it does not know the panel's width — and the schema refused the
+// obvious workaround because `labels[]` demanded a non-empty string per tick.
+//
+// The split: the PRODUCER decides which ticks have a name (`null` for one it
+// declines to name), the RENDERER decides how many of those names it can draw.
+// Thinning names is honest. Thinning data is not, so the point count below is
+// asserted in every one of these.
+
+/** The text actually painted, without the `<title>` that carries the full name. */
+function axisLabels(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll('[data-slot="series-label"]')).map(
+    (el) => el.childNodes[0]?.nodeValue ?? "",
+  )
+}
+
+function axisTickIndices(container: HTMLElement): number[] {
+  return Array.from(container.querySelectorAll('[data-slot="series-label"]')).map((el) =>
+    Number(el.getAttribute("data-tick-index")),
+  )
+}
+
+function axisFixture(labels: (string | null)[], seriesCount = 1) {
+  return {
+    ...seriesFixtures.fresh,
+    data: {
+      ...seriesFixtures.fresh.data,
+      payload: {
+        unit: "ms",
+        labels,
+        series: Array.from({ length: seriesCount }, (_, s) => ({
+          name: `s${s + 1}`,
+          values: labels.map((_, i) => i + 1 + s),
+        })),
+      },
+    },
+  }
+}
+
+/** A rolling window, named every third tick — the shape ping.py now pushes. */
+const WINDOW_12: (string | null)[] = [
+  "-55s", null, null, "-40s", null, null, "-25s", null, null, "-10s", null, "now",
+]
+
+/** The same window with every tick named, which is what the producer had to send before. */
+const WINDOW_24_ALL_NAMED = Array.from({ length: 24 }, (_, i) => `-${(23 - i) * 5}s`)
+
+describe("a sparse axis — the producer names the ticks, the renderer fits them", () => {
+  it("draws a name only where the producer put one", () => {
+    const { container } = render(<PanelRenderer {...axisFixture(WINDOW_12)} now={FIXTURE_NOW} />)
+    expect(axisLabels(container)).toEqual(["-55s", "-40s", "-25s", "-10s", "now"])
+    expect(axisTickIndices(container)).toEqual([0, 3, 6, 9, 11])
+  })
+
+  it("keeps every point of an axis whose ticks are mostly unnamed", () => {
+    const { container } = render(<PanelRenderer {...axisFixture(WINDOW_12, 2)} now={FIXTURE_NOW} />)
+    // 12 categories × 2 series, all present: a null LABEL removes a name, never
+    // a data point.
+    expect(container.querySelectorAll('[data-slot="series-bar"]')).toHaveLength(24)
+    expect(container.querySelectorAll('[data-slot="series-group"]')).toHaveLength(12)
+    const unnamed = container.querySelector('[data-slot="series-group"][data-label-state="unnamed"]')
+    expect(unnamed).toBeTruthy()
+    expect(unnamed!.querySelector('[data-slot="series-label"]')).toBeNull()
+    expect(unnamed!.querySelectorAll('[data-slot="series-bar"]')).toHaveLength(2)
+  })
+
+  it("thins the names it cannot fit instead of truncating every one into noise", () => {
+    const { container } = render(
+      <PanelRenderer {...axisFixture(WINDOW_24_ALL_NAMED)} now={FIXTURE_NOW} />,
+    )
+    const drawn = axisLabels(container)
+    expect(drawn.length).toBeGreaterThan(1)
+    expect(drawn.length).toBeLessThan(WINDOW_24_ALL_NAMED.length)
+    // The regression itself: nothing may be drawn as "-1…".
+    for (const text of drawn) {
+      // Not "-1…": what is drawn is a whole label, because the renderer made
+      // room by drawing fewer of them rather than by shortening all of them.
+      expect(text, `"${text}" says nothing`).not.toMatch(/…/)
+      expect(WINDOW_24_ALL_NAMED).toContain(text)
+    }
+    expect(AXIS_MIN_LABEL_CHARS).toBeGreaterThanOrEqual(4)
+    // …and not one of the 24 points was thinned with them.
+    expect(container.querySelectorAll('[data-slot="series-bar"]')).toHaveLength(24)
+  })
+
+  it("thins evenly and keeps the last named tick, so the axis is not a stride nobody chose", () => {
+    const { container } = render(
+      <PanelRenderer {...axisFixture(WINDOW_24_ALL_NAMED)} now={FIXTURE_NOW} />,
+    )
+    const indices = axisTickIndices(container)
+    expect(indices.at(-1)).toBe(WINDOW_24_ALL_NAMED.length - 1)
+    const strides = new Set(indices.slice(1).map((v, i) => v - indices[i]))
+    expect(strides.size, `uneven axis: ${indices.join(",")}`).toBe(1)
+  })
+
+  it("keeps the name of a tick it did not draw reachable on the tick's own bars", () => {
+    const { container } = render(
+      <PanelRenderer {...axisFixture(WINDOW_24_ALL_NAMED)} now={FIXTURE_NOW} />,
+    )
+    const titles = Array.from(container.querySelectorAll('[data-slot="series-bar"] title')).map(
+      (t) => t.textContent ?? "",
+    )
+    // "-110s" is not on the axis at this width; its bar still names it.
+    expect(titles.some((t) => t.includes("-110s"))).toBe(true)
+  })
+
+  it("names the series and the value, and nothing false, on a bar with no category name", () => {
+    const { container } = render(<PanelRenderer {...axisFixture([null, "now"])} now={FIXTURE_NOW} />)
+    const title = container.querySelector('[data-slot="series-bar"] title')!.textContent ?? ""
+    expect(title).toContain("s1")
+    expect(title).toContain("ms")
+    expect(title).not.toMatch(/·\s*:/) // no empty category between the separators
+  })
+
+  it("says in the accessible summary that the axis was thinned, and that the data was not", () => {
+    const { container } = render(
+      <PanelRenderer {...axisFixture(WINDOW_24_ALL_NAMED)} now={FIXTURE_NOW} />,
+    )
+    const label = container.querySelector('svg[data-slot="series-chart"]')!.getAttribute("aria-label") ?? ""
+    expect(label).toContain("24 categories")
+    expect(label).toMatch(/every point is drawn/)
+  })
+
+  it("leaves an axis that fits alone", () => {
+    const { container } = render(<PanelRenderer {...seriesFixtures.fresh} now={FIXTURE_NOW} />)
+    expect(axisLabels(container)).toEqual(["mon", "tue", "wed", "thu", "fri"])
+    expect(
+      container.querySelector('svg[data-slot="series-chart"]')!.getAttribute("aria-label"),
+    ).not.toMatch(/every point is drawn/)
+  })
+})
+
+describe("planAxis", () => {
+  it("draws every named tick when they all fit", () => {
+    const plan = planAxis(["mon", "tue", "wed", "thu", "fri"])
+    expect(plan.ticks).toEqual(["mon", "tue", "wed", "thu", "fri"])
+    expect(plan.thinned).toBe(false)
+    expect(plan.named).toBe(5)
+  })
+
+  it("counts the unnamed ticks as categories and never as labels", () => {
+    const plan = planAxis(WINDOW_12)
+    expect(plan.ticks).toHaveLength(12)
+    expect(plan.named).toBe(5)
+    expect(plan.drawn).toBe(5)
+    expect(plan.thinned).toBe(false)
+  })
+
+  it("thins a fully named window and reports that it did", () => {
+    const plan = planAxis(WINDOW_24_ALL_NAMED)
+    expect(plan.named).toBe(24)
+    expect(plan.drawn).toBeLessThan(24)
+    expect(plan.thinned).toBe(true)
+    expect(plan.ticks).toHaveLength(24)
+  })
+
+  it("survives an axis with no name on it — the server refuses one, a stored payload may not", () => {
+    const plan = planAxis([null, null, null])
+    expect(plan.drawn).toBe(0)
+    expect(plan.named).toBe(0)
+    expect(plan.thinned).toBe(false)
+    expect(plan.ticks).toEqual([null, null, null])
+  })
+
+  it("draws the one label it has rather than none, however long it is", () => {
+    const labels = Array.from({ length: 50 }, (_, i) => (i === 20 ? "a very long category name" : null))
+    const plan = planAxis(labels)
+    expect(plan.drawn).toBe(1)
+    expect(plan.ticks[20]).toBeTruthy()
+  })
+
+  it("truncates long names on a short axis rather than dropping any of them", () => {
+    // Five categories with long names: each has a group's width to itself, so
+    // truncation is legible and thinning would cost a whole category its name.
+    // Thinning is the last resort for legibility, not the first for length.
+    const plan = planAxis(Array.from({ length: 5 }, (_, i) => `response-latency-p9${i}`))
+    expect(plan.drawn).toBe(5)
+    expect(plan.thinned).toBe(false)
+    for (const t of plan.ticks) {
+      expect(t!.endsWith("…")).toBe(true)
+      expect(t!.length).toBeGreaterThanOrEqual(AXIS_MIN_LABEL_CHARS)
+    }
+  })
+
+  it("gives a lone label the whole plot rather than a group's share of it", () => {
+    const plan = planAxis(["x".repeat(60)])
+    expect(plan.ticks[0]).toBe("x".repeat(60))
   })
 })
 

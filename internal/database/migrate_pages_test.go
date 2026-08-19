@@ -314,6 +314,14 @@ func tableIndexes(t *testing.T, db *sql.DB, table string) []indexFacts {
 		}
 		out = append(out, indexFacts{name: name, unique: unique == 1})
 	}
+	// rows.Err(), not just rows.Next() going false: iteration also stops on an
+	// error, and without this an index list truncated mid-read would be
+	// asserted against as if it were the whole list — a test that passes by
+	// seeing less than there is. tableColumns above already checks it.
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("iterate index_list(%s): %v", table, err)
+	}
 	rows.Close()
 
 	for i := range out {
@@ -329,6 +337,10 @@ func tableIndexes(t *testing.T, db *sql.DB, table string) []indexFacts {
 				t.Fatalf("scan index_info(%s): %v", out[i].name, err)
 			}
 			out[i].columns = append(out[i].columns, name.String)
+		}
+		if err := cols.Err(); err != nil {
+			cols.Close()
+			t.Fatalf("iterate index_info(%s): %v", out[i].name, err)
 		}
 		cols.Close()
 	}

@@ -234,6 +234,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "page.panel.recovered",
       "page.wake.fired",
       "page.action.dispatched",
+      "page.spec.changed",
     ],
   },
 ]

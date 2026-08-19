@@ -20,16 +20,21 @@ package api
 //	write    — may edit the page spec. Authority over arrangement, never over
 //	           content (§7.1b rule 2).
 //
-// One reading had to be pinned, because §7 states the panel rule precisely and
-// leaves the PAGE rule implicit: a page's STRUCTURE is visible to every member
-// of its workspace, and its DATA is not. §7.1 rule 2 makes the panel's crew
-// the ACL and §7.1b rule 2 describes an agent that may arrange a page while
-// seeing "the sealed placeholder" for panels it is not entitled to read — a
-// description that only makes sense if reaching the page is the easy half and
-// reading a panel is the guarded one. So membership of the workspace reaches
-// the page; membership of the owning crew reaches the panel; and `read` grants
-// exist for the subjects that follow later (a public token, §7.3), not to keep
-// colleagues out of a board they can already see the shape of.
+// §7 states the panel rule precisely and leaves the PAGE rule implicit, so the
+// page rule is written down here, in one function (canSeePage) rather than in
+// each endpoint's head:
+//
+//	a page is reached by its owner, by a workspace ADMIN/OWNER, by a member of
+//	any crew that owns one of its panels, and by whoever a live grant names.
+//
+// An earlier build let membership of the workspace reach every page, which made
+// `read` grants decide nothing — the contradiction pageReachRule
+// (pages_grants_authz.go) records in full, along with why the PRD's own
+// sentences ("three verbs, not one"; "the owner can grant read and write to
+// others") cannot be satisfied under that reading. Reaching the page is still
+// the easy half and reading a panel still the guarded one: a caller who reaches
+// a page they hold no crew membership on is served §11b decision 14's sealed
+// placeholders, which is exactly the shape §7.1b rule 2 describes.
 
 import "context"
 
@@ -90,6 +95,77 @@ func (h *PageHandler) canSeePanel(viewer *pageViewer, p *panelRecord) bool {
 		return true
 	}
 	return viewer.Crews[p.OwnerCrewID]
+}
+
+// pageReachedWithoutGrant answers the part of page reachability that needs no
+// grant lookup: ownership, the workspace role, and "may this viewer see any
+// panel on this page at all".
+//
+// The panel arm goes through canSeePanel rather than testing viewer.Crews
+// itself, so that "you can see a panel on it" and "you can open it" can never
+// disagree — a viewer served a panel through a path that refused them the page
+// would be a bug in whichever of the two was written second.
+//
+// A nil viewer means an unscoped render (Create and Update echo the page back
+// to the author, Import to the importer); those callers have already made their
+// own decision and pageDocument serves them everything.
+func (h *PageHandler) pageReachedWithoutGrant(rec *pageRecord, panels []*panelRecord, viewer *pageViewer) bool {
+	if viewer == nil {
+		return true
+	}
+	if canRole(viewer.Role, "manage") {
+		return true
+	}
+	// Ownership, from the standing already loaded: owner_user_id is the caller,
+	// or owner_crew_id is a crew they belong to (§7.1 rule 1's xor).
+	if rec.OwnerUserID != "" && rec.OwnerUserID == viewer.UserID {
+		return true
+	}
+	if rec.OwnerCrewID != "" && viewer.Crews[rec.OwnerCrewID] {
+		return true
+	}
+	for _, p := range panels {
+		if h.canSeePanel(viewer, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// canSeePage is the page-level twin of canSeePanel: may this caller open this
+// page at all. See pageReachRule (pages_grants_authz.go) for the decision it
+// implements and the endpoints that must call it.
+//
+// A false is a 404, not a 403 — a page outside the caller's reach must look
+// exactly like one that does not exist, or the endpoint becomes an existence
+// oracle for every page in the workspace. That is the same posture §11b
+// decision 14 takes for a panel, one level up.
+//
+// The grant lookup is last because it is the only arm that costs a query, and
+// it goes through grantsFor so the issuer's use-time standing is re-derived
+// here exactly as it is for `produce` and `write` (§7.1b).
+func (h *PageHandler) canSeePage(ctx context.Context, wsID string, rec *pageRecord,
+	panels []*panelRecord, viewer *pageViewer) (bool, error) {
+	if h.pageReachedWithoutGrant(rec, panels, viewer) {
+		return true, nil
+	}
+	grants, err := h.grantsFor(ctx, wsID, rec, viewer)
+	if err != nil {
+		return false, err
+	}
+	return anyGrantReachesPage(grants), nil
+}
+
+// anyGrantReachesPage is the shared verdict over an already-resolved grant set,
+// so the single-page path (canSeePage) and the bulk listing path
+// (PageHandler.List) reach it by the same route.
+func anyGrantReachesPage(grants []pageGrant) bool {
+	for _, g := range grants {
+		if reachesPage(g.Level) {
+			return true
+		}
+	}
+	return false
 }
 
 // pageGrant is one row of page_grants as the checks read it.

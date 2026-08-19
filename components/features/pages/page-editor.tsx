@@ -85,6 +85,17 @@ export interface PageWritePanel {
   icon?: string
   tab?: string
   /**
+   * The third authored scalar (§12 v1.1, internal/pages/refresh.go): the event
+   * that RUNS this panel's producer, `on:wake` or `on:panels-changed`.
+   *
+   * A scalar and not a pass-through key, so it travels with the icon and the
+   * tab rather than with the gates — but it is here for the gates' reason,
+   * sharpened: a save that drops it deletes the `automations` row compiled from
+   * it, and the page then looks exactly as it did while quietly never running
+   * the producer again.
+   */
+  refresh?: string
+  /**
    * The pass-through half — §8b.1 buttons, §5 wake gates, §4 rule 4's failure
    * route. Carried VERBATIM and typed loosely on purpose, the way
    * `cmd_page.go`'s `pageWritePanelJSON` carries `[]pages.PanelAction` without
@@ -316,6 +327,9 @@ export function pageDocumentText(page: WirePage): string {
         if (typeof p.tab === "string" && p.tab.trim() !== "") out.tab = p.tab.trim()
         out.owner = p.owner ?? ""
         out.producer = p.producer ?? ""
+        // Directly under `producer`, where the PRD's own example puts it (§6):
+        // it names what runs that producer, and the two are one sentence.
+        if (typeof p.refresh === "string" && p.refresh.trim() !== "") out.refresh = p.refresh.trim()
         out.sla = formatSlaSeconds(sla ?? 0)
         if (typeof p.span === "number" && p.span > 0) out.span = p.span
         if ((p as { public?: boolean }).public) out.public = true
@@ -425,6 +439,10 @@ export function parsePageBuffer(text: string): PageBufferResult {
     // with the one that matters (§10b.1).
     if (asString(p.icon) !== "") panel.icon = asString(p.icon)
     if (asString(p.tab) !== "") panel.tab = asString(p.tab)
+    // The refresh trigger, on the same terms: the set is closed server-side and
+    // its refusals name the vocabulary, the producer kinds it can run and the
+    // gate it needs to fire from. None of that is re-decided here.
+    if (asString(p.refresh) !== "") panel.refresh = asString(p.refresh)
     // `sla_seconds` is honoured when someone writes the canonical form
     // directly — a document round-tripped out of `crewship page get -f json`
     // carries it — and `sla` is the sugar. Neither is invented when both are
@@ -778,7 +796,15 @@ export function PageEditor({
   // way to lose a spec that was never on disk.
   const [confirmDiscard, setConfirmDiscard] = React.useState(false)
   const requestClose = () => {
-    if (dirty && !save.isPending) {
+    // `dirty || save.isPending`, not `dirty && !save.isPending`.
+    //
+    // The guard was skipped during a save — the one moment it is most needed.
+    // The Save button is disabled while pending, but the backdrop and Cancel
+    // are not, so: type a spec, Save, click Cancel, and the editor unmounts
+    // with the request still in flight. If the server then refuses it,
+    // setRefusal runs on an unmounted component (a no-op) and the buffer the
+    // author would have edited is gone — the #1563 rule this block cites.
+    if (dirty || save.isPending) {
       setConfirmDiscard(true)
       return
     }

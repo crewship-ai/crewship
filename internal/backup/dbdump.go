@@ -372,6 +372,39 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "pipeline_run_step_outputs":
 		// No workspace_id column — scoped via its run.
 		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_versions":
+		// Scoped through the page, not through the author. author_agent_id is
+		// NULL for every version a HUMAN saved — which is most of them — and
+		// the automatic walk preferred it because agents reach a workspace in
+		// one hop while pages take two. A workspace's page history would have
+		// backed up containing only the edits its agents made.
+		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_panel_data", "page_panel_alerts":
+		// No workspace_id column, and these two MUST be named here rather than
+		// left to DiscoverScopedTables, because the automatic walk gets them
+		// wrong in the quietest possible way.
+		//
+		// Both carry a second, NULLABLE foreign key that reaches a
+		// workspace-scoped table in fewer hops than their real parent does:
+		// page_panel_data.producer_run_id → pipeline_runs, and
+		// page_panel_alerts.issue_id → missions. The walk keeps the SHORTEST
+		// path, so it picked those — and a filter on a nullable column omits
+		// every row where the column is NULL.
+		//
+		// That is not an edge case, it is the ordinary one. producer_run_id is
+		// NULL for every producer that is not a routine — a script on a cron, a
+		// container agent, an inbound webhook, which is most of them — and
+		// issue_id is NULL for any lapse on a panel that declares no
+		// on_failure. Backing up such a workspace dumped ZERO payload rows, the
+		// bundle verified clean, and the restore returned pages reading
+		// never_produced: the exact outcome intent.go classifies these tables
+		// IntentInclude to prevent.
+		//
+		// Scoped through the panel, whose FK to page_panels is NOT NULL, and
+		// onward through the page. TestScopedFilters_NeverTraverseANullableFK
+		// keeps the next such table from repeating it.
+		return `panel_id IN (SELECT id FROM page_panels WHERE page_id IN ` +
+			`(SELECT id FROM pages WHERE workspace_id = ?))`, []any{workspaceID}, true
 	case "chat_participants", "chat_read_cursors":
 		// No workspace_id column — scoped via the chat.
 		return "chat_id IN (SELECT id FROM chats WHERE workspace_id = ?)", []any{workspaceID}, true

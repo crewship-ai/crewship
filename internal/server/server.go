@@ -31,6 +31,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/llmproxy"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/pages"
 	"path/filepath"
 
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -607,6 +608,25 @@ func (s *Server) mountAPIRouter(
 			"fix", "export CREWSHIP_PUBLIC_URL=http://<reachable-host>:8080")
 	}
 	opts = append(opts, goapi.WithPortExposePublicURL(publicURL))
+	// Pages' embed.v1 allow-list (docs/prd/pages.md §3.1). Installed once, here,
+	// because internal/pages deliberately reads no environment of its own — a
+	// validator whose answer depends on an ambient variable cannot be tested at
+	// its boundary.
+	//
+	// A malformed list refuses the WHOLE policy rather than skipping the bad
+	// entry, and we keep going with embeds disabled instead of failing the boot:
+	// a typo in one URL must not take an instance down, and the closed policy is
+	// the safe end of that trade. An embed panel then cannot even be declared,
+	// so nobody gets a page that silently draws nothing.
+	if embedPolicy, err := pages.EmbedPolicyFromEnv(); err != nil {
+		logger.Error("CREWSHIP_PAGES_EMBED_SOURCES is invalid — embed panels stay disabled",
+			"error", err)
+	} else {
+		pages.SetEmbedPolicy(embedPolicy)
+		if embedPolicy.Enabled() {
+			logger.Info("pages: embed sources configured", "count", embedPolicy.Len())
+		}
+	}
 	// Crew container Docker network — must match what the orchestrator
 	// attaches containers to. Without this, multi-instance dev.sh
 	// deployments (crewship-1-agents, crewship-2-agents, ...) would
