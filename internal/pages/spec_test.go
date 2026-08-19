@@ -79,10 +79,41 @@ func TestParseDocument_AcceptsThePRDExample(t *testing.T) {
 		t.Errorf("producer = (%q, %q), want (script, watch-services.sh)", kind, ref)
 	}
 
-	// The second panel declares no span. It must land on the full-width
-	// default rather than on 0, which would render a zero-width panel.
+	// The second panel declares span: 4 and keeps it. This asserts that a
+	// DECLARED span survives parsing; the default is a different claim and is
+	// tested on its own below, because this comment used to say it covered
+	// both and it never did — the fixture has no panel without a span.
 	if got := doc.Spec.Panels[1].Span; got != 4 {
 		t.Errorf("panel 2 span = %d, want 4", got)
+	}
+}
+
+// A panel that declares no span gets the full width of the grid, not zero.
+//
+// Zero is the field's zero value and would render a panel with no width at
+// all, so "absent" and "0" must not be the same outcome — the same distinction
+// §9b.4 draws between a null and a measured zero, one layer down.
+func TestParseDocument_PanelWithNoSpanGetsTheGridDefault(t *testing.T) {
+	t.Parallel()
+
+	doc, err := ParseDocument([]byte(`apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Flotila
+  slug: flotila
+spec:
+  panels:
+    - id: sluzby
+      schema: status.v1
+      owner: crew/lookout
+      producer: script/watch.sh
+      sla: 30s
+`))
+	if err != nil {
+		t.Fatalf("ParseDocument: %v", err)
+	}
+	if got := doc.Spec.Panels[0].Span; got != DefaultSpan {
+		t.Errorf("span = %d for a panel that declares none, want DefaultSpan (%d)", got, DefaultSpan)
 	}
 }
 

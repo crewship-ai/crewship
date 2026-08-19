@@ -230,6 +230,18 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "provisioning.build_failed",
       "sidecar.stale",
       "image.stale",
+      // Pages (docs/prd/pages.md §5, §7.1b) — no dedicated facet yet, so
+      // they land here explicitly rather than through the unclaimed
+      // fallback the backend-parity ratchet test forbids.
+      "page.produce_denied",
+      "page.panel.updated",
+      "page.grant_added",
+      "page.grant_removed",
+      "page.panel.stale",
+      "page.panel.recovered",
+      "page.wake.fired",
+      "page.action.dispatched",
+      "page.spec.changed",
     ],
   },
 ]

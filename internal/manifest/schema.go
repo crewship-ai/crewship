@@ -42,6 +42,10 @@ const APIVersion = "crewship/v1"
 // rules, recurring issues, saved views, feature flags, instance
 // settings, recipes, crew templates, connectors, and hooks. Their
 // document types live under internal/manifest/kinds.
+//
+// Page is the 21st kind (docs/prd/pages.md §12 v1). Its spec type is
+// the one internal/pages already owns, so a manifest page and a
+// `crewship page create --file` page are the same document.
 const (
 	KindCrew             = "Crew"
 	KindAgent            = "Agent"
@@ -63,7 +67,24 @@ const (
 	KindHook             = "Hook"
 	KindSkill            = "Skill"
 	KindIssue            = "Issue"
+	KindPage             = "Page"
 )
+
+// knownKindList is the human-readable roster the parser prints when a
+// document names no kind, or names one that does not exist.
+//
+// It is ONE string because it used to be two: the "missing kind:" error
+// and the "unsupported kind" error each carried their own hand-typed
+// copy of the same twenty names (parse.go:381,383), and adding a kind
+// meant remembering both. A single const cannot drift from itself.
+// Built from the constants above so a renamed kind cannot leave a stale
+// name behind either.
+const knownKindList = KindCrew + ", " + KindAgent + ", " + KindIntegration + ", " +
+	KindWorkspace + ", " + KindProject + ", " + KindLabel + ", " + KindMilestone + ", " +
+	KindWorkflowTemplate + ", " + KindTriageRule + ", " + KindRecurringIssue + ", " +
+	KindSavedView + ", " + KindRoutine + ", " + KindFeatureFlag + ", " + KindInstanceSetting + ", " +
+	KindRecipe + ", " + KindCrewTemplate + ", " + KindConnector + ", " + KindHook + ", " +
+	KindSkill + ", " + KindIssue + ", " + KindPage
 
 // Document is the discriminated top-level shape. apiVersion + kind
 // drive which branch of Spec is populated. The raw YAML may have one

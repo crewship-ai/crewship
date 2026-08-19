@@ -129,6 +129,7 @@ These are not configuration — Crewship sets them on the crew container itself,
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_PUBLIC_URL` | (unset) | Externally-reachable base URL of the Crewship server. Required for password-recovery emails and for `/expose-port` (port-exposed agent containers). Without it the recovery email link is degraded and `/expose-port` returns `503` with a `CREWSHIP_PUBLIC_URL not set` log line. |
+| `CREWSHIP_PAGES_EMBED_SOURCES` | (unset) | Comma-separated `name=https://url` pairs a human has vetted as embeddable in a Pages `embed.v1` panel. Unset means embed panels are disabled and a page spec cannot declare one. A payload names one of these **names**, never a URL — the URL is resolved server-side on read, so nothing a producer pushes can point a reader's browser somewhere new. One malformed entry refuses the whole list rather than being skipped; only `https` is accepted, and a source resolving to this instance's own origin is refused. |
 
 ## Origin enforcement (CORS / EnforceOrigin)
 

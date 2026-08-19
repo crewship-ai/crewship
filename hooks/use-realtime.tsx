@@ -85,6 +85,12 @@ export type RealtimeEventType =
   // a sidebar open elsewhere repaints the row instead of polling for it.
   // snake_case matches the backend broadcast, like the assignment_* events.
   | "chat_renamed"
+  // A producer pushed a panel payload. Broadcast on the per-page channel
+  // `page:{pageId}` and carrying NO payload, only "panel X changed" — the
+  // client re-reads through the normal authorised path so the per-panel
+  // permission filter cannot be bypassed by a broadcast reaching a subscriber
+  // who should not see the data (docs/prd/pages.md §10b.5b).
+  | "page.panel.updated"
   // Feed-relevant journal rows forwarded by the journal→WS bridge
   // (internal/server/journal_ws_bridge.go), carrying the same serialized shape
   // the SSE stream serves (lib/types/journal.ts). NOTE: this is opt-in
@@ -148,6 +154,10 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   // sidebar but the one that issued the PATCH keeps the old title until a
   // reload.
   "chat_renamed",
+  // Pages liveness. handleMessage drops any type missing from this set, so
+  // without the entry an open page would simply never update — the exact
+  // "easy to forget" step docs/prd/pages.md §10b.5b calls out by name.
+  "page.panel.updated",
   // Journal entries forwarded by the journal→WS bridge on the opt-in
   // `journal:{workspaceId}` channel. Allowlisted so a future consumer's
   // subscription dispatches them; nothing subscribes to that channel yet, so
@@ -319,6 +329,21 @@ export function useRealtime(): RealtimeContextValue {
 }
 
 /**
+ * Provider-tolerant status read — the `useRealtimeEventSafe` of the connection
+ * state. Returns the socket's status, or null when no RealtimeProvider is
+ * mounted (a unit test, a public surface), which callers must treat as "not
+ * connected" rather than "unknown, probably fine".
+ *
+ * Exists because a surface with NO poll backstop has to be able to say so:
+ * `RealtimeStatusBanner` shows the app-wide outage after three seconds, but a
+ * per-page indicator needs the same state without throwing outside the
+ * provider (`components/features/pages/live-indicator.tsx`).
+ */
+export function useRealtimeStatusSafe(): WSStatus | null {
+  return useContext(RealtimeContext)?.status ?? null
+}
+
+/**
  * Subscribe to a specific realtime event type.
  * The callback is called whenever the event fires.
  * Returns the latest event of this type (or null).
@@ -363,6 +388,21 @@ export function useRealtimeChannel(channel: string | null): void {
   const { subscribeChannel } = useRealtime()
   useEffect(() => {
     if (!channel) return
+    return subscribeChannel(channel)
+  }, [channel, subscribeChannel])
+}
+
+/**
+ * Provider-tolerant channel subscription — the `useRealtimeEventSafe` of
+ * channels. A data hook that subscribes to a per-record channel (Pages'
+ * `page:{pageId}`, §10b.5b) is otherwise untestable without mounting the
+ * provider, and mounting the provider in a unit test opens a socket.
+ */
+export function useRealtimeChannelSafe(channel: string | null): void {
+  const ctx = useContext(RealtimeContext)
+  const subscribeChannel = ctx?.subscribeChannel
+  useEffect(() => {
+    if (!channel || !subscribeChannel) return
     return subscribeChannel(channel)
   }, [channel, subscribeChannel])
 }

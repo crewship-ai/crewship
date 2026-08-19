@@ -164,6 +164,22 @@ export const JOURNAL_ENTRY_TYPES = [
   // rather than in System where they would be filed and forgotten.
   "automation.throttled",
   "automation.depth_exceeded",
+  // Pages — docs/prd/pages.md §5, §7.1b. Unknown types are forwarded to the
+  // activity feed by design (internal/journal/feed_filter.go:33-35).
+  "page.produce_denied",
+  "page.panel.updated",
+  "page.grant_added",
+  "page.grant_removed",
+  // §4 freshness verdicts and §5's wake gates.
+  "page.panel.stale",
+  "page.panel.recovered",
+  "page.wake.fired",
+  // §8b.2 — one entry per action click, written by the dispatch handler
+  // (internal/api/pages_actions.go). The audit trail for "a button on a page
+  // started a run" is the reason §8 rule 8 treats the platform's own agent as
+  // an untrusted producer: the record has to exist regardless of who clicked.
+  "page.action.dispatched",
+  "page.spec.changed",
 ] as const
 
 export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number]

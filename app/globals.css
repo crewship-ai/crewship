@@ -478,6 +478,89 @@ body {
     line-height: 1rem;
   }
 
+  /* ── The Pages register ──
+     A third named register, for the panel surface. Same standing as the
+     navigation register above: not an exception to the roles, a NAMED set of
+     roles for a genuinely different reading task.
+
+     A panel is a CARD OF EVIDENCE. Four or five of them tile a page, each one
+     answering a question a producer pushed the answer to, and every panel
+     carries the same four runs of text in the same order — what this is, what
+     it says, the qualifier, and who produced it when. That repetition is the
+     whole reason this register exists: the roles are the same on every panel of
+     every schema, so they get names once here rather than a size each, in each
+     schema's component, eleven times over.
+
+       .type-page-label    11px UPPERCASE  panel header, card header, column head
+       .type-page-value    14px            the content: cells, rows, prose, banners
+       .type-page-meta     12px            the qualifier: status word, age, counts, hints
+       .type-page-stamp    11px mono       machine text: ids, slugs, run ids, versions
+       .type-page-metric   30px            the one big number, and the em dash that
+                                           stands in for it
+
+     **Every size here is a house token, not a number.** That is the point of
+     the block and the reason it is not a second font: Pages was already off the
+     scale — `text-[11px]` in eleven files, `text-[10px]` in three, below the
+     floor `--typo-micro` documents — and the fix for a surface that spelled its
+     sizes out is to give its roles names, not to give it a typeface. Change
+     `--typo-*` above and Pages moves with the product; it cannot drift again
+     without editing this block, which is exactly the property it lacked.
+
+     Two judgements are recorded here rather than left to each component:
+
+     **The qualifier is 12px, not 11.** Every one of those `text-[11px]` runs
+     was a supporting line — the status word, the age, the empty hint, a count —
+     and a panel grid is mostly supporting lines. The comment on the roles above
+     already settled this argument once, out loud: at the smaller size *"a whole
+     page of them read as fine print rather than as dense"*, and *"the density
+     this product wants comes from how much fits in a card, not from how small
+     the letters are."* Pages was the surface that had not heard it. 11px stays
+     for the two runs that are genuinely not meant to be read line by line —
+     the uppercase label you aim at, and the machine stamp you go looking for —
+     and both sit AT the documented floor rather than under it.
+
+     **The value is 14px at 1.25rem, which is `--typo-body` exactly.** Two 14px
+     idioms had grown inside Pages: `.type-row` at 1.3rem leading in
+     `status-panel.tsx`, and `text-body` at 1.25rem in the collapsed table
+     cards. Same size, different leading, no rule about which wins. `text-body`
+     wins, for two reasons that both point the same way: it is the token that
+     tracks `--typo-body` (`.type-row` hard-codes 0.875rem and would sit still
+     through a scale change), and `components/layout/property-row.tsx` — the
+     product's canonical label/value pair, which the table card list is bound to
+     verbatim — is written in it. A register whose value role disagreed with
+     PropertyRow would make a collapsed table read as a different product from
+     the detail pane beside it, which is the exact defect this surface was
+     already fixed for once. */
+  .type-page-label {
+    font-size: var(--typo-micro);
+    line-height: var(--typo-micro-lh);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .type-page-value {
+    font-size: var(--typo-body);
+    line-height: var(--typo-body-lh);
+  }
+  .type-page-meta {
+    font-size: var(--typo-label);
+    line-height: var(--typo-label-lh);
+  }
+  .type-page-stamp {
+    font-family: var(--font-mono);
+    font-size: var(--typo-micro);
+    line-height: var(--typo-micro-lh);
+  }
+  /* `leading-none` and tabular figures ride along, because a metric that
+     changes in place must not jitter and a 30px number with 2.25rem of leading
+     puts a visible gap between itself and its unit. */
+  .type-page-metric {
+    font-size: var(--typo-display);
+    line-height: 1;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
   /* Hairline: 211 uses of border-white/10 and 53 of border-white/8 existed
      because the divider inside a card had no name — only the card's own
      border did. Now it has one. */
@@ -706,5 +789,117 @@ body {
   .agent-active-card,
   .agent-active-dot {
     animation: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Print (PRD §10b.8) — "send the monthly close to the accountant" via the
+ * browser's own Print-to-PDF. Server-side PDF generation is explicitly out
+ * of scope; this is the whole feature. Every rule below is gated on
+ * `@media print` and changes nothing on screen.
+ *
+ * Four things a printed page must do that the screen view does not:
+ *
+ *   1. Paper is white — force the LIGHT palette even though the app always
+ *      carries `html.dark` (app/layout.tsx:31). `html.dark` (tag+class,
+ *      specificity 0-1-1) outranks the bare `.dark { … }` rule above
+ *      (0-1-0) regardless of where either is declared in this file, so this
+ *      wins without relying on source order.
+ *      NOTE: --chart-1..5 are deliberately NOT listed here. They are
+ *      currently identical between `:root` and `.dark` (a known bug fixed on
+ *      a different branch, #1940) — touching them here would conflict with
+ *      that PR for zero visual effect today.
+ *   2. The app chrome (icon rail, top toolbar, operational banners) is not
+ *      part of the document being printed.
+ *   3. Pages' 12-column grid (`components/features/pages/page-view.tsx`)
+ *      collapses to one column, and a panel breaks BETWEEN panels, never
+ *      through one. The panel components already carry `print:grid-cols-1` /
+ *      `print:break-inside-avoid` Tailwind utilities for this; the rules
+ *      below key off the same elements' stable `data-slot` attributes as a
+ *      second, independent path to the same result — including the specific
+ *      failure mode the grid's own comment already documents (a
+ *      `md:col-span-8` cell does not clamp inside a 1-column grid, it
+ *      creates seven implicit columns) — because a print preview is
+ *      typically rendered at a desktop-width viewport where `md:` utilities
+ *      are still active.
+ *   4. Every panel's provenance footer and age print, even where the screen
+ *      view only shows the age once a panel goes stale. A printed number
+ *      with no date next to it is the exact dishonesty §4 exists to
+ *      prevent.
+ * ───────────────────────────────────────────────────────────────────────── */
+@media print {
+  /* 1. Light palette, unconditionally — values copied verbatim from the
+     light block at the top of this file. Only the tokens print actually
+     uses (backgrounds, text, borders); --chart-1..5 excluded (see above). */
+  :root,
+  html.dark {
+    color-scheme: light;
+    --background: oklch(0.9911 0 0);
+    --foreground: oklch(0.1994 0.0470 270.6494);
+    --card: oklch(0.9851 0 0);
+    --card-foreground: oklch(0.1994 0.0470 270.6494);
+    --popover: oklch(1.0000 0 0);
+    --popover-foreground: oklch(0.1994 0.0470 270.6494);
+    --primary: #0E6BE8;
+    --primary-foreground: oklch(1.0000 0 0);
+    --primary-hover: #1E7BFE;
+    --secondary: oklch(0.1994 0.0470 270.6494);
+    --secondary-foreground: oklch(1.0000 0 0);
+    --muted: oklch(1.0000 0 0);
+    --muted-foreground: oklch(0.1994 0.0470 270.6494);
+    --muted-foreground-soft: oklch(0.50 0.03 270);
+    --accent: oklch(1.0000 0 0);
+    --accent-foreground: #0E6BE8;
+    --border: oklch(0.9212 0.0033 17.2170);
+    --input: oklch(0.8452 0 0);
+    --ring: #0E6BE8;
+    --surface-subtle: oklch(0.975 0 0);
+    --surface-raised: oklch(1 0 0);
+  }
+
+  /* Chrome strips background colours from print by default; the freshness
+     dots and status tints (§3: "glyph + text, never colour alone" — colour
+     is a bonus, not the only signal, so losing it is not a correctness bug,
+     but keeping it is strictly better on a monthly close a human is about to
+     read) survive when told to. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* 2. App chrome. The icon rail is `[data-slot="sidebar"]`
+     (components/ui/sidebar.tsx). The top toolbar and every operational
+     banner (Runtime/Update/RealtimeStatus) are siblings rendered before the
+     routed page content inside `<main data-slot="sidebar-inset">`
+     (app/(dashboard)/layout.tsx) — the content div is always last, so this
+     holds regardless of which banners happen to be mounted. */
+  [data-slot="sidebar"] {
+    display: none !important;
+  }
+  [data-slot="sidebar-inset"] > *:not(:last-child) {
+    display: none !important;
+  }
+
+  /* 3. Single-column grid, and no cell allowed to span past it. */
+  [data-slot="panel-grid"] {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+  [data-slot="panel-cell"] {
+    grid-column: 1 / -1 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  [data-slot="panel"] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* 4. Provenance and age are the honesty, not decoration — never let them
+     print dimmer than the body text around them. */
+  [data-slot="panel-provenance"],
+  [data-slot="panel-age"] {
+    opacity: 1 !important;
+    color: var(--foreground) !important;
   }
 }

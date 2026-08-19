@@ -1,7 +1,9 @@
 package pages
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -73,6 +75,27 @@ type PanelSpec struct {
 	Schema PanelSchema `json:"schema" yaml:"schema"`
 	Title  string      `json:"title,omitempty" yaml:"title,omitempty"`
 
+	// Icon is the panel's glyph, from the closed set in icons.go. Optional:
+	// a panel that declares none keeps the icon its schema implies. It exists
+	// because a page with three status.v1 panels on it had three identical
+	// headers, and the schema is the wrong thing to derive identity from —
+	// "is it running" and "who is on call" are the same SHAPE and not the same
+	// subject. Closed for the reason PanelSchema is: an open string is a name
+	// the client cannot draw, and a blank header is a quieter failure than an
+	// unknown schema, which at least renders a fallback that says so.
+	Icon PanelIcon `json:"icon,omitempty" yaml:"icon,omitempty"`
+
+	// Tab is the name on the tab bar this panel appears under. Optional: a page
+	// where no panel declares one has no bar and renders exactly as it did
+	// before tabs existed.
+	//
+	// One key on the panel and no `tabs:` block, so adding a tab is one word
+	// rather than a new section — and so there is no second list that can
+	// disagree with the panels about which of them exists. Bar order is first
+	// appearance; a panel with no tab lands on the first one. The whole rule,
+	// and the reason a tab is more than a layout choice, is in tabs.go.
+	Tab string `json:"tab,omitempty" yaml:"tab,omitempty"`
+
 	// Owner is the permission anchor, not a label: "crew/<slug>". A panel the
 	// viewer may not see is filtered server-side before serialisation and
 	// leaves a sealed placeholder in its grid slot, so the page has the same
@@ -96,6 +119,156 @@ type PanelSpec struct {
 	// action over panels the author has not looked at. Only a human may set it
 	// — an agent can build the page but cannot widen its reach.
 	Public bool `json:"public,omitempty" yaml:"public,omitempty"`
+
+	// Actions are the buttons this panel offers (§8b.1). They are DECLARED
+	// here, by a human editing the page, and that is the whole security
+	// property: the click posts an action id, the server resolves it against
+	// this stored list, and the wire format has no field in which a caller
+	// could name a routine of its own. An agent may write a narrative onto a
+	// panel; it can never author the button underneath it (§8 rule 4).
+	Actions []PanelAction `json:"actions,omitempty" yaml:"actions,omitempty"`
+
+	// OnFailure says what happens when this panel stops reporting (§4 rule 4).
+	// A page that quietly goes stale must generate work for a human rather
+	// than sit there looking plausible.
+	OnFailure *PanelOnFailure `json:"on_failure,omitempty" yaml:"on_failure,omitempty"`
+
+	// Refresh names the event that RUNS this panel's producer (§12 v1.1, and
+	// the worked example at §6). It is a TRIGGER declaration, not a hint: a
+	// page holds no query and no datasource, so the only way a panel's
+	// contents change is a producer pushing to it, and a `refresh:` that does
+	// not run the producer cannot refresh anything.
+	//
+	// Closed, and refused at save time with the vocabulary named — the whole
+	// reasoning, and the four things it refuses, are in refresh.go. Like the
+	// gates it rides on, it is compiled into an `automations` row rather than
+	// into a second eventing path.
+	Refresh PanelRefresh `json:"refresh,omitempty" yaml:"refresh,omitempty"`
+
+	// Wake gates turn this panel from a display into a sensor (§5, §0.1): a
+	// threshold on the pushed payload wakes an agent, which writes its
+	// analysis back onto the same page. Each gate compiles to an `automations`
+	// row — the journal-event matcher that already exists — rather than to a
+	// second eventing path.
+	Wake []PanelWake `json:"wake,omitempty" yaml:"wake,omitempty"`
+}
+
+// PanelAction is one button (§8b.1).
+//
+// The vocabulary is the small set Block Kit, Adaptive Cards and amis arrived at
+// independently: an id, a label, a semantic style, an optional confirm step,
+// and a distinction between "this calls the server" and "this only affects the
+// client". Adaptive Cards' Action.Execute — a named remote operation — is the
+// direct analogue of "run this routine".
+type PanelAction struct {
+	// ID is unique within the page. It is what a click posts; see §8b.2.
+	ID string `json:"id" yaml:"id"`
+
+	// Kind is closed. "custom" resolves to a handler registered in our own
+	// client at build time — never to user-supplied code — and exists from day
+	// one on Airbnb's advice, because an extension point retrofitted later is
+	// an extension point bolted onto a shape that never expected it.
+	Kind PanelActionKind `json:"kind" yaml:"kind"`
+
+	Label string           `json:"label" yaml:"label"`
+	Style PanelActionStyle `json:"style,omitempty" yaml:"style,omitempty"`
+
+	// Confirm is drawn by host chrome, never by panel content (§8 rule 5), so
+	// an injected panel cannot fake or skip it.
+	Confirm *PanelActionConfirm `json:"confirm,omitempty" yaml:"confirm,omitempty"`
+
+	// Routine is the named operation a "call" runs. It is read from HERE at
+	// dispatch time and never from the request.
+	Routine string `json:"routine,omitempty" yaml:"routine,omitempty"`
+
+	// Params are fixed and author-controlled; Inputs are collected from the
+	// user and validated server-side against this declaration.
+	Params map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Inputs []PanelInput   `json:"inputs,omitempty" yaml:"inputs,omitempty"`
+
+	// Target is the panel ids a "toggle" shows or hides. Local only.
+	Target []string `json:"target,omitempty" yaml:"target,omitempty"`
+
+	// Ref is the internal entity a "link" points at — never a URL (§8 rule 3).
+	// The renderer builds the address. Slack AI's private-channel leak was a
+	// rendered link, and CamoLeak proved a trusted first-party proxy is not a
+	// defence, so the schema simply has nowhere to put one.
+	Ref *PanelEntityRef `json:"ref,omitempty" yaml:"ref,omitempty"`
+}
+
+// PanelActionKind is closed: a new kind is a server release.
+type PanelActionKind string
+
+const (
+	ActionCall   PanelActionKind = "call"
+	ActionLink   PanelActionKind = "link"
+	ActionToggle PanelActionKind = "toggle"
+	ActionCustom PanelActionKind = "custom"
+)
+
+// PanelActionStyle is the semantic triad all three mature formats converged on.
+type PanelActionStyle string
+
+const (
+	ActionStyleDefault PanelActionStyle = "default"
+	ActionStylePrimary PanelActionStyle = "primary"
+	ActionStyleDanger  PanelActionStyle = "danger"
+)
+
+// PanelActionConfirm is the confirm step. Friction is calibrated to blast
+// radius (§8 rule 7): a read-only or reversible action declares none, because
+// Anthropic's own containment data shows ~93% of prompts get approved and a
+// universal dialog is a rubber stamp rather than a control.
+type PanelActionConfirm struct {
+	Title        string `json:"title" yaml:"title"`
+	Body         string `json:"body" yaml:"body"`
+	ConfirmLabel string `json:"confirm_label,omitempty" yaml:"confirm_label,omitempty"`
+	CancelLabel  string `json:"cancel_label,omitempty" yaml:"cancel_label,omitempty"`
+}
+
+// PanelInput is one parameter collected before a "call" dispatches. The shape
+// mirrors the server-declared form schema SlashActionModal already renders, so
+// the surface has one field switch rather than two.
+type PanelInput struct {
+	Name     string   `json:"name" yaml:"name"`
+	Label    string   `json:"label,omitempty" yaml:"label,omitempty"`
+	Type     string   `json:"type,omitempty" yaml:"type,omitempty"`
+	Required bool     `json:"required,omitempty" yaml:"required,omitempty"`
+	Default  string   `json:"default,omitempty" yaml:"default,omitempty"`
+	Options  []string `json:"options,omitempty" yaml:"options,omitempty"`
+}
+
+// PanelEntityRef names an internal entity. Kind is closed and there is no URL
+// field anywhere in it, deliberately.
+type PanelEntityRef struct {
+	Kind string `json:"kind" yaml:"kind"`
+	ID   string `json:"id" yaml:"id"`
+}
+
+// PanelOnFailure routes a panel's failure to somewhere a human will see it.
+type PanelOnFailure struct {
+	// Issue is "crew/<slug>" — the crew whose board gets the issue.
+	Issue string `json:"issue,omitempty" yaml:"issue,omitempty"`
+}
+
+// PanelWake is one threshold that wakes an agent (§5).
+type PanelWake struct {
+	// When is the predicate over the pushed payload, e.g.
+	// `any(state == "critical")`. Deliberately not a general expression
+	// language: it is matched against a payload, and a predicate nobody can
+	// read is a predicate nobody can audit.
+	When string `json:"when" yaml:"when"`
+
+	// For requires the condition to hold this long before firing, so a single
+	// bad scrape does not wake anybody.
+	For string `json:"for,omitempty" yaml:"for,omitempty"`
+
+	// Agent is "crew/<slug>" — who gets woken.
+	Agent string `json:"agent" yaml:"agent"`
+
+	// Writes is the panel id the woken agent is expected to write. It is a
+	// declaration, not a grant: the agent still needs produce authority on it.
+	Writes string `json:"writes,omitempty" yaml:"writes,omitempty"`
 }
 
 // SLADuration parses the declared SLA.
@@ -155,10 +328,57 @@ func ParseDocument(raw []byte) (*Document, error) {
 	if err := dec.Decode(&doc); err != nil {
 		return nil, newError(CodeInvalidSpec, "", "%v", err)
 	}
+
+	// A YAML stream can carry more than one document, and decoding the first
+	// while ignoring the rest is the quietest way this function could lose
+	// somebody's work: `crewship page create --file` would exit zero, print
+	// nothing, and create one page out of four.
+	//
+	// That is reachable, and by our own hand — `crewship export page` with no
+	// slug emits every page in the workspace as one `---`-separated stream, and
+	// this is the documented way back in. Refusing costs nothing anyone wanted:
+	// nobody hands `page create` four pages and means one.
+	//
+	// A LEADING `---` is not a second document. yaml reads it as the start of
+	// the first, so a single-page export — which is also `---`-prefixed — still
+	// parses. Only a genuine second document reaches this branch.
+	var trailing Document
+	err := dec.Decode(&trailing)
+	switch {
+	case err == nil && !trailingIsEmpty(trailing):
+		// A real second document. An EMPTY one is not: yaml.v3 hands back a
+		// zero Document with a nil error for the nothing after a trailing
+		// `---`, and refusing that would reject a perfectly ordinary one-page
+		// file — including one `crewship export page` wrote, since it ends
+		// every document with its own separator.
+		return nil, newError(CodeInvalidSpec, "",
+			"this file carries more than one YAML document and a page spec is one page; "+
+				"split the stream and create each page separately")
+	case err == nil:
+		// Empty trailing document: treated as end of stream.
+	case !errors.Is(err, io.EOF):
+		// Not EOF and not a document either: the bytes after the first document
+		// are malformed. Saying so beats accepting the first half of a file the
+		// author believes was read whole.
+		return nil, newError(CodeInvalidSpec, "", "after the page document: %v", err)
+	}
+
 	if err := doc.Validate(); err != nil {
 		return nil, err
 	}
 	return &doc, nil
+}
+
+// trailingIsEmpty reports whether a decoded trailing document carries nothing.
+//
+// Document holds a slice, so it is not comparable and `== Document{}` will not
+// build. Checking the four fields a real page always has is enough and is more
+// honest than reflect.DeepEqual: what we are asking is "did the author write a
+// second PAGE here", and a document with no apiVersion, no kind, no name and no
+// panels is not one.
+func trailingIsEmpty(d Document) bool {
+	return d.APIVersion == "" && d.Kind == "" &&
+		d.Metadata == (Metadata{}) && len(d.Spec.Panels) == 0
 }
 
 // Validate checks the document's shape and every declared limit. It resolves
@@ -209,6 +429,18 @@ func (d *Document) Validate() error {
 			return newError(CodeInvalidSpec, p.Schema,
 				"panel %q declares unknown schema %q; the set is closed", p.ID, p.Schema)
 		}
+		// The icon is normalised before it is checked, and checked before it is
+		// stored: what validates is exactly what the client will be asked to
+		// resolve. Trimming only — no case folding — because `icon: Memory`
+		// silently becoming `memory` teaches an author a spelling that is not
+		// the vocabulary, and the next name they guess will not be forgiven.
+		p.Icon = PanelIcon(strings.TrimSpace(string(p.Icon)))
+		if p.Icon != "" && !p.Icon.Known() {
+			return newError(CodeInvalidSpec, p.Schema,
+				"panel %q declares icon %q; the set is closed — one of: %s",
+				p.ID, p.Icon, PanelIconList())
+		}
+
 		if _, err := p.OwnerCrewSlug(); err != nil {
 			return newError(CodeInvalidSpec, p.Schema, "panel %q: %v", p.ID, err)
 		}
@@ -234,5 +466,35 @@ func (d *Document) Validate() error {
 				"panel %q declares span %d; the grid has 12 columns", p.ID, p.Span)
 		}
 	}
-	return nil
+
+	// Tabs before actions, and page-scoped for the same kind of reason: how many
+	// distinct tabs a page declares, and whether two of them differ only by
+	// case, are not questions the per-panel loop above can answer. A tab hides
+	// panels (tabs.go), so a bar that draws a blank word, or the same word
+	// twice, is a page whose reader cannot tell what they are not being shown.
+	if err := validatePageTabs(d.Spec.Panels); err != nil {
+		return err
+	}
+
+	// Actions last, because two of their rules are page-scoped: ids are unique
+	// within the PAGE (§8b.1) and a toggle may only target a panel that exists
+	// on it, neither of which is answerable inside the per-panel loop above.
+	// The stored spec is the dispatch allow-list (§8b.2), so an action that does
+	// not validate here is an action that can never be clicked.
+	if err := validatePageActions(d.Spec.Panels); err != nil {
+		return err
+	}
+	// Gates last, and here rather than only in the handler: ParseDocument and
+	// the manifest kind both call Validate, so a gate that names a panel which
+	// is not on the page has to fail at parse time. Otherwise `crewship apply`
+	// and the editor accept it and the server refuses it later, which is the
+	// same document being valid in one door and invalid in the next.
+	if err := ValidateGates(d); err != nil {
+		return err
+	}
+	// Refresh AFTER the gates, and not by accident: `refresh: on:wake` is a
+	// declaration ABOUT the gates — it is refused on a page that declares none,
+	// and refused on a panel that declares its own — so it can only be checked
+	// once the gates on this document are known to compile (refresh.go).
+	return ValidateRefresh(d)
 }

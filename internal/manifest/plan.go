@@ -267,8 +267,26 @@ func kindOrder(kind string, action Action) int {
 		"Issue":            20, // depends on Crew + optional Project / Agent / Labels
 		"TriageRule":       21, // depends on Project + Label + Crew
 		"SavedView":        22, // depends on Label + Project
+		"Page":             22, // depends on Crew + Agent + Routine (18)
 		"Hook":             23, // toggles existing rows
 	}
+	// Page shares SavedView's rank on purpose. Both are read surfaces
+	// over kinds created above them and neither depends on the other, so
+	// they are genuinely unordered with respect to each other and the
+	// tie-break on description keeps the plan output stable. The rank
+	// has to sit above Routine (18) — every panel names a producer, and
+	// the server's authoring gate refuses a page whose routine does not
+	// exist yet — and below Hook (23), which is the documented end of
+	// the sequence. On delete the reversal (100-r) then tears the page
+	// down before the routine it points at, which is the order that
+	// leaves no dangling producer reference.
+	//
+	// Note the spelling: this table is capitalised, the kinds emit
+	// lowercase ("page"), and snakeToDocKind below is the bridge. That
+	// mismatch has already caused one production ordering bug
+	// (see the fallback comment) — a "page" entry here instead of
+	// "Page" would silently fall through to 99 and order the kind
+	// alphabetically by description again.
 	r, ok := rank[kind]
 	if !ok {
 		// The SPEC-2 kinds emit LOWERCASE names from their per-kind packages

@@ -134,6 +134,19 @@ func TestPolicy_DecideAction_Matrix(t *testing.T) {
 		{AutonomyGuided, ActionEscalationCreate, DecisionAutoLogJournal},
 		{AutonomyTrusted, ActionEscalationCreate, DecisionAutoLogJournal},
 		{AutonomyFull, ActionEscalationCreate, DecisionAutoJournal},
+
+		// Page write (#1945): one panel's payload. issue_write's numbers,
+		// reached by its own argument rather than by inheritance — the door is
+		// already default-deny per panel and a HUMAN opened it (the declared
+		// producer, or a produce grant), the frequency is the highest in this
+		// matrix (a 30 s SLA, a ring sized for a push every 5 s), and the page
+		// is already the artefact the operator is looking at, so an inbox item
+		// would duplicate it. Strict still holds: a number other humans read
+		// and trust is the write an operator at that level wants to see first.
+		{AutonomyStrict, ActionPageWrite, DecisionInboxApprove},
+		{AutonomyGuided, ActionPageWrite, DecisionAutoLogJournal},
+		{AutonomyTrusted, ActionPageWrite, DecisionAutoLogJournal},
+		{AutonomyFull, ActionPageWrite, DecisionAutoJournal},
 	}
 
 	for _, tc := range cases {
@@ -481,7 +494,11 @@ func TestPolicy_KnownActionsMatchesSource(t *testing.T) {
 func TestPolicy_StrictCrew_RefusesTheUnattendedWrites(t *testing.T) {
 	strict := Policy{AutonomyLevel: AutonomyStrict, BehaviorMode: BehaviorWarn}
 
-	for _, a := range []Action{ActionIssueWrite, ActionAssignmentCreate} {
+	// page_write joins the list for the same reason and with the same cost,
+	// stated in the PRD's terms: a strict crew's routines do not write panels,
+	// and a panel nobody writes reads as `stale` rather than as a number nobody
+	// checked (docs/prd/pages.md §4). The public PUT stays open to a human.
+	for _, a := range []Action{ActionIssueWrite, ActionAssignmentCreate, ActionPageWrite} {
 		got := strict.DecideAction(a)
 		if got == DecisionAutoJournal || got == DecisionAutoLogJournal || got == DecisionAutoLogInbox {
 			t.Errorf("strict × %s = %s — a strict crew must not do this unattended", a, got)

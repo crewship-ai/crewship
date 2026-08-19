@@ -170,6 +170,7 @@ func (r *Router) registerAdminRoutes() {
 	// writes a gdpr_actions audit row (v107) recording who acted
 	// on whom, scope, and operator-supplied reason.
 	gdprH := NewAdminGDPRHandler(r.db, r.logger, r.outputBasePath)
+	gdprH.SetJournal(r.Journal())
 	r.authedAdmin("GET", "/api/v1/admin/users/{userId}/data", gdprH.ExportUserData)
 	r.authedMut("DELETE", "/api/v1/admin/users/{userId}/data", roleManage, gdprH.DeleteUserData)
 

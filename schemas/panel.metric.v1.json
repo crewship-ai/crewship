@@ -24,6 +24,10 @@
       "type": "number",
       "description": "Change since the previous push, in the same unit as `value`. Omit when there is no previous value to compare against; send 0 when the value genuinely did not move — an omitted delta renders as nothing, a zero delta renders as \"no change\"."
     },
+    "delta_good": {
+      "enum": ["up", "down"],
+      "description": "Which direction of `delta` is an improvement, and the only thing that lets the delta take a colour. Omit it and the delta renders with its sign, an arrow and a muted tone; send \"up\" and a rise is success, send \"down\" and a fall is success. There is no default on purpose: green-up on an error rate would be a lie, so the payload has to say which way is good."
+    },
     "target": {
       "type": "number",
       "description": "The value this metric is aiming at, in the same unit. Rendered as a marker, never as a second series."

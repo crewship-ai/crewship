@@ -20,8 +20,8 @@ describe("concept icons", () => {
     const sidebar = await import("@/components/layout/app-sidebar")
     const nav = sidebar.NAV_ICONS as Record<string, unknown>
 
-    for (const key of ["dashboard", "inbox", "issues", "routines", "activity",
-      "journal", "crews", "skills", "credentials", "integrations",
+    for (const key of ["dashboard", "inbox", "issues", "routines", "pages",
+      "activity", "journal", "crews", "skills", "credentials", "integrations",
       "marketplace", "settings", "admin"] as const) {
       expect(nav[key], `rail is missing "${key}"`).toBe(CONCEPT_ICON[key])
     }

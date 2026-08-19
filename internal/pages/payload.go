@@ -40,10 +40,18 @@ func ValidatePayload(schema PanelSchema, raw []byte) (Payload, error) {
 	switch schema {
 	case SchemaMetric:
 		return ValidateMetric(raw)
+	case SchemaSeries:
+		return ValidateSeries(raw)
 	case SchemaStatus:
 		return ValidateStatus(raw)
 	case SchemaTable:
 		return ValidateTable(raw)
+	case SchemaNarrative:
+		return ValidateNarrative(raw)
+	case SchemaEmbed:
+		// Refuses everything on an instance with no embed allow-list, which is
+		// every instance by default — see internal/pages/embed.go.
+		return ValidateEmbed(raw)
 	}
 	if schema.Known() {
 		return nil, newError(CodeUnknownSchema, schema,
@@ -77,7 +85,21 @@ type MetricPayload struct {
 	// Sparkline is recent history, oldest first. A nil element is a gap the
 	// producer knows about, so the line breaks instead of interpolating.
 	Sparkline []*float64 `json:"sparkline,omitempty"`
+	// DeltaGood says which direction is the good one, and is absent by default
+	// (PRD §11b.9). Without it the delta renders muted, with a sign and an
+	// arrow and no colour — because a green arrow pointing up is a lie on an
+	// error rate, and the payload is the only thing that knows which metric
+	// this is. "up" or "down"; the JSON Schema rejects anything else.
+	DeltaGood *string `json:"delta_good,omitempty"`
 }
+
+// DeltaGoodUp and DeltaGoodDown are the only two values DeltaGood may hold.
+// The JSON Schema enforces the enum on the way in; these exist so callers
+// compare against a constant rather than a loose string.
+const (
+	DeltaGoodUp   = "up"
+	DeltaGoodDown = "down"
+)
 
 // Schema implements Payload.
 func (p *MetricPayload) Schema() PanelSchema { return SchemaMetric }
@@ -279,12 +301,58 @@ func checkSize(schema PanelSchema, raw []byte) error {
 // The published schema already refuses them, so this is the belt to that
 // braces: it is what catches a schema and a struct that have drifted apart.
 func decodeStrict(raw []byte, into any) error {
+	// `$schema` is dropped before the strict pass rather than modelled as a
+	// field on all six payload structs.
+	//
+	// Every schema in schemas/ declares it and tells producers to send it —
+	// "Present so a hand-written payload gets inline validation in an editor".
+	// The JSON-Schema pass accepts it, and DisallowUnknownFields then refused
+	// it: a payload written exactly the way our own published contract
+	// describes was rejected by the validator that contract belongs to.
+	//
+	// Dropped HERE, on the way to the decoder, and nowhere else. The push path
+	// stores the ORIGINAL request bytes (pages_data.go), so a `$schema` a
+	// producer sent is kept and served back — which is harmless, since no
+	// renderer reads it, and honest, since it is what the producer wrote.
+	// An earlier version of this comment claimed the key never reaches a
+	// reader; it does, and saying otherwise would send the next person looking
+	// for a stripping step that does not exist.
+	//
+	// Every OTHER unknown field is still refused, which is the property this
+	// function exists for: a producer misspelling `sparkline` learns so at the
+	// push instead of watching a panel quietly render nothing.
+	raw, err := dropSchemaKey(raw)
+	if err != nil {
+		return err
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(into); err != nil {
 		return err
 	}
 	return nil
+}
+
+// dropSchemaKey removes a top-level `$schema` from an object payload.
+//
+// Re-encoding only happens when the key is actually there, so the common path
+// hands the original bytes through untouched — the payload the schema pass
+// judged is the payload the decoder sees.
+func dropSchemaKey(raw []byte) ([]byte, error) {
+	if !bytes.Contains(raw, []byte(`"$schema"`)) {
+		return raw, nil
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		// Not an object, or malformed. Hand it back unchanged and let the
+		// strict decoder produce the error a caller can act on.
+		return raw, nil //nolint:nilerr // the decoder below reports it better
+	}
+	if _, ok := top["$schema"]; !ok {
+		return raw, nil
+	}
+	delete(top, "$schema")
+	return json.Marshal(top)
 }
 
 // compiledPanelSchemas compiles each embedded schema once. The compiler is

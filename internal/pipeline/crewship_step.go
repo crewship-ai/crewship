@@ -93,13 +93,13 @@ type crewshipVerb struct {
 // and the JSON Schema all read it, so a verb cannot be saveable but
 // undispatchable, or dispatchable but ungated.
 //
-// ALL SIX ARE NOW GOVERNED. Five of them shipped refused, because
-// internal/policy described none of these capabilities and picking an Action
-// for them was a governance decision — what may a `guided` crew do unattended?
-// — that a step kind does not get to make on the way past. That decision now
-// exists: internal/policy declares issue_write, assignment_create and
-// escalation_create with a decided cell for every autonomy level, and the
-// reasoning for each cell lives there rather than here.
+// EVERY VERB HERE IS GOVERNED. Five of the original six shipped refused,
+// because internal/policy described none of these capabilities and picking an
+// Action for them was a governance decision — what may a `guided` crew do
+// unattended? — that a step kind does not get to make on the way past. That
+// decision now exists: internal/policy declares issue_write, assignment_create,
+// escalation_create and page_write with a decided cell for every autonomy
+// level, and the reasoning for each cell lives there rather than here.
 //
 // The refusal path is deliberately still live. A verb added here with no
 // PolicyAction is refused at SAVE with a message naming what is missing, so the
@@ -170,6 +170,36 @@ var crewshipVerbs = map[string]crewshipVerb{
 		PolicyAction: "escalation_create",
 		RequiredArgs: []string{"from_slug", "reason", "chat_id"},
 		Summary:      "Raise an escalation to a human",
+	},
+	"page.write": {
+		Method: "PUT",
+		// The PANEL travels in the body, not in the path, even though the public
+		// route spells it /pages/{slug}/panels/{panelId}/data. crewshipRoutePath
+		// fills ONE {arg} placeholder (crewship_actions.go), so a two-placeholder
+		// template would render `/panels//data` for the second one and 404 at
+		// 03:00 in a way nobody could read. One placeholder, one body field, and
+		// both are required args below.
+		Path:         "/api/v1/internal/pages/{page}/data",
+		PolicyAction: "page_write",
+		// `data` is the panel's payload as authored — an object, validated
+		// against the panel's published schema on the far side
+		// (pages.ValidatePayload). It is required because a push with no payload
+		// has nothing to say; `state` is optional and defaults to "ok", because
+		// "ok"/"failed" is the producer's own verdict and silence means it
+		// worked (docs/prd/pages.md §4 rule 2).
+		RequiredArgs: []string{"page", "panel", "data"},
+		// FALSE, and this is a decision rather than a default. The other five
+		// verbs that can act unattended do so by falling back to "system"; this
+		// one has a stronger identity available with no agent in sight — the RUN.
+		// The dispatcher injects author_run_id, the internal route resolves it to
+		// the running routine's slug, and a panel whose declared producer is
+		// `routine/<that slug>` is being written by its own producer (§7.1
+		// rule 4). So a routine a human authored, with no author agent at all,
+		// writes its own panel; what it cannot do is write somebody else's,
+		// which needs a `produce` grant that a human issued to the acting agent
+		// or to the author crew (§7.1b rule 1).
+		RequiresActingAgent: false,
+		Summary:             "Write a panel's payload onto a page (the routine must be the panel's declared producer, or hold a produce grant)",
 	},
 }
 

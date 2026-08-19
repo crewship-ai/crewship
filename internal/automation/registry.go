@@ -78,8 +78,12 @@ type Options struct {
 // rate counters and the pending map) on the very path that would want the
 // read lock.
 type Registry struct {
-	store   loader
-	enq     Enqueuer
+	store loader
+	enq   Enqueuer
+	// issues is the sink for ActionKindIssue rules; nil until something wires
+	// one, which is the state every deployment was in before Pages' wake
+	// gates existed. See issue.go.
+	issues  IssueOpener
 	chains  ChainSource
 	journal journal.Emitter
 	logger  *slog.Logger
@@ -154,8 +158,15 @@ type intent struct {
 	pipelineSlug   string
 	debounceKey    string
 	inputsJSON     string
-	fireAt         time.Time
-	debounceMaxAt  time.Time
+	// actionKind decides which sink Flush hands this intent to. Copied off
+	// the rule at match time like everything else here, so a rule edited
+	// mid-burst cannot change the destination of an intent already forming.
+	actionKind string
+	// issue is the rendered issue this intent will open, for an issue-kind
+	// rule. Nil for a routine rule.
+	issue         *IssueIntent
+	fireAt        time.Time
+	debounceMaxAt time.Time
 	// originCandidates names the run whose work produced the triggering entry,
 	// best first, taken from the entry at match time — NOT looked up, because
 	// Observer runs on the journal write path. Flush resolves them there, off
@@ -515,6 +526,7 @@ func (r *Registry) coalesceLocked(rule Resolved, e journal.Entry, key string, no
 			pipelineSlug:   rule.PipelineSlug,
 			debounceKey:    key,
 			debounceMaxAt:  maxAt,
+			actionKind:     rule.ActionKind,
 		}
 		r.pending[key] = it
 	}
@@ -522,6 +534,17 @@ func (r *Registry) coalesceLocked(rule Resolved, e journal.Entry, key string, no
 	it.fireAt = now.Add(time.Duration(rule.DebounceSeconds) * time.Second)
 	if it.fireAt.After(it.debounceMaxAt) {
 		it.fireAt = it.debounceMaxAt
+	}
+	if rule.ActionKind == ActionKindIssue {
+		// The latest event wins the rendered issue, exactly as it wins the
+		// rendered inputs below and for the same reason: the burst fires once
+		// and the freshest description of it is the honest one.
+		it.issue = renderIssueIntent(rule, e)
+		it.issue.Coalesced = it.coalesced
+		// No origin candidates: an issue is not a run and joins no chain, so
+		// there is nothing for Flush to price. See issue.go on what bounds it
+		// instead.
+		return
 	}
 	it.inputsJSON = renderInputsJSON(rule.Action.Inputs, e)
 	// Remember which run produced this entry so Flush can price the hop.
@@ -607,6 +630,12 @@ func (r *Registry) Flush(ctx context.Context) int {
 
 	n := 0
 	for _, it := range pending {
+		if it.actionKind == ActionKindIssue {
+			if r.openIssue(ctx, it) {
+				n++
+			}
+			continue
+		}
 		if r.enq == nil {
 			continue
 		}

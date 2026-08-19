@@ -38,6 +38,7 @@ import {
   Globe,
   Hammer,
   Hash,
+  LayoutTemplate,
   Megaphone,
   MessageSquare,
   MessageSquareWarning,
@@ -251,6 +252,25 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "run.session_init": PlugZap,
   "run.agent_span": Activity,
   "agent.error": AlertTriangle,
+
+  // ── Pages ─────────────────────────────────────────────────────────
+  // Same glyph CONCEPT_ICON.pages uses (lib/concept-icons.ts) for a panel
+  // successfully pushed to; denial and grant changes get their own faces
+  // so a scan of the feed can tell "data arrived" from "access changed".
+  "page.panel.updated": LayoutTemplate,
+  "page.produce_denied": ShieldOff,
+  "page.grant_added": UserPlus,
+  "page.grant_removed": UserMinus,
+  // Freshness (§4) reads as a clock going quiet and a clock catching up; a
+  // wake gate (§5) is the one entry here that means an agent was started.
+  "page.panel.stale": Clock,
+  "page.panel.recovered": CheckCircle,
+  "page.wake.fired": Zap,
+  // A human pressed a button on a page and a routine was enqueued (§8b.2).
+  "page.action.dispatched": Play,
+  // The page's arrangement changed — the event a `refresh: on:panels-changed`
+  // panel runs its producer on.
+  "page.spec.changed": LayoutTemplate,
 }
 
 /**

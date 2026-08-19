@@ -59,23 +59,46 @@ func TestValidatePayload_UnknownSchemaIsRefused(t *testing.T) {
 }
 
 // embed.v1 is reserved in the migration's CHECK so admitting it later is not a
-// breaking change (§3.1) — but it is not implemented in 1.0, and a payload sent
-// to it must be refused rather than stored against a panel nothing can render.
+// breaking change (§3.1) — but it needs a second origin and a sandbox proxy,
+// not a payload type, and a payload sent to it must be refused rather than
+// stored against a panel nothing can render.
 func TestValidatePayload_ReservedSchemasAreNotYetProducible(t *testing.T) {
 	t.Parallel()
 
-	for _, s := range []PanelSchema{SchemaSeries, SchemaNarrative, SchemaEmbed} {
+	for _, s := range []PanelSchema{SchemaEmbed} {
 		t.Run(string(s), func(t *testing.T) {
 			if !s.Known() {
 				t.Errorf("%s should be a known member of the closed set — the migration reserves the name", s)
 			}
 			if s.Producible() {
-				t.Errorf("%s reports as producible, but v0 ships metric.v1, status.v1 and table.v1 only (§12)", s)
+				t.Errorf("%s reports as producible, but §3.1 places the sandboxed embed at v1.2", s)
 			}
 			if _, err := ValidatePayload(s, []byte(`{}`)); err == nil {
 				t.Errorf("a payload for %s was accepted before the schema exists", s)
 			}
 		})
+	}
+}
+
+// The other five are producible: a schema with a published payload document and
+// a renderer. This is the half of the closed set a producer may push to, and it
+// is asserted as a whole so a schema cannot be given a renderer without being
+// given a payload schema, or the reverse.
+func TestPanelSchema_ProducibleSet(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []PanelSchema{SchemaMetric, SchemaSeries, SchemaStatus, SchemaTable, SchemaNarrative} {
+		if !s.Producible() {
+			t.Errorf("%s is not producible; it has a published payload schema and a renderer", s)
+		}
+		// Producible means ValidatePayload dispatches somewhere real: the
+		// error for an empty object must be about the CONTENT, never
+		// "reserved but not yet producible".
+		_, err := ValidatePayload(s, []byte(`{}`))
+		var ve *ValidationError
+		if errors.As(err, &ve) && ve.Code == CodeUnknownSchema {
+			t.Errorf("%s is producible but ValidatePayload still reports %s", s, CodeUnknownSchema)
+		}
 	}
 }
 

@@ -129,10 +129,41 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// every external reader an accountant or client was given, with no
 	// error anyone would see until they clicked.
 	"page_public_tokens": IntentInclude,
-	"hooks":              IntentInclude,
-	"labels":             IntentInclude,
-	"milestones":         IntentInclude,
-	"projects":           IntentInclude,
+	// page_webhooks is the inbound-webhook table (§10b.5c) and it is the same
+	// judgement as page_public_tokens above, reached the same way. It carries a
+	// SHA-256 DIGEST and never a usable secret — there is no cleartext column in
+	// the schema at all — so a bundle is not a credential store, and a reader of
+	// the dump learns which integrations exist, never how to be one.
+	//
+	// Carrying it is the choice that makes a restore honest. A page webhook is
+	// wired into something outside this instance: a cron on a box we do not own,
+	// a Zapier step, a PLC gateway, a GitHub Action secret. None of those is
+	// re-issued by a restore, and none of them reports an error anybody here
+	// would see — dropping the table would leave every external producer POSTing
+	// into a 404 while the panel quietly went stale, which is precisely the
+	// failure §4's freshness contract exists to surface rather than to cause.
+	// The row also carries created_by_user_id (the human accountable for the
+	// capability, §7.1b rule 1) and revoked_at: a restore that lost those would
+	// resurrect tokens somebody had deliberately pulled, and lose the audit
+	// trail that says who issued what.
+	//
+	// Restoring a digest hands the restored instance no authority the source did
+	// not have: the token still writes exactly one panel, and its authority is
+	// re-derived from its issuer's CURRENT standing on every fire, so a bundle
+	// restored into a workspace where that human is not a member yields a token
+	// that holds nothing.
+	"page_webhooks": IntentInclude,
+	// page_panel_alerts is the edge a lapse was already reported on: one row
+	// per (panel, gate) while an alert is open, deleted on recovery. It rides
+	// the bundle because dropping it is not neutral in either direction — a
+	// restore without it re-opens an issue on the next sweep for an outage a
+	// human already closed by hand, and it carries the issue_id that makes the
+	// recovery entry able to name what it is closing.
+	"page_panel_alerts": IntentInclude,
+	"hooks":             IntentInclude,
+	"labels":            IntentInclude,
+	"milestones":        IntentInclude,
+	"projects":          IntentInclude,
 
 	// === Eval / training (round-trip) =========================
 	"eval_runs":           IntentInclude,

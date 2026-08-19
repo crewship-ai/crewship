@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crewship.io/schemas/panel.narrative.v1.json",
+  "title": "Crewship panel payload — narrative.v1",
+  "description": "Typed prose blocks and an optional one-line verdict. This is the panel an AI agent writes, so PRD §8 is its specification rather than its background, and the schema is where those rules are enforced: the agent FILLS this document, it never emits markup, HTML, CSS or code (rule 1). There is no image field anywhere below — absent, not sanitised, because CamoLeak exfiltrated through a trusted FIRST-PARTY image proxy and CSP did not help (rule 2). There is no URL field anywhere below either: a block may name an internal Crewship entity by id and the renderer builds the link, because Slack AI's private-channel leak was a rendered link (rule 3). There is no `actions` array yet — narrative.v1 ships text-only (§12 v1), and the PageAction vocabulary of §8b arrives with its server-verified click token. Every object here is `additionalProperties: false`, so each of those absences is a rejection at the boundary and not a field a renderer has to remember to ignore.",
+  "type": "object",
+  "required": ["blocks"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference (informational; the server ignores it). Present so a hand-written payload gets inline validation in an editor while a producer script is being developed."
+    },
+    "verdict": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240,
+      "description": "The one-line conclusion, rendered as the panel's lead. Optional and NOT nullable: omit it when the agent reached no conclusion. There is deliberately no null form — the em dash means \"no basis to compute a value\" (§9b.4) and a missing sentence is not a missing measurement, so borrowing the glyph here would blunt the one distinction this product rests on."
+    },
+    "blocks": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 40,
+      "items": { "$ref": "#/$defs/Block" },
+      "description": "The prose, in render order. Required even when empty: an empty array is a measured \"the agent ran and had nothing to say\", which renders the panel's own sentence, while an absent array is a producer that stopped halfway. Bounded at 40 because a panel is a summary — an agent with more than forty blocks to write is writing a document, and the page has a table panel for structure and an issue for a document."
+    }
+  },
+  "$defs": {
+    "Block": {
+      "type": "object",
+      "required": ["kind", "text"],
+      "additionalProperties": false,
+      "description": "One typed block. §8 rule 1: `narrative.v1` accepts typed blocks, not a markdown blob — the agent fills a schema and the host owns the look, which is the Adaptive Cards \"no code behind\" rule. `text` is plain text and is rendered through a React element, never through innerHTML (rule 10), so any angle brackets it happens to contain render as the characters they are.",
+      "properties": {
+        "kind": {
+          "enum": ["paragraph", "list"],
+          "description": "Closed, like every other enum in this vocabulary. `paragraph` is one paragraph. `list` is one bullet: consecutive `list` blocks are rendered as a single unordered list, which is how a list survives a schema whose block carries exactly one string."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "The sentence, in plain text. No markup, no markdown, no HTML: the schema has no field that carries any, and the renderer emits React text nodes. It may not contain a URL either — a `https://`, `data:`, `javascript:` or `www.` in the prose is refused at the boundary (§8 rule 3, and §14's \"a narrative payload containing … an external URL … is rejected at the API boundary\"). To point at something, use `ref` and let the renderer build the link. Bidirectional-override and other C0 control characters are refused too: an agent that can flip the reading order of a sentence can make it say the opposite of what it stores."
+        },
+        "ref": {
+          "$ref": "#/$defs/EntityRef",
+          "description": "An optional reference to one internal Crewship entity. This is the ONLY way a block points at anything, and it carries an id, never an address."
+        }
+      }
+    },
+    "EntityRef": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "additionalProperties": false,
+      "description": "§8 rule 3: *\"A narrative block may reference an internal Crewship entity by id (issue, run, page, agent) and the renderer builds the URL. It may not carry a URL.\"* The renderer maps `kind` to a route it already knows and interpolates `id`; there is no href on the wire, so an agent that has been talked into exfiltrating something has no field to put a destination in. Slack AI's private-channel exfiltration was a rendered link, and this is the shape that has no way to become one.",
+      "properties": {
+        "kind": {
+          "enum": ["issue", "run", "page", "agent", "crew"],
+          "description": "Which internal noun this is. Closed: the renderer holds one route per member, so a kind it does not know could only become a dead link or an unvalidated path."
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "description": "The entity's id or slug. The pattern admits the shapes this repo actually issues — `1935`, `run_8812`, `nightly-close` — and admits no scheme, no slash and no dot-dot, so it cannot be grown into a path or an absolute URL by a producer that has read this description."
+        }
+      }
+    }
+  }
+}

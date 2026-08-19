@@ -274,10 +274,15 @@ WHERE a.deleted_at IS NULL AND a.enabled = 1`)
 		decodeJSON(actionRaw, &r.Action)
 		r.CreatedAt = parseTS(createdAt)
 		r.UpdatedAt = parseTS(updatedAt)
-		if r.PipelineID == "" {
+		if r.ActionKind == ActionKindRoutine && r.PipelineID == "" {
 			// Unresolvable target. Skipping here beats enqueuing a run the
 			// dispatcher can never fire — the row stays in the table and
 			// starts working the moment the routine exists.
+			//
+			// Scoped to routine rules: an issue rule names no routine, so the
+			// LEFT JOIN never resolves for one and an unconditional skip would
+			// drop every issue rule ever written — silently, which is the
+			// failure mode this whole package apologises for elsewhere.
 			continue
 		}
 		out = append(out, r)

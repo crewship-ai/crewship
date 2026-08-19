@@ -1,28 +1,28 @@
 {
   "summary": {
-    "api_operations": 557,
-    "api_exact_docs": 557,
+    "api_operations": 581,
+    "api_exact_docs": 581,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 759,
-    "cli_exact_docs": 759,
-    "cli_root_docs_present": 759,
+    "cli_operations": 783,
+    "cli_exact_docs": 783,
+    "cli_root_docs_present": 783,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 420,
-    "api_with_concrete_response_schemas": 542,
+    "api_with_test_signals": 434,
+    "api_with_concrete_response_schemas": 566,
     "api_generic_response_schemas": 0,
-    "api_with_request_bodies": 235,
-    "api_with_concrete_json_requests": 231,
+    "api_with_request_bodies": 246,
+    "api_with_concrete_json_requests": 242,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 744,
-    "cli_with_flags": 359,
-    "cli_with_all_flags_documented": 359,
+    "cli_with_test_signals": 768,
+    "cli_with_flags": 373,
+    "cli_with_all_flags_documented": 373,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
-    "environment_variables": 101,
+    "environment_variables": 102,
     "environment_variables_missing": 0,
-    "manifest_kinds": 20,
+    "manifest_kinds": 21,
     "manifest_kinds_missing": 0,
     "docs_commands_missing": 0,
     "docs_api_paths_missing": 0,
@@ -2489,6 +2489,7 @@
         "cmd/gen-openapi/handler_resolution_test.go",
         "cmd/gen-openapi/param_inference_test.go",
         "internal/api/admin_authz_floor_test.go",
+        "internal/api/pages_transfer_owner_test.go",
         "internal/api/unauth_reachability_test.go",
         "internal/database/migrate_mission_code_links_test.go"
       ],
@@ -2514,6 +2515,7 @@
             "cmd/gen-openapi/handler_resolution_test.go",
             "cmd/gen-openapi/param_inference_test.go",
             "internal/api/admin_authz_floor_test.go",
+            "internal/api/pages_transfer_owner_test.go",
             "internal/api/unauth_reachability_test.go",
             "internal/database/migrate_mission_code_links_test.go"
           ]
@@ -2535,6 +2537,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "internal/api/pages_transfer_owner_test.go",
         "internal/database/migrate_mission_code_links_test.go"
       ],
       "concrete_response_schema": true,
@@ -2554,6 +2557,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_admin.go",
           "test_signals": [
+            "internal/api/pages_transfer_owner_test.go",
             "internal/database/migrate_mission_code_links_test.go"
           ]
         }
@@ -2574,6 +2578,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "internal/api/pages_transfer_owner_test.go",
         "internal/database/migrate_mission_code_links_test.go"
       ],
       "concrete_response_schema": true,
@@ -2593,6 +2598,7 @@
           "openapi_operation": true,
           "source_file": "internal/api/router_admin.go",
           "test_signals": [
+            "internal/api/pages_transfer_owner_test.go",
             "internal/database/migrate_mission_code_links_test.go"
           ]
         }
@@ -5512,6 +5518,7 @@
         "internal/api/auth_recovery_cov_test.go",
         "internal/api/auth_recovery_test.go",
         "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go",
         "internal/api/unauth_reachability_test.go"
       ],
       "concrete_response_schema": true,
@@ -5534,6 +5541,7 @@
             "internal/api/auth_recovery_cov_test.go",
             "internal/api/auth_recovery_test.go",
             "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go",
             "internal/api/unauth_reachability_test.go"
           ]
         }
@@ -5659,7 +5667,8 @@
       "test_signals": [
         "cmd/crewship/cmd_login_cov_test.go",
         "internal/api/cli_pair_test.go",
-        "internal/api/openapi_unauthenticated_set_test.go"
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -5680,7 +5689,8 @@
           "test_signals": [
             "cmd/crewship/cmd_login_cov_test.go",
             "internal/api/cli_pair_test.go",
-            "internal/api/openapi_unauthenticated_set_test.go"
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -5749,7 +5759,8 @@
         "internal/api/auth_recovery_sec_test.go",
         "internal/api/auth_recovery_test.go",
         "internal/api/openapi_unauthenticated_set_test.go",
-        "internal/api/provision_takeover_test.go"
+        "internal/api/provision_takeover_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -5772,7 +5783,8 @@
             "internal/api/auth_recovery_sec_test.go",
             "internal/api/auth_recovery_test.go",
             "internal/api/openapi_unauthenticated_set_test.go",
-            "internal/api/provision_takeover_test.go"
+            "internal/api/provision_takeover_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -17314,6 +17326,852 @@
       }
     },
     {
+      "method": "POST",
+      "path": "/api/v1/page-webhooks/{token}",
+      "operation_id": "post_api_v1_page-webhooks_token",
+      "tag": "page-webhooks",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/prd/pages.md"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "test_signals": [
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/pages",
+      "operation_id": "get_api_v1_pages",
+      "tag": "pages",
+      "source_file": "cmd/crewship/cmd_page.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/cli/page.mdx",
+        "docs/guides/pages.mdx",
+        "docs/manifest/page.md",
+        "docs/prd/pages.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_export_page_test.go",
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "…"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/crewship/cmd_page.go",
+          "test_signals": [
+            "cmd/crewship/cmd_export_page_test.go",
+            "cmd/crewship/cmd_page_action_test.go",
+            "cmd/crewship/cmd_page_grants_test.go",
+            "cmd/crewship/cmd_page_publish_test.go",
+            "cmd/crewship/cmd_page_refresh_test.go",
+            "cmd/crewship/cmd_page_test.go",
+            "cmd/crewship/cmd_page_transfer_test.go",
+            "cmd/crewship/cmd_page_wake_test.go",
+            "…"
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/pages",
+      "operation_id": "post_api_v1_pages",
+      "tag": "pages",
+      "source_file": "cmd/crewship/cmd_page.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/cli/page.mdx",
+        "docs/guides/pages.mdx",
+        "docs/manifest/page.md",
+        "docs/prd/pages.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_export_page_test.go",
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "…"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/crewship/cmd_page.go",
+          "test_signals": [
+            "cmd/crewship/cmd_export_page_test.go",
+            "cmd/crewship/cmd_page_action_test.go",
+            "cmd/crewship/cmd_page_grants_test.go",
+            "cmd/crewship/cmd_page_publish_test.go",
+            "cmd/crewship/cmd_page_refresh_test.go",
+            "cmd/crewship/cmd_page_test.go",
+            "cmd/crewship/cmd_page_transfer_test.go",
+            "cmd/crewship/cmd_page_wake_test.go",
+            "…"
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/pages/import",
+      "operation_id": "post_api_v1_pages_import",
+      "tag": "pages",
+      "source_file": "cmd/crewship/cmd_page_transfer.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "internal/api/pages_transfer_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/crewship/cmd_page_transfer.go",
+          "test_signals": [
+            "cmd/crewship/cmd_page_transfer_test.go",
+            "internal/api/pages_transfer_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/pages/{slug}",
+      "operation_id": "delete_api_v1_pages_slug",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/cli/page.mdx",
+        "docs/guides/pages.mdx",
+        "docs/manifest/page.md",
+        "docs/prd/pages.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/gen-openapi/handler_resolution_test.go",
+        "internal/api/pages_authored_echo_test.go",
+        "internal/api/pages_webhooks_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages.go",
+          "test_signals": [
+            "cmd/crewship/cmd_page_test.go",
+            "cmd/gen-openapi/handler_resolution_test.go",
+            "internal/api/pages_authored_echo_test.go",
+            "internal/api/pages_webhooks_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/pages/{slug}",
+      "operation_id": "get_api_v1_pages_slug",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/cli/page.mdx",
+        "docs/guides/pages.mdx",
+        "docs/manifest/page.md",
+        "docs/prd/pages.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/gen-openapi/handler_resolution_test.go",
+        "internal/api/pages_authored_echo_test.go",
+        "internal/api/pages_webhooks_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages.go",
+          "test_signals": [
+            "cmd/crewship/cmd_page_test.go",
+            "cmd/gen-openapi/handler_resolution_test.go",
+            "internal/api/pages_authored_echo_test.go",
+            "internal/api/pages_webhooks_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/pages/{slug}",
+      "operation_id": "patch_api_v1_pages_slug",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/cli/page.mdx",
+        "docs/guides/pages.mdx",
+        "docs/manifest/page.md",
+        "docs/prd/pages.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/gen-openapi/handler_resolution_test.go",
+        "internal/api/pages_authored_echo_test.go",
+        "internal/api/pages_webhooks_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages.go",
+          "test_signals": [
+            "cmd/crewship/cmd_page_test.go",
+            "cmd/gen-openapi/handler_resolution_test.go",
+            "internal/api/pages_authored_echo_test.go",
+            "internal/api/pages_webhooks_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/pages/{slug}/export",
+      "operation_id": "get_api_v1_pages_slug_export",
+      "tag": "pages",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true
+        }
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/pages/{slug}/grants",
+      "operation_id": "delete_api_v1_pages_slug_grants",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/handler_resolution_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages.go",
+          "test_signals": [
+            "cmd/gen-openapi/handler_resolution_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/pages/{slug}/grants",
+      "operation_id": "get_api_v1_pages_slug_grants",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/handler_resolution_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages.go",
+          "test_signals": [
+            "cmd/gen-openapi/handler_resolution_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/pages/{slug}/grants",
+      "operation_id": "put_api_v1_pages_slug_grants",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/gen-openapi/handler_resolution_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages.go",
+          "test_signals": [
+            "cmd/gen-openapi/handler_resolution_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/pages/{slug}/panels/{panelId}/actions",
+      "operation_id": "get_api_v1_pages_slug_panels_panelId_actions",
+      "tag": "pages",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/guides/pages.mdx",
+        "docs/prd/pages.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}",
+      "operation_id": "post_api_v1_pages_slug_panels_panelId_actions_actionId",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages_actions.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/guides/pages.mdx",
+        "docs/prd/pages.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages_actions.go"
+        }
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/pages/{slug}/panels/{panelId}/data",
+      "operation_id": "put_api_v1_pages_slug_panels_panelId_data",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages.go"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/pages/{slug}/public",
+      "operation_id": "get_api_v1_pages_slug_public",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages_public.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/prd/pages.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages_public.go"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/pages/{slug}/public",
+      "operation_id": "post_api_v1_pages_slug_public",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages_public.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/prd/pages.md"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages_public.go"
+        }
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/pages/{slug}/public/{tokenId}",
+      "operation_id": "delete_api_v1_pages_slug_public_tokenId",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages_public.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages_public.go"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/pages/{slug}/rollback",
+      "operation_id": "post_api_v1_pages_slug_rollback",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages_transfer.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages_transfer.go"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/pages/{slug}/versions",
+      "operation_id": "get_api_v1_pages_slug_versions",
+      "tag": "pages",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/pages/{slug}/webhooks",
+      "operation_id": "get_api_v1_pages_slug_webhooks",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages_webhooks.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/pages_webhooks_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages_webhooks.go",
+          "test_signals": [
+            "internal/api/pages_webhooks_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/pages/{slug}/webhooks",
+      "operation_id": "post_api_v1_pages_slug_webhooks",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages_webhooks.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/pages_webhooks_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages_webhooks.go",
+          "test_signals": [
+            "internal/api/pages_webhooks_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/pages/{slug}/webhooks/{webhookId}",
+      "operation_id": "delete_api_v1_pages_slug_webhooks_webhookId",
+      "tag": "pages",
+      "source_file": "internal/api/router_pages_webhooks.go",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "internal/api/router_pages_webhooks.go"
+        }
+      }
+    },
+    {
       "method": "GET",
       "path": "/api/v1/paymaster/spend/by-agent/{crewId}",
       "operation_id": "get_api_v1_paymaster_spend_by-agent_crewId",
@@ -18032,6 +18890,79 @@
           "openapi_operation": true,
           "test_signals": [
             "internal/api/cross_workspace_fence_matrix_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/public/pages/{token}",
+      "operation_id": "get_api_v1_public_pages_token",
+      "tag": "public",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx",
+        "docs/prd/pages.md"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go",
+        "internal/api/route_read_scope_invariant_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "test_signals": [
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go",
+            "internal/api/route_read_scope_invariant_test.go"
+          ]
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/public/pages/{token}/unlock",
+      "operation_id": "post_api_v1_public_pages_token_unlock",
+      "tag": "public",
+      "exact_docs": [
+        "docs/api-reference/pages.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": true,
+      "concrete_json_request": true,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "test_signals": [
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -20433,7 +21364,8 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-        "internal/api/openapi_unauthenticated_set_test.go"
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -20452,7 +21384,8 @@
           "openapi_operation": true,
           "test_signals": [
             "cmd/gen-openapi/schemas_final_21_generic_responses_test.go",
-            "internal/api/openapi_unauthenticated_set_test.go"
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -20475,7 +21408,8 @@
       "test_signals": [
         "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
         "internal/api/openapi_conformance_test.go",
-        "internal/api/openapi_unauthenticated_set_test.go"
+        "internal/api/openapi_unauthenticated_set_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -20495,7 +21429,8 @@
           "test_signals": [
             "cmd/gen-openapi/schemas_final_integrations_connectors_test.go",
             "internal/api/openapi_conformance_test.go",
-            "internal/api/openapi_unauthenticated_set_test.go"
+            "internal/api/openapi_unauthenticated_set_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -20515,7 +21450,8 @@
         "docs/guides/migrations.mdx",
         "docs/guides/routines.mdx",
         "docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md",
-        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md"
+        "docs/prd/RELEASE-1-0-READINESS-2026-08-10.md",
+        "docs/prd/pages.md"
       ],
       "resource_docs": [
         "docs/api-reference/webhooks.mdx"
@@ -20524,7 +21460,8 @@
       "test_signals": [
         "cmd/gen-openapi/schemas_final_auth_integrations_credentials_notifications_users_webhooks_test.go",
         "internal/api/openapi_unauthenticated_set_test.go",
-        "internal/api/pipeline_webhooks_async_test.go"
+        "internal/api/pipeline_webhooks_async_test.go",
+        "internal/api/route_authz_invariant_test.go"
       ],
       "concrete_response_schema": true,
       "generic_response_schema": false,
@@ -20544,7 +21481,8 @@
           "test_signals": [
             "cmd/gen-openapi/schemas_final_auth_integrations_credentials_notifications_users_webhooks_test.go",
             "internal/api/openapi_unauthenticated_set_test.go",
-            "internal/api/pipeline_webhooks_async_test.go"
+            "internal/api/pipeline_webhooks_async_test.go",
+            "internal/api/route_authz_invariant_test.go"
           ]
         }
       }
@@ -25921,7 +26859,8 @@
       "root": "automation",
       "exact_docs": [
         "docs/cli/automation.mdx",
-        "docs/cli/overview.mdx"
+        "docs/cli/overview.mdx",
+        "docs/cli/page.mdx"
       ],
       "root_docs": [
         "docs/cli/automation.mdx"
@@ -26038,7 +26977,8 @@
       "root": "automation",
       "exact_docs": [
         "docs/cli/automation.mdx",
-        "docs/cli/overview.mdx"
+        "docs/cli/overview.mdx",
+        "docs/cli/page.mdx"
       ],
       "root_docs": [
         "docs/cli/automation.mdx"
@@ -27568,6 +28508,7 @@
         "cmd/crewship/cmd_consolidate_cov_test.go",
         "cmd/crewship/cmd_consolidate_test.go",
         "cmd/crewship/cmd_keeper_review_test.go",
+        "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_pipeline_cov_test.go",
         "cmd/crewship/cmd_run_yaml_metadata_test.go",
         "cmd/crewship/cmd_slash_fastpath_test.go"
@@ -30449,7 +31390,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_export_cov_test.go",
         "cmd/crewship/cmd_export_manifest_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_export_perms_sec_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_routine_extra_cov2_test.go"
       ],
       "flags": [
@@ -30477,6 +31420,7 @@
       "test_signals": [
         "cmd/crewship/cmd_export_cov_test.go",
         "cmd/crewship/cmd_export_manifest_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_export_perms_sec_test.go"
       ],
       "flags": [
@@ -30487,6 +31431,31 @@
       "documented_flags": [
         "no-credentials",
         "no-skill-bodies",
+        "output"
+      ]
+    },
+    {
+      "path": "export page",
+      "use": "page [slug]",
+      "short": "Export pages as kind=Page manifests (YAML)",
+      "root": "export",
+      "exact_docs": [
+        "docs/cli/export.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/export.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_export_cov_test.go",
+        "cmd/crewship/cmd_export_manifest_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
+        "cmd/crewship/cmd_export_perms_sec_test.go"
+      ],
+      "flags": [
+        "output"
+      ],
+      "documented_flags": [
         "output"
       ]
     },
@@ -31323,6 +32292,7 @@
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_inbox_cov_test.go",
         "cmd/crewship/cmd_inbox_foureyes_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
         "cmd/crewship/cmd_workflow_cov_test.go"
       ],
       "flags": [
@@ -31857,7 +32827,8 @@
         "cmd/crewship/cmd_integration_cov_test.go",
         "cmd/crewship/cmd_integration_crew_cov_test.go",
         "cmd/crewship/cmd_integration_parse_test.go",
-        "cmd/crewship/cmd_integration_tools_cov_test.go"
+        "cmd/crewship/cmd_integration_tools_cov_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go"
       ],
       "flags": [
         "agent",
@@ -32981,12 +33952,14 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_chain_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_issue_attachments_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
         "cmd/crewship/cmd_issue_extra_cov2_test.go",
         "cmd/crewship/cmd_issue_extra_cov_test.go",
         "cmd/crewship/cmd_issue_lifecycle_cov_test.go",
-        "cmd/crewship/cmd_issue_workflow_cov_test.go"
+        "cmd/crewship/cmd_issue_workflow_cov_test.go",
+        "…"
       ]
     },
     {
@@ -35424,11 +36397,11 @@
         "cmd/crewship/cmd_agent_ask_test.go",
         "cmd/crewship/cmd_checkpoint_cov_test.go",
         "cmd/crewship/cmd_checkpoint_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_format_sweep_1195_1211_test.go",
         "cmd/crewship/cmd_format_sweep_batch4_test.go",
         "cmd/crewship/cmd_format_sweep_batch6_test.go",
         "cmd/crewship/cmd_issue_cov_test.go",
-        "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "…"
       ]
     },
@@ -35947,12 +36920,12 @@
       "test_signals": [
         "cmd/crewship/cmd_activity_cov_test.go",
         "cmd/crewship/cmd_crew_config_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
         "cmd/crewship/cmd_memory_cov_test.go",
         "cmd/crewship/cmd_memory_health_test.go",
         "cmd/crewship/cmd_memory_port_test.go",
         "cmd/crewship/cmd_memory_remote_test.go",
         "cmd/crewship/cmd_memory_versions_cov_test.go",
-        "cmd/crewship/cmd_memory_versions_projection_test.go",
         "…"
       ],
       "flags": [
@@ -36047,7 +37020,7 @@
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_projection_test.go",
         "cmd/crewship/cmd_memory_versions_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
         "…"
       ],
       "flags": [
@@ -36274,7 +37247,7 @@
         "cmd/crewship/cmd_memory_versions_cov_test.go",
         "cmd/crewship/cmd_memory_versions_projection_test.go",
         "cmd/crewship/cmd_memory_versions_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
         "…"
       ]
     },
@@ -37662,6 +38635,653 @@
       ],
       "documented_flags": [
         "print-only"
+      ]
+    },
+    {
+      "path": "page",
+      "use": "page",
+      "short": "Author and feed Pages — panel dashboards fed by producers, not queries",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/export.mdx",
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_audit_cov_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "page action",
+      "use": "action \u003cslug\u003e/\u003cpanel\u003e \u003caction-id\u003e",
+      "short": "Dispatch a panel's declared action",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "idempotency-key",
+        "input"
+      ],
+      "documented_flags": [
+        "idempotency-key",
+        "input"
+      ]
+    },
+    {
+      "path": "page actions",
+      "use": "actions \u003cslug\u003e/\u003cpanel\u003e",
+      "short": "List the actions a panel declares, and the routine each one runs",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ]
+    },
+    {
+      "path": "page create",
+      "use": "create",
+      "short": "Create a page from a YAML (or JSON) page document",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/export.mdx",
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_audit_test.go",
+        "cmd/crewship/cmd_chat_create_test.go",
+        "cmd/crewship/cmd_checkpoint_cov_test.go",
+        "cmd/crewship/cmd_checkpoint_test.go",
+        "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "cmd/crewship/cmd_hooks_write_test.go",
+        "cmd/crewship/cmd_integration_crew_cov_test.go",
+        "…"
+      ],
+      "flags": [
+        "file"
+      ],
+      "documented_flags": [
+        "file"
+      ]
+    },
+    {
+      "path": "page delete",
+      "use": "delete \u003cslug\u003e",
+      "short": "Delete a page and its panels",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "yes"
+      ],
+      "documented_flags": [
+        "yes"
+      ]
+    },
+    {
+      "path": "page export",
+      "use": "export \u003cslug\u003e",
+      "short": "Export a page as a portable bundle (no workspace ids, references declared)",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/export.mdx",
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ]
+    },
+    {
+      "path": "page get",
+      "use": "get \u003cslug\u003e",
+      "short": "Show one page: its panels, their data, freshness and provenance",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ]
+    },
+    {
+      "path": "page grant",
+      "use": "grant \u003cslug\u003e",
+      "short": "Grant read, produce or write on a page to a user, a crew or an agent",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "agent",
+        "crew",
+        "level",
+        "panels",
+        "user"
+      ],
+      "documented_flags": [
+        "agent",
+        "crew",
+        "level",
+        "panels",
+        "user"
+      ]
+    },
+    {
+      "path": "page grants",
+      "use": "grants \u003cslug\u003e",
+      "short": "List a page's grants, and say which of them are still live",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ]
+    },
+    {
+      "path": "page import",
+      "use": "import \u003cfile\u003e",
+      "short": "Install a page bundle, binding its declared references to local ones",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/export.mdx",
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "bind",
+        "slug"
+      ],
+      "documented_flags": [
+        "bind",
+        "slug"
+      ]
+    },
+    {
+      "path": "page links",
+      "use": "links \u003cslug\u003e",
+      "short": "List a page's public links, and say which of them still work",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ]
+    },
+    {
+      "path": "page list",
+      "use": "list",
+      "short": "List the pages in this workspace",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_agent_mcp_cov_test.go",
+        "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
+        "cmd/crewship/cmd_chat_attachments_test.go",
+        "cmd/crewship/cmd_chat_cov2_test.go",
+        "cmd/crewship/cmd_checkpoint_cov_test.go",
+        "cmd/crewship/cmd_checkpoint_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "page publish",
+      "use": "publish \u003cslug\u003e",
+      "short": "Publish a page to someone outside the workspace, behind an expiring link",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "expires-in-days",
+        "password-stdin",
+        "show-provenance"
+      ],
+      "documented_flags": [
+        "expires-in-days",
+        "password-stdin",
+        "show-provenance"
+      ]
+    },
+    {
+      "path": "page revoke",
+      "use": "revoke \u003cslug\u003e",
+      "short": "Withdraw a user's, crew's or agent's grants on a page",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "agent",
+        "crew",
+        "level",
+        "user"
+      ],
+      "documented_flags": [
+        "agent",
+        "crew",
+        "level",
+        "user"
+      ]
+    },
+    {
+      "path": "page rollback",
+      "use": "rollback \u003cslug\u003e",
+      "short": "Restore a retained version of a page's spec",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "to",
+        "yes"
+      ],
+      "documented_flags": [
+        "to",
+        "yes"
+      ]
+    },
+    {
+      "path": "page set",
+      "use": "set \u003cslug\u003e/\u003cpanel\u003e",
+      "short": "Push a panel's payload (JSON on stdin with --data -)",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "data",
+        "state"
+      ],
+      "documented_flags": [
+        "data",
+        "state"
+      ]
+    },
+    {
+      "path": "page unpublish",
+      "use": "unpublish \u003cslug\u003e",
+      "short": "Withdraw one public link without touching the others",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "id",
+        "yes"
+      ],
+      "documented_flags": [
+        "id",
+        "yes"
+      ]
+    },
+    {
+      "path": "page update",
+      "use": "update \u003cslug\u003e",
+      "short": "Replace a page's spec from a YAML (or JSON) page document",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "file"
+      ],
+      "documented_flags": [
+        "file"
+      ]
+    },
+    {
+      "path": "page versions",
+      "use": "versions \u003cslug\u003e",
+      "short": "Show the retained version history of a page",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ]
+    },
+    {
+      "path": "page webhook",
+      "use": "webhook",
+      "short": "Let something that cannot run this binary write one panel",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_agent_channels_test.go",
+        "cmd/crewship/cmd_format_sweep_batch2_test.go",
+        "cmd/crewship/cmd_format_sweep_batch6_test.go",
+        "cmd/crewship/cmd_notifychannel_cov_test.go",
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "page webhook create",
+      "use": "create \u003cslug\u003e",
+      "short": "Mint a token that writes one panel, and print it once",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "name",
+        "panel"
+      ],
+      "documented_flags": [
+        "name",
+        "panel"
+      ]
+    },
+    {
+      "path": "page webhook list",
+      "use": "list \u003cslug\u003e",
+      "short": "List a page's webhook tokens, and say which of them still work",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ]
+    },
+    {
+      "path": "page webhook revoke",
+      "use": "revoke \u003cslug\u003e",
+      "short": "Withdraw one webhook token without touching the others",
+      "root": "page",
+      "exact_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/page.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_grants_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_refresh_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
+        "cmd/crewship/cmd_page_wake_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go"
+      ],
+      "flags": [
+        "id",
+        "yes"
+      ],
+      "documented_flags": [
+        "id",
+        "yes"
       ]
     },
     {
@@ -39348,6 +40968,7 @@
         "docs/cli/explain.mdx",
         "docs/cli/inspect.mdx",
         "docs/cli/overview.mdx",
+        "docs/cli/page.mdx",
         "docs/cli/recurring.mdx",
         "docs/cli/routine.mdx",
         "docs/cli/signal.mdx",
@@ -39362,12 +40983,12 @@
       "test_signals": [
         "cmd/crewship/cmd_chain_test.go",
         "cmd/crewship/cmd_commands_test.go",
+        "cmd/crewship/cmd_export_page_test.go",
+        "cmd/crewship/cmd_page_action_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_root_headless_multiarg_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
-        "cmd/crewship/cmd_routine_bench_test.go",
-        "cmd/crewship/cmd_routine_budget_test.go",
-        "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "…"
       ]
     },
@@ -39955,6 +41576,7 @@
       "short": "Export a routine bundle as JSON to stdout",
       "root": "routine",
       "exact_docs": [
+        "docs/cli/page.mdx",
         "docs/cli/routine.mdx"
       ],
       "root_docs": [
@@ -40505,6 +42127,7 @@
         "docs/cli/diff.mdx",
         "docs/cli/explain.mdx",
         "docs/cli/inspect.mdx",
+        "docs/cli/page.mdx",
         "docs/cli/routine.mdx",
         "docs/cli/wait.mdx"
       ],
@@ -40569,6 +42192,7 @@
         "docs/cli/diff.mdx",
         "docs/cli/explain.mdx",
         "docs/cli/inspect.mdx",
+        "docs/cli/page.mdx",
         "docs/cli/routine.mdx"
       ],
       "root_docs": [
@@ -40918,14 +42542,14 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_export_page_test.go",
+        "cmd/crewship/cmd_page_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
         "cmd/crewship/cmd_routine_budget_test.go",
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
-        "cmd/crewship/cmd_routine_doctor_cov_test.go",
-        "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ],
       "flags": [
@@ -40986,9 +42610,9 @@
         "cmd/crewship/cmd_keeper_history_test.go",
         "cmd/crewship/cmd_memory_versions_projection_test.go",
         "cmd/crewship/cmd_notify_prefs_cov_test.go",
+        "cmd/crewship/cmd_page_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
-        "cmd/crewship/cmd_routine_bench_test.go",
         "…"
       ]
     },
@@ -41719,6 +43343,7 @@
       ],
       "status": "documented_exact",
       "test_signals": [
+        "cmd/crewship/cmd_page_webhook_test.go",
         "cmd/crewship/cmd_routine_backtest_test.go",
         "cmd/crewship/cmd_routine_bench_cov_test.go",
         "cmd/crewship/cmd_routine_bench_test.go",
@@ -41726,7 +43351,6 @@
         "cmd/crewship/cmd_routine_capabilities_cov_test.go",
         "cmd/crewship/cmd_routine_doctor_cov_test.go",
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
-        "cmd/crewship/cmd_routine_extra_cov_test.go",
         "…"
       ]
     },
@@ -41895,10 +43519,10 @@
         "cmd/crewship/cmd_chat_create_test.go",
         "cmd/crewship/cmd_consolidate_test.go",
         "cmd/crewship/cmd_keeper_review_test.go",
+        "cmd/crewship/cmd_page_action_test.go",
         "cmd/crewship/cmd_pipeline_cov_test.go",
         "cmd/crewship/cmd_root_headless_test.go",
         "cmd/crewship/cmd_run_cov_test.go",
-        "cmd/crewship/cmd_run_id_namespace_test.go",
         "…"
       ],
       "flags": [
@@ -42113,6 +43737,7 @@
       "root": "saved-view",
       "exact_docs": [
         "docs/cli/overview.mdx",
+        "docs/cli/page.mdx",
         "docs/cli/saved-view.mdx"
       ],
       "root_docs": [
@@ -42389,6 +44014,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_crew_container_cov_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_server_test.go",
         "cmd/crewship/cmd_session_classify_test.go",
         "cmd/crewship/cmd_session_cov_test.go"
@@ -43750,10 +45376,10 @@
         "cmd/crewship/cmd_explain_cov_test.go",
         "cmd/crewship/cmd_login_password_stdin_test.go",
         "cmd/crewship/cmd_logs_cov_test.go",
+        "cmd/crewship/cmd_page_publish_test.go",
+        "cmd/crewship/cmd_page_webhook_test.go",
         "cmd/crewship/cmd_parity_test.go",
         "cmd/crewship/cmd_retry_cov_test.go",
-        "cmd/crewship/cmd_routine_webhooks_cov_test.go",
-        "cmd/crewship/cmd_run_cov_test.go",
         "…"
       ]
     },
@@ -44118,12 +45744,12 @@
       "test_signals": [
         "cmd/crewship/cmd_commands_test.go",
         "cmd/crewship/cmd_doctor_cov_test.go",
+        "cmd/crewship/cmd_page_transfer_test.go",
         "cmd/crewship/cmd_root_headless_test.go",
         "cmd/crewship/cmd_routine_extra_cov2_test.go",
         "cmd/crewship/cmd_routine_extra_cov_test.go",
         "cmd/crewship/cmd_skill_authoring_cov_test.go",
         "cmd/crewship/cmd_skill_cov_test.go",
-        "cmd/crewship/cmd_slash_cov_test.go",
         "…"
       ],
       "flags": [
@@ -44988,6 +46614,7 @@
         "docs/guides/credentials.mdx",
         "docs/guides/issue-attachments.mdx",
         "docs/guides/orchestration.mdx",
+        "docs/guides/pages.mdx",
         "docs/prd/agent-identity-signing.md",
         "docs/prd/agent-isolation-findings-2026-08-01.md",
         "docs/security/threat-model.mdx"
@@ -45455,6 +47082,14 @@
         "docs/api-reference/backup.mdx",
         "docs/guides/backup.mdx",
         "docs/security/backup-instance-security.mdx"
+      ],
+      "status": "documented"
+    },
+    {
+      "name": "CREWSHIP_PAGES_EMBED_SOURCES",
+      "docs": [
+        "docs/configuration/environment.mdx",
+        "docs/guides/pages.mdx"
       ],
       "status": "documented"
     },
@@ -45931,6 +47566,7 @@
         "docs/manifest/agent.md",
         "docs/manifest/crew.md",
         "docs/manifest/issue.md",
+        "docs/manifest/page.md",
         "docs/manifest/project.md",
         "docs/manifest/recurring_issue.md",
         "docs/manifest/saved_view.md",
@@ -46069,6 +47705,7 @@
         "docs/guides/migrations.mdx",
         "docs/guides/onboarding.mdx",
         "docs/guides/orchestration.mdx",
+        "docs/guides/pages.mdx",
         "docs/guides/paymaster.mdx",
         "docs/guides/quartermaster.mdx",
         "docs/guides/routines.mdx",
@@ -46087,6 +47724,7 @@
         "docs/manifest/crew_template.md",
         "docs/manifest/integration.md",
         "docs/manifest/issue.md",
+        "docs/manifest/page.md",
         "docs/manifest/recipe.md",
         "docs/manifest/recurring_issue.md",
         "docs/manifest/routine.md",
@@ -46191,6 +47829,7 @@
         "docs/api-reference/crews.mdx",
         "docs/api-reference/issues.mdx",
         "docs/api-reference/overview.mdx",
+        "docs/api-reference/pages.mdx",
         "docs/api-reference/websocket.mdx",
         "docs/api-reference/workspaces.mdx",
         "docs/changelog/overview.mdx",
@@ -46201,6 +47840,7 @@
         "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/activity.mdx",
+        "docs/guides/automations.mdx",
         "docs/guides/issue-attachments.mdx",
         "docs/guides/issue-detail.mdx",
         "docs/guides/manifests.mdx",
@@ -46256,6 +47896,31 @@
         "docs/manifest/milestone.md",
         "docs/manifest/project.md",
         "docs/manifest/recipe.md"
+      ],
+      "status": "documented"
+    },
+    {
+      "name": "Page",
+      "docs": [
+        "docs/api-reference/admin.mdx",
+        "docs/api-reference/agents.mdx",
+        "docs/api-reference/credentials.mdx",
+        "docs/api-reference/journal.mdx",
+        "docs/api-reference/pages.mdx",
+        "docs/api-reference/runs.mdx",
+        "docs/cli/activity.mdx",
+        "docs/cli/credential.mdx",
+        "docs/cli/export.mdx",
+        "docs/cli/page.mdx",
+        "docs/guides/automations.mdx",
+        "docs/guides/pages.mdx",
+        "docs/guides/routines-migration.mdx",
+        "docs/guides/routines.mdx",
+        "docs/manifest/README.md",
+        "docs/manifest/page.md",
+        "docs/prd/memory-retrieval-layer.md",
+        "docs/prd/pages.md",
+        "docs/security/audit.mdx"
       ],
       "status": "documented"
     },
@@ -46355,6 +48020,7 @@
         "docs/guides/routines.mdx",
         "docs/guides/watching-agent-runs.mdx",
         "docs/manifest/README.md",
+        "docs/manifest/page.md",
         "docs/manifest/recurring_issue.md",
         "docs/manifest/routine.md",
         "docs/prd/CHAT-SURFACE-CODE-AUDIT-2026-08-13.md",
@@ -46373,6 +48039,7 @@
         "docs/manifest/README.md",
         "docs/manifest/label.md",
         "docs/manifest/milestone.md",
+        "docs/manifest/page.md",
         "docs/manifest/project.md",
         "docs/manifest/saved_view.md",
         "docs/manifest/triage_rule.md",
@@ -46511,6 +48178,7 @@
         "docs/manifest/crew.md",
         "docs/manifest/feature_flag.md",
         "docs/manifest/integration.md",
+        "docs/manifest/page.md",
         "docs/manifest/recipe.md",
         "docs/manifest/skill.md",
         "docs/manifest/workspace.md",
@@ -46525,11 +48193,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4161,
-    "api_path_references": 2075,
-    "environment_references": 421,
-    "manifest_kind_references": 209,
-    "flag_references": 1927,
+    "command_references": 4271,
+    "api_path_references": 2145,
+    "environment_references": 425,
+    "manifest_kind_references": 228,
+    "flag_references": 1978,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,
