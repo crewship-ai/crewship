@@ -27,14 +27,19 @@ func TestBuildCatalogPrices_IsPopulated(t *testing.T) {
 	}
 }
 
-// A model the catalogue carries no cost for must produce NO row, so the lookup
-// falls through to providerFallback — the ceiling. A zero row would bill a
-// hosted model at $0, which is the failure the rate card exists to prevent.
+// A model the catalogue carries no usable cost for must produce NO row, so the
+// lookup falls through to providerFallback — the ceiling. A zero row would bill
+// a hosted model at $0, which is the failure the rate card exists to prevent.
+//
+// "No usable cost" is two cases, not one: an absent cost block, and a cost
+// block of all zeros. The snapshot carries 23 of the latter, and they are not
+// free models — mistral/labs-devstral-small-2512 and the google lyria previews
+// are hosted. Asserting only the absent case is what let the zero rows through.
 func TestBuildCatalogPrices_SkipsCostlessModels(t *testing.T) {
 	cat := modelcatalog.Default()
 	prices := catalogPrices()
 
-	var checkedCostless, checkedPriced int
+	var checkedCostless, checkedZero, checkedPriced int
 	for _, prov := range cat.Providers() {
 		for _, m := range cat.Models(prov) {
 			key := prov + "/" + m.ID
@@ -44,6 +49,13 @@ func TestBuildCatalogPrices_SkipsCostlessModels(t *testing.T) {
 				checkedCostless++
 				if present {
 					t.Errorf("%s has no cost in the catalogue but got a rate row %+v", key, got)
+				}
+				continue
+			}
+			if in == 0 && out == 0 {
+				checkedZero++
+				if present {
+					t.Errorf("%s is priced 0/0 in the catalogue but got a rate row %+v — it must fall through to providerFallback", key, got)
 				}
 				continue
 			}
@@ -68,7 +80,10 @@ func TestBuildCatalogPrices_SkipsCostlessModels(t *testing.T) {
 	if checkedPriced == 0 {
 		t.Error("no priced model in the embedded catalogue — the snapshot looks empty")
 	}
-	t.Logf("checked %d priced and %d costless catalogue models", checkedPriced, checkedCostless)
+	if checkedZero == 0 {
+		t.Error("no 0/0-priced model in the embedded catalogue — this test's whole point is that they exist and must be skipped; if a refresh really removed them all, delete this guard deliberately")
+	}
+	t.Logf("checked %d priced, %d costless and %d zero-priced catalogue models", checkedPriced, checkedCostless, checkedZero)
 }
 
 // An absent cache_read or cache_write mirrors the input rate, never zero. Zero

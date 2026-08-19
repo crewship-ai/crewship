@@ -165,8 +165,14 @@ func NewOpenAI(apiKey string) *OpenAI {
 // An explicitly-empty baseURL is NOT rewritten to the hosted default: it is an
 // unambiguous misconfiguration and keeps surfacing as a parse error, which is
 // the only response that names the actual problem.
+// stream_options is deliberately NOT set here. The hosted API accepts it, but
+// this constructor takes an arbitrary endpoint: Azure OpenAI before
+// api-version 2024-08-01 and several self-hosted servers reject unknown body
+// keys outright ("Unrecognized request argument supplied: stream_options"), so
+// forcing it on would break streaming that worked before this existed. Callers
+// who know their backend supports it can opt in through NewOpenAICompat.
 func NewOpenAIWithBaseURL(apiKey, baseURL string) *OpenAI {
-	cfg := OpenAICompatConfig{APIKey: apiKey, IncludeUsage: true}.withDefaults()
+	cfg := OpenAICompatConfig{APIKey: apiKey}.withDefaults()
 	cfg.BaseURL = baseURL
 	return newOpenAIProvider(cfg)
 }
@@ -180,7 +186,9 @@ func NewOpenAIWithBaseURL(apiKey, baseURL string) *OpenAI {
 // NewOpenAIWithBaseURL) — callers wiring an untrusted endpoint MUST pass a
 // guarded client, never nil.
 func NewOpenAIWithClient(apiKey, baseURL string, client *http.Client) *OpenAI {
-	cfg := OpenAICompatConfig{APIKey: apiKey, Client: client, IncludeUsage: true}.withDefaults()
+	// No stream_options — a tenant-configured endpoint is exactly the case
+	// that may reject it. See NewOpenAIWithBaseURL.
+	cfg := OpenAICompatConfig{APIKey: apiKey, Client: client}.withDefaults()
 	cfg.BaseURL = baseURL // explicit, including "" — see NewOpenAIWithBaseURL
 	return newOpenAIProvider(cfg)
 }

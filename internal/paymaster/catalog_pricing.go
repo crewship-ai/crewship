@@ -44,6 +44,20 @@ func buildCatalogPrices() map[string]modelPrice {
 			if !ok {
 				continue
 			}
+			// An all-zero cost block is not a claim that the model is free —
+			// it is a gap in the upstream catalogue, and the snapshot carries
+			// 23 of them (mistral/labs-devstral-small-2512 and the google
+			// lyria previews are hosted models priced 0/0). Writing the row
+			// would bill them at $0, which is precisely what the comment above
+			// says this file must never do. Skipping lets them fall through to
+			// providerFallback and be over-estimated, which is the safe
+			// direction. It also over-bills the genuinely free OpenRouter
+			// ":free" tiers, and that trade is deliberate: free is a claim only
+			// "ollama/*" and "local/*" get to make, and they make it in
+			// priceTable where a human signed off on it.
+			if in == 0 && outRate == 0 {
+				continue
+			}
 			out[prov+"/"+m.ID] = modelPrice{
 				InputPerM:       in,
 				OutputPerM:      outRate,

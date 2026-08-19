@@ -136,8 +136,8 @@ func RateCard(provider, model string) modelPrice {
 
 // lookupPrice resolves (provider, model) to a rate. Lookup order:
 //  1. exact "<provider>/<model>" match in priceTable
-//  2. exact match in the embedded models.dev snapshot (catalog_pricing.go)
-//  3. provider-wildcard "<provider>/*" match (used by ollama/local)
+//  2. provider-wildcard "<provider>/*" match (used by ollama/local)
+//  3. exact match in the embedded models.dev snapshot (catalog_pricing.go)
 //  4. providerFallback for the provider
 //  5. zero (returned if even the provider is unknown — we never invent a rate
 //     for a totally unknown vendor; the operator should see $0 and notice)
@@ -146,9 +146,14 @@ func RateCard(provider, model string) modelPrice {
 // exact hand-written match, because priceTable carries verified corrections a
 // bulk import must never overwrite — Opus 4.7 was billed 3× over until someone
 // checked, and alias rows like "openai/gpt-5" have no catalogue equivalent at
-// all. And it sits BEFORE the wildcard, because "ollama/*" and "local/*" have
-// to keep zeroing out every local model no matter what a catalogue thinks a
-// same-named hosted model costs.
+// all.
+//
+// It also sits AFTER the wildcard, so "ollama/*" and "local/*" keep zeroing out
+// every local model no matter what a catalogue thinks a same-named hosted model
+// costs. The trim happens to exclude ollama today, but embed.go documents how to
+// widen it — and a refresh that pulled in an ollama or local provider would
+// otherwise start billing every local call. A promise that only holds because of
+// what a snapshot currently omits is not a promise.
 func lookupPrice(provider, model string) modelPrice {
 	prov := strings.ToLower(strings.TrimSpace(provider))
 	mod := strings.ToLower(strings.TrimSpace(model))
@@ -159,10 +164,10 @@ func lookupPrice(provider, model string) modelPrice {
 	if p, ok := priceTable[prov+"/"+mod]; ok {
 		return p
 	}
-	if p, ok := catalogPrice(prov, mod); ok {
+	if p, ok := priceTable[prov+"/*"]; ok {
 		return p
 	}
-	if p, ok := priceTable[prov+"/*"]; ok {
+	if p, ok := catalogPrice(prov, mod); ok {
 		return p
 	}
 	if p, ok := providerFallback[prov]; ok {

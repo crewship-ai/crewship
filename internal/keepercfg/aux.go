@@ -642,7 +642,9 @@ func persistAuxTx(ctx context.Context, tx *sql.Tx, slot string, o AuxOverride, a
 func validateAux(o AuxOverride) error {
 	if o.Provider != "" && !KnownAuxProvider(o.Provider) {
 		if o.Provider == "google" || o.Provider == "gemini" {
-			return newValidation("google models cannot back an evaluator — this build has no Gemini provider; use anthropic, openai, or ollama")
+			return newValidation(fmt.Sprintf(
+				"google models cannot back an evaluator — this build has no Gemini provider; use one of %s",
+				strings.Join(auxProviders(), ", ")))
 		}
 		return newValidation(fmt.Sprintf("unknown evaluator provider %q — use one of %s",
 			o.Provider, strings.Join(auxProviders(), ", ")))

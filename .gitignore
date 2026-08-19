@@ -126,6 +126,10 @@ ehthumbs.db
 *.db-shm
 *.db-wal
 data/
+# …but the models.dev snapshot under internal/modelcatalog/data/ is tracked
+# deliberately: go:embed resolves it at compile time, so an untracked file
+# means the whole server and CLI fail to build on a fresh clone and in CI.
+!internal/modelcatalog/data/
 internal/orchestrator/data/
 /entrypoint.sh
 coverage_log.md

@@ -134,7 +134,15 @@ func openAIStreamClient(cfg OpenAICompatConfig) *http.Client {
 		return cfg.StreamClient
 	}
 	if cfg.Client != nil && cfg.Client.Transport != nil {
-		return &http.Client{Transport: cfg.Client.Transport}
+		// CheckRedirect travels with the transport. The governance client sets
+		// http.ErrUseLastResponse alongside its dialer Control, and carrying
+		// only the transport would leave Stream following up to ten redirects
+		// off a fenced endpoint while Complete refuses at the first 3xx — the
+		// asymmetry this function's comment says it exists to prevent.
+		return &http.Client{
+			Transport:     cfg.Client.Transport,
+			CheckRedirect: cfg.Client.CheckRedirect,
+		}
 	}
 	// Clone DefaultTransport so deployments behind HTTP_PROXY / HTTPS_PROXY
 	// keep working and TLS/dial defaults aren't dropped — a zero-value
