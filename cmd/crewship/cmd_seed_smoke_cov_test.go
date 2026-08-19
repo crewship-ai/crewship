@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
@@ -46,6 +48,16 @@ func TestMain(m *testing.M) {
 	// untouched, so every test can be handed back the same starting state.
 	// See clistate_test.go.
 	snapshotPristineCLIState()
+	// snapshotPristineCLIState walked the tree with Commands(), which sorted
+	// every child slice alphabetically. Freeze that order: from here on
+	// Commands() is a pure read, so the 34 parallel tests that enumerate a
+	// shared command cannot race each other inside sort.Sort (#1989). The
+	// order they observe is the alphabetical one production renders, because
+	// the walk above did the sorting before this line turned it off.
+	//
+	// Test-scoped on purpose — main() still sorts, so `crewship --help` is
+	// unchanged for users. cobra_sort_parallel_guard_test.go is the guard.
+	cobra.EnableCommandSorting = false
 	os.Exit(m.Run())
 }
 
