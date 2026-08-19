@@ -100,6 +100,19 @@ func TestMatchCrewContainer(t *testing.T) {
 			wantReason: "the fallback name is derived from this crew's id",
 		},
 		{
+			// The label set as it stood before crewship.kind existed: the
+			// crew id and slug, no kind. service_inventory_test.go's own
+			// fixture for "the crew's own agent runtime" is shaped exactly
+			// this way, so it is not hypothetical.
+			name:       "this crew's id with no kind label, name matching",
+			labels:     map[string]string{crewCrewIDLabel: crewID, crewCrewLabel: "alpha"},
+			names:      []string{"/" + crewName},
+			crewID:     crewID,
+			wantKind:   provider.CrewContainerKindCrew,
+			wantMatch:  true,
+			wantReason: "a partially-labelled container is a gap, not a conflict",
+		},
+		{
 			name:       "a container labelled for another crew but named like this one",
 			labels:     map[string]string{crewCrewIDLabel: "ckbeta02"},
 			names:      []string{"/" + crewName},

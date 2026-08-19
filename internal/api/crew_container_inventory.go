@@ -23,6 +23,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -31,6 +32,11 @@ import (
 // bytes; every Crewship surface that shows container memory (crew limits,
 // resource drift) speaks MiB, so the conversion happens once, here.
 const bytesPerMiB = 1024 * 1024
+
+// statsFanout bounds how many stats reads are in flight at once. A crew has a
+// runtime container and a handful of sidecars, so this is a ceiling on a
+// pathological manifest rather than a throttle on the normal case.
+const statsFanout = 8
 
 // crewContainerEntry is one of the crew's containers as the API reports it.
 //
@@ -127,25 +133,46 @@ func (h *CrewHandler) Containers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	out := make([]crewContainerEntry, 0, len(live))
-	for _, c := range live {
-		entry := crewContainerEntry{
+	out := make([]crewContainerEntry, len(live))
+	for i, c := range live {
+		out[i] = crewContainerEntry{
 			Name:   c.Name,
 			Image:  c.Image,
 			Kind:   c.Kind,
 			Status: c.State,
 		}
 		if c.Kind == provider.CrewContainerKindCrew {
-			entry.AgentCount = agentCount
+			out[i].AgentCount = agentCount
 		}
+	}
+
+	// Usage is read CONCURRENTLY, and that is not premature: docker's stats
+	// call collects two samples a second apart (IncludePreviousSample, so
+	// CPUPercent is a 1s delta rather than a since-boot average), so a serial
+	// pass costs one second per running container — a crew with a runtime and
+	// three sidecars would take four seconds to draw a panel.
+	//
+	// These goroutines are joined before the handler returns, so they never
+	// outlive the request and need no beginBackgroundWork registration. The
+	// bound keeps a crew with many sidecars from opening a burst of daemon
+	// connections at once.
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, statsFanout)
+	for i, c := range live {
 		// Only a running container has usage to report, and asking about a
 		// stopped one is a daemon round-trip whose answer is already known.
-		if c.State == "running" {
-			cpu, mem := h.containerUsage(r, c.ID)
-			entry.CPUPercent, entry.MemoryMB = cpu, mem
+		if c.State != "running" {
+			continue
 		}
-		out = append(out, entry)
+		wg.Add(1)
+		go func(idx int, containerID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			out[idx].CPUPercent, out[idx].MemoryMB = h.containerUsage(r, containerID)
+		}(i, c.ID)
 	}
+	wg.Wait()
 	// Docker returns containers newest-first, which reorders the table on
 	// every poll as sidecars are recycled. Fixed order instead: the crew's own
 	// runtime first — it is what the reader came for — then sidecars by name.

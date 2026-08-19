@@ -47,9 +47,13 @@ func matchCrewContainer(labels map[string]string, names []string, crewID, crewCo
 		return provider.CrewContainerKindCrew, true
 	}
 	// A container that names ANOTHER crew is never adopted by the name
-	// fallback: a wrong-but-present ownership label is a conflict, not a
-	// gap, and the fallback exists only for containers that carry none.
-	if labels[crewCrewIDLabel] != "" {
+	// fallback: a wrong ownership label is a conflict, not a gap.
+	//
+	// A container carrying THIS crew's id but no kind label still reaches the
+	// name check below — that combination is exactly what the labels looked
+	// like before crewship.kind existed, so rejecting it here would re-open
+	// the gap the fallback is for.
+	if id := labels[crewCrewIDLabel]; id != "" && id != crewID {
 		return "", false
 	}
 	if crewContainerName == "" {
