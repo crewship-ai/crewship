@@ -220,6 +220,24 @@ jobs:
           - suite: test-inbox.sh
           - suite: test-keeper-aux.sh
           - suite: test-keeper-config.sh
+          # The composition depth cap (#1839). It asserts a SAFETY property
+          # rather than a feature: routine -> crewship step -> issue event ->
+          # automation -> routine can close a cycle, and nothing else bounds
+          # it. It was proven broken on a live instance — 59 hops past a cap
+          # of 8 — and the unit test that models that run is a hypothesis
+          # about it, not the same claim. Needs no provider credential: the
+          # cycle runs through crewship's own nouns, not an agent reply.
+          - suite: test-automation-loop.sh
+          # Pages (#1937). Landed in the pages series after this workflow was
+          # last touched, so it reached main in no tier at all — the same hole
+          # this guard exists to close, found by the guard a second time.
+          # Provider-free and deterministic by its own header: no model call
+          # anywhere, the only wait is the 5s SLA it measures, and it deletes
+          # its page on exit. It proves what only a running server can show —
+          # that provenance is ATTACHED rather than echoed, that the 64 KiB
+          # cap answers 422 and not 500, and that a panel goes stale on its
+          # own. Its "RED BY DESIGN" guard is spent: `crewship page` exists.
+          - suite: test-pages.sh
           # NDJSON agent-run stream (#1818). Its Tier A block — CLI parity, the
           # 404-not-403 rule for a chat you cannot see, and the frame contract
           # on an idle chat — needs no provider credential. Its Tier B block
