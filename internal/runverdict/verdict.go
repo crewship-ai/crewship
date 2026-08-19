@@ -132,9 +132,10 @@ const (
 // embedded wiring gets.
 //
 // The deadline is applied here rather than by the two callers so they
-// cannot drift, and inside the emit path deliberately: a verdict whose
-// model call ran out of time has nothing to emit, so bounding the whole
-// function is the same thing as bounding the call.
+// cannot drift, and it covers the MODEL CALL only. Extending it over the
+// emit would mean a verdict that answered at 19.9s of a 20s budget was
+// generated (and billed) and then dropped on the way to the journal —
+// the one outcome worse than either bound alone.
 //
 // Trivial runs (<=1 entry — just a run.started with nothing else) are
 // also skipped without an LLM call: there's no outcome to assess yet.
@@ -152,13 +153,14 @@ func GenerateAndEmit(ctx context.Context, emitter Emitter, provider llm.Provider
 		return nil
 	}
 
+	callCtx := ctx
 	if budget > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, budget)
+		callCtx, cancel = context.WithTimeout(ctx, budget)
 		defer cancel()
 	}
 
-	resp, err := provider.Complete(ctx, llm.Request{
+	resp, err := provider.Complete(callCtx, llm.Request{
 		Model:     model,
 		System:    systemPrompt,
 		MaxTokens: 400,

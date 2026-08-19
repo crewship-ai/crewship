@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
 
@@ -119,5 +120,40 @@ func TestGenerateAndEmit_OverrunningTheBudgetCutsTheCallOff(t *testing.T) {
 	}
 	if len(emitter.entries) != 0 {
 		t.Errorf("emitted %d entries after a timed-out call, want 0", len(emitter.entries))
+	}
+}
+
+// deadlineRecordingEmitter records whether the emit it was handed was itself
+// under the model call's deadline.
+type deadlineRecordingEmitter struct {
+	recordingEmitter
+	hadDeadline bool
+}
+
+func (e *deadlineRecordingEmitter) Emit(ctx context.Context, entry journal.Entry) (string, error) {
+	_, e.hadDeadline = ctx.Deadline()
+	return e.recordingEmitter.Emit(ctx, entry)
+}
+
+// The budget bounds the model call, not the journal write behind it. A verdict
+// that answered just inside its deadline and was then dropped on the way to
+// the journal would be the one outcome worse than either bound alone: billed,
+// generated, and invisible.
+func TestGenerateAndEmit_BudgetDoesNotBoundTheEmit(t *testing.T) {
+	provider := &budgetProbeProvider{content: `{"outcome":"goal_met","verdict":"ok","summary":"ok"}`}
+	emitter := &deadlineRecordingEmitter{}
+
+	if err := GenerateAndEmit(context.Background(), emitter, provider, testModel, 4*time.Second,
+		baseEntry(), multiEntryRun()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !provider.hadDeadline {
+		t.Fatal("the model call was not bounded by the budget")
+	}
+	if emitter.hadDeadline {
+		t.Error("the emit inherited the model call's deadline; the budget must cover the call only")
+	}
+	if len(emitter.entries) != 1 {
+		t.Errorf("emitted %d entries, want 1", len(emitter.entries))
 	}
 }
