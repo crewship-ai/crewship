@@ -63,6 +63,9 @@
               },
               "guides/first-crew",
               "guides/chat-sessions",
+              "guides/chat-surface-limits",
+              "guides/ask-forms",
+              "guides/chat-demo-walkthrough",
               "guides/watching-agent-runs",
               "guides/manifests",
               "guides/devcontainers",
@@ -149,7 +152,8 @@
                   "observability/otlp-setup",
                   "observability/metrics",
                   "guides/feedback",
-                  "guides/telemetry"
+                  "guides/telemetry",
+                  "guides/chat-telemetry"
                 ]
               },
               "guides/scheduling",
@@ -160,6 +164,7 @@
               "guides/cartographer",
               "guides/hooks",
               "guides/automations",
+              "guides/pages",
               "guides/quartermaster",
               "guides/watch-roster",
               {
@@ -309,6 +314,7 @@
             "pages": [
               "cli/mission",
               "cli/routine",
+              "cli/page",
               "cli/pipeline",
               "cli/webhook",
               "cli/waitpoint",
@@ -473,6 +479,7 @@
               "api-reference/milestones",
               "api-reference/recurring-issues",
               "api-reference/saved-views",
+              "api-reference/pages",
               "api-reference/triage",
               "api-reference/workflow-templates",
               "api-reference/credentials",

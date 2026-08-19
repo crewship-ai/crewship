@@ -1,0 +1,237 @@
+/**
+ * "via Add a receipt" — which form a user turn came out of, and with what.
+ *
+ * ─── What changed, and why (audit P0.6) ────────────────────────────────────
+ *
+ * This module used to be a bounded in-memory map keyed by the RENDERED
+ * MESSAGE CONTENT. Content is not an identity. Two identical submissions
+ * collided — the second silently relabelled the first — a reload lost every
+ * entry, and the values the user had filled in were never recorded anywhere at
+ * all: they were component state, and the sheet unmounted.
+ *
+ * Provenance is now the readable face of a durable record. A submission mints
+ * an id, the envelope (./ask-envelope.ts) carries the form, its version, the
+ * answers and which upload answered which field, and the badge is read from
+ * the envelope on the turn rather than looked up by what the message says.
+ *
+ * Two lookups, in this order:
+ *
+ *   1. THE TURN'S OWN METADATA. `conversation.Message.Metadata` already exists
+ *      and is persisted with the message, so this is the path that survives a
+ *      reload, a second tab, and a colleague opening the same shared chat.
+ *      It is also the only one that cannot collide: the id is on the turn.
+ *   2. THE LOCAL LEDGER, below. Kept in `sessionStorage`, so the answers
+ *      survive a reload of the tab that sent them even before the send path
+ *      carries the envelope end to end. Bounded per session.
+ *
+ * The old content-keyed map is still here because ChatPanel and the composer
+ * call it and are owned elsewhere this week — but it no longer guesses: when
+ * one piece of content has been recorded under two different forms, it returns
+ * NOTHING rather than the most recent label. A missing badge is a courtesy not
+ * offered; a wrong one is the transcript telling the user something untrue.
+ *
+ * Nothing in here ever holds a value from a field that failed closed — the
+ * envelope drops those before it is built, and the ledger only ever stores
+ * envelopes.
+ */
+
+import type { AskSubmissionEnvelope } from "./ask-envelope"
+import { askEnvelopeFromMetadata, askEnvelopeLabel } from "./ask-envelope"
+
+/** Bounded per session: a long conversation must not grow a record of every
+ *  form ever submitted in it. Oldest first out — losing the answers to a
+ *  submission scrolled far out of view costs a badge, not a message. */
+const MAX_ENTRIES_PER_SESSION = 32
+
+/** sessionStorage, not localStorage: this is about the conversation in front
+ *  of the user, and it should not outlive the tab it was typed in. */
+const STORAGE_PREFIX = "crewship.ask-submissions."
+
+/** In-memory mirror, so a reader does not parse JSON on every render and the
+ *  module still works where storage is unavailable (SSR, a locked-down
+ *  browser, a test environment without one). */
+const ledger = new Map<string, AskSubmissionEnvelope[]>()
+
+function storage(): Storage | null {
+  try {
+    if (typeof window === "undefined" || !window.sessionStorage) return null
+    return window.sessionStorage
+  } catch {
+    // Access itself throws in a blocked third-party context. The ledger then
+    // lives only in memory, which is exactly what it used to be.
+    return null
+  }
+}
+
+function load(sessionId: string): AskSubmissionEnvelope[] {
+  const cached = ledger.get(sessionId)
+  if (cached) return cached
+
+  const store = storage()
+  let entries: AskSubmissionEnvelope[] = []
+  if (store) {
+    try {
+      const raw = store.getItem(STORAGE_PREFIX + sessionId)
+      const parsed = raw ? JSON.parse(raw) : null
+      if (Array.isArray(parsed)) {
+        // Read back through the same reader the wire uses, so a malformed or
+        // half-written entry is dropped rather than rendered.
+        entries = parsed
+          .map((e) => askEnvelopeFromMetadata({ ask_submission: e }))
+          .filter((e): e is AskSubmissionEnvelope => e !== null)
+      }
+    } catch {
+      entries = []
+    }
+  }
+  ledger.set(sessionId, entries)
+  return entries
+}
+
+function persist(sessionId: string, entries: AskSubmissionEnvelope[]): void {
+  const store = storage()
+  if (!store) return
+  try {
+    store.setItem(STORAGE_PREFIX + sessionId, JSON.stringify(entries))
+  } catch {
+    // A full or refusing quota costs durability, not the send. The in-memory
+    // mirror still answers for this tab's lifetime.
+  }
+}
+
+/**
+ * Record one submission. Called by the sheet at the moment it hands the
+ * rendered text to the send path, so the envelope exists before anything can
+ * come back — including a send that fails, which is a submission the user made
+ * and is entitled to see recorded.
+ */
+export function recordAskSubmission(sessionId: string, envelope: AskSubmissionEnvelope): void {
+  const entries = load(sessionId).filter((e) => e.submission_id !== envelope.submission_id)
+  entries.push(envelope)
+  while (entries.length > MAX_ENTRIES_PER_SESSION) entries.shift()
+  ledger.set(sessionId, entries)
+  persist(sessionId, entries)
+}
+
+/** One submission by its id — the identity content could not be. */
+export function lookupAskSubmission(
+  sessionId: string,
+  submissionId: string,
+): AskSubmissionEnvelope | null {
+  return load(sessionId).find((e) => e.submission_id === submissionId) ?? null
+}
+
+/** Every submission recorded in this session, oldest first. */
+export function listAskSubmissions(sessionId: string): AskSubmissionEnvelope[] {
+  return [...load(sessionId)]
+}
+
+/** A turn as this module needs to read it. Structural rather than importing
+ *  `ChatTurn`, so the ledger stays a plain module and the renderer can pass
+ *  anything turn-shaped (a history row, a live turn, a test fixture). */
+export interface AskProvenanceTurn {
+  metadata?: unknown
+  parts?: { type: string; metadata?: unknown }[]
+}
+
+/**
+ * The envelope for one turn, or null.
+ *
+ * Looks at the turn's metadata and then at its parts' metadata: the history
+ * loader folds a message's own metadata onto the turn, while a live stream
+ * event carries it on the part, and a badge that only worked on one of those
+ * would be a badge that disappears on reload.
+ *
+ * A turn carrying only a submission id (a sender that recorded the envelope
+ * locally and put a pointer on the wire) is resolved through the ledger.
+ */
+export function askSubmissionForTurn(
+  sessionId: string,
+  turn: AskProvenanceTurn,
+): AskSubmissionEnvelope | null {
+  const sources: unknown[] = [turn.metadata, ...(turn.parts ?? []).map((p) => p.metadata)]
+  for (const source of sources) {
+    const direct = askEnvelopeFromMetadata(source)
+    if (direct) {
+      // A pointer-only envelope (id and form, no answers) is completed from
+      // the ledger when this client is the one that sent it.
+      if (Object.keys(direct.values).length === 0 && !direct.field_attachment_ids) {
+        const full = lookupAskSubmission(sessionId, direct.submission_id)
+        if (full) return full
+      }
+      return direct
+    }
+  }
+  return null
+}
+
+/** The badge text for one turn, or null when it did not come out of a form. */
+export function askProvenanceForTurn(sessionId: string, turn: AskProvenanceTurn): string | null {
+  const envelope = askSubmissionForTurn(sessionId, turn)
+  return envelope ? askEnvelopeLabel(envelope) : null
+}
+
+// ---------------------------------------------------------------------------
+// The legacy content-keyed path.
+//
+// Still exported because ChatPanel and the composer call it, and until the
+// send path carries the envelope it is the only thing that can label the
+// optimistic turn the user is looking at. It is no longer allowed to GUESS.
+// ---------------------------------------------------------------------------
+
+const KEY_SEPARATOR = " "
+const MAX_LEGACY_ENTRIES = 64
+
+/** Content → label, or the collision sentinel. */
+const AMBIGUOUS = Symbol("two forms produced this exact message")
+const legacyEntries = new Map<string, string | typeof AMBIGUOUS>()
+
+function legacyKey(sessionId: string, content: string): string {
+  return `${sessionId}${KEY_SEPARATOR}${content.trim()}`
+}
+
+/** @deprecated Record the envelope instead (`recordAskSubmission`). */
+export function recordAskProvenance(sessionId: string, content: string, formLabel: string): void {
+  const k = legacyKey(sessionId, content)
+  const existing = legacyEntries.get(k)
+  legacyEntries.delete(k)
+  // Two different forms rendering the same message poisons the key: content
+  // cannot tell them apart, so it stops answering rather than handing back
+  // the most recent label. Once poisoned it stays that way — a third
+  // submission from the first form does not make the second one go away.
+  legacyEntries.set(k, existing !== undefined && existing !== formLabel ? AMBIGUOUS : formLabel)
+  while (legacyEntries.size > MAX_LEGACY_ENTRIES) {
+    const oldest = legacyEntries.keys().next().value
+    if (oldest === undefined) break
+    legacyEntries.delete(oldest)
+  }
+}
+
+/** @deprecated Read the turn instead (`askProvenanceForTurn`). */
+export function lookupAskProvenance(sessionId: string, content: string): string | null {
+  const found = legacyEntries.get(legacyKey(sessionId, content))
+  return typeof found === "string" ? found : null
+}
+
+/** Test seam. Clears both the ledger and the legacy map, including what the
+ *  ledger persisted — nothing in the product calls this. */
+export function resetAskProvenance(): void {
+  legacyEntries.clear()
+  const store = storage()
+  if (store) {
+    for (const sessionId of ledger.keys()) {
+      try {
+        store.removeItem(STORAGE_PREFIX + sessionId)
+      } catch {
+        // Nothing to do: the in-memory mirror is cleared below regardless.
+      }
+    }
+  }
+  ledger.clear()
+}
+
+/** Test seam: drop the in-memory mirror WITHOUT touching what was persisted,
+ *  which is what a page reload does. */
+export function forgetAskSubmissionsInMemory(): void {
+  ledger.clear()
+}

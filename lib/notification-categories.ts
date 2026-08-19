@@ -68,6 +68,7 @@ export const NOTIFICATION_CATEGORY_GROUPS: NotificationCategoryGroup[] = [
       { key: "system.health", label: "Instance health", hint: "The instance itself reported a problem" },
       { key: "system.migration", label: "Migrations", hint: "A schema migration ran on this instance" },
       { key: "security", label: "Security", hint: "A guardrail fired, or an egress attempt was blocked" },
+      { key: "pages.stale", label: "Stale pages", hint: "A page you own has a panel past its freshness SLA" },
     ],
   },
   {

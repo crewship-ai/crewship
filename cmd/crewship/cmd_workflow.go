@@ -110,7 +110,7 @@ var workflowListCmd = &cobra.Command{
 				builtin = "yes"
 			}
 			rows = append(rows, []string{
-				truncateID(t.ID, 12),
+				f.ShortID(t.ID, truncateID(t.ID, 12)),
 				t.Name,
 				builtin,
 				fmt.Sprintf("%d", countStages(t.TemplateJSON)),

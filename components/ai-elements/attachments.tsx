@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useRef, useState, type ComponentProps, type DragEvent } from "react";
-import { File as FileIcon, FileImage, FileText, Paperclip, X, Upload } from "lucide-react";
+import {
+  AlertTriangle,
+  File as FileIcon,
+  FileImage,
+  FileText,
+  Paperclip,
+  X,
+  Upload,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { Button } from "@/components/ui/button";
@@ -15,16 +23,24 @@ export type Attachment = {
   type: string;
   url?: string;
   status?: "uploading" | "ready" | "error";
+  /** Why the upload was refused. Shown on the chip as its tooltip; the chip
+   *  states the failure in words regardless, because a tooltip is not
+   *  reachable on a phone and not announced by a screen reader. */
+  error?: string;
 };
 
 export type AttachmentsProps = ComponentProps<"div"> & {
   attachments: Attachment[];
   onRemove?: (id: string) => void;
+  /** Re-run a failed upload. Only offered for `status: "error"` chips, and
+   *  only when the caller can actually do it (it needs the source File). */
+  onRetry?: (id: string) => void;
 };
 
 export const Attachments = ({
   attachments,
   onRemove,
+  onRetry,
   className,
   ...props
 }: AttachmentsProps) => (
@@ -34,7 +50,12 @@ export const Attachments = ({
   >
     <AnimatePresence initial={false}>
       {attachments.map((a) => (
-        <AttachmentChip key={a.id} attachment={a} onRemove={onRemove} />
+        <AttachmentChip
+          key={a.id}
+          attachment={a}
+          onRemove={onRemove}
+          onRetry={onRetry}
+        />
       ))}
     </AnimatePresence>
   </div>
@@ -43,11 +64,30 @@ export const Attachments = ({
 export type AttachmentChipProps = {
   attachment: Attachment;
   onRemove?: (id: string) => void;
+  onRetry?: (id: string) => void;
 };
 
-export const AttachmentChip = ({ attachment, onRemove }: AttachmentChipProps) => {
-  const Icon =
-    attachment.type.startsWith("image/")
+/**
+ * One file, as the composer shows it back to the user.
+ *
+ * The three states are deliberately told apart in WORDS, not only in colour:
+ * a failed upload used to differ from a finished one by a faint destructive
+ * tint and nothing else — same shape, same filename, same size — so two files
+ * that had both been refused by the server read as two attached documents, and
+ * the only statement that anything had gone wrong was a toast that had already
+ * expired. A chip that lies about a file being attached is worse than no chip:
+ * the message goes out, the agent is asked about a document, and the answer
+ * comes back about a file it could not find.
+ *
+ * `data-status` is on the element on purpose — it is what a test asks instead
+ * of matching Tailwind classes, and it is the same fact the label states.
+ */
+export const AttachmentChip = ({ attachment, onRemove, onRetry }: AttachmentChipProps) => {
+  const failed = attachment.status === "error";
+  const uploading = attachment.status === "uploading";
+  const Icon = failed
+    ? AlertTriangle
+    : attachment.type.startsWith("image/")
       ? FileImage
       : attachment.type.startsWith("text/") || attachment.type === "application/json"
         ? FileText
@@ -60,18 +100,39 @@ export const AttachmentChip = ({ attachment, onRemove }: AttachmentChipProps) =>
       animate={{ opacity: 1, scale: 1, x: 0 }}
       exit={{ opacity: 0, scale: 0.85, x: -8 }}
       transition={spring.snappy}
+      data-status={attachment.status ?? "ready"}
+      title={failed ? attachment.error : undefined}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border bg-muted/40 pl-2 pr-1 py-0.5 text-xs",
-        attachment.status === "uploading" && "opacity-70",
-        attachment.status === "error" &&
-          "border-destructive/50 bg-destructive/10 text-destructive",
+        uploading && "opacity-70",
+        failed && "border-destructive bg-destructive/10 text-destructive",
       )}
     >
-      <Icon className="h-3 w-3 text-muted-foreground" />
+      <Icon
+        className={cn("h-3 w-3", failed ? "text-destructive" : "text-muted-foreground")}
+      />
       <span className="max-w-32 truncate">{attachment.name}</span>
-      <span className="text-[10px] text-muted-foreground">
-        {formatBytes(attachment.size)}
-      </span>
+      {failed ? (
+        // Not a colour, not an icon: the sentence. This is the one thing on
+        // screen that stops a refused upload from reading as an attachment.
+        <span className="text-[10px] font-medium">Upload failed — not attached</span>
+      ) : uploading ? (
+        <span className="text-[10px] text-muted-foreground">Uploading…</span>
+      ) : (
+        <span className="text-[10px] text-muted-foreground">
+          {formatBytes(attachment.size)}
+        </span>
+      )}
+      {failed && onRetry && (
+        <button
+          type="button"
+          onClick={() => onRetry(attachment.id)}
+          className="ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium underline underline-offset-2 hover:bg-destructive/15"
+          aria-label={`Retry ${attachment.name}`}
+        >
+          Retry
+        </button>
+      )}
       {onRemove && (
         <button
           type="button"

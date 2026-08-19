@@ -19,6 +19,12 @@ import type { ChatTurn } from "@/hooks/use-chat"
 interface ExportDialogProps {
   turns: ChatTurn[]
   agentName?: string
+  /** Controlled open state. The dialog owned its own until the slash
+   *  palette's /export needed a way in — the palette can't press ⌘E, so
+   *  ChatPanel holds the state and both entry points write to it. Omit
+   *  both props to keep the hotkey-only behaviour. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 function turnsToMarkdown(turns: ChatTurn[], agentName?: string): string {
@@ -47,8 +53,13 @@ function turnsToMarkdown(turns: ChatTurn[], agentName?: string): string {
   return out.join("\n")
 }
 
-export function ExportDialog({ turns, agentName }: ExportDialogProps) {
-  const [open, setOpen] = useState(false)
+export function ExportDialog({ turns, agentName, open: openProp, onOpenChange }: ExportDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) setInternalOpen(next)
+    onOpenChange?.(next)
+  }
 
   useHotkeys(
     "mod+e",

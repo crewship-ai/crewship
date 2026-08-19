@@ -95,7 +95,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.26.5"
+  GO_VERSION: "1.26.6"
   # Suites this workflow deliberately never runs. The reason for each is in the
   # "Suites deliberately NOT run here" block above; this list is the machine-
   # readable half, read by `suite-coverage-guard`. The two RUN lists are not
@@ -242,6 +242,16 @@ jobs:
           - suite: test-run-stream.sh
             allow_signup: "true"
             seed_flags: "--with-users"
+          # Session provenance (#1934), same tiering as test-run-stream.sh above:
+          # its Tier A block — `run get` is a real command, `journal --type
+          # run.session_init` filters rather than ignoring the flag, and `run
+          # list --format json` carries every field the server sends — needs no
+          # provider credential. Tier B drives a live agent and SKIPs with its
+          # reason when none replies, so a green square here does NOT claim the
+          # provenance of a real run was proved. Deliberately not in
+          # pr-subset.sh (the suite header says why), which is exactly how it
+          # ended up in no tier at all.
+          - suite: test-session-provenance.sh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

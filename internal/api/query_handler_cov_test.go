@@ -335,7 +335,7 @@ func TestCovQFinishQueryCompletedJournal(t *testing.T) {
 
 	startCtx := context.Background()
 	h.finishQuery(startCtx, "pcF", "run-abc", "chatF", "viktor", "nela", wsID, "crewF", "t1",
-		strings.Repeat("ok ", 3), "", time.Now())
+		strings.Repeat("ok ", 3), "", time.Now(), nil)
 
 	var status, resp string
 	if err := db.QueryRowContext(context.Background(),

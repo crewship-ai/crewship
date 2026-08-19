@@ -6,12 +6,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 )
 
@@ -73,6 +75,18 @@ import (
 //     warning naming the deleted user_id so the operator knows to
 //     manually review lessons.md if any. See Known Gaps.
 //
+// # Pages (docs/prd/pages.md §7.1 rule 1b, issue #1944)
+//
+// pages.owner_user_id references users(id) ON DELETE RESTRICT, so a page a
+// departing user owns is a row that would otherwise BLOCK this cascade
+// (once whatever caller eventually hard-deletes the users row runs into
+// it), not one this handler could safely skip. Before any of the deletes
+// below run, transferDepartingUserPages (pages_transfer_owner.go) hands
+// every page the subject owns IN THIS WORKSPACE to a crew — never deletes
+// it — and if a page cannot be resolved to a crew, the ENTIRE erasure
+// refuses rather than deleting some rows and leaving the page problem for
+// later. See transferOrRefuseUserPages below.
+//
 // # Idempotency
 //
 // Running DELETE twice for the same user is a no-op the second time
@@ -93,13 +107,29 @@ type AdminGDPRHandler struct {
 	db             *sql.DB
 	logger         *slog.Logger
 	outputBasePath string
+	// journal records the pages owner-transfer audit trail §7.1 rule 1b
+	// requires. Defaults to noopEmitter so a handler built without
+	// SetJournal (e.g. an older test) still runs — see SetJournal.
+	journal journal.Emitter
 }
 
 // NewAdminGDPRHandler constructs a handler. outputBasePath should be
 // the same root the persona / peer card handlers receive so the
 // per-agent .memory paths resolve consistently across endpoints.
 func NewAdminGDPRHandler(db *sql.DB, logger *slog.Logger, outputBasePath string) *AdminGDPRHandler {
-	return &AdminGDPRHandler{db: db, logger: logger, outputBasePath: outputBasePath}
+	return &AdminGDPRHandler{db: db, logger: logger, outputBasePath: outputBasePath, journal: noopEmitter{}}
+}
+
+// SetJournal wires a journal emitter so a transferred page's audit entry
+// (§7.1 rule 1b) lands in the real Crew Journal once the router has
+// resolved one. A nil argument collapses back to noopEmitter, matching
+// every other SetJournal in this package.
+func (h *AdminGDPRHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 // adminContext bundles the boilerplate every handler in this file
@@ -140,6 +170,10 @@ type gdprActionScope struct {
 	InboxItems      int `json:"inbox_items"`
 	UserModels      int `json:"user_models"`
 	PeerCardsOnDisk int `json:"peer_cards_on_disk,omitempty"`
+	// PagesTransferred counts pages handed to a crew because the subject
+	// owned them (§7.1 rule 1b). Never a delete count — a page is never
+	// deleted by this cascade, only reassigned.
+	PagesTransferred int `json:"pages_transferred,omitempty"`
 }
 
 // newGDPRActionID returns a short hex id for a gdpr_actions row.
@@ -196,8 +230,30 @@ func (h *AdminGDPRHandler) finalizeGDPRAction(ctx context.Context, id string, sc
 	}
 }
 
+// transferOrRefuseUserPages runs the §7.1 rule 1b precondition: every page
+// targetID owns in wsID moves to a crew, never gets deleted, and if any
+// page can't be resolved (see ErrPagesNeedManualTransfer) the whole erasure
+// is refused before it mutates anything else. On success, scope.PagesTransferred
+// is filled in so the audit row and the response both record it — including
+// the zero-pages, zero-transferred common case.
+func (h *AdminGDPRHandler) transferOrRefuseUserPages(ctx context.Context, actionID, actorID, wsID, targetID string, scope *gdprActionScope) error {
+	results, err := transferDepartingUserPages(ctx, h.db, h.journal, actorID, wsID, targetID)
+	if err != nil {
+		return err
+	}
+	scope.PagesTransferred = len(results)
+	if len(results) > 0 {
+		h.logger.Info("gdpr delete: transferred user-owned pages ahead of erasure",
+			"action_id", actionID, "workspace_id", wsID, "target", targetID, "count", len(results))
+	}
+	return nil
+}
+
 // DeleteUserData is the Art. 17 cascade. POST-condition:
 //
+//   - pages the subject owned are transferred to a crew, never deleted
+//     (§7.1 rule 1b) — and if any page can't be resolved to a crew, NONE
+//     of the rest of this cascade runs either; see transferOrRefuseUserPages.
 //   - peer_cards rows referencing the user are gone (DB + best-
 //     effort on-disk).
 //   - memory_versions rows tagged data_subject_id = user are gone.
@@ -248,6 +304,34 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 		scope    gdprActionScope
 		firstErr error
 	)
+
+	// 0) pages: transfer BEFORE anything else purges. §7.1 rule 1b makes
+	// this a precondition, not a cleanup step — a page transfer that ran
+	// after the rest of the cascade would mean an erasure that already
+	// deleted the subject's peer_cards/memory_versions/inbox_items/
+	// user_models rows could still fail on a page it couldn't resolve,
+	// leaving a half-erased subject. Refusing FIRST, before any delete
+	// runs, means a failed erasure changes nothing.
+	if err := h.transferOrRefuseUserPages(r.Context(), actionID, actorID, wsID, targetID, &scope); err != nil {
+		var needsManual *ErrPagesNeedManualTransfer
+		status := http.StatusInternalServerError
+		msg := "failed to transfer subject's pages ahead of erasure"
+		if errors.As(err, &needsManual) {
+			status = http.StatusConflict
+			msg = err.Error()
+		} else {
+			h.logger.Error("gdpr delete: pages transfer failed",
+				"action_id", actionID, "workspace_id", wsID, "target", targetID, "err", err)
+		}
+		h.finalizeGDPRAction(r.Context(), actionID, scope, err)
+		writeJSON(w, status, map[string]any{
+			"action_id":    actionID,
+			"data_subject": targetID,
+			"workspace_id": wsID,
+			"error":        msg,
+		})
+		return
+	}
 
 	// 1) peer_cards: walk rows so we can purge the on-disk file
 	// per row before the DB row goes (best-effort on disk). Match

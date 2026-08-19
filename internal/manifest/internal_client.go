@@ -30,6 +30,16 @@ type internalClient struct {
 
 func newInternalClient(c *Client) internalapi.Client { return &internalClient{inner: c} }
 
+// NewKindsClient is newInternalClient for callers outside this package.
+//
+// Apply builds the adapter itself (apply_kinds.go) because it drives every
+// kind at once. A caller that drives ONE kind directly — `crewship export
+// page`, which calls kinds.ExportPage / kinds.ExportPages — needs the same
+// adapter and has no other way to obtain one, and a second copy of it in
+// cmd/crewship would be a second place for the 16 MiB body cap and the
+// nil-response guard above to be got wrong.
+func NewKindsClient(c *Client) internalapi.Client { return newInternalClient(c) }
+
 func (a *internalClient) Get(ctx context.Context, path string) (*internalapi.Response, error) {
 	return wrapResponse(a.inner.api.Get(ctx, path))
 }

@@ -27,6 +27,17 @@ type ChatMessageOption struct {
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
 	// adapter default in place.
 	MaxTurns int
+	// Metadata is structured data the client attached TO the message rather
+	// than inside it — today, the ask-form submission envelope
+	// (internal/askforms). It never becomes part of the content the agent
+	// reads: the handler is free to persist what it can validate and to drop
+	// everything else, and a message with none of it behaves exactly as it did
+	// before this field existed.
+	//
+	// It arrives from an untrusted client, so no consumer may store it
+	// verbatim — see chatbridge.HandleChatMessage, which round-trips it
+	// through askforms.EnvelopeFromMetadata and keeps only what parses.
+	Metadata map[string]any
 }
 
 // ChatHandler processes incoming chat messages from WebSocket clients and

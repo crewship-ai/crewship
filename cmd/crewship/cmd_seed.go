@@ -341,6 +341,16 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// ── Phase 10c: Pages ──
+	// After issues, because a page's `on_failure` opens one and the demo reads
+	// better when the boards it points at already exist.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedPages(ctx, client); err != nil {
+		return err
+	}
+
 	// ── Phase 10b: Wait for background provisioning (only if requested) ──
 	// Provisioning was triggered in Phase 2b; in async mode we skip the wait
 	// entirely and tell the user how to check status. With --wait-provision

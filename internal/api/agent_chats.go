@@ -90,22 +90,10 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	type chatResponse struct {
-		ID             string  `json:"id"`
-		AgentID        string  `json:"agent_id"`
-		WorkspaceID    string  `json:"workspace_id"`
-		Title          *string `json:"title"`
-		Mode           string  `json:"mode"`
-		Status         string  `json:"status"`
-		MessageCount   int     `json:"message_count"`
-		StartedAt      string  `json:"started_at"`
-		EndedAt        *string `json:"ended_at"`
-		CreatedAt      string  `json:"created_at"`
-		Origin         *string `json:"origin"`
-		LastActivityAt string  `json:"last_activity_at"`
-		UnreadCount    int     `json:"unread_count"`
-	}
-
+	// chatResponse is package-level (agent_chats_rename.go) rather than local
+	// to this function: PATCH .../chats/{chatId} answers with ONE of these, so
+	// a client can splice a renamed row into the list it already holds. Two
+	// structs would drift.
 	var result []chatResponse
 	for rows.Next() {
 		var c chatResponse

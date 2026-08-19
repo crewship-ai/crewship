@@ -227,6 +227,10 @@ func TestBuildPlan_FullCompleteExample(t *testing.T) {
 	// Connectors install from the server catalog; a missing entry is
 	// fatal at plan time, so "linear" must resolve to a catalog row.
 	stub.on("GET", "/api/v1/connectors/linear", 200, `{"id":"conn1","slug":"linear","installed":false,"required_credentials":["LINEAR_API_KEY"]}`)
+	// Pages are looked up by slug on the slug-addressed endpoint; like
+	// the recipe lookup above, the stub's default `[]` body cannot
+	// decode into PageRemote, so answer 404 → "not there" → plan Create.
+	stub.on("GET", "/api/v1/pages/community-pulse", 404, `{"error":"page not found"}`)
 
 	plan, err := BuildPlan(context.Background(), NewClient(stub), bundle, Options{Mode: ApplyUpsert})
 	if err != nil {
@@ -245,7 +249,7 @@ func TestBuildPlan_FullCompleteExample(t *testing.T) {
 	for _, kind := range []string{
 		"project", "label", "milestone", "workflowtemplate", "triage_rule",
 		"recurring_issue", "saved_view", "routine", "recipe", "crew_template",
-		"connector", "feature_flag", "instancesetting", "hook",
+		"connector", "feature_flag", "instancesetting", "hook", "page",
 	} {
 		if !seen[kind] {
 			t.Errorf("plan has no item for kind %s; kinds seen: %v", kind, seen)

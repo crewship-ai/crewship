@@ -319,6 +319,25 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		pb.appendKindItems(items)
 	}
 
+	// Phase 16.5: Pages (deps: Crew, Agent, Routine). Every panel names
+	// an owning crew and a producer, and a page whose producer does not
+	// exist yet is refused by the server's authoring gate — so pages
+	// land after the routines and agents they point at. Lookup is by
+	// slug (pages are slug-addressable; see PageRemote's note on the
+	// SavedView precedent this must not repeat).
+	for i := range b.Pages {
+		doc := &b.Pages[i]
+		remote, err := kinds.LookupPageRemoteBySlug(ctx, c, doc.Metadata.Slug)
+		if err != nil {
+			return fmt.Errorf("page %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
+		if err != nil {
+			return fmt.Errorf("page %q: plan: %w", doc.Metadata.Slug, err)
+		}
+		pb.appendKindItems(items)
+	}
+
 	// Phase 17: Hooks (toggle existing)
 	for i := range b.Hooks {
 		doc := &b.Hooks[i]
@@ -429,6 +448,9 @@ func validateAllKinds(b *Bundle, wsCtx internalapi.WorkspaceContext) error {
 	for i := range b.Hooks {
 		check(b.Hooks[i].Metadata.Slug, b.Hooks[i].Validate(wsCtx))
 	}
+	for i := range b.Pages {
+		check(b.Pages[i].Metadata.Slug, b.Pages[i].Validate(wsCtx))
+	}
 	// Duplicate-slug detection for the new top-level kinds + the
 	// other SPEC-2 surfaces. Skips legacy Documents (Crew bundles)
 	// which already have their own duplicate-slug check inside
@@ -452,6 +474,7 @@ func validateAllKinds(b *Bundle, wsCtx internalapi.WorkspaceContext) error {
 	checkDups("CrewTemplate", collect(func(i int) string { return b.CrewTemplates[i].Metadata.Slug }, len(b.CrewTemplates)))
 	checkDups("Connector", collect(func(i int) string { return b.Connectors[i].Metadata.Slug }, len(b.Connectors)))
 	checkDups("Hook", collect(func(i int) string { return b.Hooks[i].Metadata.Slug }, len(b.Hooks)))
+	checkDups("Page", collect(func(i int) string { return b.Pages[i].Metadata.Slug }, len(b.Pages)))
 	if len(errs) == 0 {
 		return nil
 	}

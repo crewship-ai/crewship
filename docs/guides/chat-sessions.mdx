@@ -37,9 +37,9 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 | **Session** | One row in `chats`, scoped to one agent. Stable ID, persists across reloads and operators. Anyone with read access to the agent can resume the same transcript. Created lazily on first send (or explicitly via `POST /api/v1/agents/{agentId}/chats`). |
 | **`chats.origin`** | A `NULL`-able enum stamped at create time: `UI`, `CLI`, `WEBHOOK`, `CRON`, or `AGENT`. Anything else is stored as `NULL` so a rogue caller cannot inject arbitrary text into a UI chip. Migration v59. |
 | **Chat branch** | A divergence in the conversation tree produced by edit-and-resend. The truncated tail isn't deleted — it lives in `chat_branches` (migration v57) so the alternate timeline stays retrievable. The active branch is the one currently rendered. |
-| **Slash palette** | Server-registered command set surfaced by typing `/` at start-of-line or `Ctrl+K` anywhere. Commands like `/eval`, `/checkpoint`, `/skill` are parsed as structured commands (not chat messages) and route to dedicated handlers. |
+| **Slash palette** | The conversation's own command palette: **`⌘/`** (`Ctrl+/`), or the **Commands** button in the chat header strip. Not `⌘K` — that is the workspace-wide palette in the top bar, and both used to answer to it, which opened two dialogs on one press. Typing `/` in the composer does *not* open it (there is no start-of-line trigger wired). |
 | **Model picker** | Per-turn override of the agent's `llm_model`. Lives next to the send button. The override applies only to the current send — the agent's default model is unchanged for subsequent turns. |
-| **Attachment** | A file uploaded into a chat — image, document, log, anything ≤25 MB. Written to the server's storage provider as a blob; the agent's container sees it under `/output/<agentSlug>/attachments/<chatId>/<filename>`. Since #1768 the upload also records a row in `attachments` (`owner_type = 'chat'`) with the size, SHA-256, content type and uploader; the dead `chat_attachments` table it was meant to use is gone. There is still no listing or delete endpoint for chat attachments — the complete surface is [issue attachments](/guides/issue-attachments). |
+| **Attachment** | A file uploaded into a chat — image, document, log, anything ≤25 MB. Written to the server's storage provider as a blob; the agent's container sees it under `/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`. That tree belongs to the crew runtime (uid 1001) once the crew is provisioned, so the server writes the blob *through the running crew container* — attaching to a stopped crew returns `409` telling you to start it (#922). Since #1768 the upload also records a row in `attachments` (`owner_type = 'chat'`) with the size, SHA-256, content type and uploader; the dead `chat_attachments` table it was meant to use is gone. The row is written *before* the bytes and promoted after they land, so a `201` always means both exist. Each upload gets its own `<attachmentId>` directory, so two files of the same name never overwrite each other, and both listing and deletion exist (`crewship chat attachments list|delete`). There is still no download endpoint — the agent reads the file from its own filesystem. |
 | **Reaction** | A workspace-shared emoji vote on a single assistant message. Persisted in `message_reactions` (migration v57) with `UNIQUE(chat, message, emoji, user)` so POST is idempotent. Aggregated counts (`{emoji, count, mine}`) returned by List. |
 | **Right-panel tab** | One of **Files** (F1), **Artifacts** (F2), **Diff** (F3), or **Terminal** (F4). Each tab streams independently; switching tabs doesn't retrigger inactive streams. URL state `&panel=…` deep-links to a tab. |
 | **Shallow router state** | Browser-only URL params written via `window.history.replaceState` (helper: `useShallowSearchParam`). Used for which panel is open, which message is being edited, slash-palette state — none of which justify a full Next.js navigation but all of which should appear in copy-pasted URLs. |
@@ -70,8 +70,8 @@ Drops you into Viktor's most recent session. To start fresh, click **New session
 
 Type into the composer and hit **Enter**. The agent's response streams back via WebSocket; the presence chip in the footer shows `thinking` while the model is generating. Useful composer tricks (full detail in [Composer](#composer)):
 
-- `/` to open the slash palette for structured commands (`/eval`, `/checkpoint`, `/skill <name>`).
-- Drag, paste, or click-upload an image / file — capped at 25 MB, surfaced to the agent under `/output/<agentSlug>/attachments/…`.
+- **`⌘/`** (or the **Commands** button in the chat header) opens the slash palette for structured commands (`/skill <name>`, `/credential`, …). `⌘K` is the workspace palette in the top bar, not this one.
+- Drag, paste, or click-upload an image / file — capped at 25 MB, surfaced to the agent under `/output/<agentSlug>/attachments/…`. The crew must be running: that directory is owned by the crew runtime, so the upload is written through the crew container.
 - Pick a different model from the dropdown next to **Send** for *this turn only* (handy for switching to Opus mid-conversation for a hard step).
 
 </Step>
@@ -217,7 +217,7 @@ and `404` when the chat is unavailable to the caller.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/agents/{agentId}/chats/{chatId}/attachments` | Upload a file (multipart, ≤25 MB). Returns the file's storage URL + the `chat_attachments` row ID. Handler: `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`. |
+| `POST` | `/api/v1/agents/{agentId}/chats/{chatId}/attachments` | Upload a file (multipart, ≤25 MB). Returns `{filename, size, path, agent_path}` and records a row in `attachments`. Handler: `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`. |
 
 ### Participants
 
@@ -290,6 +290,7 @@ The chat page subscribes to the per-session WebSocket channel (`session:<chatID>
 | `assignment_completed` / `assignment_failed` | `session:<chatID>` | Terminal state — the agent's reply (or the failure) is ready to fetch. |
 | `peer_query_running` | `session:<chatID>` | A peer-query sub-task started inside this chat (multi-agent dispatch). |
 | `escalation_created` / `escalation_resolved` | `session:<chatID>` | The agent escalated to a human, or the escalation was decided. |
+| `escalation_expired` / `escalation_cancelled` | `session:<chatID>` | The other two ways an escalation ends: its deadline passed with no answer (the agent continued with an explicit warning), or a human withdrew it. See [the lifecycle](/guides/harbormaster#escalations-the-other-human-decision). |
 | `port_expose_created` | `session:<chatID>` | The agent opened a container port and the proxy URL is ready. |
 | `steering_queued` | `session:<chatID>` | A mid-turn steering message was queued (see [Mid-turn steering](#mid-turn-steering)); the agent applies it on the next turn. |
 
@@ -297,12 +298,15 @@ Each event triggers a REST re-fetch of the affected resource — the server-side
 
 ## Routes
 
-Two top-level routes serve chat:
+Three top-level routes serve chat:
 
 | Route | Purpose |
 |---|---|
+| `/chat` | The chat index, and the **Chat** entry in the left rail and the mobile nav sheet. Lists recent conversations across every agent — merged client-side from `GET /agents` plus a capped fan-out of `GET /agents/{id}/chats`, newest activity first — with the agent roster beneath it. It holds no WebSocket: picking a thread is what opens a live connection, on the page below. |
 | `/crews?crew=<slug>&agent=<slug>` | Selection-driven canvas. Click an agent in the canvas to open a chat panel inline. |
 | `/chat/<agentSlug>?session=<chatId>` | Full-page chat — the same agent, the same session model, the whole viewport for messages + composer + right panel. |
+
+The session is a **query parameter, never a path segment**. The static export serves `/chat/<slug>` through a one-level rewrite in `internal/api/static.go`, so a deeper `/chat/<agent>/<session>` would resolve to the wrong page shell.
 
 The `/chat/<agentSlug>` URL is **deep-linkable** — the `session` query parameter scopes to a specific chat history. Without `?session`, the route opens the agent's most recent chat. With a `session` ID, it scrolls to that chat's history and resumes the conversation in place.
 
@@ -323,6 +327,25 @@ A "session" is a `chats` row. Sessions persist across page reloads, browser sess
 Anything else (or empty) is stored as `NULL` so a rogue caller cannot shove arbitrary text into a UI-rendered chip. The Sessions sidebar renders a colored chip per origin — NULL rows show no chip. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
 
 Chat sessions honor the workspace `preferred_language` — the agent replies in it. Set it with `crewship workspace update --language <code>` (see [`crewship workspace`](/cli/workspace)).
+
+### Session names
+
+A session names itself from its **first message**. `chats.title` had been in the schema since the first migration with nothing writing it, so every thread in every list read "Untitled session" — which makes a list of conversations unusable the moment there is more than one. The chat page now derives a title from the opening message and writes it with [Rename Chat](/api-reference/agents#rename-chat).
+
+The derivation (`lib/chat-title.ts`) is deliberately dumb and local — no model call, no round trip before your message goes out:
+
+- whitespace collapses, the text is trimmed, control and invisible formatting characters are dropped (the same normalisation the server applies on write, so the value you see is the value stored);
+- it is cut to **60 characters at a word boundary**, with an ellipsis only when something was actually cut. A single token longer than that is the one case a word is broken, because the alternative is a base64 paste as the thread's name;
+- a message that is only an attachment is named after the **file**;
+- a message that yields nothing usable — empty, whitespace, `???` — leaves the session **untitled**. "Untitled session" is a poor name; a thread called `…` is worse.
+
+Three properties worth knowing:
+
+- **It fires once**, on the first message of a session that has no title. Rename a thread yourself and nothing will ever overwrite it — not the next message, not a reload.
+- **It never blocks the send.** The message goes out first and the title follows as a separate request. If that request fails the message is unaffected and nothing is reported; the session simply stays untitled, which is where it already was.
+- **A rename does not reorder the sidebar.** The server does not bump `last_activity_at` on a rename, and the client splices only the title into the row it already holds — so fixing a name never shoves a thread to the top.
+
+Rename by hand at any time with `crewship chat rename <chat-id> "<title>"` or the API. The new title is broadcast on the workspace channel as `chat_renamed` (`{agent_id, chat_id, title}`), so a session list open in another tab repaints without polling.
 
 ### Unread badges & last activity
 
@@ -377,9 +400,21 @@ The bottom-of-page composer is a single textarea with three superpowers:
 
 - **Slash palette** — typing `/` at the start of a line opens a fuzzy-search palette over registered slash commands (e.g. `/eval`, `/checkpoint`, `/skill <name>`). Commands are registered server-side so a multi-line `/eval my-suite --baseline last-week` is parsed as a structured command rather than a chat message.
 - **Model picker** — dropdown next to the send button overrides the agent's default `llm_model` for this turn only. Useful when an operator wants to spend Opus on a hard reasoning step inside an agent that normally runs Sonnet.
-- **Attachments** — paste images, drag files, or paste image data from the clipboard. Files are uploaded via `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments` (handler `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`) and written to the server's storage provider as a blob. The agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`. 25 MB cap per upload.
+- **Attachments** — paste images, drag files, or paste image data from the clipboard. Files are uploaded via `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments` (handler `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`) and written to the server's storage provider as a blob. The agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`. 25 MB cap per upload.
 
-  The upload also records a row in `attachments` (`owner_type = 'chat'`) with the filename, resolved content type, size, SHA-256 and uploader — #1768. The blob's location is unchanged on purpose: `/output/<agentSlug>/...` is what prompts, tools and users already reference, so chat attachments are *not* content-addressed the way [issue attachments](/guides/issue-attachments) are, and `storage_key` on the row is what says where each one lives. There is still no listing or delete endpoint for a chat attachment; the issue surface is the complete one.
+  **The message names the file.** Uploading puts bytes in the container; it does not tell the agent they are there. So when the composer sends a message with attachments, it appends a block naming each one by the path relative to the agent's working directory (which *is* `/output/<agentSlug>/`, so the `path` the upload returned opens as-is):
+
+  ```
+  what do you make of this?
+
+  I've attached a file to this message. The path is relative to your working directory:
+
+  - attachments/cht_xyz789/att_9f2a1c/invoice.pdf
+  ```
+
+  The payload is an ordinary user message — no new envelope, no adapter-specific framing, nothing the agent has to be trained for. The wording is fixed in `lib/attachment-message.ts` and covered by a table-driven test; the transcript shows the block verbatim, because it is exactly what the agent received. Three consequences worth knowing: a message with **no text at all** still sends when something is attached (a photo needs no caption); Send is refused while an upload is still in flight, rather than sending a message that names only the files that finished; and the block counts toward the 64 KiB WebSocket frame cap, so a draft that fits on its own can be refused once attachments are added — the draft and the attachments both survive the refusal.
+
+  The upload also records a row in `attachments` (`owner_type = 'chat'`) with the filename, resolved content type, size, SHA-256 and uploader — #1768. The blob stays under `/output/<agentSlug>/...` on purpose: that path is what prompts, tools and users already reference, so chat attachments are *not* content-addressed the way [issue attachments](/guides/issue-attachments) are, and `storage_key` on the row is what says where each one lives. What the path gained is an `<attachmentId>` segment before the filename, which makes one upload one identity at one location — two different files called `evidence.pdf` no longer overwrite each other. Listing and deletion live at `GET`/`DELETE /api/v1/agents/{agentId}/chats/{chatId}/attachments[/{attachmentId}]`; there is still no download endpoint.
 
 Enter sends; Shift-Enter inserts a newline. `Ctrl+K` opens the palette unconditionally.
 

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crewship.io/schemas/panel.embed.v1.json",
+  "title": "Crewship panel payload — embed.v1",
+  "description": "The one escape hatch (PRD §3.1): a cross-origin sandboxed iframe showing a page a HUMAN OPERATOR has already vetted. The payload names which of the vetted sources to show — it does not carry a URL, and there is no field one could travel in. The server resolves the name against the instance's embed allow-list and attaches the resolved URL on the way out; a producer that is not in the allow-list's vocabulary cannot make a browser fetch anything.",
+  "type": "object",
+  "required": ["source"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference (informational; the server ignores it). Present so a hand-written payload gets inline validation in an editor while a producer script is being developed."
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "description": "The NAME of one entry in the instance's embed allow-list — `grafana-fleet`, `status-page`. Not a URL, and deliberately not a URL: an iframe src is fetched by the READER's browser, from the reader's network, at render time, so a URL a producer could change on every push would be a covert channel out of the workspace exactly like the image tag §8 rule 2 removes and the rendered link §8 rule 3 removes. This is §8 rule 4's shape applied to embeds — the human declares the allow-list, the machine selects from it — and a name from a closed set leaks log2(n) bits per push instead of an arbitrary payload. An unknown name is refused; it is never fetched to find out."
+    },
+    "caption": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "One line of plain text drawn by host chrome above the frame (\"eu-west · since the 12:40 incident\"), so a reader can tell why THIS source is showing. Plain text: no markup, no URL, no entity reference. It renders through the React element renderer like every other panel string (§8 rule 10)."
+    }
+  },
+  "$comment": "The absences are the specification, not an oversight, and each one is a field some other product shipped and regretted. No `url`/`src` — see `source` above. No `html`, `srcdoc` or `markup`: §8 rule 1 says the agent fills a schema and never emits markup, and Grafana's Angular HTML panel is the named prior art for why (killed in v10; the community rebuilt it unsupervised). No `sandbox`, `allow` or `csp`: the host owns the sandbox, and a payload that could widen it is a payload that can remove it — `allow-scripts allow-same-origin` together let a frame delete its own sandbox attribute. No `width`/`height`: producer-controlled geometry is a panel that can cover the page it sits on, and §3.1 pins sizing as negotiated rather than free. No `image`: §8 rule 2, absent rather than sanitised."
+}

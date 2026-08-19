@@ -50,7 +50,7 @@ permissions:
 env:
   NODE_VERSION: "22"
   PNPM_VERSION: "10"
-  GO_VERSION: "1.26.5"
+  GO_VERSION: "1.26.6"
 
 jobs:
   # ── Sentinel: reject leaked git merge-conflict markers ──
@@ -100,10 +100,11 @@ jobs:
 
   # ── Shell unit tests ──
   # The shell we ship is as load-bearing as the Go, and harder to reason
-  # about: dev.sh wedges a dev slot when a helper trips `set -e`, and the
-  # alert-issue block in security.yml decides whether a failed security scan
-  # closes its own tracking issue. Both had test files that no workflow ran,
-  # so both regressed unnoticed. They run here.
+  # about: dev.sh wedges a dev slot when a helper trips `set -e`, and two
+  # blocks in security.yml decide whether a failed security scan closes its own
+  # tracking issue and whether a reported vulnerability reddens the build.
+  # Both had test files that no workflow ran, so both regressed unnoticed.
+  # They run here.
   shell:
     needs: [merge-conflict-markers]
     name: Shell
@@ -117,7 +118,7 @@ jobs:
         run: go run ./scripts/agents-invariants
       - name: dev.sh helpers
         run: bash scripts/dev-sh-test.sh
-      - name: security.yml alert-issue logic
+      - name: security.yml alert-issue + govulncheck allowlist logic
         run: bash scripts/security-yml-test.sh
       - name: deploy-dev.sh push_branch
         run: bash scripts/deploy-dev-test.sh
@@ -165,6 +166,16 @@ jobs:
       # block a merge is branch-protection policy and the repo owner's call.
       - name: review-status.sh (throttled vs reviewed classifier)
         run: bash scripts/review-status-test.sh
+
+      # One layer out again, and the case security-yml-test.sh names as outside
+      # its own scope: not "would the job's logic be right" but "does the job
+      # still run on a PR at all". The onboarding journey is the one gate whose
+      # entire value is the trigger it sits behind — it spent most of its life
+      # nightly-only, which let a PR reintroduce the very 404 its spec exists to
+      # catch. Deleting the job, or moving it back behind `schedule:`, leaves
+      # every other check green; this step is what goes red.
+      - name: onboarding journey is gated on PRs
+        run: bash scripts/onboarding-gate-test.sh
 
   # ── Per-PR control-plane harness ──
   # This is intentionally a small, explicit subset. Runtime suites that need
@@ -475,6 +486,166 @@ jobs:
           set -uo pipefail
           [ -f /tmp/crewship-pr-playwright.pid ] && kill "$(cat /tmp/crewship-pr-playwright.pid)" 2>/dev/null || true
 
+  # ── First-run journey, against a never-bootstrapped database ──
+  #
+  # The flagship repair on the chat-as-a-primary-surface branch was that a new
+  # user's final click in the onboarding wizard landed on /crews/agents/<id>/chat
+  # — a route the /crews redesign had deleted. e2e/onboarding-wizard.spec.ts was
+  # itself asserting that dead route, so it passed ONLY while the bug was
+  # present. The repair points it at /chat/<slug> and additionally waits for the
+  # composer, because a route that resolves is not the same as a chat that works.
+  #
+  # That spec used to run nightly only (e2e-devcontainer.yml), which left the
+  # repair unguarded on the one path that would catch a regression: a PR could
+  # reintroduce the 404 and go green. It runs here now, and the nightly copy has
+  # been REMOVED rather than left in place — two copies of a 90-line job drift,
+  # and the copy that drifts is the one nobody reads.
+  #
+  # WHY ITS OWN JOB, and not a few steps folded into `playwright-pr`, which
+  # already builds the UI, installs Chromium and starts a server. That job seeds
+  # its fixture with `crewship seed`, and the wizard consumes the one-shot
+  # bootstrap that seed needs. Running the wizard first does not merely reorder
+  # the steps: the wizard bootstraps through the BROWSER, so no CLI token is
+  # ever written to the runner's CLI config, and seed's already-initialized
+  # fallback is requireAuth() (cmd/crewship/main.go:283) — which only reads a
+  # stored token and never logs in with a password. Seed would die on "not
+  # logged in", taking the whole PR browser gate with it. Sharing one server
+  # would also mean exporting CREWSHIP_E2E_SKIP_TOKEN_PROBE into the instance
+  # that serves the other spec. A throwaway instance keeps both gates honest.
+  #
+  # COST. ~3.5 min, of which the spec itself is ~12 s; the rest is the same UI
+  # build, CLI build and Chromium download that every browser job pays, and the
+  # download is the only volatile part (24 s to 521 s observed across nightly
+  # runs). It adds NOTHING to a PR's wall-clock: it starts in parallel with the
+  # Go jobs and this pipeline's critical path is `Go Race` at ~24 min. Even a
+  # full 20-minute timeout finishes inside that window.
+  onboarding-journey:
+    needs: [merge-conflict-markers]
+    name: Onboarding journey (fresh DB)
+    runs-on: ubuntu-latest
+    # Above the ~11.7 min worst case observed nightly (a 521 s Chromium
+    # download), and still under the Go Race critical path, so even a hang
+    # cannot extend the pipeline.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Build web UI into the embed dir
+        # A bare checkout carries only web/out/.placeholder.html, which is
+        # enough for `go:embed` to compile (#1567) and fine for the API-only
+        # jobs — but this job drives the UI with a browser, and against the
+        # placeholder every UI route answers 503, so the client-side redirect
+        # to /bootstrap never happens and the first spec times out. Export the
+        # real UI (same two steps as `make build`) before the binary is built.
+        run: |
+          set -euo pipefail
+          pnpm build
+          ./scripts/embed-web-out.sh sync
+
+      - name: Build CLI
+        run: go build -o crewship ./cmd/crewship
+
+      - name: Generate ephemeral test secrets
+        # Per-run keys, and ::add-mask:: BEFORE the write: Actions prints the
+        # resolved `env:` block of every later step and $GITHUB_ENV values are
+        # not secrets, so nothing redacts them by default.
+        run: |
+          set -euo pipefail
+          nextauth="$(openssl rand -hex 32)"
+          enckey="$(openssl rand -hex 32)"
+          echo "::add-mask::$nextauth"
+          echo "::add-mask::$enckey"
+          {
+            echo "NEXTAUTH_SECRET=$nextauth"
+            echo "ENCRYPTION_KEY=$enckey"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Playwright browsers
+        # `--with-deps` pulls the apt packages chromium needs on the
+        # GitHub-hosted ubuntu runner. Without it, the headless launch
+        # fails with cryptic .so lookups.
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start crewship server on an empty database
+        env:
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+          CREWSHIP_SKIP_SIDECAR: "1"
+          # Short-circuits the live api.anthropic.com probe in
+          # internal/api/onboarding.go so the wizard's Launch step accepts a
+          # fake sk-ant-oat token. Without this the gate would either need a
+          # real Anthropic secret or flake whenever Anthropic has a hiccup.
+          CREWSHIP_E2E_SKIP_TOKEN_PROBE: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
+          ./crewship start >/tmp/crewship-onboarding.log 2>&1 &
+          echo $! > /tmp/crewship-onboarding.pid
+          for i in $(seq 1 90); do
+            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
+              echo "server up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server failed to start" >&2
+          tail -300 /tmp/crewship-onboarding.log >&2
+          exit 1
+
+      - name: Confirm fresh-DB precondition
+        # The spec skips itself when needs_bootstrap is false, and a skipped
+        # Playwright suite exits 0. Without this assertion an instance that
+        # somehow arrived pre-bootstrapped would turn the gate green with zero
+        # real assertions — worse than red, because it would be believed.
+        run: |
+          set -euo pipefail
+          body=$(curl -sf http://localhost:8080/api/v1/system/setup-status)
+          echo "setup-status: $body"
+          echo "$body" | grep -q '"needs_bootstrap":true' || {
+            echo "::error::Expected needs_bootstrap=true on a fresh CI DB, got $body"
+            exit 1
+          }
+
+      - name: Run onboarding-wizard Playwright spec
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:8080
+        run: pnpm exec playwright test --config=playwright.fresh.config.ts
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-report-onboarding-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Dump server log on failure
+        if: failure()
+        run: tail -300 /tmp/crewship-onboarding.log || true
+
+      - name: Stop server
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -f /tmp/crewship-onboarding.pid ] && kill "$(cat /tmp/crewship-onboarding.pid)" 2>/dev/null || true
+
   # ── Frontend: lint, typecheck, build ──
   frontend:
     needs: [merge-conflict-markers]
@@ -515,6 +686,47 @@ jobs:
         run: pnpm build
         env:
           NEXTAUTH_SECRET: "ci-build-secret-not-real"
+
+      # ── /chat survives `output: "export"` ──
+      #
+      # PRD chat-as-a-primary-surface §9 rule 1: "Step 4's acceptance test
+      # runs against the static export, not the dev server. The rewrite is
+      # the risk; a dev-server test would pass while production 404s."
+      #
+      # internal/api/static_chat_index_test.go proves the SERVING half —
+      # given a filesystem with chat.html and chat/_.html, the handler's
+      # ordering sends /chat to the index and /chat/<slug> to the per-agent
+      # placeholder. It builds that filesystem with fstest.MapFS, so by
+      # construction it cannot notice Next emitting different filenames, and
+      # the two would then disagree in silence: every Go test green, /chat a
+      # 404 in the shipped binary.
+      #
+      # This step proves the EMITTING half, against the same `out/` that the
+      # `binary` job embeds. Two greps' worth of CI time, and it is the only
+      # place in the pipeline that looks at the real export's filenames.
+      #
+      # Deliberately not a Playwright project over a served build: this
+      # catches the actual risk (the filename) without a second web server,
+      # a second browser install and ~3 min per run. Deliberately not a Go
+      # test reading web/out/: the Go jobs use .github/actions/setup-go-embed,
+      # which stages only the tracked placeholder, so such a test would
+      # t.Skip in every job that runs it — and buying a permanent skip would
+      # also mean raising scripts/skip-budget.txt for coverage that never
+      # executes.
+      - name: Static export emits the /chat routes
+        run: |
+          set -euo pipefail
+          missing=0
+          # out/chat.html            — app/(dashboard)/chat/page.tsx, served for /chat
+          # out/chat/_.html          — the [agentSlug] placeholder, served for /chat/<slug>
+          for f in out/chat.html out/chat/_.html; do
+            if [ ! -f "$f" ]; then
+              echo "::error file=next.config.ts::$f is not in the static export. /chat (or /chat/<agentSlug>) will 404 in the shipped binary — internal/api/static.go serves these exact filenames and internal/api/static_chat_index_test.go assumes they exist. If a route moved, update both."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+          echo "✓ out/chat.html and out/chat/_.html are in the export"
 
       - name: Upload static export
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

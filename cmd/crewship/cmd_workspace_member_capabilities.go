@@ -93,7 +93,8 @@ Examples:
   crewship workspace member capabilities grant ludmila routine.create issue.create memory.write
 
 Valid capability strings: chat, routine.create, skill.create,
-credential.create, credential.rotate, issue.create, memory.write.
+credential.create, credential.rotate, issue.create, page.create,
+memory.write.
 
 Server rejects unknown capabilities (typo guard) with a 400.`,
 	Args: cobra.MinimumNArgs(2),

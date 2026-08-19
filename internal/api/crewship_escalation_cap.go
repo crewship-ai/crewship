@@ -80,17 +80,22 @@ func (e *escalationCapRefusal) Error() string { return e.msg }
 // already has — the number the budget is compared against.
 //
 // The status test is a NOT IN over the TERMINAL statuses rather than an IN over
-// PENDING, and the direction matters: RESOLVED is the only terminal value the
-// table has today (escalation_handler.go and escalation_autoresolve.go are the
-// only writers), so a status added later counts as OUTSTANDING and the cap fails
-// closed instead of silently leaving the budget. Same reasoning
-// missionLiveStatusFilter records for the mission caps.
+// PENDING, and the direction matters: a status added later counts as
+// OUTSTANDING and the cap fails closed instead of silently leaking the budget.
+// Same reasoning missionLiveStatusFilter records for the mission caps.
+//
+// That list must therefore be extended whenever the vocabulary grows, and it
+// was — EXPIRED and CANCELLED are terminal (see escalation_lifecycle.go). A
+// question nobody answered is finished with; leaving it on this list would have
+// let a crew's escalation budget fill up with dead rows and refuse every new
+// question from then on, which is a worse failure than the leak the NOT IN
+// guards against.
 func countPendingEscalations(ctx context.Context, db *sql.DB, crewID string) (int, error) {
 	var n int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM escalations
-		WHERE crew_id = ? AND status NOT IN ('RESOLVED')`,
-		crewID).Scan(&n); err != nil {
+		WHERE crew_id = ? AND status NOT IN (?, ?, ?)`,
+		crewID, escalationStatusResolved, escalationStatusExpired, escalationStatusCancelled).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count pending escalations: %w", err)
 	}
 	return n, nil

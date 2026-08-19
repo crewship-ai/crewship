@@ -21,6 +21,14 @@ tests=(
   # Deterministic and provider-free like the rest of the list: the routines it
   # drives are `crewship` and `transform` steps, so it calls no model.
   test-automation-loop.sh
+  # Pages (#1937). On the per-PR gate rather than the nightly because the
+  # properties it proves are the ones only a running server can show — that
+  # provenance is ATTACHED rather than echoed, that the 64 KiB cap answers 422
+  # and not 500, and that a panel goes stale on its own — and each of them is a
+  # silent failure: a page that lies about its freshness looks exactly like one
+  # that does not. Deterministic and provider-free: no model is called, the
+  # only wait is the 5s SLA it is measuring, and it deletes its page on exit.
+  test-pages.sh
 )
 
 # Every suite runs, and EVERY failure counts. A bare `for … done` exits with the

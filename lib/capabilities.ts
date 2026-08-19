@@ -29,6 +29,7 @@ export const Capability = {
   // copied verbatim rather than normalised to match its neighbours.
   CredentialReveal: "credentials:reveal",
   IssueCreate: "issue.create",
+  PageCreate: "page.create",
   MemoryWrite: "memory.write",
 } as const
 
@@ -43,6 +44,7 @@ export const ALL_CAPABILITIES: CapabilityValue[] = [
   Capability.Chat,
   Capability.RoutineCreate,
   Capability.IssueCreate,
+  Capability.PageCreate,
   Capability.MemoryWrite,
   Capability.SkillCreate,
   Capability.CredentialCreate,
@@ -77,6 +79,12 @@ export const CAPABILITY_LABELS: Record<
     en: "Create issues",
     cs: "Vytvářet issues",
     description: "File tickets from conversations.",
+  },
+  [Capability.PageCreate]: {
+    en: "Create pages",
+    cs: "Vytvářet stránky",
+    description:
+      "Author a Page — a workspace-visible surface that names crews as panel owners and routines as producers.",
   },
   [Capability.MemoryWrite]: {
     en: "Write memory",

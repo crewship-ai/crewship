@@ -416,65 +416,90 @@ func auditOnePath(ctx context.Context, db *sql.DB, j journal.Emitter, cfg AuditW
 
 // parsedMemoryPath decomposes a host-side memory file path into its
 // semantic components. Returns ok=false when the path doesn't match
-// the documented {basePath}/crews/{crewID}/agents/{slug}/.memory/ shape.
+// one of the two documented .memory shapes (see parseMemoryPath).
 type parsedMemoryPath struct {
 	CrewID    string
-	AgentSlug string
-	RelPath   string // shape: 'agent:{slug}/{rel}' — matches the
-	// path convention RecordVersion expects so the version row's
-	// path field is stable across sidecar and audit-watcher writes.
+	AgentSlug string // empty for the crew-shared tree — it belongs to no one agent
+	RelPath   string // shape: 'agent:{slug}/{rel}' or 'crew:{crewID}/{file}' —
+	// matches the path convention RecordVersion expects so the version
+	// row's path field is stable across sidecar, consolidator and
+	// audit-watcher writes of the same logical file.
 	Tier Tier
 }
 
-// parseMemoryPath does the shape match. Expected:
+// parseMemoryPath does the shape match. Both halves of the crew
+// directory are canonical memory (crewpaths.go states the layout once):
 //
-//	{basePath}/crews/{crewID}/agents/{slug}/.memory/<file-or-subdir>
+//	{basePath}/crews/{crewID}/agents/{slug}/.memory/<rel>   an agent's own
+//	{basePath}/crews/{crewID}/shared/.memory/<rel>          the crew's shared
 //
-// File mapping → Tier:
-//   - AGENT.md  → TierAgent
-//   - CREW.md   → TierCrew (only when path is /.memory/CREW.md at the
-//     crew-shared level, but agent-level CREW.md is unusual — we map
-//     anything literally named CREW.md to TierCrew)
-//   - pins.md   → TierPins
-//   - daily/<file>.md → TierAgent (daily logs are personal)
-//   - learned-*.md → TierLearned
-//   - anything else → ok=false (skip)
+// The shared half was missing until the 2026-08-13 audit's §4.5: CREW.md
+// is written there by memory.write's CREW tier (tools.go resolvePath →
+// {CrewMemoryDir}/CREW.md), but the parser only walked the agent half,
+// so the panel that lists crew:{crewID}/CREW.md showed an empty history
+// for a file that existed. Nothing was wrong with the writer; the
+// projection had a hole. (lessons.md, also written into this tree by
+// consolidate.WriteCrewLesson, stays unrecorded — see classifyMemoryFile:
+// its format is owned by the lesson writer, and the version trail has no
+// tier for it.)
+//
+// Tier mapping lives in classifyMemoryFile (projection.go) — shared with
+// the API's readability signal so the watcher's gate and the operator-
+// facing "can this be read" answer cannot drift.
+//
+// Canonical path convention:
+//   - agent half:  'agent:{slug}/{rel}' — keeps the sub-path, so
+//     daily/2026-08-13.md stays distinguishable per day.
+//   - shared half: 'crew:{crewID}/{file}', the basename for everything
+//     except daily logs. This is byte-identical to what the consolidator
+//     already records (consolidate.canonicalAuditPath), which is what
+//     makes the 60 s dedup window work between the two writers instead
+//     of producing a duplicate row per consolidation — and it is the
+//     path the memory panel asks for.
 func parseMemoryPath(basePath, fullPath string) (parsedMemoryPath, bool) {
 	rel, err := filepath.Rel(basePath, fullPath)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return parsedMemoryPath{}, false
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
-	// Expected min shape: crews/{crewID}/agents/{slug}/.memory/<file>
-	if len(parts) < 6 || parts[0] != "crews" || parts[2] != "agents" || parts[4] != ".memory" {
+	if len(parts) < 5 || parts[0] != "crews" {
 		return parsedMemoryPath{}, false
 	}
 	crewID := parts[1]
-	slug := parts[3]
-	memoryRel := strings.Join(parts[5:], "/")
-	base := filepath.Base(memoryRel)
-	var tier Tier
+
 	switch {
-	case base == "AGENT.md":
-		tier = TierAgent
-	case base == "CREW.md":
-		tier = TierCrew
-	case base == "pins.md":
-		tier = TierPins
-	case strings.HasPrefix(base, "learned-") && strings.HasSuffix(base, ".md"):
-		tier = TierLearned
-	case len(parts) >= 7 && parts[5] == "daily" && strings.HasSuffix(base, ".md"):
-		tier = TierAgent
-	default:
-		return parsedMemoryPath{}, false
+	// crews/{crewID}/agents/{slug}/.memory/<rel>
+	case len(parts) >= 6 && parts[2] == "agents" && parts[4] == ".memory":
+		slug := parts[3]
+		memoryRel := strings.Join(parts[5:], "/")
+		tier, ok := classifyMemoryFile(scopeAgent, memoryRel)
+		if !ok {
+			return parsedMemoryPath{}, false
+		}
+		return parsedMemoryPath{
+			CrewID:    crewID,
+			AgentSlug: slug,
+			RelPath:   fmt.Sprintf("agent:%s/%s", slug, memoryRel),
+			Tier:      tier,
+		}, true
+
+	// crews/{crewID}/shared/.memory/<rel>
+	case parts[2] == "shared" && parts[3] == ".memory":
+		memoryRel := strings.Join(parts[4:], "/")
+		tier, ok := classifyMemoryFile(scopeShared, memoryRel)
+		if !ok {
+			return parsedMemoryPath{}, false
+		}
+		name := filepath.Base(memoryRel)
+		if tier == TierCrew && strings.HasPrefix(memoryRel, "daily/") {
+			// Keep the day out of the crew's single CREW.md lane.
+			name = "daily/" + name
+		}
+		return parsedMemoryPath{
+			CrewID:  crewID,
+			RelPath: fmt.Sprintf("crew:%s/%s", crewID, name),
+			Tier:    tier,
+		}, true
 	}
-	// Path convention: 'agent:{slug}/{rel}' so the row is groupable
-	// alongside sidecar-recorded versions of the same logical file.
-	canonical := fmt.Sprintf("agent:%s/%s", slug, memoryRel)
-	return parsedMemoryPath{
-		CrewID:    crewID,
-		AgentSlug: slug,
-		RelPath:   canonical,
-		Tier:      tier,
-	}, true
+	return parsedMemoryPath{}, false
 }

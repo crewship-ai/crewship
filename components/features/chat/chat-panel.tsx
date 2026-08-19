@@ -4,10 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
 import {
   Bot,
+  Command,
   Wifi,
   WifiOff,
   Users,
 } from "lucide-react"
+import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
@@ -17,7 +19,7 @@ import {
   ConversationScrollButton,
   ConversationEmptyState,
 } from "@/components/ai-elements/conversation"
-import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
+import { renderAskTemplate } from "@/lib/ask-template"
 import { useChat, type HistoryPart } from "@/hooks/use-chat"
 import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -30,11 +32,17 @@ import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
 import { RightDrawer } from "./right-drawer"
 import { SlashPalette } from "./composer/slash-palette"
+import { SlashActionModal } from "./composer/slash-action-modal"
+import type { SlashActionSchema as ServerSlashCommand } from "@/hooks/use-slash-commands"
 import { type CrewMember } from "./composer/mention-autocomplete"
 import { ChatComposer } from "./composer/chat-composer"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { FollowUps } from "./suggestions/follow-ups"
+import { AskRail } from "./asks/ask-rail"
+import { useAskForms } from "./asks/use-ask-forms"
+import { lookupAskProvenance } from "./asks/ask-provenance"
+import { askFormsFromColumn, type AskForm } from "./asks/types"
 import { ConversationSearch } from "./search/conversation-search"
 import { ExportDialog } from "./export/export-dialog"
 import { ReconnectBanner } from "./messages/reconnect-banner"
@@ -42,6 +50,7 @@ import type { FileEntry } from "./chat-tree-row"
 import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch } from "@/lib/api-fetch"
 import { resolveWsBase } from "@/lib/server-base"
+import { emitChatEvent } from "@/lib/telemetry"
 
 function getWsUrl(): string {
   const base = resolveWsBase()
@@ -61,6 +70,24 @@ interface ChatPanelProps {
   agentSlug: string
   /** Agent role / role_title. Used to pick role-aware suggestion packs. */
   agentRole?: string | null
+  /** The agent's own chat suggestions — the raw `agents.suggested_prompts`
+   *  column, one per line. When set it replaces the role pack's chips; when
+   *  null/empty (every agent nobody has configured) the role pack answers
+   *  exactly as before. */
+  suggestedPrompts?: string | null
+  /** The agent's questionnaire forms — the raw `agents.ask_forms` column, a
+   *  JSON array as TEXT, from the record the caller already has.
+   *
+   *  The three states are distinct and all three are used:
+   *    · a string → these are the forms;
+   *    · `null`   → this agent has no forms (the answer for almost every
+   *      agent), and no request is made;
+   *    · omitted  → the caller has no agent record, and `useAskForms` falls
+   *      back to fetching the detail endpoint for itself.
+   *
+   *  The chat page passes it because it resolved this agent out of the roster
+   *  it fetched for the tree, exactly as it does for `suggestedPrompts`. */
+  askForms?: string | null
   /** How this session was created — UI / CLI / WEBHOOK / CRON / AGENT.
    *  Rendered as a chip in the connection bar so the user knows where
    *  they are at a glance. Undefined = unknown (pre-migration). */
@@ -86,13 +113,48 @@ interface ChatPanelProps {
 
 const noopFileClick = () => {}
 
+/** How the chat palette's key is written for a human. The binding itself is
+ *  `mod+slash` on the palette's own useHotkeys call; this is the label, and it
+ *  lives here because this panel is the only thing that shows it. Kept out of
+ *  slash-palette.tsx on purpose: half a dozen suites stub that module wholesale
+ *  to mount this panel, and a second export would break every one of them. */
+const CHAT_PALETTE_SHORTCUT = "⌘/"
+
+/** Cold-start rail cap: two rows at 1280px (PRD §5.1). The rest collapses
+ *  into `+N`. Follow-ups keep their own cap of 3, inside FollowUps. */
+const EMPTY_STATE_CHIP_LIMIT = 6
+
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
-  const suggestionPack = getSuggestions(agentRole)
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
+  const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
-  const [sessionReady, setSessionReady] = useState(false)
+
+  // Sessions whose `chats` row this panel has CONFIRMED exists. Confirmed
+  // means one of exactly two things happened: we created the row ourselves
+  // (the POST below came back ok), or the server handed us real messages for
+  // it. It is never INFERRED.
+  //
+  // It used to be inferred, and that was the bug: the history GET treats
+  // anything that is not a 404 as proof of existence, but
+  // GET /chats/{id}/messages answers 200 with an empty message list for a chat
+  // that does not exist at all (internal/api/proxy.go, ChatMessages — the
+  // shape the CLI's history/export/recap commands read too, so it is not
+  // moving). A draft session therefore looked "ready", the create POST was
+  // skipped, and the first message went out against a chat with no row: no
+  // conversation persisted, an auto-title PATCH into the void, and a WS
+  // channel the authorizer could not authorise (internal/ws/channel_auth.go,
+  // isSessionOwner → send_message denied).
+  //
+  // A ref, not state: nothing renders from it, and the create path must read
+  // the value as it is at click time rather than as it was when the callback
+  // was memoised. Keyed by session id so switching back and forth inside one
+  // mount doesn't re-ask.
+  const confirmedRowsRef = useRef<Set<string>>(new Set())
+  // In-flight create per session id, so two sends in the same tick (a
+  // suggestion chip plus a fast Enter) share one POST — and one re-subscribe.
+  const createInFlightRef = useRef<Map<string, Promise<boolean>>>(new Map())
 
   // Cutoff: turns whose timestamp is BEFORE this number skip the arrival
   // animation. Bumped on every session swap so loaded-from-history turns
@@ -103,7 +165,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const sessionLoadedFor = useRef<string | null>(null)
 
   useEffect(() => {
-    setSessionReady(false)
     setHistoryLoading(true)
     setAnimateAfter(Date.now() + 250)
     sessionLoadedFor.current = sessionId
@@ -147,7 +208,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [historyReloadNonce, setHistoryReloadNonce] = useState(0)
   const requestHistoryReload = useCallback(() => setHistoryReloadNonce((n) => n + 1), [])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     getToken: getWsToken,
     sessionId,
@@ -185,6 +246,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       content: string
       parts?: HistoryPart[]
       ts: string
+      // The server has always returned this and this type has never named it,
+      // so every reload dropped it here — the last hop of a chain that is
+      // otherwise complete. An ask-form submission carries its envelope
+      // (which form, which version, which answers, which file answered which
+      // field) in message metadata; the renderer reads it through
+      // askProvenanceForTurn. Without this field the reader was looking for
+      // something no code path could ever hand it.
+      metadata?: Record<string, unknown>
     }
 
     // Fetch history with a couple of retries on transient failures. The old
@@ -193,20 +262,28 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     // retry with backoff and, if it still fails, LEAVE the existing turns in
     // place rather than wiping them — a network blip must never look like an
     // empty chat. A genuine 404 (brand-new session) is not an error.
-    const fetchOnce = async (): Promise<{ exists: boolean; messages: HistoryMessage[] } | "retry"> => {
+    //
+    // A 404 and a 200 carrying an empty list are the SAME answer here — "no
+    // history" — and this panel deliberately draws no other conclusion from
+    // either. The server returns the second for a chat that does not exist
+    // (proxy.go), so "not a 404" says nothing about whether the row is there;
+    // reading it as existence is what skipped the create and lost the
+    // conversation. Only messages that actually came back are proof, and that
+    // is recorded below.
+    const fetchOnce = async (): Promise<{ messages: HistoryMessage[] } | "retry"> => {
       try {
         const r = await apiFetch(`/api/v1/chats/${sessionId}/messages?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (r.status === 404) return { exists: false, messages: [] }
+        if (r.status === 404) return { messages: [] }
         if (!r.ok) return "retry"
         const data = await r.json()
-        return { exists: true, messages: (data?.messages ?? []) as HistoryMessage[] }
+        return { messages: (data?.messages ?? []) as HistoryMessage[] }
       } catch {
         return "retry"
       }
     }
 
     const run = async () => {
-      let result: { exists: boolean; messages: HistoryMessage[] } | "retry" = "retry"
+      let result: { messages: HistoryMessage[] } | "retry" = "retry"
       for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
         if (attempt > 0) await new Promise((res) => setTimeout(res, 300 * attempt))
         result = await fetchOnce()
@@ -224,8 +301,11 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         return
       }
 
-      const { exists, messages } = result
-      setSessionReady(exists)
+      const { messages } = result
+      // Messages exist ⇒ the chat they belong to exists. This is the one
+      // reading of a history response that is safe, and it is what lets a
+      // conversation the user is coming back to skip the create POST.
+      if (messages.length > 0) confirmedRowsRef.current.add(sessionId)
       // Replace atomically — including with [] for an empty (newly created)
       // session — so visible turns swap cleanly between sessions.
       loadHistory(messages.map((m) => ({
@@ -234,6 +314,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         content: m.content,
         parts: m.parts,
         timestamp: new Date(m.ts),
+        metadata: m.metadata,
       })))
       setHistoryLoading(false)
     }
@@ -286,16 +367,100 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return list
   }, [agentId, agentSlug, agentName, agentRole, participantNames, currentUserId])
 
-  const ensureSession = useCallback(async () => {
-    if (sessionReady || !workspaceId || !sessionId) return
-    try {
-      const res = await apiFetch(
-        `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, origin: "UI" }) },
-      )
-      if (res.ok) setSessionReady(true)
-    } catch { /* ignore */ }
-  }, [agentId, workspaceId, sessionId, sessionReady])
+  /**
+   * Make sure this session's `chats` row exists before anything is sent into
+   * it (PRD Step 3: arriving is not sending, so the row is created by the
+   * first message).
+   *
+   * Returns whether the row is there. **Callers must not send when it is
+   * false** — the WS channel authorizer resolves a session by looking the chat
+   * up (internal/ws/channel_auth.go, isSessionOwner), so a `send_message` for
+   * a row that does not exist is refused server-side and the reply, the
+   * persisted turn and the auto-title all quietly fail to happen.
+   *
+   * The rule is "confirm, don't infer": on the first send for a session we
+   * POST unless we have already confirmed the row. The POST is an upsert
+   * (`INSERT OR IGNORE`, internal/api/agent_chats.go CreateChat), so the
+   * redundant one — for a session created by /chats up front, or one whose
+   * history came back legitimately empty — costs a single round trip that
+   * writes nothing, once per session, on a surface that is about to open a
+   * WebSocket anyway. Probing first to avoid it would cost the same round trip
+   * and could not answer the question (see `confirmedRowsRef`).
+   *
+   * A failure is not latched: nothing is marked confirmed, so the next send
+   * tries again.
+   */
+  const ensureSession = useCallback(async (): Promise<boolean> => {
+    if (!workspaceId || !sessionId) return false
+    if (confirmedRowsRef.current.has(sessionId)) return true
+
+    // Two sends racing into the same fresh session share one POST — and
+    // therefore one resubscribeSession.
+    const pending = createInFlightRef.current.get(sessionId)
+    if (pending) return pending
+
+    const sid = sessionId
+    const attempt = (async (): Promise<boolean> => {
+      try {
+        const res = await apiFetch(
+          `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sid, origin: "UI" }) },
+        )
+        if (!res.ok) return false
+        confirmedRowsRef.current.add(sid)
+        // The conversation begins here, not at mount: a draft session is a URL
+        // and a text box until this POST gives it a row. `composer` because
+        // typing (or attaching) is what asked for it — the explicit "New
+        // session" control emits `sidebar` from chat-page-client.tsx. A create
+        // that failed emits nothing: there is no conversation to have started.
+        emitChatEvent("chat_session_created", { session_id: sid, agent_id: agentId, source: "composer" })
+        // The mount-time `subscribe` for this session was refused — the
+        // channel authorizer needs the row, and until this POST there was no
+        // row (see the comment on resubscribeSession in hooks/use-chat.ts).
+        // Now there is, so take the channel before the message goes out.
+        // resubscribeSession is per-session idempotent and reuses the socket
+        // this panel already has; it never opens a second one.
+        resubscribeSession()
+        return true
+      } catch {
+        return false
+      } finally {
+        createInFlightRef.current.delete(sid)
+      }
+    })()
+    createInFlightRef.current.set(sid, attempt)
+    return attempt
+  }, [agentId, workspaceId, sessionId, resubscribeSession])
+
+  /** ensureSession, plus the one thing the user has to be told about.
+   *
+   *  A create that fails means nothing can be added to this conversation, and
+   *  work that could not be added must not look added — the composer keeps the
+   *  draft (onSent never runs), the sidebar gets no phantom row (onSend never
+   *  runs), and this says why. It fires only when the create is actually
+   *  refused, never on a background probe or a retry, so it cannot become the
+   *  noise nobody reads.
+   *
+   *  It says WHAT FAILED and not what did not happen next, because it has two
+   *  callers and only one of them is a send. The composer takes a single
+   *  ensureSession prop and gives the same function to both paths — the send
+   *  (useMessageSubmit) and the attachment upload, which creates the row for
+   *  the same reason before it uploads a byte (EnsureChatSessionProvider,
+   *  composer/attachment-zone.tsx). It used to end "your message wasn't sent",
+   *  which was a second toast about a message the user never wrote whenever a
+   *  file was what failed to attach.
+   *
+   *  So the consequence is stated by the caller that knows it: the upload path
+   *  already names the file, says it is not on the agent and offers Retry
+   *  (toastUploadFailure), and the send path leaves the draft in the box where
+   *  the user can see it. */
+  const ensureSessionForSend = useCallback(async (): Promise<boolean> => {
+    const ok = await ensureSession()
+    if (!ok) {
+      toast.error("Couldn't start this conversation. Check your connection and try again.")
+    }
+    return ok
+  }, [ensureSession])
 
   // Fetch files only when the Files tab might be visible (drawer open + active)
   const filesVisible = drawerOpen && drawerActiveTab === "files"
@@ -341,21 +506,66 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     if (connectionStatus !== "connected" || isStreaming) return
     autoSentRef.current = true
     void (async () => {
-      await ensureSession()
+      // No row, no send — the server would refuse it anyway, and the handoff
+      // silently dropping the goal it was sent here with is exactly the shape
+      // of failure this whole change is about. The toast tells the user; the
+      // ref stays set so a failed handoff does not retry itself in a loop.
+      if (!(await ensureSessionForSend())) return
       sendMessage(text)
       onSend?.(sessionId, text)
     })()
-  }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSession, sendMessage, onSend, sessionId])
+  }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSessionForSend, sendMessage, onSend, sessionId])
 
   const composerInitialInput = autoSendInitial ? undefined : initialInput
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming) return
-    await ensureSession()
+    if (!(await ensureSessionForSend())) return
     sendMessage(suggestion)
     setPinNonce((n) => n + 1)
     onSend?.(sessionId, suggestion)
-  }, [isStreaming, sendMessage, ensureSession, sessionId, onSend])
+  }, [isStreaming, sendMessage, ensureSessionForSend, sessionId, onSend])
+
+  // This agent's questionnaire forms. Empty for every agent nobody has
+  // configured — which is to say for almost all of them — and an empty list
+  // is what makes the rail below render exactly the chips it rendered before
+  // this feature existed.
+  //
+  // Parsed here, from the column the caller handed down, so the chat costs no
+  // request for it. `undefined` (no record at all) is passed through as
+  // undefined, which is what leaves the hook's own fetch in charge. Memoised
+  // because the hook takes the parsed list as a dependency: a fresh array
+  // every render would re-run its effect on every render.
+  const providedAskForms = useMemo(
+    () => (askForms === undefined ? undefined : askFormsFromColumn(askForms)),
+    [askForms],
+  )
+  const askFormList = useAskForms(agentId, providedAskForms)
+
+  // The form whose sheet is open, if any. Owned here rather than in the
+  // composer because the chips that open it live here; the SHEET is mounted
+  // by the composer, which is the only place it can both sit above the input
+  // and reuse the composer's own submit path.
+  const [activeAskForm, setActiveAskForm] = useState<AskForm | null>(null)
+  // A sheet is about one conversation. Swapping sessions with one open would
+  // leave it hovering over a chat it was never opened from, holding answers
+  // meant for the previous one.
+  useEffect(() => { setActiveAskForm(null) }, [sessionId])
+
+  const handleFormClick = useCallback((form: AskForm) => {
+    // Deliberately no send, no ensureSession, no pin. Opening a form is not
+    // an interaction with the agent yet — that is the whole distinction the
+    // chip's glyph and ellipsis are promising.
+    setActiveAskForm(form)
+  }, [])
+
+  const closeAskForm = useCallback(() => setActiveAskForm(null), [])
+
+  /** "via Add a receipt" over a user bubble that came out of a form. */
+  const resolveAskProvenance = useCallback(
+    (content: string) => lookupAskProvenance(sessionId, content),
+    [sessionId],
+  )
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {})
@@ -373,10 +583,83 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     setPinNonce((n) => n + 1)
   }, [editAndResend])
 
+  // ── The slash palette's delegated commands ────────────────────────────────
+  //
+  // Every id the palette hands over must DO something here. It used to hand
+  // over branch / search / export / run-task as well, and this handler covered
+  // regenerate and clear: the other four closed the palette and did nothing
+  // (audit P0.8). Search and export are now real — the two surfaces that own
+  // those UIs already existed, they were just unreachable from anywhere but
+  // their own hotkey — and the rest are classified in the palette itself.
+  //
+  // The list the palette delegates is PANEL_HANDLED_COMMAND_IDS, which
+  // chat-panel-slash-actions.test.tsx walks: a new delegated command is red
+  // until it is handled here.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+
+  // The palette's open state is held here rather than inside the palette,
+  // because the panel is what puts a BUTTON on screen for it (below). It had
+  // no button, and its only key was ⌘K — which the toolbar's global palette
+  // also answers to, so the two used to open together. The key moved to ⌘/;
+  // the button is what stops the surface from being reachable only by people
+  // who already knew.
+  const [slashPaletteOpen, setSlashPaletteOpen] = useState(false)
+  // A palette is about one conversation, same rule as the ask sheet and the
+  // action modal below it.
+  useEffect(() => { setSlashPaletteOpen(false) }, [sessionId])
+
   const handleSlashCommand = useCallback((id: string) => {
     if (id === "regenerate") regenerateWithPin()
     else if (id === "clear") loadHistory([])
+    else if (id === "search") setSearchOpen(true)
+    else if (id === "export") setExportOpen(true)
   }, [regenerateWithPin, loadHistory])
+
+  // Rows that would be no-ops on THIS conversation right now. Static
+  // classification (does the capability exist at all?) lives in the palette;
+  // this is the part only the host can know.
+  const slashDisabledCommands = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {}
+    if (turns.length === 0) {
+      out.clear = "Nothing to clear yet"
+      out.regenerate = "Nothing to regenerate yet"
+      out.search = "Nothing to search yet"
+      out.export = "Nothing to export yet"
+    } else if (isStreaming) {
+      out.regenerate = "Wait for the reply to finish"
+    }
+    return out
+  }, [turns.length, isStreaming])
+
+  // The server-driven action the user picked, if any. The panel owns the
+  // modal (not the palette) because the form pre-fills from the conversation.
+  const [slashAction, setSlashAction] = useState<ServerSlashCommand | null>(null)
+  useEffect(() => { setSlashAction(null) }, [sessionId])
+
+  /** What "…from this conversation" means for an action's form: the transcript,
+   *  trimmed, as the raw material for the field that asks for one. Only fields
+   *  the catalogue actually declares are used (SlashActionModal ignores keys
+   *  that no field is named after). */
+  const slashActionPreFill = useMemo<Record<string, string>>(() => {
+    const transcript = turns
+      .filter((t) => t.role === "user" || t.role === "assistant")
+      .slice(-6)
+      .map((t) => {
+        const text = t.parts.filter((p) => p.type === "text").map((p) => p.content).join("\n").trim()
+        if (!text) return ""
+        return `${t.role === "user" ? "You" : agentName ?? "Assistant"}: ${text}`
+      })
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 4000)
+    const preFill: Record<string, string> = {}
+    if (transcript) {
+      preFill.prompt = transcript
+      preFill.description = transcript
+    }
+    return preFill
+  }, [turns, agentName])
 
   // Opt-in virtualized list (localStorage crewship.virtualChat=1) — mounts
   // only the viewport instead of every turn. Initialized false and flipped
@@ -405,6 +688,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       onRegenerate={!isStreaming ? regenerateWithPin : undefined}
       onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
+      resolveAskProvenance={resolveAskProvenance}
       footer={<StreamingIndicator isStreaming={isStreaming} turns={turns} agentName={agentName} />}
     />
   ) : (
@@ -431,6 +715,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               agentId={agentId}
               chatId={sessionId}
               resolveAuthorName={resolveAuthorName}
+              resolveAskProvenance={resolveAskProvenance}
             />
           ))}
         </AnimatePresence>
@@ -500,11 +785,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         </div>
         {turns.length === 0 && !historyLoading && (
           <div className="px-4 pb-2 shrink-0">
-            <Suggestions>
-              {defaultSuggestions.map((s) => (
-                <Suggestion key={s} suggestion={s} onClick={() => handleSuggestionClick(s)}>{s}</Suggestion>
-              ))}
-            </Suggestions>
+            <AskRail
+              questions={defaultSuggestions}
+              forms={askFormList}
+              limit={EMPTY_STATE_CHIP_LIMIT}
+              disabled={isStreaming}
+              onPickQuestion={handleSuggestionClick}
+              onPickForm={handleFormClick}
+            />
           </div>
         )}
         <ChatComposer
@@ -515,11 +803,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}
           stopGeneration={stopGeneration}
-          ensureSession={ensureSession}
+          ensureSession={ensureSessionForSend}
           sendMessage={sendMessage}
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}
+          askForm={activeAskForm}
+          onCloseAskForm={closeAskForm}
+          renderAskTemplate={renderAskTemplate}
         />
       </div>
     )
@@ -533,26 +824,34 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         <div className="flex items-center gap-2 px-4 md:px-6 h-[41px] border-b shrink-0">
           <ConnectionBadge status={connectionStatus} />
           <OriginChip origin={sessionOrigin} />
-          <span className="text-micro text-muted-foreground ml-auto font-mono">
-            {sessionId.slice(0, 8)}
-          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
+            <span className="text-micro text-muted-foreground font-mono">
+              {sessionId.slice(0, 8)}
+            </span>
+          </div>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
         </div>
         {turns.length === 0 && !historyLoading && (
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
-            <Suggestions>
-              {defaultSuggestions.map((s) => (
-                <Suggestion key={s} suggestion={s} onClick={() => handleSuggestionClick(s)}>{s}</Suggestion>
-              ))}
-            </Suggestions>
+            <AskRail
+              questions={defaultSuggestions}
+              forms={askFormList}
+              limit={EMPTY_STATE_CHIP_LIMIT}
+              disabled={isStreaming}
+              onPickQuestion={handleSuggestionClick}
+              onPickForm={handleFormClick}
+            />
           </div>
         )}
         <div className="mx-auto w-full max-w-3xl">
         <FollowUps
           prompts={followUpPrompts}
           onPick={handleSuggestionClick}
+          forms={askFormList}
+          onPickForm={handleFormClick}
           show={!isStreaming && turns.length > 0 && turns[turns.length - 1].role === "assistant"}
         />
         </div>
@@ -564,12 +863,15 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}
           stopGeneration={stopGeneration}
-          ensureSession={ensureSession}
+          ensureSession={ensureSessionForSend}
           sendMessage={sendMessage}
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}
           mentionMembers={mentionMembers}
+          askForm={activeAskForm}
+          onCloseAskForm={closeAskForm}
+          renderAskTemplate={renderAskTemplate}
         />
       </div>
 
@@ -586,16 +888,69 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       </RightDrawer>
 
       <RightRail className={cn(pushOpen && "border-l-0")} />
-      <SlashPalette agentSlug={agentSlug} onCommand={handleSlashCommand} />
+      {/* workspaceId is what makes the server-driven Actions group exist at
+          all: useSlashCommands(undefined) never runs its query, so the palette
+          rendered without it could only ever show the client rows. */}
+      <SlashPalette
+        agentSlug={agentSlug}
+        workspaceId={workspaceId ?? undefined}
+        onCommand={handleSlashCommand}
+        onAction={setSlashAction}
+        disabledCommands={slashDisabledCommands}
+        open={slashPaletteOpen}
+        onOpenChange={setSlashPaletteOpen}
+      />
+      {workspaceId && (
+        <SlashActionModal
+          command={slashAction}
+          workspaceId={workspaceId}
+          contextPreFill={slashActionPreFill}
+          onClose={() => setSlashAction(null)}
+        />
+      )}
       <ArtifactPane agentId={agentId} />
-      <ConversationSearch turns={turns} />
-      <ExportDialog turns={turns} agentName={agentName} />
+      <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
+      <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
       <ReconnectBanner status={connectionStatus} />
     </div>
   )
 }
 
 /* ---- Small shared sub-components extracted to reduce duplication ---- */
+
+/**
+ * The chat palette's visible door.
+ *
+ * Until this existed the palette had exactly one entry point — ⌘K — which is
+ * also the toolbar's global palette, so the two opened together and the
+ * shortcut appeared nowhere on screen. The key is now ⌘/, and a key that
+ * nothing announces is a key nobody presses, so it is spelled out here: in the
+ * label a screen reader gets, in the tooltip a mouse gets, and in a <kbd>
+ * matching the one the toolbar's search button wears two rows up.
+ *
+ * It is also the only way in for anyone whose layout does not put Slash on a
+ * bare key — react-hotkeys-hook matches the PHYSICAL key — and for anyone
+ * driving this surface with a pointer.
+ */
+function CommandsButton({ onClick }: { onClick: () => void }) {
+  const label = `Chat commands (${CHAT_PALETTE_SHORTCUT})`
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      data-testid="chat-commands-trigger"
+      className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-micro text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <Command className="h-3 w-3" aria-hidden="true" />
+      <span className="hidden sm:inline">Commands</span>
+      <kbd className="pointer-events-none hidden select-none rounded border border-white/[0.08] bg-white/[0.03] px-1 font-mono text-[10px] leading-none sm:inline">
+        {CHAT_PALETTE_SHORTCUT}
+      </kbd>
+    </button>
+  )
+}
 
 function ConnectionBadge({ status }: { status: string }) {
   return (

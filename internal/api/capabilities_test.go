@@ -222,6 +222,9 @@ func TestAllCapabilities(t *testing.T) {
 		"credentials:reveal",
 		"issue.create",
 		"memory.write",
+		// docs/prd/pages.md §11 — authoring a Page. In no bundle, for
+		// the reason recorded on the constant.
+		"page.create",
 		"routine.create",
 		"skill.create",
 	}

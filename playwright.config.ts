@@ -24,7 +24,15 @@ export default defineConfig({
     // bootstrapped) or false-fail globalSetup (no demo user on a
     // fresh DB). Run via
     //   pnpm exec playwright test --config=playwright.fresh.config.ts
-    // instead — wired into the e2e-devcontainer nightly workflow.
+    // instead.
+    //
+    // Unlike the entries above, this one is NOT stale coverage: the spec
+    // is current and it gates every pull request, in ci.yml's
+    // `onboarding-journey` job, which stands up a throwaway server on an
+    // empty DB. It sits in this list for a precondition it cannot get
+    // here, not because it walks a deleted route. Removing it from
+    // testIgnore would not gain coverage — it would break the spec.
+    // scripts/onboarding-gate-test.sh pins that arrangement.
     "**/onboarding-wizard.spec.ts",
   ],
   globalSetup: "./e2e/global-setup.ts",

@@ -75,6 +75,19 @@ const (
 	// bundle includes this above the MEMBER tier.
 	CapabilityIssueCreate = "issue.create"
 
+	// CapabilityPageCreate gates authoring a Page (docs/prd/pages.md
+	// §11, POST /api/v1/pages). A page is a workspace-visible surface
+	// that names crews as panel owners and routines as producers, so
+	// creating one is a MANAGER+ action by default — this capability
+	// is how an admin lets a specific MEMBER author pages without
+	// promoting them.
+	//
+	// It appears in no bundle, like credentials:reveal: the v109
+	// migration's stored capability sets predate it, and adding a
+	// string to a bundle that the backfill never wrote would make the
+	// role-derived fallback disagree with what is in the column.
+	CapabilityPageCreate = "page.create"
+
 	// CapabilityMemoryWrite gates writes to agent / crew / workspace
 	// memory via the slash /remember surface. The HITL verifier
 	// (PR #3 of MEMORY-ROADMAP-2026) still gates persistence; this
@@ -100,6 +113,7 @@ var allCapabilities = map[string]struct{}{
 	CapabilityCredentialReveal: {},
 	CapabilityIssueCreate:      {},
 	CapabilityMemoryWrite:      {},
+	CapabilityPageCreate:       {},
 }
 
 // IsValidCapability reports whether the string is a known capability

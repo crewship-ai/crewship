@@ -1,7 +1,13 @@
-// Command gen-openapi extracts the registered HTTP routes from
-// internal/api/router_*.go and writes a minimal OpenAPI 3.0 document to
-// internal/api/openapi.gen.json, embedded and served at GET /openapi.json
-// (internal/api/openapi.go, internal/server/routes.go).
+// Command gen-openapi extracts the registered HTTP routes from internal/api
+// and writes a minimal OpenAPI 3.0 document to internal/api/openapi.gen.json,
+// embedded and served at GET /openapi.json (internal/api/openapi.go,
+// internal/server/routes.go).
+//
+// Which FILES it scans is decided by content, not by filename (#1953): every
+// non-test .go file in internal/api that contains a route-registration call is
+// read. It used to glob router_*.go, which made the naming convention
+// load-bearing — a registrar under any other name contributed nothing to the
+// spec and nothing said so.
 //
 // This is a source scan, not a reflection- or runtime-based generator: it
 // regex-matches the handful of call shapes this codebase actually uses to
@@ -94,7 +100,7 @@ func main() {
 }
 
 func run() error {
-	files, err := filepath.Glob(filepath.Join(routerDir, "router_*.go"))
+	files, err := routeSourceFiles()
 	if err != nil {
 		return err
 	}
@@ -104,15 +110,13 @@ func run() error {
 		if wd, _ := os.Getwd(); filepath.Base(wd) == "api" {
 			routerDir = "../../internal/api"
 			outputPath = "../../internal/api/openapi.gen.json"
-			files, err = filepath.Glob(filepath.Join(routerDir, "router_*.go"))
+			cachedSourceFiles = nil
+			files, err = routeSourceFiles()
 			if err != nil {
 				return err
 			}
 		}
 	}
-	// router.go itself (not router_*.go) registers no routes directly today,
-	// but scan it too in case that changes — cheap and future-proof.
-	files = append(files, filepath.Join(routerDir, "router.go"))
 
 	seen := map[route]bool{}
 	var routes []route
@@ -511,6 +515,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range hookSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	for key, schema := range pagesSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	for key, name := range executionResponseSchemas() {
 		result[key] = mergeDomainSchema(result[key], DomainSchema{Response: ref(name)})
 	}
@@ -760,6 +767,22 @@ func responseComponents() map[string]any {
 		"trigger_type": scalar("string"), "status": scalar("string"), "started_at": nullable("string"), "finished_at": nullable("string"), "error_message": nullable("string"),
 		"exit_code": nullable("integer"), "metadata": map[string]any{"type": "object", "additionalProperties": true}, "model": nullable("string"), "created_at": scalar("string"),
 		"agent_name": nullable("string"), "agent_slug": nullable("string"), "crew_name": nullable("string"),
+		// Session provenance: omitted entirely for runs that recorded none
+		// (older runs, adapters with no session-init), which is why every one
+		// of these is nullable rather than a guaranteed scalar.
+		"cli_version": nullable("string"), "api_key_source": nullable("string"),
+		"permission_mode": nullable("string"), "session_id": nullable("string"),
+		"mcp_server_errors": array(ref("MCPServerError")),
+		// The list above is what the record could identify and is capped; these
+		// two say what it leaves out, and a client that renders the list without
+		// them shows a partial answer as a complete one.
+		"mcp_server_error_count":      scalar("integer"),
+		"mcp_server_errors_truncated": scalar("boolean"),
+		// Tool names and refusal counts only — the denied input never reaches
+		// the run record. The count separates an agent that tried once from one
+		// hammering a wall it cannot see.
+		"permission_denials":           array(ref("DeniedTool")),
+		"permission_denials_truncated": scalar("boolean"),
 	})
 	schemas := map[string]any{
 		"Workspace": workspace, "WorkspaceList": array(ref("Workspace")), "WorkspaceCounts": object(map[string]any{"crews": scalar("integer"), "agents": scalar("integer"), "members": scalar("integer")}),
@@ -770,6 +793,11 @@ func responseComponents() map[string]any {
 		"IssueCreator": object(map[string]any{"type": scalar("string"), "id": scalar("string"), "name": scalar("string")}),
 		"Skill":        skill, "SkillList": array(ref("Skill")), "InstalledSkillAgent": object(stringProps("agent_id", "agent_slug", "agent_name", "avatar_url", "crew_id", "crew_slug", "crew_name", "crew_color", "crew_icon", "crew_avatar_style")),
 		"Run": run, "RunList": object(map[string]any{"data": array(ref("Run")), "stats": ref("RunStats"), "pagination": ref("Pagination")}),
+		"MCPServerError": object(stringProps("name", "type", "message")),
+		// tool_name carries the failure CATEGORY when the CLI named no tool, so
+		// a refusal nobody could name still renders. count is absent on records
+		// written before the tally existed — it is never a "denied zero times".
+		"DeniedTool": object(map[string]any{"tool_name": scalar("string"), "count": scalar("integer")}),
 		"RunStats":   object(map[string]any{"running": scalar("integer"), "today": scalar("integer"), "failed": scalar("integer")}),
 		"Pagination": object(map[string]any{"page": scalar("integer"), "limit": scalar("integer"), "total": scalar("integer"), "total_pages": scalar("integer")}),
 	}
@@ -1367,6 +1395,38 @@ func resolveHandlerRefs(call, src string) (inline []inlineHandler, targets []han
 		}
 	}
 	return nil, nil, false
+}
+
+// routeRegistrationCall matches a route registration on the router, in any of
+// the five call shapes this codebase uses. It is deliberately looser than
+// combinedPattern / splitPattern — no literal method or path — because its
+// only job is to decide whether a FILE registers routes at all.
+//
+// #1953: route discovery used to be `router_*.go`, so a registrar with any
+// other filename contributed nothing to the spec, silently. Two invariants
+// were built on that glob; the other one (internal/api's
+// route_authz_invariant_test.go) is the security-relevant half, and
+// internal/api/pages_internal.go was the file both of them could not see.
+var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin)\(`)
+
+// routeSourceFiles lists the non-test Go files in routerDir that register at
+// least one route. A file that registers none is skipped only because it has
+// nothing to contribute, never because of what it is called.
+func routeSourceFiles() ([]string, error) {
+	var files []string
+	for _, file := range sourceFiles() {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("read %s: %w", file, err)
+		}
+		if routeRegistrationCall.Match(data) {
+			files = append(files, file)
+		}
+	}
+	return files, nil
 }
 
 // sourceFiles lists the package's non-test Go files. _test.go is excluded

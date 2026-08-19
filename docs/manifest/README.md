@@ -53,6 +53,7 @@ spec:
 | Kind | What it is | Lifecycle | Doc |
 |---|---|---|---|
 | [`SavedView`](/manifest/saved_view) | Shared filtered list (issues / missions / runs) | full CRUD | [saved_view.md](/manifest/saved_view) |
+| [`Page`](/manifest/page) | Dashboard of typed, permissioned panels that producers push into | full CRUD | [page.md](/manifest/page) |
 | [`Hook`](/manifest/hook) | Toggle for code-registered lifecycle hooks | enable/disable only | [hook.md](/manifest/hook) |
 
 ### Catalog references (install / deploy)
@@ -105,7 +106,8 @@ spec:
 10. **RecurringIssues** (deps: Projects, Labels, Crews)
 11. **TriageRules** (deps: Projects, Labels, Crews)
 12. **SavedViews** (deps: Labels, Projects)
-13. **Hooks** (toggles only)
+13. **Pages** (deps: Crews, Agents, Routines)
+14. **Hooks** (toggles only)
 
 ## Apply modes
 
@@ -139,6 +141,7 @@ Every kind also has a per-entity CLI surface for one-off operations (no manifest
 | RecurringIssue | `crewship recurring list/delete` |
 | TriageRule | `crewship triage list/process` |
 | SavedView | `crewship saved-view list/delete` |
+| Page | `crewship page list/get/create/update/delete/set/grant/revoke` |
 | WorkflowTemplate | `crewship workflow list/get/create/delete` |
 | FeatureFlag | `crewship feature-flag list/enable/disable/inherit` |
 | InstanceSetting | `crewship instance settings list/get/set/delete` |

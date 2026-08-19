@@ -187,24 +187,39 @@ Default allowed domains (from `internal/egressallow/allowlist.go`, re-exported b
 
 Unknown network modes default to **restricted** (fail closed). Keep this list in sync with `components/features/crews/crew-network-policy.tsx` on the frontend.
 
-### Sidecar Endpoints (40 paths, 44 routes)
+### Sidecar Endpoints (45 path patterns, 58 method+path arms)
 
-The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The path count below is 40; the 44-route total reflects four paths that register multiple HTTP verbs (`/manifest` GET+PATCH, `/crew-connections` GET+POST, `/connections/{id}/files` GET+POST, `/issue/{identifier}` GET+PATCH):
+The sidecar exposes a local API on port 9119 (`internal/sidecar/server.go`). The
+two numbers differ because several patterns are prefixes carrying more than one
+verb — `/issue/{identifier}` alone answers GET, PATCH, comment, link and
+attachments. Both are derived from the `buildHandler` switch; the authoritative
+list is that switch, and `TestSidecarRoutes_IdentityCoverage` fails the build
+when a route registered there is not classified by whose identity guards it.
 
-<Accordion title="Full endpoint catalog (40 paths)">
+<Accordion title="Full endpoint catalog (45 path patterns)">
 | Category | Endpoints |
 |----------|-----------|
-| **Memory** | `/memory/search`, `/memory/status`, `/memory/reindex` |
+| **Memory** | `/memory/read`, `/memory/write`, `/memory/search`, `/memory/status`, `/memory/reindex` |
+| **In-container MCP servers** | `/mcp/memory`, `/mcp/memory/{slug}`, `/mcp/routines`, `/mcp/notify` |
+| **MCP gateway** | `/mcp/tools`, `/mcp/call`, `/mcp/status` |
 | **Assignment** | `/assign`, `/results/{id}`, `/query`, `/standup`, `/escalate`, `/report-confidence` |
-| **Missions** | `/mission/create`, `/mission/{id}`, `/mission/{id}/start`, `/mission/templates` |
+| **Missions** | `/mission/create`, `/mission/templates`, `/mission/{id}` (GET status, POST `/start`) |
+| **Issues** | `/issue/create`, `/issues` (GET), `/issue/{identifier}` (GET/PATCH, plus `/comment`, `/link`, `/attachments`, `/attachments/{id}`) |
+| **Pipelines** | `/pipelines` (GET), `/pipelines/save`, `/pipelines/{slug}` (GET, POST `/run`, POST `/dry_run`) |
+| **Pages** | `/pages/{page}/{panel}` (PUT — the producer door, see [Pages](/guides/pages)) |
+| **Connections** | `/connections`, `/connections/{id}` (`/message`, `/messages`, `/files`), `/crew-connections` |
 | **Keeper** | `/keeper/request`, `/keeper/execute` |
-| **MCP** | `/mcp/tools`, `/mcp/call`, `/mcp/status` |
-| **Connections** | `/connections`, `/connections/{id}/message`, `/connections/{id}/messages`, `/connections/{id}/files`, `/crew-connections` |
-| **Issues** | `/issue/create`, `/issues` (GET), `/issue/{identifier}` (GET/PATCH), `/issue/{identifier}/comment`, `/issue/{identifier}/link`, `/issue/{identifier}/attachments` (GET/POST), `/issue/{identifier}/attachments/{id}` (GET) |
-| **Management** | `/crews`, `/crew/create`, `/agent/create`, `/credentials`, `/agent-credentials` |
-| **Pipelines** | `/pipelines`, `/pipelines/{slug}`, `/pipelines/save`, `/pipelines/{slug}/run`, `/pipelines/{slug}/dry_run` |
+| **Credentials** | `/credentials` (GET), `/credentials/create`, `/credentials/{name}/rotate` |
+| **Authoring** | `/skills/generate`, `/skills/author`, `/routines/schedules/create` |
+| **Management** | `/crews`, `/crew/create`, `/agent/create`, `/spawn` |
 | **Other** | `/manifest` (GET/PATCH), `/expose-port` |
 </Accordion>
+
+`POST /agent-credentials` and `POST /crew-connections` were listed here until
+#1768 and never worked: both forwarded to an internal endpoint that is
+registered nowhere, so the agent got a 502 every time. They were removed rather
+than repaired, because a route that *looks* like it grants credential
+assignment invites someone to add the backend half without the gate.
 
 ## Keeper Request Lifecycle
 

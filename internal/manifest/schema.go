@@ -42,6 +42,10 @@ const APIVersion = "crewship/v1"
 // rules, recurring issues, saved views, feature flags, instance
 // settings, recipes, crew templates, connectors, and hooks. Their
 // document types live under internal/manifest/kinds.
+//
+// Page is the 21st kind (docs/prd/pages.md §12 v1). Its spec type is
+// the one internal/pages already owns, so a manifest page and a
+// `crewship page create --file` page are the same document.
 const (
 	KindCrew             = "Crew"
 	KindAgent            = "Agent"
@@ -63,7 +67,24 @@ const (
 	KindHook             = "Hook"
 	KindSkill            = "Skill"
 	KindIssue            = "Issue"
+	KindPage             = "Page"
 )
+
+// knownKindList is the human-readable roster the parser prints when a
+// document names no kind, or names one that does not exist.
+//
+// It is ONE string because it used to be two: the "missing kind:" error
+// and the "unsupported kind" error each carried their own hand-typed
+// copy of the same twenty names (parse.go:381,383), and adding a kind
+// meant remembering both. A single const cannot drift from itself.
+// Built from the constants above so a renamed kind cannot leave a stale
+// name behind either.
+const knownKindList = KindCrew + ", " + KindAgent + ", " + KindIntegration + ", " +
+	KindWorkspace + ", " + KindProject + ", " + KindLabel + ", " + KindMilestone + ", " +
+	KindWorkflowTemplate + ", " + KindTriageRule + ", " + KindRecurringIssue + ", " +
+	KindSavedView + ", " + KindRoutine + ", " + KindFeatureFlag + ", " + KindInstanceSetting + ", " +
+	KindRecipe + ", " + KindCrewTemplate + ", " + KindConnector + ", " + KindHook + ", " +
+	KindSkill + ", " + KindIssue + ", " + KindPage
 
 // Document is the discriminated top-level shape. apiVersion + kind
 // drive which branch of Spec is populated. The raw YAML may have one
@@ -556,6 +577,35 @@ type Agent struct {
 	// than a screenful.
 	Prompt     string `yaml:"prompt,omitempty"      json:"prompt,omitempty"`
 	PromptFile string `yaml:"prompt_file,omitempty" json:"prompt_file,omitempty"`
+
+	// SuggestedPrompts is the agent's own chat suggestions — the chips
+	// under an empty composer — as ONE PROMPT PER LINE. It is stored
+	// verbatim in agents.suggested_prompts, which is newline-separated
+	// text and not a list (see the migration
+	// 20260812233006_agent_suggested_prompts.sql for why), so the
+	// manifest carries the same string the textarea edits and YAML
+	// renders it as a block scalar exactly like Prompt above:
+	//
+	//	suggested_prompts: |
+	//	  What shipped this week?
+	//	  Who is blocked?
+	//
+	// Caps — at most 8 prompts, at most 120 characters each — are
+	// re-stated in validate.go's checkSuggestedPrompts so `crewship plan`
+	// rejects an over-long list without a round-trip. That mirrors the
+	// server's normalizeSuggestedPrompts (internal/api/
+	// agents_suggested_prompts.go) the same way validAgentRole mirrors
+	// the server's role enum; the server stays the enforcing copy.
+	//
+	// Empty means "not declared here", NOT "clear them" — see
+	// agentBodyDiffers in plan.go.
+	SuggestedPrompts string `yaml:"suggested_prompts,omitempty" json:"suggested_prompts,omitempty"`
+
+	// AskForms is the canonical JSON array stored in agents.ask_forms. It is
+	// intentionally a string rather than a second manifest-only model: export
+	// and apply must preserve the server-normalised document byte-for-byte.
+	// Empty means the field is not declared and must not clear remote state.
+	AskForms string `yaml:"ask_forms,omitempty" json:"ask_forms,omitempty"`
 
 	// Skills and EnvRefs are slug-level references to entries in
 	// the surrounding CrewSpec/WorkspaceSpec. Apply resolves the

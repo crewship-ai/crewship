@@ -3,19 +3,30 @@
 import { motion, AnimatePresence } from "motion/react"
 import { Sparkles } from "lucide-react"
 
-import { Suggestion } from "@/components/ai-elements/suggestion"
-import { spring, stagger } from "@/lib/motion"
+import { spring } from "@/lib/motion"
+import { AskRail } from "../asks/ask-rail"
+import type { AskForm } from "../asks/types"
+
+/** Follow-ups have always shown at most three chips; forms join the same
+ *  three, and the remainder collapses into `+N` (PRD §5.1). */
+const FOLLOW_UP_LIMIT = 3
 
 interface FollowUpsProps {
   prompts: string[]
   onPick: (text: string) => void
   show: boolean
+  /** This agent's questionnaire forms. Empty for every agent that has none,
+   *  which is the overwhelming majority — and with an empty list this renders
+   *  exactly the three chips it always did. */
+  forms?: AskForm[]
+  onPickForm?: (form: AskForm) => void
 }
 
-export function FollowUps({ prompts, onPick, show }: FollowUpsProps) {
+export function FollowUps({ prompts, onPick, show, forms, onPickForm }: FollowUpsProps) {
+  const formList = onPickForm ? forms ?? [] : []
   return (
     <AnimatePresence>
-      {show && prompts.length > 0 && (
+      {show && (prompts.length > 0 || formList.length > 0) && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -24,27 +35,19 @@ export function FollowUps({ prompts, onPick, show }: FollowUpsProps) {
           className="flex items-center gap-2 px-4 md:px-6 pt-1 pb-2 shrink-0"
         >
           <Sparkles className="h-3 w-3 text-muted-foreground" />
-          <motion.div
-            variants={{ show: stagger.chips, hidden: {} }}
-            initial="hidden"
-            animate="show"
-            className="flex flex-wrap items-center gap-1.5"
-          >
-            {prompts.slice(0, 3).map((p) => (
-              <motion.div
-                key={p}
-                variants={{
-                  hidden: { opacity: 0, scale: 0.95, y: 4 },
-                  show: { opacity: 1, scale: 1, y: 0 },
-                }}
-                transition={spring.snappy}
-              >
-                <Suggestion suggestion={p} onClick={onPick} />
-              </motion.div>
-            ))}
-          </motion.div>
+          <AskRail
+            className="min-w-0 flex-1"
+            questions={prompts}
+            forms={formList}
+            limit={FOLLOW_UP_LIMIT}
+            onPickQuestion={onPick}
+            onPickForm={onPickForm ?? noop}
+            animateChips
+          />
         </motion.div>
       )}
     </AnimatePresence>
   )
 }
+
+function noop() {}

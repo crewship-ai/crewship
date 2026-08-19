@@ -102,10 +102,68 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"triage_rules":        IntentInclude,
 	"workflow_templates":  IntentInclude,
 	"saved_views":         IntentInclude,
-	"hooks":               IntentInclude,
-	"labels":              IntentInclude,
-	"milestones":          IntentInclude,
-	"projects":            IntentInclude,
+
+	// === Pages (round-trip) ===================================
+	// PRD docs/prd/pages.md §10b.5 draws the line here: `crewship
+	// export` carries the page SPEC only, because export moves
+	// configuration between installs. A BACKUP is a whole-instance
+	// snapshot, so it carries spec, grants, versions AND panel data —
+	// "a page whose numbers vanish on restore would be a page nobody
+	// trusts afterwards".
+	"pages":         IntentInclude,
+	"page_panels":   IntentInclude,
+	"page_versions": IntentInclude,
+	// page_grants is the ACL. Dropping it on restore would silently
+	// widen or narrow who can read a page, and `granted_by_user_id` is
+	// NOT NULL precisely so a grant always names the human accountable
+	// for it (§7.1b rule 1). A restore that loses that is a restore
+	// that loses the audit trail.
+	"page_grants": IntentInclude,
+	// page_panel_data is the payload ring — the numbers themselves.
+	// Bounded to 200 rows / 7 days per panel by internal/pages, so it
+	// cannot make a bundle unbounded.
+	"page_panel_data": IntentInclude,
+	// page_public_tokens carries HASHES, never a usable secret, plus
+	// each link's expiry and revocation. Carrying it keeps a published
+	// link working across a restore; dropping it would silently break
+	// every external reader an accountant or client was given, with no
+	// error anyone would see until they clicked.
+	"page_public_tokens": IntentInclude,
+	// page_webhooks is the inbound-webhook table (§10b.5c) and it is the same
+	// judgement as page_public_tokens above, reached the same way. It carries a
+	// SHA-256 DIGEST and never a usable secret — there is no cleartext column in
+	// the schema at all — so a bundle is not a credential store, and a reader of
+	// the dump learns which integrations exist, never how to be one.
+	//
+	// Carrying it is the choice that makes a restore honest. A page webhook is
+	// wired into something outside this instance: a cron on a box we do not own,
+	// a Zapier step, a PLC gateway, a GitHub Action secret. None of those is
+	// re-issued by a restore, and none of them reports an error anybody here
+	// would see — dropping the table would leave every external producer POSTing
+	// into a 404 while the panel quietly went stale, which is precisely the
+	// failure §4's freshness contract exists to surface rather than to cause.
+	// The row also carries created_by_user_id (the human accountable for the
+	// capability, §7.1b rule 1) and revoked_at: a restore that lost those would
+	// resurrect tokens somebody had deliberately pulled, and lose the audit
+	// trail that says who issued what.
+	//
+	// Restoring a digest hands the restored instance no authority the source did
+	// not have: the token still writes exactly one panel, and its authority is
+	// re-derived from its issuer's CURRENT standing on every fire, so a bundle
+	// restored into a workspace where that human is not a member yields a token
+	// that holds nothing.
+	"page_webhooks": IntentInclude,
+	// page_panel_alerts is the edge a lapse was already reported on: one row
+	// per (panel, gate) while an alert is open, deleted on recovery. It rides
+	// the bundle because dropping it is not neutral in either direction — a
+	// restore without it re-opens an issue on the next sweep for an outage a
+	// human already closed by hand, and it carries the issue_id that makes the
+	// recovery entry able to name what it is closing.
+	"page_panel_alerts": IntentInclude,
+	"hooks":             IntentInclude,
+	"labels":            IntentInclude,
+	"milestones":        IntentInclude,
+	"projects":          IntentInclude,
 
 	// === Eval / training (round-trip) =========================
 	"eval_runs":           IntentInclude,

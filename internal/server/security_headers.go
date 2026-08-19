@@ -3,6 +3,8 @@ package server
 import (
 	"net/http"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/pages"
 )
 
 // securityHeadersMiddleware adds standard security headers to all HTTP responses.
@@ -112,6 +114,18 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 					"img-src 'self' data: blob: https://logos.composio.dev; "+
 					"font-src 'self' data:; "+
 					"connect-src 'self'; "+
+					// Pages' embed.v1 panel (docs/prd/pages.md §3.1). Without
+					// this directive frame-src falls back to default-src
+					// 'self', so a correctly configured, human-vetted embed
+					// source is still refused by the browser — the panel would
+					// render an empty frame and no error anyone could act on.
+					//
+					// The value is derived from the operator's allow-list and
+					// is "frame-src 'none'" when nothing is configured, which
+					// is every instance that has not opted in. Nothing a
+					// producer sends can widen it: a payload names a source,
+					// the policy names the origins.
+					pages.FrameSrcDirective()+"; "+
 					"frame-ancestors 'none'; "+
 					"base-uri 'self'; "+
 					"form-action 'self'")

@@ -16,6 +16,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -56,6 +57,9 @@ type capResolver struct {
 	runUpdates []runUpdateRec
 	increments []int
 	costCalls  []RunCostUsage
+	// costCtxErrs[i] is the ctx.Err() seen by the i-th RecordCost call — the
+	// difference between a ledger row and a warning line, see RecordCost below.
+	costCtxErrs []error
 }
 
 func (c *capResolver) CreateChat(context.Context, CreateChatRequest) error { return nil }
@@ -103,10 +107,20 @@ func (c *capResolver) UpdateChatTitle(_ context.Context, _, title string) error 
 	return c.titleErr
 }
 
-func (c *capResolver) RecordCost(_ context.Context, usage RunCostUsage) error {
+// RecordCost mirrors the transport the real resolver uses: IPCResolver.RecordCost
+// builds its POST with http.NewRequestWithContext, so a context that is already
+// cancelled fails the request before it ever leaves the process. Reproducing that
+// here is what lets a test tell "the ledger was written" apart from "the ledger
+// write was attempted and lost".
+func (c *capResolver) RecordCost(ctx context.Context, usage RunCostUsage) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.costCalls = append(c.costCalls, usage)
+	err := ctx.Err()
+	c.costCtxErrs = append(c.costCtxErrs, err)
+	if err != nil {
+		return fmt.Errorf("record cost: %w", err)
+	}
 	return nil
 }
 
@@ -239,6 +253,55 @@ func claudeSuccessOutput(nTools int) string {
 	fmt.Fprintf(&b, `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t0","text":"%s"}]}}`+"\n", long)
 	b.WriteString(`{"type":"result","subtype":"success","total_cost_usd":0.0042,"num_turns":2,"is_error":false,"usage":{"input_tokens":10,"output_tokens":5},"modelUsage":{"claude-test":{"input_tokens":10}}}` + "\n")
 	return b.String()
+}
+
+// claudeProvenanceOutput is a minimal successful transcript whose session-init
+// line carries the full provenance envelope, including an apiKeySource the
+// sanitiser does not recognise and one skipped MCP server.
+const claudeProvenanceOutput = `{"type":"system","subtype":"init","model":"claude-test","session_id":"sess-abc","claude_code_version":"2.1.219","apiKeySource":"/home/agent/.creds","permissionMode":"bypassPermissions","capabilities":["interrupt_receipt_v1"],"mcp_server_errors":[{"name":"crewship-memory","error":"bad config"}]}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}
+{"type":"result","subtype":"success","total_cost_usd":0.01,"num_turns":1,"is_error":false,"usage":{"input_tokens":1,"output_tokens":1}}
+`
+
+// The run record is where an operator asks "which CLI answered, on which
+// credential, and did it lose an MCP server" — #1934. Session-scoped inventory
+// (capabilities/skills/tools) is deliberately not on the run row.
+func TestHandleChatMessagePersistsSessionProvenance(t *testing.T) {
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentOutput: claudeProvenanceOutput, exitCode: 0}
+	b := testBridgeWithContainer(t, resolver, ctr)
+
+	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-prov", "hello", func(ws.ChatEvent) {}); err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if len(resolver.runUpdates) != 1 {
+		t.Fatalf("UpdateRun calls = %d, want 1: %+v", len(resolver.runUpdates), resolver.runUpdates)
+	}
+	meta := resolver.runUpdates[0].metadata
+	for k, want := range map[string]any{
+		"cli_version":     "2.1.219",
+		"permission_mode": "bypassPermissions",
+		"session_id":      "sess-abc",
+		// The upstream value looked like a path — it must be reported as
+		// changed, never stored verbatim.
+		"api_key_source": "other",
+	} {
+		if meta[k] != want {
+			t.Errorf("completed metadata[%q] = %v, want %v", k, meta[k], want)
+		}
+	}
+	if meta["mcp_server_errors"] == nil {
+		t.Errorf("completed metadata missing mcp_server_errors: %+v", meta)
+	}
+	for _, k := range []string{"capabilities", "skills", "tools", "mcp_servers"} {
+		if _, ok := meta[k]; ok {
+			t.Errorf("session-scoped key %q must not be copied onto the run record", k)
+		}
+	}
+	// The pre-existing usage keys must survive the new merge.
+	if meta["total_cost_usd"] == nil || meta["duration_ms"] == nil || meta["model"] != "claude-test" {
+		t.Errorf("existing completed metadata clobbered: %+v", meta)
+	}
 }
 
 // ---------- success path: text, tools, result metadata, done ----------
@@ -940,5 +1003,203 @@ func TestHandleChatMessageLogWriteFailureNonFatal(t *testing.T) {
 	msgs, rerr := b.convStore.Read(context.Background(), "sess-logfail", 0, 0)
 	if rerr != nil || len(msgs) != 2 {
 		t.Errorf("messages = %d (err %v), want 2", len(msgs), rerr)
+	}
+}
+
+// claudeProvenanceNoOutput is the same session-init line with nothing after
+// it: the CLI opened a session, told us what it was, and then produced no
+// answer. The run is recorded FAILED (#545).
+const claudeProvenanceNoOutput = `{"type":"system","subtype":"init","model":"claude-test","session_id":"sess-abc","claude_code_version":"2.1.219","apiKeySource":"none","permissionMode":"bypassPermissions"}
+`
+
+// "Which CLI answered, and did everything load?" is a question asked about the
+// run that WENT WRONG. Recording provenance only on the happy path answers it
+// exactly when nobody needs it — so every terminal update carries it, not just
+// COMPLETED.
+func TestHandleChatMessage_FailedRunStillRecordsProvenance(t *testing.T) {
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentOutput: claudeProvenanceNoOutput, exitCode: 0}
+	b := testBridgeWithContainer(t, resolver, ctr)
+
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-prov-fail", "hello", func(ws.ChatEvent) {})
+
+	if len(resolver.runUpdates) == 0 {
+		t.Fatal("no UpdateRun call recorded")
+	}
+	last := resolver.runUpdates[len(resolver.runUpdates)-1]
+	if last.status != "FAILED" {
+		t.Fatalf("run status = %q, want FAILED — the fixture produces no answer", last.status)
+	}
+	for k, want := range map[string]any{
+		"cli_version":     "2.1.219",
+		"permission_mode": "bypassPermissions",
+		"session_id":      "sess-abc",
+		"api_key_source":  "none",
+	} {
+		if last.metadata[k] != want {
+			t.Errorf("FAILED metadata[%q] = %v, want %v — a failed run is the one you need this for", k, last.metadata[k], want)
+		}
+	}
+	// The path's own diagnosis must survive the shared builder.
+	if last.metadata["reason"] != "no_output" {
+		t.Errorf("FAILED metadata[reason] = %v, want no_output", last.metadata["reason"])
+	}
+}
+
+// Every journal entry the orchestrator emits during a chat run — exec.command,
+// chat.agent_response, run.session_init, sidecar.stale — landed with an EMPTY
+// trace_id, because only `run.started`/`run.completed` are emitted by the API
+// layer, which stamps TraceID itself. The orchestrator's own JournalEntry has
+// no TraceID field at all: it inherits the id from the context, and the chat
+// path never stamped one.
+//
+// Consequence: `crewship journal --run-id <id>` returned nothing for a chat
+// run, so provenance recorded during the run could not be tied back to it.
+// The assignment dispatch path already does this (assignments_run.go).
+func TestHandleChatMessage_StampsRunIDOnTheJournalContext(t *testing.T) {
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentOutput: claudeProvenanceOutput, exitCode: 0}
+	b := testBridgeWithContainer(t, resolver, ctr)
+
+	var seen []string
+	b.orch.SetJournal(recordingRunIDJournal{fn: func(ctx context.Context) {
+		seen = append(seen, journal.RunIDFromContext(ctx))
+	}})
+
+	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-trace", "hello", func(ws.ChatEvent) {}); err != nil {
+		t.Fatalf("HandleChatMessage: %v", err)
+	}
+	if len(seen) == 0 {
+		t.Fatal("the orchestrator emitted no journal entries — nothing to correlate")
+	}
+	for i, runID := range seen {
+		if runID == "" {
+			t.Fatalf("orchestrator journal entry %d carries no run id: `journal --run-id` cannot find it", i)
+		}
+	}
+}
+
+// recordingRunIDJournal captures the run id visible on the emit context.
+type recordingRunIDJournal struct{ fn func(context.Context) }
+
+func (r recordingRunIDJournal) Emit(ctx context.Context, _ orchestrator.JournalEntry) (string, error) {
+	r.fn(ctx)
+	return "j_test", nil
+}
+
+// The no-output failure is the canonical symptom of a permission-blocked run:
+// the CLI denied every tool, so the agent produced nothing. That is precisely
+// the terminal path that recorded no permission_denials, because only the
+// COMPLETED branch merged result usage — so the read-back chain never fired on
+// the case it was built for.
+func TestHandleChatMessage_FailedRunRecordsPermissionDenials(t *testing.T) {
+	const denied = `{"type":"system","subtype":"init","model":"claude-test","session_id":"sess-d","claude_code_version":"2.1.219","apiKeySource":"none"}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"num_turns":1,"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"curl http://x"}}]}
+`
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentOutput: denied, exitCode: 0}
+	b := testBridgeWithContainer(t, resolver, ctr)
+
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-denied", "hello", func(ws.ChatEvent) {})
+
+	if len(resolver.runUpdates) == 0 {
+		t.Fatal("no UpdateRun call recorded")
+	}
+	last := resolver.runUpdates[len(resolver.runUpdates)-1]
+	if last.status != "FAILED" {
+		t.Fatalf("run status = %q, want FAILED — the fixture produces no answer", last.status)
+	}
+	if last.metadata["permission_denials"] == nil {
+		t.Errorf("FAILED metadata carries no permission_denials: %+v — the run reads as one that CHOSE not to act", last.metadata)
+	}
+	// Result usage belongs on the failing record for the same reason: a run
+	// that burned tokens and then failed still cost money.
+	if last.metadata["total_cost_usd"] == nil {
+		t.Errorf("FAILED metadata carries no cost: %+v", last.metadata)
+	}
+}
+
+// A run that spent money and then failed spent the money. The chat path
+// recorded the spend on the run record — #1950 made every terminal branch
+// carry the accumulator — but kept billing the paymaster ledger only on the
+// COMPLETED branch, while the scheduler bills before its runErr branch.
+//
+// So `crewship run get` shows the cost and the ledger shows nothing: budget
+// enforcement under-counts and the cap does not trip on exactly the runs that
+// burn tokens without producing an answer.
+func TestHandleChatMessage_FailedRunStillBillsTheLedger(t *testing.T) {
+	// No output, so the run is FAILED (#545) — and a real cost on the result.
+	const spentThenFailed = `{"type":"system","subtype":"init","model":"claude-test","session_id":"sess-b","claude_code_version":"2.1.219"}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":4,"num_turns":9,"usage":{"input_tokens":1000,"output_tokens":500}}
+`
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentOutput: spentThenFailed, exitCode: 0}
+	b := testBridgeWithContainer(t, resolver, ctr)
+
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-bill", "hello", func(ws.ChatEvent) {})
+
+	if len(resolver.runUpdates) == 0 {
+		t.Fatal("no UpdateRun call recorded")
+	}
+	last := resolver.runUpdates[len(resolver.runUpdates)-1]
+	if last.status != "FAILED" {
+		t.Fatalf("run status = %q, want FAILED", last.status)
+	}
+	if last.metadata["total_cost_usd"] == nil {
+		t.Fatalf("the run record does not report the spend: %+v", last.metadata)
+	}
+	if len(resolver.costCalls) == 0 {
+		t.Fatalf("run record reports total_cost_usd=%v but the ledger recorded nothing — "+
+			"the budget cap cannot trip on a run that spends and then fails",
+			last.metadata["total_cost_usd"])
+	}
+}
+
+// …and a run the user STOPPED spent the money too.
+//
+// Billing was hoisted above the runErr branch to end that under-counting, but it
+// was handed `ctx` — the per-turn run context ws.Client.handleCancelMessage
+// cancels on Stop. IPCResolver.RecordCost builds its POST with
+// http.NewRequestWithContext, so on a cancelled context the request dies before
+// it leaves the process and the spend survives only as a WARN line: the same
+// under-counting, moved from failed runs to cancelled ones. Seven lines below,
+// the CANCELLED branch already builds a detached context for exactly this reason.
+func TestHandleChatMessage_CancelledRunStillBillsTheLedger(t *testing.T) {
+	// Tokens are burned and reported before the user presses Stop.
+	const spentThenStopped = `{"type":"system","subtype":"init","model":"claude-test","session_id":"sess-c"}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"half an answ"}}}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":4,"num_turns":9,"usage":{"input_tokens":1000,"output_tokens":500}}
+`
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentOutput: spentThenStopped, exitCode: 0}
+	b := testBridgeWithContainer(t, resolver, ctr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Stop button, mid-stream: the hub cancels the run context.
+	streamFn := func(e ws.ChatEvent) {
+		if e.Type == "text" {
+			cancel()
+		}
+	}
+
+	err := b.HandleChatMessage(ctx, "user-1", "sess-stopped", "hello", streamFn)
+	if err == nil || !strings.Contains(err.Error(), "run agent") {
+		t.Fatalf("expected the wrapped cancellation error, got: %v", err)
+	}
+	if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != "CANCELLED" {
+		t.Fatalf("runUpdates = %+v, want one CANCELLED", resolver.runUpdates)
+	}
+	if len(resolver.costCalls) != 1 {
+		t.Fatalf("RecordCost calls = %d, want 1 — a cancelled run that burned tokens still owes the ledger",
+			len(resolver.costCalls))
+	}
+	if resolver.costCtxErrs[0] != nil {
+		t.Fatalf("RecordCost got an already-cancelled context (%v): the POST never leaves the process, "+
+			"so `crewship run get` shows the spend and the paymaster ledger has no row",
+			resolver.costCtxErrs[0])
+	}
+	if got := resolver.costCalls[0]; got.InputTokens != 1000 || got.OutputTokens != 500 {
+		t.Errorf("billed tokens = (%d,%d), want (1000,500)", got.InputTokens, got.OutputTokens)
 	}
 }

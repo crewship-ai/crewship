@@ -209,6 +209,10 @@ type Router struct {
 	// it a newly created rule would not fire until the 60s tick, which reads
 	// as "the automation is broken" to whoever just saved it.
 	automations *AutomationHandler
+	// pages is the PageHandler behind the page routes, exposed via Pages() so
+	// the boot path can give it the automation registry-refresh hook and start
+	// its freshness sweeper on the same instance.
+	pages *PageHandler
 	// PipelinesHandler is exposed (capitalised) so the orchestrator
 	// boot path can hand it the AgentRunner adapter post-construction.
 	// The router builds handlers before the orchestrator is fully
@@ -238,6 +242,16 @@ type Router struct {
 	// instance would work (the sweeper is stateless over the DB) but
 	// would split journal/log wiring across two handlers for no gain.
 	assignmentHandler *AssignmentHandler
+
+	// queryHandler is the live QueryHandler created during route
+	// registration. Stored for the same reason as assignmentHandler above:
+	// the boot path starts the escalation expiry sweeper
+	// (StartEscalationExpirySweeper) on the instance the HTTP routes use, so
+	// the sweeper's journal emitter and its in-memory waiter map are the ones
+	// a resolving request would touch. A second instance would expire rows
+	// correctly and then fail to wake anybody waiting on them, which is the
+	// half-fix this field exists to prevent.
+	queryHandler *QueryHandler
 
 	// version is the ldflags-injected binary version (e.g. "v0.1.0-beta.1"
 	// or "dev" for local builds). Surfaced on GET /api/v1/system/version
@@ -619,6 +633,19 @@ func (r *Router) Automations() *AutomationHandler {
 	return r.automations
 }
 
+// Pages returns the PageHandler the page routes dispatch to, so the boot path
+// can hand it the same registry-refresh hook (a wake gate authored through
+// PATCH /pages must fire on the next push, not on the next 60s tick) and start
+// its freshness sweeper on the instance whose clock and journal the request
+// paths use. Returns nil when registerRoutes hasn't run yet.
+//
+// Several PageHandlers are constructed — one per route file, each stateless
+// over the database — and this is deliberately the one behind create, update,
+// delete and the public push path, which is where both hooks belong.
+func (r *Router) Pages() *PageHandler {
+	return r.pages
+}
+
 // AuthHandler returns the registered AuthHandler so server startup code can
 // call MaybeGenerateSetupToken on the same instance the /api/v1/bootstrap
 // route dispatches to. Returns nil when registerAuthRoutes hasn't run yet
@@ -633,6 +660,12 @@ func (r *Router) AuthHandler() *AuthHandler {
 // hasn't run yet (handler-only tests that build a Router by hand).
 func (r *Router) Assignments() *AssignmentHandler {
 	return r.assignmentHandler
+}
+
+// Queries returns the live QueryHandler (nil before route registration) so
+// the boot path can start the escalation expiry sweeper on it.
+func (r *Router) Queries() *QueryHandler {
+	return r.queryHandler
 }
 
 // Journal returns the journal emitter or a no-op if unset. Handlers should

@@ -55,3 +55,39 @@ func validateCSV(label, raw string, allowed map[string]struct{}) error {
 	}
 	return nil
 }
+
+// rejectTypeWildcard refuses a glob in a journal entry-type filter.
+//
+// --type and --exclude-type are open sets (116 entry types and growing), so
+// they are passed through unvalidated on purpose — an allowlist here would
+// reject a legitimate filter every time the server shipped a type the CLI had
+// not heard of. That openness has one sharp edge: the filter compiles to
+// `entry_type IN (...)` on the server (internal/journal/queries.go), with no
+// LIKE, prefix or glob path anywhere, so a value containing `*` or `?` matches
+// nothing at all and the command exits 0 with an empty page.
+//
+// Nothing about that output says the question was unanswerable, which makes it
+// the most dangerous possible result from an audit surface: docs/cli/routine.mdx
+// points operators at the `approval.*` family to find out who disarmed a
+// routine gate, and a reader who types that literally would conclude nobody
+// ever had. Refusing costs one error message; the alternative costs a wrong
+// answer that looks exactly like a right one.
+//
+// The suggestion is built from the prefix the caller actually typed rather than
+// from a canned example, so it is the command they meant, ready to edit.
+func rejectTypeWildcard(label, raw string) error {
+	if raw == "" || !strings.ContainsAny(raw, "*?") {
+		return nil
+	}
+	hint := "list the types explicitly, comma-separated"
+	// `approval.*` → suggest the shape with the prefix preserved.
+	if prefix, _, ok := strings.Cut(raw, "*"); ok && strings.HasSuffix(prefix, ".") {
+		hint = fmt.Sprintf("list them explicitly, e.g. --%s %sgranted,%sdenied", label, prefix, prefix)
+	}
+	return fmt.Errorf(
+		"invalid --%s value %q: wildcards are not supported — entry types are matched exactly, "+
+			"so this filter would match nothing and return an empty result that looks like "+
+			"'no such events happened'.\n%s\n"+
+			"`crewship journal --help` and the entry-type catalogue in docs/cli/journal.mdx list the names",
+		label, raw, hint)
+}

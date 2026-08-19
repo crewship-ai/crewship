@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/admission"
+	"github.com/crewship-ai/crewship/internal/askforms"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -29,6 +31,13 @@ import (
 // exiting 0 with no stdout). Kept short and actionable, matching the
 // generic-error copy style used elsewhere in the chat stream.
 const noOutputChatMessage = "The agent returned no output — try again"
+
+// ledgerWriteTimeout bounds the terminal bookkeeping writes that must outlive
+// the turn's own context — the paymaster ledger write, and the CANCELLED
+// branch's run-status/transcript writes. Both run after the agent has stopped,
+// on a context that may already be cancelled, so they get a fresh deadline
+// rather than an inherited (possibly dead) one.
+const ledgerWriteTimeout = 5 * time.Second
 
 // AgentStatusPendingReview is the agents.status sentinel set by the
 // hire endpoint when the per-crew autonomy policy returns
@@ -325,6 +334,33 @@ func generateMsgID() string {
 	return string(out)
 }
 
+// terminalRunMeta builds the metadata attached to a run's final UpdateRun.
+//
+// It exists so every terminal path carries session provenance, not just the
+// happy one. "Which CLI binary answered, on which credential, and did it drop
+// an MCP server at startup?" is a question asked about the run that went
+// WRONG — recording it only on COMPLETED answers it exactly when nobody is
+// asking. A cancelled or failed run has the same init event; the only thing it
+// lacks is a result envelope.
+//
+// extra carries a path's own diagnosis (e.g. reason=no_output) and is applied
+// last, so a caller can always override.
+func terminalRunMeta(startedAt time.Time, acc *orchestrator.Accumulator, extra map[string]interface{}) map[string]interface{} {
+	meta := map[string]interface{}{
+		"duration_ms": time.Since(startedAt).Milliseconds(),
+	}
+	// Everything the accumulator captured, in one call — provenance AND result
+	// usage. Merging only the provenance half here is what left a FAILED chat
+	// run without permission_denials while a COMPLETED one had them, and the
+	// no-output failure is exactly the run that gets read for "why did it do
+	// nothing" (#1949).
+	orchestrator.MergeRunAccumulator(meta, acc, "")
+	for k, v := range extra {
+		meta[k] = v
+	}
+	return meta
+}
+
 // HandleChatMessage processes an incoming chat message by resolving the session,
 // ensuring the container is running, persisting the message, and streaming the
 // agent's response back to the client.
@@ -371,6 +407,26 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("agent %s pending review: hire not approved", info.AgentID)
 	}
 
+	// What the client attached TO this message rather than inside it. Today
+	// that is the ask-form submission envelope: which form was answered, at
+	// what version, with what values, and which upload answered which field.
+	//
+	// It is REBUILT rather than copied. msgOpt.Metadata is a raw map straight
+	// off an untrusted socket, and storing it verbatim would let any client
+	// write arbitrary structure into a durable conversation record. Reading it
+	// back through askforms.EnvelopeFromMetadata means exactly one shape can
+	// survive the hop — a valid envelope — and anything else (junk, a partial
+	// envelope, a metadata map with no envelope in it) leaves the message
+	// exactly as it would have been persisted before any of this existed.
+	//
+	// Nothing here touches Content. A form submission is an ordinary user
+	// message; strip the metadata and the conversation reads identically,
+	// which is what lets every CLI adapter stay unaware of forms.
+	var userMsgMetadata any
+	if env, ok := askforms.EnvelopeFromMetadata(msgOpt.Metadata); ok {
+		userMsgMetadata = map[string]any{askforms.EnvelopeMetadataKey: env}
+	}
+
 	// The human turn is recorded and fanned out to the other participants
 	// regardless of whether the agent will respond. streamFn's BroadcastExcept
 	// skips the sender (who already rendered it optimistically); harmless in a
@@ -381,6 +437,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			AgentID:      info.AgentID,
 			Role:         conversation.RoleUser,
 			Content:      content,
+			Metadata:     userMsgMetadata,
 			AuthorUserID: userID,
 			Timestamp:    time.Now().UTC(),
 		})
@@ -788,6 +845,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
 		b.logger.Warn("failed to create run record", "error", err)
 	}
+	// Put the run on the context so every journal entry emitted beneath it
+	// inherits trace_id = runID. The orchestrator's JournalEntry has no
+	// TraceID field of its own — it reads the id from here — so without this
+	// every entry it writes during a chat run (exec.command,
+	// chat.agent_response, run.session_init, sidecar.stale) landed unlinked,
+	// and `crewship journal --run-id <id>` answered nothing for a chat run
+	// while working fine for an assignment (assignments_run.go does the same
+	// stamping). run.started/run.completed were the only linked rows because
+	// the API layer sets TraceID itself.
+	ctx = journal.WithRunID(ctx, runID)
 
 	startedAt := time.Now()
 	// The run slot was already claimed (tryMarkRunStart, above) before
@@ -796,17 +863,47 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// /chats/{id}/steer) is detected and QUEUED instead of racing a second
 	// Exec into the same container. Released via the defer registered there.
 	runErr := b.orch.RunAgent(ctx, req, handler)
+
+	// Bill the ledger before branching on runErr, the way the scheduler does.
+	// A run that spent money and then failed spent the money: #1950 taught
+	// every terminal branch to record the cost on the run record, but billing
+	// stayed on the COMPLETED branch, so `crewship run get` showed the spend
+	// while the paymaster ledger showed nothing — budget enforcement
+	// under-counting on exactly the runs that burn tokens without producing an
+	// answer (#1954). Best-effort by contract: never fails the turn.
+	//
+	// The model is session-init ground truth when the CLI reported one,
+	// otherwise the requested one; ResultUsageForLedger returns ok=false when
+	// there is no usage to bill, so a run that never reached the API bills
+	// nothing.
+	//
+	// The write is DETACHED from ctx. ctx is the per-turn run context, and Stop
+	// cancels it (ws.Client.handleCancelMessage); IPCResolver.RecordCost builds
+	// its POST with http.NewRequestWithContext, so on a cancelled context the
+	// request dies before it leaves the process and the spend survives only as
+	// the WARN below — the very under-counting this hoist removed, moved from
+	// failed runs to cancelled ones. WithoutCancel keeps the values on ctx (the
+	// run id stamped above, trace/auth) and drops only the cancellation; the
+	// timeout bounds the now-unparented call. Same shape the CANCELLED branch
+	// below uses for its own writes, and the same one crew_sidecar_teardown.go
+	// uses for post-request cleanup.
+	if usage, ok := ResultUsageForLedger(info.WorkspaceID, info.CrewID, info.AgentID,
+		orchestrator.EffectiveModel(acc, info.LLMModel), acc.ResultMeta()); ok {
+		costCtx, costCancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
+		if err := b.resolver.RecordCost(costCtx, usage); err != nil {
+			b.logger.Warn("failed to record run cost usage", "run_id", runID, "error", err)
+		}
+		costCancel()
+	}
 	if runErr != nil {
 		// If context was cancelled (user pressed stop), don't emit error -- the hub
 		// sends a clean "done" event. Emitting error here would cause an error flash.
 		if ctx.Err() == context.Canceled {
 			b.logger.Info("run cancelled by user", "chat_id", chatID, "duration_ms", time.Since(startedAt).Milliseconds())
 			cancelMsg := "cancelled"
-			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 			defer cleanCancel()
-			if err := b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, map[string]interface{}{
-				"duration_ms": time.Since(startedAt).Milliseconds(),
-			}); err != nil {
+			if err := b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, terminalRunMeta(startedAt, acc, nil)); err != nil {
 				b.logger.Warn("failed to update run status", "run_id", runID, "status", "CANCELLED", "error", err)
 			}
 			// Persist whatever the run produced before it was stopped so the
@@ -835,9 +932,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 
 		errMsg := runErr.Error()
-		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, map[string]interface{}{
-			"duration_ms": time.Since(startedAt).Milliseconds(),
-		}); err != nil {
+		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, terminalRunMeta(startedAt, acc, nil)); err != nil {
 			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 		}
 		// In-band failure: the CLI exited 0 and then reported that the turn
@@ -869,10 +964,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.logger.Warn("agent run produced no output; surfacing error to chat (#545)",
 			"chat_id", chatID, "run_id", runID, "agent_slug", info.AgentSlug)
 		noOutputErr := "agent returned no output (#545)"
-		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &noOutputErr, map[string]interface{}{
-			"duration_ms": time.Since(startedAt).Milliseconds(),
-			"reason":      "no_output",
-		}); err != nil {
+		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &noOutputErr, terminalRunMeta(startedAt, acc, map[string]interface{}{
+			"reason": "no_output",
+		})); err != nil {
 			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 		}
 		if err := b.convStore.Append(ctx, chatID, conversation.Message{
@@ -901,26 +995,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	completedMeta := map[string]interface{}{
 		"duration_ms": time.Since(startedAt).Milliseconds(),
 	}
-	orchestrator.MergeResultUsageMeta(completedMeta, acc.ResultMeta())
-	// Persist the model the run actually resolved to (session-init ground
-	// truth) so `crewship inspect`/the run JSON can confirm Opus-vs-Sonnet.
-	resolvedModel := info.LLMModel
-	if m := acc.ResolvedModel(); m != "" {
-		completedMeta["model"] = m
-		resolvedModel = m
-	}
+	// The ledger was billed right after the run (see above), so this only has
+	// to stamp the record.
+	orchestrator.MergeRunAccumulator(completedMeta, acc, info.LLMModel)
 	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
-	}
-
-	// Forward the CLI-reported token usage to the paymaster ledger (#1205).
-	// See cost.go's resultUsageForLedger doc for why this adapter-side write
-	// is needed in addition to (not instead of) the sidecar's own HTTP-level
-	// cost observation. Best-effort: never fails the chat turn.
-	if usage, ok := ResultUsageForLedger(info.WorkspaceID, info.CrewID, info.AgentID, resolvedModel, acc.ResultMeta()); ok {
-		if err := b.resolver.RecordCost(ctx, usage); err != nil {
-			b.logger.Warn("failed to record run cost usage", "run_id", runID, "error", err)
-		}
 	}
 
 	// Build compact tool summary for conversation context (cap at 10 entries

@@ -36,6 +36,12 @@ export const JOURNAL_ENTRY_TYPES = [
   "approval.denied",
   "approval.timeout",
   "approval.cancelled",
+  // Standing decisions: "approve this gate for me from now on", and the
+  // withdrawal of that permission. Namespaced under approval.* on purpose —
+  // one filter has to show the one-off decision and the standing grant that
+  // explains why later runs stopped asking.
+  "approval.trust_granted",
+  "approval.trust_revoked",
   // Cost
   "llm.call",
   "llm.cache_hit",
@@ -148,6 +154,9 @@ export const JOURNAL_ENTRY_TYPES = [
   // Runs (extended)
   "run.agent_span",
   "agent.error",
+  // The CLI session a run happened inside — model, binary version, and the
+  // MCP servers it started WITHOUT. Severity carries the difference.
+  "run.session_init",
   // Automations — the composition substrate. Both mean work did NOT
   // happen: throttled is a rule over its hourly cap, depth_exceeded is a
   // composed chain refused at the shared ceiling. Someone asking "why did
@@ -155,6 +164,22 @@ export const JOURNAL_ENTRY_TYPES = [
   // rather than in System where they would be filed and forgotten.
   "automation.throttled",
   "automation.depth_exceeded",
+  // Pages — docs/prd/pages.md §5, §7.1b. Unknown types are forwarded to the
+  // activity feed by design (internal/journal/feed_filter.go:33-35).
+  "page.produce_denied",
+  "page.panel.updated",
+  "page.grant_added",
+  "page.grant_removed",
+  // §4 freshness verdicts and §5's wake gates.
+  "page.panel.stale",
+  "page.panel.recovered",
+  "page.wake.fired",
+  // §8b.2 — one entry per action click, written by the dispatch handler
+  // (internal/api/pages_actions.go). The audit trail for "a button on a page
+  // started a run" is the reason §8 rule 8 treats the platform's own agent as
+  // an untrusted producer: the record has to exist regardless of who clicked.
+  "page.action.dispatched",
+  "page.spec.changed",
 ] as const
 
 export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number]

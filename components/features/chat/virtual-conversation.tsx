@@ -48,6 +48,8 @@ interface VirtualConversationProps {
   onRegenerate?: () => void
   onEditUserMessage?: (turnId: string, newContent: string) => void
   resolveAuthorName: (userId: string) => string | null
+  /** Forwarded to TurnRenderer — see the prop's note there. */
+  resolveAskProvenance?: (content: string) => string | null
   /** Rendered under the last turn (streaming indicator). */
   footer?: React.ReactNode
 }
@@ -83,6 +85,7 @@ export function VirtualConversation({
   onRegenerate,
   onEditUserMessage,
   resolveAuthorName,
+  resolveAskProvenance,
   footer,
 }: VirtualConversationProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null)
@@ -135,6 +138,7 @@ export function VirtualConversation({
               agentId={agentId}
               chatId={sessionId}
               resolveAuthorName={resolveAuthorName}
+              resolveAskProvenance={resolveAskProvenance}
             />
           </div>
         )}

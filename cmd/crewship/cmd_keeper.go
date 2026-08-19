@@ -550,6 +550,7 @@ Examples:
 			return err
 		}
 
+		f := newFormatter()
 		headers := []string{"ID", "AGENT", "CREDENTIAL", "TYPE", "DECISION", "RISK", "CREATED"}
 		var rows [][]string
 		for _, e := range entries {
@@ -562,10 +563,10 @@ Examples:
 				risk = fmt.Sprintf("%d", *e.RiskScore)
 			}
 			rows = append(rows, []string{
-				truncateString(e.ID, 12), e.AgentName, e.CredName, e.RequestType, decision, risk, e.CreatedAt,
+				f.ShortID(e.ID, truncateString(e.ID, 12)), e.AgentName, e.CredName, e.RequestType, decision, risk, e.CreatedAt,
 			})
 		}
-		return newFormatter().Auto(entries, headers, rows)
+		return f.Auto(entries, headers, rows)
 	},
 }
 

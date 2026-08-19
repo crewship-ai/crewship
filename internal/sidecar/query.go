@@ -16,12 +16,19 @@ import (
 // The context deadline fires first for clean cancellation; the client timeout is a safety net.
 var queryClient = &http.Client{Timeout: 130 * time.Second}
 
-// escalateWaitClient uses a 310s timeout (10s buffer over the 300s context timeout in handleEscalate wait).
-// The agent blocks while waiting for human response to the escalation.
-// Shares transport with ipcClient for consistency (both talk to crewshipd over HTTP).
+// escalateWaitClient is the long-poll client for /escalate. The agent blocks
+// on it while a human decides. Shares transport with ipcClient for consistency
+// (both talk to crewshipd over HTTP).
+//
+// The per-request context is the real bound — it is derived from the deadline
+// the SERVER published (see serverWaitWindow). This Timeout is only a backstop
+// against a hung connection, so it sits well clear of the usual window plus
+// escalateWaitGrace: if this fired first it would turn the server's explicit
+// EXPIRED answer back into the silent client-side timeout this whole change
+// removes.
 var escalateWaitClient = &http.Client{
 	Transport: ipcClient.Transport,
-	Timeout:   310 * time.Second,
+	Timeout:   600 * time.Second,
 }
 
 type queryRequest struct {
@@ -322,8 +329,28 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 2: Long-poll for human response (5 minute timeout).
-	waitCtx, waitCancel := context.WithTimeout(r.Context(), 300*time.Second)
+	// Step 2: long-poll for the human response, bounded by the SERVER's
+	// deadline.
+	//
+	// This used to be a hardcoded 300 s here and nothing at all on the server:
+	// the client gave up, the agent proceeded without an answer, and the row
+	// stayed PENDING forever because nothing told crewshipd the question had
+	// been abandoned. The server now owns the deadline (escalations.deadline_at,
+	// returned as timeout_seconds/deadline_at on the create), records the
+	// give-up when it passes, and answers this poll with an explicit warning.
+	// Giving the client a grace margin over the server's window is what makes
+	// the server's answer the one the agent hears — racing it would put us back
+	// to a silent client-side timeout.
+	//
+	// Nothing on this side changed when the server grew a SECOND clock. The
+	// window published on the create is still the agent's, this poll is still
+	// bounded by it, and the wait body is passed through verbatim — so the
+	// server's `status: UNANSWERED` (the question is still open for a human,
+	// but not for this run) reaches the agent without a client-side change.
+	// What did change is what the server does to the ROW at this instant: it no
+	// longer expires it. See internal/api/escalation_lifecycle.go.
+	waitTimeout := serverWaitWindow(createResult) + escalateWaitGrace
+	waitCtx, waitCancel := context.WithTimeout(r.Context(), waitTimeout)
 	defer waitCancel()
 
 	waitURL := fmt.Sprintf("%s/api/v1/internal/escalations/%s/wait", s.ipc.BaseURL, neturl.PathEscape(escalationID))
@@ -337,33 +364,28 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 
 	waitResp, err := escalateWaitClient.Do(waitReq)
 	if err != nil {
-		// Timeout or connection error — return TIMEOUT status to agent.
-		writeJSONResponse(w, http.StatusOK, map[string]interface{}{
-			"escalation_id": escalationID,
-			"status":        "TIMEOUT",
-			"resolution":    "",
-		})
+		// The connection failed or this client gave up before the server
+		// answered. The server still owns the row — and, since the two clocks
+		// split, it keeps the question OPEN for a human rather than expiring it
+		// on the agent's window. So this is TIMEOUT (we do not know the outcome)
+		// rather than a claim about the row's state, and the agent is told what
+		// that means either way.
+		writeJSONResponse(w, http.StatusOK, escalateGaveUp(escalationID))
 		return
 	}
 	defer waitResp.Body.Close()
 
-	// Non-200 response (e.g. 408 timeout, 404, 500) — treat as timeout.
+	// Non-200 (408, 404, 500). The server answers UNANSWERED (and EXPIRED, and
+	// CANCELLED) with a 200, so this is no longer the ordinary end of a wait —
+	// it is a genuine fault.
 	if waitResp.StatusCode != http.StatusOK {
-		writeJSONResponse(w, http.StatusOK, map[string]interface{}{
-			"escalation_id": escalationID,
-			"status":        "TIMEOUT",
-			"resolution":    "",
-		})
+		writeJSONResponse(w, http.StatusOK, escalateGaveUp(escalationID))
 		return
 	}
 
 	var waitResult map[string]interface{}
 	if err := json.NewDecoder(waitResp.Body).Decode(&waitResult); err != nil {
-		writeJSONResponse(w, http.StatusOK, map[string]interface{}{
-			"escalation_id": escalationID,
-			"status":        "TIMEOUT",
-			"resolution":    "",
-		})
+		writeJSONResponse(w, http.StatusOK, escalateGaveUp(escalationID))
 		return
 	}
 
@@ -371,6 +393,61 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 	waitResult["escalation_id"] = escalationID
 
 	writeJSONResponse(w, http.StatusOK, waitResult)
+}
+
+// escalateGaveUp is what the agent is told when this client stopped waiting
+// without hearing a terminal answer from the server — a dropped connection, a
+// 5xx, an unreadable body.
+//
+// It carries a warning for the same reason the server's EXPIRED answer does:
+// an agent may continue without the answer it asked for, but it must never do
+// so believing nothing happened. The old shape here was
+// {"status":"TIMEOUT","resolution":""}, which reads to a model exactly like a
+// question that was answered with silence.
+func escalateGaveUp(escalationID string) map[string]interface{} {
+	return map[string]interface{}{
+		"escalation_id": escalationID,
+		"status":        "TIMEOUT",
+		"resolution":    "",
+		"warning": "The wait for a human answer ended without one reaching this agent. Continue WITHOUT it: " +
+			"do not assume approval, say in your result that the question went unanswered, and avoid irreversible " +
+			"actions that depended on it.",
+	}
+}
+
+// escalateWaitGrace is how far past the server's own deadline this client
+// waits before giving up on its own. It exists so the server's terminal answer
+// (status=EXPIRED, with the warning) is what the agent receives, rather than a
+// client-side timeout that races it and tells the agent nothing.
+const escalateWaitGrace = 10 * time.Second
+
+// escalateWaitFallback is the window used when the server did not publish one
+// — an older crewshipd, or a create response we could not read. It matches the
+// value this file hardcoded before the server owned the deadline, so a
+// version-skewed pair behaves exactly as it always did instead of failing in a
+// new way.
+const escalateWaitFallback = 300 * time.Second
+
+// serverWaitWindow reads the answer-by window out of the create response.
+// timeout_seconds is preferred over deadline_at because it needs no agreement
+// about clocks between the container and the host; deadline_at is the fallback
+// for a server that publishes only the instant.
+func serverWaitWindow(createResult map[string]interface{}) time.Duration {
+	if secs, ok := createResult["timeout_seconds"].(float64); ok && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if raw, ok := createResult["deadline_at"].(string); ok && raw != "" {
+		if at, err := time.Parse(time.RFC3339, raw); err == nil {
+			if remaining := time.Until(at); remaining > 0 {
+				return remaining
+			}
+			// The deadline has already passed. Poll anyway, briefly: the
+			// server answers such a call immediately with EXPIRED, and that
+			// answer is what the agent needs to see.
+			return time.Second
+		}
+	}
+	return escalateWaitFallback
 }
 
 // handleReportConfidence handles POST /report-confidence — agent reports mid-task confidence.

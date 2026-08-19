@@ -126,9 +126,9 @@ describe("MembersSection — expanding a row", () => {
 
     expand(/expand permissions for Mel Member/i)
 
-    // Eight capabilities for Mel and nobody else. The old grid rendered
-    // 8 × every member at once; the row keys the disclosure to the identity.
-    expect(screen.getAllByRole("switch")).toHaveLength(8)
+    // Nine capabilities for Mel and nobody else. The old grid rendered
+    // N × every member at once; the row keys the disclosure to the identity.
+    expect(screen.getAllByRole("switch")).toHaveLength(9)
     expect(screen.getByRole("switch", { name: /Revoke issue.create from Mel Member/i })).toBeTruthy()
     expect(screen.queryByRole("switch", { name: /Vic Viewer/i })).toBeNull()
   })
@@ -208,7 +208,7 @@ describe("MembersSection — expanding a row", () => {
     // capability across people) without the table.
     const pips = await screen.findByLabelText(/Mel Member: chat, issue.create/i)
     const granted = pips.querySelectorAll('[data-granted="true"]')
-    expect(pips.querySelectorAll("[data-capability]")).toHaveLength(8)
+    expect(pips.querySelectorAll("[data-capability]")).toHaveLength(9)
     expect(granted).toHaveLength(2)
     expect(
       Array.from(granted).map((n) => n.getAttribute("data-capability")),

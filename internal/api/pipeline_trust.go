@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -57,6 +60,35 @@ func (h *PipelineHandler) trustGrants() *pipeline.TrustGrantStore {
 		return h.trustGrantStore
 	}
 	return pipeline.NewTrustGrantStore(h.db)
+}
+
+// emitTrustDecision writes the audit entry for a standing-approval decision.
+//
+// Shape and contract copied from harbormaster.AfterDecide
+// (internal/harbormaster/store_mutate.go): actor type + id, the scope the row
+// lives in, refs that join back to the row, and a best-effort emit that never
+// fails the request. It runs only AFTER the decision is durable — an entry for
+// a grant that did not commit is a lie, and an entry for a revoke that
+// affected no row is the same lie in the other direction.
+//
+// The emitter is nil in tests that build PipelineHandler as a bare literal;
+// production wires it via SetJournal (internal/server/server.go). A nil
+// emitter drops the entry rather than panicking, exactly as AfterDecide's own
+// `if j != nil` does.
+func (h *PipelineHandler) emitTrustDecision(ctx context.Context, entryType journal.EntryType, workspaceID, actorID, summary string, payload, refs map[string]any) {
+	if h.emitter == nil {
+		return
+	}
+	_, _ = h.emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: workspaceID,
+		Type:        entryType,
+		Severity:    journal.SeverityNotice,
+		ActorType:   journal.ActorUser,
+		ActorID:     actorID,
+		Summary:     summary,
+		Payload:     payload,
+		Refs:        refs,
+	})
 }
 
 // GrantTrust records a standing approval for one gate of one routine.
@@ -148,6 +180,28 @@ func (h *PipelineHandler) GrantTrust(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "grant standing approval")
 		return
 	}
+	// The grant is durable now, so the audit entry can be written. Until
+	// this existed a standing grant was the only decision in the system with
+	// no journal trail — the inbox broadcast below is a UI refresh, not a
+	// record, and it survives nothing.
+	h.emitTrustDecision(r.Context(), journal.EntryTrustGranted, workspaceID, in.GrantedByUserID,
+		fmt.Sprintf("standing approval granted on gate %q of routine %q", body.StepID, slug),
+		map[string]any{
+			// The hash is the safety property: this grant fires against this
+			// body and no other. An audit that omits it cannot say what was
+			// trusted, only that something was.
+			"definition_hash": p.DefinitionHash,
+			"reason":          body.Reason,
+			"prior_approvals": body.PriorApprovals,
+			"max_uses":        body.MaxUses,
+			"expires_at":      body.ExpiresAt,
+		},
+		map[string]any{
+			"trust_grant_id": id,
+			"pipeline_id":    p.ID,
+			"pipeline_slug":  slug,
+			"step_id":        body.StepID,
+		})
 	h.broadcastInboxUpdated(workspaceID, "trust_granted")
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id":              id,
@@ -238,6 +292,17 @@ func (h *PipelineHandler) RevokeTrust(w http.ResponseWriter, r *http.Request) {
 	}
 	reason := r.URL.Query().Get("reason")
 
+	// Read the grant BEFORE withdrawing it. Revoke reports only whether a row
+	// flipped, and an entry saying "trust withdrawn" without naming the gate
+	// is unusable: the audit question is which gate starts asking again, and
+	// after the UPDATE the step id would have to be re-read anyway. Losing the
+	// race (someone else revoked in between) makes Revoke return false and no
+	// entry is written, which is the correct outcome.
+	revokedGrant, lookupErr := h.findTrustGrant(r.Context(), workspaceID, p.ID, grantID)
+	if lookupErr != nil {
+		h.logger.Warn("trust grant: pre-revoke lookup for audit", "error", lookupErr, "grant_id", grantID)
+	}
+
 	revoked, err := h.trustGrants().Revoke(r.Context(), workspaceID, p.ID, grantID, actorID, reason)
 	if err != nil {
 		h.logger.Error("trust grant: revoke", "error", err, "grant_id", grantID)
@@ -248,6 +313,43 @@ func (h *PipelineHandler) RevokeTrust(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "no live standing approval with that id on this routine")
 		return
 	}
+	stepID, definitionHash := "", ""
+	if revokedGrant != nil {
+		stepID, definitionHash = revokedGrant.StepID, revokedGrant.DefinitionHash
+	}
+	h.emitTrustDecision(r.Context(), journal.EntryTrustRevoked, workspaceID, actorID,
+		fmt.Sprintf("standing approval revoked on gate %q of routine %q", stepID, slug),
+		map[string]any{
+			"definition_hash": definitionHash,
+			"reason":          reason,
+		},
+		map[string]any{
+			"trust_grant_id": grantID,
+			"pipeline_id":    p.ID,
+			"pipeline_slug":  slug,
+			"step_id":        stepID,
+		})
 	h.broadcastInboxUpdated(workspaceID, "trust_revoked")
 	writeJSON(w, http.StatusOK, map[string]string{"id": grantID, "status": "revoked"})
+}
+
+// findTrustGrant returns one grant by id, scoped to the workspace AND the
+// routine — the same predicate Revoke applies, so a lookup can never describe
+// a grant the revoke would refuse to touch. Returns (nil, nil) when no such
+// grant exists.
+//
+// The store lists per routine rather than fetching by id; a routine carries a
+// handful of gates, so scanning that slice costs less than another query
+// method nothing else would call.
+func (h *PipelineHandler) findTrustGrant(ctx context.Context, workspaceID, pipelineID, grantID string) (*pipeline.TrustGrant, error) {
+	grants, err := h.trustGrants().List(ctx, workspaceID, pipelineID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range grants {
+		if grants[i].ID == grantID {
+			return &grants[i], nil
+		}
+	}
+	return nil, nil
 }

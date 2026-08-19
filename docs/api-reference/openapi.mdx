@@ -14,7 +14,7 @@ Returns a generated [OpenAPI 3.0](https://spec.openapis.org/oas/v3.0.3) document
 GET /openapi.json
 ```
 
-This is a **route catalog**, not a hand-authored contract: paths, HTTP methods, and path parameters (`{id}`-style) are exact, generated straight from the route registrations in `internal/api/router_*.go` by `cmd/gen-openapi`. Bodies are *derived* from the handlers, not authored: most operations now carry a named schema, and where the generator could not derive a shape it emits an unconstrained `object` rather than guessing. For prose, examples and the reasoning behind a field, use the per-resource pages in this section.
+This is a **route catalog**, not a hand-authored contract: paths, HTTP methods, and path parameters (`{id}`-style) are exact, generated straight from the route registrations in `internal/api` by `cmd/gen-openapi` — from every file in that package that registers a route, whatever it is called. Bodies are *derived* from the handlers, not authored: most operations now carry a named schema, and where the generator could not derive a shape it emits an unconstrained `object` rather than guessing. For prose, examples and the reasoning behind a field, use the per-resource pages in this section.
 
 `/api/v1/internal/*` routes are deliberately excluded — that surface is sidecar-only, `X-Internal-Token` authenticated (see [Internal IPC](/api-reference/internal)), and this endpoint itself carries no auth. Publishing a route map of the one part of the API kept non-public would be counterproductive.
 

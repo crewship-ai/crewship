@@ -190,14 +190,75 @@ func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]stri
 			"memory_enabled":  a.MemoryEnabled,
 			"system_prompt":   prompt,
 		}
+		for k, v := range agentUpdateOnlyFields(a) {
+			body[k] = v
+		}
 		id, err := createOrResolve(client, "/api/v1/agents", body, "/api/v1/agents", a.Slug)
 		if err != nil {
+			return nil, fmt.Errorf("agent %s: %w", a.Slug, err)
+		}
+		if err := applyAgentUpdateOnlyFields(client, id, a); err != nil {
 			return nil, fmt.Errorf("agent %s: %w", a.Slug, err)
 		}
 		ids[a.Slug] = id
 		fmt.Fprintf(os.Stderr, "  + Agent: %s (%s, %s)\n", a.Name, a.AgentRole, a.ToolProfile)
 	}
 	return ids, nil
+}
+
+// agentUpdateOnlyFields carries the agent columns that PATCH
+// /api/v1/agents/{id} accepts but POST /api/v1/agents does NOT.
+//
+// createAgentRequest (internal/api/agents_create.go) models a fixed set of
+// columns and readJSON ignores everything else, so a key only the update
+// handler knows about is accepted with a 201 and silently dropped.
+// suggested_prompts and ask_forms are both such keys: they reached the update
+// allow-list (internal/api/agents_update.go) and never the create struct.
+//
+// The manifest importer hit this first and settled the pattern — see
+// buildAgentPostCreateBody in internal/manifest/plan.go, which is the same
+// function for the same reason. The seeder cannot reuse it directly (it takes
+// a manifest.Agent), so it restates the set here; both are pinned by tests
+// that assert on the resulting RECORD rather than on the request that was
+// sent, which is the only way this class of bug shows up.
+//
+// This is the hook for the next column of the same shape: add the field here
+// and both the create body and the follow-up PATCH cover it at once.
+func agentUpdateOnlyFields(a seeddata.AgentDef) map[string]interface{} {
+	out := map[string]interface{}{}
+	if strings.TrimSpace(a.SuggestedPrompts) != "" {
+		out["suggested_prompts"] = a.SuggestedPrompts
+	}
+	if forms := seeddata.AgentAskForms(a.AskFormsSlug); strings.TrimSpace(forms) != "" {
+		out["ask_forms"] = forms
+	}
+	return out
+}
+
+// applyAgentUpdateOnlyFields is the follow-up PATCH that actually persists
+// them. It runs on both paths on purpose: after a fresh create, where the
+// create dropped them, and after a 409 resolve, where the agent predates this
+// data and a re-seed is how an existing workspace picks it up.
+//
+// A refusal is fatal. The server validates both columns before writing
+// (normalizeSuggestedPrompts, internal/askforms), so an error here means the
+// seeded definition is invalid — and an agent silently created without the
+// questionnaire it was supposed to demonstrate is exactly the outcome this
+// whole path exists to prevent.
+func applyAgentUpdateOnlyFields(client *cli.Client, agentID string, a seeddata.AgentDef) error {
+	patch := agentUpdateOnlyFields(a)
+	if len(patch) == 0 {
+		return nil
+	}
+	resp, err := client.Patch("/api/v1/agents/"+agentID, patch)
+	if err != nil {
+		return fmt.Errorf("set suggested prompts / ask forms: %w", err)
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return fmt.Errorf("set suggested prompts / ask forms: %w", err)
+	}
+	resp.Body.Close()
+	return nil
 }
 
 // ════════════════════════════════════════════════════════════════════════════

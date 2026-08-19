@@ -118,7 +118,7 @@ func TestCovQMMFinishQuery_Completed(t *testing.T) {
 	h.SetJournal(em)
 
 	h.finishQuery(context.Background(), "cqmm-conv-c", "run-c", "chat-c",
-		"alice", "bob", wsID, "cqmm-fc", "cqmm-tgt", "the answer", "", time.Now().Add(-50*time.Millisecond))
+		"alice", "bob", wsID, "cqmm-fc", "cqmm-tgt", "the answer", "", time.Now().Add(-50*time.Millisecond), nil)
 
 	// peer_conversations marked COMPLETED with response persisted.
 	var status, resp string
@@ -167,7 +167,7 @@ func TestCovQMMFinishQuery_Failed(t *testing.T) {
 	h.SetJournal(em)
 
 	h.finishQuery(context.Background(), "cqmm-conv-f", "run-f", "chat-f",
-		"alice", "bob", wsID, "cqmm-ff", "cqmm-tgt2", "", "boom: execution error", time.Now().Add(-20*time.Millisecond))
+		"alice", "bob", wsID, "cqmm-ff", "cqmm-tgt2", "", "boom: execution error", time.Now().Add(-20*time.Millisecond), nil)
 
 	var status string
 	if err := db.QueryRow(`SELECT status FROM peer_conversations WHERE id='cqmm-conv-f'`).Scan(&status); err != nil {
@@ -217,7 +217,7 @@ func TestCovQMMFinishQuery_NoRunNoWorkspace(t *testing.T) {
 	h.SetJournal(em)
 
 	h.finishQuery(context.Background(), "cqmm-conv-nr", "", "chat-nr",
-		"alice", "bob", "", "cqmm-nr", "cqmm-tgt3", "ok", "", time.Now())
+		"alice", "bob", "", "cqmm-nr", "cqmm-tgt3", "ok", "", time.Now(), nil)
 
 	for _, e := range em.entries {
 		if e.TraceID != "" {

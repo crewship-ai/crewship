@@ -54,7 +54,8 @@ POST /api/v1/labels
 
 `name` and `color` are required; `label_group` is optional. Returns `201
 Created` with the label shape. Invalid JSON or a missing required field returns
-`400`; insufficient role returns `403`.
+`400`; insufficient role returns `403`. Label names are unique per workspace, so
+re-creating an existing name returns `409 Conflict` rather than a second row.
 
 ### Update a label
 

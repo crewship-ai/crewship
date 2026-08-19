@@ -58,6 +58,10 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "exec.output_chunk",
       "run.agent_span",
       "agent.error",
+      // Provenance of the CLI session the run happened inside. It belongs
+      // beside the run it describes, not under System: "this run started
+      // without crewship-memory" is a fact about that run.
+      "run.session_init",
     ],
   },
   {
@@ -125,6 +129,13 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "approval.denied",
       "approval.timeout",
       "approval.cancelled",
+      // A trust grant is a standing decision — "approve this gate for me from
+      // now on" — so it belongs with the one-off approvals rather than in a
+      // group of its own. Reading them together is the point: a filter that
+      // showed the decisions but not the standing permission behind them would
+      // hide why later runs stopped asking.
+      "approval.trust_granted",
+      "approval.trust_revoked",
       "credential.revealed",
       "credential.lease_issued",
       "credential.reveal_policy_changed",
@@ -219,6 +230,18 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "provisioning.build_failed",
       "sidecar.stale",
       "image.stale",
+      // Pages (docs/prd/pages.md §5, §7.1b) — no dedicated facet yet, so
+      // they land here explicitly rather than through the unclaimed
+      // fallback the backend-parity ratchet test forbids.
+      "page.produce_denied",
+      "page.panel.updated",
+      "page.grant_added",
+      "page.grant_removed",
+      "page.panel.stale",
+      "page.panel.recovered",
+      "page.wake.fired",
+      "page.action.dispatched",
+      "page.spec.changed",
     ],
   },
 ]

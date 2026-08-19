@@ -5,9 +5,11 @@ name: Nightly E2E
 # Why this workflow exists
 # ------------------------
 # Of the ~84 Playwright tests in `e2e/`, exactly 6 ran automatically before
-# this landed: `e2e-devcontainer.yml`'s onboarding job drives
-# `playwright.fresh.config.ts`, whose `testMatch` is
-# `["**/onboarding-wizard.spec.ts"]`. Everything else — the whole main
+# this landed: a nightly onboarding job drove `playwright.fresh.config.ts`,
+# whose `testMatch` is `["**/onboarding-wizard.spec.ts"]` (that job has since
+# moved onto pull requests as `onboarding-journey` in ci.yml, and the PR
+# browser subset in `playwright.pr.config.ts` has been added alongside it).
+# Everything else — the whole main
 # config — ran only when a human remembered to type `pnpm test:e2e` on a
 # machine with a seeded server. Nobody did, for long enough that the specs
 # drifted out from under the product.
@@ -81,9 +83,15 @@ name: Nightly E2E
 #                             baselines for surfaces that no longer exist would
 #                             be pinning the wrong picture; regenerating them
 #                             belongs to whoever rewrites the spec.
-#   onboarding-wizard.spec.ts owned by e2e-devcontainer.yml + the fresh config.
-#                             It needs a NEVER-bootstrapped DB, which is the
-#                             opposite of this workflow's seeded instance.
+#   onboarding-wizard.spec.ts owned by the `onboarding-journey` job in ci.yml,
+#                             which runs it on every pull request through
+#                             playwright.fresh.config.ts. It needs a
+#                             NEVER-bootstrapped DB, which is the opposite of
+#                             this workflow's seeded instance. Excluded here
+#                             because it is gated better elsewhere — not
+#                             because nothing runs it. (It was owned by
+#                             e2e-devcontainer.yml's nightly until the gate
+#                             moved onto PRs.)
 #
 # a11y.spec.ts DOES run here. `e2e-devcontainer.yml` carries a TODO(a11y-ci)
 # saying it is blocked on three things: the real UI in the embed dir, an
@@ -106,7 +114,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.26.5"
+  GO_VERSION: "1.26.6"
   NODE_VERSION: "22"
   PNPM_VERSION: "10"
   # ── The buckets. Keep them in sync with the coverage guard below. ──
@@ -133,7 +141,7 @@ env:
   #   crews-real-workflow         0 / 12
   #   command-palette             5 /  7
   #   crew-image-freshness        0 /  1
-  #   pr-contract                 0 /  1
+  #   pr-contract                 0 /  1   ← MOVED to EXCLUDED, see below
   #                              ──────────
   #                              29 / 61   of the 90 tests selected here
   #
@@ -165,12 +173,23 @@ env:
     e2e/full-integration.spec.ts
     e2e/manual-crews-walkthrough.spec.ts
     e2e/mobile-crews.spec.ts
-    e2e/pr-contract.spec.ts
     e2e/smoke.spec.ts
   # EXCLUDED: deliberately run by nobody here — see the header for each.
+  #
+  # pr-contract.spec.ts was in DRIFT and did not belong there. It is the PR
+  # browser gate: playwright.pr.config.ts selects it, ci.yml's `playwright-pr`
+  # job runs it on every pull request, and it is GREEN there. It failed here for
+  # reasons that are about this workflow's harness rather than the spec — the
+  # drift job seeds with `--skip-issues` while the spec creates an issue, and it
+  # never applies the `admin ratelimits set http.api_per_min 1000` headroom that
+  # `playwright-pr` gives it. So the nightly was filing a currently-gating spec
+  # into a "known-stale, never fatal" rot issue every night, which is how a live
+  # gate gets read as dead code and deleted. Listed here, with its real owner
+  # named, instead.
   EXCLUDED_SPECS: >-
     e2e/visual.spec.ts
     e2e/onboarding-wizard.spec.ts
+    e2e/pr-contract.spec.ts
 
 jobs:
   # ── Guard: no spec may silently belong to no bucket ──

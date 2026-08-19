@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
 	wshub "github.com/crewship-ai/crewship/internal/ws"
 )
@@ -63,6 +64,11 @@ type WorkspaceHandler struct {
 	logger  *slog.Logger
 	license *license.License
 	hub     *wshub.Hub
+	// journal records the pages owner-transfer audit trail (§7.1 rule 1b)
+	// that RemoveMember triggers when the departing member owns a page.
+	// nil is safe: transferDepartingUserPages falls back to a no-op
+	// emitter on its own, matching every other SetJournal in this package.
+	journal journal.Emitter
 }
 
 // NewWorkspaceHandler creates a WorkspaceHandler with the given database and logger.
@@ -77,6 +83,11 @@ func (h *WorkspaceHandler) SetLicense(lic *license.License) { h.license = lic }
 // SetHub attaches the WebSocket hub so mutations (currently workspace
 // deletion) broadcast realtime events to connected clients.
 func (h *WorkspaceHandler) SetHub(hub *wshub.Hub) { h.hub = hub }
+
+// SetJournal wires a journal emitter so RemoveMember's page-owner transfer
+// (§7.1 rule 1b) lands in the real Crew Journal once the router has resolved
+// one. A nil argument is fine — see the journal field comment.
+func (h *WorkspaceHandler) SetJournal(j journal.Emitter) { h.journal = j }
 
 // workspaceCounts is the nested `_count` object the settings UI reads
 // (settings-layout.tsx: org._count.{crews,agents,members}). Always

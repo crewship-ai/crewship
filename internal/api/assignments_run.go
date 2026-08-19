@@ -457,6 +457,13 @@ func (h *AssignmentHandler) runAssignment(
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Session provenance for the terminal run record, filled in once the CLI
+	// stream starts (below). Declared up here so every finishAssignment call
+	// site can pass it, including the early-dispatch bails that return before
+	// an agent runs: those pass it still nil, the getters are nil-safe, and a
+	// run that never reached a CLI records nothing rather than blank fields.
+	var acc *orchestrator.Accumulator
+
 	// Record the sub-agent run via the journal — this is the source of
 	// truth for "run started" post Phase J. trace_id == runID groups
 	// every entry the assignment will produce.
@@ -577,7 +584,7 @@ func (h *AssignmentHandler) runAssignment(
 		})
 
 	if h.orch == nil {
-		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", "orchestrator not available")
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", "orchestrator not available", acc)
 		return
 	}
 
@@ -594,7 +601,7 @@ func (h *AssignmentHandler) runAssignment(
 			h.logger.Error("ensure provisioned for assignment", "error", perr,
 				"assignment_id", assignmentID, "crew_id", body.CrewID)
 			h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
-				fmt.Sprintf("preparing the crew container failed: %v", perr))
+				fmt.Sprintf("preparing the crew container failed: %v", perr), acc)
 			return
 		}
 	}
@@ -615,7 +622,7 @@ func (h *AssignmentHandler) runAssignment(
 		h.logger.Error("resolve crew runtime config for assignment",
 			"error", cfgErr, "crew_id", body.CrewID, "assignment_id", assignmentID)
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
-			fmt.Sprintf("resolve crew runtime config: %v", cfgErr))
+			fmt.Sprintf("resolve crew runtime config: %v", cfgErr), acc)
 		return
 	}
 	// Journal + live-stream the runtime container-preparation steps the
@@ -629,16 +636,24 @@ func (h *AssignmentHandler) runAssignment(
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
-			fmt.Sprintf("container error: %v", err))
+			fmt.Sprintf("container error: %v", err), acc)
 		return
 	}
 
-	// Collect agent output
+	// Collect agent output. The shared buffering handler runs underneath for
+	// its session-init capture only — this path keeps its own text collection
+	// (joinAssignmentOutput caps and truncates what becomes result_summary,
+	// which the accumulator's plain concatenation would not).
 	var outputParts []string
+	base, bufAcc := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
+		CaptureResultMeta: true,
+	})
+	acc = bufAcc
 	handler := func(event orchestrator.AgentEvent) {
 		if event.Type == "text" && event.Content != "" {
 			outputParts = append(outputParts, event.Content)
 		}
+		base(event)
 	}
 
 	agentRole := "AGENT"
@@ -655,7 +670,7 @@ func (h *AssignmentHandler) runAssignment(
 		// rather than dispatch an MCP-blind, HITL-inert degraded run.
 		h.logger.Error("assignment dispatch build failed", "error", buildErr, "assignment_id", assignmentID)
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
-			fmt.Sprintf("dispatch error: %v", buildErr))
+			fmt.Sprintf("dispatch error: %v", buildErr), acc)
 		return
 	}
 
@@ -666,7 +681,7 @@ func (h *AssignmentHandler) runAssignment(
 	guardRelease, guardErr := refuseIfBackupInProgress(ctx, h.db, body.WorkspaceID)
 	if guardErr != nil {
 		h.logger.Warn("assignment refused — backup in progress", "assignment_id", assignmentID, "workspace_id", body.WorkspaceID)
-		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", guardErr.Error())
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", guardErr.Error(), acc)
 		return
 	}
 	defer guardRelease()
@@ -688,12 +703,12 @@ func (h *AssignmentHandler) runAssignment(
 			partial = joinAssignmentOutput(outputParts)
 		}
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, partial,
-			fmt.Sprintf("execution error: %v", err))
+			fmt.Sprintf("execution error: %v", err), acc)
 		return
 	}
 
 	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID,
-		joinAssignmentOutput(outputParts), "")
+		joinAssignmentOutput(outputParts), "", acc)
 }
 
 // joinAssignmentOutput concatenates the collected agent text into the
@@ -855,10 +870,19 @@ func userFacingAssignmentError(raw string) string {
 // callback, and double-pump the freed crew slot.
 //
 // Returns true when this call owned the terminal transition.
+//
+// acc carries the CLI's session-init provenance onto the terminal run entry
+// and is nil at every call site that finished the assignment without running
+// an agent (early dispatch failure, the recovery sweeper). It is passed as the
+// accumulator rather than as a pre-built metadata map so the projection stays
+// in ONE place: which keys a run record keeps is a decision that has already
+// moved once, and nine call sites each building their own map is how the chat
+// bridge ended up recording provenance on COMPLETED only.
 
 func (h *AssignmentHandler) finishAssignment(
 	ctx context.Context,
 	assignmentID, runID, chatID, targetSlug, workspaceID, result, errMsg string,
+	acc *orchestrator.Accumulator,
 ) bool {
 	now := time.Now().UTC().Format(time.RFC3339)
 	status := "COMPLETED"
@@ -914,6 +938,12 @@ func (h *AssignmentHandler) finishAssignment(
 		}
 		if status == "COMPLETED" {
 			payload["exit_code"] = 0
+		}
+		// Unconditional on status: a FAILED delegation is precisely when
+		// someone asks which CLI answered and whether it dropped an MCP
+		// server on the way in.
+		if md := runSessionProvenance(acc); md != nil {
+			payload["metadata"] = md
 		}
 		if _, err := h.journal.Emit(ctx, journal.Entry{
 			WorkspaceID: workspaceID,

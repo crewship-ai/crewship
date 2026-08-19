@@ -23,6 +23,15 @@ export const WELCOME_FLAG = "crewship.justOnboarded"
  */
 const DISMISSED_FLAG = "crewship.welcomeChecklistDismissed"
 
+/**
+ * Breadcrumb the wizard leaves alongside `crewship.firstAgentId`.
+ *
+ * Chat is addressed by slug (`/chat/<agentSlug>`), and the id is all the
+ * setup response carries, so onboarding resolves the slug once and stores it
+ * here rather than every reader of the breadcrumb doing its own lookup.
+ */
+const FIRST_AGENT_SLUG = "crewship.firstAgentSlug"
+
 interface ChecklistItem {
   id: string
   done: boolean
@@ -47,6 +56,7 @@ export function WelcomeChecklist({ firstAgentId }: { firstAgentId?: string | nul
   // Render-gate state — null while we're consulting localStorage so we
   // don't briefly flash the banner on a session that already dismissed.
   const [visible, setVisible] = useState<boolean | null>(null)
+  const [firstAgentSlug, setFirstAgentSlug] = useState<string | null>(null)
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -56,6 +66,7 @@ export function WelcomeChecklist({ firstAgentId }: { firstAgentId?: string | nul
     try {
       const dismissed = window.localStorage.getItem(DISMISSED_FLAG) === "1"
       const justOnboarded = window.localStorage.getItem(WELCOME_FLAG) === "1"
+      setFirstAgentSlug(window.localStorage.getItem(FIRST_AGENT_SLUG))
       setVisible(justOnboarded && !dismissed)
     } catch {
       // localStorage may throw in private-browsing modes — fail closed
@@ -84,8 +95,13 @@ export function WelcomeChecklist({ firstAgentId }: { firstAgentId?: string | nul
       title: "Talk to your first agent",
       description: "Open the chat surface for the agent the wizard just created.",
       icon: Sparkles,
-      cta: firstAgentId
-        ? { label: "Open chat", href: `/crews/agents/${firstAgentId}/chat` }
+      // /crews/agents/<id>/chat is gone — that subtree was deleted with the
+      // selection-driven /crews redesign, and this CTA 404'd for every user
+      // who reached it. Chat is /chat/<slug>; without a slug the roster is
+      // the honest destination, since a link that lands somewhere beats one
+      // that lands nowhere.
+      cta: firstAgentId && firstAgentSlug
+        ? { label: "Open chat", href: `/chat/${encodeURIComponent(firstAgentSlug)}` }
         : { label: "Browse agents", href: "/crews" },
     },
     {

@@ -7,6 +7,10 @@
 #
 # Window formats: 1s, 10s, 1m, 1h, 1d
 # Scope: ip (unauthenticated), user (authenticated), agent (webhooks)
+#        connection (one websocket), panel / workspace / token (Pages, below)
+#
+# Optional `burst:` — bucket depth, where a limiter absorbs a burst and then
+# settles to `requests` per `window`. Absent means burst == requests.
 
 # ============================================
 # CRITICAL OPERATIONS
@@ -160,6 +164,56 @@ websocket:
     scope: connection
     applies_to:
       - WebSocket send_message
+
+# ============================================
+# PAGES (docs/prd/pages.md 10b.3)
+# ============================================
+#
+# The dangerous number in Pages is push FREQUENCY, not size: 24 panels x 100
+# pages x one push every 5 s is 2 880 writes per second, which no amount of
+# index tuning survives on SQLite's single writer.
+#
+# Only the RATE rows live here. The size and count rows from the same table
+# (64 KiB payload, 256 KiB spec, 24 panels/page, 100 pages/workspace, 200
+# payloads per ring, 50 versions) are Go constants in internal/pages -- a
+# payload cap that varies per deployment is a payload cap no producer can code
+# against.
+#
+# Values are mirrored in internal/ratelimitcfg (keys pages.*), which is what
+# the admin "Rate Limiters" console edits; this file is the declarative map of
+# WHICH ROUTE each limit covers.
+#
+# The per-process caveat at the top of this file is load-bearing here. With N
+# replicas every bucket below becomes N x, so PAGE_PUSH_PANEL is enforced a
+# second time where the write lands: a minimum-interval check on produced_at,
+# in the same transaction as the INSERT (internal/pages/limits.go,
+# internal/api/pages_data.go). That floor is 1m / burst = 2 s -- loose enough
+# never to refuse a push the bucket would have allowed at its steadiest, tight
+# enough that no number of replicas turns one panel into a write firehose.
+pages:
+  - name: PAGE_PUSH_PANEL
+    requests: 12
+    burst: 30
+    window: 1m
+    scope: panel
+    applies_to:
+      - PUT /api/v1/pages/{slug}/panels/{panelId}/data
+
+  - name: PAGE_PUSH_WORKSPACE
+    requests: 600
+    window: 1m
+    scope: workspace
+    applies_to:
+      - PUT /api/v1/pages/{slug}/panels/{panelId}/data
+
+  # 7.3.2 rule 6. Declared with the rest of the set so there is one number to
+  # tune; /p/{token} is not built yet, so nothing enforces this today.
+  - name: PAGE_PUBLIC_VIEW
+    requests: 600
+    window: 1h
+    scope: token
+    applies_to:
+      - GET /p/{token}
 
 # ============================================
 # NOTES

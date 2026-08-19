@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -71,6 +72,14 @@ func (h *IssueHandler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO labels (id, workspace_id, name, color, label_group, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		id, wsID, req.Name, req.Color, req.LabelGroup, now)
 	if err != nil {
+		// Same reasoning as project create: a duplicate name in this
+		// workspace is a conflict the caller can act on, and the seed's
+		// idempotent re-run path keys off the 409.
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			writeProblem(w, r, http.StatusConflict,
+				fmt.Sprintf("A label named %q already exists in this workspace", req.Name))
+			return
+		}
 		internalError(w, r, h.logger, "create label", err)
 		return
 	}

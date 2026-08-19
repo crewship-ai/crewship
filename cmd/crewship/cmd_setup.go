@@ -311,7 +311,22 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 		// stale URL when the user passed --server or has an active
 		// profile with a leftover CREWSHIP_SERVER env var.
 		server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
-		fmt.Printf("Open it in the browser: %s/crews/agents/%s/chat\n", strings.TrimRight(server, "/"), result.AgentID)
+		// This is the first URL the product ever hands a new user, and until
+		// now it was a 404: /crews/agents/<id>/chat belonged to the route
+		// subtree the selection-driven /crews redesign deleted.
+		//
+		// It cannot be replaced by the specific link it was trying to be.
+		// Every surviving agent surface is keyed on the agent's SLUG —
+		// /chat/<slug> for the conversation, /crews?agent=<slug> for the
+		// canvas — and the setup response carries only ids (see the payload
+		// in internal/api/onboarding.go). Interpolating the id into either
+		// one is worse than a generic link: the canvas matches ?agent=
+		// against slugs, so an id is cleared on arrival by the stale-selection
+		// watcher and the user lands on a blank canvas with nothing to report.
+		//
+		// So: the roster. It resolves, the freshly created agent is on it,
+		// and the id printed on the line above identifies which one.
+		fmt.Printf("Open it in the browser: %s/crews\n", strings.TrimRight(server, "/"))
 	}
 	return nil
 }

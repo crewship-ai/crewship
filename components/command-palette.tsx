@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Network, Zap, Key, Activity, Settings, LayoutDashboard, Plus, ShieldCheck,
-  CircleDot, Inbox, ClipboardCheck, CalendarClock, Plug, History,
+  CircleDot, Inbox, ClipboardCheck, CalendarClock, Plug, History, MessageSquare,
+  LayoutTemplate,
 } from "lucide-react"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
@@ -13,6 +14,16 @@ import { MCPLogo } from "@/components/icons/mcp-logos"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { paletteFilter } from "@/lib/palette-filter"
 import { routineHref } from "@/lib/routine-href"
+import { emitChatEvent } from "@/lib/telemetry"
+import {
+  CONVERSATION_SEARCH_DEBOUNCE_MS,
+  CONVERSATION_SEARCH_MIN_QUERY,
+  conversationHitHref,
+  conversationHitSnippet,
+  searchConversations,
+  type ConversationHit,
+} from "@/lib/conversation-search"
+import { formatRelativeShort } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import {
@@ -133,6 +144,7 @@ const NAV_ITEMS: Array<{ title: string; href: string; icon: typeof Network; keyw
   { title: "Approvals", href: "/approvals", icon: ClipboardCheck, keywords: [] },
   { title: "Activity", href: "/activity", icon: Activity, keywords: ["runs", "traces"] },
   { title: "Routines", href: "/routines", icon: CalendarClock, keywords: ["pipelines"] },
+  { title: "Pages", href: "/pages", icon: LayoutTemplate, keywords: ["dashboards", "panels"] },
   { title: "Integrations", href: "/integrations", icon: Plug, keywords: ["mcp", "notifications", "channels"] },
   { title: "Skills", href: "/skills", icon: Zap, keywords: [] },
   { title: "Credentials", href: "/credentials", icon: Key, keywords: ["secrets", "tokens"] },
@@ -319,6 +331,16 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [members, setMembers] = useState<MemberResult[]>([])
   const [integrations, setIntegrations] = useState<IntegrationResult[]>([])
   const [recent, setRecent] = useState<RecentEntry[]>([])
+  // ── Conversations ───────────────────────────────────────────────────────
+  //
+  // The one group that cannot be fetched once and filtered in the browser:
+  // messages are the largest thing in the workspace and the only one whose
+  // match is a phrase rather than a name. So this group asks the server on
+  // every (debounced) keystroke, while every other group stays exactly as it
+  // was — the entity rows never wait on it, and a failed or unconfigured
+  // search simply renders no group at all.
+  const [query, setQuery] = useState("")
+  const [conversations, setConversations] = useState<ConversationHit[]>([])
   const filteredIssues = issues.filter((issue) => issue.identifier)
   // A full page means there are probably more behind it. Saying so beats
   // "No results found" for an issue that exists but was never fetched.
@@ -341,6 +363,58 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   useEffect(() => {
     if (open) setRecent(readRecent())
   }, [open])
+
+  // A closed palette keeps no query: the next ⌘K opens on a clean field, and
+  // the group it drew does not flash back before the first keystroke.
+  useEffect(() => {
+    if (!open) {
+      setQuery("")
+      setConversations([])
+    }
+  }, [open])
+
+  // Debounced, cancellable conversation search. The abort does two jobs:
+  // it stops the in-flight request when a newer keystroke replaces it, and
+  // it drops a late response that would otherwise overwrite fresher rows.
+  useEffect(() => {
+    if (!open || !workspaceId) return
+    const trimmed = query.trim()
+    if (trimmed.length < CONVERSATION_SEARCH_MIN_QUERY) {
+      setConversations([])
+      return
+    }
+    const ac = new AbortController()
+    const timer = setTimeout(() => {
+      void searchConversations(trimmed, { workspaceId, signal: ac.signal }).then((hits) => {
+        if (ac.signal.aborted) return
+        setConversations(hits)
+        // One event per request that actually ran, so the count is searches
+        // and not keystrokes. The terms are not recorded — what somebody types
+        // into ⌘K is as private as the message they are hunting for — and a
+        // search returning nothing is the most informative row in the table.
+        emitChatEvent("conversation_search_run", {
+          result_count: hits.length,
+          has_results: hits.length > 0,
+          source: "palette",
+        })
+      })
+    }, CONVERSATION_SEARCH_DEBOUNCE_MS)
+    return () => {
+      clearTimeout(timer)
+      ac.abort()
+    }
+  }, [open, workspaceId, query])
+
+  // Only hits that can actually be opened. A hit whose agent slug did not
+  // resolve has nowhere to navigate, and a row that goes nowhere is worse
+  // than one that is absent.
+  const conversationRows = useMemo(
+    () =>
+      conversations
+        .map((hit) => ({ hit, href: conversationHitHref(hit) }))
+        .filter((row): row is { hit: ConversationHit; href: string } => row.href !== null),
+    [conversations],
+  )
 
   useEffect(() => {
     if (!open || !workspaceId) return
@@ -416,11 +490,22 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       filter={paletteFilter}
       showCloseButton={false}
     >
-      <CommandInput placeholder="Search issues, projects, agents..." />
+      {/* Controlled, because one group (Conversations) searches the server
+          with what was typed rather than filtering a list already in hand. */}
+      <CommandInput
+        placeholder="Search issues, projects, agents..."
+        value={query}
+        onValueChange={setQuery}
+      />
       <CommandList className="max-h-[420px]">
-        <CommandEmpty>
-          <span className="type-row text-muted-foreground">No results found.</span>
-        </CommandEmpty>
+        {/* cmdk counts only the rows IT filtered, and the conversation rows
+            are force-mounted past that filter — so with hits on screen its
+            "empty" state is a lie. Withhold it while they are showing. */}
+        {conversationRows.length === 0 && (
+          <CommandEmpty>
+            <span className="type-row text-muted-foreground">No results found.</span>
+          </CommandEmpty>
+        )}
 
         {recent.length > 0 && (
           <CommandGroup heading={<GroupLabel>Recent</GroupLabel>} className={PALETTE_GROUP_CLASS}>
@@ -455,6 +540,52 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <span className="type-row">{action.title}</span>
               </CommandItem>
             ))}
+          </CommandGroup>
+        )}
+
+        {conversationRows.length > 0 && (
+          // forceMount on both the group and its rows: these hits were
+          // ranked by the server's BM25 over the whole message, and cmdk's
+          // own filter — which only sees the 140-character preview — would
+          // hide the very row the query found.
+          <CommandGroup
+            forceMount
+            heading={<GroupLabel>Conversations</GroupLabel>}
+            className={PALETTE_GROUP_CLASS}
+          >
+            {conversationRows.map(({ hit, href }, position) => {
+              const snippet = conversationHitSnippet(hit)
+              const who = hit.agent_name || hit.agent_slug || ""
+              return (
+                <CommandItem
+                  key={hit.id}
+                  forceMount
+                  // The message id trails the label so two identical
+                  // snippets from one agent stay two distinct rows — cmdk
+                  // keys its selection state on this string.
+                  value={`${snippet} ${who} conversation ${hit.id}`}
+                  className={PALETTE_ITEM_CLASS}
+                  data-href={href}
+                  onSelect={() => {
+                    // The RANK, not the row. A search whose answer is always
+                    // opened at position 4 is a ranking bug, and nothing else
+                    // in the product can see it.
+                    emitChatEvent("conversation_search_result_opened", {
+                      session_id: hit.session_id,
+                      position,
+                      result_count: conversationRows.length,
+                      source: "palette",
+                    })
+                    go(href, snippet, "Conversations")
+                  }}
+                >
+                  <MessageSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="type-row flex-1 truncate">{snippet}</span>
+                  <span className="type-meta max-w-[120px] truncate text-muted-foreground-soft">{who}</span>
+                  <span className="type-meta shrink-0 text-muted-foreground-soft">{formatRelativeShort(hit.ts)}</span>
+                </CommandItem>
+              )
+            })}
           </CommandGroup>
         )}
 

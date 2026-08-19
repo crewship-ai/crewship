@@ -57,7 +57,7 @@ describe("useFileEditor", () => {
     const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: null }))
 
     act(() => {
-      result.current.openFileEditor({ path: "/w/a.ts", name: "a.ts" })
+      result.current.openFileEditor({ path: "/w/a.ts", name: "a.ts" }, { kind: "agent" })
     })
 
     expect(mockFetch).not.toHaveBeenCalled()
@@ -70,7 +70,7 @@ describe("useFileEditor", () => {
     const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
 
     act(() => {
-      result.current.openFileEditor({ path: "src/app with space.ts", name: "app with space.ts" })
+      result.current.openFileEditor({ path: "src/app with space.ts", name: "app with space.ts" }, { kind: "agent" })
     })
 
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit]
@@ -78,7 +78,11 @@ describe("useFileEditor", () => {
       "/api/v1/agents/a1/files/download?workspace_id=ws-1&path=src%2Fapp%20with%20space.ts",
     )
     expect(init.signal).toBeInstanceOf(AbortSignal)
-    expect(result.current.editorFile).toEqual({ path: "src/app with space.ts", name: "app with space.ts" })
+    expect(result.current.editorFile).toEqual({
+      path: "src/app with space.ts",
+      name: "app with space.ts",
+      scope: { kind: "agent" },
+    })
     expect(result.current.editorLoading).toBe(true)
   })
 
@@ -88,7 +92,7 @@ describe("useFileEditor", () => {
     const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
 
     await act(async () => {
-      result.current.openFileEditor({ path: "a.ts", name: "a.ts" })
+      result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
       await flushAsync()
     })
 
@@ -101,7 +105,7 @@ describe("useFileEditor", () => {
 
     const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
     await act(async () => {
-      result.current.openFileEditor({ path: "a.ts", name: "a.ts" })
+      result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
       await flushAsync()
     })
 
@@ -115,7 +119,7 @@ describe("useFileEditor", () => {
 
     const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
     await act(async () => {
-      result.current.openFileEditor({ path: "a.ts", name: "a.ts" })
+      result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
       await flushAsync()
     })
 
@@ -134,13 +138,13 @@ describe("useFileEditor", () => {
     const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
 
     act(() => {
-      result.current.openFileEditor({ path: "first.ts", name: "first.ts" })
+      result.current.openFileEditor({ path: "first.ts", name: "first.ts" }, { kind: "agent" })
     })
     const firstSignal = (mockFetch.mock.calls[0][1] as RequestInit).signal as AbortSignal
     expect(firstSignal.aborted).toBe(false)
 
     act(() => {
-      result.current.openFileEditor({ path: "second.ts", name: "second.ts" })
+      result.current.openFileEditor({ path: "second.ts", name: "second.ts" }, { kind: "agent" })
     })
     expect(firstSignal.aborted).toBe(true)
   })
@@ -156,7 +160,7 @@ describe("useFileEditor", () => {
 
     const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
     act(() => {
-      result.current.openFileEditor({ path: "a.ts", name: "a.ts" })
+      result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
     })
     const signal = (mockFetch.mock.calls[0][1] as RequestInit).signal as AbortSignal
 
@@ -193,7 +197,7 @@ describe("useFileEditor", () => {
 
       const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
       await act(async () => {
-        result.current.openFileEditor({ path: "src/a.ts", name: "a.ts" })
+        result.current.openFileEditor({ path: "src/a.ts", name: "a.ts" }, { kind: "agent" })
         await flushAsync()
       })
       act(() => {
@@ -220,7 +224,7 @@ describe("useFileEditor", () => {
 
       const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
       await act(async () => {
-        result.current.openFileEditor({ path: "a.ts", name: "a.ts" })
+        result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
         await flushAsync()
       })
       await act(async () => {
@@ -238,7 +242,7 @@ describe("useFileEditor", () => {
 
       const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
       await act(async () => {
-        result.current.openFileEditor({ path: "a.ts", name: "a.ts" })
+        result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
         await flushAsync()
       })
       await act(async () => {
@@ -247,6 +251,85 @@ describe("useFileEditor", () => {
       })
 
       expect(toastError).toHaveBeenCalledWith("Save failed")
+    })
+  })
+
+  // ===========================================================================
+  // The scope travels with the file, so the write cannot pick a different tree
+  // than the read did. The crew scope lists `<crewId>/…` keys; the agent routes
+  // 403 those on read ("path not scoped to this agent") and, for any path that
+  // slipped past, would have written them into the agent's own tree.
+  // ===========================================================================
+  describe("scope", () => {
+    it("reads a crew file through the crew route", () => {
+      mockFetch.mockResolvedValueOnce(okText("shared"))
+
+      const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
+      act(() => {
+        result.current.openFileEditor(
+          { path: "crew-1/handbook.md", name: "handbook.md" },
+          { kind: "crew", crewId: "crew-1" },
+        )
+      })
+
+      const [url] = mockFetch.mock.calls[0] as [string]
+      expect(url).toBe(
+        "/api/v1/crews/crew-1/files/download?workspace_id=ws-1&path=crew-1%2Fhandbook.md",
+      )
+    })
+
+    it("writes it back to the same crew tree it was read from", async () => {
+      mockFetch.mockResolvedValueOnce(okText("shared"))
+      mockFetch.mockResolvedValueOnce({ ok: true } as Response)
+
+      const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
+      await act(async () => {
+        result.current.openFileEditor(
+          { path: "crew-1/handbook.md", name: "handbook.md" },
+          { kind: "crew", crewId: "crew-1" },
+        )
+        await flushAsync()
+      })
+      await act(async () => {
+        result.current.handleEditorSave("edited")
+        await flushAsync()
+      })
+
+      const [url, init] = mockFetch.mock.calls[1] as [string, RequestInit]
+      expect(url).toBe(
+        "/api/v1/crews/crew-1/files/save?workspace_id=ws-1&path=crew-1%2Fhandbook.md",
+      )
+      expect(url).not.toContain("/agents/")
+      expect(init.method).toBe("PUT")
+      expect(toastSuccess).toHaveBeenCalledWith("File saved")
+    })
+
+    it("follows the file that is actually open when the scope changes underneath", async () => {
+      mockFetch.mockResolvedValue(okText("x"))
+
+      const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
+      await act(async () => {
+        result.current.openFileEditor({ path: "src/a.ts", name: "a.ts" }, { kind: "agent" })
+        await flushAsync()
+      })
+      await act(async () => {
+        result.current.openFileEditor(
+          { path: "crew-1/handbook.md", name: "handbook.md" },
+          { kind: "crew", crewId: "crew-1" },
+        )
+        await flushAsync()
+      })
+      await act(async () => {
+        result.current.handleEditorSave("edited")
+        await flushAsync()
+      })
+
+      const saves = mockFetch.mock.calls
+        .map((c) => String(c[0]))
+        .filter((u) => u.includes("/files/save"))
+      expect(saves).toEqual([
+        "/api/v1/crews/crew-1/files/save?workspace_id=ws-1&path=crew-1%2Fhandbook.md",
+      ])
     })
   })
 
@@ -266,7 +349,7 @@ describe("useFileEditor", () => {
     )
 
     act(() => {
-      result.current.openFileEditor({ path: "a.ts", name: "a.ts" })
+      result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
     })
     const firstSignal = (mockFetch.mock.calls[0][1] as RequestInit).signal as AbortSignal
     act(() => {

@@ -1,16 +1,17 @@
 # Trivy ignore list — vulnerabilities triaged as not-applicable.
 # Format: one CVE per line, optional `# reason` after.
-
-# --- github.com/docker/docker (Moby) daemon-side CVEs ---
-# Crewship imports docker/docker exclusively as an HTTP API CLIENT
-# (api/types, client, pkg/stdcopy stream demultiplexer). None of the
-# CVEs below execute in our process — they affect dockerd (the daemon)
-# running on the host. Mitigation = upgrade Docker Engine on hosts via
-# the OS package manager (apt/yum), not by bumping the Go module.
 #
-# Go module `github.com/docker/docker` v28.5.2+incompatible is the last
-# tagged Go-module release as of 2026-05-23; v29.x exists on GitHub but
-# is not yet published to the Go module proxy. Re-evaluate quarterly.
-CVE-2026-34040
-CVE-2026-41567
-CVE-2026-42306
+# Currently EMPTY, and nothing in the repo invokes trivy today (the wired
+# scanners are grype, OSV and govulncheck — see .github/workflows/security.yml).
+#
+# It previously suppressed CVE-2026-34040, CVE-2026-41567 and CVE-2026-42306
+# as daemon-side `github.com/docker/docker` findings. That module is no longer
+# in the graph at all — the container provider moved to github.com/moby/moby,
+# and `go mod why -m github.com/docker/docker` reports it out — so the triage
+# those entries recorded no longer describes anything we ship.
+#
+# Removed rather than left in place for the same reason the govulncheck
+# allowlist was emptied: an inert suppression file is not a harmless one. The
+# day someone wires trivy into CI, three CVEs would arrive pre-silenced on a
+# rationale that had quietly stopped being true. An entry here should always be
+# a decision someone is making now, not one the repo inherited.

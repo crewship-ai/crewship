@@ -249,3 +249,55 @@ func TestDocsToCodeExplicitIgnoreConvention(t *testing.T) {
 		t.Fatalf("explicit docs-inventory ignore marker did not suppress illustrative symbols: %+v", checks.Missing)
 	}
 }
+
+// The manifest kind roster used to be read out of the parser's ERROR MESSAGE:
+// two hand-typed copies of the same twenty names lived in parse.go, and this
+// tool scraped one of them. #1935 replaced both with a single const built from
+// the Kind* declarations — a strictly better change that silently blinded this
+// gate, because the literal it was scraping stopped existing. The roster came
+// back empty, and 225 correct documentation references were reported as
+// "missing from the source inventory".
+//
+// Two things are pinned here. The roster is read from the DECLARATION, which
+// cannot be reworded; and an empty roster is a TOOLING failure that says so,
+// rather than a documentation verdict that blames the docs.
+func TestManifestKindsComeFromTheDeclarationNotAnErrorMessage(t *testing.T) {
+	sources := []docFile{{
+		Path: manifestKindSourcePath,
+		Text: "const (\n\tKindCrew  = \"Crew\"\n\tKindAgent = \"Agent\"\n\tKindPage  = \"Page\"\n)\n",
+	}}
+	docs := []docFile{{Path: "docs/guides/x.mdx", Text: "kind: Crew\nkind: Agent\nkind: Page\n"}}
+
+	got, err := inventoryManifestKinds(sources, docs)
+	if err != nil {
+		t.Fatalf("inventoryManifestKinds: %v", err)
+	}
+	var names []string
+	for _, rec := range got {
+		names = append(names, rec.Name)
+	}
+	want := []string{"Agent", "Crew", "Page"}
+	if len(names) != len(want) {
+		t.Fatalf("kinds: got %v want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("kinds: got %v want %v", names, want)
+		}
+	}
+}
+
+func TestManifestKindsRefuseToReportAnEmptyRosterAsADocsGap(t *testing.T) {
+	// The declaration file present but unrecognisable — a rename, a refactor,
+	// a move. The honest answer is "I could not find the roster", not "none of
+	// your kinds are documented".
+	sources := []docFile{{Path: manifestKindSourcePath, Text: "package manifest\n"}}
+
+	_, err := inventoryManifestKinds(sources, nil)
+	if err == nil {
+		t.Fatal("an empty roster must be an error, not a silent zero")
+	}
+	if !strings.Contains(err.Error(), manifestKindSourcePath) {
+		t.Errorf("the error must name where the roster was looked for, got: %v", err)
+	}
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crewship.io/schemas/panel.metric.v1.json",
+  "title": "Crewship panel payload — metric.v1",
+  "description": "One number, with an optional delta, target and sparkline. Pushed by a routine or by a script running inside a crew container: `crewship page set <page>/<panel> --data -` reading this document on stdin. The panel holds no query and no datasource — this payload IS the panel's data, and the server attaches the timestamp, the run id and the producer identity to it. Freshness (fresh / stale / failed) is computed server-side from the timestamp the server stored, so there is deliberately no field here in which a producer could supply its own.",
+  "type": "object",
+  "required": ["value"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference (informational; the server ignores it). Present so a hand-written payload gets inline validation in an editor while a producer script is being developed."
+    },
+    "value": {
+      "type": ["number", "null"],
+      "description": "The measured value, rendered at full contrast when fresh. Required, and nullable on purpose: `0` is a measured zero (\"we looked and there was nothing\") and `null` is no basis to compute (\"we have nothing to look at\"), which renders as an em dash. The two are different claims and the app already separates them — do not send 0 to mean \"no data\"."
+    },
+    "unit": {
+      "type": "string",
+      "maxLength": 24,
+      "description": "Unit suffix rendered next to the value (\"ms\", \"req/s\", \"Kč\"). One unit per panel: two units is two panels, because a single tile cannot say which number the unit belongs to."
+    },
+    "delta": {
+      "type": "number",
+      "description": "Change since the previous push, in the same unit as `value`. Omit when there is no previous value to compare against; send 0 when the value genuinely did not move — an omitted delta renders as nothing, a zero delta renders as \"no change\"."
+    },
+    "delta_good": {
+      "enum": ["up", "down"],
+      "description": "Which direction of `delta` is an improvement, and the only thing that lets the delta take a colour. Omit it and the delta renders with its sign, an arrow and a muted tone; send \"up\" and a rise is success, send \"down\" and a fall is success. There is no default on purpose: green-up on an error rate would be a lie, so the payload has to say which way is good."
+    },
+    "target": {
+      "type": "number",
+      "description": "The value this metric is aiming at, in the same unit. Rendered as a marker, never as a second series."
+    },
+    "sparkline": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": ["number", "null"],
+        "description": "One historical point. `null` marks a gap the producer knows about, so the line breaks instead of interpolating across missing data."
+      },
+      "description": "Recent history for the inline trend line, oldest first. Bounded at 200 to match the payload ring: a panel is not a time-series database, and a longer array is payload bloat rather than more insight. Around 30 points is what the rendered sparkline can actually resolve."
+    }
+  }
+}

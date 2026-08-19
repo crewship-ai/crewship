@@ -11,6 +11,43 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Tabs on a page (#1935).** A panel may declare `tab: Odezva`, and the page
+  grows a bar under the breadcrumb — several screens instead of one long
+  scroll. One optional key on the panel and **no `tabs:` block**: adding a tab
+  is one word on the panel that needs it, and there is no second list that can
+  disagree with the panels about which of them exists. Bar order is first
+  appearance in the panel list; a panel that declares none lands on the first
+  tab; a page where nothing declares one has no bar and renders exactly as it
+  did before.
+
+  A tab HIDES panels, which is why this is not only a layout feature. Every tab
+  carries the **worst freshness state of its own panels** — `failed` over
+  `stale` over `never_produced` over `fresh` — as a glyph beside its name and
+  never as colour alone, and the page's own freshness summary is computed over
+  **every** tab rather than the visible one, so it does not move when the tab
+  does. Without both, a critical panel could sit failing on the third tab while
+  the page read fine, which is the silent-old-numbers failure the freshness
+  contract exists to prevent.
+
+  A tab whose panels are all sealed to a reader still appears on that reader's
+  bar, carrying its placeholders: the page has the same shape for everyone, and
+  a bar that reflowed per viewer would disclose, by what it left out, whose data
+  was on it. `tab` therefore rides on the sealed placeholder too — page
+  structure, like `span`, never the panel's data.
+
+  The selected tab is in the URL (`/pages/sit?tab=odezva`). **Print ignores
+  tabs**: paper cannot be clicked, so a printed page renders every tab's panels
+  in bar order under their tab names, with no bar. On a phone the bar scrolls
+  sideways rather than wrapping. A tab name that is blank, longer than 32
+  characters, carries a control character, collides with another differing only
+  in case, or is the ninth tab on a page, is refused at save with the reason.
+
+  Carried end to end: YAML → CLI → API → the manifest kind (including drift
+  detection, on sealed panels too) → `page export`/`import` → the in-app editor.
+  The editor was **dropping `icon:` on every save** the same way it would have
+  dropped `tab:` — `PATCH` replaces the panel set wholesale, so a key the editor
+  does not mention is a key the save deletes — and both now round-trip.
+
 - **Attachments on issues — and the agent working the issue can read them
   (#1768).** Attach a crash log, a screenshot, a repro bundle or a diff to an
   issue over the API (`GET`/`POST` `…/issues/{ident}/attachments`,
@@ -230,6 +267,32 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   guards.
 
 ### Security
+
+- **Go toolchain bumped 1.26.5 → 1.26.6, clearing eight advisories (#1959).**
+  Seven were in the standard library and reachable from real call paths —
+  `crypto/tls` post-handshake message flooding (GO-2026-6090), `net/http`
+  missing `ReadHeaderTimeout` on the unencrypted HTTP/2 check (GO-2026-6089)
+  and its IDNA Punycode label handling (GO-2026-5026), quadratic
+  `net/url.resolvePath` (GO-2026-6218), unbounded recursion in `encoding/xml`
+  (GO-2026-6088) and `encoding/asn1` (GO-2026-5972), and JavaScript regexp
+  context tracking in `html/template` (GO-2026-6091). The eighth,
+  GO-2026-6222, was excessive memory allocation decoding VP8L in
+  `golang.org/x/image`, reachable from avatar upload, and is fixed by that
+  module's 0.44.0 → 0.45.0 bump.
+
+  Dependabot proposed the toolchain move in the `Dockerfile` alone; the
+  version is pinned in **thirteen** places (`go.mod`, the `Dockerfile` and
+  eleven workflow pins), and only moving them together changes what the
+  released binary and CI are actually built with. `govulncheck ./...` now
+  reports zero.
+
+  The govulncheck allowlist is emptied in the same change. Its five entries
+  were all `docker/docker` advisories, and that module left the graph when the
+  container provider moved to `github.com/moby/moby` — a dead entry would have
+  silently re-accepted those IDs had it ever returned transitively. The
+  allowlist arm of the gate now has unit coverage in
+  `scripts/security-yml-test.sh`, extracted verbatim from the workflow the way
+  the scheduled-report gate already was.
 
 - **Capability tokens are hashed at rest (#1888).** `port_exposures.token` and
   `pipeline_webhooks.token` were stored in the clear and looked up by equality.

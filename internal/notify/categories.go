@@ -61,6 +61,13 @@ const (
 	CategorySystemMigration = "system.migration"
 	CategorySecurity        = "security"
 
+	// CategoryPagesStale fires when a Page's panel data ages past its SLA
+	// (docs/prd/pages.md §10b.6). It notifies the page owner only — default
+	// on for the owner, off for everyone else; `on_failure` → issue remains
+	// the escalation path for anything that needs work rather than
+	// awareness.
+	CategoryPagesStale = "pages.stale"
+
 	// Everything else.
 	CategoryChatReplies = "chat.replies"
 	CategoryMemory      = "memory"
@@ -115,6 +122,7 @@ var CategoryGroups = []CategoryGroup{
 	}},
 	{Key: "system", Label: "System", Categories: []string{
 		CategorySystemHealth, CategorySystemMigration, CategorySecurity,
+		CategoryPagesStale,
 	}},
 	{Key: "other", Label: "Chat & memory", Categories: []string{
 		CategoryChatReplies, CategoryMemory,

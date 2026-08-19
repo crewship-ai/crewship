@@ -6,7 +6,7 @@
 #
 #  This bundle demonstrates ONE document of every kind the manifest
 #  layer supports. Real bundles can pick and choose — you rarely need
-#  all 14 kinds in the same file. The intent here is "copy lines you
+#  every kind in the same file. The intent here is "copy lines you
 #  need; the syntax for every kind lives in one place."
 #
 #  Theme: a fictional "Outlands" SaaS — engineering team + Discord
@@ -379,3 +379,33 @@ metadata:
   slug: pre-run-cost-gate
 spec:
   enabled: true
+
+---
+# ─── 16. Page ────────────────────────────────────────────────────────
+# A status board for the community crew. A page holds no query and no
+# credentials — each panel names a PRODUCER that pushes its payload
+# (`crewship page set community-pulse/services --data -`) and an OWNER
+# crew that decides who may see it. Panel order is the layout.
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Community pulse
+  slug: community-pulse
+  description: Discord health at a glance
+spec:
+  panels:
+    - id: services
+      schema: status.v1
+      title: Jede to?
+      owner: crew/community              # anyone outside the crew gets a sealed slot
+      producer: script/watch-services.sh # a script inside the crew container
+      sla: 30s                           # nothing in 30s and the panel renders stale
+      span: 8                            # 12-column grid
+
+    - id: messages-per-hour
+      schema: metric.v1
+      title: Messages / hour
+      owner: crew/community
+      producer: routine/discord-sync     # the routine declared in section 9
+      sla: 2h
+      span: 4
