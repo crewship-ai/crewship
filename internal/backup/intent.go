@@ -129,10 +129,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// every external reader an accountant or client was given, with no
 	// error anyone would see until they clicked.
 	"page_public_tokens": IntentInclude,
-	"hooks":               IntentInclude,
-	"labels":              IntentInclude,
-	"milestones":          IntentInclude,
-	"projects":            IntentInclude,
+	"hooks":              IntentInclude,
+	"labels":             IntentInclude,
+	"milestones":         IntentInclude,
+	"projects":           IntentInclude,
 
 	// === Eval / training (round-trip) =========================
 	"eval_runs":           IntentInclude,
