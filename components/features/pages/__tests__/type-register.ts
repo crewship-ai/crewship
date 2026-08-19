@@ -17,7 +17,7 @@
  * pass a computed-style check while being exactly the drift these tests exist
  * to catch.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import path from "node:path"
 
 const REPO_ROOT = path.resolve(__dirname, "../../../..")
@@ -106,13 +106,19 @@ export function sizeUtility(el: Element): string | null {
 export function pagesSources(): { file: string; code: string }[] {
   const out: { file: string; code: string }[] = []
   const walk = (dir: string) => {
-    for (const entry of readdirSync(dir)) {
-      const full = path.join(dir, entry)
-      if (statSync(full).isDirectory()) {
-        if (entry !== "__tests__") walk(full)
+    // withFileTypes, so the directory test and the read are not two separate
+    // questions about the same path. `readdirSync` + `statSync` + `readFileSync`
+    // asks the filesystem three times and acts on the first answer — a
+    // time-of-check/time-of-use race CodeQL flags, and one fewer syscall per
+    // entry is the incidental win. The Dirent carries the type the directory
+    // listing already knew.
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name !== "__tests__") walk(full)
         continue
       }
-      if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue
+      if (!/\.tsx?$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) continue
       const raw = readFileSync(full, "utf8")
       const code = raw
         .replace(/\/\*[\s\S]*?\*\//g, "")
