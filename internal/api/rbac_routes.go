@@ -157,6 +157,14 @@ func scopeForRoute(pattern string) string {
 			return "webhooks:write"
 		}
 		return "workspace:admin"
+	case "pages":
+		// A page is a workspace-wide surface with its own per-object ACL
+		// (docs/prd/pages.md §7.2), and the mintable scope vocabulary has no
+		// entry for it. workspace:admin is the honest "this is workspace
+		// administration" gate the doc comment above describes — the finer
+		// pages:write scope arrives with the grant surface, which is what
+		// would make it mean something.
+		return "workspace:admin"
 	case "admin", "integrations", "connectors", "recipes", "templates",
 		"projects", "milestones", "labels", "relations", "feature-flags",
 		"instance", "issues", "journal", "checkpoints", "missions",

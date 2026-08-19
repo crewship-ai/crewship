@@ -219,6 +219,11 @@ var requiredQueryParametersInSpec = []string{
 	"DELETE /api/v1/feedback ?message_id",
 	"DELETE /api/v1/feedback ?signal",
 	"DELETE /api/v1/notification-templates ?category",
+	// Verified against PageHandler.DeleteGrant (internal/api/pages_grants.go:307):
+	// a revoke naming nobody answers 400 rather than reporting success while
+	// withdrawing nothing, which is how an operator would come to believe an
+	// agent's access was gone. Pinned by TestPageGrants_RevokeWithoutASubjectIs400.
+	"DELETE /api/v1/pages/{slug}/grants ?subject",
 	"GET /api/v1/admin/backups/download ?path",
 	"GET /api/v1/admin/backups/inspect ?path",
 	"GET /api/v1/admin/backups/verify ?path",

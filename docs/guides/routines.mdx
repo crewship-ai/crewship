@@ -1077,6 +1077,16 @@ out of it — `transform` with `.identifier` gives you the new issue's key.
 | `issue.link` | Relates two issues | `identifier`, `target_identifier`, `relation_type` | `issue_write` |
 | `assignment.create` | Delegates a task to an agent in the author crew | `target_slug`, `task`, `chat_id` | `assignment_create` |
 | `escalation.create` | Raises an escalation to a human | `from_slug`, `reason`, `chat_id` | `escalation_create` |
+| `page.write` | Writes a panel's payload onto a page | `page`, `panel`, `data` | `page_write` |
+
+`page.write` is bounded twice over, and the first bound is not the autonomy
+level. The routine may only write a panel that **names it as the producer**, or
+one a human granted the crew or the acting agent `produce` on — an agent can
+never issue that grant itself. On top of that, a **strict** crew's routines do
+not write panels at all: `page_write` holds for approval under strict, and on an
+unattended run a hold is a refusal. That is deliberate. An unwritten panel goes
+`stale` and says so, which is a better outcome than a number nobody approved.
+Raise it with `crewship policy set` if a crew should push unattended.
 
 `relation_type` is one of `blocks`, `blocked_by`, `relates_to`, `duplicate_of`,
 `sub_issue_of`. A missing required arg is a **save-time** error, not a 400 at

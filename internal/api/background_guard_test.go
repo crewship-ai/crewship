@@ -28,6 +28,7 @@ var unregisteredSpawnSites = map[string]string{
 	"assignments_running_recovery.go:StartStuckRunningSweeper":   "boot daemon: ticker loop, stopped via ctx",
 	"assignments_stuck_sweeper.go:StartStuckQueueSweeper":        "boot daemon: ticker loop, stopped via ctx",
 	"credential_rotation.go:StartCredentialRotationExpiryWorker": "boot daemon: stop channel + caller's WaitGroup",
+	"pages_on_failure.go:StartPanelFreshnessSweeper":             "boot daemon: ticker loop, stopped via ctx",
 	"mcp_registry.go:StartRegistrySyncWorker":                    "boot daemon: stop channel + caller's WaitGroup",
 	"oauth_token.go:StartOAuthRefreshWorker":                     "boot daemon: stop channel + caller's WaitGroup",
 	"port_expose_registry.go:StartPurger":                        "daemon: purge loop, stopped by the registry",

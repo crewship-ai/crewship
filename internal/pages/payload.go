@@ -40,10 +40,14 @@ func ValidatePayload(schema PanelSchema, raw []byte) (Payload, error) {
 	switch schema {
 	case SchemaMetric:
 		return ValidateMetric(raw)
+	case SchemaSeries:
+		return ValidateSeries(raw)
 	case SchemaStatus:
 		return ValidateStatus(raw)
 	case SchemaTable:
 		return ValidateTable(raw)
+	case SchemaNarrative:
+		return ValidateNarrative(raw)
 	}
 	if schema.Known() {
 		return nil, newError(CodeUnknownSchema, schema,
@@ -77,7 +81,21 @@ type MetricPayload struct {
 	// Sparkline is recent history, oldest first. A nil element is a gap the
 	// producer knows about, so the line breaks instead of interpolating.
 	Sparkline []*float64 `json:"sparkline,omitempty"`
+	// DeltaGood says which direction is the good one, and is absent by default
+	// (PRD §11b.9). Without it the delta renders muted, with a sign and an
+	// arrow and no colour — because a green arrow pointing up is a lie on an
+	// error rate, and the payload is the only thing that knows which metric
+	// this is. "up" or "down"; the JSON Schema rejects anything else.
+	DeltaGood *string `json:"delta_good,omitempty"`
 }
+
+// DeltaGoodUp and DeltaGoodDown are the only two values DeltaGood may hold.
+// The JSON Schema enforces the enum on the way in; these exist so callers
+// compare against a constant rather than a loose string.
+const (
+	DeltaGoodUp   = "up"
+	DeltaGoodDown = "down"
+)
 
 // Schema implements Payload.
 func (p *MetricPayload) Schema() PanelSchema { return SchemaMetric }

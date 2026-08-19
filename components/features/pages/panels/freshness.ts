@@ -11,7 +11,7 @@
  * A measured `0` is a `0`. Only "no basis to compute" is a `—`. There is no
  * fourth glyph — the product already has one and Pages inherits it verbatim.
  */
-import type { PanelSnapshot, PanelSpec, PanelState } from "./types"
+import type { PanelProvenance, PanelSnapshot, PanelSpec, PanelState } from "./types"
 
 /** U+2014. The one and only no-data glyph. */
 export const EM_DASH = "—"
@@ -51,6 +51,22 @@ export function panelStateWord(state: PanelState): string {
     case "never_produced":
       return "no data yet"
   }
+}
+
+/**
+ * Provenance readers. The wire name (§11b.4) wins; the camelCase spelling is
+ * accepted only so the not-yet-converted normaliser in `hooks/use-pages.ts`
+ * keeps rendering, and both this fallback and the deprecated fields on
+ * `PanelProvenance` go away with it.
+ */
+export function provenanceRunId(prov: PanelProvenance | null | undefined): string | null {
+  return prov?.run_id ?? null
+}
+
+export function provenanceProducedAt(
+  prov: PanelProvenance | null | undefined,
+): string | Date | null {
+  return prov?.produced_at ?? null
 }
 
 export function toDate(value: string | Date | null | undefined): Date | null {

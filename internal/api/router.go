@@ -209,6 +209,10 @@ type Router struct {
 	// it a newly created rule would not fire until the 60s tick, which reads
 	// as "the automation is broken" to whoever just saved it.
 	automations *AutomationHandler
+	// pages is the PageHandler behind the page routes, exposed via Pages() so
+	// the boot path can give it the automation registry-refresh hook and start
+	// its freshness sweeper on the same instance.
+	pages *PageHandler
 	// PipelinesHandler is exposed (capitalised) so the orchestrator
 	// boot path can hand it the AgentRunner adapter post-construction.
 	// The router builds handlers before the orchestrator is fully
@@ -617,6 +621,19 @@ func (r *Router) Provisioning() *ProvisioningHandler {
 // its registry-refresh hook. Returns nil when registerRoutes hasn't run yet.
 func (r *Router) Automations() *AutomationHandler {
 	return r.automations
+}
+
+// Pages returns the PageHandler the page routes dispatch to, so the boot path
+// can hand it the same registry-refresh hook (a wake gate authored through
+// PATCH /pages must fire on the next push, not on the next 60s tick) and start
+// its freshness sweeper on the instance whose clock and journal the request
+// paths use. Returns nil when registerRoutes hasn't run yet.
+//
+// Several PageHandlers are constructed — one per route file, each stateless
+// over the database — and this is deliberately the one behind create, update,
+// delete and the public push path, which is where both hooks belong.
+func (r *Router) Pages() *PageHandler {
+	return r.pages
 }
 
 // AuthHandler returns the registered AuthHandler so server startup code can

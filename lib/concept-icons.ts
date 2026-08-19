@@ -1,7 +1,7 @@
 import {
   Activity, AtSign, Bell, BookOpen, Brain, CircleDot, FolderTree, Inbox, Key,
-  LayoutDashboard, MessageSquare, Play, Plug, ScrollText, Settings, ShieldCheck,
-  Store, Users, Zap,
+  LayoutDashboard, LayoutTemplate, MessageSquare, Play, Plug, ScrollText,
+  Settings, ShieldCheck, Store, Users, Zap,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -28,6 +28,12 @@ export const CONCEPT_ICON = {
   inbox: Inbox,
   issues: CircleDot,
   routines: ScrollText,
+  /**
+   * A page: panels laid out on a grid. LayoutTemplate rather than
+   * LayoutDashboard, which Dashboard already holds — Pages is where a person
+   * goes to see the state of their work, and the two must not wear one face.
+   */
+  pages: LayoutTemplate,
   activity: Activity,
   journal: BookOpen,
   crews: Users,

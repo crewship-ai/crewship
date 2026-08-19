@@ -1,0 +1,61 @@
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Síť
+  slug: sit
+  description: Dva producenti, dva jazyky, jedna stránka. Go pinguje, Python měří HTTP.
+spec:
+  # Two producers write this page and neither knows about the other. That is
+  # the point of §0's "the page has no datasource": a panel's producer is
+  # whatever runs next to the thing being measured, in whatever language it
+  # was easiest to write, and the page is where their answers meet.
+  #
+  # `tab:` puts a panel on a named screen instead of on one long scroll. There
+  # is no `tabs:` block: the bar is the tab names in the order they first
+  # appear below, and a panel that names none lands on the first tab. Each tab
+  # carries the worst freshness state of its own panels, so a panel that stops
+  # reporting on a tab you are not looking at still says so on the bar — see
+  # docs/guides/pages.mdx. `flotila.page.yaml` declares no tabs at all and
+  # renders as it always did.
+  panels:
+    # ── Go: ICMP-ish reachability, every 5s ───────────────────────────────
+    - id: dosah
+      schema: status.v1
+      icon: network
+      title: Dosažitelnost
+      owner: crew/ops
+      producer: script/ping-go
+      sla: 30s
+      span: 12
+      tab: Síť
+
+    - id: latence
+      schema: metric.v1
+      icon: clock
+      title: Odezva 8.8.8.8
+      owner: crew/ops
+      producer: script/ping-go
+      sla: 30s
+      span: 4
+      tab: Odezva
+
+    # ── Python: HTTP timing, every 5s ─────────────────────────────────────
+    - id: http
+      schema: series.v1
+      icon: network
+      title: HTTP odezva podle cíle
+      owner: crew/engineering
+      producer: script/ping-py
+      sla: 30s
+      span: 8
+      tab: Odezva
+
+    - id: cile
+      schema: table.v1
+      icon: database
+      title: Cíle
+      owner: crew/engineering
+      producer: script/ping-py
+      sla: 30s
+      span: 12
+      tab: Cíle

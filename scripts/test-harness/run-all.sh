@@ -45,6 +45,10 @@ tests=(test-memory.sh test-delegation.sh test-crew-links.sh test-notifications.s
 # when the server's provider isn't docker (503), so it's safe to always include;
 # opt out with WITH_ORPHAN_REAP=0.
 [[ "${WITH_ORPHAN_REAP:-1}" == "1" ]] && tests+=(test-orphan-token-reap.sh)
+# Pages (#1937) — provider-free and deterministic: it creates one page, pushes
+# one payload, waits out a 5s SLA and deletes the page again. Safe to include
+# by default; opt out with WITH_PAGES=0.
+[[ "${WITH_PAGES:-1}" == "1" ]] && tests+=(test-pages.sh)
 # #1412 category preference-matrix suite — opt-in: it creates two PERSONAL
 # notification channels + writes real cells into the CURRENT session user's
 # preference matrix (cleaned up on exit, but a crash mid-run could leave

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ChartLine, CircleHelp, FileText, TriangleAlert } from "lucide-react"
+import { ChartLine, CircleHelp, FileText, Frame, TriangleAlert } from "lucide-react"
 
 import { PanelFrame } from "./panel-frame"
 import type { PanelProps } from "./types"
@@ -24,9 +24,9 @@ export function UnknownSchemaPanel({ panel, data, now, publicView, className }: 
       className={className}
       icon={CircleHelp}
     >
-      <p className="text-body text-muted-foreground">
+      <p className="type-page-value text-muted-foreground">
         This version of Crewship does not render{" "}
-        <code className="font-mono text-[12px] text-foreground">{String(panel.schema)}</code>{" "}
+        <code className="type-page-stamp text-foreground">{String(panel.schema)}</code>{" "}
         panels. Upgrade Crewship, or change this panel to one of the schemas this build knows.
       </p>
     </PanelFrame>
@@ -35,11 +35,16 @@ export function UnknownSchemaPanel({ panel, data, now, publicView, className }: 
 
 /**
  * A schema that is in the closed vocabulary but is not implemented in this
- * slice — `series.v1` and `narrative.v1` are staged later (§12). Distinct from
- * an unknown schema on purpose: the page is valid, the renderer is behind.
+ * build. `embed.v1` is the only one left: §3.1 stages it last because it needs
+ * a second origin and a sandbox proxy rather than a payload type.
+ *
+ * Distinct from an unknown schema on purpose: the page is valid, the renderer
+ * is behind — and `embed.v1`'s name is reserved from the first migration
+ * precisely so it never has to read as unknown.
  */
 export function PendingSchemaPanel({ panel, data, now, publicView, className }: PanelProps) {
-  const icon = panel.schema === "narrative.v1" ? FileText : ChartLine
+  const icon =
+    panel.schema === "narrative.v1" ? FileText : panel.schema === "embed.v1" ? Frame : ChartLine
   return (
     <PanelFrame
       panel={panel}
@@ -49,8 +54,8 @@ export function PendingSchemaPanel({ panel, data, now, publicView, className }: 
       className={className}
       icon={icon}
     >
-      <p className="text-body text-muted-foreground">
-        <code className="font-mono text-[12px] text-foreground">{String(panel.schema)}</code>{" "}
+      <p className="type-page-value text-muted-foreground">
+        <code className="type-page-stamp text-foreground">{String(panel.schema)}</code>{" "}
         panels arrive in a later release. The panel and its data are being kept — nothing pushed
         to it is lost.
       </p>
@@ -73,7 +78,7 @@ export function PanelErrorPanel({ panel, data, now, publicView, className }: Pan
       className={className}
       icon={TriangleAlert}
     >
-      <p className="text-body text-destructive">
+      <p className="type-page-value text-destructive">
         This panel could not be rendered from its latest payload. The rest of the page is
         unaffected; re-push the panel or check the producer&apos;s output shape.
       </p>

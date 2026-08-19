@@ -28,6 +28,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	if r.hub != nil {
 		ws.SetHub(r.hub)
 	}
+	ws.SetJournal(r.Journal())
 	crews := NewCrewHandler(r.db, r.logger)
 	crewSocket := r.socketPath
 	if crewSocket == "" {

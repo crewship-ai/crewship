@@ -29,6 +29,7 @@ import { InboxTile, type InboxEntry } from "@/components/features/dashboard/inbo
 import { RecentMissionsTable } from "@/components/features/dashboard/recent-missions-table"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
+import { PagesStrip } from "@/components/features/dashboard/pages-strip"
 
 import {
   useAgentSummaries, useCrewSummaries, useProjectSummaries,
@@ -599,6 +600,11 @@ export default function DashboardPage() {
         </DashboardCard>
         </AppearStack>
       </div>
+
+      {/* ── Row 6b: Pages strip (§10b.5d) ─────────────────────────── */}
+      <Appear order={9}>
+        <PagesStrip />
+      </Appear>
 
       {/* ── Row 7: Recent missions table ─────────────────────────── */}
       <Appear order={9}>

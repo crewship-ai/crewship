@@ -288,6 +288,23 @@ Keeper Phase 2 (aux-LLM evaluators, PR-C / PRD §6 F4). All four are wrapped in 
 |---|---|---|
 | `POST` | `/api/v1/internal/mcp-tool-calls` | Record an MCP tool invocation for audit. |
 
+### Pages
+
+| Method | Path | Purpose |
+|---|---|---|
+| `PUT` | `/api/v1/internal/pages/{page}/data` | Write one panel's payload on behalf of a routine run or a container agent. |
+
+The body is an **envelope**, not the payload: `workspace_id`, `crew_id`,
+`agent_id` and `author_run_id` are injected by the caller (the dispatcher for
+the `page.write` verb, the sidecar for an agent) and the payload rides in
+`data`. `author_run_id` is optional — an agent in a container has no run, and
+the provenance column is nullable for exactly that caller.
+
+Producer authority is checked here, not upstream: the panel's declared
+`producer:` must name the acting routine or agent, or a human must have issued
+a `produce` grant covering the panel. A refusal writes a journal entry and
+notifies the page owner. See [Pages](/guides/pages).
+
 ### Port expose
 
 | Method | Path | Purpose |

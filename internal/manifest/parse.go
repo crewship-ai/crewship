@@ -97,6 +97,7 @@ func (b *Bundle) isEmpty() bool {
 		len(b.Hooks) == 0 &&
 		len(b.Skills) == 0 &&
 		len(b.Issues) == 0 &&
+		len(b.Pages) == 0 &&
 		len(b.Crews) == 0 &&
 		len(b.Agents) == 0 &&
 		len(b.Integrations) == 0
@@ -162,6 +163,14 @@ type Bundle struct {
 	// wsCtx.HasCrew, with the matching SlugLookup populated by
 	// buildKindWorkspaceContext from the legacy bundle.
 	Issues []kinds.IssueDocument
+
+	// Pages are workspace-scoped dashboards authored via `kind: Page`
+	// (docs/prd/pages.md §12 v1). The panel list inside each document is
+	// the internal/pages authoring type verbatim, so the same YAML is
+	// accepted by `crewship page create --file` and by `crewship apply`.
+	// Per-panel owner/producer references (crew, agent, routine) are
+	// FK-validated against the rest of the bundle in PageDocument.Validate.
+	Pages []kinds.PageDocument
 }
 
 // LoadFile reads a manifest file and returns the parsed bundle with
@@ -377,10 +386,16 @@ func Load(data []byte) (*Bundle, error) {
 				return nil, fmt.Errorf("decode Issue document: %w", err)
 			}
 			out.Issues = append(out.Issues, doc)
+		case KindPage:
+			var doc kinds.PageDocument
+			if err := raw.Decode(&doc); err != nil {
+				return nil, fmt.Errorf("decode Page document: %w", err)
+			}
+			out.Pages = append(out.Pages, doc)
 		case "":
-			return nil, errors.New("missing kind: (expected one of: Crew, Agent, Integration, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)")
+			return nil, errors.New("missing kind: (expected one of: " + knownKindList + ")")
 		default:
-			return nil, fmt.Errorf("unsupported kind %q (expected one of: Crew, Agent, Integration, Workspace, Project, Label, Milestone, WorkflowTemplate, TriageRule, RecurringIssue, SavedView, Routine, FeatureFlag, InstanceSetting, Recipe, CrewTemplate, Connector, Hook, Skill, Issue)", head.Kind)
+			return nil, fmt.Errorf("unsupported kind %q (expected one of: %s)", head.Kind, knownKindList)
 		}
 	}
 

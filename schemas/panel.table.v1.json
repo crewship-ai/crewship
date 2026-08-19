@@ -20,9 +20,9 @@
     },
     "rows": {
       "type": "array",
-      "maxItems": 500,
+      "maxItems": 200,
       "items": { "$ref": "#/$defs/Row" },
-      "description": "The rows, in the order they should be rendered — the producer sorts, because the panel has no query with which to sort anything. Required even when empty: an empty array is a measured \"nothing matched\", while an absent one is a producer that stopped halfway. Bounded at 500, above which the answer is a narrower query in the producer, not a longer table on the page."
+      "description": "The rows, in the order they should be rendered — the producer sorts, because the panel has no query with which to sort anything. Required even when empty: an empty array is a measured \"nothing matched\", while an absent one is a producer that stopped halfway. Bounded at 200: the 64 KiB payload cap is roughly a thousand rows, which is more than anyone reads and more than we will virtualise, so the byte cap alone would admit a table nobody can use. Above 200 the answer is a narrower query in the producer, not a longer table on the page."
     }
   },
   "$defs": {
