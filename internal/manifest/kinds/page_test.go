@@ -290,6 +290,10 @@ func TestPageDocument_Validate_RejectsReservedSchema(t *testing.T) {
 		}
 	}
 	if reserved == "" {
+		// SKIP-WAIVER(#1935): the vocabulary has no Known-but-not-Producible
+		// member until embed.v1 lands, so there is nothing for this test to
+		// refuse. It stops skipping on its own at that point — embed is Known
+		// always and Producible only where an operator vetted an allow-list.
 		t.Skip("every known schema is producible today; nothing reserved to refuse")
 	}
 	d := pageTestDoc()
