@@ -28,6 +28,18 @@ type DemoCredential struct {
 	// Sensitivity is the reveal classification: "", "RESTRICTED" or "SEALED".
 	// Empty leaves the server default (STANDARD).
 	Sensitivity string
+	// SecurityLevel is the Keeper tier, 1–4 (internal/keeper/tier.go). It is
+	// the property that decides what happens when an agent asks for the
+	// credential, so the demo vault has to span it: with every row at the
+	// server default of 1, the tier donut is one grey ring, the tier facet has
+	// three rows that select nothing, and "L4 · critical" is a badge nobody has
+	// ever seen. 0 leaves the server default.
+	//
+	// The tiers here are the ones the tier table's own blast descriptions imply
+	// — an SSH deploy key and a cloud account are L3's examples verbatim, and a
+	// production database DSN is L4's. Guessing lower would make the demo teach
+	// the wrong habit.
+	SecurityLevel int
 	// Tags feed the tag facet.
 	Tags []string
 	// Username is the cleartext identifier half a USERPASS credential
@@ -81,7 +93,8 @@ func DemoCredentials() []DemoCredential {
 				Provider:    "GITHUB",
 				Value:       dummyPrefix + "github-acme",
 			},
-			Tags: []string{"demo", "source-control"},
+			SecurityLevel: 2,
+			Tags:          []string{"demo", "source-control"},
 		},
 		{
 			Def: CredentialDef{
@@ -91,7 +104,8 @@ func DemoCredentials() []DemoCredential {
 				Provider:    "GITHUB",
 				Value:       dummyPrefix + "github-globex",
 			},
-			Tags: []string{"demo", "source-control"},
+			SecurityLevel: 2,
+			Tags:          []string{"demo", "source-control"},
 		},
 
 		// Multi-part: one credential, three parts, two of them not secret.
@@ -109,7 +123,8 @@ func DemoCredentials() []DemoCredential {
 				{Key: "region", Value: "eu-central-1"},
 				{Key: "session_token", Value: dummyPrefix + "aws-session-token", Secret: true},
 			},
-			Tags: []string{"demo", "cloud"},
+			SecurityLevel: 3,
+			Tags:          []string{"demo", "cloud"},
 		},
 
 		// Login shape: the cleartext half is an identifier, not a secret.
@@ -126,7 +141,8 @@ func DemoCredentials() []DemoCredential {
 				{Key: "host", Value: "smtp.example.invalid"},
 				{Key: "port", Value: "587"},
 			},
-			Tags: []string{"demo", "comms"},
+			SecurityLevel: 2,
+			Tags:          []string{"demo", "comms"},
 		},
 
 		{
@@ -137,7 +153,8 @@ func DemoCredentials() []DemoCredential {
 				Provider:    "GITHUB",
 				Value:       demoPrivateKeyPEM,
 			},
-			Tags: []string{"demo", "source-control"},
+			SecurityLevel: 3,
+			Tags:          []string{"demo", "source-control"},
 		},
 
 		{
@@ -148,7 +165,8 @@ func DemoCredentials() []DemoCredential {
 				Provider:    "NONE",
 				Value:       demoCertificatePEM,
 			},
-			Tags: []string{"demo", "infra"},
+			SecurityLevel: 3,
+			Tags:          []string{"demo", "infra"},
 		},
 
 		{
@@ -159,7 +177,8 @@ func DemoCredentials() []DemoCredential {
 				Provider:    "STRIPE",
 				Value:       dummyPrefix + "stripe",
 			},
-			Tags: []string{"demo", "payments"},
+			SecurityLevel: 2,
+			Tags:          []string{"demo", "payments"},
 		},
 		{
 			Def: CredentialDef{
@@ -169,7 +188,8 @@ func DemoCredentials() []DemoCredential {
 				Provider:    "NOTION",
 				Value:       dummyPrefix + "notion",
 			},
-			Tags: []string{"demo", "docs"},
+			SecurityLevel: 1,
+			Tags:          []string{"demo", "docs"},
 		},
 
 		{
@@ -180,7 +200,8 @@ func DemoCredentials() []DemoCredential {
 				Provider:    "NONE",
 				Value:       dummyPrefix + "webhook-hmac",
 			},
-			Tags: []string{"demo", "infra"},
+			SecurityLevel: 2,
+			Tags:          []string{"demo", "infra"},
 		},
 
 		// RESTRICTED and SEALED exist so the classification badges and the
@@ -195,8 +216,9 @@ func DemoCredentials() []DemoCredential {
 				Provider:    "NONE",
 				Value:       "postgres://demo:" + dummyPrefix + "dsn@db.example.invalid:5432/demo",
 			},
-			Sensitivity: "SEALED",
-			Tags:        []string{"demo", "data", "production"},
+			Sensitivity:   "SEALED",
+			SecurityLevel: 4,
+			Tags:          []string{"demo", "data", "production"},
 		},
 		{
 			Def: CredentialDef{
@@ -206,8 +228,9 @@ func DemoCredentials() []DemoCredential {
 				Provider:    "KUBERNETES",
 				Value:       dummyPrefix + "kubeconfig",
 			},
-			Sensitivity: "RESTRICTED",
-			Tags:        []string{"demo", "infra"},
+			Sensitivity:   "RESTRICTED",
+			SecurityLevel: 3,
+			Tags:          []string{"demo", "infra"},
 		},
 	}
 }

@@ -132,7 +132,17 @@ type credentialResponse struct {
 	UpdatedAt  string   `json:"updated_at"`
 	AgentCount int      `json:"_count_agent_credentials"`
 	AgentNames []string `json:"agent_names"`
-	MCPUsed    bool     `json:"mcp_used"`
+	// AgentIDs are the same agents as AgentNames, in the same order.
+	//
+	// The names alone could say WHICH agents hold a credential but never
+	// point at one: an avatar, a link and a filter facet are all keyed by
+	// id, and a console that only had names had to either omit the agent's
+	// face or derive one from the name — which would render a different
+	// avatar for the same agent than every other page shows. Always
+	// non-nil, and index-aligned with AgentNames by construction (one
+	// query, one ORDER BY).
+	AgentIDs []string `json:"agent_ids"`
+	MCPUsed  bool     `json:"mcp_used"`
 	// Attribution (v98). CreatedByActorType is one of 'user' /
 	// 'agent' / 'system'; nil only on pre-v98 rows that the
 	// migration hasn't backfilled to 'user' (no such case in
@@ -319,7 +329,7 @@ func (h *CredentialHandler) enrichCredentials(ctx context.Context, result []cred
 		credIDs[i] = c.ID
 	}
 	crewIDsMap := h.loadCrewIDsBatch(ctx, credIDs)
-	agentNamesMap := h.loadAgentNamesBatch(ctx, credIDs)
+	agentRefsMap := h.loadAgentRefsBatch(ctx, credIDs)
 	mcpUsedSet := h.loadMCPUsedBatch(ctx, credIDs)
 	for i := range result {
 		if ids, ok := crewIDsMap[result[i].ID]; ok {
@@ -327,13 +337,23 @@ func (h *CredentialHandler) enrichCredentials(ctx context.Context, result []cred
 		} else {
 			result[i].CrewIDs = []string{}
 		}
-		if names, ok := agentNamesMap[result[i].ID]; ok {
-			result[i].AgentNames = names
-		} else {
-			result[i].AgentNames = []string{}
-		}
+		result[i].AgentNames, result[i].AgentIDs = splitAgentRefs(agentRefsMap[result[i].ID])
 		result[i].MCPUsed = mcpUsedSet[result[i].ID]
 	}
+}
+
+// splitAgentRefs fans one ordered list of agents out into the two parallel
+// arrays the wire format carries. Both are always non-nil so the console can
+// iterate without a null check, and both are built from the same slice in the
+// same pass — the index alignment the field doc promises cannot drift.
+func splitAgentRefs(refs []agentRef) (names []string, ids []string) {
+	names = make([]string, 0, len(refs))
+	ids = make([]string, 0, len(refs))
+	for _, r := range refs {
+		names = append(names, r.Name)
+		ids = append(ids, r.ID)
+	}
+	return names, ids
 }
 
 // credentialCursorPrefix versions the opaque list cursor so a future format
@@ -409,11 +429,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.CrewIDs = h.loadCrewIDs(r.Context(), c.ID)
-	if names, ok := h.loadAgentNamesBatch(r.Context(), []string{c.ID})[c.ID]; ok {
-		c.AgentNames = names
-	} else {
-		c.AgentNames = []string{}
-	}
+	c.AgentNames, c.AgentIDs = splitAgentRefs(h.loadAgentRefsBatch(r.Context(), []string{c.ID})[c.ID])
 	c.MCPUsed = h.loadMCPUsedBatch(r.Context(), []string{c.ID})[c.ID]
 	writeJSON(w, http.StatusOK, c)
 }

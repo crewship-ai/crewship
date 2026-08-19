@@ -5,7 +5,7 @@
 // see Rotate/Delete buttons that 403 on click.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { CredentialDetailSheet } from "../credential-detail-sheet"
 
 const h = vi.hoisted(() => ({
@@ -17,6 +17,8 @@ const h = vi.hoisted(() => ({
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: (...args: unknown[]) => h.apiFetch(...args),
 }))
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 
 vi.mock("@/hooks/use-abilities", async () => {
   const { defineAbilitiesFor } = await import("@/lib/permissions/abilities")
@@ -70,38 +72,50 @@ function renderSheet(overrides: Record<string, unknown> = {}) {
   )
 }
 
+/**
+ * The sheet had five tabs and now has none — every section is on the page at
+ * once, in the /issues shape. These stay as no-ops rather than being deleted
+ * from ~40 call sites: what each test asserts is unchanged, and the name still
+ * marks WHICH section it is about.
+ */
 function openSettingsTab() {
-  const trigger = screen.getByRole("tab", { name: /settings/i })
-  fireEvent.mouseDown(trigger)
-  fireEvent.click(trigger)
+  /* no tabs: the section is already rendered */
 }
 
+// Every knob the mocked hooks read is reset here, so no test inherits one from
+// whichever test ran before it. `capabilities` and `apiFetch` were already
+// reset; `role` was not, and the tier and readiness describes below are the
+// two that never assign it — they ran against whatever the previous describe
+// happened to leave behind.
+//
+// Measured, not assumed: forcing a prior describe to leak VIEWER leaves both
+// of them green, because neither asserts anything role-dependent. So this is
+// the reset being complete rather than a bug being fixed — it stops the next
+// role-sensitive assertion added to either describe from depending on file
+// order, which is the point at which it would have become one.
 beforeEach(() => {
+  h.role = "OWNER"
   h.capabilities = []
   h.apiFetch.mockReset()
   h.apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
 })
 
-describe("Settings tab gating by role", () => {
-  it("OWNER sees update value, rotate and delete", () => {
+describe("write affordances gated by role", () => {
+  it("OWNER sees rotate and delete", () => {
     h.role = "OWNER"
     renderSheet()
-    openSettingsTab()
 
-    expect(screen.getByText("Update value")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /rotate with grace overlap/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /delete credential/i })).toBeInTheDocument()
   })
 
-  it("MANAGER keeps update value but loses rotate and delete (backend requires manage)", () => {
+  it("MANAGER loses rotate and delete (backend requires manage), and is told why", () => {
     h.role = "MANAGER"
     renderSheet()
-    openSettingsTab()
 
-    expect(screen.getByText("Update value")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /rotate with grace overlap/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
-    // ...and gets told why, instead of a silent gap.
+    // ...instead of a silent gap.
     expect(screen.getByText(/require a workspace admin/i)).toBeInTheDocument()
   })
 
@@ -121,7 +135,6 @@ describe("Settings tab gating by role", () => {
     renderSheet()
     openSettingsTab()
 
-    expect(screen.queryByText("Update value")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /rotate with grace overlap/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
     expect(screen.getByText(/don't have permission to modify/i)).toBeInTheDocument()
@@ -136,7 +149,9 @@ describe("Settings tab gating by role", () => {
   it("MANAGER gets the header Edit button (PATCH allows MANAGER)", () => {
     h.role = "MANAGER"
     renderSheet()
-    expect(screen.getByRole("button", { name: /^edit$/i })).toBeInTheDocument()
+    // Two now: the header action and the Value card's pointer to it, which
+    // exists because replacing a value no longer has its own control here.
+    expect(screen.getAllByRole("button", { name: /^edit$/i })).toHaveLength(2)
   })
 
   // #1034 — the backend honors the credential.rotate capability for
@@ -183,13 +198,11 @@ describe("Test now gating follows server-declared probe support", () => {
   })
 })
 
-function openTab(name: RegExp) {
-  const trigger = screen.getByRole("tab", { name })
-  fireEvent.mouseDown(trigger)
-  fireEvent.click(trigger)
+function openTab(_name: RegExp) {
+  /* no tabs: the section is already rendered — see openSettingsTab */
 }
 
-describe("Overview tab field rendering", () => {
+describe("property rendering", () => {
   it("renders username, expiry, last-used, last-error and last-used-IPs when present", () => {
     h.role = "OWNER"
     renderSheet({
@@ -201,29 +214,39 @@ describe("Overview tab field rendering", () => {
     })
 
     expect(screen.getByText("Username")).toBeInTheDocument()
-    expect(screen.getByText("svc-account")).toBeInTheDocument()
-    expect(screen.getByText("Expires")).toBeInTheDocument()
+    // Twice on purpose: once in the identity line under the name, once as a
+    // property. The header says what this credential IS; the row is where you
+    // read it off.
+    expect(screen.getAllByText("svc-account").length).toBeGreaterThan(0)
+    // Twice: the figures band and the property row.
+    expect(screen.getAllByText("Expires").length).toBeGreaterThan(0)
     expect(screen.getByText("Last error")).toBeInTheDocument()
     expect(screen.getByText("401 Unauthorized")).toBeInTheDocument()
     expect(screen.getByText("10.0.0.1")).toBeInTheDocument()
     expect(screen.getByText("10.0.0.2")).toBeInTheDocument()
-    // "never" must not leak in once a real last-used timestamp exists.
+    // "never" must not leak in once a real last-used timestamp exists —
+    // neither in the figures band nor in the properties.
     expect(screen.queryByText("never")).not.toBeInTheDocument()
   })
 
   it("shows 'never' for Last used when the credential has never been used", () => {
     h.role = "OWNER"
     renderSheet({ last_used_at: null })
-    expect(screen.getByText("never")).toBeInTheDocument()
+    // The figures band and the property row both say it.
+    expect(screen.getAllByText("never").length).toBeGreaterThan(0)
   })
 
-  it("does not render a Username row, expiry, error box or IP list when absent", () => {
+  it("does not render a Username row, expiry row, error card or IP list when absent", () => {
     h.role = "OWNER"
     renderSheet()
-    expect(screen.queryByText("Username")).not.toBeInTheDocument()
-    expect(screen.queryByText("Expires")).not.toBeInTheDocument()
+    const props = within(screen.getByText("Properties").closest("[class*='rounded-xl']")!)
+    expect(props.queryByText("Username")).not.toBeInTheDocument()
+    // The figures band keeps a fixed set of slots and prints "—" for an
+    // expiry that does not exist, the way the issue band prints "—" for no due
+    // date. What must not appear is a PROPERTY row asserting one.
+    expect(props.queryByText("Expires")).not.toBeInTheDocument()
     expect(screen.queryByText("Last error")).not.toBeInTheDocument()
-    expect(screen.queryByText("Last 5 IPs")).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Last \d+ IPs$/)).not.toBeInTheDocument()
   })
 
   // The CLI badge marks credentials Crewship itself uses to authenticate an
@@ -362,21 +385,25 @@ describe("Test now request lifecycle", () => {
   })
 })
 
-describe("Used-by tab", () => {
-  it("lists every assigned agent and mirrors the count on the tab badge", () => {
+describe("used by", () => {
+  it("lists every assigned agent and carries the count on the section", () => {
     h.role = "OWNER"
     renderSheet({ agent_names: ["agent-a", "agent-b"], _count_agent_credentials: 2 })
-    openTab(/used by/i)
     expect(screen.getByText("agent-a")).toBeInTheDocument()
     expect(screen.getByText("agent-b")).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /used by/i })).toHaveTextContent("2")
+    // The count moved from a tab badge to the card's own subtitle, and to the
+    // figures band — the tab it used to sit on no longer exists.
+    // The count moved from a tab badge to the figures band and the card's own
+    // subtitle — the tab it used to sit on no longer exists.
+    expect(screen.getAllByText("Used by").length).toBe(2)
+    expect(screen.getAllByText("2").length).toBeGreaterThan(0)
   })
 
   it("shows the empty state when no agent uses the credential", () => {
     h.role = "OWNER"
     renderSheet({ agent_names: [] })
     openTab(/used by/i)
-    expect(screen.getByText(/not yet used by any agent/i)).toBeInTheDocument()
+    expect(screen.getByText(/no agent holds this credential yet/i)).toBeInTheDocument()
   })
 
   it("shows the MCP-usage note only when mcp_used is true", () => {
@@ -393,18 +420,18 @@ describe("Used-by tab", () => {
 // the empty state, a MEMBER who opened it was told "No audit events yet" about a
 // credential whose history they simply were not allowed to read. Hiding the tab
 // is the honest answer; showing a false empty timeline is not.
-describe("Audit tab visibility follows the backend gate", () => {
+describe("audit visibility follows the backend gate", () => {
   it("is offered to a role that can read the timeline", () => {
     h.role = "MANAGER"
     renderSheet()
-    expect(screen.getByRole("tab", { name: /audit/i })).toBeInTheDocument()
+    expect(screen.getByText("Audit")).toBeInTheDocument()
   })
 
   for (const role of ["MEMBER", "VIEWER"]) {
     it(`is hidden from ${role}, who would get a 403 and a false empty state`, () => {
       h.role = role
       renderSheet()
-      expect(screen.queryByRole("tab", { name: /audit/i })).not.toBeInTheDocument()
+      expect(screen.queryByText("Audit")).not.toBeInTheDocument()
     })
   }
 
@@ -442,7 +469,7 @@ describe("Audit tab", () => {
 
     expect(await screen.findByText("CREATED")).toBeInTheDocument()
     expect(screen.getByText("READ")).toBeInTheDocument()
-    expect(screen.getByText(/from 1\.2\.3\.4/)).toBeInTheDocument()
+    expect(screen.getByText(/^1\.2\.3\.4$/)).toBeInTheDocument()
   })
 
   it("shows the empty state when the audit log has no events", async () => {
@@ -455,7 +482,7 @@ describe("Audit tab", () => {
     })
     renderSheet()
     openTab(/audit/i)
-    expect(await screen.findByText(/no audit events yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/nothing has happened to this credential yet/i)).toBeInTheDocument()
   })
 
   // A 500 or network blip on the audit fetch must degrade to the empty
@@ -470,7 +497,7 @@ describe("Audit tab", () => {
     })
     renderSheet()
     openTab(/audit/i)
-    expect(await screen.findByText(/no audit events yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/nothing has happened to this credential yet/i)).toBeInTheDocument()
   })
 
   it("shows a loading spinner while the audit fetch is in flight", () => {
@@ -483,7 +510,7 @@ describe("Audit tab", () => {
     })
     renderSheet()
     openTab(/audit/i)
-    expect(screen.queryByText(/no audit events yet/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/nothing has happened to this credential yet/i)).not.toBeInTheDocument()
     // Sheet content is portaled to document.body, not the RTL container —
     // query the document directly for the decorative (aria-hidden) spinner.
     expect(document.querySelector("svg.animate-spin")).toBeInTheDocument()
@@ -502,7 +529,7 @@ describe("Audit tab", () => {
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })
     renderSheet()
-    expect(screen.getByRole("tab", { name: /audit/i })).toBeInTheDocument()
+    expect(screen.getByText("Audit")).toBeInTheDocument()
     openTab(/audit/i)
     expect(await screen.findByText("READ")).toBeInTheDocument()
   })
@@ -567,7 +594,8 @@ describe("Header and settings action callbacks fire with the right credential", 
         onEdit={onEdit}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }))
+    // The header action; the Value card's pointer is covered separately.
+    fireEvent.click(screen.getAllByRole("button", { name: /^edit$/i })[0])
     expect(onEdit).toHaveBeenCalledWith(credential)
   })
 
@@ -591,124 +619,54 @@ describe("Header and settings action callbacks fire with the right credential", 
   })
 })
 
-describe("Settings tab — inline value update ('Save value')", () => {
-  it("Save is disabled until the draft has non-whitespace content", () => {
+// The inline "Save value" editor is gone.
+//
+// One credential could have its secret replaced in three places on one screen:
+// rotate, this input, and the Value field in the Edit dialog — and two of them
+// issued the same PATCH. Rotate stays because it is a different operation (the
+// old value keeps working through a grace window). The plain swap belongs where
+// every other property of the credential is changed, and the form's own tests
+// cover it (credential-form.test.tsx).
+describe("changing the value", () => {
+  it("offers no second value editor beside Rotate", () => {
     h.role = "OWNER"
     renderSheet()
-    openSettingsTab()
-    const save = screen.getByRole("button", { name: /save value/i })
-    expect(save).toBeDisabled()
-
-    const input = screen.getByPlaceholderText(/paste new secret value/i)
-    fireEvent.change(input, { target: { value: "   " } })
-    expect(save).toBeDisabled()
-
-    fireEvent.change(input, { target: { value: "sk-live-123" } })
-    expect(save).not.toBeDisabled()
+    expect(screen.queryByPlaceholderText(/paste new secret value/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /save value/i })).not.toBeInTheDocument()
   })
 
-  it("toggling the eye button switches the input between masked and plaintext", () => {
+  // …but it must not become a dead end: a reader looking for "replace this
+  // secret" has to be told where it went.
+  it("points at Edit, and that link opens Edit with this credential", () => {
     h.role = "OWNER"
-    renderSheet()
-    openSettingsTab()
-    const input = screen.getByPlaceholderText(/paste new secret value/i) as HTMLInputElement
-    expect(input.type).toBe("password")
-    fireEvent.click(screen.getByRole("button", { name: /show value/i }))
-    expect(input.type).toBe("text")
-    fireEvent.click(screen.getByRole("button", { name: /hide value/i }))
-    expect(input.type).toBe("password")
-  })
-
-  // Regression target: a successful PATCH must wipe the plaintext draft from
-  // state (not just clear the input visually) and tell the caller to refetch
-  // so the sheet reflects the new value's metadata (e.g. rotated_at).
-  it("on success: clears the draft, shows Saved, and calls onRefresh", async () => {
-    h.role = "OWNER"
-    const onRefresh = vi.fn()
-    h.apiFetch.mockImplementation((url: unknown, opts?: unknown) => {
-      const method = (opts as { method?: string } | undefined)?.method
-      if (method === "PATCH") {
-        return Promise.resolve({ ok: true, status: 200, json: async () => ({}) })
-      }
-      return Promise.resolve({ ok: true, status: 200, json: async () => [] })
-    })
+    const onEdit = vi.fn()
     render(
       <CredentialDetailSheet
         workspaceId="ws1"
         credential={credential}
         open
         onOpenChange={() => {}}
-        onRefresh={onRefresh}
+        onRefresh={() => {}}
         onRotate={() => {}}
-        onEdit={() => {}}
+        onEdit={onEdit}
       />,
     )
-    openSettingsTab()
-    const input = screen.getByPlaceholderText(/paste new secret value/i) as HTMLInputElement
-    fireEvent.change(input, { target: { value: "new-secret-value" } })
-    fireEvent.click(screen.getByRole("button", { name: /save value/i }))
-
-    expect(await screen.findByText("Saved")).toBeInTheDocument()
-    expect(input.value).toBe("")
-    expect(onRefresh).toHaveBeenCalledTimes(1)
+    expect(
+      screen.getByText(/leave the field empty there to keep the existing one/i),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole("button", { name: /^Edit$/ })[1])
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: credential.id }))
   })
 
-  it("on a server-rejected value: shows the server's error message and keeps the draft", async () => {
+  it("keeps Rotate, which is not the same operation", () => {
     h.role = "OWNER"
-    h.apiFetch.mockImplementation((url: unknown, opts?: unknown) => {
-      const method = (opts as { method?: string } | undefined)?.method
-      if (method === "PATCH") {
-        return Promise.resolve({ ok: false, status: 400, json: async () => ({ error: "Value rejected" }) })
-      }
-      return Promise.resolve({ ok: true, status: 200, json: async () => [] })
-    })
     renderSheet()
-    openSettingsTab()
-    const input = screen.getByPlaceholderText(/paste new secret value/i) as HTMLInputElement
-    fireEvent.change(input, { target: { value: "bad-value" } })
-    fireEvent.click(screen.getByRole("button", { name: /save value/i }))
-
-    expect(await screen.findByText("Value rejected")).toBeInTheDocument()
-    expect(input.value).toBe("bad-value")
-
-    // Retyping clears the stale error immediately rather than leaving a red
-    // message stuck under input the user has already changed.
-    fireEvent.change(input, { target: { value: "bad-value2" } })
-    expect(screen.queryByText("Value rejected")).not.toBeInTheDocument()
-  })
-
-  it("falls back to a generic 'Request failed (status)' message when the error body has no message", async () => {
-    h.role = "OWNER"
-    h.apiFetch.mockImplementation((url: unknown, opts?: unknown) => {
-      const method = (opts as { method?: string } | undefined)?.method
-      if (method === "PATCH") {
-        return Promise.resolve({ ok: false, status: 422, json: async () => ({}) })
-      }
-      return Promise.resolve({ ok: true, status: 200, json: async () => [] })
-    })
-    renderSheet()
-    openSettingsTab()
-    fireEvent.change(screen.getByPlaceholderText(/paste new secret value/i), { target: { value: "x" } })
-    fireEvent.click(screen.getByRole("button", { name: /save value/i }))
-    expect(await screen.findByText("Request failed (422)")).toBeInTheDocument()
-  })
-
-  it("shows a network-error message when the PATCH request throws", async () => {
-    h.role = "OWNER"
-    h.apiFetch.mockImplementation((url: unknown, opts?: unknown) => {
-      const method = (opts as { method?: string } | undefined)?.method
-      if (method === "PATCH") {
-        return Promise.reject(new Error("boom"))
-      }
-      return Promise.resolve({ ok: true, status: 200, json: async () => [] })
-    })
-    renderSheet()
-    openSettingsTab()
-    fireEvent.change(screen.getByPlaceholderText(/paste new secret value/i), { target: { value: "x" } })
-    fireEvent.click(screen.getByRole("button", { name: /save value/i }))
-    expect(await screen.findByText("Network error")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /rotate and show the new value/i }),
+    ).toBeInTheDocument()
   })
 })
+
 
 describe("Settings tab — delete flow", () => {
   it("OWNER confirms delete: sends the DELETE request, refreshes and closes the sheet", async () => {
@@ -826,7 +784,7 @@ describe("Capability elevation reaches MEMBER", () => {
     openSettingsTab()
     // PATCH is MANAGER+ with no capability escape hatch, so surfacing the
     // inline rewrite here would be the mirror-image bug: a button that 403s.
-    expect(screen.queryByText("Update value")).not.toBeInTheDocument()
+    expect(screen.queryByText("Replace the value")).not.toBeInTheDocument()
   })
 
   it("MEMBER without the capability sees neither", () => {
@@ -835,53 +793,496 @@ describe("Capability elevation reaches MEMBER", () => {
     renderSheet()
     openSettingsTab()
     expect(screen.queryByRole("button", { name: /rotate with grace overlap/i })).not.toBeInTheDocument()
-    expect(screen.queryByText("Update value")).not.toBeInTheDocument()
   })
 })
 
 describe("Sheet close/reopen resets transient state", () => {
-  it("resets the active tab, test result and value draft after the sheet closes and reopens", () => {
+  it("clears the probe result, so it cannot describe the previous credential", async () => {
     h.role = "OWNER"
     const base = { ...credential, testable: true }
-    const { rerender } = render(
+    h.apiFetch.mockImplementation(async (url: string) =>
+      String(url).includes("/test")
+        ? { ok: true, status: 200, json: async () => ({ valid: true }) }
+        : { ok: true, status: 200, json: async () => [] },
+    )
+    const view = (open: boolean) => (
       <CredentialDetailSheet
         workspaceId="ws1"
         credential={base}
-        open
+        open={open}
         onOpenChange={() => {}}
         onRefresh={() => {}}
         onRotate={() => {}}
         onEdit={() => {}}
+      />
+    )
+    const { rerender } = render(view(true))
+
+    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    expect(await screen.findByText("Valid")).toBeInTheDocument()
+
+    rerender(view(false))
+    rerender(view(true))
+
+    // A green "Valid" carried over from the last secret you looked at is worse
+    // than no verdict: it is a claim about THIS one that nobody made.
+    expect(screen.queryByText("Valid")).not.toBeInTheDocument()
+  })
+})
+
+// The Keeper tier decides what happens when an agent asks for this credential,
+// and this sheet is where an operator goes to understand one secret in full. It
+// showed the reveal classification and not the tier — two different sentences
+// about the same row, and only one of them was on screen.
+describe("the Keeper tier", () => {
+  it("names the tier in the identity chips, beside the classification", () => {
+    renderSheet({ security_level: 4, security_level_label: "L4 · critical" })
+    // Two places, on purpose: a chip in the identity card so it is visible
+    // without scrolling, and the card that explains what it costs.
+    expect(screen.getAllByText("L4 · critical")).toHaveLength(2)
+  })
+
+  it("spells out on Overview what the tier does, not just what it is called", () => {
+    renderSheet({ security_level: 3, security_level_label: "L3 · high" })
+    expect(screen.getByText("Keeper tier")).toBeInTheDocument()
+    expect(screen.getAllByText("L3 · high").length).toBeGreaterThan(0)
+    // The blast radius the tier is FOR, and the consequence it imposes.
+    expect(screen.getByText(/Admin access to real infrastructure/i)).toBeInTheDocument()
+    expect(screen.getByText(/auto-leases rather than granting standing access/i)).toBeInTheDocument()
+  })
+
+  // "We were not told" and "L1 · low" are different claims, and defaulting to
+  // the second would put a reassuring badge on a row nobody has classified.
+  it("says the server did not report a tier rather than assuming L1", () => {
+    renderSheet()
+    expect(screen.getByText(/did not report a tier/i)).toBeInTheDocument()
+    expect(screen.queryByText("L1 · low")).not.toBeInTheDocument()
+  })
+
+  // Fail-closed, matching keeper.SecurityLevel.Tier(): a stored level the table
+  // does not define is guarded as critical, so the sheet must say critical.
+  it("reads an out-of-range level as L4", () => {
+    renderSheet({ security_level: 42 })
+    expect(screen.getAllByText("L4 · critical").length).toBeGreaterThan(0)
+  })
+})
+
+// Readiness moved here from the credentials table when that table was removed:
+// "the vault has a valid PAT" and "`gh` exists in the crew's container" are
+// different facts, and this sheet is where "will this actually work?" is asked
+// about one secret. Three states, not two — a green tick we did not earn is the
+// exact false reassurance the readiness endpoint exists to remove.
+describe("readiness", () => {
+  const GAP = {
+    crewId: "c1",
+    crewName: "engineering",
+    tool: "gh",
+    feature: "ghcr.io/devcontainers/features/github-cli:1",
+    featureId: "github-cli",
+  }
+
+  it("names the missing CLI and the crew that lacks it", () => {
+    render(
+      <CredentialDetailSheet
+        workspaceId="ws1"
+        credential={credential}
+        open
+        onOpenChange={() => {}}
+        onRefresh={() => {}}
+        onRotate={() => {}}
+        toolGaps={[GAP]}
+        readinessKnown
       />,
     )
+    expect(screen.getAllByText("Needs gh").length).toBeGreaterThan(0)
+    expect(screen.getByText("engineering")).toBeInTheDocument()
+    expect(screen.getByText("github-cli")).toBeInTheDocument()
+  })
+
+  it("says Ready once a crew has reported and no gap came back", () => {
+    render(
+      <CredentialDetailSheet
+        workspaceId="ws1"
+        credential={credential}
+        open
+        onOpenChange={() => {}}
+        onRefresh={() => {}}
+        onRotate={() => {}}
+        toolGaps={[]}
+        readinessKnown
+      />,
+    )
+    expect(screen.getAllByText("Ready").length).toBeGreaterThan(0)
+  })
+
+  // The important one.
+  it("refuses to claim Ready when no crew has reported at all", () => {
+    render(
+      <CredentialDetailSheet
+        workspaceId="ws1"
+        credential={credential}
+        open
+        onOpenChange={() => {}}
+        onRefresh={() => {}}
+        onRotate={() => {}}
+        toolGaps={[]}
+        readinessKnown={false}
+      />,
+    )
+    expect(screen.queryByText("Ready")).not.toBeInTheDocument()
+    expect(screen.getAllByText("Readiness unknown").length).toBeGreaterThan(0)
+    expect(screen.getByText(/no crew has reported its tool inventory yet/i)).toBeInTheDocument()
+  })
+})
+
+// #1162, inherited from the list's own delete when that delete went with the
+// table: another admin removing the credential first is the outcome the user
+// wanted, so it is a success with a note — and every OTHER failure has to be
+// said out loud rather than closing the dialog over an untouched credential.
+describe("deleting the credential", () => {
+  // Explicit, not inherited: `h.role` is module-global and the delete button
+  // only renders for a role that can delete, so a test that relied on an
+  // earlier one leaving OWNER behind would pass or fail on file ordering.
+  beforeEach(() => {
+    h.role = "OWNER"
+  })
+
+  async function clickDelete() {
     openSettingsTab()
-    expect(screen.getByText("Update value")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /delete credential/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: /^delete$/i }))
+  }
 
-    rerender(
+  it("treats a 404 as already-gone: refreshes, closes and says so", async () => {
+    const { toast } = await import("sonner")
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") return { ok: false, status: 404, json: async () => ({}) }
+      return { ok: true, status: 200, json: async () => [] }
+    })
+    const onRefresh = vi.fn()
+    const onOpenChange = vi.fn()
+    render(
       <CredentialDetailSheet
         workspaceId="ws1"
-        credential={base}
-        open={false}
-        onOpenChange={() => {}}
-        onRefresh={() => {}}
+        credential={credential}
+        open
+        onOpenChange={onOpenChange}
+        onRefresh={onRefresh}
         onRotate={() => {}}
-        onEdit={() => {}}
       />,
     )
-    rerender(
+    await clickDelete()
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled())
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("already deleted"))
+  })
+
+  // A 403 that closes the dialog and leaves the credential in place reads
+  // exactly like a successful delete. It used to do precisely that.
+  it("reports a refused delete instead of closing over an untouched credential", async () => {
+    const { toast } = await import("sonner")
+    h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") return { ok: false, status: 403, json: async () => ({}) }
+      return { ok: true, status: 200, json: async () => [] }
+    })
+    const onRefresh = vi.fn()
+    const onOpenChange = vi.fn()
+    render(
       <CredentialDetailSheet
         workspaceId="ws1"
-        credential={base}
+        credential={credential}
+        open
+        onOpenChange={onOpenChange}
+        onRefresh={onRefresh}
+        onRotate={() => {}}
+      />,
+    )
+    await clickDelete()
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("Couldn't delete")))
+    expect(onRefresh).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+})
+
+// Reveal has four gates: a workspace switch, the MANAGER floor, the
+// credentials:reveal capability, and the SEALED classification. Failing any one
+// used to render NOTHING, which teaches a reader that the product cannot show a
+// secret — and then a colleague on the same screen has the button. Each gate is
+// a different fix, so each one says which.
+describe("why reveal is unavailable", () => {
+  function renderReveal(over: Record<string, unknown> = {}, policyEnabled = true) {
+    h.apiFetch.mockImplementation(async (url: string) =>
+      String(url).includes("/reveal-policy")
+        ? { ok: true, status: 200, json: async () => ({ enabled: policyEnabled }) }
+        : { ok: true, status: 200, json: async () => [] },
+    )
+    return renderSheet(over)
+  }
+
+  it("says SEALED can never be revealed, whatever else is configured", async () => {
+    h.role = "OWNER"
+    h.capabilities = ["credentials:reveal"]
+    renderReveal({ sensitivity: "SEALED" })
+    // Twice: the Value card explains why the button is missing, and the
+    // Classification card explains what SEALED means. Both are true and both
+    // are where the reader is looking when the question comes up.
+    expect((await screen.findAllByText(/SEALED can never be revealed/i)).length).toBe(2)
+    expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
+  })
+
+  it("points at the workspace switch when reveal is off", async () => {
+    h.role = "OWNER"
+    h.capabilities = ["credentials:reveal"]
+    renderReveal({}, false)
+    expect(await screen.findByText(/switched off for this workspace/i)).toBeInTheDocument()
+  })
+
+  it("names the missing capability when the switch is on but the grant is not", async () => {
+    h.role = "OWNER"
+    h.capabilities = []
+    renderReveal({})
+    expect(await screen.findByText(/needs the credentials:reveal capability/i)).toBeInTheDocument()
+  })
+
+  it("offers the button once all four gates are open", async () => {
+    h.role = "OWNER"
+    h.capabilities = ["credentials:reveal"]
+    renderReveal({})
+    expect(
+      await screen.findByRole("button", { name: /reveal the existing value/i }),
+    ).toBeInTheDocument()
+  })
+
+  // Below the MANAGER floor there is nothing to explain: reveal is not a thing
+  // that tier does, and an explanation would read as an offer.
+  it("explains nothing to a role that cannot write at all", async () => {
+    h.role = "VIEWER"
+    renderReveal({})
+    expect(screen.queryByText(/credentials:reveal capability/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/switched off for this workspace/i)).not.toBeInTheDocument()
+  })
+})
+
+// A slot bound to a crew printed the raw cuid — an identifier nobody
+// recognises, in the one row on the page that answers "who can read this?".
+describe("who a slot reaches", () => {
+  const BINDING = {
+    id: "b1",
+    credential_id: "cred_1",
+    credential_name: "STRIPE_API_KEY",
+    scope: "CREW",
+    crew_id: "crew_1",
+    agent_id: null,
+    slot: "GH_TOKEN",
+    created_at: "",
+  }
+
+  function renderWithBinding(crewsById: Record<string, unknown>) {
+    h.apiFetch.mockImplementation(async (url: string) =>
+      String(url).includes("/credentials/bindings")
+        ? { ok: true, status: 200, json: async () => ({ bindings: [BINDING] }) }
+        : { ok: true, status: 200, json: async () => [] },
+    )
+    render(
+      <CredentialDetailSheet
+        workspaceId="ws1"
+        credential={credential}
         open
         onOpenChange={() => {}}
         onRefresh={() => {}}
         onRotate={() => {}}
-        onEdit={() => {}}
+        crewsById={crewsById as never}
       />,
     )
+  }
 
-    // Back on Overview — the Settings-only text must be gone.
-    expect(screen.queryByText("Update value")).not.toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: /overview/i })).toHaveAttribute("data-state", "active")
+  it("names the crew and draws its tile instead of printing its id", async () => {
+    h.role = "OWNER"
+    renderWithBinding({
+      crew_1: { id: "crew_1", name: "engineering", icon: "rocket", color: "#ff0000" },
+    })
+    expect(await screen.findByText("engineering")).toBeInTheDocument()
+    expect(screen.queryByText("crew_1")).not.toBeInTheDocument()
+  })
+
+  // A crew we hold no record of still gets its row: hiding it would hide the
+  // fact that something can read this secret.
+  it("falls back to the id for a crew it cannot name", async () => {
+    h.role = "OWNER"
+    renderWithBinding({})
+    expect(await screen.findByText("crew_1")).toBeInTheDocument()
+  })
+})
+
+// A credential read every couple of minutes produced fifty rows of
+// "USE · 3m ago" — a card three screens tall that pushed everything below it
+// out of reach and said nothing the first row did not.
+describe("the audit timeline", () => {
+  function events(n: number, over: Partial<Record<string, unknown>> = {}) {
+    return Array.from({ length: n }, (_, i) => ({
+      id: `e${i}`,
+      event_type: "USE",
+      agent_id: null,
+      ip_address: null,
+      metadata: null,
+      occurred_at: `2026-08-10T10:${String(i).padStart(2, "0")}:00Z`,
+      actor_kind: "system",
+      ...over,
+    }))
+  }
+  function routeAudit(list: unknown[]) {
+    h.apiFetch.mockImplementation(async (url: string) =>
+      String(url).includes("/audit")
+        ? { ok: true, status: 200, json: async () => list }
+        : { ok: true, status: 200, json: async () => [] },
+    )
+  }
+
+  it("shows ten, and says how many there are", async () => {
+    h.role = "OWNER"
+    routeAudit(events(37))
+    renderSheet()
+
+    expect(await screen.findByText("10 of 37")).toBeInTheDocument()
+    expect(screen.getAllByText("USE")).toHaveLength(10)
+  })
+
+  it("expands to the rest on request, and back", async () => {
+    h.role = "OWNER"
+    routeAudit(events(37))
+    renderSheet()
+
+    fireEvent.click(await screen.findByRole("button", { name: /show all 37/i }))
+    expect(screen.getAllByText("USE")).toHaveLength(37)
+
+    fireEvent.click(screen.getByRole("button", { name: /show less/i }))
+    expect(screen.getAllByText("USE")).toHaveLength(10)
+  })
+
+  // A full page means the timeline is longer than we asked for. Reporting the
+  // page size as the total would understate a busy credential's history.
+  it("marks a full page as a floor, not a total", async () => {
+    h.role = "OWNER"
+    routeAudit(events(50))
+    renderSheet()
+    expect(await screen.findByText("10 of 50+")).toBeInTheDocument()
+  })
+
+  it("offers no expander when everything already fits", async () => {
+    h.role = "OWNER"
+    routeAudit(events(4))
+    renderSheet()
+    expect(await screen.findByText("4")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /show all/i })).not.toBeInTheDocument()
+  })
+})
+
+// "Who read this secret?" is the first question asked of a credential's
+// timeline, and the rows could not answer it — they carried the event type, a
+// time, and sometimes an IP.
+describe("who did it", () => {
+  function routeAudit(list: unknown[]) {
+    h.apiFetch.mockImplementation(async (url: string) =>
+      String(url).includes("/audit")
+        ? { ok: true, status: 200, json: async () => list }
+        : { ok: true, status: 200, json: async () => [] },
+    )
+  }
+  const base = {
+    id: "e1",
+    event_type: "USE",
+    agent_id: null,
+    ip_address: null,
+    metadata: null,
+    occurred_at: "2026-08-10T10:00:00Z",
+  }
+
+  it("draws an agent with the avatar it has everywhere else", async () => {
+    h.role = "OWNER"
+    routeAudit([{ ...base, actor_kind: "agent", actor_id: "ag_1", actor_name: "Deploy bot" }])
+    renderSheet()
+
+    const row = (await screen.findByText("Deploy bot")).closest("li")!
+    // alt="" makes it presentational, which is right — the name beside it is
+    // the accessible label — so assert on the element, not on a role.
+    expect(row.querySelector("img")).not.toBeNull()
+  })
+
+  // A generated face for a colleague is a picture of someone who does not
+  // exist. A person gets a person glyph and their name.
+  it("draws a human without inventing a face for them", async () => {
+    h.role = "OWNER"
+    routeAudit([
+      { ...base, event_type: "REVEAL", actor_kind: "user", actor_id: "u1", actor_name: "Riley Quinn" },
+    ])
+    renderSheet()
+
+    const row = (await screen.findByText("Riley Quinn")).closest("li")!
+    expect(row.querySelector("img")).toBeNull()
+    expect(within(row).getByText("REVEAL")).toBeInTheDocument()
+  })
+
+  it("says system for a row nobody signed, rather than leaving a gap", async () => {
+    h.role = "OWNER"
+    routeAudit([{ ...base, event_type: "DETECTED", actor_kind: "system", actor_id: "" }])
+    renderSheet()
+    expect(await screen.findByText("system")).toBeInTheDocument()
+  })
+
+  // An older server sends no actor fields at all. The agent_id column is the
+  // one attribution that predates them.
+  it("still attributes an agent when the server sends no actor block", async () => {
+    h.role = "OWNER"
+    routeAudit([{ ...base, agent_id: "ag_legacy" }])
+    renderSheet()
+    expect(await screen.findByText("ag_legacy")).toBeInTheDocument()
+  })
+})
+
+// A sidecar fetch is the commonest event on a busy credential and it has no
+// agent behind it — the sidecar serves a whole container. Reporting it as
+// "system" is true and useless; the crew that owns the container is the answer.
+describe("a sidecar read", () => {
+  it("is attributed to the crew, drawn as that crew", async () => {
+    h.role = "OWNER"
+    h.apiFetch.mockImplementation(async (url: string) =>
+      String(url).includes("/audit")
+        ? {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "e1",
+                event_type: "USE",
+                agent_id: null,
+                ip_address: null,
+                metadata: { source: "sidecar_fetch", crew_id: "crew_1" },
+                occurred_at: "2026-08-10T10:00:00Z",
+                actor_kind: "crew",
+                actor_id: "crew_1",
+                actor_name: "engineering",
+              },
+            ],
+          }
+        : { ok: true, status: 200, json: async () => [] },
+    )
+    render(
+      <CredentialDetailSheet
+        workspaceId="ws1"
+        credential={credential}
+        open
+        onOpenChange={() => {}}
+        onRefresh={() => {}}
+        onRotate={() => {}}
+        crewsById={
+          { crew_1: { id: "crew_1", name: "engineering", icon: "rocket", color: "#0f0" } } as never
+        }
+      />,
+    )
+    expect(await screen.findByText("engineering")).toBeInTheDocument()
+    expect(screen.queryByText("system")).not.toBeInTheDocument()
   })
 })

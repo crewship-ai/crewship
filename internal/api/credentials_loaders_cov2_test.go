@@ -18,8 +18,8 @@ func TestCovCL2_BatchLoaders_QueryFailure_ReturnEmpty(t *testing.T) {
 	db.Close()
 	ctx := context.Background()
 
-	if got := h.loadAgentNamesBatch(ctx, []string{"c1"}); len(got) != 0 {
-		t.Errorf("loadAgentNamesBatch on closed db = %v, want empty", got)
+	if got := h.loadAgentRefsBatch(ctx, []string{"c1"}); len(got) != 0 {
+		t.Errorf("loadAgentRefsBatch on closed db = %v, want empty", got)
 	}
 	if got := h.loadMCPUsedBatch(ctx, []string{"c1"}); len(got) != 0 {
 		t.Errorf("loadMCPUsedBatch on closed db = %v, want empty", got)

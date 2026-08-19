@@ -2539,6 +2539,12 @@
             "nullable": true,
             "type": "string"
           },
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "agent_names": {
             "items": {
               "type": "string"
@@ -2665,6 +2671,7 @@
           "updated_at",
           "_count_agent_credentials",
           "agent_names",
+          "agent_ids",
           "mcp_used"
         ],
         "type": "object"
@@ -8670,6 +8677,15 @@
       },
       "RemainingCredentialAudit": {
         "properties": {
+          "actor_id": {
+            "type": "string"
+          },
+          "actor_kind": {
+            "type": "string"
+          },
+          "actor_name": {
+            "type": "string"
+          },
           "agent_id": {
             "nullable": true,
             "type": "string"

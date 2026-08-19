@@ -17,6 +17,12 @@
  * single-select, and its three rows are bounded — which Category and Scope,
  * both of which grow with the workspace, are not.
  *
+ * TIER earns the same place on the same test: four rows, single-select, bounded
+ * forever by the Keeper tier table. It is here rather than behind the Filter
+ * button because it is the second question asked about a vault ("what is
+ * dangerous?") and, until it was added, the answer was nowhere on this page at
+ * all. It is also the one section that prints zeroes — see below.
+ *
  * Every count comes from the same functions the list filters with
  * (`lib/credentials/facets.ts`), so a count can never disagree with what
  * clicking it selects. A facet with nothing behind it is omitted rather than
@@ -26,7 +32,7 @@
  */
 
 import * as React from "react"
-import { AlertTriangle, Check, Hash, Layers, PackageX, Shapes } from "lucide-react"
+import { AlertTriangle, ArrowUpDown, Bot, Building2, Check, Hash, KeyRound, Layers, ListChecks, PackageX, Shapes, ShieldCheck } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 
 import {
@@ -37,33 +43,83 @@ import {
   SidebarSection,
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import type { CredentialCrewRef } from "@/hooks/use-credential-readiness"
 import type { CredentialFacetOption, CredentialFilters } from "@/lib/credentials/facets"
 import { EMPTY_CREDENTIAL_FILTERS } from "@/lib/credentials/facets"
+import { UNCLASSIFIED_TIER, tierMeta, type CredentialTierLevel } from "@/lib/credentials/tiers"
+import { CredentialTierBadge } from "./credential-tier-badge"
 import { cn } from "@/lib/utils"
 
 /** What the rail needs from a credential. Deliberately narrow: the rail
- *  renders an icon, a name and a selection state, and nothing in this shape
- *  should tempt a caller into routing a secret through it. */
+ *  renders an icon, a name, a tier and a selection state, and nothing in this
+ *  shape should tempt a caller into routing a secret through it. */
 export interface SidebarCredential {
   id: string
   name: string
   provider: string
   type: string
+  /** Keeper tier, 1–4, or null when the server did not report one. */
+  tier?: CredentialTierLevel | null
+  /** The server's own tier label, for the chip's tooltip. */
+  tierLabel?: string | null
 }
 
 export interface CredentialsSidebarProps {
   filters: CredentialFilters
   onFiltersChange: (next: CredentialFilters) => void
   counts: { all: number; attention: number; missingTool: number }
-  categories: CredentialFacetOption[]
+  /** Brands in use — what the picker sets and the row icon already shows. */
+  brands: CredentialFacetOption[]
+  /** Credential shapes in use — the wizard's first question. */
+  shapes?: CredentialFacetOption[]
   scopes: CredentialFacetOption[]
-  tags: string[]
+  /** Keeper tiers — every tier, including the empty ones. See the TIER section. */
+  tiers?: CredentialFacetOption[]
+  /** Agents holding at least one credential; the value is the agent id, which
+   *  is what its avatar is keyed by. */
+  agents?: CredentialFacetOption[]
+  /** Tags in use, with counts — see buildTagFacet. */
+  tags: CredentialFacetOption[]
+  /** crew id → name + icon + colour, so a crew scope row draws the crew. */
+  crewsById?: Record<string, CredentialCrewRef>
+  /** How the credential list is ordered. Lives here because the list does. */
+  sort?: CredentialSortKey
+  onSortChange?: (next: CredentialSortKey) => void
+  /**
+   * Bulk selection, for callers that can delete.
+   *
+   * A MODE, not the resting state. A checkbox on every row all the time says
+   * the list is a thing you tick, when it is overwhelmingly a thing you click
+   * — and it puts a delete affordance one mis-click from every secret in the
+   * vault. The toggle in the section header turns it on for the moment you
+   * actually want it.
+   *
+   * Omit `onSelectModeChange` and there is no toggle and no checkbox, which is
+   * what a role that cannot delete should see.
+   */
+  selectMode?: boolean
+  onSelectModeChange?: (next: boolean) => void
+  selectedIds?: ReadonlySet<string>
+  onToggleSelected?: (id: string) => void
   onToggleCollapse: () => void
   /** The credentials the current filters leave — the rail's body. */
   credentials?: SidebarCredential[]
   selectedCredentialId?: string | null
   onSelectCredential?: (id: string) => void
+}
+
+/** How the rail can order the credential list. Mirrors the page's own sort,
+ *  which moved here when the table that used to own it was removed — the order
+ *  belongs to the list, and the rail is the list. */
+export type CredentialSortKey = "last_used" | "name" | "created"
+
+const SORT_LABELS: Record<CredentialSortKey, string> = {
+  last_used: "Last used",
+  name: "Name",
+  created: "Added",
 }
 
 const dropdownAnim = {
@@ -76,25 +132,41 @@ export function CredentialsSidebar({
   filters,
   onFiltersChange,
   counts,
-  categories,
+  brands,
+  shapes = [],
   scopes,
+  tiers = [],
+  agents = [],
   tags,
+  crewsById = {},
+  sort = "last_used",
+  onSortChange,
+  selectMode = false,
+  onSelectModeChange,
+  selectedIds,
+  onToggleSelected,
   onToggleCollapse,
   credentials = [],
   selectedCredentialId = null,
   onSelectCredential,
 }: CredentialsSidebarProps) {
   const [filterOpen, setFilterOpen] = React.useState(false)
+  const [sortOpen, setSortOpen] = React.useState(false)
   const [statusOpen, setStatusOpen] = React.useState(true)
+  const [tierOpen, setTierOpen] = React.useState(true)
 
   const set = (patch: Partial<CredentialFilters>) => onFiltersChange({ ...filters, ...patch })
 
-  // Status is excluded on purpose: it has its own always-visible section, so
-  // counting it here would badge the Filter button for a choice already on
-  // screen. The badge exists to explain a short list; a status selection
-  // explains itself.
+  // Status and tier are excluded on purpose: both have their own always-visible
+  // sections, so counting them here would badge the Filter button for a choice
+  // already on screen. The badge exists to explain a short list; a selection the
+  // rail is still showing as pressed explains itself.
   const activeFilterCount =
-    (filters.category ? 1 : 0) + (filters.scope ? 1 : 0) + (filters.tag ? 1 : 0)
+    (filters.brand ? 1 : 0) +
+    (filters.shape ? 1 : 0) +
+    (filters.scope ? 1 : 0) +
+    (filters.tag ? 1 : 0) +
+    (filters.agentId ? 1 : 0)
 
   const statusRows: {
     key: CredentialFilters["status"]
@@ -146,13 +218,30 @@ export function CredentialsSidebar({
                   {...dropdownAnim}
                   className="absolute right-0 top-9 z-50 max-h-[360px] min-w-[210px] overflow-y-auto rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl"
                 >
+                  {/* Every group draws its rows with the thing they are ABOUT
+                      — the brand marks in a category, the crew's own tile, the
+                      agent's own avatar. The previous version repeated one
+                      lucide glyph down each group, which is the same as no icon
+                      at all: three rows that look identical are three rows you
+                      have to read. */}
                   <FacetGroup
-                    label="Category"
+                    label="Brand"
                     icon={Shapes}
-                    options={categories}
-                    selected={filters.category}
+                    options={brands}
+                    selected={filters.brand}
+                    renderIcon={(opt) => <CategoryMarks providers={opt.providers} />}
                     onSelect={(value) => {
-                      set({ category: value })
+                      set({ brand: value })
+                      setFilterOpen(false)
+                    }}
+                  />
+                  <FacetGroup
+                    label="Shape"
+                    icon={KeyRound}
+                    options={shapes}
+                    selected={filters.shape}
+                    onSelect={(value) => {
+                      set({ shape: value })
                       setFilterOpen(false)
                     }}
                   />
@@ -161,18 +250,44 @@ export function CredentialsSidebar({
                     icon={Layers}
                     options={scopes}
                     selected={filters.scope}
+                    renderIcon={(opt) => <ScopeMark value={opt.value} crews={crewsById} />}
                     onSelect={(value) => {
                       set({ scope: value })
                       setFilterOpen(false)
                     }}
                   />
+                  {agents.length > 0 && (
+                    <FacetGroup
+                      label="Assigned to"
+                      icon={Bot}
+                      options={agents}
+                      selected={filters.agentId}
+                      // AgentAvatar, not a background-image. DiceBear returns
+                      // an unencoded `data:image/svg+xml,<svg …>` URI, and the
+                      // quotes inside the SVG make Chromium's CSSOM reject the
+                      // whole declaration — the element keeps its box and paints
+                      // nothing. Every other avatar in the product is an <img>
+                      // for that reason; this is the same component they use, so
+                      // the face here is the face everywhere else.
+                      renderIcon={(opt) => (
+                        <AgentAvatar
+                          seed={opt.value}
+                          data-agent-id={opt.value}
+                          className="h-4 w-4 shrink-0"
+                        />
+                      )}
+                      onSelect={(value) => {
+                        set({ agentId: value })
+                        setFilterOpen(false)
+                      }}
+                    />
+                  )}
                   {tags.length > 0 && (
                     <FacetGroup
                       label="Tag"
                       icon={Hash}
-                      options={tags.map((t) => ({ value: t, label: t, count: 0 }))}
+                      options={tags}
                       selected={filters.tag}
-                      hideCounts
                       onSelect={(value) => {
                         set({ tag: value })
                         setFilterOpen(false)
@@ -185,13 +300,17 @@ export function CredentialsSidebar({
                       <button
                         type="button"
                         onClick={() => {
-                          // Search and status survive: a user who typed a
-                          // query and then clears the facets is narrowing,
-                          // not starting over.
+                          // Search, status and tier survive: a user who typed a
+                          // query and then clears the facets is narrowing, not
+                          // starting over — and status and tier were both
+                          // chosen in the rail, which is still showing them as
+                          // pressed. Undoing a selection the user can see is
+                          // not "clear filters", it is a surprise.
                           onFiltersChange({
                             ...EMPTY_CREDENTIAL_FILTERS,
                             search: filters.search,
                             status: filters.status,
+                            tier: filters.tier,
                           })
                           setFilterOpen(false)
                         }}
@@ -240,9 +359,149 @@ export function CredentialsSidebar({
           })}
       </SidebarSection>
 
+      {/* ── Tier ── (single-select, and the one section that prints zeroes)
+       *
+       * Every other facet in this rail omits an empty row, because a control
+       * that filters to nothing is a control that appears to work and does not.
+       * Tier is the exception, deliberately: "L4 · critical — 0" is not an empty
+       * control, it is the answer to "does anything here stop for a human?", and
+       * an operator who cannot find the row cannot tell whether the answer is
+       * "none" or "the console does not track that". Empty rows are dimmed, the
+       * way /routines dims a status bucket holding nothing.
+       */}
+      {tiers.length > 0 && (
+        <SidebarSection
+          label="Tier"
+          count={tiers.length}
+          collapsible
+          collapsed={!tierOpen}
+          onToggle={() => setTierOpen(!tierOpen)}
+          className="border-b border-white/[0.06]"
+        >
+          <SidebarRow selected={filters.tier === null} onSelect={() => set({ tier: null })}>
+            <ShieldCheck className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate">Any tier</span>
+            <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">
+              {counts.all}
+            </span>
+          </SidebarRow>
+          {tiers.map((opt) => {
+            const level = opt.value === UNCLASSIFIED_TIER ? null : Number(opt.value)
+            const dot = level === null ? "bg-muted-foreground/30" : tierMeta(level).dotClass
+            const selected = filters.tier === opt.value
+            const empty = opt.count === 0
+            return (
+              <SidebarRow
+                key={opt.value}
+                selected={selected}
+                onSelect={() => set({ tier: selected ? null : opt.value })}
+              >
+                <span
+                  className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dot, empty && !selected && "opacity-40")}
+                  aria-hidden="true"
+                />
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate",
+                    empty && !selected && "text-foreground/40",
+                  )}
+                >
+                  {opt.label}
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 tabular-nums text-[10px] text-muted-foreground/60",
+                    empty && "text-muted-foreground/35",
+                  )}
+                >
+                  {opt.count}
+                </span>
+              </SidebarRow>
+            )
+          })}
+        </SidebarSection>
+      )}
+
       <div className="flex min-h-0 flex-1 flex-col">
-        <SidebarSection label="Credentials" count={credentials.length} />
-        <div className="min-h-0 flex-1 overflow-y-auto pb-1">
+        <SidebarSection
+          label="Credentials"
+          count={credentials.length}
+          actions={
+            <div className="flex items-center gap-0.5">
+              {onSelectModeChange && (
+                <button
+                  type="button"
+                  aria-pressed={selectMode}
+                  aria-label={selectMode ? "Leave selection mode" : "Select several credentials"}
+                  title={selectMode ? "Done selecting" : "Select several"}
+                  onClick={() => onSelectModeChange(!selectMode)}
+                  className={cn(
+                    "inline-flex h-5 items-center gap-1 rounded px-1 text-[10px] transition-colors",
+                    selectMode
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground/70 hover:bg-white/[0.06] hover:text-foreground",
+                  )}
+                >
+                  <ListChecks className="h-3 w-3" aria-hidden="true" />
+                  {selectMode ? "Done" : "Select"}
+                </button>
+              )}
+              {onSortChange ? (
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label={`Sort credentials — ${SORT_LABELS[sort]}`}
+                  title={`Sorted by ${SORT_LABELS[sort].toLowerCase()}`}
+                  aria-expanded={sortOpen}
+                  onClick={() => setSortOpen(!sortOpen)}
+                  className="inline-flex h-5 items-center gap-1 rounded px-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-white/[0.06] hover:text-foreground"
+                >
+                  <ArrowUpDown className="h-3 w-3" aria-hidden="true" />
+                  {SORT_LABELS[sort]}
+                </button>
+                <AnimatePresence>
+                  {sortOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setSortOpen(false)} />
+                      <motion.div
+                        {...dropdownAnim}
+                        className="absolute right-0 top-6 z-50 min-w-[150px] rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl"
+                      >
+                        {(Object.keys(SORT_LABELS) as CredentialSortKey[]).map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              onSortChange(key)
+                              setSortOpen(false)
+                            }}
+                            className={cn(
+                              "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+                              sort === key ? "text-primary-hover" : "text-muted-foreground/80",
+                            )}
+                          >
+                            <span className="flex-1">{SORT_LABELS[key]}</span>
+                            {sort === key && <Check className="h-3 w-3 shrink-0" aria-hidden="true" />}
+                          </button>
+                        ))}
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+              ) : null}
+            </div>
+          }
+        />
+        {/* A labelled region, inherited from the table this rail replaced.
+            "The row for GH_TOKEN" needs somewhere to be addressed — for a
+            screen reader as much as for a test — and the rail is now the only
+            place that row exists. */}
+        <div
+          role="region"
+          aria-label="Credential list"
+          className="min-h-0 flex-1 overflow-y-auto pb-1"
+        >
           {credentials.map((c) => {
             const brand = getBrand(c.provider)
             const Icon = brand.Icon
@@ -252,12 +511,34 @@ export function CredentialsSidebar({
                 selected={selectedCredentialId === c.id}
                 onSelect={() => onSelectCredential?.(c.id)}
               >
+                {selectMode && onToggleSelected && (
+                  // stopPropagation, or ticking the box would also open the
+                  // credential — and the whole point of ticking several is not
+                  // navigating away between them.
+                  <input
+                    type="checkbox"
+                    checked={selectedIds?.has(c.id) ?? false}
+                    onChange={() => onToggleSelected(c.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    // Space is the checkbox's own activation key AND the row's,
+                    // so without this a tick also opened the credential.
+                    onKeyDown={(e) => e.stopPropagation()}
+                    className="h-3 w-3 shrink-0 cursor-pointer accent-primary"
+                    aria-label={`Select ${c.name}`}
+                  />
+                )}
                 <Icon
                   className="h-3.5 w-3.5 shrink-0"
                   style={{ color: brandColor(brand) }}
                   aria-hidden="true"
                 />
                 <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{c.name}</span>
+                {/* The tier travels with the name. Which secret you are about to
+                    open and how hard it is guarded are one question, and this
+                    rail answered only half of it. */}
+                {c.tier !== undefined && (
+                  <CredentialTierBadge level={c.tier} serverLabel={c.tierLabel} />
+                )}
               </SidebarRow>
             )
           })}
@@ -273,21 +554,25 @@ export function CredentialsSidebar({
 }
 
 /** One labelled group inside the Filter dropdown. Clicking the selected
- *  option again clears it, so the dropdown needs no separate "any" row. */
+ *  option again clears it, so the dropdown needs no separate "any" row.
+ *
+ *  `renderIcon` is how a group draws its rows with the real thing — a brand
+ *  mark, a crew tile, an agent's avatar. `icon` stays as the fallback for a row
+ *  that has nothing of its own, and as the group's own glyph. */
 function FacetGroup({
   label,
   icon: Icon,
   options,
   selected,
   onSelect,
-  hideCounts = false,
+  renderIcon,
 }: {
   label: string
   icon: React.ComponentType<{ className?: string }>
   options: CredentialFacetOption[]
   selected: string | null
   onSelect: (value: string | null) => void
-  hideCounts?: boolean
+  renderIcon?: (opt: CredentialFacetOption) => React.ReactNode
 }) {
   if (options.length === 0) return null
   return (
@@ -295,25 +580,90 @@ function FacetGroup({
       <div className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground-soft">
         {label}
       </div>
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          onClick={() => onSelect(selected === opt.value ? null : opt.value)}
-          className={cn(
-            "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
-            selected === opt.value ? "text-primary-hover" : "text-muted-foreground/80",
-          )}
-        >
-          <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-          {!hideCounts && (
+      {options.map((opt) => {
+        const mark = renderIcon?.(opt)
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onSelect(selected === opt.value ? null : opt.value)}
+            className={cn(
+              "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+              selected === opt.value ? "text-primary-hover" : "text-muted-foreground/80",
+            )}
+          >
+            {mark ?? <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />}
+            <span className="min-w-0 flex-1 truncate">{opt.label}</span>
             <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground-soft">
               {opt.count}
             </span>
-          )}
-        </button>
-      ))}
+            {selected === opt.value && <Check className="h-3 w-3 shrink-0" aria-hidden="true" />}
+          </button>
+        )
+      })}
     </>
+  )
+}
+
+/**
+ * The brands actually inside a category, as their own marks.
+ *
+ * Up to three, overlapped, commonest first — enough to recognise the group
+ * without turning the row into a logo wall. Showing only the top one would say
+ * "Source control" beside the GitHub mark while GitLab sits in the same bucket,
+ * which reads as a claim about what the row selects rather than what it holds.
+ */
+function CategoryMarks({ providers }: { providers?: string[] }) {
+  const shown = (providers ?? []).slice(0, 3)
+  if (shown.length === 0) {
+    return <Shapes className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
+  }
+  return (
+    <span className="flex shrink-0 items-center" aria-hidden="true">
+      {shown.map((provider, i) => {
+        const brand = getBrand(provider)
+        const Icon = brand.Icon
+        return (
+          <Icon
+            key={`${provider}-${i}`}
+            className={cn("h-3.5 w-3.5 shrink-0", i > 0 && "-ml-1.5")}
+            style={{ color: brandColor(brand) }}
+          />
+        )
+      })}
+    </span>
+  )
+}
+
+/**
+ * A scope row's own mark: the workspace, or the crew's own tile.
+ *
+ * A crew we hold no record of still gets a row — hiding it would hide its
+ * credentials — so it falls back to the generic stack glyph rather than to a
+ * crew tile that would invent an icon and a colour for it.
+ */
+function ScopeMark({
+  value,
+  crews,
+}: {
+  value: string
+  crews: Record<string, CredentialCrewRef>
+}) {
+  if (value === "WORKSPACE") {
+    return <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+  }
+  const crew = value.startsWith("crew:") ? crews[value.slice("crew:".length)] : undefined
+  if (!crew) {
+    return <Layers className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
+  }
+  return (
+    <CrewIcon
+      // getCrewIconDef resolves an unknown name to the default glyph, so an
+      // empty string is the "use the fallback" value rather than a crash.
+      icon={crew.icon ?? ""}
+      color={crew.color ?? undefined}
+      size="sm"
+      className="!h-4 !w-4 !rounded shrink-0"
+    />
   )
 }

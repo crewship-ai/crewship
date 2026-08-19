@@ -141,8 +141,14 @@ beforeEach(() => {
   try { localStorage.clear() } catch { /* jsdom */ }
 })
 
-describe("Readiness column", () => {
-  it("names the missing CLI when a crew that can use the credential lacks it", async () => {
+// Readiness is no longer a column — the table that carried it is gone, and the
+// rail is the list. What the PAGE still owes the reader is the aggregate: how
+// many secrets are waiting on a CLI, which ones, and never a green claim it did
+// not earn. The three-state cell itself moved to the credential's own Overview
+// and is tested against the real component in
+// components/features/credentials/__tests__/credential-detail-sheet.test.tsx.
+describe("readiness on the page", () => {
+  it("counts the credentials waiting on a CLI and names them in the attention queue", async () => {
     routeApi({
       credentials: [makeCredential()],
       crews: [{ id: "c1", name: "engineering" }],
@@ -150,11 +156,12 @@ describe("Readiness column", () => {
     })
     render(<CredentialsPage />)
 
-    expect(await screen.findByText("needs gh")).toBeInTheDocument()
-    expect(screen.queryByText("ready")).not.toBeInTheDocument()
+    const tile = (await screen.findByText("Tools missing")).parentElement!
+    await waitFor(() => expect(within(tile).getByText("1")).toBeInTheDocument())
+    expect(screen.getByText(/the CLI that reads it is missing from a crew/i)).toBeInTheDocument()
   })
 
-  it("says ready once at least one crew has reported and no gap came back", async () => {
+  it("offers the missing-tool facet only once a crew has actually reported a gap", async () => {
     routeApi({
       credentials: [makeCredential()],
       crews: [{ id: "c1", name: "engineering" }],
@@ -162,22 +169,28 @@ describe("Readiness column", () => {
     })
     render(<CredentialsPage />)
 
-    expect(await screen.findByText("ready")).toBeInTheDocument()
+    expect(await inList("GH_TOKEN")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /missing tool/i })).not.toBeInTheDocument()
   })
 
   // The important one. No crew answered, so we know nothing — and "nothing
-  // reported" must not render as the same green tick as "checked, all good".
-  it("shows neither ready nor a gap when no crew has reported at all", async () => {
+  // reported" must not render as the same clean bill as "checked, all good".
+  it("says nobody reported rather than implying everything is fine", async () => {
     routeApi({ credentials: [makeCredential()], crews: [] })
     render(<CredentialsPage />)
 
     expect(await inList("GH_TOKEN")).toBeInTheDocument()
-    expect(screen.queryByText("ready")).not.toBeInTheDocument()
-    expect(screen.queryByText(/^needs /)).not.toBeInTheDocument()
-    expect(screen.getByTitle(/no crew reported its tool inventory yet/i)).toBeInTheDocument()
+    const tile = screen.getByText("Tools missing").parentElement!
+    expect(within(tile).getByText(/no crew reported/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /missing tool/i })).not.toBeInTheDocument()
   })
 })
 
+// Scoped to the credential list on purpose. The overview cards above the table
+// report the WHOLE vault — that is what a dashboard is, and a donut that
+// re-drew itself to one slice the moment you clicked a slice would be useless —
+// so a name can legitimately appear in "recently used" while the filtered table
+// excludes it. What "narrows" means is that the TABLE narrows.
 describe("left rail filtering", () => {
   it("narrows the table to the credentials whose tool is missing", async () => {
     routeApi({
@@ -194,10 +207,10 @@ describe("left rail filtering", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Missing tool 1$/ }))
 
     expect(list().getByText("GH_TOKEN")).toBeInTheDocument()
-    expect(screen.queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
+    expect(list().queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
   })
 
-  it("narrows by category, and clearing the filters brings the rest back", async () => {
+  it("narrows by brand, and clearing the filters brings the rest back", async () => {
     routeApi({
       credentials: [
         makeCredential({ id: "cred_1", name: "GH_TOKEN", provider: "GITHUB" }),
@@ -207,9 +220,12 @@ describe("left rail filtering", () => {
     render(<CredentialsPage />)
 
     await openFilter()
-    fireEvent.click(await screen.findByRole("button", { name: /^Source control 1$/ }))
+    // Brand, not category: the category was inferred from the provider and
+    // nobody ever chose it. GitHub is what the picker sets and what the row
+    // icon shows.
+    fireEvent.click(await screen.findByRole("button", { name: /^GitHub 1$/ }))
     expect(list().getByText("GH_TOKEN")).toBeInTheDocument()
-    expect(screen.queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
+    expect(list().queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
 
     await openFilter()
     fireEvent.click(screen.getByRole("button", { name: /clear filters/i }))
@@ -229,7 +245,7 @@ describe("left rail filtering", () => {
     await openFilter()
     fireEvent.click(await screen.findByRole("button", { name: /crew · engineering/i }))
     expect(list().getByText("GH_TOKEN")).toBeInTheDocument()
-    expect(screen.queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
+    expect(list().queryByText("ANTHROPIC_API_KEY")).not.toBeInTheDocument()
   })
 
   it("searches from the rail", async () => {
@@ -245,7 +261,7 @@ describe("left rail filtering", () => {
       target: { value: "anthropic" },
     })
     expect(list().getByText("ANTHROPIC_API_KEY")).toBeInTheDocument()
-    expect(screen.queryByText("GH_TOKEN")).not.toBeInTheDocument()
+    expect(list().queryByText("GH_TOKEN")).not.toBeInTheDocument()
   })
 
   it("tells the user the filters matched nothing instead of showing an empty table", async () => {
@@ -255,7 +271,8 @@ describe("left rail filtering", () => {
     fireEvent.change(await screen.findByPlaceholderText(/search a secret or tool/i), {
       target: { value: "zzzz" },
     })
-    expect(screen.getByText(/no credentials match the current filters/i)).toBeInTheDocument()
+    // The message lives with the list, and the list is the rail.
+    expect(list().getByText(/nothing matches these filters/i)).toBeInTheDocument()
   })
 
   // A rail full of zeroes beside "No credentials yet" is a filter surface for
@@ -298,7 +315,7 @@ describe("KPI strip", () => {
     routeApi({ credentials: [makeCredential()], crews: [] })
     render(<CredentialsPage />)
 
-    const tile = (await screen.findByText("Tools missing")).closest("div")!.parentElement!
+    const tile = (await screen.findByText("Tools missing")).parentElement!
     expect(within(tile).getByText(/no crew reported/i)).toBeInTheDocument()
   })
 })
@@ -319,13 +336,15 @@ describe("master-detail", () => {
     })
     render(<CredentialsPage />)
 
-    const rail = await screen.findByRole("complementary")
-    fireEvent.click(within(rail).getByRole("button", { name: /GH_TOKEN/ }))
+    const region = await screen.findByRole("region", { name: /credential list/i })
+    fireEvent.click(within(region).getByRole("button", { name: /GH_TOKEN/ }))
 
-    await waitFor(() =>
-      expect(screen.queryByRole("region", { name: /credential list/i })).not.toBeInTheDocument(),
-    )
-    // A modal would have left the table queryable behind a scrim, and would
+    // The rail keeps its list — it is the navigation. What must go is the
+    // OVERVIEW: a dashboard about the whole vault under the detail of one
+    // secret is two answers to different questions stacked on each other.
+    await waitFor(() => expect(screen.queryByText("Security tiers")).not.toBeInTheDocument())
+    expect(screen.getByTestId("detail-sheet")).toBeInTheDocument()
+    // A modal would have left the overview queryable behind a scrim, and would
     // have announced itself as a dialog. Neither is true here.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })

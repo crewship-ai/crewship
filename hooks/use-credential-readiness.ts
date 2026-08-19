@@ -42,6 +42,10 @@ export interface CredentialToolGap {
 export interface CredentialReadiness {
   /** crew id → display name, for the sidebar's Scope facet. */
   crewNames: Record<string, string>
+  /** crew id → name + icon + colour, for rendering the crew rather than
+   *  naming it. Same rows as `crewNames`, which stays because the facet
+   *  builder only ever needed the label. */
+  crewsById: Record<string, CredentialCrewRef>
   /** Credential id → every crew that can use it but lacks its CLI. */
   gapsByCredential: Map<string, CredentialToolGap[]>
   /** The same information as a set, for the "Missing tool" filter. */
@@ -57,6 +61,7 @@ export interface CredentialReadiness {
 
 const EMPTY: CredentialReadiness = {
   crewNames: {},
+  crewsById: {},
   gapsByCredential: new Map(),
   missingToolIds: new Set(),
   crewsChecked: 0,
@@ -66,6 +71,19 @@ const EMPTY: CredentialReadiness = {
 interface CrewRow {
   id?: string
   name?: string
+  icon?: string | null
+  color?: string | null
+}
+
+/** A crew as the credentials surfaces need it: enough to name it AND to draw
+ *  the same tile every other page draws for it. Name-only was the previous
+ *  shape, and it is why the Scope facet showed one generic glyph beside every
+ *  crew — three rows that look identical are three rows you have to read. */
+export interface CredentialCrewRef {
+  id: string
+  name: string
+  icon: string | null
+  color: string | null
 }
 
 interface ReadinessBody {
@@ -84,7 +102,7 @@ export function useCredentialReadiness(workspaceId: string | null): CredentialRe
 
   React.useEffect(() => {
     if (!workspaceId) {
-      setState({ ...EMPTY, crewNames: {}, gapsByCredential: new Map(), missingToolIds: new Set() })
+      setState({ ...EMPTY, crewNames: {}, crewsById: {}, gapsByCredential: new Map(), missingToolIds: new Set() })
       return
     }
     let cancelled = false
@@ -105,9 +123,18 @@ export function useCredentialReadiness(workspaceId: string | null): CredentialRe
       }
       if (cancelled) return
 
-      const named = crews.filter((c): c is { id: string; name?: string } => typeof c?.id === "string")
+      const named = crews.filter((c): c is CrewRow & { id: string } => typeof c?.id === "string")
       const crewNames: Record<string, string> = {}
-      for (const c of named) crewNames[c.id] = c.name ?? c.id
+      const crewsById: Record<string, CredentialCrewRef> = {}
+      for (const c of named) {
+        crewNames[c.id] = c.name ?? c.id
+        crewsById[c.id] = {
+          id: c.id,
+          name: c.name ?? c.id,
+          icon: c.icon ?? null,
+          color: c.color ?? null,
+        }
+      }
 
       const gapsByCredential = new Map<string, CredentialToolGap[]>()
       const missingToolIds = new Set<string>()
@@ -149,7 +176,7 @@ export function useCredentialReadiness(workspaceId: string | null): CredentialRe
         }
       }
 
-      setState({ crewNames, gapsByCredential, missingToolIds, crewsChecked, loading: false })
+      setState({ crewNames, crewsById, gapsByCredential, missingToolIds, crewsChecked, loading: false })
     })()
 
     return () => {

@@ -46,7 +46,7 @@ func TestCovICMaybeRecordSidecarUse(t *testing.T) {
 	_ = h
 
 	t.Run("empty cred id no-op", func(t *testing.T) {
-		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "", "")
+		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "", "", "")
 		// nothing to assert beyond "does not panic / does not write"
 		var n int
 		_ = db.QueryRow(`SELECT COUNT(*) FROM credential_audit`).Scan(&n)
@@ -56,7 +56,7 @@ func TestCovICMaybeRecordSidecarUse(t *testing.T) {
 	})
 
 	t.Run("missing row skips", func(t *testing.T) {
-		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "no-such-cred", "")
+		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "no-such-cred", "", "")
 		var n int
 		_ = db.QueryRow(`SELECT COUNT(*) FROM credential_audit`).Scan(&n)
 		if n != 0 {
@@ -66,8 +66,8 @@ func TestCovICMaybeRecordSidecarUse(t *testing.T) {
 
 	t.Run("debounce: second call within window skipped", func(t *testing.T) {
 		seedCredentialEnc(t, db, wsID, userID, "cred-use", "K", "v")
-		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "cred-use", "")
-		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "cred-use", "")
+		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "cred-use", "", "")
+		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "cred-use", "", "")
 		var n int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM credential_audit WHERE credential_id = 'cred-use' AND event_type = 'USE'`).Scan(&n); err != nil {
 			t.Fatalf("query: %v", err)
@@ -83,13 +83,13 @@ func TestCovICMaybeRecordSidecarUse(t *testing.T) {
 			t.Fatalf("drop: %v", err)
 		}
 		// Must not panic; failure only logs.
-		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "cred-use2", "")
+		maybeRecordSidecarUse(context.Background(), db, newTestLogger(), "cred-use2", "", "")
 	})
 
 	t.Run("CAS db error tolerated", func(t *testing.T) {
 		closed := setupTestDB(t)
 		closed.Close()
-		maybeRecordSidecarUse(context.Background(), closed, newTestLogger(), "cred-x", "")
+		maybeRecordSidecarUse(context.Background(), closed, newTestLogger(), "cred-x", "", "")
 	})
 }
 

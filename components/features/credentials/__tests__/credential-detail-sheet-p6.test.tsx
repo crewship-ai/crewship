@@ -9,7 +9,7 @@
 // fail here.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { CredentialDetailSheet } from "../credential-detail-sheet"
 
 const h = vi.hoisted(() => ({
@@ -105,10 +105,14 @@ function renderSheet(
   return { onRotate, onBack }
 }
 
-function openTab(name: RegExp) {
-  const trigger = screen.getByRole("tab", { name })
-  fireEvent.mouseDown(trigger)
-  fireEvent.click(trigger)
+/**
+ * The sheet had five tabs and now has none — every section is on the page at
+ * once, in the /issues shape. These stay as no-ops rather than being deleted
+ * from ~40 call sites: what each test asserts is unchanged, and the name still
+ * marks WHICH section it is about.
+ */
+function openTab(_name: RegExp) {
+  /* no tabs: the section is already rendered */
 }
 
 beforeEach(() => {
@@ -231,13 +235,18 @@ describe("Fields tab", () => {
     // The non-secret half IS shown — that is the entire point of storing it
     // in the clear.
     expect(screen.getByText("eu-central-1")).toBeInTheDocument()
-    expect(screen.queryByText(/•/)).not.toBeInTheDocument()
+    // Scoped to the Fields card: the credential's OWN value renders as dots on
+    // the same page now, and that one is a deliberate placeholder for a value
+    // the reveal ceremony can produce. A field's secret half has no such
+    // ceremony and no bytes to stand in for.
+    const fieldsCard = screen.getByText("passphrase").closest("[class*='rounded-xl']")!
+    expect(within(fieldsCard).queryByText(/•/)).not.toBeInTheDocument()
   })
 
   it("says the credential is a single value when it has no extra parts", async () => {
     renderSheet()
     openTab(/fields/i)
-    expect(await screen.findByText(/single value — no extra fields/i)).toBeInTheDocument()
+    expect(await screen.findByText(/single value — no extra parts/i)).toBeInTheDocument()
   })
 
   it("degrades to the empty state when the fields request fails", async () => {
@@ -247,7 +256,7 @@ describe("Fields tab", () => {
     })
     renderSheet()
     openTab(/fields/i)
-    expect(await screen.findByText(/single value — no extra fields/i)).toBeInTheDocument()
+    expect(await screen.findByText(/single value — no extra parts/i)).toBeInTheDocument()
   })
 })
 
@@ -321,9 +330,6 @@ describe("Used by — slots and grant provenance", () => {
 describe("classification control", () => {
   it("says the current classification is unknown when the API does not report one", () => {
     renderSheet()
-    const trigger = screen.getByRole("tab", { name: /settings/i })
-    fireEvent.mouseDown(trigger)
-    fireEvent.click(trigger)
     expect(screen.getByText(/not reported by the credentials api/i)).toBeInTheDocument()
   })
 
@@ -337,9 +343,6 @@ describe("classification control", () => {
       return ok([])
     })
     renderSheet()
-    const trigger = screen.getByRole("tab", { name: /settings/i })
-    fireEvent.mouseDown(trigger)
-    fireEvent.click(trigger)
 
     fireEvent.click(screen.getByRole("button", { name: "RESTRICTED" }))
     await waitFor(() =>
@@ -353,9 +356,6 @@ describe("classification control", () => {
   it("blocks a MANAGER from lowering a classification, which the server would refuse", async () => {
     h.role = "MANAGER"
     renderSheet({ sensitivity: "SEALED" })
-    const trigger = screen.getByRole("tab", { name: /settings/i })
-    fireEvent.mouseDown(trigger)
-    fireEvent.click(trigger)
     expect(screen.getByRole("button", { name: "STANDARD" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "RESTRICTED" })).toBeDisabled()
   })
@@ -368,9 +368,6 @@ describe("classification control", () => {
       return ok([])
     })
     renderSheet()
-    const trigger = screen.getByRole("tab", { name: /settings/i })
-    fireEvent.mouseDown(trigger)
-    fireEvent.click(trigger)
     fireEvent.click(screen.getByRole("button", { name: "SEALED" }))
     expect(await screen.findByText("Forbidden")).toBeInTheDocument()
   })
@@ -378,9 +375,6 @@ describe("classification control", () => {
   it("is not offered at all to a role that cannot write it", () => {
     h.role = "VIEWER"
     renderSheet()
-    const trigger = screen.getByRole("tab", { name: /settings/i })
-    fireEvent.mouseDown(trigger)
-    fireEvent.click(trigger)
     expect(screen.queryByRole("button", { name: "SEALED" })).not.toBeInTheDocument()
   })
 })

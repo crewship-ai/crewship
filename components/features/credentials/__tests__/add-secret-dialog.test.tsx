@@ -79,6 +79,46 @@ describe("draft hygiene", () => {
   })
 })
 
+// A centred card is right on a laptop and wrong on a phone: the shared
+// DialogContent insets itself by 1rem, which leaves a 358px column that the
+// step bar, six shape tiles and a two-button footer all have to share, and it
+// pins the card vertically so the footer lands under the browser chrome. On a
+// phone the dialog takes the screen instead.
+describe("on a phone", () => {
+  it("takes the whole viewport rather than a centred 358px card", () => {
+    renderDialog()
+    const dialog = screen.getByRole("dialog")
+    for (const cls of [
+      "max-sm:inset-0",
+      "max-sm:h-[100dvh]",
+      "max-sm:max-w-none",
+      "max-sm:rounded-none",
+      "max-sm:translate-x-0",
+      "max-sm:translate-y-0",
+    ]) {
+      expect(dialog.className).toContain(cls)
+    }
+  })
+
+  it("stays a centred modal from sm up, at the width New crew uses", () => {
+    renderDialog()
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("sm:max-w-[680px]")
+    expect(dialog.className).toContain("sm:max-h-[85vh]")
+  })
+
+  it("scrolls only the body, so the header and the actions never leave", () => {
+    renderDialog()
+    const body = screen.getByTestId("wizard-body")
+    const dialog = screen.getByRole("dialog")
+    expect(dialog.className).toContain("overflow-hidden")
+    expect(body.className).toContain("overflow-y-auto")
+    // The title and the step bar sit above the scrollport, the actions below.
+    expect(body.contains(screen.getByRole("heading", { name: /add a credential/i }))).toBe(false)
+    expect(body.contains(screen.getByTestId("wizard-footer"))).toBe(false)
+  })
+})
+
 describe("dismissal", () => {
   it("closes when the wizard cancels", () => {
     const { onOpenChange } = renderDialog()

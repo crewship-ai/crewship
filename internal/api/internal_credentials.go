@@ -37,7 +37,11 @@ const sidecarUseDebounce = 60 * time.Second
 // CodeRabbit caught the race on the first review pass. The CAS
 // guarantees exactly one goroutine wins per debounce window — the
 // loser's UPDATE matches zero rows and bails before recording.
-func maybeRecordSidecarUse(ctx context.Context, db *sql.DB, logger *slog.Logger, credID string, ip string) {
+// crewID is the crew whose sidecar asked. It is the only identity this layer
+// has — a sidecar serves a whole container, so there is no agent to name — and
+// recording it is the difference between a timeline that says "system read this
+// 50 times" and one that says which crew's container did.
+func maybeRecordSidecarUse(ctx context.Context, db *sql.DB, logger *slog.Logger, credID string, ip string, crewID string) {
 	if credID == "" {
 		return
 	}
@@ -75,7 +79,11 @@ func maybeRecordSidecarUse(ctx context.Context, db *sql.DB, logger *slog.Logger,
 	// USE debounce stays best-effort by design: an audit hiccup must
 	// never fail (or slow) the sidecar credential fetch. The drop
 	// counter + stable log event replace the old silent Warn.
-	recordCredentialEventBestEffort(ctx, db, logger, credID, AuditEventUse, "" /* agent unknown at this layer */, ip, map[string]any{"source": "sidecar_fetch"})
+	meta := map[string]any{"source": "sidecar_fetch"}
+	if crewID != "" {
+		meta["crew_id"] = crewID
+	}
+	recordCredentialEventBestEffort(ctx, db, logger, credID, AuditEventUse, "" /* a sidecar serves a crew, not one agent */, ip, meta)
 }
 
 // ListCredentials returns active credentials for the sidecar.
@@ -311,7 +319,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 			// the sidecar (loopback) and the IP would always be 127.0.0.1
 			// which is no signal. Debounced to one row per credential per
 			// minute so a busy sidecar doesn't flood the timeline.
-			maybeRecordSidecarUse(r.Context(), h.db, h.logger, c.ID, "")
+			maybeRecordSidecarUse(r.Context(), h.db, h.logger, c.ID, "", crewID)
 		}
 		result = append(result, c)
 	}

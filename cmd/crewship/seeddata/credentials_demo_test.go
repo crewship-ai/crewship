@@ -169,3 +169,65 @@ func TestDemoCredentials_PEMShapesAreWellFormed(t *testing.T) {
 		}
 	}
 }
+
+// TestDemoCredentials_SpanTheTierScale — the demo vault exists so the surfaces
+// have something to show, and the Keeper tier is now one of those surfaces: a
+// donut, a facet with a row per tier, and a badge on every name. With every row
+// at the server default of 1 all three render, all three are empty, and the one
+// tier an operator most needs to recognise is the one they have never seen.
+func TestDemoCredentials_SpanTheTierScale(t *testing.T) {
+	seen := map[int]int{}
+	for _, dc := range DemoCredentials() {
+		seen[dc.SecurityLevel]++
+	}
+	for level := 1; level <= 4; level++ {
+		if seen[level] == 0 {
+			t.Errorf("no demo credential at L%d — the tier facet, the donut arc and "+
+				"the badge for that tier are all unreachable in a seeded workspace", level)
+		}
+	}
+}
+
+// A tier the table does not define is read as L4 by every surface (that is the
+// fail-closed rule in internal/keeper/tier.go), so shipping one in the demo data
+// would quietly mark a row critical and teach the wrong thing about the badge.
+func TestDemoCredentials_TiersAreDefinedLevels(t *testing.T) {
+	for _, dc := range DemoCredentials() {
+		if dc.SecurityLevel < 1 || dc.SecurityLevel > 4 {
+			t.Errorf("%s: security level %d is not a defined tier (1–4)",
+				dc.Def.Name, dc.SecurityLevel)
+		}
+	}
+}
+
+// The tier is a claim about blast radius, and the two rows whose descriptions
+// say "production" are the ones that must not be filed as low-risk. Pinning
+// these two by name is deliberate: they are the demo's worked examples of what
+// L3 and L4 are for.
+func TestDemoCredentials_ProductionRowsAreGuarded(t *testing.T) {
+	want := map[string]int{
+		"prod-db-dsn":    4,
+		"deploy-ssh-key": 3,
+		"aws-sandbox":    3,
+	}
+	seen := map[string]bool{}
+	for _, dc := range DemoCredentials() {
+		lvl, ok := want[dc.Def.Name]
+		if !ok {
+			continue
+		}
+		seen[dc.Def.Name] = true
+		if dc.SecurityLevel != lvl {
+			t.Errorf("%s: security level %d, want L%d — %s",
+				dc.Def.Name, dc.SecurityLevel, lvl,
+				"this row is the demo's example of that tier")
+		}
+	}
+	// Otherwise deleting a pinned row turns this test green by making it check
+	// nothing, which is the failure mode a pinned-name assertion exists to avoid.
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("%s is gone from the demo set — it was the worked example of its tier", name)
+		}
+	}
+}

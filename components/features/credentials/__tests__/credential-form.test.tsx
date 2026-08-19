@@ -784,3 +784,14 @@ describe("crews fetch", () => {
     expect(h.apiFetch.mock.calls.filter((c) => String(c[0]).includes("/crews"))).toHaveLength(1)
   })
 })
+
+// The brand IS the icon — it is what the rail, the dashboard and the
+// credential's own page draw for this credential. The picker sat here
+// unlabelled, opposite the Name label, which made the one control that changes
+// a credential's face read as a read-only badge.
+describe("the icon picker", () => {
+  it("is labelled, so it reads as something you can change", () => {
+    renderForm()
+    expect(screen.getByText("Icon")).toBeInTheDocument()
+  })
+})

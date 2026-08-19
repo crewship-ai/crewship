@@ -466,13 +466,20 @@ var credAuditCmd = &cobra.Command{
 			IPAddress  *string        `json:"ip_address"`
 			Metadata   map[string]any `json:"metadata"`
 			OccurredAt string         `json:"occurred_at"`
+			// Who did it, resolved by the server. The AGENT column only ever
+			// held the agent_id column, so a rotation or a reveal — the events
+			// an incident responder cares about most — showed "-" for the
+			// person who did it.
+			ActorKind string `json:"actor_kind"`
+			ActorID   string `json:"actor_id"`
+			ActorName string `json:"actor_name"`
 		}
 		if err := cli.ReadJSON(resp, &events); err != nil {
 			return err
 		}
 
 		f := newFormatter()
-		headers := []string{"TIME", "EVENT", "AGENT", "IP"}
+		headers := []string{"TIME", "EVENT", "ACTOR", "WHO", "IP"}
 		var rows [][]string
 		for _, e := range events {
 			ts := e.OccurredAt
@@ -481,15 +488,32 @@ var credAuditCmd = &cobra.Command{
 			} else if t, err := time.Parse(time.RFC3339, e.OccurredAt); err == nil {
 				ts = t.Format("2006-01-02 15:04:05")
 			}
-			agent := "-"
-			if e.AgentID != nil && *e.AgentID != "" {
-				agent = *e.AgentID
+			kind := e.ActorKind
+			if kind == "" && e.AgentID != nil && *e.AgentID != "" {
+				// An older server sends no actor block; the agent_id column is
+				// the one attribution that predates it.
+				kind = "agent"
+			}
+			if kind == "" {
+				kind = "system"
+			}
+			// The name where we have one, the id where we do not. A deleted
+			// agent still did the thing, and its id is the only handle left.
+			who := e.ActorName
+			if who == "" {
+				who = e.ActorID
+			}
+			if who == "" && e.AgentID != nil {
+				who = *e.AgentID
+			}
+			if who == "" {
+				who = "-"
 			}
 			ip := "-"
 			if e.IPAddress != nil && *e.IPAddress != "" {
 				ip = *e.IPAddress
 			}
-			rows = append(rows, []string{ts, e.EventType, agent, ip})
+			rows = append(rows, []string{ts, e.EventType, kind, who, ip})
 		}
 		return f.Auto(events, headers, rows)
 	},

@@ -654,6 +654,12 @@ func seedOneDemoCredential(client *cli.Client, dc seeddata.DemoCredential) (stri
 	if len(dc.Tags) > 0 {
 		body["tags"] = dc.Tags
 	}
+	// 0 means "leave the server default" (which is 1) rather than sending a
+	// level the tier table does not define — an out-of-range value is read as
+	// L4 everywhere, so a zero on the wire would silently mark the row critical.
+	if dc.SecurityLevel > 0 {
+		body["security_level"] = dc.SecurityLevel
+	}
 	resp, err := client.Post("/api/v1/credentials", body)
 	if err != nil {
 		return "", err
