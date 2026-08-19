@@ -68,5 +68,14 @@
 #                    SKIP-WAIVER(#1929); walIndexUnbuildable, the decision they
 #                    drive, now has a permission-free direct test that does run
 #                    as root.
+# 2026-08-19 (#1935): 125 -> 126. TestPageDocument_Validate_RejectsReservedSchema
+#                     searches the schema vocabulary for one that is Known but
+#                     not Producible, and skips when the set is empty. It is
+#                     empty until embed.v1 lands: embed is Known always and
+#                     Producible only where an operator has vetted an allow-list,
+#                     so it is the reserved case the test wants. Carries
+#                     SKIP-WAIVER(#1935). The skip stops firing once embed.v1 is
+#                     on the branch; lowering this back to 125 is the win to
+#                     record when the whole epic is on main.
 
-125
+126
