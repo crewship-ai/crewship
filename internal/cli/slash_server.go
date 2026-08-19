@@ -73,39 +73,44 @@ type SlashHTTPClient interface {
 }
 
 // LoadServerSlashCommands fetches the capability-filtered slash
-// catalog for the active workspace and registers each entry on
-// the REPL. Returns the count loaded so the caller can surface
-// "5 server actions available" in the boot banner.
+// catalog for the active workspace and registers each entry on the
+// REPL. Returns the NAMES registered, in catalog order, so the caller
+// can both count them for the boot banner and list them in /help.
+//
+// The names rather than a count because these commands are in no static
+// help text: they are workspace-specific and capability-filtered, so a
+// user who is told "5 actions loaded" and cannot find out which five has
+// been told nothing.
 //
 // Failures are non-fatal — a network blip at REPL boot shouldn't
 // prevent the user from chatting. The function logs to repl.Err
-// and returns 0, no error. The user can manually refresh later via
+// and returns nil, no error. The user can manually refresh later via
 // the /refresh meta-command (registered separately).
-func LoadServerSlashCommands(ctx context.Context, repl *REPL, client SlashHTTPClient) int {
+func LoadServerSlashCommands(ctx context.Context, repl *REPL, client SlashHTTPClient) []string {
 	if client == nil || repl == nil {
-		return 0
+		return nil
 	}
 	wsID := client.GetWorkspaceID()
 	if wsID == "" {
-		return 0
+		return nil
 	}
 	resp, err := client.Get("/api/v1/slash-commands?workspace_id=" + url.QueryEscape(wsID))
 	if err != nil {
 		fmt.Fprintf(repl.Err, "[slash] failed to fetch server actions: %v\n", err)
-		return 0
+		return nil
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		fmt.Fprintf(repl.Err, "[slash] server returned %d: %s\n", resp.StatusCode, string(body))
-		return 0
+		return nil
 	}
 	var cmds []ServerSlashCommand
 	if err := json.NewDecoder(resp.Body).Decode(&cmds); err != nil {
 		fmt.Fprintf(repl.Err, "[slash] decode failed: %v\n", err)
-		return 0
+		return nil
 	}
-	loaded := 0
+	var loaded []string
 	for _, cmd := range cmds {
 		cmd := cmd // capture
 		name := slashCommandName(cmd.ID)
@@ -127,7 +132,7 @@ func LoadServerSlashCommands(ctx context.Context, repl *REPL, client SlashHTTPCl
 			continue
 		}
 		repl.Register(name, buildSlashHandler(cmd, client, repl.Out))
-		loaded++
+		loaded = append(loaded, name)
 	}
 	return loaded
 }
@@ -192,8 +197,18 @@ func buildSlashHandler(cmd ServerSlashCommand, client SlashHTTPClient, out io.Wr
 		}
 		// Required-field check at the client so the user sees
 		// "name required" inline instead of round-tripping for a 400.
+		//
+		// A boolean is never missing. Its browser control is a checkbox
+		// with exactly two states, whose unticked value IS the empty
+		// string, so an emptiness test would make `false` unsayable —
+		// and would make the same command behave differently at the two
+		// prompts, which is the thing parseSlashBool exists to prevent.
+		// Mirrors isMissingRequired in lib/routine-inputs.ts.
 		for _, f := range cmd.FormSchema {
-			if f.Required && values[f.Name] == "" {
+			if !f.Required || f.ValueType == "boolean" {
+				continue
+			}
+			if values[f.Name] == "" {
 				if f.Default != "" {
 					values[f.Name] = f.Default
 					continue
@@ -203,8 +218,22 @@ func buildSlashHandler(cmd ServerSlashCommand, client SlashHTTPClient, out io.Wr
 		}
 		// Apply defaults for unspecified optional fields.
 		for _, f := range cmd.FormSchema {
-			if _, ok := values[f.Name]; !ok && f.Default != "" {
+			if _, ok := values[f.Name]; ok {
+				continue
+			}
+			if f.Default != "" {
 				values[f.Name] = f.Default
+				continue
+			}
+			// A declared boolean with no default still gets one, because
+			// the browser gives it one: the form renders a checkbox, an
+			// untouched checkbox is unticked, and unticked submits false.
+			// Leaving it absent here would make the same command mean
+			// "false" in chat and "whatever the routine decides" at this
+			// prompt — the divergence parseSlashBool was written to
+			// prevent, one layer up.
+			if f.ValueType == "boolean" {
+				values[f.Name] = "false"
 			}
 		}
 		body, err := slashCommandPayload(cmd, values)

@@ -20,6 +20,7 @@
 export const Capability = {
   Chat: "chat",
   RoutineCreate: "routine.create",
+  RoutineRun: "routine.run",
   SkillCreate: "skill.create",
   CredentialCreate: "credential.create",
   CredentialRotate: "credential.rotate",
@@ -43,6 +44,12 @@ export type CapabilityValue = (typeof Capability)[keyof typeof Capability]
 export const ALL_CAPABILITIES: CapabilityValue[] = [
   Capability.Chat,
   Capability.RoutineCreate,
+  // Beside its sibling, and deliberately not appended at the end: the
+  // list reads low-stakes → high-stakes, and running a routine sits
+  // nowhere near the credential grants. Inserting here does re-sort the
+  // pip column once, which is unavoidable for any addition that is not
+  // last.
+  Capability.RoutineRun,
   Capability.IssueCreate,
   Capability.PageCreate,
   Capability.MemoryWrite,
@@ -74,6 +81,12 @@ export const CAPABILITY_LABELS: Record<
     en: "Create routines",
     cs: "Vytvářet rutiny",
     description: "Schedule recurring pipeline runs.",
+  },
+  [Capability.RoutineRun]: {
+    en: "Run routines",
+    cs: "Spouštět rutiny",
+    description:
+      "Invoke an existing routine, and see it in the slash palette. Separate from creating one: a run executes inside the author crew's container with its credentials and integrations, right now. Not floored by role — a VIEWER granted this can run routines.",
   },
   [Capability.IssueCreate]: {
     en: "Create issues",
@@ -122,12 +135,14 @@ export const CAPABILITY_BUNDLES = {
   power: [
     Capability.Chat,
     Capability.RoutineCreate,
+    Capability.RoutineRun,
     Capability.IssueCreate,
     Capability.MemoryWrite,
   ],
   admin: [
     Capability.Chat,
     Capability.RoutineCreate,
+    Capability.RoutineRun,
     Capability.SkillCreate,
     Capability.CredentialCreate,
     Capability.CredentialRotate,

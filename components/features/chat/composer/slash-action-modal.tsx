@@ -175,7 +175,7 @@ function Form({
         if (body) {
           devWarn(`[slash ${command.id}] server error:`, body)
         }
-        toast.error(humanizeError(res.status, body))
+        toast.error(humanizeError(res.status, body, Boolean(routineSlugFromSlashId(command.id))))
         return
       }
       const result = await res.json().catch(() => null)
@@ -310,7 +310,29 @@ function buildPayload(
 //
 // `body` is no longer consumed — kept in the signature for caller
 // compatibility but the modal now logs it before calling this fn.
-function humanizeError(status: number, _body: string): string {
+//
+// `isRoutineRun` adds the two statuses the run endpoint answers with
+// that no other slash action produces. Without them, the commonest way
+// a routine run is refused — the author crew has not connected an
+// integration it declares — reached the user as "Request failed (HTTP
+// 422)", while the identical refusal on the routines detail page says
+// which integration and offers a link to connect it. Same refusal, two
+// surfaces; the quiet one was the new one.
+//
+// The specific missing integration/credential is deliberately NOT named
+// here even though the body carries it: the rule at the top of this
+// function is that response bodies do not reach the DOM on this path,
+// and a slash action is not worth making an exception to it. The
+// message says which KIND of thing is missing and where to look.
+function humanizeError(status: number, _body: string, isRoutineRun = false): string {
+  if (isRoutineRun) {
+    switch (status) {
+      case 409:
+        return "This routine isn't runnable right now — it's awaiting approval or has been disabled."
+      case 422:
+        return "This routine needs an integration or credential its crew doesn't have. Open the routine to see which."
+    }
+  }
   switch (status) {
     case 400:
       return "The form values were rejected by the server."

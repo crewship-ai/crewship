@@ -193,6 +193,32 @@ describe("slash action modal — running a routine", () => {
     expect(onSuccess).toHaveBeenCalledWith(msn, { run_id: "run_1", status: "COMPLETED" })
   })
 
+  it.each([
+    [422, /integration or credential/i],
+    [409, /awaiting approval or has been disabled/i],
+  ])("explains a %i from the run endpoint", async (status, message) => {
+    // These two are the run endpoint's characteristic refusals and no
+    // other slash action produces them. Before they were mapped, the
+    // commonest way a routine run fails — the crew has not connected an
+    // integration the routine declares — reached the user as "Request
+    // failed (HTTP 422)", while the same refusal on the routine's detail
+    // page named the integration and linked to it.
+    apiFetch.mockResolvedValue({
+      ok: false,
+      status,
+      text: async () => `{"missing_integrations":["google-drive"]}`,
+      json: async () => ({}),
+    })
+    render(<SlashActionModal command={msn} workspaceId="ws-1" onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: msn.label }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(toastError.mock.calls[0][0]).toMatch(message)
+    // The body is never echoed into the DOM on this path — the rule that
+    // keeps credential validation errors out of a toast.
+    expect(toastError.mock.calls[0][0]).not.toMatch(/google-drive/)
+  })
+
   it("surfaces a 403 as a permission message rather than a raw body", async () => {
     // A member whose routine.run grant was revoked between the palette
     // opening and the submit.

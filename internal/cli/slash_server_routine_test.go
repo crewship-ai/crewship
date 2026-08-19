@@ -356,8 +356,8 @@ func TestLoadServerSlashCommands_RegistersRoutineUnderItsSlug(t *testing.T) {
 	}]`
 	client := newRecordingSlashClient("ws-1", catalog)
 	repl := newTestREPL()
-	if n := LoadServerSlashCommands(context.Background(), repl, client); n != 1 {
-		t.Fatalf("loaded %d commands, want 1", n)
+	if n := LoadServerSlashCommands(context.Background(), repl, client); len(n) != 1 {
+		t.Fatalf("loaded %v, want exactly one command", n)
 	}
 	handler, ok := repl.Slash["msn-etn-podklady"]
 	if !ok {
@@ -444,8 +444,8 @@ func TestLoadServerSlashCommands_BuiltinsWinCollisions(t *testing.T) {
 
 	// Only the non-colliding entry counts as loaded — the banner must
 	// not promise a command the shell does not have.
-	if n := LoadServerSlashCommands(context.Background(), repl, client); n != 1 {
-		t.Fatalf("loaded %d commands, want 1 (the collision is skipped)", n)
+	if n := LoadServerSlashCommands(context.Background(), repl, client); len(n) != 1 {
+		t.Fatalf("loaded %v, want exactly one (the collision is skipped)", n)
 	}
 	if _, err := repl.Slash["exit"](context.Background(), nil); err != nil {
 		t.Fatalf("/exit: %v", err)
@@ -513,5 +513,57 @@ func TestCoerceRoutineInput_RejectsNonFiniteNumbers(t *testing.T) {
 	}
 	if _, err := coerceRoutineInput("integer", " 42 "); err != nil {
 		t.Errorf("a padded integer was rejected: %v", err)
+	}
+}
+
+// A required boolean is never "missing" at either prompt.
+//
+// The browser's control is a checkbox with two states whose unticked
+// value is the empty string, so isMissingRequired exempts booleans. An
+// emptiness test here made `false` unsayable in the repl while chat
+// accepted it — the same routine, two behaviours, which is exactly what
+// the shared boolean vocabulary was written to prevent.
+func TestSlashRoutineHandler_RequiredBooleanIsNeverMissing(t *testing.T) {
+	cmd := ServerSlashCommand{
+		ID: "routine.run:typed",
+		FormSchema: []ServerSlashField{
+			{Name: "confirm", ValueType: "boolean", Required: true},
+		},
+	}
+	client := newRecordingSlashClient("ws-1", `[]`)
+	handler := buildSlashHandler(cmd, client, io.Discard)
+
+	// Bare invocation: the box was never ticked, which means false.
+	if _, err := handler(context.Background(), nil); err != nil {
+		t.Fatalf("a required boolean was reported missing: %v", err)
+	}
+	body, _ := json.Marshal(client.lastPostBody)
+	if !strings.Contains(string(body), `"confirm":false`) {
+		t.Errorf("body did not carry the unticked boolean: %s", body)
+	}
+
+	// And the explicit spelling behaves the same. Written `confirm=""`
+	// rather than a bare `confirm=`: the shared key=value regex requires
+	// a value token, so the bare form is unparseable for every field
+	// type, not just this one. Widening it would touch the four platform
+	// commands too, so it is left alone here.
+	client2 := newRecordingSlashClient("ws-1", `[]`)
+	h2 := buildSlashHandler(cmd, client2, io.Discard)
+	if _, err := h2(context.Background(), []string{`confirm=""`}); err != nil {
+		t.Fatalf("confirm=\"\" was rejected: %v", err)
+	}
+	body2, _ := json.Marshal(client2.lastPostBody)
+	if !strings.Contains(string(body2), `"confirm":false`) {
+		t.Errorf("body did not carry the explicit false: %s", body2)
+	}
+
+	// A required STRING keeps the ordinary rule — the exemption is for
+	// the one type whose control cannot express "unanswered".
+	strCmd := ServerSlashCommand{
+		ID:         "routine.run:typed",
+		FormSchema: []ServerSlashField{{Name: "obdobi", ValueType: "string", Required: true}},
+	}
+	if _, err := buildSlashHandler(strCmd, newRecordingSlashClient("ws-1", `[]`), io.Discard)(context.Background(), nil); err == nil {
+		t.Error("a missing required string was accepted")
 	}
 }
