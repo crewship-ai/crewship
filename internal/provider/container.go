@@ -472,6 +472,58 @@ type ServiceLister interface {
 	ListCrewServices(ctx context.Context, crewID, crewSlug string) ([]CrewServiceStatus, error)
 }
 
+// The CrewContainerInfo.Kind vocabulary — which of a crew's containers a row
+// describes. Declared beside the type rather than inside the docker provider
+// because the server, the CLI and the web UI all key off the two strings.
+const (
+	// CrewContainerKindCrew is the crew's own agent runtime container — the
+	// one agents exec into. At most one per crew.
+	CrewContainerKindCrew = "crew"
+	// CrewContainerKindSidecar is one of the crew's declared service
+	// sidecars (postgres, redis, …).
+	CrewContainerKindSidecar = "sidecar"
+)
+
+// CrewContainerInfo is one live container belonging to a crew — its agent
+// runtime, or one of its sidecars — read straight from the container runtime.
+//
+// It is the whole-crew superset of CrewServiceStatus, which answers only for
+// sidecars and renames them to their manifest service name. Here the name is
+// the container's real runtime name, because the surface this backs is a
+// Docker view: an operator reading it is about to type it into `docker logs`.
+//
+// Deliberately carries no usage metrics. CPU and memory come from
+// ContainerStats, which is a second call per container with a cost this
+// listing should not silently pay for callers that only want the inventory.
+type CrewContainerInfo struct {
+	ID    string // runtime container id
+	Name  string // container name as the runtime knows it, no leading "/"
+	Image string // image reference the container is currently running
+	Kind  string // CrewContainerKindCrew | CrewContainerKindSidecar
+	State string // "running" | "stopped" | "creating" | "error" — same vocabulary as ContainerStatus
+}
+
+// CrewContainerLister is an optional interface for container providers that
+// can enumerate EVERY container belonging to a crew — the agent runtime and
+// the sidecars — in one pass.
+//
+// ServiceLister answers the narrower "which sidecars are up" question and
+// cannot answer this one: the crew's own runtime container is what a Docker
+// view is mostly about, and it carries no crewship.svc label, so it is
+// invisible to that listing by construction.
+//
+// The docker provider implements it. Providers that do not (apple-container
+// today) leave the GET /containers endpoint answering an empty list rather
+// than erroring — the same "unsupported → empty, don't fail" convention
+// ServiceLister documents.
+type CrewContainerLister interface {
+	// ListCrewContainers enumerates only the containers owned by crewID.
+	// The slug is a display/name-fallback input only; selecting by slug
+	// alone would list an identically-slugged crew's containers from
+	// another workspace (#1732).
+	ListCrewContainers(ctx context.Context, crewID, crewSlug string) ([]CrewContainerInfo, error)
+}
+
 // CrewImageState answers "is the image this crew is actually running still the
 // image its tag names?" for one crew — the read half of #1845.
 //

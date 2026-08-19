@@ -15,12 +15,23 @@ export type BottomTab =
   // run / activity
   | "logs" | "trace"
 
+// One row of GET /api/v1/crews/{crewId}/containers — mirror of
+// internal/api/crew_container_inventory.go crewContainerEntry.
+//
+// Every metric is nullable and NULL MEANS UNMEASURED, not zero: a stopped
+// container has no CPU reading, and a runtime that cannot report stats
+// (apple-container) has none either. The tab renders those as "—"; rendering
+// them as 0 would draw an idle container where nothing was measured.
 export interface ContainerStatus {
   name: string
   image: string
+  /** "running" | "stopped" | "creating" | "error" — the server's live state. */
   status: string
+  /** "crew" (the agent runtime) or "sidecar" (a declared service). */
+  kind?: string
   cpu_percent?: number | null
   memory_mb?: number | null
+  /** Agents that run in this container — set on the crew runtime row only. */
   agent_count?: number | null
 }
 

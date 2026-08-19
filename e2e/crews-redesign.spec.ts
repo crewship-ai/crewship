@@ -107,11 +107,18 @@ test.describe("/crews — bottom panel", () => {
     await expect(messagesTab).toHaveAttribute("aria-pressed", "true")
   })
 
-  test("Docker tab loads workspace runtime data", async ({ page }) => {
+  // The Docker tab is crew-scoped (#1697): with a crew in context it draws the
+  // container table, without one it asks for a crew. Both are correct renders
+  // of the same panel — this pins that the panel renders one of them, not that
+  // the table header is unconditionally present, which it never was.
+  test("Docker tab renders the crew container panel", async ({ page }) => {
     await page.goto("/crews")
     await page.getByRole("button", { name: /^Docker$/ }).click()
-    // The header row of the Docker tab is always visible once expanded.
-    await expect(page.getByText(/^Container$/, { exact: false })).toBeVisible({ timeout: TIMEOUT })
+    const panel = page.getByRole("tabpanel", { name: /Docker panel/ })
+    await expect(panel).toBeVisible({ timeout: TIMEOUT })
+    await expect(
+      panel.getByText(/Container|Select a crew|No containers running|Loading container status/).first(),
+    ).toBeVisible({ timeout: TIMEOUT })
   })
 })
 
@@ -162,11 +169,17 @@ test.describe("backend route sanity", () => {
     expect(body.status).toBe("ok")
   })
 
-  test("/api/v1/system/runtime returns container list", async ({ request }) => {
+  // The name this test used to carry — "returns container list" — described
+  // something the endpoint has never done. /api/v1/system/runtime is the HOST
+  // runtime inventory (#1690); the bottom panel's Docker tab reads
+  // /api/v1/crews/{crewId}/containers for the per-crew containers (#1697).
+  test("/api/v1/system/runtime answers the host runtime inventory", async ({ request }) => {
     const res = await request.get("/api/v1/system/runtime")
     expect(res.ok()).toBe(true)
-    // Schema not pinned here; just confirm the endpoint works for the
-    // bottom-panel Docker tab.
+    const body = await res.json()
+    // The one assertion worth making here: it does NOT carry containers, so
+    // nothing goes back to reading them off it.
+    expect(body.containers).toBeUndefined()
   })
 
   test("legacy /crews/agents/[id] redirects via static handler", async ({ request }) => {

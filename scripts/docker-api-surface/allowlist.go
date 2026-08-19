@@ -31,6 +31,14 @@ var ambiguousMethods = map[string]bool{
 	"Info":   true,
 	"Ping":   true,
 	"Events": true,
+	// provider.ContainerProvider declares ContainerStats too, and every
+	// caller outside internal/provider/docker reaches the daemon THROUGH
+	// that interface rather than through the SDK. Counting those as Docker
+	// calls would put packages in the table that hold no client and open no
+	// socket — the gate would be reporting the interface, not the surface.
+	// The real SDK call (p.client.ContainerStats in the docker provider) has
+	// a receiver in dockerReceivers, so it still counts.
+	"ContainerStats": true,
 }
 
 // dockerReceivers are the identifiers that hold a Docker client in this tree,
