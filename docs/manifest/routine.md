@@ -74,6 +74,11 @@ spec:
                                         #   omitted = unrestricted at this layer.
                                         #   The authoring crew's network policy
                                         #   (restricted mode) applies on top.
+  slash:                                # optional — offer as /<slug> in chat + repl
+    enabled: true                       # required to appear; absent/false = not offered
+    label: <palette row text>           # optional — falls back to metadata.name, then slug
+    label_cs: <Czech label>             # optional — falls back to label
+    icon: <lucide-icon-name>            # optional — lowercase kebab-case, e.g. receipt
 
   # ---- manifest-only nested triggers ----
   schedules:                            # optional — 0..N cron triggers
@@ -754,3 +759,126 @@ Cron triggers are already declarative + versioned with the routine via
 a `crewship apply -f routine.yaml` deploys the steps + schedules + webhook
 atomically, so a schedule change is version-controlled alongside the
 logic. The in-process scheduler (30s tick) fires them.
+
+## `slash`: offering a routine as a command
+
+A cron trigger fires a routine on a clock; a webhook fires it on an event.
+`slash` is the third way in: a **person**, who wants it run now, for a value
+only they know.
+
+```yaml
+spec:
+  inputs:
+    - name: obdobi
+      type: string
+      description: Billing period, YYYY-MM. Empty means the previous month.
+    - name: ucetnictvi_root
+      type: string
+      default: "Unify - Účetnictví"
+  slash:
+    enabled: true
+    label: Monthly accounting pack
+    label_cs: Účetní podklady za měsíc
+    icon: receipt
+```
+
+That routine is then offered as `/msn-etn-podklady` in both chat and the repl:
+
+```
+crewship › /msn-etn-podklady obdobi=2026-07
+```
+
+In chat, picking it from the palette opens a form built from `inputs`, with
+`ucetnictvi_root` prefilled at its declared default and `obdobi` left empty.
+Submitting runs the routine with those values.
+
+**The command is the slug, not the label.** `label` is prose for the palette
+row; what a user types is `metadata.slug`, unchanged. One name for the thing,
+in the manifest and in the muscle memory.
+
+### Fields
+
+| Key | Type | Effect |
+|---|---|---|
+| `enabled` | bool | The opt-in. Absent or `false` and the routine is not offered. |
+| `label` | string | Palette row text, ≤ 80 characters, single line. Falls back to `metadata.name`, then the slug. |
+| `label_cs` | string | Czech label, same bounds. Falls back to `label`. |
+| `icon` | string | Lucide icon name, lowercase kebab-case, ≤ 40 characters. An unknown name renders a generic icon rather than failing — the set is open. |
+
+### Why opt-in
+
+A workspace's routine list is the wrong size for a palette, and which handful
+of them a human is meant to trigger by hand is a judgement the author makes.
+Nothing infers it from the step graph. A routine with no `slash` block behaves
+exactly as it did before the block existed, which is what every routine written
+so far does.
+
+### What it does not change
+
+Offering a routine as a command is a **presentation** decision. It grants no
+one anything:
+
+- The caller still needs the `routine.run` capability (or `MANAGER`+), granted
+  explicitly with `crewship workspace member capabilities grant <user>
+  routine.run`. A member without it does not see the command in the palette,
+  and a direct call to the run endpoint gets a `403`.
+- A `proposed` routine still needs approving and a `disabled` one still needs
+  re-enabling; neither is offered, and neither runs.
+- `integrations_required`, `resources`, `credentials_required` and
+  `max_cost_usd` all apply to a slash-triggered run exactly as they apply to a
+  cron-triggered one.
+
+A routine whose slug collides with a platform slash command (`routine`,
+`issue`, `skill`, `credential`) is silently kept out of the palette — the
+platform command wins in every workspace — and the collision is logged for the
+operator. Rename the routine to reclaim it.
+
+### In the CLI shell
+
+`crewship shell` loads the same capability-filtered catalog at start-up and
+registers each entry, so the command exists at that prompt too:
+
+```
+crewship › /msn-etn-podklady obdobi=2026-07
+[/msn-etn-podklady] ✓
+```
+
+Values are `key=value`, quoted when they contain spaces
+(`ucetnictvi_root="Unify - Účetnictví"`), and each is sent as its declared
+type — a `number` unquoted, a `boolean` as `true`/`yes`/`on` or
+`false`/`no`/`off`. A value the shell cannot restore to its declared type is
+refused at the prompt with the field named, before any request goes out.
+
+**Built-ins win.** The shell's own commands (`/help`, `/exit`, `/agent`,
+`/clear`, …) are registered first, and a routine whose slug matches one is
+skipped with a `[slash] exit shadows a built-in command — skipping` warning.
+Rename the routine if you want it in the shell.
+
+### Ask the agent instead
+
+An agent in chat can run a routine for you without the palette. It is told
+which routines exist **and what each one's inputs are**, and instructed to ask
+you for any value it does not have rather than guess or run with an empty
+`inputs` object:
+
+```
+You:    run the monthly accounting pack
+Agent:  Which period? (obdobi, YYYY-MM — leave it and it uses last month.)
+        I'll use the defaults for ucetnictvi_root ("Unify - Účetnictví")
+        and vypis_odesilatel ("info@rb.cz") unless you say otherwise.
+You:    2026-07
+Agent:  [runs msn-etn-podklady with obdobi=2026-07]
+```
+
+Write a `description` on each input — it is the sentence the agent reads back
+to the user, and the only place the meaning of `obdobi` is recorded.
+
+### Running with inputs from the dashboard
+
+The Run button on a routine's detail page uses the same form: a routine that
+declares `inputs` opens them prefilled at their defaults before the run starts,
+rather than running at defaults with no way to say otherwise. A routine that
+declares no inputs runs on the first click, as it always has. This needs no
+`slash` block — that block is only about the palette.
+
+See also: [Slash Commands API](/api-reference/slash-commands).

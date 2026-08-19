@@ -66,13 +66,31 @@ type runRequestBody struct {
 // the workspace WebSocket channel and watch for pipeline.* journal
 // entries — the run id in the response payload joins them.
 func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
-	// Running a routine spawns execution (control-plane) — MANAGER+. Gating only
-	// ReplayRun left this primary run path membership-only.
-	if !requireRole(w, r, "create") {
-		return
-	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
+	// Running a routine spawns execution (control-plane) — MANAGER+, or a
+	// member an admin has explicitly granted routine.run. Layered gate, the
+	// same shape CreateSchedule uses: the role check runs first and passes
+	// every caller who used to pass, so nothing about the MANAGER+ path
+	// changes; only when it denies does the capability get a say.
+	//
+	// What routine.run does NOT do is skip anything below it. The
+	// governance status gate, the integrations / resources / credentials
+	// preconditions and the routine's own spend caps all run afterwards
+	// and refuse a capability-admitted caller exactly as they refuse an
+	// ADMIN. The capability decides who may ask; the gates decide what
+	// the platform agrees to. A `proposed` routine is 409 for both.
+	role := RoleFromContext(r.Context())
+	callerID := ""
+	if caller := UserFromContext(r.Context()); caller != nil {
+		callerID = caller.ID
+	}
+	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
+		workspaceID, callerID, role,
+		CapabilityRoutineRun, "routine.run", "routine:"+slug,
+		"create") {
+		return
+	}
 	if h.runner == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "pipeline runner not wired",

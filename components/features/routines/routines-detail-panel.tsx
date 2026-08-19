@@ -20,6 +20,8 @@ import {
   normalizeRoutineStatus,
 } from "@/lib/routine-governance"
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
+import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
+import { RoutineRunInputsDialog } from "./routine-run-inputs-dialog"
 import { usePipelineRunRecords, isActiveRunStatus } from "@/hooks/use-pipeline-run-records"
 import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { credentialTypeLabel, extractMissingCredentials } from "@/lib/credential-labels"
@@ -183,7 +185,26 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, slug])
 
-  const triggerAction = async (action: "run") => {
+  // Run asks for the routine's inputs first, when it declares any. Held
+  // as the spec list rather than a boolean so the dialog renders from the
+  // routine that was current at the click, not from whatever the list
+  // selection has become since.
+  const [pendingRunInputs, setPendingRunInputs] = useState<RoutineInputSpec[] | null>(null)
+
+  // The Run button's two paths. A routine with declared inputs opens the
+  // form; one without runs immediately, which is what that button has
+  // always done and must go on doing.
+  const startRun = () => {
+    if (!routine) return
+    const specs = routineInputSpecs(routine.definition)
+    if (specs.length === 0) {
+      void triggerAction("run")
+      return
+    }
+    setPendingRunInputs(specs)
+  }
+
+  const triggerAction = async (action: "run", inputs: Record<string, unknown> = {}) => {
     if (!routine) return
     setBusyAction(action)
     try {
@@ -191,7 +212,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
       // path; its panel is gone — two thirds of it repeated the graph
       // and the Access card, and its one unique fact, the model each
       // step resolves to, now sits on the node it describes.
-      const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine)
+      const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine, inputs)
       const res = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -580,9 +601,17 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                   {/* Wrapped in a span so the run-guard tooltip still
                       shows on a disabled button — disabled buttons
                       swallow hover events. */}
-                  <span title={runGuard ?? "Invoke routine with empty inputs"} className="inline-flex">
+                  <span
+                    title={
+                      runGuard ??
+                      (routineInputSpecs(routine.definition).length > 0
+                        ? "Fill in this run's inputs, then run"
+                        : "Invoke routine")
+                    }
+                    className="inline-flex"
+                  >
                     <Button
-                      onClick={() => triggerAction("run")}
+                      onClick={startRun}
                       disabled={!!busyAction || !!runGuard}
                       className="h-8 gap-1.5 rounded-lg px-3 text-[12px] font-medium"
                     >
@@ -638,6 +667,16 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           </div>
         </div>
       )}
+      <RoutineRunInputsDialog
+        inputs={pendingRunInputs}
+        routineName={routine?.name || slug}
+        submitting={busyAction === "run"}
+        onCancel={() => setPendingRunInputs(null)}
+        onRun={(inputs) => {
+          setPendingRunInputs(null)
+          void triggerAction("run", inputs)
+        }}
+      />
     </div>
   )
 }

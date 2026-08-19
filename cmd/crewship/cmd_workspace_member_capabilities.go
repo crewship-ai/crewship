@@ -92,9 +92,14 @@ Examples:
   crewship workspace member capabilities grant ludmila routine.create
   crewship workspace member capabilities grant ludmila routine.create issue.create memory.write
 
-Valid capability strings: chat, routine.create, skill.create,
-credential.create, credential.rotate, issue.create, page.create,
-memory.write.
+Valid capability strings: chat, routine.create, routine.run,
+skill.create, credential.create, credential.rotate, issue.create,
+page.create, memory.write.
+
+routine.create authors a routine; routine.run invokes one that already
+exists (and puts it in the member's slash palette). They are separate
+grants — the bookkeeper who triggers the monthly accounting pack needs
+only the second.
 
 Server rejects unknown capabilities (typo guard) with a 400.`,
 	Args: cobra.MinimumNArgs(2),
@@ -123,7 +128,7 @@ This overwrites existing grants — use 'grant' for incremental edits.
 
 Bundles:
   chat   — chat only
-  power  — chat + routine.create + issue.create + memory.write
+  power  — chat + routine.create + routine.run + issue.create + memory.write
   admin  — full set, including credential.create + credential.rotate
 
 The OWNER target is immutable (server 403s) regardless of bundle.

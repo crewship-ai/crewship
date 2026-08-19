@@ -133,6 +133,17 @@ Examples (typed at the prompt):
 			return true, nil
 		})
 
+		// Server-driven actions, loaded AFTER the built-ins above so a
+		// routine can never take /exit or /help — LoadServerSlashCommands
+		// skips a name already registered and warns. This is what makes
+		// `/msn-etn-podklady obdobi=2026-07` work at this prompt: the
+		// capability-filtered catalog arrives from
+		// GET /api/v1/slash-commands and each entry becomes a command.
+		//
+		// Non-fatal by construction: a network blip returns 0 and logs,
+		// and the shell opens as it always did.
+		serverActions := cli.LoadServerSlashCommands(cmd.Context(), repl, client)
+
 		repl.BareHandler = func(_ context.Context, line string) error {
 			if activeAgent == "" {
 				return fmt.Errorf("no active agent. Set one with /agent <slug>")
@@ -162,6 +173,12 @@ Examples (typed at the prompt):
 		fmt.Println(strings.TrimSpace(`
 crewship shell — type /help for commands, Ctrl-D to exit.
 `))
+		if serverActions > 0 {
+			// Worth a line: these commands are workspace-specific and
+			// capability-filtered, so what /help lists is not the whole
+			// set and the difference is not otherwise discoverable.
+			fmt.Printf("%d workspace action(s) available — type / to see them.\n", serverActions)
+		}
 		return repl.Run(cmd.Context())
 	},
 }

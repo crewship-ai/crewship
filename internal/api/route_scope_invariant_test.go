@@ -116,6 +116,21 @@ func TestScopeForRoute(t *testing.T) {
 		{"/api/v1/notification-channels", "webhooks:write"},
 		{"/api/v1/workspaces/{workspaceId}/pipeline-webhooks", "webhooks:write"},
 		{"/api/v1/workspaces/{workspaceId}", "workspace:admin"},
+		// Still workspace:admin, and deliberately so. This is the API-TOKEN
+		// axis, which is not the axis routine.run moved. A session caller
+		// (JWT, from the dashboard or the repl) is unscoped and never meets
+		// this gate at all; what admits them is the route's role plus the
+		// handler's layered role-or-capability check, and that is where a
+		// member holding routine.run now gets through — see
+		// TestRunEndpoint_CapabilityGate.
+		//
+		// A scoped API token still needs workspace:admin to invoke a
+		// routine. Lowering it would mean minting a narrower scope for the
+		// pipelines family, which the vocabulary does not have (see the
+		// granularity note on scopeForRoute) — and inventing one here to
+		// mirror a capability would weaken the token gate for every caller
+		// in order to widen it for a class of caller that does not use
+		// tokens.
 		{"/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", "workspace:admin"},
 		{"/api/v1/admin/backups", "workspace:admin"},
 		{"/api/v1/projects", "workspace:admin"},

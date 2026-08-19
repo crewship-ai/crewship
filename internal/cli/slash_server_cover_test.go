@@ -355,17 +355,23 @@ func TestLoadServerSlashCommands_RegistersHandlerWithReplOut(t *testing.T) {
 // hit (credential, issue, remember).
 func TestSlashCommandPayload_AllIDs(t *testing.T) {
 	t.Run("credential", func(t *testing.T) {
-		got := slashCommandPayload("credential", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "credential"}, map[string]string{
 			"name": "GH_PAT", "type": "SECRET", "value": "ghp_x",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["name"] != "GH_PAT" || got["type"] != "SECRET" || got["value"] != "ghp_x" {
 			t.Errorf("credential reshape: %v", got)
 		}
 	})
 	t.Run("issue", func(t *testing.T) {
-		got := slashCommandPayload("issue", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "issue"}, map[string]string{
 			"title": "Bug", "description": "It broke", "priority": "high",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["title"] != "Bug" || got["priority"] != "high" {
 			t.Errorf("issue reshape: %v", got)
 		}
@@ -382,33 +388,45 @@ func TestSlashCommandPayload_AllIDs(t *testing.T) {
 	// REPL and the UI. slashCommandPayload now applies the same
 	// fallbacks inline.
 	t.Run("routine timezone defaults to UTC", func(t *testing.T) {
-		got := slashCommandPayload("routine", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "routine"}, map[string]string{
 			"name": "Daily", "cron": "0 7 * * *", "timezone": "",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["timezone"] != "UTC" {
 			t.Errorf("timezone default lost: %v", got)
 		}
 	})
 	t.Run("routine timezone explicit override wins", func(t *testing.T) {
-		got := slashCommandPayload("routine", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "routine"}, map[string]string{
 			"name": "Daily", "cron": "0 7 * * *", "timezone": "Europe/Prague",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["timezone"] != "Europe/Prague" {
 			t.Errorf("explicit timezone overridden: %v", got)
 		}
 	})
 	t.Run("credential type defaults to SECRET", func(t *testing.T) {
-		got := slashCommandPayload("credential", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "credential"}, map[string]string{
 			"name": "Test", "value": "v",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["type"] != "SECRET" {
 			t.Errorf("type default lost: %v", got)
 		}
 	})
 	t.Run("issue priority defaults to none", func(t *testing.T) {
-		got := slashCommandPayload("issue", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "issue"}, map[string]string{
 			"title": "T",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["priority"] != "none" {
 			t.Errorf("priority default lost: %v", got)
 		}

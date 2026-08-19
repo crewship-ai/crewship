@@ -26,6 +26,13 @@ import (
 //
 // Lives in internal/api (not internal/database) because the helpers
 // live here and database can't import api (cycle).
+//
+// What it compares against is FallbackCapabilitiesForRole, NOT
+// BundleCapabilities. The two were briefly the same function and this
+// test is why they aren't: a bundle is a preset an admin applies today
+// and may grow (routine.run joined `power` and `admin`), while the
+// fallback has to keep matching a migration that already ran. Point
+// this at a bundle again and the guard stops guarding.
 func TestMigrationBundleDriftV109(t *testing.T) {
 	// Re-state the migration's hardcoded JSON exactly as the SQL
 	// emits it. If you change either side, this assertion will fail
