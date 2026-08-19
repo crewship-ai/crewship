@@ -157,7 +157,30 @@ test.describe("onboarding wizard — first-run flow", () => {
     await launch.click()
     expect((await setupRespPromise).status()).toBe(201)
 
-    await page.waitForURL(/\/crews\/agents\//, { timeout: 15_000 })
+    // The wizard's last click. It used to land on /crews/agents/<id>/chat,
+    // a route the /crews redesign deleted — so this assertion passed only
+    // while a brand-new user's first click 404'd. Chat is /chat/<slug>.
+    //
+    // handleLaunch (app/(onboarding)/onboarding/page.tsx) resolves the slug
+    // with one GET /agents/<id> and falls back to the dashboard when that
+    // lookup returns nothing, so BOTH landing pages are reachable by
+    // design. Wait for either and then assert the good one: a fallback is
+    // then a one-line failure naming its cause instead of a 15s timeout.
+    await page.waitForURL((url) => /^\/chat\/[^/]+$/.test(url.pathname) || url.pathname === "/", {
+      timeout: 15_000,
+    })
+    expect(
+      new URL(page.url()).pathname,
+      "wizard fell back to the dashboard — GET /agents/<id> did not yield a slug, so the new agent's chat was never linked",
+    ).toMatch(/^\/chat\/[^/]+$/)
+
+    // A route that resolves is not the same as a chat that works. The
+    // composer is the thing the first click exists to reach; its
+    // placeholder is `Message <agent>...`, or "Send a message..." before
+    // the agent name has resolved (chat-composer.tsx).
+    await expect(
+      page.locator('textarea[placeholder^="Message "], textarea[placeholder="Send a message..."]'),
+    ).toBeVisible({ timeout: 15_000 })
 
     // DB-state assertions
     const statusAfter = await (await request.get(SETUP_STATUS_PATH)).json()

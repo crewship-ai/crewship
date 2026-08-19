@@ -36,6 +36,12 @@ export const JOURNAL_ENTRY_TYPES = [
   "approval.denied",
   "approval.timeout",
   "approval.cancelled",
+  // Standing decisions: "approve this gate for me from now on", and the
+  // withdrawal of that permission. Namespaced under approval.* on purpose —
+  // one filter has to show the one-off decision and the standing grant that
+  // explains why later runs stopped asking.
+  "approval.trust_granted",
+  "approval.trust_revoked",
   // Cost
   "llm.call",
   "llm.cache_hit",

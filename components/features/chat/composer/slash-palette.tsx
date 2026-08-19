@@ -6,9 +6,7 @@ import { useHotkeys } from "react-hotkeys-hook"
 import {
   MessageSquarePlus,
   Eraser,
-  GitBranch,
   FileCode,
-  Play,
   Search,
   Download,
   Undo2,
@@ -53,6 +51,122 @@ interface SlashPaletteProps {
    *  chat panel owns the SlashActionModal lifecycle so the form can
    *  read conversation context for pre-fill. */
   onAction?: (command: ServerSlashCommand) => void
+  /** Rows the host cannot honour *right now*, id → reason (e.g. nothing
+   *  to regenerate in an empty conversation). Rendered disabled with the
+   *  reason on screen, exactly like a statically-disabled row. This is
+   *  the runtime half of the honesty contract below; the static half is
+   *  CLIENT_ACTION_CONTRACT. */
+  disabledCommands?: Record<string, string>
+  /** Controlled open state. Omit to let the palette own it (⌘/). */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+// ── The honesty contract (audit P0.8) ───────────────────────────────────────
+//
+// A command that closes the palette and does nothing is the same class of
+// defect as a clickable-looking <span>: the UI states a capability the system
+// does not have. So every action this palette can put on screen — the
+// client-side rows below AND the server-driven catalogue in
+// internal/api/slash_commands_handler.go — is classified as exactly one of:
+//
+//   · enabled  — selecting it performs the effect its label advertises;
+//   · disabled — rendered, visibly disabled, with the reason on screen;
+//   · hidden   — not rendered at all.
+//
+// __tests__/slash-palette-contract.test.tsx enumerates both sources and fails
+// on anything unclassified, including a new entry added to the Go catalogue.
+// Adding a row here without an entry below is therefore a red test, not a
+// silent no-op.
+
+export type SlashActionClassification =
+  | { state: "enabled" }
+  | { state: "disabled"; reason: string }
+  | { state: "hidden"; reason: string }
+
+/** Classification of every client-side row this file has ever offered.
+ *  Hidden entries stay listed on purpose: the reason is the record of why the
+ *  row went away, and the contract test asserts they are not rendered. */
+export const CLIENT_ACTION_CONTRACT: Record<string, SlashActionClassification> = {
+  // Creating a session is the chat PAGE's job: it POSTs the chat, refetches
+  // the session list and selects the new row. `router.push("/chat/<slug>")`
+  // does none of that — the page holds the active session in local state and
+  // does not re-read the URL on a client navigation, so the old code changed
+  // the address bar and nothing else.
+  "new-session": {
+    state: "disabled",
+    reason: "Use New session in the chat header",
+  },
+  clear: { state: "enabled" },
+  regenerate: { state: "enabled" },
+  // Nothing in the client or the API creates an alternate reply from a turn:
+  // no branch endpoint, no branch state in useChat, no handler in ChatPanel.
+  branch: {
+    state: "hidden",
+    reason: "No alternate-reply path exists in the client or the API",
+  },
+  search: { state: "enabled" },
+  export: { state: "enabled" },
+  "open-files": { state: "enabled" },
+  // The Context tab moved to the agent canvas. The rail no longer renders a
+  // button for it and RightRail rewrites a persisted "context" tab back to
+  // "files" on mount, so this row opened the Files panel under another name.
+  "open-context": {
+    state: "hidden",
+    reason: "The Context tab moved to the agent canvas; this opened Files",
+  },
+  "toggle-drawer": { state: "enabled" },
+  // "Hand off to subagent" — chat has no subagent hand-off. Delegation
+  // arrives as events from the backend; there is no client action that starts
+  // one, and ChatPanel never had a handler for this id.
+  "run-task": {
+    state: "hidden",
+    reason: "Chat cannot start a subagent hand-off",
+  },
+}
+
+/** Classification of the server catalogue. Keyed by the ids in
+ *  internal/api/slash_commands_handler.go — capability filtering happens
+ *  server-side, so an entry reaching the client only means the caller MAY run
+ *  it, not that this build knows how. */
+export const SERVER_ACTION_CONTRACT: Record<string, SlashActionClassification> = {
+  // "Create routine from this conversation" cannot be honoured. The endpoint
+  // it maps to (POST /workspaces/{ws}/pipeline-schedules) SCHEDULES an
+  // existing pipeline: resolveSchedulePipelineID rejects any body without
+  // target_pipeline_id/slug, so name+cron+timezone is a guaranteed 400. The
+  // missing piece is the transcript→routine step, which does not exist —
+  // see the audit's §5.2 for why its shape is still an open question.
+  routine: {
+    state: "disabled",
+    reason: "Needs an existing routine to schedule — a transcript is not one",
+  },
+  // Issue creation is crew-scoped: the only POST route is
+  // /api/v1/crews/{crewId}/issues (POST /api/v1/issues is not registered).
+  // Chat carries an agent, not a crew, and the panel is not allowed to fetch
+  // the agent record on mount — chat-panel-ask-forms.test.tsx pins that this
+  // surface makes no such request. Wiring this needs the crew id passed down
+  // from the chat page, which already has it in the roster it fetched.
+  issue: {
+    state: "disabled",
+    reason: "Issue create is crew-scoped and chat has no crew id yet",
+  },
+  skill: { state: "enabled" },
+  credential: { state: "enabled" },
+}
+
+/** A catalogue entry from a server newer than this build. It has no endpoint
+ *  mapping in slash-action-modal.tsx, so it is offered as what it is. */
+const UNCLASSIFIED_SERVER_ACTION: SlashActionClassification = {
+  state: "disabled",
+  reason: "This build doesn't know how to run this action",
+}
+
+function classifyClient(id: string): SlashActionClassification {
+  return CLIENT_ACTION_CONTRACT[id] ?? UNCLASSIFIED_SERVER_ACTION
+}
+
+function classifyServer(id: string): SlashActionClassification {
+  return SERVER_ACTION_CONTRACT[id] ?? UNCLASSIFIED_SERVER_ACTION
 }
 
 // Server-driven icon resolution. The catalog uses lucide icon names;
@@ -74,6 +188,10 @@ interface SlashCommand {
   icon: React.ComponentType<{ className?: string }>
   shortcut?: string
   group: "chat" | "view" | "tools" | "navigation"
+  /** Who performs the effect. "panel" rows call `onCommand` and the host
+   *  (ChatPanel) does the work — chat-panel-slash-actions.test.tsx walks
+   *  PANEL_HANDLED_COMMAND_IDS and fails until the host implements one. */
+  handledBy: "panel" | "palette"
   run: (ctx: SlashRunCtx) => void | Promise<void>
 }
 
@@ -91,8 +209,10 @@ const COMMANDS: SlashCommand[] = [
     label: "New session",
     hint: "Start a fresh chat",
     icon: MessageSquarePlus,
-    shortcut: "⌘N",
     group: "chat",
+    handledBy: "palette",
+    // Disabled by the contract above — kept so the row can explain itself
+    // rather than vanishing from a palette people have learned.
     run: ({ router, agentSlug, close }) => {
       if (agentSlug) router.push(`/chat/${agentSlug}`)
       close()
@@ -104,6 +224,7 @@ const COMMANDS: SlashCommand[] = [
     hint: "Wipe visible turns (keeps history)",
     icon: Eraser,
     group: "chat",
+    handledBy: "panel",
     run: ({ onCommand, close }) => {
       onCommand?.("clear")
       close()
@@ -114,19 +235,9 @@ const COMMANDS: SlashCommand[] = [
     label: "Regenerate last response",
     icon: Undo2,
     group: "chat",
+    handledBy: "panel",
     run: ({ onCommand, close }) => {
       onCommand?.("regenerate")
-      close()
-    },
-  },
-  {
-    id: "branch",
-    label: "Branch from last response",
-    hint: "Create alternate reply",
-    icon: GitBranch,
-    group: "chat",
-    run: ({ onCommand, close }) => {
-      onCommand?.("branch")
       close()
     },
   },
@@ -136,6 +247,7 @@ const COMMANDS: SlashCommand[] = [
     icon: Search,
     shortcut: "⌘F",
     group: "tools",
+    handledBy: "panel",
     run: ({ onCommand, close }) => {
       onCommand?.("search")
       close()
@@ -144,10 +256,11 @@ const COMMANDS: SlashCommand[] = [
   {
     id: "export",
     label: "Export conversation",
-    hint: "Markdown / PDF / share link",
+    hint: "Markdown / copy",
     icon: Download,
     shortcut: "⌘E",
     group: "tools",
+    handledBy: "panel",
     run: ({ onCommand, close }) => {
       onCommand?.("export")
       close()
@@ -159,19 +272,9 @@ const COMMANDS: SlashCommand[] = [
     icon: FileCode,
     shortcut: "⌘1",
     group: "view",
+    handledBy: "palette",
     run: ({ drawer, close }) => {
       drawer.toggle("files")
-      close()
-    },
-  },
-  {
-    id: "open-context",
-    label: "Open Context panel",
-    icon: Sparkles,
-    shortcut: "⌘4",
-    group: "view",
-    run: ({ drawer, close }) => {
-      drawer.toggle("context")
       close()
     },
   },
@@ -181,23 +284,23 @@ const COMMANDS: SlashCommand[] = [
     icon: PanelRight,
     shortcut: "⌘B",
     group: "view",
+    handledBy: "palette",
     run: ({ drawer, close }) => {
       drawer.toggle()
       close()
     },
   },
-  {
-    id: "run-task",
-    label: "Run task…",
-    hint: "Hand off to subagent",
-    icon: Play,
-    group: "tools",
-    run: ({ onCommand, close }) => {
-      onCommand?.("run-task")
-      close()
-    },
-  },
 ]
+
+/** Ids the palette can put on screen. The contract test asserts each one is
+ *  classified, and that nothing classified `hidden` is in here. */
+export const CLIENT_COMMAND_IDS: string[] = COMMANDS.map((c) => c.id)
+
+/** Enabled rows whose effect the HOST must implement. Walked by
+ *  chat-panel-slash-actions.test.tsx. */
+export const PANEL_HANDLED_COMMAND_IDS: string[] = COMMANDS
+  .filter((c) => c.handledBy === "panel" && classifyClient(c.id).state === "enabled")
+  .map((c) => c.id)
 
 const GROUP_LABELS: Record<SlashCommand["group"], string> = {
   chat: "Chat",
@@ -206,13 +309,33 @@ const GROUP_LABELS: Record<SlashCommand["group"], string> = {
   navigation: "Navigation",
 }
 
+/** Why a row cannot be run right now, or null when it can. Runtime reasons
+ *  from the host win over the static classification only in the sense that
+ *  either one is enough to disable — neither can re-enable the other. */
+function reasonFor(
+  classification: SlashActionClassification,
+  runtimeReason: string | undefined,
+): string | null {
+  if (classification.state === "disabled") return classification.reason
+  if (runtimeReason) return runtimeReason
+  return null
+}
+
 export function SlashPalette({
   onCommand,
   agentSlug,
   workspaceId,
   onAction,
+  disabledCommands,
+  open: openProp,
+  onOpenChange,
 }: SlashPaletteProps) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) setInternalOpen(next)
+    onOpenChange?.(next)
+  }
   const router = useRouter()
   const toggleDrawer = useDrawerStore((s) => s.toggle)
 
@@ -223,20 +346,66 @@ export function SlashPalette({
   // by a chat-only user.
   const { data: actions = [] } = useSlashCommands(workspaceId)
 
+  // ── ⌘/ — deliberately not ⌘K ────────────────────────────────────────────
+  //
+  // This was `mod+k`, and so is AppToolbar's plain `document` keydown for the
+  // GLOBAL palette. Neither stopped the other, so one press inside a
+  // conversation opened both dialogs, stacked, and the typing went to whichever
+  // had mounted last. Two document-level listeners on the same key cannot be
+  // ordered into a winner — `stopPropagation` does not separate listeners on
+  // the same node in the same phase — so the fix is that only one of them
+  // exists.
+  //
+  // ⌘K went to the global palette because the product already says so, out
+  // loud, on every route including this one: the toolbar renders a permanent
+  // "Search… ⌘K" button with the key in a <kbd>. The alternative — ⌘K meaning
+  // the chat palette while the composer has focus — was rejected because
+  // "the composer has focus" is not a state a user can see here (nothing on
+  // this surface draws a focus ring, and focus moves to a turn, a chip or the
+  // rail on any click), so it would make a visible label wrong exactly where
+  // the cursor usually is.
+  //
+  // react-hotkeys-hook matches on `event.code`, not `event.key`, so the key is
+  // named for the physical one: "mod+slash" matches `code: "Slash"`, and
+  // "mod+/" would never match anything. That also means a layout where Slash
+  // sits behind a modifier does not get this binding — which is the other
+  // reason the host puts a button on screen for it (CommandsButton in
+  // chat-panel.tsx, which is where the "⌘/" the user reads is written).
   useHotkeys(
-    ["mod+k"],
-    () => setOpen((v) => !v),
+    ["mod+slash"],
+    () => setOpen(!open),
     { preventDefault: true, enableOnFormTags: true, enableOnContentEditable: true },
+    [open, openProp],
   )
 
+  // ── Escape belongs to the topmost surface, and only to it ────────────────
+  //
+  // Same defect as ⌘K, one key over. This palette is a modal dialog, so while
+  // it is up it IS the top layer — but RightDrawer binds `esc` through
+  // react-hotkeys-hook (a bubble-phase listener on `document`), so one Escape
+  // closed the palette AND the panel underneath it, which the user never asked
+  // to lose.
+  //
+  // Capture phase on `document` is where Radix's own dismiss hook listens too
+  // (@radix-ui/react-use-escape-keydown registers with `capture: true`).
+  // stopPropagation() there leaves same-node, same-phase listeners alone — so
+  // the dialog still dismisses itself — while ending the journey before
+  // anything bubbling can see the key. setOpen(false) is stated anyway so this
+  // does not silently depend on that Radix internal.
+  //
+  // ask-form-sheet.tsx does the same thing one layer down, by stopping the
+  // React synthetic event on its own root.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false)
+      if (e.key !== "Escape") return
+      e.stopPropagation()
+      setOpen(false)
     }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [open])
+    document.addEventListener("keydown", onKey, { capture: true })
+    return () => document.removeEventListener("keydown", onKey, { capture: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, openProp])
 
   const ctx: SlashRunCtx = {
     router,
@@ -246,36 +415,59 @@ export function SlashPalette({
     close: () => setOpen(false),
   }
 
+  // Actions classified `hidden` never reach the list, so the group's count is
+  // the count of what is actually on screen.
+  const visibleActions = actions.filter((cmd) => classifyServer(cmd.id).state !== "hidden")
+
   const grouped = COMMANDS.reduce<Record<string, SlashCommand[]>>((acc, cmd) => {
     ;(acc[cmd.group] ??= []).push(cmd)
     return acc
   }, {})
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen} title="Command palette" description="Run a command">
-      <CommandInput placeholder="Type a command or search…" />
+    // Named for what it is. It used to be "Command palette" while the global
+    // one is "Command Palette" — two dialogs a case difference apart, on a
+    // surface that could show you either. The name is the only thing a screen
+    // reader gets (CommandDialog renders the title sr-only), so the visible
+    // half of the same job is done by the placeholder.
+    <CommandDialog
+      open={open}
+      onOpenChange={setOpen}
+      title="Chat commands"
+      description="Run a command in this conversation"
+    >
+      <CommandInput placeholder="Search chat commands…" />
       <CommandList>
         <CommandEmpty>No commands match.</CommandEmpty>
         {/* Server-driven actions group — renders first so capability-
             granted actions are the high-signal items at the top of
             the palette. Hidden entirely when the user has no grants
             (the rest of the palette is unaffected). */}
-        {actions.length > 0 && (
+        {visibleActions.length > 0 && (
           <>
-            <CommandGroup heading={`Actions (${actions.length})`}>
-              {actions.map((cmd) => {
+            <CommandGroup heading={`Actions (${visibleActions.length})`}>
+              {visibleActions.map((cmd) => {
                 const Icon = (cmd.icon && ICON_BY_NAME[cmd.icon]) || Sparkles
+                const reason = reasonFor(classifyServer(cmd.id), disabledCommands?.[cmd.id])
                 return (
                   <CommandItem
                     key={`server-${cmd.id}`}
+                    data-testid={`slash-action-${cmd.id}`}
                     value={`${cmd.label} ${cmd.label_cs ?? ""}`}
+                    disabled={reason !== null}
                     onSelect={() => {
+                      if (reason !== null) return
                       onAction?.(cmd)
                       setOpen(false)
                     }}
                   >
                     <Icon className="h-4 w-4" />
                     <span>{cmd.label}</span>
+                    {reason !== null && (
+                      <span data-slash-reason className="ml-auto text-xs text-muted-foreground truncate">
+                        {reason}
+                      </span>
+                    )}
                   </CommandItem>
                 )
               })}
@@ -289,20 +481,33 @@ export function SlashPalette({
             <CommandGroup heading={GROUP_LABELS[group as SlashCommand["group"]]}>
               {list.map((cmd) => {
                 const Icon = cmd.icon
+                const reason = reasonFor(classifyClient(cmd.id), disabledCommands?.[cmd.id])
                 return (
                   <CommandItem
                     key={cmd.id}
+                    data-testid={`slash-item-${cmd.id}`}
                     value={`${cmd.label} ${cmd.hint ?? ""}`}
-                    onSelect={() => cmd.run(ctx)}
+                    disabled={reason !== null}
+                    onSelect={() => {
+                      if (reason !== null) return
+                      cmd.run(ctx)
+                    }}
                   >
                     <Icon className="h-4 w-4" />
                     <span>{cmd.label}</span>
-                    {cmd.hint && (
+                    {reason === null && cmd.hint && (
                       <span className="ml-2 text-xs text-muted-foreground truncate">
                         {cmd.hint}
                       </span>
                     )}
-                    {cmd.shortcut && <CommandShortcut>{cmd.shortcut}</CommandShortcut>}
+                    {reason !== null && (
+                      <span data-slash-reason className="ml-auto text-xs text-muted-foreground truncate">
+                        {reason}
+                      </span>
+                    )}
+                    {reason === null && cmd.shortcut && (
+                      <CommandShortcut>{cmd.shortcut}</CommandShortcut>
+                    )}
                   </CommandItem>
                 )
               })}

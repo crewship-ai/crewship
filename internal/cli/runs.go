@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,24 +13,115 @@ import (
 	"time"
 )
 
+// RawJSON is a JSON document the CLI carries but does not own — a run's
+// `metadata` is the first one — held as the bytes the server sent.
+//
+// It is json.RawMessage plus one thing: it knows how to render itself as YAML.
+// A bare json.RawMessage IS a []byte, and yaml.v3 renders a []byte as a
+// sequence of integers, one per line, so `run list --format yaml` over a
+// handful of runs printed hundreds of numbers where a mapping belonged.
+// cmd_preferences.go had already had to decode around the same thing by hand
+// at its own call site.
+//
+// The knowledge lives on the type rather than inside Formatter.YAML on
+// purpose. The formatter is handed structs that variously carry json tags
+// (RunDetail), yaml tags (cli.SlashCommand) or neither, so re-routing it
+// through JSON would have renamed the keys of every other command's YAML
+// output in order to fix this one. Any other field holding an opaque document
+// should take this type.
+type RawJSON []byte
+
+// MarshalJSON hands the document back byte for byte. An absent one is null,
+// not an empty string: "the server sent no metadata" is what null means here.
+func (r RawJSON) MarshalJSON() ([]byte, error) {
+	if len(r) == 0 {
+		return []byte("null"), nil
+	}
+	return r, nil
+}
+
+func (r *RawJSON) UnmarshalJSON(b []byte) error {
+	if r == nil {
+		return errors.New("cli.RawJSON: UnmarshalJSON on nil pointer")
+	}
+	*r = append((*r)[:0], b...)
+	return nil
+}
+
+// MarshalYAML decodes the document so the YAML encoder is given its SHAPE —
+// mapping, sequence, scalar — instead of the bytes it is spelled with.
+//
+// Numbers go through json.Number and come back as int64 wherever they are
+// whole. Decoding straight into float64, which is what encoding/json does by
+// default, would print a token count or a unix timestamp as 1.699999999e+09.
+//
+// A document that does not parse is rendered as the string it is. It came from
+// a server this CLI did not ship with, or a row edited around the API, and one
+// unreadable field must not fail the whole listing.
+func (r RawJSON) MarshalYAML() (interface{}, error) {
+	if len(bytes.TrimSpace(r)) == 0 {
+		return nil, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(r))
+	dec.UseNumber()
+	var doc interface{}
+	if err := dec.Decode(&doc); err != nil {
+		return string(r), nil
+	}
+	return yamlNumbers(doc), nil
+}
+
+// String is the document as it was received — what the table and human
+// renderers print when they want the literal.
+func (r RawJSON) String() string { return string(r) }
+
+// yamlNumbers walks a decoded document turning json.Number into the narrowest
+// Go scalar that holds it. json.Number is a string type, so handing one
+// straight to the YAML encoder would quote every number in the document.
+func yamlNumbers(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		for k, item := range val {
+			val[k] = yamlNumbers(item)
+		}
+		return val
+	case []interface{}:
+		for i, item := range val {
+			val[i] = yamlNumbers(item)
+		}
+		return val
+	case json.Number:
+		if n, err := strconv.ParseInt(val.String(), 10, 64); err == nil {
+			return n
+		}
+		if f, err := val.Float64(); err == nil {
+			return f
+		}
+		return val.String()
+	}
+	return v
+}
+
 // RunDetail mirrors the per-run shape returned by GET /api/v1/runs/{id}.
 //
 // Field set tracks the legacy runResponse + the journal.RunAggregated read
 // model: callers (wait, resume, diff, recap, tui) all share this single
 // view, so adding a column means one type change and not three.
 type RunDetail struct {
-	ID           string          `json:"id"`
-	AgentID      string          `json:"agent_id"`
-	ChatID       *string         `json:"chat_id"`
-	WorkspaceID  string          `json:"workspace_id"`
-	TriggeredBy  *string         `json:"triggered_by"`
-	TriggerType  string          `json:"trigger_type"`
-	Status       string          `json:"status"`
-	StartedAt    *string         `json:"started_at"`
-	FinishedAt   *string         `json:"finished_at"`
-	ErrorMessage *string         `json:"error_message"`
-	ExitCode     *int            `json:"exit_code"`
-	Metadata     json.RawMessage `json:"metadata"`
+	ID           string  `json:"id"`
+	AgentID      string  `json:"agent_id"`
+	ChatID       *string `json:"chat_id"`
+	WorkspaceID  string  `json:"workspace_id"`
+	TriggeredBy  *string `json:"triggered_by"`
+	TriggerType  string  `json:"trigger_type"`
+	Status       string  `json:"status"`
+	StartedAt    *string `json:"started_at"`
+	FinishedAt   *string `json:"finished_at"`
+	ErrorMessage *string `json:"error_message"`
+	ExitCode     *int    `json:"exit_code"`
+	// Metadata is the server's own blob. RawJSON, not json.RawMessage, so
+	// `--format yaml` renders the document rather than its bytes.
+	Metadata RawJSON `json:"metadata"`
 	// Model and the session-provenance fields below are absent on older runs
 	// and on adapters that report no session-init, so every one of them is a
 	// pointer: a renderer has to be able to skip the row rather than print an

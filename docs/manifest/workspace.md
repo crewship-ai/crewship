@@ -251,9 +251,10 @@ every failure into one message so you fix them in a single pass:
 - Crews: each crew has a slug (slug-formatted, unique within the
   workspace) and at least one agent.
 - Agents: slug + name required; `agent_role` (AGENT \| LEAD),
-  `cli_adapter`, and `tool_profile` enum-checked; at most one LEAD per
-  crew; `skills` and `env_refs` resolve against the crew-scope then
-  workspace-scope declarations.
+  `cli_adapter`, and `tool_profile` enum-checked; `suggested_prompts`
+  capped at 8 non-blank lines of at most 120 characters each; at most
+  one LEAD per crew; `skills` and `env_refs` resolve against the
+  crew-scope then workspace-scope declarations.
 
   > **`COORDINATOR` is not valid in nested bundles.** Inside a
   > `kind: Crew` or `kind: Workspace` document the agent-role validator

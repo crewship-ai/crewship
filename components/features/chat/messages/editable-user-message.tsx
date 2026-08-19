@@ -103,7 +103,11 @@ export function EditableUserMessage({
 
   return (
     <div className={cn("flex flex-col gap-1 ml-auto max-w-[80%]", className)}>
-      <div className="rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 shadow-sm px-4 py-3 text-sm">
+      {/* pre-wrap: the same text is edited in a <textarea> above, so a bubble
+          that collapses newlines shows something the editor does not. It also
+          keeps the attachment block of a message sent with a file readable
+          (lib/attachment-message.ts) instead of running it onto one line. */}
+      <div className="whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 shadow-sm px-4 py-3 text-sm">
         {text}
       </div>
       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">

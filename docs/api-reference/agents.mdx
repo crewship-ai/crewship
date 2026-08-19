@@ -48,8 +48,11 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | GET | [/api/v1/agents/{agentId}/chats](#list-chats) | List chat sessions |
 | POST | [/api/v1/agents/{agentId}/chats](#create-chat) | Create a new chat session |
 | PUT | [/api/v1/agents/{agentId}/chats/{chatId}/read](#mark-chat-read) | Mark a chat read |
+| PATCH | [/api/v1/agents/{agentId}/chats/{chatId}](#rename-chat) | Rename a chat session |
 | DELETE | [/api/v1/agents/{agentId}/chats/{chatId}](#delete-chat) | Delete a chat session |
 | POST | [/api/v1/agents/{agentId}/chats/{chatId}/attachments](#chat-attachments) | Upload a chat attachment |
+| GET | [/api/v1/agents/{agentId}/chats/{chatId}/attachments](#list-chat-attachments) | List a chat's attachments |
+| DELETE | [/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}](#delete-chat-attachment) | Delete one chat attachment |
 | GET | [/api/v1/agents/{agentId}/runs](#agent-runs) | List execution history |
 | GET | [/api/v1/agents/{agentId}/credential-bindings](#credential-bindings) | List MCP credential bindings |
 | GET, POST, PATCH, DELETE | [/api/v1/agents/{agentId}/integrations](#agent-integrations) | Manage agent MCP integrations |
@@ -289,6 +292,8 @@ GET /api/v1/agents?workspace_id={workspaceId}
 | `timeout_seconds` | integer | Maximum execution time |
 | `tool_profile` | string | Tool access profile |
 | `memory_enabled` | boolean | Whether agent memory is enabled |
+| `suggested_prompts` | string? | Chat suggestions offered under an empty conversation, one per line (max 8, max 120 chars each). `null` when unconfigured -- the chat then shows the built-in defaults |
+| `ask_forms` | string? | The agent's questionnaires: a JSON array of form definitions, canonical as stored (max 4 forms, max 6 fields each). `null` when unconfigured -- see **Ask forms** under [Update Agent](#update-agent) |
 | `cli_tools` | string? | Comma-separated list of allowed CLI tools |
 | `schedule_cron` | string? | Cron expression for scheduled runs |
 | `schedule_prompt` | string? | Prompt used for scheduled runs |
@@ -404,6 +409,88 @@ Partial update -- only provided fields are changed.
 | `schedule_prompt` | string | Schedule prompt |
 | `schedule_enabled` | boolean | Enable/disable schedule |
 | `mcp_config_json` | string | Agent MCP config JSON (must contain an `mcpServers` object) |
+| `suggested_prompts` | string | Chat suggestions, one per line (see below) |
+| `ask_forms` | string | Ask forms as a JSON array, given as a **string** (see below) |
+
+**Suggested prompts.** `suggested_prompts` holds the questions this agent
+offers as buttons under an empty conversation, one per line -- at most 8 lines,
+at most 120 characters each. The server normalises on write: CRLF becomes LF,
+each line is trimmed, blank lines are dropped, and a value that ends up empty
+is stored as `null`. An agent with `null` here is not misconfigured; it simply
+shows the built-in defaults, which is what every agent did before the field
+existed. Rejections name the offending line -- `"at most 8 prompts are allowed
+(got 9)"`, `"prompt 3 exceeds 120 characters (it has 154)"` -- so a caller can
+fix the entry rather than the whole list. Set it from the console under an
+agent's **Config -> Chat suggestions**, or with
+`crewship agent update <agent> --suggested-prompts @questions.txt`.
+
+**Ask forms.** `ask_forms` holds the questionnaires this agent offers: a chip
+that opens a short form, whose answers are rendered into an **ordinary user
+message** and sent. The value is a JSON array given as a *string* -- the column
+is TEXT, the console edits it in a textarea and the CLI reads it from a file,
+and accepting a nested array as well would put two encodings of one value on
+one endpoint.
+
+```json
+[{
+  "id": "receipt",
+  "label": "Add a receipt",
+  "template": "Please file this receipt.\n\nSupplier: {{supplier}}\nAmount: {{amount}} {{amount_currency}}\nPeriod: {{month}}\nCategory: {{category}}\nDocument: {{document}}",
+  "attachment": "required",
+  "fields": [
+    {"name": "supplier", "label": "Supplier", "type": "text", "required": true, "placeholder": "Vodafone"},
+    {"name": "amount", "label": "Amount", "type": "money", "required": true, "currency": ["CZK", "EUR", "USD"]},
+    {"name": "month", "label": "Period", "type": "month", "default": "2026-08"},
+    {"name": "category", "label": "Category", "type": "select", "options": ["Telco", "Hosting"]},
+    {"name": "document", "label": "Document", "type": "file"}
+  ]
+}]
+```
+
+`id` is a slug and must be unique; `label` is the chip's text (max 48
+characters); `attachment` is `none` | `optional` | `required` and defaults to
+`none`; `template` is at most 2000 characters. Field types are `text`,
+`textarea`, `number`, `money`, `date`, `month`, `select`, `multiselect`,
+`checkbox`, `file` and `photo` -- **an unrecognised type is accepted and falls
+back to a text input**, which is what lets a new type ship without a
+coordinated frontend release. `select` and `multiselect` must carry `options`.
+A JSON Schema for authoring lives at `schemas/ask-form.v1.json`.
+
+**Money fields answer to two placeholders.** A `money` field named `amount`
+renders as `{{amount}}` for the number and `{{amount_currency}}` for the
+chosen currency. The second name is derived so that two money fields on one
+form cannot fight over a single `{{currency}}`.
+
+**Template rendering.** `{{field}}` substitution only -- no conditionals, no
+loops, no expressions. Three rules decide what gets sent:
+
+1. Every placeholder must name a field on **its own form**, and this is
+   checked when the form is **saved**, not when it is rendered. The author
+   finds out while authoring; the person talking to the agent never meets a
+   broken template.
+2. An empty optional value **drops the whole line it sits on**, static label
+   and all, unless another placeholder on that line produced something. So a
+   receipt with no category sends no `Category:` line rather than a dangling
+   one. This is the only rule that is not obvious from reading a template.
+3. Values are inserted verbatim -- the result is a user message, so nothing is
+   markdown-escaped -- but control characters are stripped, each value is
+   capped at 2000 characters and the finished message at 32000. `file` and
+   `photo` values render as the agent-visible path
+   `attachments/<chatId>/<name>`, one per line when there are several.
+
+**Rejections name the form and the placeholder**, because the caller is
+mid-edit: `form "receipt": template names {{suplier}}, which is not a field on
+that form`, `form "receipt": has no fields`, `two forms share the id
+"receipt"`, `at most 4 forms are allowed per agent (got 5)`. Nothing is
+written when a definition is refused. A value that normalises to nothing --
+`""`, whitespace, `[]`, or `null` -- clears the column.
+
+The stored value is **canonical**: parsed, validated and re-encoded with
+defaults spelled out and a stable key order, so what a caller reads back is
+stable rather than showing a diff nobody made. Set it from the console under
+an agent's **Config -> Ask forms**, or with `crewship agent update <agent>
+--ask-forms @forms.json`, and render one without a browser with `crewship
+agent ask-preview <agent> <form-id> --var k=v`.
 
 **Response:** `200 OK` -- updated agent object.
 
@@ -1475,6 +1562,46 @@ path parameters.
 **Status:** `401` unauthenticated, `403` denied, and `404` when the chat is
 not nested under the supplied agent and workspace.
 
+### Rename Chat
+
+```
+PATCH /api/v1/agents/{agentId}/chats/{chatId}
+```
+
+Sets `chats.title` -- the name the session list, the chat sidebar and the
+agent-replied notification display. A session with no title reads "Untitled
+session" everywhere, so this is what makes a list of conversations navigable.
+
+**Auth:** The chat creator may rename their own chat; an agent editor may rename
+any chat for that agent -- the same gate as Delete Chat.
+
+**Request:** `{ "title": "Refactor the queue worker" }`. `title` is required and
+must be a string; an absent key, `null`, a non-string and a title that is empty
+after normalisation are all `400`.
+
+**Normalisation (server-side, before storage):** whitespace runs -- including
+newlines and tabs -- collapse to a single space, because a title is one line by
+definition; control characters and invisible formatting characters (zero-width
+padding, the right-to-left override used for label spoofing) are stripped, with
+the ZERO WIDTH JOINER exempted so emoji sequences survive; the result is trimmed
+and capped at **200 characters**. The cap counts characters, not bytes, so a
+Czech or Japanese title gets the same length as an English one. Over the cap is
+`400`, never a silent truncation.
+
+The stored title is **text, not HTML**: markup is preserved verbatim (`<Draft>
+plan` stays `<Draft> plan`), and every consumer is responsible for escaping it
+when rendering.
+
+**Response:** `200 OK` with the updated chat row -- the same object shape one
+element of [List Chats](#list-chats) has, including `unread_count`, so a client
+can replace the row it already holds without refetching the list. Renaming does
+not touch `last_activity_at`: fixing a name must not reorder the list.
+
+**Status:** `400` invalid or empty/over-long title, `401` unauthenticated, `403`
+when the caller is neither the creator nor an agent editor, `404` when the chat
+is not nested under the supplied agent and workspace (cross-tenant included),
+and `500` on a storage failure.
+
 ### Delete Chat
 
 ```
@@ -1509,15 +1636,110 @@ workspace. The endpoint returns the sidecar's attachment metadata and uses
 `400` for an invalid upload, `404` for an unknown or mis-nested chat, and
 `502` when the sidecar cannot be reached.
 
+The blob is written to
+`<crewID>/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`, which
+the agent sees at
+`/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`. A
+provisioned crew owns that tree as uid 1001, so the server cannot create the
+directory host-side; the write is replayed through the running crew container
+as that uid. **A stopped crew therefore returns `409`**, with the remedy in the
+message.
+
+**One upload is one identity at one location.** The attachment id segment is
+what makes that true. Uploading two different files under the same name — say
+`evidence.pdf` twice — produces two attachments, two directories and two
+blobs, each resolving to its own recorded checksum; neither overwrites the
+other. Re-uploading the *same* bytes under the *same* name in the same chat is
+a retry, not a second attachment: it resolves to the attachment that already
+exists and returns its path.
+
+Chat attachment blobs are deliberately not content-addressed, because the path
+is what the agent is told to open. They therefore live outside
+`<root>/attachments/` and outside the content-addressed reclaim sweep; the
+delete endpoint below is how their bytes are recovered.
+
+**Metadata is written before the bytes, not after.** The row is inserted first
+in an unpublished state, the blob is written second, and the row is promoted
+last, so `201` means both exist: a success response can never mean "the bytes
+landed and nobody recorded it". Every failure leaves an unpublished row, which
+is never listed and never returned, and which a background collector removes
+along with any bytes it names once it is more than an hour old (the sweep runs hourly, so within about two hours).
+
+Attachments uploaded before this scheme keep their original two-segment path
+(`attachments/<chatId>/<filename>`) and keep working unchanged — the stored key
+is the authority on where an attachment lives, so they list, resolve and delete
+exactly like new ones.
+
+Errors from the storage layer are forwarded as a single sentence prefixed with
+`failed to save attachment: `, not as a nested JSON document.
+
 **Auth:** Authenticated caller with create/write access to the agent chat.
 
 **Request:** `multipart/form-data` with required binary `file` field; no JSON
 body.
 
-**Response:** `200 OK` or `201 Created` with attachment metadata.
+**Response:** `201 Created` with `{filename, size, path, agent_path}`. `path`
+is the agent-relative
+`attachments/<chatId>/<attachmentId>/<filename>`; `agent_path` is the same
+location as an absolute in-container path.
 
-**Status:** `400` invalid upload, `401` unauthenticated, `403` denied, `404`
-unknown or mis-nested agent/chat, and `502` sidecar failure.
+**Status:** `400` invalid upload, `401` unauthenticated, `403` denied or the
+chat is not this agent's, `404` unknown agent/chat, `409` the crew container is
+not running (start the crew and retry), `413` too large to write through the
+crew container, `503` no container runtime is configured, and `502` sidecar
+failure.
+
+### List Chat Attachments
+
+```
+GET /api/v1/agents/{agentId}/chats/{chatId}/attachments?workspace_id={workspaceId}
+```
+
+Every published attachment on one chat, newest first. Unpublished
+reservations (an upload that did not finish) are never included.
+
+**Auth:** Any authenticated member of the workspace that owns the chat.
+
+**Response:** `200 OK` with an array. Each element carries `id`,
+`workspace_id`, `owner_type` (`chat`), `owner_id` (the chat id), `filename`,
+`content_type`, `size_bytes`, `sha256`, `uploaded_by_user_id`,
+`uploaded_by_agent_id`, `uploaded_by_name`, `created_at`, `path` and
+`agent_path`. `id` is the durable identity — it is what the delete below
+takes, and it is the segment inside `path`.
+
+**Status:** `400` when a path id is missing, `401` unauthenticated, `404` for
+an unknown, mis-nested or cross-tenant chat (the three are indistinguishable
+by design), `500` on a read failure.
+
+### Delete Chat Attachment
+
+```
+DELETE /api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}?workspace_id={workspaceId}
+```
+
+Removes the attachment: the stored file first, then the metadata row.
+
+**Idempotent.** Deleting an attachment that is already gone answers `204` —
+what the caller asked for is already true. Cross-tenant access is refused one
+step earlier: an attachment in another workspace is reachable only through a
+chat in that workspace, and that chat is a `404` here.
+
+If the unlink fails (most often a stopped crew, which owns the tree) the row is
+kept and the error is forwarded as `failed to delete attachment: …`; retrying
+the same call completes the deletion. The order is deliberate — a row that
+outlives its bytes is visible and repairable, whereas bytes that outlive their
+row are unreachable for ever, since no sweep walks this tree.
+
+**Auth:** Authenticated caller with create/write access to the agent chat.
+
+**Request:** No body.
+
+**Response:** `204 No Content`.
+
+**Status:** `400` when a path id is missing, `401` unauthenticated, `403`
+denied, `404` for an unknown, mis-nested or cross-tenant chat, `409`/`5xx`
+forwarded from the storage layer when the bytes cannot be removed, `502`
+sidecar failure.
 
 ### Credential Bindings
 

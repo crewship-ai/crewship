@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useWebSocket, type WSStatus, type WSMessage } from "@/hooks/use-websocket"
 import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
+import { randomUUIDv4 } from "@/lib/random-id"
 
 /** Upper bound on out-of-order events held during reassembly. Past this, a gap
  *  is assumed permanently lost and the stream skips ahead so it never freezes.
@@ -17,17 +18,10 @@ const MAX_PENDING_EVENTS = 1000
  *  never left silently empty. */
 export const NO_OUTPUT_ERROR = "The agent returned no output — try again"
 
-/** uuid() is unavailable in non-secure (HTTP) contexts.
- *  Fall back to a simple Math.random-based UUID when needed. */
-function uuid(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID()
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0
-    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16)
-  })
-}
+/** crypto.randomUUID is unavailable in non-secure (HTTP) contexts, which is
+ *  how the dev clones are reached. lib/random-id falls back to
+ *  crypto.getRandomValues, which has no such gate. */
+const uuid = randomUUIDv4
 
 // --- Turn-based model types ---
 
@@ -65,13 +59,20 @@ export interface ChatTurn {
    *  attribute a teammate's message (avatar/name) and distinguish it from the
    *  local user's own turns. Undefined for the local user / private chats. */
   authorUserId?: string
-  /** Per-turn metadata. Currently only `trace_id` is consumed (by the
-   *  feedback store to link signals back to the OTel trace that
-   *  produced the message). Backend wiring is not yet shipped — see
-   *  the open follow-up in the feedback guide — so this field is
-   *  populated only when the WebSocket event carries it, and is
-   *  always optional for downstream readers. */
-  metadata?: { trace_id?: string }
+  /** Per-turn metadata — whatever rode WITH the message rather than inside it.
+   *
+   *  Two readers today. `trace_id` is stamped by the `done` event and consumed
+   *  by the feedback store to link signals back to the OTel trace that produced
+   *  the message. The ask-form submission envelope
+   *  (components/features/chat/asks/ask-envelope.ts) arrives under its own key
+   *  on a user turn — set optimistically by sendMessage, and recovered from
+   *  `conversation.Message.Metadata` by messagesToTurns on reload, which is the
+   *  path that makes a badge survive a refresh.
+   *
+   *  Open-ended by design: this map is the message's metadata, and narrowing it
+   *  to the keys that happen to have readers is what silently dropped the
+   *  envelope. */
+  metadata?: { trace_id?: string } & Record<string, unknown>
 }
 
 // --- Legacy types (kept for history loading compatibility) ---
@@ -214,7 +215,19 @@ function historyPartToTurnPart(part: HistoryPart, id: string, timestamp: Date): 
   }
 }
 
-/** Convert flat ChatMessage history into turns for display */
+/** Convert flat ChatMessage history into turns for display.
+ *
+ *  A persisted message's own `metadata` is carried onto the turn it becomes.
+ *  It used to be dropped on every 1:1 message→turn branch, and that drop is
+ *  why a reloaded conversation could not show which form a turn came out of
+ *  even when the server had the answer sitting on the row: the renderer reads
+ *  `turn.metadata` (asks/ask-provenance.ts, via `askProvenanceForTurn`) and
+ *  there was never anything there.
+ *
+ *  The legacy assistant-grouping branch at the bottom is left alone — it
+ *  already forwards `msg.metadata` onto the PART, which the same reader also
+ *  looks at, and several such messages can share one turn, so there is no
+ *  single message whose metadata the turn could honestly claim. */
 export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
   const turns: ChatTurn[] = []
   for (const msg of messages) {
@@ -226,6 +239,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         isStreaming: false,
         timestamp: msg.timestamp,
         authorUserId: msg.authorUserId,
+        metadata: msg.metadata,
       })
     } else if (msg.role === "system") {
       // Persisted system turns may carry structured parts (e.g. the error
@@ -241,6 +255,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         parts,
         isStreaming: false,
         timestamp: msg.timestamp,
+        metadata: msg.metadata,
       })
     } else if (msg.parts && msg.parts.length > 0) {
       // Modern message: rebuild the turn from its structured parts so the
@@ -253,6 +268,7 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
         parts: msg.parts.map((p, i) => historyPartToTurnPart(p, `${msg.id}-${i}`, msg.timestamp)),
         isStreaming: false,
         timestamp: msg.timestamp,
+        metadata: msg.metadata,
       })
     } else {
       // assistant/tool messages: group consecutive ones into a single turn
@@ -1157,6 +1173,47 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         return
       }
 
+      // The server uses a top-level error frame for failures that happen
+      // before a chat run exists: denied subscriptions/sends, malformed
+      // payloads, and an unavailable chat handler. These are not chat_event
+      // payloads, but they still terminate an optimistic local send. Ignoring
+      // one leaves the user turn showing "thinking" forever.
+      //
+      // Which of them the USER sees is a narrower question, and the answer is:
+      // only the ones that terminate something this chat has in flight.
+      //
+      //  - No channel → the frame belongs to no conversation. The server sends
+      //    those for connection-level faults (an unparseable frame, an unrouted
+      //    verb) that say nothing about this chat, and every chat open on this
+      //    socket would otherwise adopt them. Our own sends name their channel
+      //    (see sendMessage), so a refused send still comes back addressed.
+      //  - Another session's channel → not ours.
+      //  - Our channel, nothing in flight → an UNSOLICITED deny. The one that
+      //    actually happens is a draft session's subscribe: an unsent
+      //    conversation has no `chats` row (PRD step 3), isSessionOwner refuses
+      //    the channel until it exists, and ChatPanel re-subscribes the moment
+      //    ensureSession() creates it. Expected, self-correcting, and no reason
+      //    to put "access denied" — as an assistant turn under a Regenerate
+      //    button — into a chat the user has not typed into. A deny that is NOT
+      //    self-correcting (access genuinely revoked) shows up on the next send,
+      //    which is the point at which it stops the user and is surfaced.
+      if (msg.type === "error") {
+        if (!channelSessionId || channelSessionId !== sessionId) return
+        if (!isStreamingRef.current) return
+        const payload = msg.payload
+        let reason = ""
+        if (typeof payload === "string") {
+          reason = payload
+        } else if (payload && typeof payload === "object") {
+          const details = payload as Record<string, unknown>
+          if (typeof details.message === "string") reason = details.message
+          else if (typeof details.error === "string") reason = details.error
+        }
+        flushPendingText()
+        handleErrorEvent(reason)
+        return
+      }
+
       if (msg.type !== "chat_event") return
       // Drop deltas arriving after a local cancel so the cancelled stream
       // can't resurrect itself. The server's cancel ack races against
@@ -1185,6 +1242,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       flushPendingText,
       ingestChatEvent,
       drainPending,
+      handleErrorEvent,
     ],
   )
 
@@ -1234,8 +1292,50 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     return () => { sendRef.current?.({ type: "unsubscribe", channel }) }
   }, [sessionId, status, subscribeAndResume])
 
+  // …but that subscribe is DENIED for a draft session.
+  //
+  // A conversation the user has opened and not yet sent into has no `chats`
+  // row (the row appears on first send — PRD Step 3), and the channel
+  // authorizer resolves ownership by looking the chat up: isSessionOwner in
+  // internal/ws/channel_auth.go refuses a channel whose session does not
+  // exist. The server DOES answer that refusal — an "access denied" error
+  // frame on this very channel (internal/ws/client.go's subscribe) — but
+  // handleMessage deliberately does not surface an unsolicited deny, so
+  // nothing about it is visible in an empty chat. The first reply still lands,
+  // which is what hid this — a run started by this socket is written straight
+  // back to the sending client (internal/ws/client.go:470-474) and never
+  // touches the channel fan-out. Everything from another origin in the same
+  // session (a teammate in a group chat, a CLI run, a webhook) is lost until
+  // the socket reconnects or the user leaves the session and comes back.
+  //
+  // So the caller tells us when the row came into existence — ChatPanel calls
+  // this right after its ensureSession() POST succeeds — and we take the
+  // channel again. Once per session: `resume` asks the server to replay an
+  // in-flight run from our last seq, and firing it twice would replay it
+  // twice. The ref holds the session id it already re-subscribed for, so a
+  // later session gets its own single retry without needing a reset.
+  const resubscribedForRef = useRef<string | null>(null)
+  const resubscribeSession = useCallback(() => {
+    const sid = sessionIdRef.current
+    if (!sid || resubscribedForRef.current === sid) return
+    resubscribedForRef.current = sid
+    subscribeAndResume()
+  }, [subscribeAndResume])
+
+  /** Send a message.
+   *
+   *  `metadata` rides WITH the message, never inside it: `content` is
+   *  byte-identical to what a plain send of the same text produces, and the
+   *  payload omits the key entirely when there is nothing to carry, so a plain
+   *  composer message, a suggestion chip and `?prompt=` all serialize to the
+   *  exact bytes they did before any of this existed. Today the only occupant
+   *  is the ask-form submission envelope, forwarded by useMessageSubmit.
+   *
+   *  It is also stamped on the optimistic turn, so the "via <form>" badge is
+   *  on screen the moment the message is — the reload path recovers the same
+   *  thing from the persisted message (messagesToTurns above). */
   const sendMessage = useCallback(
-    (content: string) => {
+    (content: string, metadata?: Record<string, unknown>) => {
       if (!content.trim() || isStreaming) return
 
       const userTurn: ChatTurn = {
@@ -1244,6 +1344,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         parts: [{ id: uuid(), type: "text", content: content.trim(), timestamp: new Date() }],
         isStreaming: false,
         timestamp: new Date(),
+        metadata,
       }
 
       setTurns((prev) => [...prev, userTurn])
@@ -1254,9 +1355,16 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
 
       send({
         type: "send_message",
+        // Name the channel this send is about. The server echoes it on any
+        // frame-level refusal (denied session, invalid payload, chat handler
+        // unavailable — internal/ws/client.go), which is what makes those
+        // rejections addressable: handleMessage above refuses to attribute an
+        // error frame that names no channel to whatever chat happens to be open.
+        channel: "session:" + sessionId,
         payload: JSON.stringify({
           session_id: sessionId,
           content: content.trim(),
+          ...(metadata ? { metadata } : {}),
         }),
       })
     },
@@ -1321,7 +1429,11 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       return
     }
 
-    // Remove all turns after (and including) the last assistant turn
+    // Remove all turns after (and including) the last assistant turn. The user
+    // turn itself is kept as-is, badge and all — a regenerate re-asks the same
+    // question. What it deliberately does NOT do is put the envelope back on
+    // the wire: a submission id is minted once per press of Send, and
+    // re-sending it would record a second submission the user never made.
     setTurns((prev) => prev.slice(0, lastUserIdx + 1))
     setIsStreaming(true)
     textBufferRef.current = ""
@@ -1330,6 +1442,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
 
     send({
       type: "send_message",
+      channel: "session:" + sessionId,
       payload: JSON.stringify({
         session_id: sessionId,
         content: lastUserContent,
@@ -1358,9 +1471,17 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
         return
       }
 
-      // Replace the user turn content and remove everything after
+      // Replace the user turn content and remove everything after.
+      //
+      // The metadata goes with it. An ask envelope claims "the user answered
+      // this form this way, and this is the text it rendered" — once the text
+      // has been edited by hand that is no longer true, so the badge must not
+      // survive the edit. Nothing is sent in its place either (the payload
+      // below carries no metadata), so the local turn and the persisted one
+      // agree: this is a typed message now.
+      const { metadata: _replacedEnvelope, ...priorTurn } = turns[turnIdx]
       const editedTurn: ChatTurn = {
-        ...turns[turnIdx],
+        ...priorTurn,
         parts: [{ id: uuid(), type: "text", content: trimmed, timestamp: new Date() }],
       }
       setTurns(turns.slice(0, turnIdx).concat(editedTurn))
@@ -1371,6 +1492,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
 
       send({
         type: "send_message",
+        channel: "session:" + sessionId,
         payload: JSON.stringify({
           session_id: sessionId,
           content: trimmed,
@@ -1423,6 +1545,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     editAndResend,
     loadHistory,
     markHistoryUnavailable,
+    resubscribeSession,
     isStreaming,
     connectionStatus: status as WSStatus,
   }

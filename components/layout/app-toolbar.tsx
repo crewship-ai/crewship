@@ -9,6 +9,7 @@ import {
   LogOut, Menu, Network, Search, Settings, Shield, ShieldCheck, Store, User, X, Zap,
 } from "lucide-react"
 
+import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { useRealtime } from "@/hooks/use-realtime"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Button } from "@/components/ui/button"
@@ -28,12 +29,10 @@ import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
-import { getCrewDotColor } from "@/lib/entities"
 import { CommandPalette } from "@/components/command-palette"
 import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { ActivityBell } from "@/components/features/activity/activity-bell"
 import { useAppStore } from "@/lib/store"
-import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 import { SystemStatusPill } from "./status-pill"
@@ -45,11 +44,21 @@ const DOCS_URL = "https://docs.crewship.ai"
 const GITHUB_URL = "https://github.com/crewship-ai/crewship"
 const SUPPORT_URL = "https://github.com/crewship-ai/crewship/issues"
 
-const mobileNavSections = [
+/**
+ * Exported for the same reason as `navSections` in app-sidebar: the two nav
+ * definitions are hand-kept twins, and a test that reads both is what stops a
+ * surface from existing on the desktop rail and nowhere on a phone.
+ */
+export const mobileNavSections = [
   {
     label: "Work",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
+      // Same entry as the desktop rail, same icon (CONCEPT_ICON.sessions).
+      // The mobile sheet otherwise picks its icons locally from lucide, but
+      // an icon that changes between breakpoints is the drift lib/concept-icons
+      // exists to prevent.
+      { title: "Chat", href: "/chat", icon: CONCEPT_ICON.sessions },
       { title: "Crews & Agents", href: "/crews", icon: Network },
     ],
   },
@@ -102,60 +111,19 @@ const mobileNavSections = [
 
 
 
-interface AgentBreadcrumb {
-  agentName: string
-  crewName: string | null
-  crewId: string | null
-  crewColor: string | null
-}
-
-
-const AGENT_PATH_RE = /^\/crews\/agents\/([^/]+)/
-
-
-function useAgentBreadcrumb(pathname: string, workspaceId: string | null): AgentBreadcrumb | null {
-  const [data, setData] = useState<AgentBreadcrumb | null>(null)
-  const match = pathname.match(AGENT_PATH_RE)
-  const agentId = match?.[1]
-
-  useEffect(() => {
-    if (!agentId || agentId === "_" || agentId === "new" || !workspaceId) {
-      setData(null)
-      return
-    }
-
-    let cancelled = false
-    setData(null)
-
-    async function fetchBreadcrumb() {
-      try {
-        const res = await apiFetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-        if (!res.ok) {
-          if (!cancelled) setData(null)
-          return
-        }
-        const agent = await res.json()
-        if (!cancelled) {
-          setData({
-            agentName: agent.name,
-            crewName: agent.crew?.name ?? null,
-            crewId: agent.crew_id,
-            crewColor: agent.crew?.color ?? null,
-          })
-        }
-      } catch {
-        if (!cancelled) setData(null)
-      }
-    }
-
-    fetchBreadcrumb()
-    return () => { cancelled = true }
-  }, [agentId, workspaceId])
-
-  return agentId ? data : null
-}
-
-
+// There used to be an agent-detail breadcrumb here — "Agents / <crew> /
+// <agent>", keyed on a /^\/crews\/agents\/([^/]+)/ match of the pathname and
+// fed by a GET /api/v1/agents/<id> to resolve the names. All three of its
+// destinations were routes the selection-driven /crews redesign deleted:
+// /crews/agents (no page.tsx, no crews/agents.html in the export) and
+// /crews/<crewId> (same). The branch could not fire from a working navigation
+// either, because nothing routes to /crews/agents/<id> any more — it rendered
+// only when the Go static handler fell a bad URL through to the SPA root,
+// which put an agent breadcrumb above the dashboard and fired a fetch for it.
+//
+// The agent detail surface is now /crews?agent=<slug> on the /crews canvas,
+// which carries its own sub-bar, and the one deep page that still needs a way
+// back — chat — has the breadcrumb below pointing exactly there.
 export function AppToolbar() {
   const pathname = usePathname()
   const { workspaceId } = useWorkspace()
@@ -163,7 +131,6 @@ export function AppToolbar() {
   const crewsStatus = useCrewsStatus(workspaceId)
   const provisioning = useProvisioningStatus(workspaceId)
   const { session, signOut } = useAuth()
-  const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
   const { status: wsStatus } = useRealtime()
   const isMobile = useIsMobile()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -171,6 +138,25 @@ export function AppToolbar() {
   const { role } = useAbilities()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
 
+  // ⌘K opens the global palette, on every route, and it is the ONLY listener
+  // for that key in the product.
+  //
+  // It used to share it. The chat surface's own palette bound `mod+k` too
+  // (composer/slash-palette.tsx), neither listener stopped the other, and both
+  // are on `document` — where `stopPropagation` cannot order two listeners on
+  // the same node in the same phase into a winner. So one press inside a
+  // conversation opened two stacked dialogs.
+  //
+  // The key stayed here because this toolbar PRINTS it: the search button a few
+  // lines down carries "⌘K" in a <kbd>, on screen on every route including
+  // chat. A binding that changes meaning depending on where focus happens to be
+  // would make that label wrong exactly where the cursor usually is. The chat
+  // palette moved to ⌘/ and gained a button of its own; see the note on its
+  // useHotkeys call.
+  //
+  // components/features/chat/__tests__/chat-hotkey-ownership.test.tsx is what
+  // keeps this a single owner — it fails if pressing ⌘K in a conversation
+  // reaches anything else.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -186,51 +172,11 @@ export function AppToolbar() {
   const userEmail = session?.user?.email ?? ""
   const userAvatar = session?.user?.avatar_url ?? ""
 
-  const isAgentPage = AGENT_PATH_RE.test(pathname)
   const chatMatch = pathname.match(/^\/chat\/([^/]+)/)
   const isChatPage = Boolean(chatMatch)
   const chatAgentSlug = chatMatch?.[1] ? decodeURIComponent(chatMatch[1]) : null
 
   function renderBreadcrumbs() {
-    if (isAgentPage && agentBreadcrumb) {
-      return (
-        <>
-          <Link href="/crews/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Agents
-          </Link>
-          {agentBreadcrumb.crewName && agentBreadcrumb.crewId && (
-            <>
-              <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
-              <Link
-                href={`/crews/${agentBreadcrumb.crewId}`}
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
-              >
-                <span
-                  className="h-2 w-2 rounded-full shrink-0"
-                  style={{ backgroundColor: getCrewDotColor(agentBreadcrumb.crewColor) }}
-                />
-                {agentBreadcrumb.crewName}
-              </Link>
-            </>
-          )}
-          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
-          <span className="text-sm font-semibold truncate">{agentBreadcrumb.agentName}</span>
-        </>
-      )
-    }
-
-    if (isAgentPage) {
-      return (
-        <>
-          <Link href="/crews/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Agents
-          </Link>
-          <span className="text-muted-foreground-soft text-sm shrink-0">/</span>
-          <span className="text-sm text-muted-foreground">...</span>
-        </>
-      )
-    }
-
     // Chat page: link back to /crews?agent=<slug> so the toolbar back-action
     // restores agent selection in the canvas (instead of dumping the user
     // on an empty roster).

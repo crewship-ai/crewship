@@ -174,8 +174,44 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		return "", pendingCredVaultError
 	}
 
+	// Retire any DEAD proposal holding this name before deciding whether the
+	// name is taken.
+	//
+	// A PENDING_APPROVAL credential is reachable through exactly one route: the
+	// resolve path of the escalation that staged it (approve → ACTIVE, reject →
+	// REJECTED + deleted_at). Once that escalation is no longer PENDING, the
+	// route answers 409 forever, so the row can never be activated and never
+	// rejected — it is an encrypted secret nobody can act on. Counting it as a
+	// live name meant one unanswered question jammed auto-staging for that name
+	// permanently: every later proposal came back as a conflict and the agent
+	// was told to have a human type the value in by hand.
+	//
+	// The predicate is reachability (no PENDING escalation links it), not a list
+	// of terminal statuses, because reachability is the property that makes the
+	// row dead — and it keeps the rule symmetrical with the probe below: a
+	// proposal whose question is STILL OPEN is genuinely live and must still
+	// conflict, or two rows would race the UNIQUE(workspace_id, name) constraint
+	// with no way to tell which one a human was looking at.
+	//
+	// The disposal is the same disposal expiry and cancellation now perform
+	// (disposeStagedCredential); this pass is the net for rows stranded before
+	// those paths learned to clean up, which no forward-looking fix can reach.
+	if _, err := h.db.ExecContext(ctx, `
+		UPDATE credentials
+		   SET status = 'REJECTED', deleted_at = ?, updated_at = ?
+		 WHERE workspace_id = ? AND name = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL
+		   AND NOT EXISTS (
+		       SELECT 1 FROM escalations e
+		        WHERE e.credential_id = credentials.id AND e.status = 'PENDING'
+		   )`,
+		time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339), wsID, p.Name); err != nil {
+		h.logger.Warn("pending credential: retire stranded proposal", "name", p.Name, "error", err)
+	}
+
 	// Clear any soft-deleted same-name row so the INSERT can't trip the
 	// UNIQUE(workspace_id, name) constraint (mirrors credentials_mutate.go).
+	// Runs after the retirement above so rows it just soft-deleted are cleared
+	// in the same pass.
 	if _, err := h.db.ExecContext(ctx,
 		"DELETE FROM credentials WHERE workspace_id = ? AND name = ? AND deleted_at IS NOT NULL",
 		wsID, p.Name); err != nil {

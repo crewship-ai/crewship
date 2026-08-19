@@ -120,7 +120,7 @@ Implies `--wait-provision`. Picks the first provisioned crew (preferring `resear
 | 2. Crews + members | Creates four crews and links the admin user | Fatal |
 | 2a. Crew connections | All-pairs bidirectional `crew_connections` so missions can hand off | Non-fatal (logs and continues) |
 | 2b. Provision crews | Triggers devcontainer image builds in parallel | Errors deferred to end |
-| 3. Agents | Inserts agents with system prompts | Fatal |
+| 3. Agents | Inserts agents with system prompts, then a follow-up `PATCH` for the columns `POST /api/v1/agents` does not model — suggested questions and ask forms (see below) | Fatal |
 | 3b. Agent memory (if `--with-memory`) | Pre-seeds each agent's memory tiers | Non-fatal (logs and continues) |
 | 4–5. Skills + assignments | Workspace skills + per-agent skill bindings | Fatal |
 | 6–7. Credentials + assignments | Demo API keys + per-agent credential bindings | Fatal |
@@ -134,6 +134,50 @@ Implies `--wait-provision`. Picks the first provisioned crew (preferring `resear
 | 12. Smoke test | If `--smoke-test`, one prompt per agent | Fatal on any failure |
 
 The async-by-default model means a plain `crewship seed` returns quickly (~seconds for the API mutations) while crew containers warm up in the background. Pair with `crewship crew provision status <slug>` to check on individual crews.
+
+## What the seeded chat surface shows
+
+A fresh workspace is meant to demonstrate the chat features, not ship them
+switched off, so three of the seven agents come pre-configured:
+
+| Agent | Suggested questions | Ask form |
+| --- | --- | --- |
+| **Alex** (Engineering Lead) | Four delegation and status questions — break an issue into subtasks, what is blocking the crew, plan a change, what shipped yesterday | — |
+| **Morgan** (SRE / Ops Lead) | Four incident questions — triage an alert, what the last deploy changed, how to roll it back, last night's incidents | — |
+| **Casey** (Test & Review Engineer) | Three review questions — review the diff, write table-driven tests, sort real regressions from flakes | **Report a bug** |
+
+Everyone else falls back to the built-in role packs, which is the behaviour an
+unconfigured agent has always had — a demo where every agent has chips would
+say nothing about which ones were written for the job.
+
+`Report a bug` is the seeded [ask form](/guides/ask-forms): what went wrong, steps
+to reproduce, severity, first seen, and a screenshot — five fields across five
+field types, including the `photo` upload, on the agent whose job is triaging an
+input into a structured finding. Preview it without a browser:
+
+```bash
+crewship agent ask-preview casey bug-report \
+  --var summary="The credential picker shows no brands on a phone" \
+  --var steps="1. Open /credentials on a phone
+2. Tap Add a credential
+3. The brand list is empty" \
+  --var severity=P1 --var screenshot=IMG_4821.heic
+```
+
+Both columns are edited afterwards like any other agent field — `crewship agent
+update <slug> --suggested-prompts`/`--ask-forms`, or the agent's config tab.
+The definitions live in `cmd/crewship/seeddata/builtin/agents.yaml` and
+`cmd/crewship/seeddata/askforms/*.json`; the seed's own tests validate every
+form against `internal/askforms` before it can ship, so an invalid one is a red
+`go test` rather than a 400 mid-seed.
+
+<Note>
+  `POST /api/v1/agents` does not model `suggested_prompts` or `ask_forms` — a
+  create carrying them returns 201 and drops them. The seed therefore issues one
+  follow-up `PATCH` per agent that has either, which is also how the manifest
+  importer handles it (`crewship apply`). The PATCH runs on a re-seed too, so an
+  existing demo workspace picks the values up on the next `crewship seed`.
+</Note>
 
 ## Common errors
 

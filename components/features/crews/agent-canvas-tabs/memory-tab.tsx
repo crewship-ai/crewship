@@ -29,6 +29,28 @@
 // lockstep when the editor evolves (CodeMirror integration, diff
 // view, etc.). PERSONA additionally exposes an Edit button + writer
 // because it's the only operator-writeable tier.
+//
+// WHAT THIS PANEL IS READING, and why it says so out loud
+// (§4.5 of the 2026-08-13 chat-surface audit):
+//
+// The tier panels read the memory AUDIT TRAIL — rows in
+// memory_versions — not the live .memory files. No endpoint returns
+// the current bytes of an agent's memory directory; "latest recorded
+// version" is the closest thing this surface can obtain. That matters
+// because memory_versions is a projection: a file only appears if some
+// writer records it, and until the audit watcher learned the crew's
+// shared tree, CREW.md never did. A real shared memory file therefore
+// rendered here as "(no history)" — the panel stating an absence it
+// had no way to establish.
+//
+// So every empty list now has to declare which kind of empty it is.
+// GET /api/v1/memory/versions returns a `projection` object saying
+// whether the path is recorded at all, and the history section renders
+// "nothing has been written" ONLY when the server says the path is
+// watched. Unrecorded, unavailable, still-loading and failed all say
+// what they are instead. The client does not hard-code which tiers are
+// projected — that list has been wrong in three separate documents,
+// and the server owns it.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { MarkdownEditor } from "@/components/shared/markdown-editor"
@@ -89,6 +111,30 @@ interface HistoryEntry {
   written_at: string
   written_by: string
 }
+
+// Projection mirrors internal/memory/projection.go. `recorded` is the
+// only state in which an empty entry list may be read as "nothing has
+// been written"; the other two mean the trail cannot be collected for
+// this path (nothing projects it) or on this server (versioning off).
+interface Projection {
+  state: "recorded" | "unrecorded" | "unavailable"
+  reason: string
+}
+
+type HistoryStatus = "loading" | "ready" | "error"
+
+// HistoryState is what the version-history section renders from. It
+// carries the load status alongside the rows on purpose: an in-flight
+// request and a failed one both have zero entries, and neither is an
+// empty history.
+interface HistoryState {
+  status: HistoryStatus
+  entries: VersionEntry[]
+  projection: Projection
+  error?: string
+}
+
+const RECORDED: Projection = { state: "recorded", reason: "" }
 
 export interface MemoryTabProps {
   agentId: string
@@ -164,7 +210,93 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
       {sub === "peers" && (
         <PeersPanel agentId={agentId} workspaceId={workspaceId} />
       )}
+
+      <OtherTiers agentSlug={agentSlug} hasCrew={Boolean(crewId)} />
     </div>
+  )
+}
+
+// OtherTiers names the memory files this panel has no sub-tab for.
+//
+// The four tabs above are not the whole of an agent's memory, and a
+// reader who assumes they are will draw exactly the wrong conclusion
+// from them. Each entry below states what is true today rather than
+// what we would like to be true — the 2026-08-13 audit found that
+// three separate documents had this wrong, so the wording is
+// deliberately about mechanism ("who writes it, who records it") and
+// not about intent.
+function OtherTiers({ agentSlug, hasCrew }: { agentSlug: string; hasCrew: boolean }) {
+  return (
+    <section
+      data-testid="memory-other-tiers"
+      className="space-y-3 rounded border border-white/10 p-3"
+    >
+      <h3 className="text-sm font-semibold">Other memory this panel does not show</h3>
+      <p className="text-xs text-muted-foreground">
+        &ldquo;Recorded&rdquo; below means a writer puts the file into the version trail —
+        the same trail the panels above read. If a panel above reports that versioning is
+        off on this server, none of these are being recorded either.
+      </p>
+      <dl className="space-y-3 text-xs text-muted-foreground">
+        <div>
+          <dt className="font-mono text-foreground">daily/YYYY-MM-DD.md</dt>
+          <dd>
+            Recorded. Every write lands in the audit trail as{" "}
+            <code>agent:{agentSlug}/daily/&lt;date&gt;.md</code>, but the member endpoint
+            answers for one exact path at a time and there is no way to discover which
+            dates exist. Listing by prefix is admin-only (
+            <code>GET /api/v1/admin/memory/versions</code>), or{" "}
+            <code>crewship memory log</code>.
+          </dd>
+        </div>
+        <div>
+          <dt className="font-mono text-foreground">lessons.md</dt>
+          <dd>
+            Not recorded at all. The negative-learning evaluator writes it straight into
+            the memory directory (<code>consolidate.WriteLesson</code>) and no writer
+            projects it into the version trail — no row, no endpoint. An absence here is
+            this panel&rsquo;s blind spot, not an empty file. Read it from inside the crew
+            or over the CLI.
+          </dd>
+        </div>
+        <div>
+          <dt className="font-mono text-foreground">learned-&lt;topic&gt;.md</dt>
+          <dd>
+            {hasCrew ? (
+              <>
+                Recorded by the consolidator, one file per topic, as{" "}
+                <code>crew:&lt;crew&gt;/learned-&lt;topic&gt;.md</code> — but the topic
+                names cannot be enumerated without the same admin prefix listing, so
+                nothing here can offer them.
+              </>
+            ) : (
+              <>
+                Crew-scoped, and this agent is on no crew — the consolidator writes these
+                per crew, so there are none to show.
+              </>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="font-mono text-foreground">pins.md</dt>
+          <dd>
+            {hasCrew ? (
+              <>
+                Recorded at <code>crew:&lt;crew&gt;/pins.md</code> by the consolidator and
+                by the audit watcher. Reachable through the version endpoints and{" "}
+                <code>crewship memory log</code>; it simply has no tab here yet.
+              </>
+            ) : (
+              <>
+                Recorded at <code>agent:{agentSlug}/pins.md</code> when the agent keeps
+                pinned facts. Reachable through the version endpoints and{" "}
+                <code>crewship memory log</code>; it has no tab here yet.
+              </>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </section>
   )
 }
 
@@ -181,13 +313,14 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
 //                      truth and would 4xx an over-cap write anyway.
 //
 // Version history is always rendered; the timeline answers "when did
-// this change last?" for both writeable + read-only tiers.
+// this change last?" for both writeable + read-only tiers — or says
+// why it cannot answer.
 function MemoryTierEditor({
   title,
   content,
   bytes,
   capBytes,
-  versions,
+  history,
   readOnly,
   badge,
   hint,
@@ -202,7 +335,7 @@ function MemoryTierEditor({
   content: string
   bytes: number
   capBytes: number
-  versions: VersionEntry[]
+  history: HistoryState
   readOnly: boolean
   badge?: string
   hint?: string
@@ -246,9 +379,11 @@ function MemoryTierEditor({
         {editing === null ? (
           // Read-only display uses the same CodeMirror editor (with
           // readOnly=true) so markdown syntax highlighting is visible
-          // to the operator even when they cannot edit. Empty content
-          // still gets the "(empty)" placeholder via a plain pre — the
-          // editor itself looks awkward at zero bytes.
+          // to the operator even when they cannot edit. With no content
+          // the editor looks awkward at zero bytes, so a plain pre
+          // carries the placeholder — and the placeholder says which
+          // kind of nothing this is, since the content shown here is
+          // the latest RECORDED version, not the file on disk.
           content ? (
             <MarkdownEditor
               value={content}
@@ -259,7 +394,7 @@ function MemoryTierEditor({
             />
           ) : (
             <pre className="rounded border border-white/10 bg-muted/60 p-3 text-sm whitespace-pre-wrap min-h-[8rem]">
-              (empty)
+              {emptyContentPlaceholder(history)}
             </pre>
           )
         ) : (
@@ -326,24 +461,81 @@ function MemoryTierEditor({
         )}
       </section>
 
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold">Version history</h3>
-        {versions.length === 0 ? (
-          <p className="text-sm text-muted-foreground">(no history)</p>
-        ) : (
-          <ul className="space-y-1 text-sm font-mono">
-            {versions.map((h) => (
-              <li key={h.id} className="flex gap-3 text-xs">
-                <span className="text-muted-foreground w-44">{h.written_at}</span>
-                <span className="text-muted-foreground">{h.sha256.slice(0, 12)}</span>
-                <span className="w-16 text-right">{h.bytes} B</span>
-                <span className="text-muted-foreground">by {h.written_by}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <VersionHistory title={title} history={history} />
     </div>
+  )
+}
+
+// emptyContentPlaceholder keeps the content pane from claiming a file
+// is empty when all that is known is that no version was recorded.
+function emptyContentPlaceholder(history: HistoryState): string {
+  if (history.status === "loading") return "(loading…)"
+  if (history.status === "error") return "(could not be read — see below)"
+  if (history.projection.state !== "recorded") return "(not readable here — see below)"
+  return "(no version recorded)"
+}
+
+// VersionHistory is the section the audit finding is about. Four
+// outcomes, four sentences — the one thing it must never do is render
+// the same blank line for all of them.
+function VersionHistory({ title, history }: { title: string; history: HistoryState }) {
+  const { status, entries, projection } = history
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold">Version history</h3>
+
+      {status === "loading" && (
+        <p data-testid="memory-history-loading" className="text-sm text-muted-foreground">
+          Loading version history…
+        </p>
+      )}
+
+      {status === "error" && (
+        <div
+          data-testid="memory-history-error"
+          role="alert"
+          className="rounded border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+        >
+          Could not read the version history for {title}
+          {history.error ? ` — ${history.error}` : ""}. This is a failed read, not an empty
+          history: nothing here says anything about what the agent has written.
+        </div>
+      )}
+
+      {status === "ready" && entries.length === 0 && projection.state !== "recorded" && (
+        <div
+          data-testid="memory-history-unreadable"
+          className="space-y-1.5 rounded border border-warn/30 bg-warn/10 p-3 text-sm text-warn"
+        >
+          <p>This tier cannot be read here.</p>
+          <p>{projection.reason}</p>
+          <p className="text-muted-foreground">
+            The file may well have content — this panel reads the audit trail, and nothing
+            puts this path into it.
+          </p>
+        </div>
+      )}
+
+      {status === "ready" && entries.length === 0 && projection.state === "recorded" && (
+        <p data-testid="memory-history-empty" className="text-sm text-muted-foreground">
+          No version of {title} has been recorded yet. This path is watched, so that means
+          nothing has been written to it — not that the trail is missing it.
+        </p>
+      )}
+
+      {status === "ready" && entries.length > 0 && (
+        <ul className="space-y-1 text-sm font-mono">
+          {entries.map((h) => (
+            <li key={h.id} className="flex gap-3 text-xs">
+              <span className="text-muted-foreground w-44">{h.written_at}</span>
+              <span className="text-muted-foreground">{h.sha256.slice(0, 12)}</span>
+              <span className="w-16 text-right">{h.bytes} B</span>
+              <span className="text-muted-foreground">by {h.written_by}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -360,16 +552,16 @@ function AgentMemoryPanel({
   workspaceId: string
 }) {
   const path = `agent:${agentSlug}/AGENT.md`
-  const { content, bytes, versions, err } = useMemoryTierLatest(path, workspaceId)
+  const { content, bytes, history, err } = useMemoryTierLatest(path, workspaceId)
   return (
     <MemoryTierEditor
       title="AGENT.md — per-agent canonical memory"
       content={content}
       bytes={bytes}
       capBytes={AGENT_CAP_BYTES}
-      versions={versions}
+      history={history}
       readOnly
-      hint="Agent-managed file. The agent writes to this during runs; operators can audit history here but cannot edit directly. Use the admin restore endpoint to roll back a row."
+      hint="Agent-managed file. The agent writes to this during runs; operators can audit history here but cannot edit directly. Use the admin restore endpoint to roll back a row. Shown from the audit trail, not from the live file."
       err={err}
     />
   )
@@ -377,7 +569,11 @@ function AgentMemoryPanel({
 
 // CrewMemoryPanel reads `crew:<crewID>/CREW.md` and renders the same
 // shell with a "shared with crew" badge. We key by crewID (not slug)
-// to match the canonical path layout used by the writer caps.
+// to match the canonical path layout used by the writer caps — and by
+// the audit watcher, which since the §4.5 fix walks the crew's shared
+// tree ({base}/crews/{id}/shared/.memory) and records writes there
+// under exactly this path. Before that this tier was structurally
+// empty no matter what the crew had written.
 function CrewMemoryPanel({
   crewId,
   workspaceId,
@@ -386,29 +582,41 @@ function CrewMemoryPanel({
   workspaceId: string
 }) {
   const path = `crew:${crewId}/CREW.md`
-  const { content, bytes, versions, err } = useMemoryTierLatest(path, workspaceId)
+  const { content, bytes, history, err } = useMemoryTierLatest(path, workspaceId)
   return (
     <MemoryTierEditor
       title="CREW.md — shared crew memory"
       content={content}
       bytes={bytes}
       capBytes={CREW_CAP_BYTES}
-      versions={versions}
+      history={history}
       readOnly
       badge="shared with all crew members"
-      hint="All agents in this crew read this file at session start. Agent-managed; operator edits would break the orchestrator audit chain."
+      hint="All agents in this crew read this file at session start. Agent-managed (memory.write, tier CREW); operator edits would break the orchestrator audit chain. Shown from the audit trail, not from the live file."
       err={err}
     />
   )
 }
 
-// useMemoryTierLatest pulls the version history for the given path
-// and returns the latest entry's content (fetched lazily via the
-// /content endpoint). Renders an empty body when no history exists
-// rather than erroring out — that's the expected state on a fresh
-// agent that hasn't been run yet.
+// useMemoryTierLatest pulls the version history for the given path and
+// returns the latest entry's content (fetched lazily via the /content
+// endpoint), plus the server's verdict on whether this path is
+// projected into the trail at all.
+//
+// The old version of this hook collapsed four outcomes into one empty
+// array — in flight, failed, nothing written, and nothing recording
+// this path — which is precisely how a populated CREW.md rendered as
+// "(no history)". Each now keeps its own state, and the projection
+// comes from the server rather than from a client-side list of which
+// tiers are watched.
+const LOADING_HISTORY: HistoryState = {
+  status: "loading",
+  entries: [],
+  projection: RECORDED,
+}
+
 function useMemoryTierLatest(path: string, workspaceId: string) {
-  const [versions, setVersions] = useState<VersionEntry[]>([])
+  const [history, setHistory] = useState<HistoryState>(LOADING_HISTORY)
   const [content, setContent] = useState("")
   const [bytes, setBytes] = useState(0)
   const [err, setErr] = useState<string | null>(null)
@@ -418,6 +626,7 @@ function useMemoryTierLatest(path: string, workspaceId: string) {
     const headers = { "X-Workspace-ID": workspaceId }
     async function load() {
       setErr(null)
+      setHistory(LOADING_HISTORY)
       try {
         const r = await apiFetch(
           `/api/v1/memory/versions?path=${encodeURIComponent(path)}&limit=20`,
@@ -425,10 +634,19 @@ function useMemoryTierLatest(path: string, workspaceId: string) {
         )
         if (!r.ok) {
           if (r.status === 404) {
-            // Brand-new agent with no memory writes yet — surface as
-            // an empty state, not as an error.
+            // No such surface on this server. That is a gap in what we
+            // can read, not evidence about the file, so it is reported
+            // as unreadable rather than as an empty tier.
             if (!cancelled) {
-              setVersions([])
+              setHistory({
+                status: "ready",
+                entries: [],
+                projection: {
+                  state: "unavailable",
+                  reason:
+                    "This server does not serve the memory version trail (404), so no history can be read for any tier.",
+                },
+              })
               setContent("")
               setBytes(0)
             }
@@ -436,10 +654,17 @@ function useMemoryTierLatest(path: string, workspaceId: string) {
           }
           throw new Error(`list versions failed: ${r.status}`)
         }
-        const data = (await r.json()) as { entries?: VersionEntry[] }
+        const data = (await r.json()) as {
+          entries?: VersionEntry[]
+          projection?: Projection
+        }
         const entries = data.entries ?? []
+        // A server that predates the projection field is treated as
+        // "recorded": the rows it returns are real, and inventing an
+        // unreadable state for it would be its own kind of lie.
+        const projection = data.projection ?? RECORDED
         if (cancelled) return
-        setVersions(entries)
+        setHistory({ status: "ready", entries, projection })
         if (entries.length === 0) {
           setContent("")
           setBytes(0)
@@ -457,7 +682,15 @@ function useMemoryTierLatest(path: string, workspaceId: string) {
         setContent(text)
         setBytes(latest.bytes)
       } catch (e) {
-        if (!cancelled) setErr((e as Error).message)
+        if (cancelled) return
+        const message = (e as Error).message
+        setErr(message)
+        setHistory({
+          status: "error",
+          entries: [],
+          projection: RECORDED,
+          error: message,
+        })
       }
     }
     load()
@@ -466,7 +699,7 @@ function useMemoryTierLatest(path: string, workspaceId: string) {
     }
   }, [path, workspaceId])
 
-  return { content, bytes, versions, err }
+  return { content, bytes, history, err }
 }
 
 // PersonaPanel manages both the agent override editor and a read-
@@ -484,7 +717,10 @@ function PersonaPanel({
 }) {
   const [agentPersona, setAgentPersona] = useState<PersonaResponse | null>(null)
   const [crewPersona, setCrewPersona] = useState<PersonaResponse | null>(null)
-  const [history, setHistory] = useState<HistoryEntry[]>([])
+  // PERSONA has its own history surface (persona/history), so its
+  // projection is never in doubt — but a failed fetch of it must still
+  // not render as "no edits have ever been made".
+  const [history, setHistory] = useState<HistoryState>(LOADING_HISTORY)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -498,15 +734,24 @@ function PersonaPanel({
       ])
       if (pr.ok) setAgentPersona(await pr.json())
       if (hist.ok) {
-        const h = await hist.json()
-        setHistory(h.entries || [])
+        const h = (await hist.json()) as { entries?: HistoryEntry[] }
+        setHistory({ status: "ready", entries: h.entries || [], projection: RECORDED })
+      } else {
+        setHistory({
+          status: "error",
+          entries: [],
+          projection: RECORDED,
+          error: `GET persona/history returned ${hist.status}`,
+        })
       }
       if (crewId) {
         const cr = await apiFetch(`/api/v1/crews/${encodeURIComponent(crewId)}/persona`, { headers })
         if (cr.ok) setCrewPersona(await cr.json())
       }
     } catch (e) {
-      setErr((e as Error).message)
+      const message = (e as Error).message
+      setErr(message)
+      setHistory({ status: "error", entries: [], projection: RECORDED, error: message })
     }
   }, [agentId, crewId, workspaceId])
 
@@ -567,7 +812,7 @@ function PersonaPanel({
         content={personaContent}
         bytes={personaBytes}
         capBytes={PERSONA_CAP_BYTES}
-        versions={history}
+        history={history}
         readOnly={false}
         badge={agentPersona?.from_default ? "synthesized default" : undefined}
         hint={

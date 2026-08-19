@@ -29,18 +29,25 @@ import {
   getChatFileIcon,
   getEditorLanguage,
 } from "./chat-tree-row"
-import { useFileEditor } from "./hooks/use-file-editor"
+import { useFileEditor, type EditorScope } from "./hooks/use-file-editor"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { ScopeSection } from "./files/scope-section"
+import { CrewFilesScope } from "./files/crew-files-scope"
 import { TriggersTab } from "./right-panel-tabs/triggers-tab"
 import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 import { SharedContextTab } from "./right-panel-tabs/shared-context-tab"
 import { TeamTab } from "./right-panel-tabs/team-tab"
+import { DRAWER_TAB_LABELS } from "./right-rail"
+import type { DrawerTab } from "@/stores/drawer-store"
 
 interface ChatFileTreeState {
   expandedPaths: string[]
+  /** Agent-scoped only — see the persistence effect for why. */
   lastOpenedPath: string | null
 }
+
+/** This panel's agent tree. The crew scope carries its own crew id instead. */
+const AGENT_SCOPE: EditorScope = { kind: "agent" }
 
 const FileEditor = dynamic(
   () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
@@ -132,17 +139,22 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     }
     if (saved.lastOpenedPath) {
       const name = saved.lastOpenedPath.split("/").pop() ?? ""
-      openFileEditor({ path: saved.lastOpenedPath, name })
+      openFileEditor({ path: saved.lastOpenedPath, name }, AGENT_SCOPE)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId, files, workspaceId])
 
   // Persist current state. Debounced inside the useUserPreference hook.
+  //
+  // Only an agent-scoped file is remembered: the replay above reopens through
+  // the agent routes, and a crew path replayed there is a read of the wrong
+  // tree (403 at best). Rather than teach the stored shape a second scope for
+  // a convenience, a crew file simply is not the thing this panel reopens.
   useEffect(() => {
     if (replayedForAgentRef.current !== agentId) return
     setSavedTreeState({
       expandedPaths: Array.from(expanded),
-      lastOpenedPath: editorFile?.path ?? null,
+      lastOpenedPath: editorFile?.scope.kind === "agent" ? editorFile.path : null,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded, editorFile?.path, agentId])
@@ -173,6 +185,17 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     }
   }, [tree, expanded, workspaceId, basePrefix, agentId, loadingDirs])
 
+  // Two scopes, two trees, and the tree is named at the click — the editor
+  // reads and later writes whichever one it is handed here.
+  const openAgentFile = useCallback(
+    (node: TreeNode) => openFileEditor(node, AGENT_SCOPE),
+    [openFileEditor],
+  )
+  const openCrewFile = useCallback(
+    (node: TreeNode, crewId: string) => openFileEditor(node, { kind: "crew", crewId }),
+    [openFileEditor],
+  )
+
   const toggleFolder = useCallback((path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -184,9 +207,19 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
 
   const fileCount = files.filter((f) => !f.is_dir).length
   const editorOpen = editorFile !== null && activeTab === "files"
+  const ActiveTabIcon = RIGHT_PANEL_TABS.find((t) => t.id === activeTab)?.icon
 
   return (
     <div className="flex flex-col border-l overflow-hidden" style={style}>
+      {/* Opened from the rail the tab strip is hidden, and the panel used to
+          arrive with no name on it at all — three unlabelled icons on the
+          rail, and whatever they opened. The heading is the label. */}
+      {hideTabs && (
+        <div className="flex h-[41px] shrink-0 items-center gap-2 border-b px-3">
+          {ActiveTabIcon && <ActiveTabIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
+          <h2 className="text-label font-medium text-foreground">{DRAWER_TAB_LABELS[activeTab as DrawerTab] ?? activeTab}</h2>
+        </div>
+      )}
       {!hideTabs && <div className="flex items-end shrink-0 overflow-x-auto scrollbar-none border-b h-[41px]">
         {RIGHT_PANEL_TABS.map((tab) => (
           <button
@@ -219,9 +252,9 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                       depth={0}
                       expanded={expanded}
                       loadingDirs={loadingDirs}
-                      selectedFile={editorFile?.path ?? null}
+                      selectedFile={editorFile?.scope.kind === "agent" ? editorFile.path : null}
                       onToggle={toggleFolder}
-                      onFileClick={openFileEditor}
+                      onFileClick={openAgentFile}
                     />
                   ))}
                 </div>
@@ -232,11 +265,22 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                 </div>
               )}
             </ScopeSection>
+            {/* Collapsed, and the section mounts its children only when open,
+                so "loaded on demand" is the mechanism rather than a caption.
+                CrewFilesScope owns its own loading / failed / no-crew / empty
+                states — see the note at the top of that file for why a failed
+                fetch must never render as an empty crew.
+                A file clicked here is opened against /crews/{crewId}/files/*:
+                its keys are `<crewId>/…`, which the agent routes reject as
+                "path not scoped to this agent" — and would, on a save, have
+                written into the agent's own tree. */}
             <ScopeSection icon={Users} title="Crew" defaultOpen={false}>
-              <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
-                <FileText className="h-3 w-3" />
-                Shared crew files (loaded on demand)
-              </div>
+              <CrewFilesScope
+                agentId={agentId}
+                workspaceId={workspaceId}
+                selectedFile={editorFile?.scope.kind === "crew" ? editorFile.path : null}
+                onFileClick={openCrewFile}
+              />
             </ScopeSection>
             <ScopeSection
               icon={Globe}

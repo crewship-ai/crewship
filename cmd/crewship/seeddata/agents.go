@@ -22,6 +22,22 @@ type AgentDef struct {
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 	MemoryEnabled  bool   `yaml:"memory_enabled"`
 	PromptSlug     string `yaml:"prompt_slug"` // matches prompts/{slug}.md
+	// SuggestedPrompts is agents.suggested_prompts verbatim: the chips shown
+	// under an empty chat, one question per line. Left empty for most agents
+	// on purpose — the fallback role packs (lib/agent-suggestions.ts) still
+	// answer for those, and a demo where every agent has chips shows nothing
+	// about which ones were written for the job.
+	//
+	// Capped by the server at 8 prompts of 120 characters
+	// (internal/api/agents_suggested_prompts.go); the caps are asserted on
+	// this file in agents_chat_surface_test.go so an over-long line is a red
+	// test rather than a 400 mid-seed.
+	SuggestedPrompts string `yaml:"suggested_prompts,omitempty"`
+	// AskFormsSlug names the questionnaire document in askforms/{slug}.json,
+	// the same indirection PromptSlug uses for prompts/{slug}.md. The JSON is
+	// stored verbatim in agents.ask_forms and is validated by
+	// internal/askforms at test time and again by the server on write.
+	AskFormsSlug string `yaml:"ask_forms_slug,omitempty"`
 	// RequiresEnv gates seeding of this agent: when non-empty, the agent is
 	// only created if the named env var == "1". Used for the opt-in
 	// local-Ollama demo agent (CREWSHIP_SEED_OLLAMA).

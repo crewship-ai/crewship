@@ -63,6 +63,9 @@
               },
               "guides/first-crew",
               "guides/chat-sessions",
+              "guides/chat-surface-limits",
+              "guides/ask-forms",
+              "guides/chat-demo-walkthrough",
               "guides/watching-agent-runs",
               "guides/manifests",
               "guides/devcontainers",
@@ -149,7 +152,8 @@
                   "observability/otlp-setup",
                   "observability/metrics",
                   "guides/feedback",
-                  "guides/telemetry"
+                  "guides/telemetry",
+                  "guides/chat-telemetry"
                 ]
               },
               "guides/scheduling",

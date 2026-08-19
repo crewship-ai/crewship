@@ -340,10 +340,21 @@ func TestRunSetup_HappyPathTemplateCrew(t *testing.T) {
 	}
 	// Note: the "Workspace ready" banner goes to stderr (cli.PrintSuccess);
 	// stdout carries the agent pointer lines.
-	for _, want := range []string{"First agent ID: ag_1", "/crews/agents/ag_1/chat"} {
+	//
+	// The URL used to be <server>/crews/agents/<id>/chat. That route was
+	// deleted with the selection-driven /crews redesign, so the very first
+	// address this product ever hands a new user 404'd. The setup response
+	// carries no agent slug (internal/api/onboarding.go:562-564 returns
+	// agent_id / agent_ids / agent_count), and every surviving agent surface
+	// is keyed on slug — /chat/<slug>, /crews?agent=<slug> — so there is
+	// nothing to interpolate. It points at /crews, which resolves.
+	for _, want := range []string{"First agent ID: ag_1", "Open it in the browser:", "/crews\n"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout missing %q; got:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "/crews/agents/") {
+		t.Errorf("setup must not print a link into the deleted /crews/agents/* subtree; got:\n%s", out)
 	}
 	if strings.Contains(out, "Telemetry:") {
 		t.Errorf("telemetry line must be absent when flag unset non-interactively:\n%s", out)
@@ -665,9 +676,13 @@ func TestRunSetup_PreflightAndBrowserURL_HonorActiveProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runSetup: %v (want it to resolve the active profile's server, not stale CREWSHIP_SERVER)", err)
 	}
-	wantURL := stub.URL() + "/crews/agents/ag_1/chat"
+	// Trailing newline on purpose: without it, the old dead URL
+	// (<server>/crews/agents/ag_1/chat) still contains <server>/crews as a
+	// prefix and this assertion would pass on the very code it exists to
+	// reject. Anchoring on the end of the printed line makes it exact.
+	wantURL := stub.URL() + "/crews\n"
 	if !strings.Contains(out, wantURL) {
-		t.Errorf("browser URL must use the active profile's server; want substring %q, got:\n%s", wantURL, out)
+		t.Errorf("browser URL must use the active profile's server and a live route; want substring %q, got:\n%s", wantURL, out)
 	}
 	calls := stub.CallsFor("POST", "/api/v1/onboarding/setup")
 	if len(calls) != 1 {

@@ -258,6 +258,13 @@ type AgentResponse struct {
 	TimeoutSeconds int     `json:"timeout_seconds"`
 	MemoryEnabled  bool    `json:"memory_enabled"`
 	RoleTitle      *string `json:"role_title"`
+	// SuggestedPrompts is agents.suggested_prompts — newline-separated,
+	// already normalised by the server on write. NULL (nil here) and ""
+	// both mean "not configured"; deref collapses the two.
+	SuggestedPrompts *string `json:"suggested_prompts"`
+	// AskForms is the canonical JSON questionnaire document stored on the
+	// agent. nil and empty both mean not configured.
+	AskForms *string `json:"ask_forms"`
 }
 
 // FindLeadAgentByCrew returns the LEAD-role agent of a crew, or

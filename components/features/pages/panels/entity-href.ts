@@ -27,8 +27,22 @@ export const ENTITY_ROUTES: Record<EntityRefKind, (id: string) => string> = {
   issue: (id) => `/issues/${id}`,
   run: (id) => `/activity?run=${id}`,
   page: (id) => `/pages/${id}`,
-  agent: (id) => `/crews/agents/${id}`,
-  crew: (id) => `/crews/${id}`,
+  // Both of these land on plain /crews on purpose, and dropping the id is the
+  // point rather than a shortcut.
+  //
+  // The selection-driven /crews redesign deleted the whole /crews/agents
+  // subtree and never had /crews/<id>: app/(dashboard)/crews/ is a single
+  // page.tsx, and selection is carried in the query string as ?agent=<slug> /
+  // ?crew=<slug> (hooks/use-crews-selection.tsx). Both are keyed on the SLUG.
+  //
+  // An EntityRef carries only an id, and per the rule the dead-route scan
+  // states in full (app/(onboarding)/onboarding/__tests__/dead-agent-routes.ts)
+  // passing an id where a slug is expected is worse than passing nothing: the
+  // stale-selection watcher clears it and the reader lands on an empty canvas.
+  // So a panel's entity link opens the roster, which is a real page, instead of
+  // a URL that promises a record and 404s.
+  agent: () => `/crews`,
+  crew: () => `/crews`,
 }
 
 const ENTITY_REF_KIND_SET: ReadonlySet<string> = new Set<string>(ENTITY_REF_KINDS)

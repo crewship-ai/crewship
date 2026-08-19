@@ -191,6 +191,10 @@ func TestSeedAgents_CreatesAllAgents(t *testing.T) {
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	stub.OnPost("/api/v1/agents", clitest.JSONResponse(201, map[string]string{"id": covAgentIDCli2}))
+	// The agents that carry suggested_prompts / ask_forms get a follow-up
+	// PATCH — POST drops both columns. See agentUpdateOnlyFields; what lands
+	// on the record is asserted in cmd_seed_data_askforms_test.go.
+	stub.OnPatch("/api/v1/agents/"+covAgentIDCli2, clitest.JSONResponse(200, map[string]string{"id": covAgentIDCli2}))
 
 	crewIDs := map[string]string{}
 	for _, c := range seeddata.ActiveCrews() {
@@ -723,6 +727,12 @@ func TestSeedAgents_MidLoopCancellation(t *testing.T) {
 		cancel()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"id":"` + covAgentIDCli2 + `"}`))
+	})
+	// The first seeded agent carries update-only columns, so the create is
+	// followed by a PATCH before the loop reaches its next ctx check.
+	mux.HandleFunc("/api/v1/agents/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"` + covAgentIDCli2 + `"}`))
 	})
 	srv := httptest.NewServer(mux)

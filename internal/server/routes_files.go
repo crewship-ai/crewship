@@ -205,19 +205,33 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 
-	// Only shared-tree keys can hit the #922 ownership-handoff overwrite path
-	// (the entrypoint chowns /crew to UID 1001 after provisioning), so only
-	// they need to be buffered for a possible container replay. Agent /output
-	// writes stream straight to storage exactly as before — no size cap, no
-	// second copy in memory.
-	cpath, isShared := crewSharedContainerPath(crewID, storageKey)
-	if !isShared {
-		if err := s.storage.Write(r.Context(), storageKey, r.Body); err != nil {
-			s.logger.Error("file save failed", "path", sanitizeLogPath(filePath), "error", err)
+	// Both crew trees are chowned to the agent UID 1001 when the crew is
+	// provisioned (#922) — the shared tree by the container entrypoint, the
+	// /output tree by prepareCrewDirs — so a host-side write by the server UID
+	// can be refused with EACCES in either. Both therefore need the bytes a
+	// second time, to replay the write through the container as 1001.
+	//
+	// They get them differently, because their size contracts differ. The
+	// shared tree is buffered up front (KB-scale manifest files, hard 413 past
+	// the cap) so the no-op comparison below can read it twice. An /output
+	// write is uncapped by design — an agent file can be arbitrarily large —
+	// so it streams straight to storage while a bounded capture rides along;
+	// past the cap the capture is dropped and only the replay is lost, never
+	// the write.
+	cpath, fence, replayable := crewContainerPath(crewID, storageKey)
+	if fence != containerCrewSharedRoot {
+		capture := &captureReader{r: r.Body, limit: maxCrewFileSaveBytes}
+		werr := s.storage.Write(r.Context(), storageKey, capture)
+		if werr == nil {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
+			return
+		}
+		if !replayable || !errors.Is(werr, fs.ErrPermission) {
+			s.logger.Error("file save failed", "path", sanitizeLogPath(filePath), "error", werr)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
+		s.saveViaContainer(r.Context(), w, crewID, filePath, cpath, fence, capture.replay)
 		return
 	}
 
@@ -266,14 +280,9 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 		// host-side overwrite by the server UID fails with EACCES. Re-route the
 		// write through the container as 1001 — the tree owner — mirroring the
 		// exec-as-1001 pattern the credential materializer uses.
-		if s.container != nil && errors.Is(werr, fs.ErrPermission) {
-			if cerr := s.writeCrewSharedFileViaContainer(r.Context(), crewID, cpath, body); cerr != nil {
-				s.logger.Error("file save via container failed", "path", sanitizeLogPath(filePath), "error", cerr)
-				status, msg := containerSaveErrorResponse(cerr)
-				writeJSON(w, status, map[string]string{"error": msg})
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
+		if replayable && errors.Is(werr, fs.ErrPermission) {
+			s.saveViaContainer(r.Context(), w, crewID, filePath, cpath, fence,
+				func() ([]byte, bool) { return body, true })
 			return
 		}
 		s.logger.Error("file save failed", "path", sanitizeLogPath(filePath), "error", werr)
@@ -284,10 +293,112 @@ func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
 }
 
-// handleFileDelete removes a single file from a crew's shared/output tree.
+// saveViaContainer replays a write the host refused with EACCES (#922) through
+// the crew container as UID 1001 — the owner of the provisioned tree — and
+// turns each way that can fail into an answer the caller can act on rather
+// than a bare "failed to save file".
+//
+// content is a thunk because the two trees produce the bytes differently: a
+// shared-tree save already holds the whole body, an /output save may still
+// need to drain the unread remainder of the request. It reports false when the
+// bytes cannot be produced at all (larger than the replay buffer, or the
+// remainder could not be read) — the one failure here that starting the crew
+// would not fix, so it gets its own status and its own sentence.
+func (s *Server) saveViaContainer(ctx context.Context, w http.ResponseWriter,
+	crewID, filePath, containerPath, fence string, content func() ([]byte, bool)) {
+	if s.container == nil {
+		s.logger.Error("file save failed: destination is owned by the crew runtime and no container runtime is configured",
+			"path", sanitizeLogPath(filePath))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": errNoContainerRuntimeMsg})
+		return
+	}
+	body, ok := content()
+	if !ok {
+		s.logger.Error("file save failed: too large to replay through the crew container",
+			"path", sanitizeLogPath(filePath), "limit_bytes", maxCrewFileSaveBytes)
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+			"error": fmt.Sprintf("this file is owned by the crew runtime, so it has to be written through the "+
+				"crew container, which accepts at most %d bytes — the upload is larger", maxCrewFileSaveBytes)})
+		return
+	}
+	if cerr := s.writeCrewFileViaContainer(ctx, crewID, containerPath, fence, body); cerr != nil {
+		s.logger.Error("file save via container failed", "path", sanitizeLogPath(filePath), "error", cerr)
+		status, msg := containerSaveErrorResponse(cerr, fence)
+		writeJSON(w, status, map[string]string{"error": msg})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
+}
+
+// errNoContainerRuntimeMsg is what a caller sees when the destination belongs
+// to the crew runtime and this deployment has no container provider at all —
+// distinct from "the crew is stopped", because no retry will help.
+const errNoContainerRuntimeMsg = "the destination is owned by the crew runtime and this server has no " +
+	"container runtime configured, so it cannot be written — configure a container provider and retry"
+
+// captureReader streams r through to its consumer while keeping a copy of the
+// bytes it passed on, up to limit, so a failed write can be replayed.
+//
+// A request body is single-use, so the container replay needs the bytes twice.
+// The shared tree solves that by buffering up front and rejecting anything past
+// the cap with a 413; /output cannot, because an agent file write is uncapped
+// by design and streams straight to storage. Capturing keeps that property: the
+// write still streams, at most `limit` bytes are held, and a body that outgrows
+// the limit loses only its replay — never its write, and never silently (the
+// caller answers 413 explaining that the container route is the constrained
+// one).
+type captureReader struct {
+	r     io.Reader
+	buf   bytes.Buffer
+	limit int64
+	over  bool
+}
+
+func (c *captureReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if n > 0 && !c.over {
+		if int64(c.buf.Len()+n) > c.limit {
+			// Past the limit the capture can never be a whole body, and a
+			// partial one must never be replayed — drop it and stop holding
+			// memory for a replay that cannot happen.
+			c.over = true
+			c.buf = bytes.Buffer{}
+		} else {
+			c.buf.Write(p[:n])
+		}
+	}
+	return n, err
+}
+
+// replay returns the complete body, draining whatever the consumer never read
+// — a write that fails at mkdirat/openat never touches the reader at all, so
+// on the EACCES path the capture is typically still empty. It reports false if
+// the body is larger than the capture limit or the remainder cannot be read.
+func (c *captureReader) replay() ([]byte, bool) {
+	buf := make([]byte, 32*1024)
+	for !c.over {
+		_, err := c.Read(buf)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, false
+		}
+	}
+	if c.over {
+		return nil, false
+	}
+	return c.buf.Bytes(), true
+}
+
+// handleFileDelete removes one key from a crew's shared/output tree.
 // Path routing and traversal rejection are identical to save/download
 // (resolveCrewFileKey). Delete is idempotent — localfs RemoveAll treats a
 // missing key as success — so a repeat delete still returns 200.
+//
+// A key naming a DIRECTORY removes it and what is under it, host-side and
+// through the container replay alike (crewFileDeleteScript). Chat attachments
+// depend on that: one attachment is one directory.
 func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
 	filePath := r.URL.Query().Get("path")
@@ -314,17 +425,18 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// #922 ownership handoff: after a crew is provisioned the entrypoint
-	// chowns /crew (the bind source of "crews/<id>/shared/...") to the agent
-	// UID 1001, so a host-side unlink by the server UID fails with EACCES —
-	// removing a file needs write on its parent directory, which 1001 now
-	// owns. Re-route the removal through the container as 1001, mirroring the
-	// exec-as-1001 fallback handleFileSave uses for the same reason.
-	cpath, isShared := crewSharedContainerPath(crewID, storageKey)
-	if isShared && s.container != nil && errors.Is(err, fs.ErrPermission) {
-		if cerr := s.deleteCrewSharedFileViaContainer(r.Context(), crewID, cpath); cerr != nil {
+	// #922 ownership handoff: after a crew is provisioned both crew trees are
+	// owned by the agent UID 1001, so a host-side unlink by the server UID
+	// fails with EACCES — removing a file needs write on its parent directory,
+	// which 1001 now owns. Re-route the removal through the container as 1001,
+	// mirroring the exec-as-1001 fallback handleFileSave uses for the same
+	// reason. Applies to the /output tree too: a file the host cannot write is
+	// a file the host cannot unlink either.
+	cpath, fence, replayable := crewContainerPath(crewID, storageKey)
+	if replayable && s.container != nil && errors.Is(err, fs.ErrPermission) {
+		if cerr := s.deleteCrewFileViaContainer(r.Context(), crewID, cpath, fence); cerr != nil {
 			s.logger.Error("file delete via container failed", "path", sanitizeLogPath(filePath), "error", cerr)
-			status, msg := containerSaveErrorResponse(cerr)
+			status, msg := containerDeleteErrorResponse(cerr, fence)
 			writeJSON(w, status, map[string]string{"error": msg})
 			return
 		}
@@ -336,14 +448,14 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete file"})
 }
 
-// deleteCrewSharedFileViaContainer removes containerPath inside the crew
-// container as UID 1001 — the owner of the provisioned /crew tree — so a
-// host-side EACCES unlink (#922) still lands. The parent directory's realpath
-// is checked INSIDE the container (defence-in-depth on top of the host-side
+// deleteCrewFileViaContainer removes containerPath inside the crew container
+// as UID 1001 — the owner of the provisioned crew trees — so a host-side
+// EACCES unlink (#922) still lands. The parent directory's realpath is checked
+// INSIDE the container (defence-in-depth on top of the host-side
 // resolveCrewFileKey fence) so a symlinked path component can't redirect the
-// removal outside /crew/shared. Paths pass via env so a crafted destination
-// can't break out of the shell command.
-func (s *Server) deleteCrewSharedFileViaContainer(ctx context.Context, crewID, containerPath string) error {
+// removal outside fence. Paths pass via env so a crafted destination can't
+// break out of the shell command.
+func (s *Server) deleteCrewFileViaContainer(ctx context.Context, crewID, containerPath, fence string) error {
 	containerName, _, ok := s.resolveCrewContainer(ctx, crewID, false)
 	if !ok {
 		return errCrewNotFound
@@ -352,14 +464,10 @@ func (s *Server) deleteCrewSharedFileViaContainer(ctx context.Context, crewID, c
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	const script = `set -eu; d=$(dirname "$DEST"); ` +
-		`rp=$(realpath "$d"); case "$rp" in /crew/shared|/crew/shared/*) ;; ` +
-		`*) echo "refuse: destination escapes /crew/shared" >&2; exit 3 ;; esac; ` +
-		`rm -f "$DEST"`
 	result, err := s.container.Exec(ctx, provider.ExecConfig{
 		ContainerID: containerName,
-		Cmd:         []string{"sh", "-c", script},
-		Env:         []string{"DEST=" + containerPath},
+		Cmd:         []string{"sh", "-c", crewFileDeleteScript},
+		Env:         []string{"DEST=" + containerPath, "FENCE=" + fence},
 		User:        "1001:1001",
 	})
 	if err != nil {
@@ -387,28 +495,55 @@ var (
 	errCrewContainerUnavailable = errors.New("crew container unavailable")
 )
 
-// crewSharedContainerPath maps a "crews/<id>/shared/..." storage key to the
-// absolute path inside the crew container, where <OutputBasePath>/crews/<id>
-// is bind-mounted at /crew (docker provider buildMounts). Reports false for
-// keys outside that crew's shared subtree — the /output tree stays host-side.
-func crewSharedContainerPath(crewID, storageKey string) (string, bool) {
-	prefix := "crews/" + crewID + "/"
-	if !strings.HasPrefix(storageKey, prefix) {
-		return "", false
+// The two crew trees, as the container sees them. buildMounts binds
+// <OutputBasePath>/crews/<id> at /crew and <OutputBasePath>/<id> at /output;
+// each is also the fence a container-side write must resolve inside.
+const (
+	containerCrewSharedRoot = "/crew/shared"
+	containerOutputRoot     = "/output"
+)
+
+// crewContainerPath maps a crew-file storage key to its absolute path inside
+// the crew container, together with the tree root that write must stay under:
+//
+//	crews/<id>/shared/...  →  /crew/shared/...   fenced to /crew/shared
+//	<id>/<agent>/...       →  /output/<agent>/…  fenced to /output
+//
+// Both trees end up owned by the agent UID 1001 once the crew is provisioned,
+// so both need the container replay when the host-side write is refused
+// (#922). This used to answer for the shared tree only — which is why chat
+// attachments, which live in the /output tree, could never reach the fallback:
+// handleFileSave returned on the "not shared" branch before it.
+//
+// Reports false for anything outside those two trees, for a crew id that is not
+// a single clean path component, and for the tree roots themselves (a directory
+// is not a file this can write).
+func crewContainerPath(crewID, storageKey string) (containerPath, fence string, ok bool) {
+	if !safeCrewID(crewID) {
+		return "", "", false
 	}
-	rel := strings.TrimPrefix(storageKey, prefix)
-	if rel != "shared" && !strings.HasPrefix(rel, "shared/") {
-		return "", false
+	if prefix := "crews/" + crewID + "/"; strings.HasPrefix(storageKey, prefix) {
+		rel := strings.TrimPrefix(storageKey, prefix)
+		if rel != "shared" && !strings.HasPrefix(rel, "shared/") {
+			return "", "", false
+		}
+		return "/crew/" + rel, containerCrewSharedRoot, true
 	}
-	return "/crew/" + rel, true
+	if prefix := crewID + "/"; strings.HasPrefix(storageKey, prefix) {
+		if rel := strings.TrimPrefix(storageKey, prefix); rel != "" {
+			return containerOutputRoot + "/" + rel, containerOutputRoot, true
+		}
+	}
+	return "", "", false
 }
 
-// writeCrewSharedFileViaContainer writes content to containerPath inside the
-// crew container as UID 1001 — the owner of the provisioned /crew tree — so an
-// overwrite the server UID can't do host-side (#922) still lands. The write is
-// atomic (temp file in the destination dir, then mv -f), and paths pass via env
-// so a crafted destination can't break out of the shell command.
-func (s *Server) writeCrewSharedFileViaContainer(ctx context.Context, crewID, containerPath string, content []byte) error {
+// writeCrewFileViaContainer writes content to containerPath inside the crew
+// container as UID 1001 — the owner of the provisioned crew trees — so a write
+// the server UID can't do host-side (#922) still lands. fence is the tree root
+// the resolved destination must sit under (/crew/shared or /output). The write
+// is atomic (temp file in the destination dir, then mv -f), and paths pass via
+// env so a crafted destination can't break out of the shell command.
+func (s *Server) writeCrewFileViaContainer(ctx context.Context, crewID, containerPath, fence string, content []byte) error {
 	containerName, _, ok := s.resolveCrewContainer(ctx, crewID, false)
 	if !ok {
 		return errCrewNotFound
@@ -417,21 +552,22 @@ func (s *Server) writeCrewSharedFileViaContainer(ctx context.Context, crewID, co
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	// Atomic write as UID 1001, fenced to /crew/shared. The realpath check
-	// runs INSIDE the container (defence-in-depth on top of the host-side
+	// Atomic write as UID 1001, fenced to $FENCE. The realpath check runs
+	// INSIDE the container (defence-in-depth on top of the host-side
 	// resolveCrewFileKey fence): even if the agent planted a symlink inside
-	// the shared tree that redirects the resolved destination dir outside
-	// /crew/shared, the write is refused before any bytes land. Paths pass via
-	// env so a crafted destination can't break out of the shell command.
-	const script = `set -eu; d=$(dirname "$DEST"); mkdir -p "$d"; ` +
-		`rp=$(realpath "$d"); case "$rp" in /crew/shared|/crew/shared/*) ;; ` +
-		`*) echo "refuse: destination escapes /crew/shared" >&2; exit 3 ;; esac; ` +
-		`tmp=$(mktemp "$d/.crewship-save.XXXXXX"); cat > "$tmp"; ` +
-		`chmod 0664 "$tmp"; mv -f "$tmp" "$DEST"`
+	// the tree that redirects the resolved destination dir outside the fence,
+	// the write is refused before any bytes land. Both paths pass via env —
+	// the fence included, so a crafted destination can't break out of the
+	// shell command and the pattern stays a literal (quoted expansions are
+	// not globbed by `case`).
+	//
+	// mkdir -p is load-bearing on the /output tree, not just tidiness: a chat
+	// attachment is the FIRST thing to touch <agent>/attachments/<chatId>/,
+	// and the host cannot create it — that missing mkdir is the whole bug.
 	result, err := s.container.Exec(ctx, provider.ExecConfig{
 		ContainerID: containerName,
-		Cmd:         []string{"sh", "-c", script},
-		Env:         []string{"DEST=" + containerPath},
+		Cmd:         []string{"sh", "-c", crewFileWriteScript},
+		Env:         []string{"DEST=" + containerPath, "FENCE=" + fence},
 		User:        "1001:1001",
 		Stdin:       bytes.NewReader(content),
 	})
@@ -460,18 +596,82 @@ func (s *Server) writeCrewSharedFileViaContainer(ctx context.Context, crewID, co
 	return nil
 }
 
+// crewFileWriteScript is the in-container half of the #922 replay: create the
+// destination dir, refuse anything whose realpath leaves $FENCE, then write
+// atomically. Shared by both trees; $FENCE is what tells them apart.
+const crewFileWriteScript = `set -eu; d=$(dirname "$DEST"); mkdir -p "$d"; ` +
+	`rp=$(realpath "$d"); case "$rp" in "$FENCE"|"$FENCE"/*) ;; ` +
+	`*) echo "refuse: destination escapes $FENCE" >&2; exit 3 ;; esac; ` +
+	`tmp=$(mktemp "$d/.crewship-save.XXXXXX"); cat > "$tmp"; ` +
+	`chmod 0664 "$tmp"; mv -f "$tmp" "$DEST"`
+
+// crewFileDeleteScript is the same fence in front of a removal.
+//
+// It removes RECURSIVELY, because the host half it replays does: storage.Delete
+// is localfs's RemoveAll, so a key naming a directory takes the directory. The
+// script used to run `rm -f`, which exits non-zero on a directory and — under
+// `set -eu` — failed the whole exec. That made the replay strictly less capable
+// than the operation it stands in for, so one request succeeded or 5xx'd purely
+// on whether the crew was provisioned. A chat attachment is exactly a directory
+// key (attachments/<chatId>/<attachmentId>/<filename>, and the delete removes
+// the <attachmentId> directory so no empty directory is left in a tree the agent
+// reads), which made every attachment on a provisioned crew undeletable.
+//
+// The one thing the host half will do and this deliberately will not is remove a
+// tree ROOT: /output and /crew/shared are the mount points themselves, nothing
+// addresses them as a file to delete, and `rm -rf` aimed at one would take a
+// crew's entire shared tree or an agent's whole output namespace. `rm -rf` on a
+// missing path is still a success — deletion is idempotent on both halves.
+// The fence is resolved before it is compared, because the destination's
+// parent is: realpath on one side and the caller's spelling on the other are
+// only equal when no component of the fence is a symlink, and the moment one
+// is, every removal inside the tree is refused for escaping it. macOS CI found
+// this — /var is a symlink to /private/var — but a bind mount reached through
+// a link would do the same to a real install.
+//
+// Resolving it costs nothing in containment: FENCE is ours, not the caller's,
+// and DEST is still judged by where its parent actually lands. DEST itself is
+// never resolved — it is allowed not to exist, and `set -eu` would turn that
+// into an error rather than the success "already gone" has to be.
+const crewFileDeleteScript = `set -eu; f=$(realpath "$FENCE"); d=$(dirname "$DEST"); ` +
+	`rp=$(realpath "$d"); case "$rp" in "$f"|"$f"/*) ;; ` +
+	`*) echo "refuse: destination escapes $FENCE" >&2; exit 3 ;; esac; ` +
+	`case "$DEST" in "$FENCE"|"$FENCE"/|"$f"|"$f"/) echo "refuse: will not remove the tree root $FENCE" >&2; exit 4 ;; esac; ` +
+	`rm -rf "$DEST"`
+
 // containerSaveErrorResponse maps a container-write failure to an HTTP status
-// and a message the CLI can relay.
-func containerSaveErrorResponse(err error) (int, string) {
+// and a message the CLI (and the chat composer, which forwards it) can relay.
+// The 409 names the tree, because "start the crew and retry" is only actionable
+// if the reader knows which file the crew runtime owns.
+func containerSaveErrorResponse(err error, fence string) (int, string) {
 	switch {
 	case errors.Is(err, errCrewNotFound):
 		return http.StatusNotFound, "crew not found"
 	case errors.Is(err, errCrewContainerUnavailable):
+		if fence == containerOutputRoot {
+			return http.StatusConflict,
+				"the agent's output directory is owned by the crew runtime; files can only be written there while the crew container is running — start the crew and retry"
+		}
 		return http.StatusConflict,
 			"file is owned by the crew runtime; it can only be overwritten while the crew container is running — start the crew and retry"
 	default:
 		return http.StatusInternalServerError, "failed to save file"
 	}
+}
+
+// containerDeleteErrorResponse is the same mapping for the removal half. The
+// crew-ownership diagnoses are identical — the tree that cannot be written
+// cannot be unlinked either, and "start the crew and retry" is the remedy for
+// both — but the fallback message names the operation that actually failed. The
+// API layer prefixes this text with "failed to delete attachment: " and shows it
+// to a user (attachmentDeleteErrorMessage), so a delete reporting "failed to
+// save file" is a sentence that describes something nobody asked for.
+func containerDeleteErrorResponse(err error, fence string) (int, string) {
+	status, msg := containerSaveErrorResponse(err, fence)
+	if status == http.StatusInternalServerError {
+		return status, "failed to delete file"
+	}
+	return status, msg
 }
 
 // readerEqualsBytes reports whether the stream r is byte-for-byte equal to

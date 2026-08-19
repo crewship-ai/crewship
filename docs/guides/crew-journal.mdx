@@ -48,10 +48,10 @@ Defined in `internal/journal/types.go`. Every type is a stable string -- renames
 
 | Bucket | Entry types |
 |---|---|
-| Communication | `peer.conversation`, `peer.escalation`, `message.broadcast`, `agent.mentioned` |
+| Communication | `peer.conversation`, `peer.escalation` (one type per escalation lifecycle transition — `payload.state` is `pending`, `resolved`, `expired` or `cancelled`), `message.broadcast`, `agent.mentioned` |
 | Mission | `mission.status_change`, `mission.comment`, `assignment.created/running/completed/failed`, `crew.action`, `task.delegated` |
 | **Runs** (since PR #234) | `run.started`, `run.completed`, `run.failed`, `run.cancelled`, `run.timeout` |
-| Security | `keeper.request`, `keeper.decision`, `keeper.rule_auto_tuned`, `guardrail.input_blocked`, `guardrail.output_blocked`, `approval.requested/granted/denied/timeout/cancelled` |
+| Security | `keeper.request`, `keeper.decision`, `keeper.rule_auto_tuned`, `guardrail.input_blocked`, `guardrail.output_blocked`, `approval.requested/granted/denied/timeout/cancelled`, `approval.trust_granted/trust_revoked` |
 | Cost | `llm.call`, `llm.cache_hit`, `cost.incurred`, `budget.exceeded`, `budget.warning` |
 | Memory | `memory.updated`, `memory.consolidated`, `memory.priority_changed`, `summary.generated` |
 | Observability | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics`, `container.snapshot` |

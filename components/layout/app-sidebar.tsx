@@ -32,12 +32,27 @@ import {
  */
 export const NAV_ICONS = CONCEPT_ICON
 
-const navSections = [
+/**
+ * Exported so a test can ask what the navigation contains without standing up
+ * the whole sidebar tree. There are two of these arrays — this one and
+ * `mobileNavSections` in app-toolbar — and they are kept in step by hand, which
+ * is how chat came to be absent from both.
+ */
+export const navSections = [
   {
     label: "Plan",
     items: [
       { title: "Dashboard", href: "/", icon: CONCEPT_ICON.dashboard },
       { title: "Inbox", href: "/inbox", icon: CONCEPT_ICON.inbox },
+      // Chat is under Plan, next to Inbox: both are "someone is waiting on a
+      // reply". It points at the index, never at /chat/<slug> — a nav row
+      // cannot know which agent, and the index is what answers that.
+      //
+      // The label is "Chat" (PRD O5 lists Chat / Talk / Conversations as open).
+      // It is the word the product already uses for the surface — the toolbar
+      // breadcrumb, the route and the panel component all say chat — so a
+      // different noun in the rail would be the only place that disagrees.
+      { title: "Chat", href: "/chat", icon: CONCEPT_ICON.sessions },
       { title: "Issues", href: "/issues", icon: CONCEPT_ICON.issues },
       { title: "Routines", href: "/routines", icon: CONCEPT_ICON.routines },
       // Plan, after Routines: a page is where a person goes to see the state
