@@ -50,7 +50,7 @@ permissions:
 env:
   NODE_VERSION: "22"
   PNPM_VERSION: "10"
-  GO_VERSION: "1.26.5"
+  GO_VERSION: "1.26.6"
 
 jobs:
   # ── Sentinel: reject leaked git merge-conflict markers ──
@@ -100,10 +100,11 @@ jobs:
 
   # ── Shell unit tests ──
   # The shell we ship is as load-bearing as the Go, and harder to reason
-  # about: dev.sh wedges a dev slot when a helper trips `set -e`, and the
-  # alert-issue block in security.yml decides whether a failed security scan
-  # closes its own tracking issue. Both had test files that no workflow ran,
-  # so both regressed unnoticed. They run here.
+  # about: dev.sh wedges a dev slot when a helper trips `set -e`, and two
+  # blocks in security.yml decide whether a failed security scan closes its own
+  # tracking issue and whether a reported vulnerability reddens the build.
+  # Both had test files that no workflow ran, so both regressed unnoticed.
+  # They run here.
   shell:
     needs: [merge-conflict-markers]
     name: Shell
@@ -117,7 +118,7 @@ jobs:
         run: go run ./scripts/agents-invariants
       - name: dev.sh helpers
         run: bash scripts/dev-sh-test.sh
-      - name: security.yml alert-issue logic
+      - name: security.yml alert-issue + govulncheck allowlist logic
         run: bash scripts/security-yml-test.sh
       - name: deploy-dev.sh push_branch
         run: bash scripts/deploy-dev-test.sh

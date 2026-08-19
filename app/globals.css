@@ -40,13 +40,33 @@
   --input: oklch(0.8452 0 0);
   --ring: #0E6BE8;
 
-  /* Chart palette — brand-derived (primary, success, warn, purple, notice)
-   *  so data viz reads as part of the Crewship family, not generic shadcn. */
-  --chart-1: #1E7BFE;
-  --chart-2: oklch(0.72 0.18 152);
-  --chart-3: oklch(0.78 0.15 75);
-  --chart-4: oklch(0.66 0.22 300);
-  --chart-5: oklch(0.72 0.14 200);
+  /* Chart palette — light-ground tuning, deliberately distinct from the
+   *  .dark block below (was byte-identical light vs dark until this fix,
+   *  which meant one ground was always using a palette tuned for the
+   *  other). Slot 1 reuses --primary's #0E6BE8, the deeper same-hue-family
+   *  companion to marketing's #1E7BFE that this file already established
+   *  for "legible on white" (see the --primary comment above). Slots 2-5
+   *  keep the SAME hue per slot as the .dark palette (340/200/55/105) so a
+   *  series doesn't change identity across a theme switch, only lightness
+   *  and chroma move, tuned for a near-white ground.
+   *
+   *  SLOT ORDER IS LOAD-BEARING: series colours are assigned slot 1
+   *  downward and must never be cycled/reordered — see the .dark block
+   *  for the full rationale.
+   *
+   *  Checked (OKLab ΔE x100, i.e. CIE-Lab-scale distance computed in
+   *  OKLab; Machado 2009 matrices for the colour-blind simulation):
+   *  worst pair across normal vision, protanopia and deuteranopia sim
+   *  alike is 3-5 (teal vs olive) at ΔE 15.72 — every other pair clears
+   *  17+. All five stay within the sRGB gamut (no oklch() clipping).
+   *  Contrast vs --background/--card: 1=4.78/4.69, 2=10.57/10.39,
+   *  3=3.53/3.47, 4=7.53/7.40, 5=3.50/3.44 — all ≥ 3:1, the WCAG 1.4.11
+   *  non-text minimum these decorative marks are held to. */
+  --chart-1: #0E6BE8;
+  --chart-2: oklch(0.38 0.17 340);
+  --chart-3: oklch(0.61 0.104 200);
+  --chart-4: oklch(0.45 0.108 55);
+  --chart-5: oklch(0.62 0.133 105);
 
   --sidebar: oklch(0.9851 0 0);
   --sidebar-foreground: oklch(0.1994 0.0470 270.6494);
@@ -168,13 +188,41 @@
   --input: oklch(0.30 0.010 285);
   --ring: #1E7BFE;
 
-  /* Chart palette — same brand-derived hues as light, slightly bumped
-   *  for dark-bg legibility (primary stays hex, semantics use OKLCH). */
+  /* Chart palette — dark-ground tuning. Was byte-identical to the :root
+   *  block above (same 5 values reused on a near-black ground as on
+   *  near-white), which meant the light theme was rendering colours
+   *  tuned for dark and vice versa. Also failed a colour-vision check
+   *  under the old values: chart-4 (purple, h300) vs chart-1 (blue) sat
+   *  at ΔE 0.8 under simulated protanopia — functionally the same colour
+   *  — and chart-2 (green, h152) vs chart-5 (cyan, h200) was 13.5 under
+   *  normal vision, below the ΔE 15 "reliably distinct" floor.
+   *
+   *  Fix: 5 hues spread ≥ 40° apart (259 blue / 340 rose / 200 teal /
+   *  55 orange / 105 olive), each slot's L/C tuned per ground rather
+   *  than shared, chosen by search over OKLab distance both in normal
+   *  vision and after simulating protanopia/deuteranopia (Machado 2009
+   *  matrices) so no pair collapses under either. Slot 1 stays exactly
+   *  #1E7BFE, the marketing-site brand blue — see the --primary comment
+   *  above. The :root block carries the light-ground variant: same
+   *  hues, different L/C, so a series keeps its identity when the user
+   *  switches theme.
+   *
+   *  SLOT ORDER IS LOAD-BEARING. Series colours are assigned from slot 1
+   *  downward (chart-1 to the first series, chart-2 to the second, …).
+   *  Do not cycle, reorder, or renumber these — a consumer that drops a
+   *  filtered-out series must NOT cause the remaining series to shift to
+   *  a different slot, or their colours would change identity mid-view.
+   *
+   *  Checked (OKLab ΔE x100 — see :root's chart-palette comment for the
+   *  method): worst pair here is 2-4 (rose vs orange) at ΔE 16.5 under
+   *  deuteranopia simulation; every other pair clears 17+, most 25-40+.
+   *  All five in-gamut. Contrast vs --background/--card: 1=5.22/4.95,
+   *  2=4.87/4.63, 3=13.22/12.55, 4=5.62/5.33, 5=11.95/11.35. */
   --chart-1: #1E7BFE;
-  --chart-2: oklch(0.72 0.18 152);
-  --chart-3: oklch(0.78 0.15 75);
-  --chart-4: oklch(0.66 0.22 300);
-  --chart-5: oklch(0.72 0.14 200);
+  --chart-2: oklch(0.60 0.13 340);
+  --chart-3: oklch(0.84 0.13 200);
+  --chart-4: oklch(0.63 0.145 55);
+  --chart-5: oklch(0.82 0.13 105);
 
   --sidebar: oklch(0.155 0.010 285);
   --sidebar-foreground: oklch(1.0000 0 0);
