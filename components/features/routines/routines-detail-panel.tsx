@@ -198,11 +198,13 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // show routine A's fields, above routine B's name, and start routine B
   // with A's values — the wrong routine, with inputs it never declared.
   //
-  // Two guards rather than one: the effect above closes the form on a
-  // selection change, and the submit below refuses a mismatch anyway. The
-  // first is the behaviour; the second is what makes a missed re-render
-  // or a future extra dependency harmless instead of expensive.
+  // Keyed on workspace AND slug, and guarded twice: the effect above
+  // closes the form on a selection change, and the submit below refuses a
+  // mismatch anyway. The first is the behaviour; the second is what makes a
+  // missed re-render harmless instead of expensive, and it only earns that
+  // description by matching every dependency the effect has.
   const [pendingRun, setPendingRun] = useState<{
+    workspaceId: string
     slug: string
     inputs: RoutineInputSpec[]
   } | null>(null)
@@ -211,13 +213,20 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // form; one without runs immediately, which is what that button has
   // always done and must go on doing.
   const startRun = () => {
-    if (!routine) return
+    // The loaded routine and the selected slug can disagree. `fetchRoutine`
+    // sets `loading` but leaves `routine` on the PREVIOUS one until the new
+    // response lands, and the toolbar renders under `{routine && …}` — so
+    // for the width of that fetch the button is live while the panel is
+    // showing the last routine's definition. Opening the form there would
+    // build it from routine A's inputs and post it to routine B, which is
+    // the same defect as a stale dialog reached through a different door.
+    if (!routine || routine.slug !== slug) return
     const specs = routineInputSpecs(routine.definition)
     if (specs.length === 0) {
       void triggerAction("run")
       return
     }
-    setPendingRun({ slug, inputs: specs })
+    setPendingRun({ workspaceId, slug, inputs: specs })
   }
 
   const triggerAction = async (action: "run", inputs: Record<string, unknown> = {}) => {
@@ -684,7 +693,11 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         </div>
       )}
       <RoutineRunInputsDialog
-        inputs={pendingRun?.slug === slug ? pendingRun.inputs : null}
+        inputs={
+          pendingRun?.slug === slug && pendingRun.workspaceId === workspaceId
+            ? pendingRun.inputs
+            : null
+        }
         routineName={routine?.name || slug}
         submitting={busyAction === "run"}
         onCancel={() => setPendingRun(null)}
@@ -692,7 +705,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           // Refuse a submit whose form was built for a different routine.
           // Unreachable while the effect above closes the dialog on every
           // selection change — which is the point of having it.
-          if (pendingRun?.slug !== slug) {
+          if (pendingRun?.slug !== slug || pendingRun.workspaceId !== workspaceId) {
             setPendingRun(null)
             return
           }

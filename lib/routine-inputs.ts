@@ -195,8 +195,13 @@ export function coerceRoutineInput(
       // rounds without complaint: "9007199254740993" comes back as
       // ...992. The routine would then run on a value nobody typed, and
       // an integer input holding an account id or an invoice number is
-      // exactly where that lands. Refusing is the only honest option —
-      // the repl agrees, because strconv.ParseInt errors on overflow.
+      // exactly where that lands.
+      //
+      // The repl's threshold is NOT this one — it parses into an int64 and
+      // so accepts up to 2^63-1. That is not a divergence to fix: each
+      // client refuses what its own number type cannot carry exactly, and
+      // Go can carry more than JS. Hence the message names the limit as a
+      // property of this form rather than of the routine.
       if (!Number.isSafeInteger(n)) {
         throw new RoutineInputError(
           field,

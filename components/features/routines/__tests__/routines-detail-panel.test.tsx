@@ -303,6 +303,47 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
     expect(runPosts).toEqual([])
   })
 
+  it("refuses to open a form while the loaded routine is not the selected one", async () => {
+    // fetchRoutine sets `loading` but leaves `routine` on the previous one
+    // until the response lands, and the toolbar renders under
+    // `{routine && …}` — so for the width of that fetch the Run button is
+    // live while the panel still shows the last routine's definition.
+    // Opening there builds the form from A's inputs and posts it to B.
+    let release: (() => void) | null = null
+    vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+      const u = String(url)
+      if (init?.method === "POST" && u.endsWith("/run")) {
+        return okJSON({ run_id: "run-x", status: "running" })
+      }
+      if (u.includes("routine-b")) {
+        // Hold routine B's fetch open: `slug` is already B, `routine` is
+        // still A. That window is the bug.
+        await new Promise<void>((r) => {
+          release = r
+        })
+        return okJSON(OTHER)
+      }
+      return okJSON(WITH_INPUTS)
+    })
+
+    const { rerender } = render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
+    await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
+
+    rerender(<RoutinesDetailPanel {...defaultProps} slug="routine-b" />)
+    // A's toolbar is still on screen, under B's slug.
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Run$/ })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
+
+    // No form, and nothing started. Opening one here could only be wrong.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    const runPosts = vi
+      .mocked(apiFetch)
+      .mock.calls.filter(([u, init]) => init?.method === "POST" && String(u).endsWith("/run"))
+    expect(runPosts).toEqual([])
+
+    release?.()
+  })
+
   it("still runs the selected routine with its own inputs", async () => {
     // The guard must not cost the ordinary path.
     mockFor(WITH_INPUTS)
