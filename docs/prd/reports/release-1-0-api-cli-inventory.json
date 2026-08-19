@@ -15014,7 +15014,8 @@
         "docs/api-reference/issues.mdx",
         "docs/api-reference/labels.mdx",
         "docs/manifest/label.md",
-        "docs/manifest/recurring_issue.md"
+        "docs/manifest/recurring_issue.md",
+        "docs/prd/chat-as-a-primary-surface.md"
       ],
       "resource_docs": [
         "docs/api-reference/labels.mdx"
@@ -15071,7 +15072,8 @@
         "docs/api-reference/issues.mdx",
         "docs/api-reference/labels.mdx",
         "docs/manifest/label.md",
-        "docs/manifest/recurring_issue.md"
+        "docs/manifest/recurring_issue.md",
+        "docs/prd/chat-as-a-primary-surface.md"
       ],
       "resource_docs": [
         "docs/api-reference/labels.mdx"
@@ -17646,7 +17648,8 @@
         "docs/guides/issue-detail.mdx",
         "docs/manifest/milestone.md",
         "docs/manifest/project.md",
-        "docs/manifest/recurring_issue.md"
+        "docs/manifest/recurring_issue.md",
+        "docs/prd/chat-as-a-primary-surface.md"
       ],
       "resource_docs": [
         "docs/api-reference/projects.mdx"
@@ -17707,7 +17710,8 @@
         "docs/guides/issue-detail.mdx",
         "docs/manifest/milestone.md",
         "docs/manifest/project.md",
-        "docs/manifest/recurring_issue.md"
+        "docs/manifest/recurring_issue.md",
+        "docs/prd/chat-as-a-primary-surface.md"
       ],
       "resource_docs": [
         "docs/api-reference/projects.mdx"

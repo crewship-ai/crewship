@@ -882,10 +882,12 @@ contract before it is a UI change.
 
 ## 11. What this work discovered rather than built
 
-Four defect classes recurred, each with more than one instance, and each one
+Six defect classes recurred, each with more than one instance, and each one
 cost more to find than to fix. They are here because the next person on this
-surface will meet them again, and because three of the four are invisible to a
-green test suite by construction.
+surface will meet them again, and because most of them are invisible to a green
+test suite by construction — 11.5 and 11.6 were both found by running the
+software rather than by reading it or testing it, one by re-running the demo
+seed and one by a single platform in the CI matrix.
 
 ### 11.1 A failure invisible to the user *and* to the tests
 
@@ -1066,3 +1068,57 @@ than a mistake.* The corrections above were found by three independent passes �
 the audit corrected the work order, the contract sweep corrected the audit, and
 an implementing agent corrected the sweep. None of the three was clean, and
 the fourth pass found the disagreements between them.
+
+### 11.5 A contract honoured on one side of the call only
+
+Two components agree on a convention, one of them implements it, and nothing
+tests the pair — so the agreement holds right up until it is exercised.
+
+- **The demo seed's idempotency.** `cmd_seed_data.go` treats `409 Conflict` as
+  "already present" and continues, in a dozen places: crew membership, skill
+  assignment, credential bindings, crew bindings. It is a deliberate,
+  consistently applied contract. But `POST /api/v1/projects` and
+  `POST /api/v1/labels` passed a UNIQUE-constraint error to `internalError`,
+  so the server answered `500`, and the seed — which only knows how to forgive
+  a `409` — aborted on the first duplicate. `crewship seed` could be run once
+  against a clean database and never again, which is exactly the case a demo
+  install is in the second time anybody tries it.
+
+  What hid it: every test seeded a fresh database, so the second run never
+  happened anywhere. The failure was also unreadable from the outside —
+  `project Launch Prep: HTTP 500` with the constraint name only in the server
+  log — so it looked like an outage rather than a duplicate.
+
+  The general form: when one side of a call is written to a status code, that
+  status code is part of the contract, and the side that *produces* it needs a
+  test saying so. The four added here are the duplicate, the two distinct names
+  that slugify onto one slug, and — the other direction — the same name in a
+  second workspace, which must still succeed because the constraint is
+  `(workspace_id, slug)`.
+
+### 11.6 A comparison between a resolved path and an unresolved one
+
+`crewFileDeleteScript` resolved the destination's parent with `realpath` and
+compared the result against `$FENCE` exactly as handed in. Both halves are
+correct in isolation; the bug is that they are not the same kind of value. The
+instant any component of the fence is a symlink, `realpath` returns the link's
+target, the target does not begin with the fence *as spelled*, and the script
+refuses every removal inside the tree it is supposed to be protecting.
+
+It was found by `Go (macos-arm64)` and by nothing else, because macOS puts
+`t.TempDir()` under `/var`, which is a symlink to `/private/var`. On Linux the
+temp directory has no symlinked component, so seven other CI jobs — including
+`Go Race (internal/api)` and `Go (linux-arm64)` — were green on code that would
+have left a real install with an undeletable attachment tree, blaming the
+destination for the fence's spelling.
+
+Two things worth keeping:
+
+- **A path comparison must resolve both sides or neither.** The fence is ours
+  and safe to resolve; `DEST` is deliberately *not* resolved, because it is
+  allowed not to exist and `set -eu` would turn that into an error rather than
+  the success "already gone" has to be.
+- **The platform matrix is a test, not a formality.** The one job whose temp
+  directory is spelled differently is the one that found this. The reproduction
+  is portable — point the fence at a symlink — but nobody would have thought to
+  write it.
