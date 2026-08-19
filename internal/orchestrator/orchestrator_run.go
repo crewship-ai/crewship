@@ -466,6 +466,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// loggedModel guards the one-shot resolved-model log so a multi-init
 	// stream (sub-agents, restarts) doesn't re-log on every system event.
 	var loggedModel bool
+	// loggedDecodeError keeps the partial-decode warning to one per run. A
+	// mistyped field repeats on every line of a stream, and a warning that
+	// repeats stops being read.
+	var loggedDecodeError bool
+	// emittedSessionInit is the session-init entry's own one-shot guard. Kept
+	// separate from loggedModel: a run can see an init without a model, and a
+	// model without an init.
+	var emittedSessionInit bool
 	// guard aborts the run the moment the agent gets stuck repeating the
 	// identical tool call (see loop_guard.go). It observes the same tool_call
 	// events the behavior monitor does, so it's adapter-agnostic.
@@ -479,16 +487,53 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	var inBand inBandFailure
 	tappedHandler := EventHandler(func(event AgentEvent) {
 		inBand.observe(event)
+		// A line that decoded partially kept whatever matched and dropped the
+		// rest; the parser records which field it could not read. Say so once
+		// per run: the dropped field is data the CLI sent us and nothing else
+		// reports its loss, which is how a shape change stays invisible until
+		// somebody notices a surface has gone quiet (#1954).
+		if !loggedDecodeError {
+			if m, ok := event.Metadata.(map[string]interface{}); ok {
+				if note, _ := m["decode_error"].(string); note != "" {
+					loggedDecodeError = true
+					o.logger.Warn("stream line only partly decoded — a field the CLI sent was dropped",
+						"agent_id", req.AgentID,
+						"adapter", req.CLIAdapter,
+						"decode_error", note,
+					)
+				}
+			}
+		}
 		// Surface the model the run ACTUALLY resolved to. adapter_claude.go
 		// stamps meta["model"] on the session-init system event — that's
 		// ground truth for what the API served (the subscription may serve
 		// a lower tier than the requested --model). Compare against the
 		// requested override and WARN loudly on a family fallback.
-		if !loggedModel && event.Type == "system" {
+		if event.Type == "system" {
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
-				if actual, ok := m["model"].(string); ok && actual != "" {
-					loggedModel = true
-					logResolvedModel(o.logger, req.AgentID, req.LLMModel, actual)
+				if !loggedModel {
+					if actual, ok := m["model"].(string); ok && actual != "" {
+						loggedModel = true
+						version, _ := m["claude_code_version"].(string)
+						keySource, _ := m["apiKeySource"].(string)
+						logResolvedModel(o.logger, req.AgentID, req.LLMModel, actual, version, keySource)
+					}
+				}
+				// Persist the session's provenance so a --mcp-config entry the
+				// CLI silently skipped is visible in the feed rather than only
+				// in a log line nobody tails. See session_init_signal.go for
+				// what may and may not be copied out of this map.
+				//
+				// Keyed on the init subtype and its own one-shot guard, NOT on
+				// the resolved-model branch above: an init that reports a
+				// skipped server and no model must still raise the alert, and
+				// a later api_retry envelope must not be mistaken for a
+				// session opening.
+				if !emittedSessionInit {
+					if subtype, _ := m["subtype"].(string); subtype == "init" {
+						emittedSessionInit = true
+						o.emitSessionInitSignal(ctx, req, m)
+					}
 				}
 			}
 		}

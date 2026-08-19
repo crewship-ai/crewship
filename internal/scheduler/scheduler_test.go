@@ -46,6 +46,7 @@ type mockRunUpdate struct {
 	RunID, Status string
 	ExitCode      *int
 	ErrorMsg      *string
+	Metadata      map[string]interface{}
 }
 
 func (m *mockResolver) CreateChat(_ context.Context, req chatbridge.CreateChatRequest) error {
@@ -74,10 +75,10 @@ func (m *mockResolver) CreateRun(_ context.Context, runID, agentID, chatID, wsID
 	return m.createRunErr
 }
 
-func (m *mockResolver) UpdateRun(_ context.Context, runID, status string, exitCode *int, errMsg *string, _ map[string]interface{}) error {
+func (m *mockResolver) UpdateRun(_ context.Context, runID, status string, exitCode *int, errMsg *string, meta map[string]interface{}) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.updatedRuns = append(m.updatedRuns, mockRunUpdate{runID, status, exitCode, errMsg})
+	m.updatedRuns = append(m.updatedRuns, mockRunUpdate{runID, status, exitCode, errMsg, meta})
 	return m.updateRunErr
 }
 

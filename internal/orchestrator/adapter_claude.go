@@ -69,45 +69,50 @@ func (claudeCodeAdapter) PromptViaStdin(req AgentRunRequest) bool {
 }
 
 func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
-	// --bare: skips auto-discovery of hooks/skills/plugins/MCP/CLAUDE.md.
-	// Anthropic docs recommend it for scripted/SDK calls. BUT — Claude
-	// Code 2.x changed --bare's auth contract: it now strictly requires
-	// ANTHROPIC_API_KEY (or apiKeyHelper via --settings) and IGNORES
-	// CLAUDE_CODE_OAUTH_TOKEN. Workspaces seeded with OAuth (Claude
-	// Code login flow → AI_CLI_TOKEN) would otherwise fail with
-	// "Not logged in · Please run /login" the moment the binary starts.
+	// No --bare, on any auth path. It reads like the isolation flag for
+	// scripted calls, and Anthropic's docs recommend it as such, but on the
+	// real CLI it also REPLACES the built-in tool catalogue with
+	// {Bash, Edit, Read} — and --tools can only subtract from that set, never
+	// add back. Measured against 2.1.226, same --tools value in every row:
 	//
-	// Detect OAuth credentials on the run request and drop --bare in
-	// that case — let Claude's normal auth flow pick up
-	// CLAUDE_CODE_OAUTH_TOKEN (set by BuildEnvVarsSidecar). API_KEY
-	// runs keep --bare for the isolation win.
-	hasOAuth := false
-	for _, cred := range req.Credentials {
-		if cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat") {
-			hasOAuth = true
-			break
-		}
-	}
-
+	//	--bare --tools "default"                    -> [Bash Edit Read]
+	//	--bare --tools "<the CODING allowlist>"     -> [Bash Edit Read]
+	//	--bare --tools "Read,Glob,Grep,ToolSearch"  -> [Read]
+	//	          --tools "<the CODING allowlist>"  -> [Bash Edit Glob Grep Read
+	//	                                               ToolSearch WebFetch WebSearch Write]
+	//
+	// So every API-key run — --bare was already dropped for OAuth, whose auth
+	// contract it breaks — silently lost Write, Glob, Grep, WebFetch and
+	// WebSearch whatever its tool_profile said. A CODING agent that cannot
+	// create a file; a MINIMAL reviewer that cannot grep. Nothing errored.
+	//
+	// What --bare was buying is bought explicitly below instead, and verified
+	// on 2.1.226 against a project carrying both a CLAUDE.md and a
+	// .claude/settings.json with a SessionStart hook:
+	//
+	//	--setting-sources ""  the hook did not fire, and the model answered NO
+	//	                      when asked whether the repo's CLAUDE.md marker was
+	//	                      in its context (with and without --system-prompt)
+	//	--strict-mcp-config   only the servers we wrote in .mcp.json load
+	//	--tools <allowlist>   keeps the harness catalogue (Task, Workflow, Cron*,
+	//	                      TaskCreate, Skill, …) out of the model's context —
+	//	                      that catalogue IS present without --bare, so this
+	//	                      flag is the one doing that work now
+	//
+	// --setting-sources "" is therefore load-bearing rather than
+	// belt-and-braces: it is what stands between an agent and a cloned
+	// repository's hooks. Do not drop it to re-enable project skill discovery
+	// without solving hooks separately (#1932).
 	cmd := []string{
 		"claude", "--print",
 		"--output-format", "stream-json",
 		"--include-partial-messages",
 		"--dangerously-skip-permissions",
 		"--verbose",
-	}
-	if !hasOAuth {
-		cmd = append(cmd, "--bare")
-	}
-	cmd = append(cmd,
-		// --setting-sources "" disables user/global settings discovery.
-		// Independent of --bare — Anthropic's CLI reference is explicit
-		// that user-level ~/.claude/settings.json still loads without
-		// this flag, so we keep it on both auth paths.
 		"--setting-sources", "",
 		"--strict-mcp-config",
 		"--no-session-persistence",
-	)
+	}
 	if req.LLMModel != "" {
 		cmd = append(cmd, "--model", req.LLMModel)
 	}
@@ -155,13 +160,13 @@ func (claudeCodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 }
 
 // SetupSystemPrompt drops canonical memory files even though Claude Code
-// receives its prompt via --system-prompt. Reasoning: --bare suppresses
-// CLAUDE.md auto-discovery for *us*, but a future change disabling --bare
-// (per-agent toggle, or upstream default change — Anthropic has signalled
-// it'll go default for -p) would silently drop our memory. Writing the
-// canonical files unconditionally also means a customer SSH-ing into the
-// container sees the same context the agent operates under — useful for
-// debugging.
+// receives its prompt via --system-prompt, which replaces the default prompt
+// outright. Reasoning: --setting-sources "" suppresses CLAUDE.md
+// auto-discovery, so nothing reads these files today — but a per-agent toggle
+// or an upstream default change would silently drop our memory if they were
+// not there. Writing the canonical files unconditionally also means a customer
+// SSH-ing into the container sees the same context the agent operates under —
+// useful for debugging.
 func (claudeCodeAdapter) SetupSystemPrompt(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -207,16 +212,80 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		return
 	}
 
+	// A stream line is ONE JSON object, so treating any decode error as a
+	// line-level failure is what made a single mistyped field cost the whole
+	// envelope — on a result line that is no cost, no usage, and no is_error for
+	// inBandFailure to key on, i.e. a run that failed to authenticate recorded
+	// COMPLETED. Making one more field tolerant each time it happens is
+	// whack-a-mole against a shape we do not control; this is the fix in one
+	// place, and it covers the fields nobody has thought of yet.
+	//
+	// encoding/json already does the work: "If the JSON value is not appropriate
+	// for a given target type … Unmarshal skips that field and completes the
+	// unmarshaling as best it can", returning the earliest such error at the end.
+	// So on a type error `msg` is ALREADY populated with every field that did
+	// match — the error is a report about one field, not a verdict on the line,
+	// and the old code threw the decoded envelope away on the strength of it.
+	// Nothing is added to the happy path: a clean line never reaches this branch.
+	//
+	// msg.Type is the discriminator for everything below, so it is also the
+	// honest test of whether anything survived. Empty means the failure was
+	// structural rather than per-field — invalid JSON (checkValid rejects the
+	// line before any decoding), a JSON array or scalar, or a `type` that is not
+	// a string — and then the raw line still belongs in the transcript, because
+	// a CLI that started writing plain-text diagnostics to stdout must show up
+	// as visibly wrong rather than as silence.
 	var msg streamJSONMessage
-	if err := json.Unmarshal(line, &msg); err != nil {
+	err := json.Unmarshal(line, &msg)
+	if err != nil && msg.Type == "" {
 		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 		return
 	}
 
-	// Claude Code wraps content in message.content; promote it when top-level is empty.
+	// The isolation above has a second edge, and it is the price of narrowing
+	// it: a line that ROUTED is no longer dumped as raw text, so the fields json
+	// skipped on the way through are gone with nothing said about them. `result`
+	// is the sharp case — it is the CLI's final user-facing message and
+	// inBandFailure quotes it, so a release that emitted it as content blocks
+	// (the shape Anthropic uses for message content everywhere else) would show
+	// an operator "agent reported a failed run (api_error 401):" and nothing
+	// else, indistinguishable from a CLI that sent no message at all.
+	//
+	// So the line says what it lost. json's own error already names the field
+	// and the type it choked on, which is the whole diagnostic; the verbatim
+	// line remains recoverable from the run's exec.output_chunk entry, which
+	// captures raw stdout. Stamped on the events rather than logged because this
+	// is a pure function with no logger, and because a log line is not attached
+	// to the run someone is triaging — event metadata rides into the journal
+	// next to the envelope it belongs to.
+	//
+	// Deliberately NOT a raw-text event as well: an assistant line carries every
+	// tool_use of a turn, so re-emitting the line on any partial decode would
+	// dump JSON into the chat for a mistyped tool id.
+	if note := decodeNote(err, msg); note != "" {
+		inner := handler
+		handler = func(e AgentEvent) {
+			meta, _ := e.Metadata.(map[string]interface{})
+			if meta == nil {
+				meta = map[string]interface{}{}
+			}
+			meta["decode_error"] = note
+			e.Metadata = meta
+			inner(e)
+		}
+	}
+
+	// Claude Code wraps content in message.content; promote it when top-level is
+	// empty. Same rule as the line-level decode above, and for the same reason:
+	// encoding/json skips the block whose shape moved and decodes the ones either
+	// side of it, so requiring err == nil here would put the hole back exactly
+	// where the tool calls live — an assistant line carries every tool_use of a
+	// turn, and one numeric id would cost all of them. What survived is what
+	// counts, so the error is discarded and the length is the test.
 	if len(msg.Content) == 0 && len(msg.Message) > 0 {
 		var nested nestedMessage
-		if json.Unmarshal(msg.Message, &nested) == nil && len(nested.Content) > 0 {
+		_ = json.Unmarshal(msg.Message, &nested)
+		if len(nested.Content) > 0 {
 			msg.Content = nested.Content
 		}
 	}
@@ -296,12 +365,12 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 
 	case "result":
 		meta := map[string]interface{}{
-			"subtype":         msg.Subtype,
+			"subtype":         msg.Subtype.String(),
 			"duration_ms":     msg.DurationMs,
 			"duration_api_ms": msg.DurationAPI,
-			"total_cost_usd":  msg.TotalCostUSD,
-			"num_turns":       msg.NumTurns,
-			"is_error":        msg.IsError,
+			"total_cost_usd":  float64(msg.TotalCostUSD),
+			"num_turns":       int(msg.NumTurns),
+			"is_error":        bool(msg.IsError),
 		}
 		if len(msg.Usage) > 0 {
 			var usage map[string]interface{}
@@ -318,6 +387,28 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		if len(msg.Errors) > 0 {
 			meta["errors"] = msg.Errors
 		}
+		// terminal_reason names WHY the turn ended, and it is not derivable
+		// from subtype: a hard auth failure arrives as subtype "success" with
+		// is_error true and terminal_reason "api_error". api_error_status
+		// separates a bad credential (401) from a busy API (529), which is the
+		// difference between "fix the credential" and "retry".
+		if msg.TerminalReason != "" {
+			meta["terminal_reason"] = string(msg.TerminalReason)
+		}
+		if msg.APIErrorStatus > 0 {
+			meta["api_error_status"] = int(msg.APIErrorStatus)
+		}
+		if msg.StopReason != "" {
+			meta["stop_reason"] = string(msg.StopReason)
+		}
+		if msg.SessionID != "" {
+			meta["session_id"] = msg.SessionID
+		}
+		// A run blocked by permissions otherwise looks like a run that chose
+		// not to act — the model simply reports it could not do the thing.
+		if len(msg.PermissionDenials) > 0 {
+			meta["permission_denials"] = json.RawMessage(append([]byte{}, msg.PermissionDenials...))
+		}
 		handler(AgentEvent{
 			Type:      "result",
 			Content:   msg.Result,
@@ -326,10 +417,11 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		})
 
 	case "system":
+		subtype := msg.Subtype.String()
 		meta := map[string]interface{}{
-			"subtype": msg.Subtype,
+			"subtype": subtype,
 		}
-		switch msg.Subtype {
+		switch subtype {
 		case "init":
 			if msg.Model != "" {
 				meta["model"] = msg.Model
@@ -346,11 +438,52 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 					meta["mcp_servers"] = servers
 				}
 			}
+			// Session provenance. claude_code_version is the one that pays for
+			// the rest: the adapter is validated against a pinned npm version
+			// while agent containers install the `claude-code:2` devcontainer
+			// feature — latest — so the two drift apart silently, and a
+			// capability can go missing for a hundred releases before anyone
+			// notices (#1932). Record what actually answered.
+			//
+			// apiKeySource says which auth path resolved, i.e. whether the
+			// credential we mounted is the one in use. permissionMode is proof
+			// --dangerously-skip-permissions took. capabilities is the CLI's
+			// own list of protocol behaviours it implements — feature-detect on
+			// it instead of comparing version strings.
+			if msg.ClaudeCodeVersion != "" {
+				meta["claude_code_version"] = msg.ClaudeCodeVersion
+			}
+			if msg.SessionID != "" {
+				meta["session_id"] = msg.SessionID
+			}
+			if msg.APIKeySource != "" {
+				meta["apiKeySource"] = msg.APIKeySource
+			}
+			if msg.PermissionMode != "" {
+				meta["permissionMode"] = msg.PermissionMode
+			}
+			if len(msg.Capabilities) > 0 {
+				meta["capabilities"] = []string(msg.Capabilities)
+			}
+			// Whether the SKILL.md files we materialise were actually
+			// discovered. Today they are not — project-level skill discovery
+			// is off under --setting-sources "" — and this field is the
+			// per-run evidence of it.
+			if len(msg.Skills) > 0 {
+				meta["skills"] = json.RawMessage(append([]byte{}, msg.Skills...))
+			}
+			// A --mcp-config entry that fails validation is skipped and the run
+			// continues, exiting 0. An agent that lost crewship-memory that way
+			// looks healthy; this array is the only place it is reported.
+			// v2.1.219+ — absent when nothing was skipped, so a gate can fail
+			// on a non-empty array.
+			if len(msg.MCPServerErrors) > 0 {
+				meta["mcp_server_errors"] = json.RawMessage(append([]byte{}, msg.MCPServerErrors...))
+			}
 			// v2.1.111+ ships plugins + plugin_errors so operators can see
-			// when a plugin fails to load at session start. Crewship runs
-			// --bare which suppresses plugin discovery, but customers who
-			// later opt out of --bare on a per-agent basis benefit from
-			// this visibility.
+			// when a plugin fails to load at session start. Plugin discovery
+			// stays off under --setting-sources "", but a per-agent opt-out
+			// would benefit from this visibility.
 			if len(msg.Plugins) > 0 {
 				var plugins json.RawMessage
 				meta["plugins"] = json.RawMessage(append([]byte{}, msg.Plugins...))
@@ -381,7 +514,7 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		}
 		handler(AgentEvent{
 			Type:      "system",
-			Content:   msg.Subtype,
+			Content:   subtype,
 			Metadata:  meta,
 			Timestamp: time.Now(),
 		})
@@ -393,4 +526,29 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 			}
 		}
 	}
+}
+
+// decodeNote summarises, in one string, what this line lost while decoding —
+// nothing more than a description, and empty for every healthy line so the
+// marker keeps meaning something.
+//
+// It has two sources, and the second is the reason it is a function rather than
+// err.Error(). json reports a type error for a STRICT field, so a strict field
+// we could not read names itself. The tolerant types never error — that is the
+// point of them — so they can only report through their own state, and the only
+// one that does is tolerantSubtype, because it is the only one whose zero value
+// costs more than its own field. The remaining tolerant fields reduce a known
+// value ("401" is 401, "true" is true) or drop a pass-through list, which is a
+// loss the run can absorb.
+func decodeNote(err error, msg streamJSONMessage) string {
+	notes := make([]string, 0, 2)
+	if err != nil {
+		notes = append(notes, err.Error())
+	}
+	if msg.Subtype.unreadable {
+		// Named explicitly: json never saw a type error here, so nothing else
+		// in the note would mention the field that routed the whole envelope.
+		notes = append(notes, "subtype was not a readable label, so this envelope routed on an empty discriminator")
+	}
+	return strings.Join(notes, "; ")
 }

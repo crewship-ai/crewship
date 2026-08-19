@@ -57,7 +57,7 @@ var labelListCmd = &cobra.Command{
 		var rows [][]string
 		for _, l := range labels {
 			group := derefStr(l.Group, "-")
-			rows = append(rows, []string{truncateID(l.ID, 12), l.Name, l.Color, group})
+			rows = append(rows, []string{f.ShortID(l.ID, truncateID(l.ID, 12)), l.Name, l.Color, group})
 		}
 		return f.Auto(labels, headers, rows)
 	},
