@@ -226,9 +226,16 @@ test.describe("Run a routine with its inputs — routines detail page", () => {
       .poll(async () => (await probeRuns(page, seeded.workspaceId)).length, { timeout: TIMEOUT })
       .toBeGreaterThan(before.length)
 
-    const latest = (await probeRuns(page, seeded.workspaceId))[0]
-    expect(latest.status?.toLowerCase()).toBe("completed")
-    expect(latest.output).toBe("2026-07|Unify - Účetnictví|42")
+    // Asserted as "a run with this output exists", not "runs[0] has it".
+    // The seed's own test_run leaves a record too, so indexing into the list
+    // is a bet on an ordering this endpoint has never promised.
+    const runs = await probeRuns(page, seeded.workspaceId)
+    const match = runs.find((r) => r.output === "2026-07|Unify - Účetnictví|42")
+    expect(
+      match,
+      `no run carried the typed inputs — got ${JSON.stringify(runs.map((r) => r.output))}`,
+    ).toBeTruthy()
+    expect(match!.status?.toLowerCase()).toBe("completed")
   })
 
   test("the run reaches the Activity surface", async ({ page }) => {
@@ -255,18 +262,29 @@ test.describe("Run a routine with its inputs — routines detail page", () => {
   })
 
   test("cancelling starts nothing", async ({ page }) => {
-    const before = await probeRuns(page, seeded.workspaceId)
+    // Watch the wire, not the run list. Proving a negative by counting runs
+    // means sleeping first, and any sleep short enough to be tolerable is
+    // also short enough for a wrongly-started run to land just after it —
+    // the test would go green ON the bug it exists to catch. The request
+    // either left the browser or it did not, and that is knowable exactly.
+    const runRequests: string[] = []
+    page.on("request", (req) => {
+      if (req.method() === "POST" && /\/pipelines\/[^/]+\/run$/.test(req.url())) {
+        runRequests.push(req.url())
+      }
+    })
 
     await page.goto(`/routines?slug=${SLUG}`)
     await page.getByRole("button", { name: /^Run$/ }).click()
     const dialog = page.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: TIMEOUT })
+    await dialog.getByLabel(/obdobi/i).fill("2026-09")
     await dialog.getByRole("button", { name: /Cancel/i }).click()
     await expect(dialog).toBeHidden()
 
-    // A dialog that starts the run on the way out would be worse than no
-    // dialog at all — the old button at least did what it said.
-    await page.waitForTimeout(1_000)
-    expect((await probeRuns(page, seeded.workspaceId)).length).toBe(before.length)
+    // Filled in and then cancelled — a dialog that fires the run on the way
+    // out would be worse than no dialog at all, because the old button at
+    // least did what it said.
+    expect(runRequests).toEqual([])
   })
 })

@@ -227,8 +227,15 @@ test.describe("Run a routine from the chat slash palette", () => {
     // untouched default arrived, and the integer arrived as a NUMBER — the one
     // the browser holds as the string "42" and which a `code` step would fail
     // the run on if it were sent that way.
-    const latest = (await probeRuns(page, seeded.workspaceId))[0]
-    expect(latest.status?.toLowerCase()).toBe("completed")
-    expect(latest.output).toBe("2026-07|42")
+    // "A run with this output exists", not "runs[0] has it" — the seed's own
+    // test_run leaves a record too, and indexing is a bet on an ordering this
+    // endpoint has never promised.
+    const runs = await probeRuns(page, seeded.workspaceId)
+    const match = runs.find((r) => r.output === "2026-07|42")
+    expect(
+      match,
+      `no run carried the typed inputs — got ${JSON.stringify(runs.map((r) => r.output))}`,
+    ).toBeTruthy()
+    expect(match!.status?.toLowerCase()).toBe("completed")
   })
 })
