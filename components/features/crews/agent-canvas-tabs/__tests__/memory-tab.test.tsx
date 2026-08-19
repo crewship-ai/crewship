@@ -208,3 +208,145 @@ describe("MemoryTab — export follows the selected scope (#1748)", () => {
     expect(screen.queryByTestId("memory-export-button")).toBeNull()
   })
 })
+
+// ── An empty history and an unreadable one are different facts ────────
+//
+// §4.5 of the 2026-08-13 chat-surface audit: this panel reads
+// memory_versions, which is a projection of the .memory tree rather
+// than the tree itself. When nothing projects a tier, the endpoint
+// answers with an empty list — and the panel used to draw "(no
+// history)" over it, which reads as "this agent has written nothing".
+// The endpoint now says which of the two it is; these tests hold the
+// panel to rendering the difference.
+
+/** Route the panel's two version calls (list, then blob) by URL. */
+function routeVersionFetch(list: {
+  ok?: boolean
+  status?: number
+  body?: unknown
+  content?: string
+}) {
+  return vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes("/memory/versions/")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => list.content ?? "",
+        json: async () => ({}),
+      }
+    }
+    if (url.includes("/memory/versions")) {
+      return {
+        ok: list.ok ?? true,
+        status: list.status ?? 200,
+        text: async () => "",
+        json: async () => list.body ?? { entries: [] },
+      }
+    }
+    return { ok: true, status: 200, text: async () => "", json: async () => ({ peers: [] }) }
+  }) as unknown as typeof fetch
+}
+
+describe("MemoryTab — silence is not a fact", () => {
+  it("renders a tier nothing projects as unreadable, not as empty", async () => {
+    global.fetch = routeVersionFetch({
+      body: {
+        entries: [],
+        projection: {
+          state: "unrecorded",
+          reason: "No writer records this path into the memory version trail.",
+        },
+      },
+    })
+    render(<MemoryTab agentId="a1" agentSlug="alex" crewId="crew-1" workspaceId="ws-1" />)
+    fireEvent.click(screen.getByTestId("memory-subtab-crew"))
+
+    const unreadable = await screen.findByTestId("memory-history-unreadable")
+    expect(unreadable).toBeInTheDocument()
+    expect(unreadable).toHaveTextContent(/No writer records this path/i)
+    // The lie the audit named: an empty list drawn as an empty history.
+    expect(screen.queryByText(/\(no history\)/i)).toBeNull()
+    expect(screen.queryByTestId("memory-history-empty")).toBeNull()
+  })
+
+  it("renders a watched tier with no writes as genuinely empty", async () => {
+    global.fetch = routeVersionFetch({
+      body: {
+        entries: [],
+        projection: { state: "recorded", reason: "Recorded by the memory audit watcher." },
+      },
+    })
+    render(<MemoryTab agentId="a1" agentSlug="alex" crewId="crew-1" workspaceId="ws-1" />)
+    fireEvent.click(screen.getByTestId("memory-subtab-crew"))
+
+    expect(await screen.findByTestId("memory-history-empty")).toBeInTheDocument()
+    expect(screen.queryByTestId("memory-history-unreadable")).toBeNull()
+  })
+
+  it("says versioning is off rather than showing an empty tier", async () => {
+    global.fetch = routeVersionFetch({
+      body: {
+        entries: [],
+        projection: {
+          state: "unavailable",
+          reason: "Memory versioning is switched off on this server.",
+        },
+      },
+    })
+    render(<MemoryTab agentId="a1" agentSlug="alex" crewId="crew-1" workspaceId="ws-1" />)
+    fireEvent.click(screen.getByTestId("memory-subtab-crew"))
+
+    const unreadable = await screen.findByTestId("memory-history-unreadable")
+    expect(unreadable).toHaveTextContent(/switched off/i)
+    expect(screen.queryByTestId("memory-history-empty")).toBeNull()
+  })
+
+  it("does not render a failed history fetch as an empty history", async () => {
+    global.fetch = routeVersionFetch({ ok: false, status: 500 })
+    render(<MemoryTab agentId="a1" agentSlug="alex" crewId="crew-1" workspaceId="ws-1" />)
+    fireEvent.click(screen.getByTestId("memory-subtab-crew"))
+
+    expect(await screen.findByTestId("memory-history-error")).toBeInTheDocument()
+    expect(screen.queryByText(/\(no history\)/i)).toBeNull()
+    expect(screen.queryByTestId("memory-history-empty")).toBeNull()
+  })
+
+  it("lists the recorded versions when there are some", async () => {
+    global.fetch = routeVersionFetch({
+      content: "# crew memory",
+      body: {
+        entries: [
+          {
+            id: "mv_1",
+            sha256: "abcdef0123456789abcdef",
+            bytes: 13,
+            written_at: "2026-08-13T08:00:00Z",
+            written_by: "audit-watcher",
+          },
+        ],
+        projection: { state: "recorded", reason: "" },
+      },
+    })
+    render(<MemoryTab agentId="a1" agentSlug="alex" crewId="crew-1" workspaceId="ws-1" />)
+    fireEvent.click(screen.getByTestId("memory-subtab-crew"))
+
+    expect(await screen.findByText(/audit-watcher/)).toBeInTheDocument()
+    expect(screen.queryByTestId("memory-history-unreadable")).toBeNull()
+    expect(screen.queryByTestId("memory-history-empty")).toBeNull()
+  })
+})
+
+describe("MemoryTab — the tiers this panel cannot show", () => {
+  it("names daily logs, lessons.md and learned topics instead of omitting them", async () => {
+    global.fetch = routeVersionFetch({
+      body: { entries: [], projection: { state: "recorded", reason: "" } },
+    })
+    render(<MemoryTab agentId="a1" agentSlug="alex" crewId="crew-1" workspaceId="ws-1" />)
+
+    const other = await screen.findByTestId("memory-other-tiers")
+    expect(other).toHaveTextContent(/daily\//i)
+    expect(other).toHaveTextContent(/lessons\.md/i)
+    expect(other).toHaveTextContent(/learned-/i)
+  })
+})

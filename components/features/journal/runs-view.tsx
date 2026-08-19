@@ -76,6 +76,24 @@ function isFromInteractiveChild(target: EventTarget | null): boolean {
   return hit !== null && hit !== target.closest("[data-row-root]")
 }
 
+/**
+ * Where a run row's agent links point.
+ *
+ * Both of them — the agent name and the trailing external-link glyph — used
+ * to be `/crews/agents/<agent_id>`, a route the selection-driven /crews
+ * redesign deleted. The agent canvas is a query parameter on /crews now, and
+ * it is keyed on the SLUG: hooks/use-crews-selection.tsx reads ?agent= and the
+ * roster matches it against agent.slug. Passing an id is not a partial win,
+ * it is a regression — the stale-selection watcher finds no such agent,
+ * clears the parameter, and the user lands on an empty canvas.
+ *
+ * agent_slug is optional on the /api/v1/runs row, so a row without one falls
+ * back to the plain roster. A working generic page beats a broken specific
+ * one.
+ */
+const agentCanvasHref = (slug: string | undefined) =>
+  slug ? `/crews?agent=${encodeURIComponent(slug)}` : "/crews"
+
 interface Run {
   id: string
   agent_id: string
@@ -524,7 +542,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                       #{run.id.slice(0, 8)}
                     </span>
                     <Link
-                      href={`/crews/agents/${run.agent_id}`}
+                      href={agentCanvasHref(run.agent_slug)}
                       onClick={(e) => e.stopPropagation()}
                       className="text-xs font-medium truncate hover:underline"
                     >
@@ -566,7 +584,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                       {formatRelativeShort(run.started_at ?? run.created_at)}
                     </span>
                     <Link
-                      href={`/crews/agents/${run.agent_id}`}
+                      href={agentCanvasHref(run.agent_slug)}
                       onClick={(e) => e.stopPropagation()}
                       className="text-muted-foreground/60 hover:text-foreground transition-colors justify-self-end"
                       aria-label="Open agent"

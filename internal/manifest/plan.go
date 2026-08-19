@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/askforms"
 )
 
 // Action enumerates the per-resource operations a plan can describe.
@@ -851,6 +853,16 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 					if err != nil {
 						return err
 					}
+					// POST /api/v1/agents dropped the update-only fields it
+					// was just handed (see buildAgentPostCreateBody), so a
+					// brand-new agent still has them unset. One PATCH puts
+					// them where the manifest said they should be, before
+					// the bindings run.
+					if follow := buildAgentPostCreateBody(&agentCopy); len(follow) > 0 {
+						if _, err := client.UpdateAgent(ctx, created.ID, follow); err != nil {
+							return fmt.Errorf("agent %q created but its update-only fields could not be set: %w", agentCopy.Slug, err)
+						}
+					}
 					return applyAgentRefs(ctx, client, created.ID, &agentCopy, wsCreds, wsSkills)
 				})
 		}
@@ -1130,7 +1142,78 @@ func agentBodyDiffers(existing *AgentResponse, a *Agent) bool {
 	if a.RoleTitle != "" && a.RoleTitle != deref(existing.RoleTitle) {
 		return true
 	}
+	// Guarded on non-empty, like role_title and unlike prompt: an agent
+	// exported with no prompts configured comes back with the field
+	// omitted, and an omitted field must mean "not declared here" rather
+	// than "clear whatever is on the server". Without the guard a
+	// round-tripped empty agent would report drift forever — the PATCH
+	// body below only carries the key when it is non-empty, so the diff
+	// would never settle.
+	//
+	// Compared CANONICALISED, not literally. Both of these columns are
+	// rewritten by the server on write, so the manifest's spelling and the
+	// stored spelling are routinely two forms of the same value — and a diff
+	// that reports those as drift makes `apply` a command that never
+	// converges: it PATCHes on every invocation and drift-detection CI never
+	// settles. See canonicalSuggestedPrompts and canonicalAskForms.
+	if a.SuggestedPrompts != "" &&
+		canonicalSuggestedPrompts(a.SuggestedPrompts) != canonicalSuggestedPrompts(deref(existing.SuggestedPrompts)) {
+		return true
+	}
+	if a.AskForms != "" &&
+		canonicalAskForms(a.AskForms) != canonicalAskForms(deref(existing.AskForms)) {
+		return true
+	}
 	return false
+}
+
+// canonicalSuggestedPrompts is what the server will store for a given raw
+// value: the manifest-side mirror of normalizeSuggestedPrompts in
+// internal/api/agents_suggested_prompts.go (CRLF folded, each line trimmed,
+// blank lines dropped, joined with "\n" and no trailing newline).
+//
+// It exists because the documented authoring form is a YAML block scalar
+// (schema.go), and `suggested_prompts: |` unmarshals WITH a trailing newline
+// while the column never holds one. Comparing the two literally is true on
+// every run for every manifest written the documented way.
+//
+// The caps are deliberately NOT applied here — checkSuggestedPrompts reports
+// those, with the offending position named, and a diff is not the place a
+// manifest finds out it has nine prompts.
+func canonicalSuggestedPrompts(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	folded := strings.ReplaceAll(raw, "\r\n", "\n")
+	folded = strings.ReplaceAll(folded, "\r", "\n")
+
+	prompts := make([]string, 0, 8)
+	for _, line := range strings.Split(folded, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			prompts = append(prompts, line)
+		}
+	}
+	return strings.Join(prompts, "\n")
+}
+
+// canonicalAskForms is what the server will store for a given raw ask_forms
+// document — askforms.Normalize, the same function the write path calls.
+//
+// Hand-written JSON is near-certain to differ from the canonical form by key
+// order and indentation alone, so before this the only manifests that ever
+// converged were the ones `crewship export` produced. A document that does not
+// parse has no canonical form and is returned untouched: `crewship validate`
+// refuses it with a real message, and a diff must not quietly call it equal to
+// whatever the server holds.
+func canonicalAskForms(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	normalized, err := askforms.Normalize(raw)
+	if err != nil {
+		return raw
+	}
+	return normalized
 }
 
 func mcpBodyDiffers(existing *MCPServerResponse, m *MCPServer) bool {
@@ -1174,6 +1257,39 @@ func buildAgentBody(a *Agent, crewID, crewSlug string) map[string]any {
 	}
 	if a.Prompt != "" {
 		body["system_prompt"] = a.Prompt
+	}
+	for k, v := range buildAgentPostCreateBody(a) {
+		body[k] = v
+	}
+	return body
+}
+
+// buildAgentPostCreateBody carries the fields that PATCH
+// /api/v1/agents/{id} accepts but POST /api/v1/agents does NOT.
+//
+// createAgentRequest (internal/api/agents_create.go) models a fixed set
+// of columns and readJSON ignores everything else, so a key that only
+// the update handler knows about is accepted with a 201 and silently
+// dropped. suggested_prompts is such a key: it reached the update
+// allow-list (internal/api/agents_update.go) and never the create
+// struct.
+//
+// The fields therefore go out twice — once inside buildAgentBody, which
+// is what the update path PATCHes, and once as a follow-up PATCH right
+// after a create. Sending them in the create body too is harmless and
+// keeps one definition of the set; it is the follow-up that actually
+// persists them on a new agent.
+//
+// This is the hook for the next column of the same shape (ask_forms is
+// landing beside suggested_prompts): add the field here and it is
+// covered on both paths at once.
+func buildAgentPostCreateBody(a *Agent) map[string]any {
+	body := map[string]any{}
+	if a.SuggestedPrompts != "" {
+		body["suggested_prompts"] = a.SuggestedPrompts
+	}
+	if a.AskForms != "" {
+		body["ask_forms"] = a.AskForms
 	}
 	return body
 }

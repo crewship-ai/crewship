@@ -7,6 +7,7 @@ tag: Experimental
 ---
 
 {/* docs-inventory: ignore-api /api/v1/activity reason=historical-removed-route */}
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
 Crews are isolated agent teams, each with its own container resources, network policy, and members. A crew bundles the runtime sandbox (memory/CPU/TTL, runtime image, devcontainer/mise config), the egress posture (`free` vs `restricted` with an allowed-domain list), an autonomy policy, an optional shared persona, and cross-crew connections that gate agent-to-agent messaging.
 
 All crew endpoints require authentication and workspace context. The workspace
@@ -50,6 +51,8 @@ workspace ID or slug.
 | GET | [`/api/v1/crews/{crewId}/standup`](#crew-standup) | Get the crew standup summary |
 | GET | [`/api/v1/crews/{crewId}/escalations`](#list-escalations) | List crew escalations |
 | PATCH | [`/api/v1/escalations/{escalationId}/resolve`](#resolve-escalation) | Resolve an escalation |
+| POST | [`/api/v1/escalations/{escalationId}/cancel`](#cancel-escalation) | Withdraw an escalation without deciding it |
+| POST | [`/api/v1/escalations/sweep-expired`](#sweep-expired-escalations) | Expire every past-deadline escalation |
 | GET | [`/api/v1/escalations/pending-count`](#pending-escalation-count) | Count pending escalations |
 
 ---
@@ -1141,19 +1144,56 @@ Get standup summary for a crew.
 
 ## Crew Escalations
 
+An escalation is a question an agent asked a human and blocked on. It has one
+non-terminal state and three terminal ones:
+
+| Status | Meaning | Written by |
+|---|---|---|
+| `PENDING` | waiting for a human | the agent, via `POST /api/v1/internal/escalations` |
+| `RESOLVED` | a human decided; `action` is `approve`, `reject` or `redirect` | [resolve](#resolve-escalation) |
+| `EXPIRED` | the deadline passed and nobody decided | the server (see below) |
+| `CANCELLED` | a human withdrew the question without deciding | [cancel](#cancel-escalation) |
+
+Terminal states are terminal — every transition out of one is a `409` whose
+message names the state actually reached.
+
+**The deadline.** Each escalation is raised with `deadline_at` = `created_at` +
+300 s, published to the agent on the create so its wait is bounded by the
+server's clock rather than one of its own. When the deadline passes with no
+answer, the row becomes `EXPIRED` and **the agent continues without the answer,
+having been explicitly told so** — the wait response carries `status: EXPIRED`
+and a mandatory `warning`, and the journal entry is severity `warn`. The run is
+not failed and no default answer is invented; see
+[Harbormaster → What happens when nobody answers](/guides/harbormaster#what-happens-when-nobody-answers)
+for the reasoning.
+
+Expiry is applied by the long poll the agent is on, by a 60 s background
+sweeper for rows whose agent is gone, and by the read paths below before they
+answer. All three go through one compare-and-swap, so a row expires exactly
+once. `deadline_at` is `null` on rows raised before the column existed; those
+never expire.
+
 ### List Escalations
 
 ```
-GET /api/v1/crews/{crewId}/escalations?workspace_id={workspaceId}
+GET /api/v1/crews/{crewId}/escalations?workspace_id={workspaceId}&status={status}
 ```
 
 **Auth:** Authenticated workspace member; `workspace_id` must identify the
 caller’s workspace.
 
 **Path / query parameters:** `crewId` is the crew ID; `workspace_id` is the
-required workspace ID. Returns the crew’s escalation records.
+required workspace ID. Optional `status` narrows to one lifecycle state
+(`PENDING`, `RESOLVED`, `EXPIRED`, `CANCELLED`); an unrecognised value returns
+an empty list rather than everything, so a typo cannot silently widen the
+filter.
 
-**Response:** `200 OK` with an array of escalation objects.
+Any past-deadline question in the workspace is settled before the list is
+built, so a row can never be listed as `PENDING` past its own `deadline_at`.
+
+**Response:** `200 OK` with an array of escalation objects. Each carries
+`deadline_at` (nullable) alongside `status`, `action`, `resolution`,
+`resolved_by` and `resolved_at`.
 
 | Status | Condition |
 |---|---|
@@ -1176,7 +1216,59 @@ PATCH /api/v1/escalations/{escalationId}/resolve?workspace_id={workspaceId}
 | `401` | Missing authentication |
 | `403` | Insufficient role |
 | `404` | Escalation not found |
-| `409` | Escalation cannot be resolved in its current state |
+| `409` | Escalation is no longer `PENDING` — the message names the state it reached (`RESOLVED`, `EXPIRED` or `CANCELLED`) |
+
+### Cancel Escalation
+
+```
+POST /api/v1/escalations/{escalationId}/cancel?workspace_id={workspaceId}
+```
+
+**Auth:** `MANAGER`+ (`create` role) — the same gate as resolve, because
+closing out a blocking request is the same class of act whichever way it is
+closed.
+
+**Request:** optional JSON body `{"reason": "..."}`. The reason is recorded on
+the row and in the journal entry.
+
+Withdraws a question that stopped mattering. Deliberately **not** the same as
+`resolve --action reject`: a rejection is a decision the agent should act on,
+while a cancellation says nobody ever considered it. Any agent still waiting is
+unblocked immediately with an explicit "no answer" warning.
+
+**Response:** `200 OK` with `{ "id": string, "status": "CANCELLED" }`.
+
+| Status | Condition |
+|---|---|
+| `403` | Insufficient role |
+| `404` | Escalation not found — also the answer for another tenant's id, so the endpoint is not an existence oracle |
+| `409` | Escalation is no longer `PENDING` |
+| `500` | Update failed |
+
+### Sweep Expired Escalations
+
+```
+POST /api/v1/escalations/sweep-expired?workspace_id={workspaceId}
+```
+
+**Auth:** Authenticated workspace `OWNER` or `ADMIN` (`manage` role) — it
+writes terminal states.
+
+**Request:** no body. Scoped to the caller's workspace, so it cannot reach
+another tenant's rows.
+
+Expires every past-deadline `PENDING` escalation in the workspace now. The
+background sweeper and the read paths already do this; the endpoint makes the
+mechanism operable and observable rather than only inferable from a ticker.
+Running it twice returns `0` the second time.
+
+**Response:** `200 OK` with `{ "expired": integer }`.
+
+| Status | Condition |
+|---|---|
+| `401` | Missing workspace context |
+| `403` | Caller is not `OWNER`/`ADMIN` |
+| `500` | Sweep failed |
 
 ### Pending Escalation Count
 
@@ -1186,7 +1278,9 @@ GET /api/v1/escalations/pending-count?workspace_id={workspaceId}
 
 **Request:** `workspace_id` is the workspace context. No request body.
 
-Returns count of pending escalations across the workspace.
+Returns count of pending escalations across the workspace. Past-deadline
+questions are settled first, so an unanswered escalation stops being counted
+once its deadline passes instead of accumulating forever.
 
 **Response:** `200 OK` with `{ "count": integer }`.
 

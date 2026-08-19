@@ -362,22 +362,41 @@ try {
     `status=${setupResp.status()} body=${JSON.stringify(setupBody).slice(0, 200)}`,
   )
 
-  await page.waitForURL(/\/crews\/agents\//, { timeout: 10000 }).catch(() => {})
+  // The wizard used to land on /crews/agents/<id>/chat — a route the
+  // /crews redesign deleted, which is why a new user's first click 404'd.
+  // Chat is /chat/<slug> now; handleLaunch resolves the slug with one
+  // GET /agents/<id> and falls back to the dashboard when it can't, so
+  // wait for either and report which one we got.
+  await page
+    .waitForURL((url) => /^\/chat\/[^/]+$/.test(url.pathname) || url.pathname === "/", { timeout: 10000 })
+    .catch(() => {})
+  const landedOnChat = /^\/chat\/[^/]+$/.test(new URL(page.url()).pathname)
   await expect(
-    "T24 redirected to agent chat after launch",
-    page.url().includes("/crews/agents/"),
-    `landed on ${page.url()}`,
+    "T24 redirected to the new agent's chat after launch",
+    landedOnChat,
+    `landed on ${page.url()} — "/" means the agent-slug lookup came back empty`,
+  )
+
+  // T24b — the chat that loaded is usable, not an empty shell. Placeholder
+  // is `Message <agent>...` (chat-composer.tsx), or the nameless variant
+  // while the agent is still resolving.
+  const composer = page.locator('textarea[placeholder^="Message "], textarea[placeholder="Send a message..."]')
+  await composer.first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {})
+  await expect(
+    "T24b composer is on screen in the new agent's chat",
+    await composer.first().isVisible().catch(() => false),
+    `no composer textarea at ${page.url()}`,
   )
 
   // T25 — confirm the deployed crew has 4 agents (verified via the
   // Launch response body captured in T23). The body may be empty on
   // a race with page navigation; in that case T24's redirect target
-  // already proves the deploy worked since the URL carries an
-  // agent_id that only exists if the template ran end-to-end.
-  const observedAgentCount = setupBody.agent_count ?? (page.url().includes("/crews/agents/") ? 1 : 0)
+  // already proves the deploy worked, since the wizard only builds a
+  // /chat/<slug> URL from an agent_id the template actually created.
+  const observedAgentCount = setupBody.agent_count ?? (landedOnChat ? 1 : 0)
   await expect(
     "T25 deployed crew has 4 agents (or at least one valid agent_id)",
-    observedAgentCount === 4 || page.url().match(/\/crews\/agents\/[a-z0-9]+\/chat$/),
+    observedAgentCount === 4 || landedOnChat,
     `agent_count=${observedAgentCount}, url=${page.url()}`,
   )
 

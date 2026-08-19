@@ -25,7 +25,10 @@ Auth: every subcommand requires an authenticated session (`crewship login`). All
 | `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
 | `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes an `UNREAD` column (replies you haven't seen). |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
-| `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/` in the container). |
+| `chat rename <chat-id> <title>` | Give the session a name — what `chat list`, the sidebar and reply notifications call it. Alias: `title`. |
+| `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/<attachment-id>/` in the container). |
+| `chat attachments list <chat-id>` | List the files attached to a chat: id, name, size, checksum and the path the agent reads. Alias: `attachment`. |
+| `chat attachments delete <chat-id> <attachment-id>` | Remove one attachment — the row and the stored bytes. Idempotent. Aliases: `rm` / `remove`. |
 | `chat react add <chat-id> <msg-id> <emoji>` | Add an emoji reaction to a single message. |
 | `chat react remove <chat-id> <msg-id> <emoji>` | Remove your reaction (`rm` / `delete` aliases). |
 | `chat react list <chat-id> <msg-id>` | List reactions with counts and whether the caller already reacted. |
@@ -56,6 +59,33 @@ The transcript renders assistant / `model` messages through the markdown ANSI re
 
 The upload is one multipart POST to `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments`. The server caps the body at 25 MB; the CLI assembles the multipart body in memory rather than streaming because the bound is small.
 
+**The crew has to be running.** The file lands in the agent's `/output` tree, which a provisioned crew owns as uid 1001 — the server cannot create `attachments/<chat-id>/` there itself, so it writes through the crew container as that uid. On a stopped crew the upload returns `409` with `failed to save attachment: the agent's output directory is owned by the crew runtime; … start the crew and retry`. Start the crew and re-run the attach; nothing partial is left behind, and no attachment metadata row is recorded for an upload that did not land.
+
+**Each upload gets its own directory.** The file lands at `attachments/<chat-id>/<attachment-id>/<filename>` — the readable filename is still the last segment, and the id in front of it is what makes the location unique. Attaching two different files called `evidence.pdf` gives you two attachments and two blobs, each with its own checksum; neither replaces the other. Attaching the *same* file twice is a retry and resolves to the attachment that already exists.
+
+Both facts are printed by `chat attachments list`, which is also where you get the id that `chat attachments delete` takes.
+
+### `chat attachments list <chat-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent (same lookup as `chat attach`). |
+
+Calls `GET /api/v1/agents/{agentId}/chats/{chatId}/attachments`. Columns are `ID` / `FILENAME` / `SIZE` / `SHA256` (first 12 hex characters — the full digest is in `--format json`) / `AGENT PATH` / `CREATED`. An upload that did not finish is never listed.
+
+### `chat attachments delete <chat-id> <attachment-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent (same lookup as `chat attach`). |
+| `--yes` | `false` | Skip the confirmation prompt. Required in scripts — without a tty the prompt reads as "no" and the command aborts. |
+
+Calls `DELETE /api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}`. Removes the stored file and then the metadata row.
+
+Idempotent: deleting an attachment that is already gone succeeds, because what you asked for is already true. This is the only way to reclaim a chat attachment's bytes short of deleting the whole chat — chat blobs are not content-addressed (the path is what the agent is told to open), so they sit outside the background reclaim sweep that collects issue attachments.
+
+Like the upload, the removal goes through the crew container, so **a stopped crew refuses it** with `failed to delete attachment: …`. Nothing is lost — the row is kept and re-running the command after starting the crew completes the deletion.
+
 ### `chat read <chat-id>`
 
 | Flag | Default | Effect |
@@ -63,6 +93,35 @@ The upload is one multipart POST to `POST /api/v1/agents/{agentId}/chats/{chatId
 | `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent (same lookup as `chat attach`). |
 
 Calls `PUT /api/v1/agents/{agentId}/chats/{chatId}/read`. Your read cursor advances to now: `UNREAD` in `chat list` drops to 0 for the session, and the "agent replied" inbox item for it flips to read. Read state is per user — marking a shared group chat read doesn't touch anyone else's badge.
+
+### `chat rename <chat-id> <title>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--agent <slug-or-id>` | (auto) | Override the auto-resolved agent (same lookup as `chat attach`). |
+
+Calls `PATCH /api/v1/agents/{agentId}/chats/{chatId}` with `{"title": "..."}`.
+Quote the title — it is one argument, not the rest of the line.
+
+The server normalises what you send before storing it: the whole title is folded
+onto one line (newlines and tab runs become a single space), control characters
+and invisible formatting characters are stripped, and the result is trimmed and
+capped at **200 characters** (characters, not bytes — an emoji or a Czech title
+gets the same length as an English one). A title that is empty after that, or
+longer than the cap, is refused with `400` rather than silently truncated.
+
+Who may rename: the chat's creator always, and anyone who can edit the agent for
+anyone else's chats — the same gate as `chat delete`.
+
+```bash
+crewship chat rename c_abc123 "Refactor the queue worker"
+crewship chat rename c_abc123 "Audit pass" --agent atlas
+crewship chat rename c_abc123 "Audit pass" --format json
+```
+
+Human output is `Chat <chat-id> renamed to "<title>".` — the title in the message
+is the **stored** one, so normalisation is visible. `--format json` / `yaml` /
+`ndjson` emit `{"id":"<chat-id>","title":"<stored title>"}`.
 
 ### `chat steer <chat-id>`
 
@@ -217,6 +276,19 @@ crewship chat read c_abc123          # clear the badge + inbox notification
 crewship chat attach c_abc123 ./diagram.png
 crewship chat attach c_abc123 ./logs.tar.gz --agent daniel
 ```
+
+### List and remove a chat's files
+
+```bash
+crewship chat attachments list c_abc123
+# ID                    FILENAME       SIZE    SHA256        AGENT PATH                                                  CREATED
+# cml9x2k4p0001qz8f     evidence.pdf   184320  9f2a1c7d4b30  /output/daniel/attachments/c_abc123/cml9x2k4p0001qz8f/evidence.pdf   2026-08-13 09:41
+# cml9x8b2r0002qz8f     evidence.pdf   201114  1d77e0a95c62  /output/daniel/attachments/c_abc123/cml9x8b2r0002qz8f/evidence.pdf   2026-08-13 10:02
+
+crewship chat attachments delete c_abc123 cml9x2k4p0001qz8f --yes
+```
+
+Two files with the same name are two attachments with two checksums and two paths — which is the point of the id segment. Use `--format json` when you want the full digest to compare against what an agent reported reading.
 
 Pass `--agent` when the auto-lookup is ambiguous (the chat lives on more than one agent in your visible set) or when you've already pre-resolved the slug.
 

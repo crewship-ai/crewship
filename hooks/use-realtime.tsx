@@ -80,6 +80,11 @@ export type RealtimeEventType =
   // overview needed a Refresh button to see an agent's work.
   | "pipeline.saved"
   | "inbox.updated"
+  // A chat session was renamed — `{agent_id, chat_id, title}`. Emitted by
+  // PATCH /agents/{id}/chats/{chatId} (internal/api/agent_chats_rename.go) so
+  // a sidebar open elsewhere repaints the row instead of polling for it.
+  // snake_case matches the backend broadcast, like the assignment_* events.
+  | "chat_renamed"
   // A producer pushed a panel payload. Broadcast on the per-page channel
   // `page:{pageId}` and carrying NO payload, only "panel X changed" — the
   // client re-reads through the normal authorised path so the per-panel
@@ -145,6 +150,10 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   "pipeline.waitpoint.created",
   "pipeline.saved",
   "inbox.updated",
+  // Without this in the allowlist handleMessage drops the rename and every
+  // sidebar but the one that issued the PATCH keeps the old title until a
+  // reload.
+  "chat_renamed",
   // Pages liveness. handleMessage drops any type missing from this set, so
   // without the entry an open page would simply never update — the exact
   // "easy to forget" step docs/prd/pages.md §10b.5b calls out by name.

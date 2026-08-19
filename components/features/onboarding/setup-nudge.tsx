@@ -11,20 +11,28 @@ interface SetupNudgeProps {
 }
 
 export function SetupNudge({ crewCount, agentCount, credentialCount }: SetupNudgeProps) {
+  // The first two steps pointed at /crews/new and /crews/agents/new. Both
+  // routes went with the selection-driven /crews redesign — creating either a
+  // crew or an agent is a dialog on /crews now, and ?new=crew / ?new=agent is
+  // the deep link into it (crews-subbar.tsx:47-63), which exists precisely
+  // because there is no longer a URL for the form itself.
+  //
+  // This card only renders on a workspace that is still empty, so these are
+  // among the very first links a new user is offered. Both were dead.
   const steps = [
     {
       done: crewCount > 0,
       icon: Network,
       label: "Create a crew",
       description: "Group your agents by department or function",
-      href: "/crews/new",
+      href: "/crews?new=crew",
     },
     {
       done: agentCount > 0,
       icon: Bot,
       label: "Add an agent",
       description: "Create your first AI virtual employee",
-      href: "/crews/agents/new",
+      href: "/crews?new=agent",
     },
     {
       done: credentialCount > 0,

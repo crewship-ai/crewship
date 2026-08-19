@@ -243,6 +243,16 @@ type Router struct {
 	// would split journal/log wiring across two handlers for no gain.
 	assignmentHandler *AssignmentHandler
 
+	// queryHandler is the live QueryHandler created during route
+	// registration. Stored for the same reason as assignmentHandler above:
+	// the boot path starts the escalation expiry sweeper
+	// (StartEscalationExpirySweeper) on the instance the HTTP routes use, so
+	// the sweeper's journal emitter and its in-memory waiter map are the ones
+	// a resolving request would touch. A second instance would expire rows
+	// correctly and then fail to wake anybody waiting on them, which is the
+	// half-fix this field exists to prevent.
+	queryHandler *QueryHandler
+
 	// version is the ldflags-injected binary version (e.g. "v0.1.0-beta.1"
 	// or "dev" for local builds). Surfaced on GET /api/v1/system/version
 	// so the web UI can render an "update available" banner.
@@ -650,6 +660,12 @@ func (r *Router) AuthHandler() *AuthHandler {
 // hasn't run yet (handler-only tests that build a Router by hand).
 func (r *Router) Assignments() *AssignmentHandler {
 	return r.assignmentHandler
+}
+
+// Queries returns the live QueryHandler (nil before route registration) so
+// the boot path can start the escalation expiry sweeper on it.
+func (r *Router) Queries() *QueryHandler {
+	return r.queryHandler
 }
 
 // Journal returns the journal emitter or a no-op if unset. Handlers should

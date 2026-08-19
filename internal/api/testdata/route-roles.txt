@@ -11,6 +11,7 @@ DELETE /api/v1/admin/users/{userId}/data roleManage
 DELETE /api/v1/agents/{agentId} roleInline
 DELETE /api/v1/agents/{agentId}/avatar roleInline
 DELETE /api/v1/agents/{agentId}/chats/{chatId} roleSelf
+DELETE /api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId} roleCreate
 DELETE /api/v1/agents/{agentId}/credentials/{assignmentId} roleManage
 DELETE /api/v1/agents/{agentId}/integrations/{integrationId} roleCreate
 DELETE /api/v1/agents/{agentId}/peers/{userId} roleSelf
@@ -83,6 +84,7 @@ GET /api/v1/admin/keeper/judge/models roleManage
 GET /api/v1/memory/export roleManage
 PATCH /api/v1/admin/memory/config roleManage
 PATCH /api/v1/agents/{agentId} roleInline
+PATCH /api/v1/agents/{agentId}/chats/{chatId} roleSelf
 PATCH /api/v1/agents/{agentId}/integrations/{integrationId} roleCreate
 PATCH /api/v1/agents/{agentId}/learning roleManage
 PATCH /api/v1/automations/{id} roleManage
@@ -202,6 +204,8 @@ POST /api/v1/crews/{crewId}/provision roleCreate
 POST /api/v1/crews/{crewId}/rebuild roleCreate
 POST /api/v1/crews/{crewId}/refresh-image roleCreate
 POST /api/v1/crews/{crewId}/restart-agents roleCreate
+POST /api/v1/escalations/sweep-expired roleManage
+POST /api/v1/escalations/{escalationId}/cancel roleCreate
 POST /api/v1/eval/regression roleManage
 POST /api/v1/eval/replay roleManage
 POST /api/v1/feature-flags roleManage

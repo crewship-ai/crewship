@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils"
 import { spring } from "@/lib/motion"
 import { useDrawerStore } from "@/stores/drawer-store"
 
+import { DRAWER_TAB_LABELS } from "./right-rail"
+
 interface RightDrawerProps {
   children: ReactNode
   className?: string
@@ -80,6 +82,9 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
             key="drawer"
             id={`drawer-panel-${activeTab}`}
             role="tabpanel"
+            // A tabpanel with no accessible name announces as "tab panel" and
+            // nothing else — the same problem the rail's unlabelled icons had.
+            aria-label={DRAWER_TAB_LABELS[activeTab]}
             initial={{ x: width + 24, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: width + 24, opacity: 0 }}

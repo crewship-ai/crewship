@@ -17,25 +17,39 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 )
 
-// crewSharedContainerPath maps storage keys to /crew paths — pinned as a pure
-// unit so the byte-for-byte mapping the runner relies on can't drift.
-func TestCrewSharedContainerPath(t *testing.T) {
+// crewContainerPath maps storage keys to in-container paths and the fence each
+// write must resolve inside — pinned as a pure unit so the byte-for-byte
+// mapping the replay relies on can't drift.
+//
+// The /output rows are the #922 gap that made chat attachments impossible:
+// this used to answer "not replayable" for every key in the agent tree, so the
+// container fallback was unreachable code for them.
+func TestCrewContainerPath(t *testing.T) {
 	cases := []struct {
-		crewID, key, want string
-		ok                bool
+		name            string
+		crewID, key     string
+		want, wantFence string
+		ok              bool
 	}{
-		{"c1", "crews/c1/shared/scripts/x.sh", "/crew/shared/scripts/x.sh", true},
-		{"c1", "crews/c1/shared", "/crew/shared", true},
-		{"c1", "c1/report.txt", "", false},           // /output tree — not shared
-		{"c1", "crews/c2/shared/x.sh", "", false},    // other crew
-		{"c1", "crews/c1/notshared/x.sh", "", false}, // outside shared subtree
+		{"shared file", "c1", "crews/c1/shared/scripts/x.sh", "/crew/shared/scripts/x.sh", "/crew/shared", true},
+		{"shared root", "c1", "crews/c1/shared", "/crew/shared", "/crew/shared", true},
+		{"chat attachment", "c1", "c1/alex/attachments/chat-7/book.xlsx", "/output/alex/attachments/chat-7/book.xlsx", "/output", true},
+		{"agent output file", "c1", "c1/report.txt", "/output/report.txt", "/output", true},
+		{"output tree root is not a file", "c1", "c1", "", "", false},
+		{"other crew's shared tree", "c1", "crews/c2/shared/x.sh", "", "", false},
+		{"outside the shared subtree", "c1", "crews/c1/notshared/x.sh", "", "", false},
+		{"other crew's output tree", "c1", "c2/report.txt", "", "", false},
+		{"unsafe crew id", "../etc", "../etc/x", "", "", false},
+		{"empty crew id", "", "/x", "", "", false},
 	}
 	for _, tc := range cases {
-		got, ok := crewSharedContainerPath(tc.crewID, tc.key)
-		if ok != tc.ok || got != tc.want {
-			t.Errorf("crewSharedContainerPath(%q,%q) = (%q,%v), want (%q,%v)",
-				tc.crewID, tc.key, got, ok, tc.want, tc.ok)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			got, fence, ok := crewContainerPath(tc.crewID, tc.key)
+			if ok != tc.ok || got != tc.want || fence != tc.wantFence {
+				t.Errorf("crewContainerPath(%q,%q) = (%q,%q,%v), want (%q,%q,%v)",
+					tc.crewID, tc.key, got, fence, ok, tc.want, tc.wantFence, tc.ok)
+			}
+		})
 	}
 }
 
@@ -207,9 +221,20 @@ func TestHandleFileSave_OverwriteRoutesThroughContainer(t *testing.T) {
 	}
 	// The in-container script must fence the resolved dir to /crew/shared
 	// (defence-in-depth against a symlink planted inside the shared tree).
+	// The fence root travels in the environment beside DEST, so the same
+	// script can serve the /output tree without string-building a command.
 	script := strings.Join(ctr.gotCfg.Cmd, " ")
-	if !strings.Contains(script, "realpath") || !strings.Contains(script, "/crew/shared") {
-		t.Errorf("container script missing realpath fence to /crew/shared: %q", script)
+	if !strings.Contains(script, "realpath") || !strings.Contains(script, `"$FENCE"`) {
+		t.Errorf("container script missing realpath fence: %q", script)
+	}
+	var fence string
+	for _, e := range ctr.gotCfg.Env {
+		if strings.HasPrefix(e, "FENCE=") {
+			fence = strings.TrimPrefix(e, "FENCE=")
+		}
+	}
+	if fence != "/crew/shared" {
+		t.Errorf("FENCE env = %q, want /crew/shared", fence)
 	}
 }
 

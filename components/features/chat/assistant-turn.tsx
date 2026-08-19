@@ -1,6 +1,6 @@
 "use client"
 
-import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, HelpCircle, FileCode } from "lucide-react"
+import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useReactionsStore } from "@/stores/reactions-store"
 import { useEffect } from "react"
@@ -125,49 +125,6 @@ function ResultCard({ part }: { part: TurnPart }) {
         )}
       </div>
     </details>
-  )
-}
-
-interface AskQuestion {
-  question: string
-  header: string
-  options: { label: string; description: string }[]
-  multiSelect?: boolean
-}
-
-function AskUserCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
-  const input = part.metadata?.input as { questions?: AskQuestion[] } | undefined
-  const questions = input?.questions
-  if (!questions?.length) {
-    return <DefaultToolCall part={part} agentId={agentId} />
-  }
-
-  return (
-    <div className="max-w-lg space-y-3">
-      {questions.map((q, qi) => (
-        <div key={qi} className="bg-primary/5 border border-primary/20 rounded-lg overflow-hidden">
-          <div className="px-4 py-3 border-b border-primary/10 flex items-center gap-2">
-            <HelpCircle className="h-3.5 w-3.5 text-primary" />
-            <span className="text-label font-medium">{q.header}</span>
-          </div>
-          <div className="px-4 py-3">
-            <p className="text-body mb-2">{q.question}</p>
-            <div className="flex flex-wrap gap-1.5">
-              {q.options.map((opt, oi) => (
-                <span
-                  key={oi}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-label bg-muted border cursor-default"
-                  title={opt.description}
-                >
-                  <CircleDot className="h-3 w-3 text-muted-foreground" />
-                  {opt.label}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
   )
 }
 
@@ -351,7 +308,6 @@ function InlineToolCall({ part, agentId }: { part: TurnPart; agentId?: string })
   const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
 
   switch (toolName) {
-    case "AskUserQuestion": return <AskUserCard part={part} agentId={agentId} />
     case "TodoWrite": return <TodoWriteCard part={part} agentId={agentId} />
     case "Task": return <TaskCard part={part} agentId={agentId} />
     default: return <DefaultToolCall part={part} agentId={agentId} />

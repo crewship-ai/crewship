@@ -5,6 +5,7 @@ import { motion } from "motion/react"
 import {
   AlertCircle,
   AlertTriangle,
+  ClipboardList,
   Settings2,
   Wrench,
   RefreshCw,
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui/hover-card"
 import { arrival } from "@/lib/motion"
 import type { ChatTurn } from "@/hooks/use-chat"
+import { askProvenanceForTurn } from "./asks/ask-provenance"
 import { AssistantTurn } from "./assistant-turn"
 import { EditableUserMessage } from "./messages/editable-user-message"
 import { CrewProvisioningCard } from "./crew-provisioning-card"
@@ -153,10 +155,16 @@ interface TurnRendererProps {
    *  Returns null for the local user (no label) or when no participant info is
    *  available. Optional — callers without group context omit it. */
   resolveAuthorName?: (userId: string) => string | null
+  /** Resolves a user turn's content to the ask form it was submitted from, or
+   *  null for anything typed. Submitting a form sends an ORDINARY message —
+   *  there is nothing on the wire that marks it — so without this line the
+   *  transcript shows text the user never typed as if they had. Optional; a
+   *  caller that has no ask forms omits it and nothing renders. */
+  resolveAskProvenance?: (content: string) => string | null
 }
 
 /** Render a single turn (user, assistant, or system). */
-export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName }: TurnRendererProps) {
+export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
   const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
   const initialAnim = shouldAnimate ? arrival.initial : false
   const transition = shouldAnimate ? arrival.transition : { duration: 0 }
@@ -165,6 +173,20 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
     // Group-chat attribution: a teammate's message shows their name; the local
     // user's own turns (resolver returns null) render as today.
     const authorName = turn.authorUserId ? resolveAuthorName?.(turn.authorUserId) ?? null : null
+    // Which form this turn came out of.
+    //
+    // The turn's own submission envelope first (asks/ask-envelope.ts): it is
+    // carried WITH the message, so it survives a reload and it cannot confuse
+    // two identical submissions the way a content key did (audit P0.6). The
+    // injected content resolver is the fallback for a turn that has none —
+    // today that is every optimistic turn, until the send path carries the
+    // envelope end to end.
+    //
+    // Only the local user's own turns can have come from a form on this
+    // client; a teammate's message is attributed to them instead.
+    const askProvenance = turn.authorUserId
+      ? null
+      : askProvenanceForTurn(chatId ?? "", turn) ?? resolveAskProvenance?.(textContent) ?? null
     return (
       <motion.div
         initial={initialAnim}
@@ -174,6 +196,15 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
         data-turn-id={turn.id}
         className="group flex flex-col"
       >
+        {askProvenance && (
+          <div
+            data-testid="ask-provenance"
+            className="ml-auto mb-0.5 flex items-center gap-1 text-micro text-muted-foreground"
+          >
+            <ClipboardList className="h-3 w-3" aria-hidden="true" />
+            <span>via {askProvenance}</span>
+          </div>
+        )}
         {authorName && (
           <div className="ml-auto mb-0.5 flex items-center gap-1.5 text-micro text-muted-foreground">
             <span aria-hidden="true" className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-[9px] font-semibold text-primary">
@@ -192,7 +223,14 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
           <Message from="user">
             <MessageContent>
               <div className="flex items-start gap-2">
-                <span>{textContent}</span>
+                {/* pre-wrap, because a user turn is not always one line. A
+                    message sent with an attachment carries the file's
+                    agent-visible path in its own text (the payload is an
+                    ordinary user message — lib/attachment-message.ts), so the
+                    transcript already shows exactly what the agent got; it
+                    only reads as such if the block's line breaks survive.
+                    Every other multi-line paste was collapsing here too. */}
+                <span className="whitespace-pre-wrap">{textContent}</span>
               </div>
             </MessageContent>
             <div className="text-micro text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity">

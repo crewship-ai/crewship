@@ -68,6 +68,9 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	milestoneCreate := obj(map[string]any{"name": str(), "description": nullable(str()), "target_date": nullable(str()), "status": str()})
 	milestoneUpdate := obj(map[string]any{"name": nullable(str()), "description": nullable(str()), "target_date": nullable(str()), "status": nullable(str()), "position": nullable(integer())})
 	escalationResolve := obj(map[string]any{"resolution": str(), "action": str(), "redirect_to": str()})
+	// Cancelling is not resolving with a different verb: it withdraws the
+	// question rather than answering it, so it carries only a reason.
+	escalationCancel := obj(map[string]any{"reason": str()})
 	waitpoint := obj(map[string]any{"approved": boolean(), "comment": str()})
 
 	components := map[string]any{
@@ -79,8 +82,9 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"WorkflowRecurringIssueCreateRequest": recurringCreate, "WorkflowRecurringIssueUpdateRequest": recurringUpdate,
 		"WorkflowTriageRuleCreateRequest": triageCreate, "WorkflowTriageRuleUpdateRequest": triageUpdate,
 		"WorkflowMilestoneCreateRequest": milestoneCreate, "WorkflowMilestoneUpdateRequest": milestoneUpdate,
-		"WorkflowEscalationResolveRequest": escalationResolve, "WorkflowWaitpointApprovalRequest": waitpoint,
-		"WorkflowEmptyRequest": empty, "WorkflowBudgetRequest": obj(map[string]any{"monthly_budget_usd": number()}),
+		"WorkflowEscalationResolveRequest": escalationResolve, "WorkflowEscalationCancelRequest": escalationCancel,
+		"WorkflowWaitpointApprovalRequest": waitpoint,
+		"WorkflowEmptyRequest":             empty, "WorkflowBudgetRequest": obj(map[string]any{"monthly_budget_usd": number()}),
 		"WorkflowTagsRequest": obj(map[string]any{"tags": arr(str())}), "WorkflowStepOverrideRequest": obj(map[string]any{"prompt": str(), "model_override": str()}),
 		"WorkflowRollbackRequest":          obj(map[string]any{"target_version": integer(), "version": integer()}),
 		"WorkflowWaitpointCallbackRequest": obj(map[string]any{"approved": nullable(boolean()), "payload": anyValue()}),
@@ -100,6 +104,8 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"POST /api/v1/triage-rules": request("WorkflowTriageRuleCreateRequest"), "PATCH /api/v1/triage-rules/{ruleId}": request("WorkflowTriageRuleUpdateRequest"), "POST /api/v1/triage/process": request("WorkflowEmptyRequest"),
 		"POST /api/v1/projects/{projectId}/milestones": request("WorkflowMilestoneCreateRequest"), "PATCH /api/v1/milestones/{milestoneId}": request("WorkflowMilestoneUpdateRequest"),
 		"PATCH /api/v1/escalations/{escalationId}/resolve":       request("WorkflowEscalationResolveRequest"),
+		"POST /api/v1/escalations/{escalationId}/cancel":         request("WorkflowEscalationCancelRequest"),
+		"POST /api/v1/escalations/sweep-expired":                 request("WorkflowEmptyRequest"),
 		"POST /api/v1/waitpoint-tokens/{token}":                  request("WorkflowWaitpointCallbackRequest"),
 		"POST /api/v1/crews/{crewId}/missions/{missionId}/start": request("WorkflowEmptyRequest"), "POST /api/v1/crews/{crewId}/missions/{missionId}/restart": request("WorkflowEmptyRequest"), "POST /api/v1/crews/{crewId}/missions/{missionId}/resume": request("WorkflowEmptyRequest"), "POST /api/v1/crews/{crewId}/missions/{missionId}/clone": request("WorkflowEmptyRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve": request("WorkflowEmptyRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject": request("WorkflowEmptyRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable": request("WorkflowEmptyRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable": request("WorkflowEmptyRequest"),

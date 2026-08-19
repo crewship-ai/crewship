@@ -1,6 +1,6 @@
 ---
 title: "conversation"
-description: "Search an agent's indexed conversation history from the CLI."
+description: "Search indexed conversation history from the CLI."
 icon: "message-circle"
 stability: experimental
 tag: Experimental
@@ -8,23 +8,36 @@ tag: Experimental
 
 ## `crewship conversation search`
 
-Search one agent's recorded chat sessions by keyword, ranked by BM25. The
-alias `crewship conv search` is also supported.
+Search recorded chat sessions by keyword, ranked by BM25. Every agent in the
+workspace is searched unless `--agent` narrows it. The alias
+`crewship conv search` is also supported.
 
 ```bash
-crewship conversation search backend-bot "deploy pipeline"
-crewship conversation search agent_123 "rate limit" --limit 50
-crewship conversation search backend-bot "auth" --format json
+crewship conversation search "deploy pipeline"
+crewship conversation search "rate limit" --agent backend-bot --limit 50
+crewship conversation search "auth" --format json
 ```
 
 Arguments and flags:
 
 | Argument / flag | Description |
 | --- | --- |
-| `<agent-slug-or-id>` | Agent whose conversations are searched; the server verifies workspace membership. |
 | `<query>` | Required search text; remaining arguments are joined with spaces. |
+| `--agent` | Narrow to one agent (slug or ID); the server verifies workspace membership. Default is every agent in the workspace. |
 | `--limit` | Maximum hits, default `20`, accepted range `1–100`. |
 | `--format` | `json`, `yaml`, or `ndjson` for machine-readable output. |
+
+Each hit carries the agent that said it, the session id and the timestamp, so
+a workspace-wide result stays readable and you can follow up in the right
+thread.
+
+<Note>
+The agent-first positional form this command shipped with —
+`crewship conversation search backend-bot "deploy pipeline"` — still works:
+when no `--agent` is given and several arguments are passed, the first is read
+as an agent. Quote a multi-word phrase (or pass `--agent`) to search the whole
+workspace.
+</Note>
 
 Only conversations recorded after conversation search was introduced are
 indexed. For the API contract and isolation model, see

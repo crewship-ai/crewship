@@ -38,6 +38,15 @@ Examples:
 		typeFilter, _ := cmd.Flags().GetString("type")
 		severityFilter, _ := cmd.Flags().GetString("severity")
 
+		// Same guard the journal command applies, because this is the same
+		// filter reaching the same `entry_type IN (...)`. A live tail makes the
+		// failure quieter still: a glob here does not print an empty page, it
+		// prints nothing at all and keeps printing nothing, which is
+		// indistinguishable from a system where nothing is happening.
+		if err := rejectTypeWildcard("type", typeFilter); err != nil {
+			return err
+		}
+
 		q := url.Values{}
 		if crewFlag != "" {
 			crewID, err := resolveCrewID(client, crewFlag)

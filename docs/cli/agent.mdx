@@ -124,6 +124,8 @@ crewship agent update <slug-or-id> --role LEAD --memory
 | `--llm-provider` | `string` | | LLM provider: `ANTHROPIC`, `OPENAI`, `GOOGLE`. |
 | `--llm-model` | `string` | | LLM model. |
 | `--memory` | `bool` | `false` | Enable memory. |
+| `--suggested-prompts` | `string` | | Chat suggestions shown as buttons under an empty conversation: one per line, max 8 lines, max 120 characters each. Text or `@file.txt`. Pass `""` to clear, after which the agent shows the built-in defaults. |
+| `--ask-forms` | `string` | | Ask forms as a JSON array: max 4 forms, max 6 fields each. Almost always `@forms.json`. Pass `""` to clear. Preview one with `agent ask-preview`. |
 | `--lead-mode` | `string` | | Lead mode. |
 | `--timeout` | `int` | `0` | Timeout in seconds. |
 | `--schedule-cron` | `string` | | Cron expression to run the agent on a schedule (e.g. `*/5 * * * *`); empty string clears it. |
@@ -140,6 +142,149 @@ crewship agent update <slug-or-id> --role LEAD --memory
 mixed with other field updates in the same invocation — run it on its own:
 `crewship agent update <id> --self-learning[=false] --learning-reason "…"`.
 </Note>
+
+Suggested prompts are what the agent offers as buttons under an empty
+conversation — the questions someone would otherwise type every morning.
+They are per agent, so two agents in one workspace can offer different ones,
+and an agent without any keeps showing the built-in defaults. The list is
+normalised on write (blank lines dropped, each line trimmed), and a rejection
+names the line: `prompt 3 exceeds 120 characters (it has 154)`.
+
+```bash
+crewship agent update lucy --suggested-prompts "$(cat <<'EOF'
+What shipped this week?
+Which invoices are overdue?
+Draft a reply to the last email
+EOF
+)"
+
+crewship agent update lucy --suggested-prompts @questions.txt   # from a file
+crewship agent update lucy --suggested-prompts ""               # back to defaults
+crewship agent get lucy                                         # read them back
+```
+
+### Ask forms
+
+A suggested question is one line of text. An **ask form** is the same idea for
+the questions that need answers first: a chip that opens a short
+questionnaire, whose answers are rendered into an ordinary message and sent.
+There is no separate endpoint — forms ride the same agent PATCH — so they are
+written with `--ask-forms`, and in practice from a file, because a form with
+five fields and a template is not something anyone types on a command line.
+
+```bash
+crewship agent update lucy --ask-forms @forms.json
+crewship agent update lucy --ask-forms ""            # remove every form
+crewship agent get lucy                              # lists them: label, id, field count
+```
+
+```json forms.json
+[{
+  "id": "receipt",
+  "label": "Add a receipt",
+  "attachment": "required",
+  "template": "Please file this receipt.\n\nSupplier: {{supplier}}\nAmount: {{amount}} {{amount_currency}}\nPeriod: {{month}}\nCategory: {{category}}\nDocument: {{document}}",
+  "fields": [
+    {"name": "supplier", "label": "Supplier", "type": "text", "required": true, "placeholder": "Vodafone"},
+    {"name": "amount", "label": "Amount", "type": "money", "required": true, "currency": ["CZK", "EUR", "USD"]},
+    {"name": "month", "label": "Period", "type": "month", "default": "2026-08"},
+    {"name": "category", "label": "Category", "type": "select", "options": ["Telco", "Hosting"]},
+    {"name": "document", "label": "Document", "type": "file"}
+  ]
+}]
+```
+
+Field types: `text`, `textarea`, `number`, `money`, `date`, `month`, `select`,
+`multiselect`, `checkbox`, `file`, `photo`. An unrecognised type is accepted
+and renders as a text input, so a newer server can offer a type this console
+does not know yet — **except** one whose name says the value is a secret
+(`password`, `api_key`, `client_secret`, `otp`…), which is refused here and
+renders no input in the chat. A form submit is an ordinary chat message that is
+stored, searchable and read by the agent; there is no field type that makes
+that safe. Put the credential in the vault and reference it by name.
+`select` and `multiselect` need `options`. Options are trimmed on save, exactly
+as an answer is on its way into the message — `"Travel "` is stored as
+`"Travel"`, because an option spelled differently from the answer it produces
+is a choice the form renders and then refuses. Two options that differ only by
+whitespace are therefore the same option, and are refused as a duplicate rather
+than silently merged. A `money` field named `amount` answers to **two**
+placeholders: `{{amount}}` and `{{amount_currency}}`.
+
+A field may also carry `min`, `max`, `pattern` and `multiple`, all of which are
+checked when a user submits — `min`/`max` are a value on `number`/`money`, a
+length on text, and a count on `multiselect`/`file`/`photo`; `pattern` is an
+anchored full match on the text-ish types; `multiple: false` caps an upload
+field at one file. A constraint that would not be checked for its field type
+(a `pattern` on a checkbox, a bound on a date) is **refused on save** rather
+than stored and ignored, and so are `min` above `max` and a pattern that does
+not compile. Optional `version` is the author's revision number, carried into
+every submission's metadata. Full reference: [Ask forms](/guides/ask-forms).
+
+Three rules decide what is sent:
+
+1. Every `{{placeholder}}` must name a field on the same form, and that is
+   checked **when you save**, not when a user clicks the chip. A typo comes
+   back as `form "receipt": template names {{suplier}}, which is not a field
+   on that form` and nothing is written.
+2. An unanswered optional field **takes its whole line with it**, label
+   included — the receipt above with no category sends no `Category:` line
+   rather than a dangling one. This is the only rule you cannot read off the
+   template.
+3. Values go in verbatim (it is a user message), but control characters are
+   stripped, each value caps at 2000 characters and the message at 32000.
+   `file` and `photo` fields render as `attachments/<chat-id>/<name>`, one per
+   line for several files.
+
+Caps: 4 forms per agent, 6 fields per form, 48 characters per label, 2000 per
+template — all counted in characters, not bytes. `schemas/ask-form.v1.json` is
+the JSON Schema, for editor completion while writing `forms.json`.
+
+---
+
+## `crewship agent ask-preview`
+
+Render one of an agent's ask forms and print the message it would send. This
+is how a template is tested without opening a browser, and it uses the same
+renderer the chat does — the two are pinned to one golden fixture
+(`testdata/ask-templates.json`), so what you see here is what gets sent.
+
+It also applies the same **constraints** the chat applies at submit, and prints
+the same sentences, so a preview cannot show a message the sheet would have
+refused:
+
+```bash
+crewship agent ask-preview lucy receipt --var amount=9000
+# Error: these answers would be refused in the chat:
+#   Amount must be at most 5000.
+```
+
+```bash
+crewship agent ask-preview lucy receipt \
+  --var supplier=Vodafone \
+  --var amount=1249 \
+  --var amount_currency=CZK \
+  --var document=IMG_4821.heic \
+  --chat-id chat_7f3a
+```
+
+```
+Please file this receipt.
+
+Supplier: Vodafone
+Amount: 1249 CZK
+Document: attachments/chat_7f3a/IMG_4821.heic
+```
+
+No `--var month=` and no `--var category=` were given, so both of those lines
+are gone — that is rule 2 above, seen from the outside.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--var` | `string` | | Answer one field: `name=value`. Repeat for more fields, and repeat a name for a multi-value (several photos of one invoice, or a multiselect). |
+| `--chat-id` | `string` | `preview` | Chat id used to build the `attachments/<chat-id>/<file>` paths. |
+
+Output is plain text on stdout with no framing, so it pipes into a file, a
+diff or a review comment.
 
 ## `crewship agent rotate-webhook-secret`
 

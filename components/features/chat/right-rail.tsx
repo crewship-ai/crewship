@@ -33,6 +33,25 @@ const ITEMS: RailItem[] = [
   { id: "team", label: "Team", icon: Users, shortcut: "3" },
 ]
 
+/**
+ * What each panel is called, in one place.
+ *
+ * The rail is three unlabelled 16px glyphs, and the drawer it opens had no
+ * header of its own — so the only way to know which of the three you were
+ * looking at was to recognise the icon. The rail's tooltip, the drawer's
+ * accessible name and the panel's own heading all read from here so they
+ * cannot say three different things.
+ *
+ * "context" is not a rail button any more (it moved to the agent canvas) but
+ * survives in persisted user state, so it keeps a name.
+ */
+export const DRAWER_TAB_LABELS: Record<DrawerTab, string> = {
+  files: "Files",
+  triggers: "Triggers",
+  team: "Team",
+  context: "Context",
+}
+
 export function RightRail({ className }: { className?: string }) {
   // Narrow selectors — the rail re-rendered on width drags and mode flips
   // it never reads.
@@ -91,6 +110,10 @@ export function RightRail({ className }: { className?: string }) {
                   role="tab"
                   aria-selected={isActive}
                   aria-controls={`drawer-panel-${id}`}
+                  // The shortcut is drawn in the tooltip; without this it is
+                  // visual-only, and the tooltip is the thing a keyboard user
+                  // is least likely to have seen.
+                  aria-keyshortcuts={shortcut ? `Meta+${shortcut}` : undefined}
                   onClick={() => toggle(id)}
                 >
                   {isActive && (

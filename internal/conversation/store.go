@@ -335,68 +335,11 @@ func fts5Phrase(s string) string {
 // via fts5Phrase so FTS5 operators in user input are treated as literal
 // text. A whitespace-only or empty query, or an unconfigured mirror, is an
 // error rather than an unbounded scan.
+//
+// It is SearchAgents over a one-element set; see search_multi.go for the
+// query itself, which both scopes share so they can never drift.
 func (s *Store) Search(ctx context.Context, agentID, query string, limit int) ([]SearchHit, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if s.db == nil {
-		return nil, fmt.Errorf("conversation search mirror not configured")
-	}
-	if strings.TrimSpace(agentID) == "" {
-		return nil, fmt.Errorf("agent_id is required")
-	}
-	phrase := fts5Phrase(query)
-	if phrase == "" {
-		return nil, fmt.Errorf("query is required")
-	}
-	const (
-		searchDefaultLimit = 20  // initial slice capacity (constant, never caller-controlled)
-		searchMaxLimit     = 100 // hard ceiling on rows returned
-	)
-	if limit <= 0 || limit > searchMaxLimit {
-		limit = searchDefaultLimit
-	}
-
-	// JOIN the external-content FTS shadow on rowid and rank by bm25().
-	// agent_id lives only on the base table, so the bare reference stays
-	// unambiguous. ORDER BY bm25(fts) ASC puts the best (lowest) score
-	// first.
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT cm.id, cm.session_id, cm.agent_id, cm.role, cm.content, cm.tool_summary, cm.ts
-		FROM conversation_messages cm
-		JOIN conversation_messages_fts fts ON fts.rowid = cm.rowid
-		WHERE cm.agent_id = ? AND conversation_messages_fts MATCH ?
-		ORDER BY bm25(conversation_messages_fts) ASC, cm.ts DESC
-		LIMIT ?`,
-		agentID, phrase, limit,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("search query: %w", err)
-	}
-	defer rows.Close()
-
-	// Preallocate with a fixed capacity (NOT the caller-influenced limit) so
-	// the allocation size never depends on untrusted input; the slice grows
-	// to at most `limit` rows, which the SQL LIMIT already bounds.
-	out := make([]SearchHit, 0, searchDefaultLimit)
-	for rows.Next() {
-		var (
-			h     SearchHit
-			role  string
-			tsStr string
-		)
-		if err := rows.Scan(&h.ID, &h.SessionID, &h.AgentID, &role, &h.Content, &h.ToolSummary, &tsStr); err != nil {
-			return nil, fmt.Errorf("scan hit: %w", err)
-		}
-		h.Role = Role(role)
-		if t, perr := time.Parse("2006-01-02T15:04:05.000Z", tsStr); perr == nil {
-			h.Timestamp = t
-		} else if t, perr := time.Parse(time.RFC3339Nano, tsStr); perr == nil {
-			h.Timestamp = t
-		}
-		out = append(out, h)
-	}
-	return out, rows.Err()
+	return s.SearchAgents(ctx, []string{agentID}, query, limit)
 }
 
 // Read returns messages from a session's JSONL file with optional pagination.

@@ -11,19 +11,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { apiFetch } from "@/lib/api-fetch"
 import { devWarn } from "@/lib/client-log"
-import type { SlashActionSchema, SlashFormField } from "@/hooks/use-slash-commands"
+import type { SlashActionSchema } from "@/hooks/use-slash-commands"
+import { FormField } from "../asks/form-field"
 
 /**
  * Generic action modal driven by a slash command's form_schema.
@@ -32,6 +23,14 @@ import type { SlashActionSchema, SlashFormField } from "@/hooks/use-slash-comman
  * types map onto the same primitives (text, textarea, cron, slug,
  * secret, ...). Unknown types fall back to text so the server can
  * introduce new field types without coordinated frontend rollout.
+ *
+ * The field renderer itself now lives in `../asks/form-field.tsx`,
+ * shared with the ask sheet: the sheet does the same job from the
+ * same kind of schema, and a second switch statement would drift
+ * from this one the first time either side gained a type. The
+ * modal's own behaviour is unchanged by the move and is pinned by
+ * __tests__/slash-action-modal.test.tsx, which was written against
+ * the pre-extraction component.
  *
  * On submit the modal POSTs to the matching public capability-
  * gated endpoint (NOT the internal sidecar — chat-bridge handles
@@ -164,7 +163,7 @@ function Form({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {fields.map((f) => (
-        <Field
+        <FormField
           key={f.name}
           field={f}
           value={values[f.name] ?? ""}
@@ -183,170 +182,6 @@ function Form({
   )
 }
 
-function Field({
-  field,
-  value,
-  onChange,
-}: {
-  field: SlashFormField
-  value: string
-  onChange: (e: { target: { value: string } }) => void
-}) {
-  const label = (
-    <Label htmlFor={field.name} className="capitalize">
-      {field.name.replace(/_/g, " ")}
-      {field.required && <span className="ml-1 text-destructive">*</span>}
-    </Label>
-  )
-
-  switch (field.type) {
-    case "textarea":
-      return (
-        <div className="space-y-1">
-          {label}
-          <Textarea
-            id={field.name}
-            value={value}
-            onChange={onChange}
-            rows={4}
-          />
-        </div>
-      )
-
-    case "cron":
-      return (
-        <div className="space-y-1">
-          {label}
-          <Input
-            id={field.name}
-            value={value}
-            onChange={onChange}
-            className="font-mono text-sm"
-            placeholder="0 7 * * MON"
-          />
-          <p className="text-xs text-muted-foreground">
-            Standard cron expression (5 fields). Server validates parse + timezone.
-          </p>
-        </div>
-      )
-
-    case "timezone":
-      return (
-        <div className="space-y-1">
-          {label}
-          <Select value={value || "UTC"} onValueChange={(v) => onChange({ target: { value: v } })}>
-            <SelectTrigger id={field.name}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {/* Minimal initial set; expand based on usage telemetry. */}
-              <SelectItem value="UTC">UTC</SelectItem>
-              <SelectItem value="Europe/Prague">Europe/Prague</SelectItem>
-              <SelectItem value="Europe/London">Europe/London</SelectItem>
-              <SelectItem value="America/New_York">America/New_York</SelectItem>
-              <SelectItem value="America/Los_Angeles">America/Los_Angeles</SelectItem>
-              <SelectItem value="Asia/Tokyo">Asia/Tokyo</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      )
-
-    case "priority":
-      return (
-        <div className="space-y-1">
-          {label}
-          <Select value={value || "none"} onValueChange={(v) => onChange({ target: { value: v } })}>
-            <SelectTrigger id={field.name}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">None</SelectItem>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-              <SelectItem value="urgent">Urgent</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      )
-
-    case "memory_scope":
-      return (
-        <div className="space-y-1">
-          {label}
-          <Select value={value || "agent"} onValueChange={(v) => onChange({ target: { value: v } })}>
-            <SelectTrigger id={field.name}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="agent">Agent — only this agent remembers</SelectItem>
-              <SelectItem value="crew">Crew — shared across crew agents</SelectItem>
-              <SelectItem value="workspace">Workspace — visible to every crew</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      )
-
-    case "credential_type":
-      return (
-        <div className="space-y-1">
-          {label}
-          <Select value={value || "SECRET"} onValueChange={(v) => onChange({ target: { value: v } })}>
-            <SelectTrigger id={field.name}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="SECRET">Secret</SelectItem>
-              <SelectItem value="USERPASS">Username + password</SelectItem>
-              <SelectItem value="OAUTH2">OAuth2 (pending grant)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      )
-
-    case "secret":
-      return (
-        <div className="space-y-1">
-          {label}
-          <Input
-            id={field.name}
-            type="password"
-            value={value}
-            onChange={onChange}
-            autoComplete="off"
-          />
-        </div>
-      )
-
-    case "slug":
-      return (
-        <div className="space-y-1">
-          {label}
-          <Input
-            id={field.name}
-            value={value}
-            onChange={onChange}
-            placeholder="kebab-case-slug"
-            className="font-mono text-sm"
-          />
-        </div>
-      )
-
-    case "text":
-    default:
-      // Unknown types fall back to text — server controls the
-      // catalog, so an unrecognised type means the dashboard is
-      // older than the server. Showing a text input + letting the
-      // server validate beats rendering nothing.
-      return (
-        <div className="space-y-1">
-          {label}
-          <Input id={field.name} value={value} onChange={onChange} />
-        </div>
-      )
-  }
-}
-
 /**
  * Map slash command ids to the matching public API endpoint.
  *
@@ -359,17 +194,24 @@ function endpointForCommand(id: string, workspaceId: string): string {
   const ws = encodeURIComponent(workspaceId)
   switch (id) {
     case "routine":
+      // Reachable only if someone re-enables the action: this endpoint
+      // SCHEDULES an existing pipeline and rejects any body without
+      // target_pipeline_id/target_pipeline_slug, which a conversation does
+      // not have. The palette classifies "routine" as disabled for exactly
+      // that reason (SERVER_ACTION_CONTRACT in slash-palette.tsx); the branch
+      // stays because the body shape is still the right one for the day a
+      // transcript→routine step exists.
       return `/api/v1/workspaces/${ws}/pipeline-schedules`
     case "skill":
       return `/api/v1/workspaces/${ws}/skills/generate`
     case "credential":
       return `/api/v1/credentials?workspace_id=${ws}`
-    case "issue":
-      // Issue create is crew-scoped — we don't have crew_id in
-      // this surface yet. Wire through ChatPanel context in a
-      // follow-up; for now the modal pre-validates by hitting the
-      // workspace-default crew via a helper.
-      return `/api/v1/issues?workspace_id=${ws}`
+    // "issue" intentionally absent. This used to return
+    // `/api/v1/issues?workspace_id=…`, which is not a route: POST issues is
+    // registered ONLY as /api/v1/crews/{crewId}/issues (router_orchestration
+    // .go), so every submit was a 404 dressed up as a form. Chat has no crew
+    // id to put in that path, so the action is disabled in the palette rather
+    // than pointed at a URL that cannot work.
     // "remember" intentionally absent — see catalog note in
     // internal/api/slash_commands_handler.go. The backend route
     // doesn't exist yet; the server-side catalog omits the entry
@@ -401,12 +243,8 @@ function buildPayload(id: string, values: Record<string, string>): unknown {
         type: values.type || "SECRET",
         value: values.value,
       }
-    case "issue":
-      return {
-        title: values.title,
-        description: values.description,
-        priority: values.priority || "none",
-      }
+    // No "issue" case: endpointForCommand has no mapping for it, so the
+    // request is refused before a body is ever built.
     default:
       return values
   }
