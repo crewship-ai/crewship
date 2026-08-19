@@ -609,6 +609,14 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 	if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
 		return "", nil, fmt.Errorf("open %s: refusing symlinked target", path)
 	}
+	if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+		// Only "not there yet" may be read as "this is the first write
+		// of the day". Any other stat failure and we do not know
+		// whether there is content underneath — the whole-file replace
+		// below would drop it, and we would write the first-run header
+		// over the top. Same rule as snapshotPins.
+		return "", nil, fmt.Errorf("stat %s: %w", path, statErr)
+	}
 	exists := statErr == nil
 	// Read the prior content inside the lock. This is not extra I/O:
 	// the pre-#1807 code already read the whole file back after
