@@ -692,8 +692,10 @@ func TestCrewFileDeleteScript_FenceReachedThroughSymlink(t *testing.T) {
 	}
 	// `link` stands in for /var -> /private/var: same tree, spelled through a
 	// symlink, which is what the fence is handed.
+	// A unix host that cannot symlink inside its own temp directory is broken;
+	// reporting ok would hide the very case this test exists for.
 	if err := os.Symlink(real, link); err != nil {
-		t.Skipf("cannot create a symlink here: %v", err) // SKIP-WAIVER(#1977)
+		t.Fatalf("symlink: %v", err)
 	}
 	seedCrewTreeForDelete(t, real)
 
@@ -754,7 +756,7 @@ func TestCrewFileDeleteScript_RootRefusedThroughSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(real, link); err != nil {
-		t.Skipf("cannot create a symlink here: %v", err) // SKIP-WAIVER(#1977)
+		t.Fatalf("symlink: %v", err)
 	}
 
 	for _, dest := range []string{link, link + "/", real} {
@@ -790,7 +792,7 @@ func TestCrewFileDeleteScript_EscapeStillRefused(t *testing.T) {
 	// A symlinked component inside the fence that leads out of it — the attack
 	// the in-container realpath check is there to stop.
 	if err := os.Symlink(outside, filepath.Join(fence, "escape")); err != nil {
-		t.Skipf("cannot create a symlink here: %v", err) // SKIP-WAIVER(#1977)
+		t.Fatalf("symlink: %v", err)
 	}
 
 	cmd := exec.Command("sh", "-c", crewFileDeleteScript) // #nosec G204 — the script under test
