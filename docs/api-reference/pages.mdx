@@ -315,8 +315,9 @@ panel's declared schema (`metric.v1`, `status.v1`, `table.v1`, `series.v1`,
 ```
 
 **Query parameters:** `state` — the producer's own verdict, `ok` (the default)
-or `failed`. `fresh` and `stale` are the server's arithmetic and are refused
-here.
+or `failed`. Any other value is a **400**, `fresh` and `stale` included: those
+two are the server's arithmetic, and accepting them here would let a producer
+declare itself fresh.
 
 **Response 200:**
 
@@ -903,9 +904,9 @@ No `token` field: it is stored as a digest and cannot be re-read.
 POST /api/v1/pages/{slug}/webhooks
 ```
 
-For a producer that cannot run the CLI: a cron on someone else's box, a Zapier
-step, a PLC gateway, a CI job. Anything that *can* run the CLI should use
-[`page set`](/cli/page#crewship-page-set-slug-panel) instead — one write path,
+For a producer that cannot run the CLI: a cron on someone else's box, a step in
+an automation service, a PLC gateway, a CI job. Anything that *can* run the CLI should use
+[`page set`](/cli/page#crewship-page-set) instead — one write path,
 and no credential to leak.
 
 **Authentication:** session cookie. The page owner or a workspace ADMIN/OWNER.
@@ -1062,7 +1063,7 @@ bounds.
 |---|---|
 | 200 | Correct password; the page follows. |
 | 400 | Malformed JSON body. |
-| 401 | Wrong password, unknown token, or a link that carries no password — deliberately one answer through one code path, so the cases §7.3.3 requires to be indistinguishable literally are. |
+| 401 | Wrong password, unknown token, or a link that carries no password — deliberately one answer through one code path, so the cases the design requires to be indistinguishable literally are. |
 | 429 | Rate limited. The limit is applied *before* the password is checked, and keyed on the token hash for an unknown token, so guessing is the case that is limited rather than the one that is not. |
 
 ---

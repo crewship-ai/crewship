@@ -119,7 +119,7 @@ Every panel needs `sla`; a panel without one does not validate — there is no
 default that means "never mind" (§4). `owner` names the crew whose membership
 gates who can see the panel; it is the permission anchor, not decoration.
 `producer` names the routine, script, or agent allowed to push data into it —
-see [`page set`](#crewship-page-set-slug-panel) below.
+see [`page set`](#crewship-page-set) below.
 
 A panel may also declare the sensor half — a `wake:` threshold that opens an
 issue on a crew when the pushed payload crosses it, and `on_failure:` for when
@@ -207,7 +207,7 @@ Backed by `DELETE /api/v1/pages/{slug}`.
 
 ---
 
-## `crewship page set <slug>/<panel>`
+## `crewship page set`
 
 The single write path for panel data. Everything that produces a number,
 status, or table on a page — a cron job, a script inside a crew container, a
@@ -296,7 +296,7 @@ jq -n '{
 
 ---
 
-## `crewship page actions <slug>/<panel>`
+## `crewship page actions`
 
 List the actions a panel declares.
 
@@ -325,7 +325,7 @@ the web client.
 
 ---
 
-## `crewship page action <slug>/<panel> <action-id>`
+## `crewship page action`
 
 Dispatch one of a panel's declared actions.
 
@@ -667,7 +667,7 @@ the wall display.
 
 Let a producer that **cannot run this binary** write one panel: a cron on
 someone else's box, a Zapier step, a PLC gateway, a GitHub Action. Anything
-that can run the CLI should use [`page set`](#crewship-page-set-slug-panel)
+that can run the CLI should use [`page set`](#crewship-page-set)
 instead — one write path, provenance attached server-side, and no credential
 to leak.
 

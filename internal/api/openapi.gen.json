@@ -71804,9 +71804,6 @@
                               "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                               "type": "string"
                             },
-                            "public": {
-                              "type": "boolean"
-                            },
                             "schema": {
                               "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",
                               "enum": [
@@ -73172,9 +73169,6 @@
                               "producer": {
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
-                              },
-                              "public": {
-                                "type": "boolean"
                               },
                               "schema": {
                                 "description": "The set is CLOSED — a new panel kind is a server release. Five are always producible; embed.v1 is producible only where the operator has vetted an allow-list (CREWSHIP_PAGES_EMBED_SOURCES), so on an instance with none a page spec cannot declare one.",

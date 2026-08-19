@@ -174,6 +174,13 @@ func (s *Server) handlePagePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	// Retry-After travels with the status it belongs to. §10b.3's 429 carries
+	// one, and a producer that receives the refusal without the interval has to
+	// guess — which is how a rate-limited loop becomes a tighter rate-limited
+	// loop.
+	if ra := resp.Header.Get("Retry-After"); ra != "" {
+		w.Header().Set("Retry-After", ra)
+	}
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(raw)
 }
@@ -233,6 +240,16 @@ func splitPagePanelPath(p string) (page, panel string, ok bool) {
 	page, panel = strings.TrimSpace(page), strings.TrimSpace(panel)
 	if page == "" || panel == "" || strings.Contains(panel, "/") {
 		return "", "", false
+	}
+	// `.` and `..` are path segments, not names. url.PathEscape leaves both
+	// untouched, so `/pages/../data` would reach the forwarder as a page called
+	// ".." and the upstream URL would normalise to a different internal route
+	// before anyone looked at it. A page slug is [a-z0-9_-]; neither of these
+	// can be one, so refusing them costs nothing a caller wanted.
+	for _, seg := range []string{page, panel} {
+		if seg == "." || seg == ".." {
+			return "", "", false
+		}
 	}
 	return page, panel, true
 }

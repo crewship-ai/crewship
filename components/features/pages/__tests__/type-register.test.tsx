@@ -152,14 +152,19 @@ describe("no Pages source spells a font size out (globals.css, the register comm
 
   it("carries no arbitrary text size", () => {
     const offenders = sources
-      .filter((s) => /\btext-\[[\d.]+(px|rem|em)\]/.test(s.code))
+      .filter((s) => /\btext-\[(length:)?[\d.]+(px|rem|em)\]/.test(s.code))
       .map((s) => s.file)
     expect(offenders, `arbitrary text size in ${offenders.join(", ")}`).toEqual([])
   })
 
+  // The `(length:)?` in both patterns is Tailwind's TYPED arbitrary value —
+  // `text-[length:14px]`, `leading-[length:1.5rem]`. It renders identically to
+  // the untyped form and was invisible to this guard, so the one spelling a
+  // developer reaches for when the untyped form is ambiguous was the one
+  // spelling that slipped past.
   it("carries no arbitrary leading either — leading is half of a size", () => {
     const offenders = sources
-      .filter((s) => /\bleading-\[[\d.]+(px|rem|em)?\]/.test(s.code))
+      .filter((s) => /\bleading-\[(length:)?[\d.]+(px|rem|em)?\]/.test(s.code))
       .map((s) => s.file)
     expect(offenders, `arbitrary leading in ${offenders.join(", ")}`).toEqual([])
   })

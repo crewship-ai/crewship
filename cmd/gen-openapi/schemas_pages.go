@@ -213,7 +213,13 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "`crewship.page.bundle/v1`. An unknown format is refused rather than read optimistically."},
 		"page": obj(map[string]any{
 			"name": str(), "slug": str(), "description": str(), "owner": str(),
-			"panels": arr(obj(panelSpec)),
+			// The bundle's panel is the spec MINUS `public`. The prose above
+			// says a bundle cannot carry it and the schema said it could,
+			// which is worse than either alone: a client generated from this
+			// document would send a field the importer is documented to
+			// refuse. Publication is a property of the install (§7.3.2 rule 2),
+			// so it has no place in a document that travels.
+			"panels": arr(obj(withoutKey(panelSpec, "public"))),
 		}),
 		"references": map[string]any{"type": "array", "items": bundleRef,
 			"description": "Every reference the page makes to something outside itself. The importer must bind each one explicitly; an unbound reference is refused (422), because guessing would hand the page to whoever happens to hold that name in the receiving workspace."},
@@ -454,6 +460,20 @@ func mergeProps(a, b map[string]any) map[string]any {
 		out[k] = v
 	}
 	for k, v := range b {
+		out[k] = v
+	}
+	return out
+}
+
+// withoutKey copies a property map without one entry. The panel spec is shared
+// between the API shapes and the bundle, and the bundle carries one field
+// fewer; mutating the shared map would silently change the others.
+func withoutKey(props map[string]any, drop string) map[string]any {
+	out := make(map[string]any, len(props))
+	for k, v := range props {
+		if k == drop {
+			continue
+		}
 		out[k] = v
 	}
 	return out

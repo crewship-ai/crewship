@@ -169,8 +169,18 @@ export function useTweenedValues(
   // The effect fires on `key`, a serialisation of the map's contents, because
   // a fresh Map object every render would restart the tween on every render.
   // It reads the values through a ref so the dep list can stay honest.
+  //
+  // The ref is written in a LAYOUT effect, not in the render body. Writing it
+  // during render is a side effect in a function React may call twice, discard,
+  // or replay — under StrictMode it does call it twice — and the value that
+  // survives is then whichever pass ran last rather than the one that committed.
+  // This effect is declared BEFORE the tween's below, and React runs layout
+  // effects in declaration order, so `latest.current` is the committed target
+  // by the time the tween reads it.
   const latest = React.useRef(target)
-  latest.current = target
+  useIsomorphicLayoutEffect(() => {
+    latest.current = target
+  })
   const key = valuesKey(target)
 
   /** The numbers currently ON SCREEN — mid-tween ones included. */
@@ -332,8 +342,14 @@ export function useKeyedChanges(
   const [changed, setChanged] = React.useState<ReadonlySet<string>>(NO_KEYS)
   const [entered, setEntered] = React.useState<ReadonlySet<string>>(NO_KEYS)
 
+  // Written in an effect, not in the render body — same reason as
+  // useTweenedValues above: a render may run twice and be discarded, so the
+  // value that lands in the ref must be the one that committed. Declared before
+  // the effect that reads it, which is the ordering React guarantees.
   const latest = React.useRef(signatures)
-  latest.current = signatures
+  React.useEffect(() => {
+    latest.current = signatures
+  })
   const key = signaturesKey(signatures)
 
   const seen = React.useRef<ReadonlyMap<string, string> | undefined>(undefined)

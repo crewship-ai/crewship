@@ -13,7 +13,7 @@
  *    reflows the page per viewer and its absence would itself say whose data it
  *    held.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react"
 
 // The tab in the URL is read through useSearchParams, so a "reload on this
@@ -113,9 +113,20 @@ function group(container: HTMLElement, id: string): HTMLElement {
   return el
 }
 
+const ORIGINAL_URL = typeof window !== "undefined" ? window.location.href : ""
+
 beforeEach(() => {
   cleanup()
   currentSearch = new URLSearchParams()
+})
+
+// usePageTabState writes the selected tab into the REAL url through
+// history.replaceState, so a test that selects a tab leaves it there for
+// whatever runs next in the same environment. Restoring here keeps these tests
+// order-independent — the kind of coupling that shows up as one test failing
+// only when the whole file runs.
+afterEach(() => {
+  if (ORIGINAL_URL) window.history.replaceState(null, "", ORIGINAL_URL)
 })
 
 describe("tabSlug", () => {
