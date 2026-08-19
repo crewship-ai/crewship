@@ -482,6 +482,108 @@ export const ACTIVE_ENTRY_TYPES = ["run.started", "assignment.running"]
 
 const ACTIVE_SET = new Set(ACTIVE_ENTRY_TYPES)
 
+/* ------------------------------------------------------------------ *
+ *  Asks — what is still waiting on a person, as opposed to what once was
+ *
+ *  The journal is an EVENT LOG. An `approval.requested` row stays in it
+ *  after the approval was granted, and `peer.escalation` is emitted for
+ *  BOTH the ask (escalation_handler.go:255, `state: "pending"`) and its
+ *  answer (escalation_handler.go:607 and escalation_autoresolve.go:172,
+ *  `state: "resolved"`). So "is this row of a human-source type" answers
+ *  "was somebody asked", never "is somebody still being asked" — and on
+ *  an instance that works, most asks have been answered.
+ *
+ *  This vocabulary lives here rather than in activity-overview because
+ *  `scopeOf` is the shared classifier the rail, the feed and the scope
+ *  facets all read; the overview re-exports it so nothing joins twice
+ *  with two sets of rules.
+ * ------------------------------------------------------------------ */
+
+export type AskKind = "approval" | "escalation" | "keeper"
+
+export interface AskRef {
+  kind: AskKind
+  id: string
+}
+
+function idFrom(entry: JournalEntry, ...keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = entry.refs?.[k] ?? entry.payload?.[k]
+    if (typeof v === "string" && v !== "") return v
+  }
+  return undefined
+}
+
+/** True once an escalation row carries its terminal state. */
+function escalationIsResolved(entry: JournalEntry): boolean {
+  return entry.payload?.["state"] === "resolved"
+}
+
+/**
+ * The ask an entry IS, or null.
+ *
+ * Three things block a person, and each names its id on both the ask and the
+ * answer, so the two can be joined:
+ *
+ *   approval.requested   refs.approval_id        (harbormaster/store_mutate.go:83)
+ *   keeper.request       refs.keeper_request_id  (api/keeper_request.go:235)
+ *   peer.escalation      refs.escalation_id      (api/escalation_handler.go:255)
+ */
+export function askRef(entry: JournalEntry): AskRef | null {
+  switch (entry.entry_type) {
+    case "approval.requested":
+      return { kind: "approval", id: idFrom(entry, "approval_id") ?? "" }
+    case "keeper.request":
+      return { kind: "keeper", id: idFrom(entry, "keeper_request_id", "request_id") ?? "" }
+    case "peer.escalation":
+      if (escalationIsResolved(entry)) return null
+      return { kind: "escalation", id: idFrom(entry, "escalation_id") ?? "" }
+    default:
+      return null
+  }
+}
+
+/**
+ * The ask an entry CLOSES, or null.
+ *
+ * Approvals and keeper requests are closed by a different entry_type;
+ * escalations are closed by their own type carrying state "resolved",
+ * whether a person did it (escalation_handler.go:607) or the system did
+ * (escalation_autoresolve.go:172).
+ */
+export function answerRef(entry: JournalEntry): AskRef | null {
+  switch (entry.entry_type) {
+    case "approval.granted":
+    case "approval.denied":
+    case "approval.cancelled":
+    case "approval.timeout":
+      return { kind: "approval", id: idFrom(entry, "approval_id") ?? "" }
+    case "keeper.decision":
+      return { kind: "keeper", id: idFrom(entry, "keeper_request_id", "request_id") ?? "" }
+    case "peer.escalation":
+      if (!escalationIsResolved(entry)) return null
+      return { kind: "escalation", id: idFrom(entry, "escalation_id") ?? "" }
+    default:
+      return null
+  }
+}
+
+/**
+ * `kind:id` of every ask this window can PROVE was answered.
+ *
+ * Kind travels with the id so an approval decision cannot close a keeper
+ * request that happens to share an id string. Built once per window and
+ * handed to `scopeOf`, which is per-entry and cannot see its neighbours.
+ */
+export function answeredAsks(entries: JournalEntry[]): ReadonlySet<string> {
+  const answered = new Set<string>()
+  for (const e of entries) {
+    const a = answerRef(e)
+    if (a && a.id !== "") answered.add(`${a.kind}:${a.id}`)
+  }
+  return answered
+}
+
 /**
  * Which of the four operational buckets a row belongs to.
  *
@@ -489,12 +591,67 @@ const ACTIVE_SET = new Set(ACTIVE_ENTRY_TYPES)
  * and a guardrail block is something that broke even though it is not a
  * run. The buckets are mutually exclusive so the sidebar counts add up to
  * the total — counts that overlap are counts nobody trusts twice.
+ *
+ * `waiting` is the bucket that cannot be decided from the entry_type alone
+ * (#1876). A row of a human-source type is only waiting on somebody while
+ * its ask is still OPEN:
+ *
+ *   - a resolved `peer.escalation` says so on its own face, so it needs no
+ *     window at all — it is the answer, not a second ask;
+ *   - an `approval.requested` or `keeper.request` is closed by a DIFFERENT
+ *     entry type, so proving it answered needs the rest of the window.
+ *     Pass `answered` from `answeredAsks` — `scopeCounts` and
+ *     `entriesInScope` do it for you.
+ *
+ * Without `answered` the classification is still never WRONG, only
+ * conservative: an ask whose answer is out of view stays in `waiting`,
+ * which over-reports by one row rather than hiding something a person is
+ * blocking on. The same rule covers an ask carrying no id — unjoinable is
+ * not the same as answered.
  */
-export function scopeOf(entry: JournalEntry): ActivityScope {
+export function scopeOf(entry: JournalEntry, answered?: ReadonlySet<string>): ActivityScope {
   if (entry.severity === "error") return "failed"
   if (ACTIVE_SET.has(entry.entry_type)) return "active"
-  if (activitySource(entry.entry_type) === "human") return "waiting"
+  if (activitySource(entry.entry_type) === "human") {
+    const ask = askRef(entry)
+    // Not an ask at all — a resolution, which is a record of what happened.
+    if (!ask) return "done"
+    if (ask.id === "") return "waiting"
+    return answered?.has(`${ask.kind}:${ask.id}`) ? "done" : "waiting"
+  }
   return "done"
+}
+
+/**
+ * The four bucket counts over one window, joined once.
+ *
+ * This is what a status control should count. Calling `scopeOf` per row
+ * without a window is what let the rail read "Waiting 4" beside a card
+ * reading 0 — two answers to one question on one screen.
+ */
+export function scopeCounts(entries: JournalEntry[]): Record<ActivityScope, number> {
+  const answered = answeredAsks(entries)
+  const counts: Record<ActivityScope, number> = { active: 0, waiting: 0, failed: 0, done: 0 }
+  for (const e of entries) counts[scopeOf(e, answered)] += 1
+  return counts
+}
+
+/** The rows of one bucket, in feed order, joined against the whole window. */
+export function entriesInScope(entries: JournalEntry[], scope: ActivityScope): JournalEntry[] {
+  const answered = answeredAsks(entries)
+  return entries.filter((e) => scopeOf(e, answered) === scope)
+}
+
+/**
+ * Every row's bucket in one pass, keyed by entry id.
+ *
+ * For a list that renders rows one at a time: the row cannot see the window
+ * its dot is supposed to agree with, so the list resolves the scopes once
+ * and hands each row its own.
+ */
+export function scopeByEntry(entries: JournalEntry[]): Map<string, ActivityScope> {
+  const answered = answeredAsks(entries)
+  return new Map(entries.map((e) => [e.id, scopeOf(e, answered)]))
 }
 
 export interface SourceMixDatum {
