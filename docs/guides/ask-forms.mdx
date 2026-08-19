@@ -1,0 +1,187 @@
+---
+title: "Ask forms"
+description: "Chips that open a short questionnaire, render the answers into an ordinary message, and record what was answered alongside it."
+icon: "clipboard-list"
+stability: experimental
+tag: Experimental
+---
+
+# Ask forms
+
+## Overview
+
+A suggested question is one line of text a user can send with one tap. An
+**ask form** is the same idea for the questions that need answers first: a chip
+with a form glyph, a short sheet above the composer, and a message rendered
+from what the user filled in.
+
+The message it sends is an **ordinary user message**. That is the design
+decision the whole feature rests on — it is why forms work with every CLI
+adapter without any of them learning a new shape, and why the transcript reads
+the same whether a line was typed or filled in. Everything below is about
+keeping that true without making it a place where things get lost.
+
+Forms are configured per agent and ride the ordinary agent PATCH; see
+[`crewship agent`](/cli/agent) for the command and the JSON.
+
+A worked example ships with the demo data: `crewship seed` gives Casey, the
+Test & Review Engineer, a **Report a bug** form — what went wrong, steps to
+reproduce, severity, first seen, and a screenshot. Render it with `crewship
+agent ask-preview casey bug-report`, or read it at
+`cmd/crewship/seeddata/askforms/casey.json`.
+
+## What a submission produces
+
+Two things, not one:
+
+1. **The message.** The template with `{{placeholders}}` substituted, sent as
+   the user. Plus the attachment block, if files were attached.
+2. **The submission envelope.** Metadata carried *with* that message —
+   never inside it:
+
+```json
+{
+  "submission_id": "sub_9f2c…",
+  "form_id": "receipt",
+  "form_label": "Add a receipt",
+  "form_version": 3,
+  "values": {"supplier": "Vodafone", "amount": "1249", "amount_currency": "CZK"},
+  "field_attachment_ids": {"document": ["attachments/chat_7f3a/IMG_4821.heic"]},
+  "rendered_text": "Please file this receipt.\n\nSupplier: Vodafone…"
+}
+```
+
+Strip the envelope and the conversation still reads exactly as before. Keep it
+and the answers are structured data: which form, which revision of it, what was
+answered, and **which upload answered which question**.
+
+`submission_id` is the part that matters most. Before it, the only handle a
+submission had was the text it rendered to, and text is not an identity: two
+identical submissions collided, and a reload lost the association entirely.
+Files appear in `field_attachment_ids` and nowhere else, so one upload can
+never look like the answer to two different questions.
+
+<Note>
+The values under `field_attachment_ids` are the agent-visible paths the upload
+returns today. When canonical attachment identity lands they become opaque
+`att_…` ids and the shape does not change — which is why the field is named
+for identity rather than for paths.
+</Note>
+
+The envelope rides in the message's existing `metadata` field. There is no new
+table, no migration, and a message written before any of this reads back
+unchanged.
+
+## Field types
+
+`text` · `textarea` · `number` · `money` · `date` · `month` · `select` ·
+`multiselect` · `checkbox` · `file` · `photo`
+
+**The list is open.** A type this console has never heard of renders as a text
+input rather than as nothing, which is what lets a newer server offer a field
+type without a coordinated frontend release.
+
+**With one exception, and it fails closed.** A type whose *name* says the value
+is a secret — `password`, `api_key`, `client_secret`, `otp`, `private_key`, and
+anything else containing `secret`, `password`, `token`, `credential`, `oauth`,
+`cvv`, or the whole words `key`, `pin`, `otp`, `totp`, `ssn`, `pwd`, `auth` —
+is refused:
+
+- **when the form is saved.** `crewship agent update --ask-forms` and the
+  console's editor both reject it, naming the field. This is the actual
+  guarantee: the server can never ship a type the console would mishandle.
+- **when the form is opened**, for a definition stored before this rule
+  existed. The field renders no input at all, and the form cannot be submitted
+  while it is there.
+
+The reasoning is short. A form submit renders into an ordinary chat message,
+which is stored, keyword-searchable and read by the agent. There is no field
+type that makes that safe for a credential, and a text input the user *believes*
+has special handling is worse than no field at all. Put the credential in the
+vault ([Credentials](/guides/credentials)) and reference it by name.
+
+A type name is lowercase letters, digits, `-` and `_`, at most 32 characters.
+Anything else is refused for the same reason: if the two renderers cannot agree
+on what it is, neither should guess.
+
+## Constraints
+
+A field may carry `min`, `max`, `pattern` and `multiple`. What `min`/`max` mean
+depends on the field:
+
+| Field types | `min` / `max` | `pattern` | `multiple` |
+|---|---|---|---|
+| `number`, `money` | the **value** | — | — |
+| `text`, `textarea`, unrecognised types | the **length** in characters | anchored full match | — |
+| `multiselect` | how many **options** | — | — |
+| `file`, `photo` | how many **files** | — | `false` caps at one file |
+| `date`, `month`, `select`, `checkbox` | — | — | — |
+
+A dash means the constraint is **refused when the form is saved**. That is
+deliberate: a rule the submit path would not check must not be storable, or the
+author is told a lie about what their form guarantees. So is `min` above `max`,
+and a `pattern` that does not compile.
+
+`pattern` is anchored at both ends, exactly like an HTML `pattern` attribute —
+`CZ[0-9]{8}` does not accept `xxCZ25788001xx`. It is compiled by Go's RE2 when
+the form is saved, which is what makes it safe to run in a browser: no
+backreferences, no lookaround, nothing that can backtrack pathologically.
+
+Every constraint is checked where the user answers, and every refusal names the
+field by its label:
+
+```
+Amount must be at least 1.
+VAT ID is not in the expected format.
+Document takes one file — remove the extra ones.
+Tags takes at most 1 option.
+```
+
+`crewship agent ask-preview` applies the same rules to `--var` answers and
+prints the same sentences, because a preview that renders a message the chat
+would refuse is not a preview.
+
+An empty **optional** answer is never a violation — only `required` speaks to
+emptiness — so `min: 3` does not make a field mandatory.
+
+## Versioning a form
+
+`version` is the author's own revision number, optional and 1 when absent. It
+is copied into every submission envelope, so a transcript written last month
+can still be read against the questionnaire that produced it. Bump it when you
+change what the form asks for; the definition moves, the answers do not.
+
+## Where each rule is enforced
+
+| Rule | Save | Submit |
+|---|---|---|
+| Placeholder names a real field | ✅ | — |
+| Field type is renderable and not a secret | ✅ | ✅ (fails closed) |
+| Constraint is meaningful for the type | ✅ | — |
+| `pattern` compiles, `min` ≤ `max` | ✅ | — |
+| `required`, `min`, `max`, `pattern`, `multiple`, option membership | — | ✅ |
+| Attachment policy (`attachment: required`) | — | ✅ |
+
+There is no server-side *submit* endpoint to enforce answers at, because a
+submit **is** an ordinary chat message and that is not being reopened for a
+validator. What the server owns instead is the definition — which is why the
+rows above that could produce an unsafe or unenforceable form are all refused
+on the way in.
+
+The rules themselves live in one place per language, `internal/askforms` and
+`lib/ask-validate.ts`, pinned to each other by `testdata/ask-field-types.json`.
+A rule added on one side and not the other is a red test run in both suites.
+
+## Troubleshooting
+
+**"This agent's stored ask forms are not valid."** A definition in the column
+breaks a rule the validator now enforces — most often a field type that names a
+secret. The whole column is refused rather than half of it; fix the definition
+and re-save with `crewship agent update --ask-forms @forms.json`.
+
+**A field shows an explanation instead of an input.** Its type failed closed.
+The form cannot be submitted until whoever configured it removes the field.
+
+**No `via <form>` badge on a message.** The badge comes from the submission
+envelope; a message typed by hand has none, and neither does one sent from a
+different device before the envelope was carried.

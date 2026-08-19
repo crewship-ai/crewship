@@ -69,7 +69,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@orama/orama": "^3.1.18",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
-    "@sentry/nextjs": "^10.69.0",
+    "@sentry/nextjs": "^10.70.0",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",

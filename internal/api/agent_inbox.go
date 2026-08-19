@@ -90,10 +90,29 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("inbox: assignments count", "err", err, "agent_id", agentID)
 	}
 
-	// Escalations: this agent raised them, not yet resolved
+	// Escalations: this agent raised them, not yet finished with.
+	//
+	// NOT IN over the TERMINAL statuses, matching countPendingEscalations in
+	// crewship_escalation_cap.go. Two reasons, and the second is why this
+	// counted nothing at all until now:
+	//
+	//   · Direction. A status added to the vocabulary later reads as
+	//     OUTSTANDING and appears in the badge, rather than disappearing from
+	//     an IN list nobody remembered to extend. EXPIRED and CANCELLED are
+	//     exactly that case, added after this query was written.
+	//   · Casing. The IN list here was ('pending', 'open') — lowercase, against
+	//     a column that stores PENDING / RESOLVED / EXPIRED / CANCELLED
+	//     (escalation_lifecycle.go; the schema default is 'PENDING'). 'open'
+	//     was never a status at all. The count was structurally zero, so the
+	//     Crews preview panel showed an empty badge for a full queue.
+	//
+	// The constants rather than literals, so a rename moves this with them.
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND from_agent_id = ? AND status IN ('pending', 'open')`,
-		workspaceID, agentID).Scan(&resp.EscalationsOpen); err != nil {
+		`SELECT COUNT(*) FROM escalations
+		 WHERE workspace_id = ? AND from_agent_id = ? AND status NOT IN (?, ?, ?)`,
+		workspaceID, agentID,
+		escalationStatusResolved, escalationStatusExpired, escalationStatusCancelled,
+	).Scan(&resp.EscalationsOpen); err != nil {
 		h.logger.Warn("inbox: escalations count", "err", err, "agent_id", agentID)
 	}
 

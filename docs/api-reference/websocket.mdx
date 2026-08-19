@@ -142,6 +142,28 @@ Cancel an in-progress agent chat response.
 
 ---
 
+## Error frames
+
+The server answers a refused or undeliverable client frame with a top-level
+`error` message (not a `chat_event`). The reason appears under both `message`
+and `error`; what tells a client where to *put* it is the channel:
+
+- **Addressed** (`"channel": "session:chat_abc123"`) — the error is about that
+  conversation: a denied subscribe, a denied or malformed `send_message`, a
+  chat handler that is unavailable. A `send_message` refusal is addressed to
+  the session in its payload, whether or not the client set `channel` on the
+  frame it sent.
+- **Unaddressed** (`"channel": ""`) — a connection-level fault that names no
+  conversation: a frame the server could not parse, or a message type it does
+  not route. Clients must not attribute these to a chat.
+
+A deny is not by itself an error worth showing a user. A subscribe to a session
+that does not exist yet is refused (the `chats` row appears on the first send),
+and the web client re-subscribes once it does; it renders an error frame only
+when one terminates work it has in flight.
+
+---
+
 ## Channels
 
 Channels follow the format `type:id`. Access is validated against database membership when subscribing.
@@ -238,7 +260,9 @@ REST. The shapes below reflect what the server actually sends.
 | `assignment_queued` | Assignment was queued for dispatch | `{ ... }` |
 | `assignment_unqueued` | Assignment was removed from the queue | `{ ... }` |
 | `escalation.created` | An escalation was raised | `{ id, crew_id, from_slug, reason }` |
-| `escalation.resolved` | An escalation was resolved | `{ id, ... }` |
+| `escalation.resolved` | An escalation was resolved by a human | `{ id, crew_id, from_slug, action }` |
+| `escalation.expired` | An escalation's deadline passed with no answer; the agent continued without one | `{ id, crew_id, status }` |
+| `escalation.cancelled` | An escalation was withdrawn without being decided | `{ id, crew_id, from_slug }` |
 | `peer_conversation.updated` | Peer (agent-to-agent) conversation changed | `{ ... }` |
 
 #### Containers & provisioning
@@ -375,7 +399,9 @@ scoped to the originating chat session.
 | `assignment_queued` | Assignment queued | `{ ... }` |
 | `assignment_unqueued` | Assignment unqueued | `{ ... }` |
 | `escalation_created` | Escalation raised in this session | `{ id, from, reason }` |
-| `escalation_resolved` | Escalation resolved | `{ ... }` |
+| `escalation_resolved` | Escalation resolved by a human | `{ id, resolution, action }` |
+| `escalation_expired` | Escalation deadline passed unanswered — the agent continued with a warning | `{ id, status, warning }` |
+| `escalation_cancelled` | Escalation withdrawn without a decision | `{ id, status, reason }` |
 | `peer_query_running` | Peer query started | `{ ... }` |
 | `peer_query_completed` | Peer query completed | `{ ... }` |
 | `peer_query_failed` | Peer query failed | `{ ... }` |

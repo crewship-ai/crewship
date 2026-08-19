@@ -1,0 +1,163 @@
+---
+title: "Chat Surface Limits"
+description: "Every bound the chat surface applies — the value, what happens when you reach it, and whether anything tells you."
+icon: "gauge"
+stability: stable
+tag: Stable
+---
+
+Chat has a dozen bounds in it. Most refuse loudly and name what was wrong;
+two truncate quietly and one **drops data from the navigation with nothing
+on screen to say so**. This page is the single list, written so you can tell
+those cases apart before a user does.
+
+The rule this page exists to enforce: *no silent caps — log what was
+dropped.* Where a limit does not yet meet that rule, it says so here rather
+than being described as if it did.
+
+## The whole list
+
+| Limit | Value | Enforced in | At the boundary | Are you told? |
+|---|---|---|---|---|
+| Agents given a thread lookup on `/chat` and in the chat tree | 12 | `components/features/chat/chat-tree-sidebar.tsx` (`AGENT_FANOUT_CAP`) | Agents past the cap are still listed, but their conversations are never fetched | **No** — see below |
+| Threads fetched per agent for that lookup | 10 | same file (`PER_AGENT_CHAT_LIMIT`) | Older threads are not in the merged list | **No** |
+| Threads shown under **Recent conversations** on `/chat` | 25 | same file (`RECENT_THREAD_LIMIT`) | The list is cut to the 25 most recent | Partly — the heading counts what is shown, not what exists |
+| Agents spanned by a workspace-wide conversation search | 400 | `internal/api/conversation_search.go` (`maxWorkspaceSearchAgents`) | The 400 most recently created agents are searched; the rest are not | Documented, but nothing in the response or the log says the scope was cut |
+| Chat attachment size | 25 MB | `internal/api/proxy_attachments.go`, and again in the browser | `400` from the API; the composer refuses the file with a toast naming it | **Yes** |
+| Chat attachment, crew stopped | — | `internal/server/routes_files.go` | `409` with the remedy in the message | **Yes** |
+| Suggested prompts per agent | 8 | `internal/api/agents_suggested_prompts.go` | `400`: `at most 8 prompts are allowed (got 9)` | **Yes** |
+| One suggested prompt | 120 characters | same file | `400`: `prompt 3 exceeds 120 characters (it has 154)` | **Yes** |
+| Ask forms per agent | 4 | `internal/askforms` (`MaxForms`) | `400` naming the form | **Yes** |
+| Fields per ask form | 6 | `internal/askforms` (`MaxFieldsPerForm`) | `400` naming the form | **Yes** |
+| Form / field label | 48 characters | `internal/askforms` (`MaxLabelRunes`) | `400` naming the label | **Yes** |
+| Ask-form prompt template | 2000 characters | `internal/askforms` (`MaxTemplateRunes`) | `400` naming the form | **Yes** |
+| One substituted answer in a rendered form | 2000 characters | `internal/askforms` (`MaxValueRunes`) | **Silently truncated** at send time | **No** |
+| A finished ask-form message | 32000 characters | `internal/askforms` (`MaxMessageRunes`) | **Silently truncated** at send time | **No** |
+| Session title | 200 characters | `internal/api/agent_chats_rename.go` | `400` — never a silent truncation | **Yes** |
+| Auto-derived session title | 60 characters | `lib/chat-title.ts` | Cut at a word boundary, with an ellipsis | Visible in the title itself |
+| Inbound WebSocket frame | 64 KiB | `internal/ws/hub.go` | The send is refused; the draft and its attachments survive | **Yes** |
+
+All character counts are **characters, not bytes** — a Czech or Japanese
+value gets the same length as an English one.
+
+## The thirteenth agent
+
+This is the one worth reading in full, because it is the only limit on this
+page that removes something from the product's primary navigation with no
+signal at all.
+
+`/chat` and the chat tree do not have a "recent conversations across the
+workspace" endpoint. They build that list on the client: one
+`GET /api/v1/agents`, then one `GET /api/v1/agents/{id}/chats` per agent, in
+parallel, merged and sorted by last activity. That fan-out is capped at **12
+agents**, because a workspace with sixty agents would otherwise spend sixty
+requests to draw a column on a surface whose whole job is to open fast.
+
+Every agent still gets a **row** — the cap bounds the thread lookup, not the
+roster. So on a workspace with more than twelve live agents:
+
+- agents 13 and beyond appear in the tree and in the **Agents** list on
+  `/chat`, and clicking one opens a conversation normally;
+- their existing threads **never appear** under **Recent conversations**, and
+  never appear as children of their row in the tree;
+- their row shows a thread count of **`0`** and has no disclosure chevron;
+- if you narrow the tree to one of them, the tree offers **Start a
+  conversation** — the row it shows for an agent nobody has ever talked to.
+
+That last point is the defect. The tree already distinguishes *"this list
+failed to load"* from *"this list is empty"*: a failed fetch renders an em
+dash instead of a count, plus an explicit `Could not load <agent>'s
+conversations… this is not an empty history` panel with a **Retry**. An agent
+past the fan-out cap gets neither. It is presented as an agent with no
+history, which for a busy thirteenth agent is simply false.
+
+Ordering is what keeps this from being worse than it is: `GET /agents`
+returns live agents by creation recency with retired ones last, so the twelve
+that do get a lookup are the twelve newest live agents.
+
+**Which agents am I losing?** Sort your roster by creation date, newest
+first, ignore retired agents, and count off twelve. Everything below that
+line has an unreadable thread list on `/chat`.
+
+**Working around it today:** open the agent directly at `/chat/<agent-slug>`.
+That page fetches its own agent's sessions and excludes it from the fan-out,
+so the agent you are looking at is never the one being dropped. Or use
+[conversation search](/guides/conversation-search), which is server-side and
+spans up to 400 agents.
+
+**What this needs is a screen affordance, not a doc line.** A count of `0`
+that means "not asked" is the same defect class this surface already fixed
+once for failed fetches. Until an agent past the cap renders as *unknown*
+rather than *empty*, this page is a workaround and not a fix.
+
+## Workspace conversation search stops at 400 agents
+
+A workspace-scoped search — `⌘K`, or `crewship conversation search` without
+`--agent` — resolves the agents it may read from the workspace on your
+session and passes their ids to the search backend. Those ids become bound
+query parameters, and SQLite's default variable ceiling is 999, so the set is
+capped at **400**, taking the most recently created agents.
+
+A workspace past 400 agents therefore searches its newest 400 and silently
+omits the rest. Nothing in the response body marks the scope as truncated and
+nothing is logged. The bound is real and deliberate — a query that failed
+outright at agent 1000 would be worse — but a `scope` of `workspace` in the
+response currently means "workspace, or the first 400 of it", and a caller
+cannot tell which.
+
+Narrow with `--agent` (or the palette's per-agent scope) when you need a
+specific older agent searched for certain.
+
+## Attachments
+
+The 25 MB cap is enforced twice — in the browser before anything is uploaded,
+and again by the API — and both say so. The browser names the file in a
+toast; the API answers `400` with `invalid multipart form or file too large
+(max 25MB)`.
+
+The other attachment bound is not a size. The file lands in the agent's
+`/output` tree, which a provisioned crew owns as uid 1001, so the server
+writes it *through the running crew container*. **A stopped crew returns
+`409`** with the remedy in the message. Start the crew and retry; nothing
+partial is left behind and no metadata row is recorded for an upload that did
+not land.
+
+One thing that is *not* bounded: a chat attachment's blob is not
+content-addressed and sits outside the reclaim machinery on purpose
+(`internal/api/attachments_gc.go` says so), so uploads are not deduplicated and
+are not swept. The fully-featured comparison surface is
+[issue attachments](/guides/issue-attachments).
+
+## Suggested prompts and ask forms
+
+Every cap here is a refusal, not a truncation, and every refusal names the
+offending item: the prompt by its position in the list, the form by its id,
+the placeholder by its name. Nothing is written when a definition is refused.
+See [`crewship agent update`](/cli/agent) and
+[Update Agent](/api-reference/agents#update-agent) for the full contract.
+
+The two exceptions are at **render** time rather than at save time: one
+substituted answer over 2000 characters, and a finished message over 32000,
+are both cut without a warning. A valid form cannot reach the message cap
+(six fields at 2000 plus a 2000-character template is under it), so in
+practice this is the value cap on a long `textarea` answer. Both renderers —
+Go and TypeScript — are pinned to one golden fixture, so the CLI's
+`crewship agent ask-preview` shows exactly what a truncated send would carry.
+
+## Session titles
+
+A session names itself from its first message, cut to **60 characters** at a
+word boundary, with an ellipsis only when something was actually cut. That is
+a client-side derivation and the visible result is the title itself.
+
+A title you set by hand — from the console, or with
+`crewship chat rename` — is normalised server-side and capped at **200
+characters**. Over the cap is a `400`, never a silent truncation, so a long
+title is refused rather than quietly shortened.
+
+## See also
+
+- [Chat Sessions](/guides/chat-sessions) — the surface these limits apply to
+- [Conversation Search](/guides/conversation-search) — scopes and isolation
+- [`crewship chat`](/cli/chat) — attach, rename, list from the CLI
+- [`crewship agent`](/cli/agent) — suggested prompts and ask forms

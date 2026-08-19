@@ -81,12 +81,18 @@ func TestCovMisc_ResolveEscalation_RedirectSuccess(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	var resp map[string]string
+	// map[string]any, not map[string]string: the resolve response also carries
+	// agent_still_waiting (bool) since the agent's wait and the human's
+	// answerability became two clocks.
+	var resp map[string]any
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if resp["action"] != "redirect" {
-		t.Errorf("action = %q want redirect", resp["action"])
+		t.Errorf("action = %v want redirect", resp["action"])
+	}
+	if waiting, ok := resp["agent_still_waiting"].(bool); !ok || !waiting {
+		t.Errorf("agent_still_waiting = %v, want true — this agent never gave up", resp["agent_still_waiting"])
 	}
 }
 

@@ -93,8 +93,14 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
     setPreviewContent(null)
     setEditing(saved.editing && saved.lastOpenedPath !== null)
     setDirty(false)
+    // Top-level listing. No `path`: the listing route reads `subdir` and
+    // `recursive` and nothing else (internal/api/proxy_files.go AgentFiles),
+    // so `&path=/` was inert — and inert is the problem. `path` belongs to the
+    // CONTENT routes below (/files/download, /files/save), and a listing that
+    // carries it reads as one that is scoped by it. That exact mix-up is what
+    // made the artifact pane treat a directory listing as file content.
     const url = context.kind === "agent"
-      ? `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&path=/`
+      ? `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}`
       : `/api/v1/crews/${context.crewId}/files?workspace_id=${workspaceId}`
     apiFetch(url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))

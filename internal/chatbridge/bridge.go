@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/admission"
+	"github.com/crewship-ai/crewship/internal/askforms"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -30,6 +31,13 @@ import (
 // exiting 0 with no stdout). Kept short and actionable, matching the
 // generic-error copy style used elsewhere in the chat stream.
 const noOutputChatMessage = "The agent returned no output — try again"
+
+// ledgerWriteTimeout bounds the terminal bookkeeping writes that must outlive
+// the turn's own context — the paymaster ledger write, and the CANCELLED
+// branch's run-status/transcript writes. Both run after the agent has stopped,
+// on a context that may already be cancelled, so they get a fresh deadline
+// rather than an inherited (possibly dead) one.
+const ledgerWriteTimeout = 5 * time.Second
 
 // AgentStatusPendingReview is the agents.status sentinel set by the
 // hire endpoint when the per-crew autonomy policy returns
@@ -399,6 +407,26 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("agent %s pending review: hire not approved", info.AgentID)
 	}
 
+	// What the client attached TO this message rather than inside it. Today
+	// that is the ask-form submission envelope: which form was answered, at
+	// what version, with what values, and which upload answered which field.
+	//
+	// It is REBUILT rather than copied. msgOpt.Metadata is a raw map straight
+	// off an untrusted socket, and storing it verbatim would let any client
+	// write arbitrary structure into a durable conversation record. Reading it
+	// back through askforms.EnvelopeFromMetadata means exactly one shape can
+	// survive the hop — a valid envelope — and anything else (junk, a partial
+	// envelope, a metadata map with no envelope in it) leaves the message
+	// exactly as it would have been persisted before any of this existed.
+	//
+	// Nothing here touches Content. A form submission is an ordinary user
+	// message; strip the metadata and the conversation reads identically,
+	// which is what lets every CLI adapter stay unaware of forms.
+	var userMsgMetadata any
+	if env, ok := askforms.EnvelopeFromMetadata(msgOpt.Metadata); ok {
+		userMsgMetadata = map[string]any{askforms.EnvelopeMetadataKey: env}
+	}
+
 	// The human turn is recorded and fanned out to the other participants
 	// regardless of whether the agent will respond. streamFn's BroadcastExcept
 	// skips the sender (who already rendered it optimistically); harmless in a
@@ -409,6 +437,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			AgentID:      info.AgentID,
 			Role:         conversation.RoleUser,
 			Content:      content,
+			Metadata:     userMsgMetadata,
 			AuthorUserID: userID,
 			Timestamp:    time.Now().UTC(),
 		})
@@ -847,11 +876,24 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// otherwise the requested one; ResultUsageForLedger returns ok=false when
 	// there is no usage to bill, so a run that never reached the API bills
 	// nothing.
+	//
+	// The write is DETACHED from ctx. ctx is the per-turn run context, and Stop
+	// cancels it (ws.Client.handleCancelMessage); IPCResolver.RecordCost builds
+	// its POST with http.NewRequestWithContext, so on a cancelled context the
+	// request dies before it leaves the process and the spend survives only as
+	// the WARN below — the very under-counting this hoist removed, moved from
+	// failed runs to cancelled ones. WithoutCancel keeps the values on ctx (the
+	// run id stamped above, trace/auth) and drops only the cancellation; the
+	// timeout bounds the now-unparented call. Same shape the CANCELLED branch
+	// below uses for its own writes, and the same one crew_sidecar_teardown.go
+	// uses for post-request cleanup.
 	if usage, ok := ResultUsageForLedger(info.WorkspaceID, info.CrewID, info.AgentID,
 		orchestrator.EffectiveModel(acc, info.LLMModel), acc.ResultMeta()); ok {
-		if err := b.resolver.RecordCost(ctx, usage); err != nil {
+		costCtx, costCancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
+		if err := b.resolver.RecordCost(costCtx, usage); err != nil {
 			b.logger.Warn("failed to record run cost usage", "run_id", runID, "error", err)
 		}
+		costCancel()
 	}
 	if runErr != nil {
 		// If context was cancelled (user pressed stop), don't emit error -- the hub
@@ -859,7 +901,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if ctx.Err() == context.Canceled {
 			b.logger.Info("run cancelled by user", "chat_id", chatID, "duration_ms", time.Since(startedAt).Milliseconds())
 			cancelMsg := "cancelled"
-			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 			defer cleanCancel()
 			if err := b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, terminalRunMeta(startedAt, acc, nil)); err != nil {
 				b.logger.Warn("failed to update run status", "run_id", runID, "status", "CANCELLED", "error", err)

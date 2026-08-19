@@ -36,11 +36,22 @@ export interface ActiveRunItem {
 const traceHref = (runId: string) => `/activity?run=${encodeURIComponent(runId)}`
 // Agent (chat) runs have NO pipeline trace — /activity?run=<id> would 404
 // ("Trace unavailable"). They deep-link to the agent's chat instead, keyed
-// by slug (Crews → agent → Chat). With no slug we can't target one agent;
-// fall back to /crews (a real route) rather than /chat — the chat index has
-// no page in the static export, so /chat would itself 404.
+// by slug.
+//
+// With no slug we can't target one agent, and this fallback used to be
+// /crews: the export only ever built chat/_.html for the [agentSlug] child,
+// so a bare /chat fell through to the SPA index and the roster was the
+// nearest thing that actually resolved.
+//
+// app/(dashboard)/chat/page.tsx now exists — the export emits out/chat.html
+// and internal/api/static.go resolves it by its `path + ".html"` lookup,
+// ahead of the one-level dynamic rewrite, so /chat and /chat/<slug> stay
+// distinct (internal/api/static_chat_index_test.go pins that). The slug-less
+// case therefore lands on the conversation index: the same surface the row
+// was headed for, listing every agent and every recent thread, instead of a
+// sideways jump to the agent roster.
 const agentChatHref = (slug: string | undefined) =>
-  slug ? `/chat/${encodeURIComponent(slug)}` : "/crews"
+  slug ? `/chat/${encodeURIComponent(slug)}` : "/chat"
 // Steady safety poll. WS events make updates near-instant; this only backstops
 // dropped frames / runs whose start event we never saw.
 const POLL_MS = 6000

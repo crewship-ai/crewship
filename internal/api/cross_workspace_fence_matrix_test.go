@@ -813,6 +813,7 @@ func fenceKinds() []fenceKind {
 			},
 			probes: []fenceProbe{
 				{method: "DELETE", path: "/api/v1/agents/{agentId}/chats/{chatId}", mode: probeDeny},
+				{method: "PATCH", path: "/api/v1/agents/{agentId}/chats/{chatId}", body: `{"title":"pwned"}`, mode: probeDeny},
 				{method: "PUT", path: "/api/v1/agents/{agentId}/chats/{chatId}/read", mode: probeDeny},
 				{method: "POST", path: "/api/v1/chats/{chatId}/steer", body: `{"message":"pwned"}`, mode: probeDeny},
 				{method: "POST", path: "/api/v1/chats/{chatId}/participants", body: `{"user_id":"x"}`, mode: probeDeny},

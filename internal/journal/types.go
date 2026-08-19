@@ -68,6 +68,30 @@ const (
 	EntryApprovalTimeout   EntryType = "approval.timeout"
 	EntryApprovalCancelled EntryType = "approval.cancelled"
 
+	// Standing approval grants — a routine's wait:approval gate being
+	// disarmed for one step of one routine body
+	// (internal/pipeline/trust_grants.go, internal/api/pipeline_trust.go).
+	//
+	// Namespaced under `approval.` rather than given a `trust.` family of
+	// their own, deliberately: these describe the SAME control as
+	// approval.granted/denied above, one level up. An operator asking "who
+	// decided this gate could pass" needs the one-off decisions and the
+	// standing one in a single `approval.*` filter — a separate namespace
+	// would answer that question with half the evidence.
+	//
+	// Both carry: ActorType=user, ActorID=the deciding human, Refs
+	// {trust_grant_id, pipeline_id, pipeline_slug, step_id}, Payload
+	// {definition_hash, reason, ...}. The definition hash is load-bearing
+	// and not decoration — a grant only fires against that exact routine
+	// body, so an entry without it cannot say what was trusted.
+	//
+	// EntryTrustGranted: a gate stopped asking.
+	EntryTrustGranted EntryType = "approval.trust_granted"
+	// EntryTrustRevoked: a gate starts asking again. Emitted only when the
+	// revoke actually flipped a live row — an attempt that changed nothing
+	// must not read as a withdrawal that happened.
+	EntryTrustRevoked EntryType = "approval.trust_revoked"
+
 	// Credential reveal (PRD-CREDENTIALS-V2-2026 §2.6 L4). These three
 	// are the only journal entries written via EmitSync as a
 	// PRECONDITION — the action they describe does not happen unless

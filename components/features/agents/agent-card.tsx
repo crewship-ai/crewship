@@ -134,8 +134,15 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
         isGhost && "opacity-60 grayscale-[0.4] hover:opacity-90 hover:grayscale-0 group-focus-within:opacity-90 group-focus-within:grayscale-0 transition-[opacity,filter] duration-150",
       )}
     >
+      {/* Was /crews/agents/<id> — the whole card was one link into the route
+          subtree the selection-driven /crews redesign deleted, so every click
+          on an agent card 404'd. The canvas is reached by query parameter
+          now, and by SLUG: use-crews-selection matches ?agent= against
+          agent.slug, and an id in that position is cleared by the
+          stale-selection watcher, which lands the user on a blank canvas
+          rather than an error. The slug is on AgentData, so use it. */}
       <Link
-        href={`/crews/agents/${agent.id}`}
+        href={`/crews?agent=${encodeURIComponent(agent.slug)}`}
         className="block rounded-[var(--radius)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none"
       >
         <Card className="hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer h-full border-border/80 shadow-md">

@@ -70,7 +70,7 @@ describe("useMessageSubmit", () => {
     const sendMessage = vi.fn()
     const onSend = vi.fn()
     const onSent = vi.fn()
-    const ensureSession = vi.fn(async () => {})
+    const ensureSession = vi.fn(async () => true)
     const { result } = renderHook(() =>
       useMessageSubmit({
         sessionId: "session-1",
@@ -93,6 +93,28 @@ describe("useMessageSubmit", () => {
     expect(sendMessage).toHaveBeenCalledWith("hello")
     expect(onSend).toHaveBeenCalledWith("session-1", "hello")
     expect(onSent).toHaveBeenCalledTimes(1)
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("does not send when the session's row could not be created", async () => {
+    // ensureSession returning false means the `chats` row is not there. The WS
+    // channel authorizer refuses a send_message for a session it cannot resolve
+    // (internal/ws/channel_auth.go, isSessionOwner), so sending anyway loses the
+    // message silently while the composer clears as though it had gone. Nothing
+    // downstream may run: no send, no onSend (a phantom sidebar row and an
+    // auto-title PATCH against a chat that does not exist), no onSent (the draft
+    // and the attachments have to survive for the retry).
+    const ensureSession = vi.fn(async () => false)
+    const { result, sendMessage, onSend, onSent } = setup({ ensureSession })
+
+    await act(async () => { await result.current({ text: "hello", files: [] }) })
+
+    expect(ensureSession).toHaveBeenCalledTimes(1)
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onSent).not.toHaveBeenCalled()
+    // The message about it belongs to whoever tried to create the row — this
+    // hook does not double up on it.
     expect(toastError).not.toHaveBeenCalled()
   })
 
@@ -159,5 +181,139 @@ describe("useMessageSubmit", () => {
     await act(async () => { await result.current({ text: "hello", files: [] }) })
     expect(sendMessage).not.toHaveBeenCalled()
     expect(toastError).not.toHaveBeenCalled()
+  })
+})
+
+// The bug: the composer uploaded the file, the file landed in the agent's
+// container, and the WS frame carried the user's text and nothing else. The
+// agent was never told the attachment existed.
+describe("useMessageSubmit — attachments ride along with the message", () => {
+  const ready = (name: string, path: string) => ({ name, path, status: "ready" as const })
+
+  beforeEach(() => {
+    toastError.mockClear()
+  })
+
+  function setup(overrides?: Partial<Parameters<typeof useMessageSubmit>[0]>) {
+    const sendMessage = vi.fn()
+    const onSend = vi.fn()
+    const onSent = vi.fn()
+    const ensureSession = vi.fn(async () => true)
+    const { result } = renderHook(() =>
+      useMessageSubmit({
+        sessionId: "session-1",
+        isStreaming: false,
+        ensureSession,
+        sendMessage,
+        onSend,
+        onSent,
+        ...overrides,
+      }),
+    )
+    return { result, sendMessage, onSend, onSent, ensureSession }
+  }
+
+  it("names the attachment by its agent-visible path in the outbound content", async () => {
+    const { result, sendMessage, onSent } = setup({
+      attachments: [ready("report.pdf", "attachments/session-1/report.pdf")],
+    })
+
+    await act(async () => { await result.current({ text: "take a look", files: [] }) })
+
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    const [content] = sendMessage.mock.calls[0]
+    expect(content).toContain("take a look")
+    expect(content).toContain("attachments/session-1/report.pdf")
+    expect(onSent).toHaveBeenCalledTimes(1)
+  })
+
+  it("with no attachments the outbound content is byte-identical to the text", async () => {
+    const { result, sendMessage } = setup({ attachments: [] })
+    await act(async () => { await result.current({ text: "plain message", files: [] }) })
+    expect(sendMessage).toHaveBeenCalledWith("plain message")
+  })
+
+  it("sends an attachment-only message — a photo with no caption is not dropped", async () => {
+    const { result, sendMessage, onSent, ensureSession } = setup({
+      attachments: [ready("photo.jpg", "attachments/session-1/photo.jpg")],
+    })
+
+    await act(async () => { await result.current({ text: "", files: [] }) })
+
+    expect(ensureSession).toHaveBeenCalledTimes(1)
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(sendMessage.mock.calls[0][0]).toContain("attachments/session-1/photo.jpg")
+    expect(onSent).toHaveBeenCalledTimes(1)
+  })
+
+  it("still ignores an empty message when there is nothing attached", async () => {
+    const { result, sendMessage } = setup({ attachments: [] })
+    await act(async () => { await result.current({ text: "  ", files: [] }) })
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("hands onSend the user's own text, not the composed content", async () => {
+    // onSend feeds session auto-titling (chat-page-client.tsx). A title
+    // derived from the appended block would name every session "I've
+    // attached a file to this message".
+    const { result, onSend } = setup({
+      attachments: [ready("report.pdf", "attachments/session-1/report.pdf")],
+    })
+
+    await act(async () => { await result.current({ text: "take a look", files: [] }) })
+
+    expect(onSend).toHaveBeenCalledWith("session-1", "take a look")
+  })
+
+  it("measures the size guard against the FINAL content, block included", async () => {
+    // A draft that fits on its own but not once the attachment block is
+    // appended. Sizing the user's text alone would let the oversize frame
+    // through, and the server's readPump kills the whole connection on it.
+    const envelopeBytes = (content: string) =>
+      new TextEncoder().encode(
+        JSON.stringify({
+          type: "send_message",
+          payload: JSON.stringify({ session_id: "session-1", content }),
+        }),
+      ).length
+    const text = "a".repeat(WS_MAX_OUTBOUND_FRAME_BYTES - envelopeBytes("") - 10)
+    expect(checkChatMessageSize("session-1", text).ok).toBe(true)
+
+    const { result, sendMessage, onSent, ensureSession } = setup({
+      attachments: [ready("report.pdf", "attachments/session-1/report.pdf")],
+    })
+
+    await act(async () => { await result.current({ text, files: [] }) })
+
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(ensureSession).not.toHaveBeenCalled()
+    expect(toastError).toHaveBeenCalledTimes(1)
+    // Draft AND attachments survive: onSent is the only thing that clears
+    // either, and it must not fire on a refusal.
+    expect(onSent).not.toHaveBeenCalled()
+  })
+
+  it("refuses to send while an upload is still in flight", async () => {
+    const { result, sendMessage, onSent } = setup({
+      attachments: [{ name: "big.zip", status: "uploading" as const }],
+    })
+
+    await act(async () => { await result.current({ text: "here it is", files: [] }) })
+
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(onSent).not.toHaveBeenCalled()
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(toastError.mock.calls[0][0]).toMatch(/uploading/i)
+  })
+
+  it("ignores a failed upload rather than naming a file that is not there", async () => {
+    const { result, sendMessage } = setup({
+      attachments: [{ name: "big.zip", status: "error" as const }],
+    })
+
+    await act(async () => { await result.current({ text: "here it is", files: [] }) })
+
+    expect(sendMessage).toHaveBeenCalledWith("here it is")
   })
 })

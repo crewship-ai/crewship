@@ -115,4 +115,37 @@ describe("AppToolbar — the top bar never repeats the page name", () => {
     expect(header).toHaveTextContent("riley")
     expect(header).toHaveTextContent("Chat")
   })
+
+  // The toolbar used to carry a second breadcrumb branch, keyed on a
+  // /crews/agents/<id> pathname, whose "Agents" crumb linked to /crews/agents
+  // and whose crew crumb linked to /crews/<crewId>. Both are deleted routes.
+  // Nothing routes to /crews/agents/<id> any more, so the branch only ever
+  // rendered when the Go static handler fell a bad URL through to the SPA
+  // root — putting an agent breadcrumb, and a fetch for it, above the
+  // dashboard. Pin the absence: this is the shape a revert would take.
+  // Assembled, not written out: dead-agent-routes.test.ts scans every .ts/.tsx
+  // under app/ and components/, this file included, and a literal here would
+  // report itself as a live link into the very family it is asserting against.
+  const DEAD = ["/crews", "agents"].join("/")
+
+  function deadHrefs(header: Element): string[] {
+    return [...header.querySelectorAll("a")]
+      .map((a) => a.getAttribute("href") ?? "")
+      .filter((h) => h.startsWith(DEAD))
+  }
+
+  it("renders no breadcrumb into the deleted agents subtree", () => {
+    const header = renderToolbarAt(`${DEAD}/ag_1`)
+    expect(deadHrefs(header)).toEqual([])
+    expect(header.firstElementChild).toHaveTextContent(/^Crewship$/)
+  })
+
+  // Same guard, one level up: the index. Every route the toolbar can be
+  // rendered at, and not one anchor pointing at the dead family.
+  it.each(["/", "/crews", DEAD, "/chat/riley", "/settings", "/inbox"])(
+    "%s links nowhere into the dead agents family",
+    (route) => {
+      expect(deadHrefs(renderToolbarAt(route))).toEqual([])
+    },
+  )
 })

@@ -1507,6 +1507,35 @@ crewship routine trust revoke triage-inbound-issue wtg_ab12cd34 --reason "policy
 
 The gate blocks again on the next run. The grant row is kept and marked, not deleted.
 
+### The audit trail
+
+Granting and revoking each write a journal entry, because disarming a human gate is the bluntest decision the approval system offers and it used to be the only one that left no trace:
+
+| Entry type | Refs | Payload |
+|---|---|---|
+| `approval.trust_granted` | `trust_grant_id`, `pipeline_id`, `pipeline_slug`, `step_id` | `definition_hash`, `reason`, `prior_approvals`, `max_uses`, `expires_at` |
+| `approval.trust_revoked` | same | `definition_hash`, `reason` |
+
+Both are attributed to the deciding user (`actor_type: user`). `definition_hash` is the load-bearing field — a grant only fires against that exact routine body, so an entry without it records that *something* was trusted but not *what*.
+
+```bash
+crewship journal --type approval.trust_granted,approval.trust_revoked
+```
+
+One-off decisions and standing ones share the `approval.` namespace because they are the same control at two levels, so listing both families together answers "who let this through, by any route":
+
+```bash
+crewship journal --type approval.requested,approval.granted,approval.denied,approval.timeout,approval.cancelled,approval.trust_granted,approval.trust_revoked
+```
+
+<Warning>
+Name every type. `--type` is matched **exactly** — there is no prefix or glob syntax — so `--type approval.*` is not a shorthand for the line above. The CLI rejects a wildcard rather than forwarding it, because a filter that matches nothing exits 0 with an empty page, and an empty page on this question reads as "nobody ever disarmed a gate".
+</Warning>
+
+A revoke that changed no row emits nothing — an entry for a withdrawal that did not happen would make the journal disagree with the table.
+
+Neither entry sets `crew_id`, `agent_id`, `mission_id` or `trace_id`, so `crewship journal --crew`/`--agent`/`--mission`/`--trace-id` cannot narrow to them. `--since` and `--actor-type user` can. The refs (`trust_grant_id` and friends) are **not** searchable: `-q` searches `summary` and `payload` only, and refs are in neither — but the routine slug and step id are repeated into the summary, so `-q <slug>` does find a gate's decisions. `crewship journal get <entry-id>` is what prints refs and payload; the list view shows neither.
+
 ---
 
 ## Global flags

@@ -51,7 +51,7 @@ vi.mock("@/hooks/use-smooth-text", () => ({
 vi.mock("@/components/ai-elements/tool", () => ({
   Tool: ({ children }: { children: React.ReactNode }) => <div data-testid="tool">{children}</div>,
   ToolContent: ({ children }: { children: React.ReactNode }) => <div data-testid="tool-content">{children}</div>,
-  ToolHeader: ({ children }: { children: React.ReactNode }) => <div data-testid="tool-header">{children}</div>,
+  ToolHeader: ({ children, title }: { children: React.ReactNode; title?: string }) => <div data-testid="tool-header" title={title}>{children}</div>,
 }))
 
 vi.mock("@/components/ai-elements/code-block", () => ({
@@ -127,6 +127,33 @@ describe("AssistantTurn dispatch", () => {
   it("renders text part via MessageResponse", () => {
     render(<AssistantTurn turn={turn([part({ type: "text", content: "hello" })])} onCopy={onCopy} onFileClick={onFileClick} />)
     expect(screen.getByTestId("message-response").textContent?.trim()).toBe("hello")
+  })
+
+  it("does not render AskUserQuestion metadata as clickable-looking choices", () => {
+    const { container } = render(
+      <AssistantTurn
+        turn={turn([part({
+          type: "tool_call",
+          content: "AskUserQuestion",
+          metadata: {
+            tool_name: "AskUserQuestion",
+            input: {
+              questions: [{
+                header: "Choose",
+                question: "Which environment?",
+                options: [{ label: "Production", description: "Use live data" }],
+              }],
+            },
+          },
+        })])}
+        onCopy={onCopy}
+        onFileClick={onFileClick}
+      />,
+    )
+
+    expect(screen.getByTitle(/AskUserQuestion/)).toBeTruthy()
+    expect(container.querySelector(".cursor-default")).toBeNull()
+    expect(container.querySelector("button")).toBeNull()
   })
 
   it("delegates [DELEGATED ...] text to the DelegationContent branch (no MessageResponse)", () => {

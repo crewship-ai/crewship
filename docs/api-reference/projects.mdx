@@ -75,6 +75,13 @@ The lead pair is validated against the current workspace. Returns `201
 Created` with the full project shape. Missing `name` or malformed JSON returns
 `400`; an invalid or cross-workspace lead also returns `400`.
 
+The slug is derived from `name`, and `(workspace_id, slug)` is unique. A name
+that slugifies onto an existing project returns `409 Conflict` — including when
+the names differ ("Launch Prep" and "launch-prep" share a slug). The constraint
+is per workspace, so the same name in another workspace is created normally.
+Callers that re-run a fixed set of projects, such as `crewship seed`, treat the
+`409` as "already present" and continue.
+
 ### Get a project
 
 ```

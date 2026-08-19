@@ -65,6 +65,8 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"schedule_enabled":          "schedule_enabled",
 		"mcp_config_json":           "mcp_config_json",
 		"webhook_require_timestamp": "webhook_require_timestamp",
+		"suggested_prompts":         "suggested_prompts",
+		"ask_forms":                 "ask_forms",
 	}
 
 	// Validate slug format if being updated
@@ -262,9 +264,45 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate and canonicalise suggested_prompts before anything is written.
+	// The stored form is LF-separated, trimmed and blank-line-free, and an
+	// emptied textarea becomes NULL — see agents_suggested_prompts.go. The
+	// error text names the offending prompt by position: a list of eight
+	// short strings is not something "invalid input" helps anyone fix.
+	suggestedPrompts, hasSuggestedPrompts := interface{}(nil), false
+	if v, ok := body["suggested_prompts"]; ok {
+		val, _, err := suggestedPromptsPatch(v)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		suggestedPrompts, hasSuggestedPrompts = val, true
+	}
+
+	// Same treatment for ask_forms, one step stricter: the value is a JSON
+	// document, so it is parsed, fully validated and re-encoded canonically
+	// before anything is written (internal/askforms). A template naming a
+	// field that does not exist is refused HERE — while the author is still
+	// authoring — rather than surprising a user mid-send (PRD §7 rule 1).
+	askForms, hasAskForms := interface{}(nil), false
+	if v, ok := body["ask_forms"]; ok {
+		val, _, err := askFormsPatch(v)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		askForms, hasAskForms = val, true
+	}
+
 	ub := newUpdate()
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
+			if col == "suggested_prompts" && hasSuggestedPrompts {
+				val = suggestedPrompts
+			}
+			if col == "ask_forms" && hasAskForms {
+				val = askForms
+			}
 			if col == "memory_enabled" || col == "schedule_enabled" || col == "webhook_require_timestamp" {
 				if b, ok := val.(bool); ok {
 					if b {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -229,6 +230,15 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Status, req.Priority, req.LeadType, req.LeadID,
 		req.StartDate, req.TargetDate, now, now)
 	if err != nil {
+		// A duplicate (workspace_id, slug) is the caller's conflict, not our
+		// internal error, and the demo seed depends on the difference: it
+		// treats 409 as "already present" and keeps going, so a 500 here made
+		// re-seeding an already-seeded install die on the first project.
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			writeProblem(w, r, http.StatusConflict,
+				fmt.Sprintf("A project with the slug %q already exists in this workspace", slug))
+			return
+		}
 		internalError(w, r, h.logger, "insert project", err)
 		return
 	}

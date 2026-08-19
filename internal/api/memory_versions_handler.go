@@ -102,10 +102,39 @@ func (h *MemoryVersionsHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"path":    path,
-		"count":   len(entries),
-		"entries": entries,
+		"path":       path,
+		"count":      len(entries),
+		"entries":    entries,
+		"projection": h.projectionFor(path),
 	})
+}
+
+// projectionFor answers "may an empty entries list be read as 'nothing
+// has been written'?" for one canonical path.
+//
+// The endpoint returns rows out of memory_versions, which is a
+// projection of the .memory tree rather than the tree itself. Two
+// different facts arrive at this handler as the same empty list:
+// a path nothing has written yet, and a path no writer records. The
+// second one is the defect §4.5 of the 2026-08-13 chat-surface audit
+// names — a real file on disk drawn as an empty history — and it is
+// only fixable here, because the client cannot know which writers
+// exist (three documents have been wrong about exactly that).
+//
+// blobRoot is the server-level gate: RecordVersion refuses without a
+// blob root, and the consolidator skips recording, so on a server
+// without one NO path is recorded however well-formed it is. It is the
+// same value the audit watcher and consolidator receive
+// ({Storage.MemoryRoot}/versions), so this is a faithful proxy rather
+// than a second opinion.
+func (h *MemoryVersionsHandler) projectionFor(path string) memory.Projection {
+	if h.blobRoot == "" {
+		return memory.Projection{
+			State:  memory.ProjectionUnavailable,
+			Reason: memory.ProjectionUnavailableReason,
+		}
+	}
+	return memory.PathProjection(path)
 }
 
 // Show serves GET /api/v1/memory/versions/{sha}?path=... — returns

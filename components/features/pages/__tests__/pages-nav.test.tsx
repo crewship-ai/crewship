@@ -3,9 +3,16 @@
  *
  * "Pages belongs in Plan, after Routines — it is where a person goes to see
  * the state of their work, not a thing they build once." The position is the
- * assertion: Plan reads Dashboard · Inbox · Issues · Routines · Pages, and an
- * entry that drifts into Build or lands before Routines changes what the group
- * means.
+ * assertion: Plan reads Dashboard · Inbox · Chat · Issues · Routines · Pages,
+ * and an entry that drifts into Build or lands before Routines changes what
+ * the group means.
+ *
+ * Chat sits third because it arrived on the chat-surface branch (#1975) while
+ * this epic was in flight — it is next to Inbox, both being "someone is
+ * waiting on a reply". It is listed here rather than matched loosely because
+ * the whole point of this assertion is that the group is exact: a test that
+ * only checked "Pages comes after Routines" would not notice an entry landing
+ * in the wrong group entirely, which is the drift it was written to catch.
  *
  * The icon comes from `CONCEPT_ICON`, pinned by
  * `lib/__tests__/concept-icons.test.ts` — the rail is the definition and every
@@ -47,7 +54,7 @@ describe("Pages in the nav rail", () => {
     const items = within(planGroup())
       .getAllByRole("link")
       .map((a) => a.textContent?.trim())
-    expect(items).toEqual(["Dashboard", "Inbox", "Issues", "Routines", "Pages"])
+    expect(items).toEqual(["Dashboard", "Inbox", "Chat", "Issues", "Routines", "Pages"])
   })
 
   it("points it at /pages", () => {
