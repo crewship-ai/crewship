@@ -41,15 +41,18 @@ import (
 // probabilistic observer of a real window, not a timing assumption: it
 // can only fail if the zero-byte state is genuinely reachable, so it
 // never fails against an atomic (temp + rename) writer, however the
-// scheduler behaves. On the pre-fix code it reproduces in roughly 10%
-// of iterations, which over iterations below is a certainty in practice.
+// scheduler behaves. On the pre-fix code it reproduces in roughly a
+// third of iterations, so over the iteration count below it is a
+// certainty rather than a coin flip: missing it needs 0.67^150, about
+// one run in 10^26.
 func TestCanonicalWrites_AreNeverObservableAsZeroBytes(t *testing.T) {
 	t.Parallel()
 
-	// Enough iterations that a ~10%-per-iteration window is caught with
-	// overwhelming probability, while the whole test still runs in well
-	// under a second: each iteration is one small file write.
-	const iterations = 300
+	// Runtime is dominated by the two real fsyncs each durable write
+	// performs (tempfile, then parent dir), ~18ms per iteration, so this
+	// is the smallest count that still makes a miss impossible in
+	// practice — a few seconds for the whole test.
+	const iterations = 150
 
 	cases := []struct {
 		name string
@@ -126,11 +129,20 @@ func TestCanonicalWrites_AreNeverObservableAsZeroBytes(t *testing.T) {
 						// partially-written file would also be a bug,
 						// but zero bytes is the state the two-syscall
 						// shape provably produces.
+						//
+						// Until the file exists this is ENOENT, which
+						// is fine and keeps spinning. Once a non-empty
+						// read lands the window is behind us, so stop
+						// — otherwise the loop burns a core racing the
+						// writer's teardown for no added coverage.
 						b, err := os.ReadFile(path)
-						if err == nil && len(b) == 0 {
-							sawZeroBytes.Store(true)
-							return
+						if err != nil {
+							continue
 						}
+						if len(b) == 0 {
+							sawZeroBytes.Store(true)
+						}
+						return
 					}
 				}()
 
