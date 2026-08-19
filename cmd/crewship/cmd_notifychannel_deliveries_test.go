@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // The deliveries API has always returned a `title` — internal/api's wire test
@@ -64,7 +66,7 @@ func TestDeliveriesCLI_RendersTheTitleItDecoded(t *testing.T) {
 		Category: "routines.completed", Title: "✅ nightly is done",
 		Status: "sent", Attempts: 1, CreatedAt: "2026-07-28T13:00:00.000Z",
 	}
-	cells := notifyDeliveryCells(row)
+	cells := notifyDeliveryCells(cli.NewFormatter("table"), row)
 
 	if len(cells) != len(notifyDeliveryColumns) {
 		t.Fatalf("%d cells for %d columns — the header and the row have drifted",
@@ -81,7 +83,7 @@ func TestDeliveriesCLI_RendersTheTitleItDecoded(t *testing.T) {
 
 func TestDeliveriesCLI_TruncatesALongTitleRatherThanBreakingTheTable(t *testing.T) {
 	row := notifyDeliveryRow{Title: strings.Repeat("x", 200)}
-	cells := notifyDeliveryCells(row)
+	cells := notifyDeliveryCells(cli.NewFormatter("table"), row)
 	i := slices.Index(notifyDeliveryColumns, "TITLE")
 	if len([]rune(cells[i])) > 40 {
 		t.Errorf("TITLE cell is %d runes; a templated title can be long and must not "+

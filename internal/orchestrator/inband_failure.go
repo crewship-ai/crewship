@@ -74,6 +74,12 @@ type inBandFailure struct {
 	subtype string
 	message string
 	turns   int
+	// reason/status come from Claude Code's terminal_reason + api_error_status.
+	// They exist because subtype is not always a cause: a hard auth failure
+	// arrives as subtype "success" with is_error true, and labelling that run
+	// "(success)" reads as a parser bug rather than a diagnosis.
+	reason string
+	status int
 }
 
 // maxTurnsSubtype is Claude Code's result subtype for "the agent-loop turn cap
@@ -110,9 +116,10 @@ func (f *inBandFailure) observe(e AgentEvent) {
 		if s, _ := meta["error"].(string); s != "" {
 			detail = s
 		}
-		f.record(subtype, detail, metaInt(meta, "num_turns"))
+		reason, _ := meta["terminal_reason"].(string)
+		f.record(subtype, detail, metaInt(meta, "num_turns"), reason, metaInt(meta, "api_error_status"))
 	case "error":
-		f.record("", e.Content, 0)
+		f.record("", e.Content, 0, "", 0)
 	}
 }
 
@@ -130,7 +137,7 @@ func metaInt(meta map[string]interface{}, key string) int {
 	return 0
 }
 
-func (f *inBandFailure) record(subtype, message string, turns int) {
+func (f *inBandFailure) record(subtype, message string, turns int, reason string, status int) {
 	if f.seen {
 		return
 	}
@@ -138,6 +145,39 @@ func (f *inBandFailure) record(subtype, message string, turns int) {
 	f.subtype = subtype
 	f.message = strings.TrimSpace(message)
 	f.turns = turns
+	f.reason = reason
+	f.status = status
+}
+
+// namesNoCause lists the subtype / terminal_reason values Claude Code uses for
+// a turn it considers structurally finished — including one that finished by
+// failing to authenticate. Measured on two versions of the same auth failure:
+//
+//	2.1.204  subtype "success", terminal_reason "completed",  api_error_status 401
+//	2.1.226  subtype "success", terminal_reason "api_error",  api_error_status 401
+//
+// Both carry the real cause in the result text and the status code, never in
+// these two fields, so neither value may reach the user as a diagnosis: "failed
+// run (success)" and "failed run (completed)" both read as a parser bug.
+var namesNoCause = map[string]bool{"": true, "success": true, "completed": true}
+
+// label names the cause in the user-facing error, taking the first field that
+// carries one: a real error subtype, then terminal_reason, then the HTTP status
+// on its own — 401 and 529 send the operator to completely different places, so
+// the number is worth surfacing even when nothing else names the failure.
+func (f *inBandFailure) label() string {
+	if !namesNoCause[f.subtype] {
+		return f.subtype
+	}
+	switch {
+	case !namesNoCause[f.reason] && f.status > 0:
+		return fmt.Sprintf("%s %d", f.reason, f.status)
+	case !namesNoCause[f.reason]:
+		return f.reason
+	case f.status > 0:
+		return fmt.Sprintf("HTTP %d", f.status)
+	}
+	return ""
 }
 
 // inBandDetailCap bounds how much of the CLI's own message we fold into the
@@ -172,13 +212,14 @@ func (f *inBandFailure) Err() error {
 	if len(detail) > inBandDetailCap {
 		detail = detail[:inBandDetailCap] + "…"
 	}
+	label := f.label()
 	switch {
-	case detail != "" && f.subtype != "":
-		return NewInBandFailureError(fmt.Sprintf("agent reported a failed run (%s): %s", f.subtype, detail))
+	case detail != "" && label != "":
+		return NewInBandFailureError(fmt.Sprintf("agent reported a failed run (%s): %s", label, detail))
 	case detail != "":
 		return NewInBandFailureError("agent reported a failed run: " + detail)
-	case f.subtype != "":
-		return NewInBandFailureError(fmt.Sprintf("agent reported a failed run (%s) — the CLI exited 0 but its own final event says the turn failed; check the journal for that event", f.subtype))
+	case label != "":
+		return NewInBandFailureError(fmt.Sprintf("agent reported a failed run (%s) — the CLI exited 0 but its own final event says the turn failed; check the journal for that event", label))
 	}
 	return NewInBandFailureError("agent reported a failed run — the CLI exited 0 but its own final event says the turn failed (a refusal, an internal CLI error, or an exhausted quota); check the journal for that event")
 }

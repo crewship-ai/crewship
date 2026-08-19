@@ -78,7 +78,7 @@ Examples:
 				enabled = "yes"
 			}
 			rows = append(rows, []string{
-				shortBindingID(b.ID), server, b.MCPServerScope, enabled, cred,
+				f.ShortID(b.ID, shortBindingID(b.ID)), server, b.MCPServerScope, enabled, cred,
 			})
 		}
 		return f.Auto(bindings, headers, rows)
