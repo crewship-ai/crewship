@@ -52,7 +52,21 @@ fi
 # unknown subcommand plus --help makes Cobra print the ROOT help and exit 0, so
 # that probe would pass while the command does not exist. Verified against the
 # built binary before this line was written.
-if ! "$CREWSHIP" commands 2>/dev/null | grep -qE '^page( |$)'; then
+# Captured first, then matched — NOT `crewship commands | grep -q`.
+#
+# lib.sh sets `pipefail`, and `grep -q` exits at its first match, closing the
+# pipe. If the writer has not finished, it takes SIGPIPE (141) and the pipeline
+# reports failure even though the match SUCCEEDED — so the probe would say "not
+# registered" about a command that is registered.
+#
+# Whether that fires is a race against the 64 KiB pipe buffer: while the whole
+# listing fitted, the writer finished before grep closed the pipe and nobody
+# noticed. `crewship commands` is now 58 KiB and `page` sits at line 491 of 778,
+# so the margin is under 2 KiB and any new command can push it over. It did, in
+# CI, on every run — while passing on every developer machine, which is the
+# worst possible shape for a guard.
+_page_commands="$("$CREWSHIP" commands 2>/dev/null || true)"
+if ! grep -qE '^page( |$)' <<<"$_page_commands"; then
   _fail "crewship page is registered" \
     "RED BY DESIGN (issue #1937): the CLI has no 'page' command yet. PRD §11 requires one command per endpoint: page list|get|create|update|delete|set. GREEN = cmd/crewship/cmd_page.go registers them and every assertion below runs."
   finish
