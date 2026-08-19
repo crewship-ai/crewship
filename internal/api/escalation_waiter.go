@@ -1,18 +1,42 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
-// escalationResult is the response delivered to a waiting sidecar when a human resolves an escalation.
+// escalationResult is the response delivered to a waiting sidecar when an
+// escalation reaches a terminal state.
+//
+// Status carries WHICH terminal state, because "the wait ended" and "a human
+// answered" stopped being the same thing when EXPIRED and CANCELLED arrived. An
+// empty Status means RESOLVED — the only outcome that existed when the resolve
+// path was written, so its call site needs no change to keep meaning what it
+// always meant.
+//
+// Warning is the text handed to the agent IN PLACE OF an answer. It is empty
+// on a real resolution and non-empty on every other terminal state, which is
+// the wire-level expression of the product decision in escalation_lifecycle.go:
+// an agent may continue without an answer, but never without being told.
 type escalationResult struct {
 	Resolution string `json:"resolution"`
 	Action     string `json:"action"`
 	RedirectTo string `json:"redirect_to,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Warning    string `json:"warning,omitempty"`
+}
+
+// terminalStatus normalises the zero value to RESOLVED. See the Status field.
+func (r escalationResult) terminalStatus() string {
+	if r.Status == "" {
+		return escalationStatusResolved
+	}
+	return r.Status
 }
 
 // registerEscalationWaiter adds a buffered channel for the given escalation
@@ -104,8 +128,12 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 	// and check once, register only if the answer is "still pending", then
 	// check again. The second read costs one query on the blocking path only,
 	// which is the path already prepared to wait.
-	scoped := func() (status, escalationType string, resolution, action, redirectTo sql.NullString, err error) {
-		query := `SELECT status, type, resolution, action, redirect_to FROM escalations WHERE id = ?`
+	scoped := func() (escalationWaitRow, error) {
+		var row escalationWaitRow
+		query := `SELECT status, type, resolution, action, redirect_to, deadline_at,
+			         workspace_id, crew_id, chat_id, from_agent_id, reason,
+			         COALESCE(answer_deadline_at, ''), COALESCE(credential_id, '')
+			  FROM escalations WHERE id = ?`
 		args := []interface{}{escalationID}
 		if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" {
 			query += ` AND crew_id = ?`
@@ -114,12 +142,19 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 			query += ` AND workspace_id = ?`
 			args = append(args, boundWS)
 		}
-		err = h.db.QueryRowContext(r.Context(), query, args...).
-			Scan(&status, &escalationType, &resolution, &action, &redirectTo)
-		return
+		err := h.db.QueryRowContext(r.Context(), query, args...).
+			Scan(&row.status, &row.escalationType, &row.resolution, &row.action, &row.redir, &row.deadline,
+				&row.scope.workspaceID, &row.scope.crewID, &row.scope.chatID, &row.scope.fromAgentID, &row.scope.reason,
+				&row.scope.deadlineAt, &row.scope.credentialID)
+		row.scope.id = escalationID
+		// row.deadline is the AGENT's window (what this poll waits on);
+		// row.scope.deadlineAt is the HUMAN's (what an expiry would describe).
+		// They are different columns and conflating them here is how the
+		// regression got written in the first place.
+		return row, err
 	}
 
-	status, escalationType, resolution, action, redirectTo, err := scoped()
+	row, err := scoped()
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "escalation not found")
@@ -130,13 +165,13 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 	}
 
 	var ch chan escalationResult
-	if status != "RESOLVED" {
+	if row.status == escalationStatusPending {
 		ch = h.registerEscalationWaiter(escalationID)
 		defer h.removeEscalationWaiter(escalationID, ch)
 
 		// Re-read: a resolve that landed between the first read and the
 		// registration would otherwise never reach us.
-		status, escalationType, resolution, action, redirectTo, err = scoped()
+		row, err = scoped()
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				replyError(w, http.StatusNotFound, "escalation not found")
@@ -147,7 +182,16 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 		}
 	}
 
-	if status == "RESOLVED" {
+	status, escalationType, resolution, action, redirectTo := row.status, row.escalationType, row.resolution, row.action, row.redir
+
+	// A terminal state that is not an answer. The agent is told which one and
+	// why, never left to infer silence.
+	if status == escalationStatusExpired || status == escalationStatusCancelled {
+		writeJSON(w, http.StatusOK, escalationNoAnswerBody(status))
+		return
+	}
+
+	if status == escalationStatusResolved {
 		// Already resolved — decrypt CREDENTIAL resolutions and return immediately.
 		resolved := resolution.String
 		if escalationType == "CREDENTIAL" && resolved != "" {
@@ -168,19 +212,208 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Block until resolved or timeout.
+	// The server's own deadline, not the client's, and specifically the AGENT's
+	// deadline_at — never answer_deadline_at. Before this existed the only clock
+	// in the picture was the sidecar's 300 s context: it expired, the agent
+	// proceeded without an answer, and the row stayed PENDING forever because
+	// nothing on this side ever learned that the question had been abandoned.
+	//
+	// Now the wait ends on a column, and the SAME event that ends the wait
+	// records the give-up (agent_gave_up_at). What that event does NOT do any
+	// more is close the question: the human's clock is a different column with
+	// days on it, and the version of this file that expired the row here made
+	// the approval queue unusable — 409 for questions nobody had answered.
+	//
+	// A row with no deadline (raised before the column existed) keeps the old
+	// shape: block until the client gives up, and answer TIMEOUT. That is not a
+	// terminal state and is not claimed to be one.
+	var deadlineC <-chan time.Time
+	if row.deadline.Valid && row.deadline.String != "" {
+		if at, perr := parseEscalationDeadline(row.deadline.String); perr == nil {
+			timer := time.NewTimer(time.Until(at))
+			defer timer.Stop()
+			deadlineC = timer.C
+		} else {
+			h.logger.Warn("wait escalation: unparseable deadline_at, falling back to the client's timeout",
+				"escalation_id", escalationID, "deadline_at", row.deadline.String, "error", perr)
+		}
+	}
+
 	select {
 	case result := <-ch:
+		// Someone reached a terminal state while we waited. It may be the
+		// human's answer, or it may be an expiry/cancellation raced in by
+		// another observer — either way the result says which.
+		if st := result.terminalStatus(); st != escalationStatusResolved {
+			writeJSON(w, http.StatusOK, escalationNoAnswerBody(st))
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":      "RESOLVED",
+			"status":      escalationStatusResolved,
 			"resolution":  result.Resolution,
 			"action":      result.Action,
 			"redirect_to": result.RedirectTo,
 		})
+	case <-deadlineC:
+		// The AGENT's window closed. Re-read FIRST: a human may have decided in
+		// the same instant, and `select` picks at random between a ready channel
+		// and a ready timer, so reporting "no answer" without looking would
+		// throw away a decision that had already been made. If the row is
+		// terminal, hand back whatever it actually holds.
+		//
+		// The write runs on a detached, bounded context: r.Context() may be
+		// cancelled the moment we answer, and a half-committed stamp because the
+		// client hung up is a failure mode nothing would clean up.
+		bgCtx, bgCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		defer bgCancel()
+
+		settled, rerr := scoped()
+		if rerr != nil {
+			replyInternalError(w, h.logger, "wait escalation deadline re-read", rerr)
+			return
+		}
+		if settled.status != escalationStatusPending {
+			h.replyWithSettledEscalation(w, escalationID, settled)
+			return
+		}
+
+		// Still PENDING — but is it still ANSWERABLE? A row whose human
+		// deadline has also passed is one the sweeper has not reached yet (it
+		// ticks at 60 s and the read paths only sweep on a read). Telling the
+		// agent the question is still open would be false, so settle it here on
+		// the same CAS every other observer uses, and disposal of any staged
+		// credential comes along with it.
+		if answerDue(settled.scope.deadlineAt, time.Now()) {
+			flipped, expErr := h.expireEscalationRow(bgCtx, settled.scope, time.Now())
+			if expErr != nil {
+				h.logger.Error("wait escalation: expire at answer deadline", "error", expErr, "escalation_id", escalationID)
+			}
+			if flipped {
+				writeJSON(w, http.StatusOK, escalationNoAnswerBody(escalationStatusExpired))
+				return
+			}
+			// Lost the CAS: somebody decided in the same instant. Their answer,
+			// not our expiry.
+			if again, aerr := scoped(); aerr == nil {
+				h.replyWithSettledEscalation(w, escalationID, again)
+				return
+			}
+		}
+
+		// Still open. Record that this agent stopped waiting — a fact about the
+		// run, not a decision about the question — and tell it so. The row stays
+		// PENDING and stays in the operator's inbox; whoever comes back from the
+		// password manager in seven minutes can still click Approve, and their
+		// approval will still put the credential in the vault. It just will not
+		// reach this run, which is what escalationUnansweredWarning says.
+		//
+		// The stamp is CAS-guarded on status='PENDING', so a human who resolved
+		// between the re-read and here wins and no give-up is recorded for a
+		// question that was in fact answered.
+		if _, markErr := h.markAgentGaveUp(bgCtx, escalationID, time.Now()); markErr != nil {
+			h.logger.Error("wait escalation: mark agent gave up", "error", markErr, "escalation_id", escalationID)
+		}
+		h.logger.Info("escalation wait window closed; question stays open",
+			"escalation_id", escalationID, "crew_id", row.scope.crewID)
+		writeJSON(w, http.StatusOK, escalationNoAnswerBody(escalationWireUnanswered))
 	case <-r.Context().Done():
 		writeJSON(w, http.StatusRequestTimeout, map[string]string{
 			"status": "TIMEOUT",
 			"error":  "escalation not resolved in time",
 		})
 	}
+}
+
+// escalationNoAnswerBody is what an agent gets instead of an answer. The
+// warning is mandatory: continuing without a human decision is allowed, doing
+// so silently is the defect.
+//
+// Three shapes, and the difference between them matters to the model reading
+// it. EXPIRED and CANCELLED are terminal — the question is gone, nothing more
+// is coming, and a later run asking again is asking something new. UNANSWERED
+// is not terminal: the question is still in a human's inbox and may well be
+// answered, just not to this run. `still_open` carries that so an agent (or a
+// CLI rendering the response) does not have to infer it from the status string.
+func escalationNoAnswerBody(status string) map[string]interface{} {
+	warning := escalationExpiredWarning
+	stillOpen := false
+	switch status {
+	case escalationStatusCancelled:
+		warning = "The question was withdrawn by a human before it was decided. Continue without an answer and do not assume approval."
+	case escalationWireUnanswered:
+		warning = escalationUnansweredWarning
+		stillOpen = true
+	}
+	return map[string]interface{}{
+		"status":       status,
+		"resolution":   "",
+		"action":       "",
+		"warning":      warning,
+		"agent_action": escalationOutcomeContinuedWithWarning,
+		"still_open":   stillOpen,
+	}
+}
+
+// answerDue reports whether a human answer deadline has passed. An empty or
+// unparseable value is NOT due: "no deadline" and "a deadline I cannot read"
+// must both leave the question answerable, because the alternative is expiring
+// a row on the strength of a string nobody could interpret.
+func answerDue(answerDeadline string, now time.Time) bool {
+	if answerDeadline == "" {
+		return false
+	}
+	at, err := parseEscalationDeadline(answerDeadline)
+	if err != nil {
+		return false
+	}
+	return !at.After(now)
+}
+
+// parseEscalationDeadline accepts both timestamp shapes this table carries:
+// the RFC3339 this package writes, and the space-separated form SQLite's
+// datetime() produces. Same reason escalationDuePredicate normalises with
+// datetime() — a deadline the server cannot read is a deadline that never
+// fires.
+func parseEscalationDeadline(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	return time.Parse("2006-01-02 15:04:05", s)
+}
+
+// escalationWaitRow is one escalation as the long poll needs it: the state and
+// answer it may already carry, its deadline, and the scope a deadline
+// transition has to journal itself with. Read once under the caller's token
+// binding, so the expiry path never has to make a second authorization
+// decision.
+type escalationWaitRow struct {
+	status, escalationType    string
+	resolution, action, redir sql.NullString
+	deadline                  sql.NullString
+	scope                     expirableEscalation
+}
+
+// replyWithSettledEscalation answers with whatever terminal state the row
+// actually holds, for the deadline path that lost its compare-and-swap.
+func (h *QueryHandler) replyWithSettledEscalation(w http.ResponseWriter, escalationID string, row escalationWaitRow) {
+	if row.status != escalationStatusResolved {
+		writeJSON(w, http.StatusOK, escalationNoAnswerBody(row.status))
+		return
+	}
+	resolved := row.resolution.String
+	if row.escalationType == "CREDENTIAL" && resolved != "" {
+		dec, decErr := encryption.Decrypt(resolved)
+		if decErr != nil {
+			h.logger.Error("decrypt credential resolution", "error", decErr, "escalation_id", escalationID)
+			replyError(w, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		resolved = dec
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":      escalationStatusResolved,
+		"resolution":  resolved,
+		"action":      row.action.String,
+		"redirect_to": row.redir.String,
+	})
 }

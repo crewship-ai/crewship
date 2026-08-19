@@ -28,8 +28,10 @@ Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachmen
 | POST | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions`](#add-reaction) | Add a reaction |
 | DELETE | [`/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}`](#remove-reaction) | Remove a reaction |
 | POST | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments`](#upload-attachment) | Upload a chat attachment |
+| GET | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments`](/api-reference/agents#list-chat-attachments) | List a chat's attachments |
+| DELETE | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}`](/api-reference/agents#delete-chat-attachment) | Delete one chat attachment |
 | GET | [`/api/v1/chats/{chatId}/stream`](#stream-a-run) | Watch a session's agent run as newline-delimited JSON |
-| POST | [`/api/v1/conversations/search`](#search-conversations) | Search one agent's conversation history |
+| POST | [`/api/v1/conversations/search`](#search-conversations) | Search conversation history — one agent, or the whole workspace |
 
 Peer-to-peer crew messaging lives on the [internal IPC plane](#crew-messaging-sidecar-ipc), not the public API.
 
@@ -42,9 +44,21 @@ POST /api/v1/conversations/search
 Content-Type: application/json
 ```
 
-Searches one agent's indexed chat messages using BM25 relevance. The handler
-first verifies that `agent_id` belongs to the caller's workspace; the search
-backend itself is not an authorization boundary.
+Searches indexed chat messages using BM25 relevance, in one of two scopes:
+
+- **agent scope** — `agent_id` given. The handler verifies that agent belongs
+  to the caller's workspace before searching it.
+- **workspace scope** — `agent_id` omitted. The handler reads the caller's
+  own agents (from the workspace on the request context, never from the body)
+  and runs ONE ranked query across them. This is what ⌘K sends: the user is
+  searching everything they can see and has no agent in mind to name.
+
+In both scopes the search backend is a filter, not an authorization boundary
+— the handler decides which agent ids it may ever see, and drops any hit that
+comes back for an agent outside that set.
+
+Workspace scope spans at most 400 agents (the most recently created ones);
+the bound exists because the agent ids are bound query parameters.
 
 **Auth:** authenticated session or CLI token with workspace context.
 
@@ -54,23 +68,29 @@ backend itself is not an authorization boundary.
 {"agent_id":"agent_123","query":"deploy pipeline","limit":20}
 ```
 
-`agent_id` and `query` are required. `limit` is optional; the search store
-defaults or clamps it to its supported range (the CLI default is 20 and its
-maximum is 100).
+`query` is required. `agent_id` is **optional** — omitting it selects the
+workspace scope. `limit` is optional; the search store defaults or clamps it
+to its supported range (the CLI default is 20 and its maximum is 100).
 
 ### Response
 
 ```json
-{"count":1,"query":"deploy pipeline","hits":[{"id":"msg_abc","session_id":"sess-42","agent_id":"agent_123","role":"user","content":"deploy the staging pipeline","ts":"2026-06-01T10:00:00Z"}]}
+{"count":1,"query":"deploy pipeline","scope":"workspace","hits":[{"id":"msg_abc","session_id":"sess-42","agent_id":"agent_123","agent_slug":"backend-bot","agent_name":"Backend Bot","role":"user","content":"deploy the staging pipeline","ts":"2026-06-01T10:00:00Z"}]}
 ```
+
+`scope` is `agent` or `workspace`. `agent_slug` and `agent_name` are resolved
+by the handler (the search mirror stores only an agent id) so a caller can
+say who said it and link to the thread at
+`/chat/<agent_slug>?session=<session_id>` — the same URL chat notifications
+deep-link to.
 
 | Status | Condition |
 |---|---|
-| `200` | Search completed; `hits` is an array and may be empty. |
-| `400` | Malformed JSON, missing `agent_id`/`query`, or invalid search query. |
+| `200` | Search completed; `hits` is an array and may be empty. An agentless workspace is a `200` with no hits. |
+| `400` | Malformed JSON, missing `query`, or invalid search query. |
 | `401` | Workspace context is missing. |
-| `404` | Agent is absent from the caller's workspace. |
-| `503` | Conversation search is not configured. |
+| `404` | The requested `agent_id` is absent from the caller's workspace. |
+| `503` | Conversation search is not configured, or the configured backend cannot span agents (workspace scope only). |
 
 ---
 
@@ -151,12 +171,12 @@ workspace member; `500` database error while removing the reaction.
 
 ## Chat attachments
 
-Files attached by an operator to a chat session. The binary is written to the storage provider and the agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`.
+Files attached by an operator to a chat session. The binary is written to the storage provider and the agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`.
 
-Each upload also records a row in `attachments` (`owner_type = 'chat'`) carrying the filename, resolved content type, size, SHA-256 and uploader. Before #1768 no row was written at all and the file on disk was the entire state; the dead `chat_attachments` table it was supposed to use was dropped in the same change.
+Each upload also records a row in `attachments` (`owner_type = 'chat'`) carrying the filename, resolved content type, size, SHA-256 and uploader. The row is written **before** the bytes and promoted after they land, so a `201` always means both exist — a success can never mean "the file is stored and nothing recorded it". An upload that fails part-way leaves an unpublished row, which is never listed and is reclaimed with any bytes it named within about two hours (a one-hour grace period, collected by an hourly sweep). Before #1768 no row was written at all and the file on disk was the entire state; the dead `chat_attachments` table it was supposed to use was dropped in the same change.
 
 <Note>
-The row is metadata only — there is no listing, download or delete endpoint for a chat attachment yet, and the blob is **not** content-addressed the way an issue attachment's is: it stays at `<crewID>/<agentSlug>/attachments/<chatId>/<filename>` because that path is the agent-visible contract. `storage_key` on the row is the authority on where any given attachment lives. See [Issue attachments](/guides/issue-attachments) for the surface that is complete.
+The blob is **not** content-addressed the way an issue attachment's is: it stays at `<crewID>/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>` because that path is the agent-visible contract. `storage_key` on the row is the authority on where any given attachment lives — which is what keeps attachments uploaded before the id segment existed working at their original path. The attachment id in the path is what makes one upload one identity at one location: two different files called `evidence.pdf` are two attachments with two checksums, and neither overwrites the other. Listing and deletion live on the agent route — see [List Chat Attachments](/api-reference/agents#list-chat-attachments) and [Delete Chat Attachment](/api-reference/agents#delete-chat-attachment). There is still no download endpoint for a chat attachment; the agent reads it from its own filesystem.
 </Note>
 
 ### Upload attachment
@@ -182,8 +202,8 @@ The path is **agent-and-chat scoped**, not just chat-scoped — the handler veri
 {
   "filename": "report.pdf",
   "size": 482311,
-  "path": "attachments/cht_xyz/report.pdf",
-  "agent_path": "/output/viktor/attachments/cht_xyz/report.pdf"
+  "path": "attachments/cht_xyz/att_9f2a1c/report.pdf",
+  "agent_path": "/output/viktor/attachments/cht_xyz/att_9f2a1c/report.pdf"
 }
 ```
 
@@ -287,6 +307,9 @@ See [Internal IPC API — Crew messaging and files](/api-reference/internal#crew
 
 ## Tenancy
 
+- Conversation search: the scope comes from the request context. With
+  `agent_id`, cross-workspace returns 404; without it, another workspace's
+  caller searches only its own agents and simply gets no hits.
 - Reactions: handler joins `chats.workspace_id → workspace_members.role`. No workspace_id in path or body. Cross-workspace returns 404.
 - Attachments: agent-and-chat both validated against the session's workspace. Cross-workspace returns 404; chat-not-on-agent returns 403.
 - Crew messaging is internal-only; the sidecar's `IPCConfig` carries the scope.

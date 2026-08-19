@@ -38,7 +38,7 @@ All four require workspace context and the `manage` role. Field shapes, query pa
 
 ## Audit watcher
 
-Wired at server startup; no operator configuration required beyond having `CREWSHIP_STORAGE_BASE_PATH` point at the directory the crew bind-mounts live under. The watcher runs on the host, watches `{basePath}/crews/**` for close-write events, shape-matches paths against the canonical layout (`AGENT.md`, `CREW.md`, `pins/`, `learned-*.md`, `daily/*.md`), and:
+Wired at server startup; no operator configuration required beyond having `CREWSHIP_STORAGE_BASE_PATH` point at the directory the crew bind-mounts live under. The watcher runs on the host, watches `{basePath}/crews/**` for close-write events, shape-matches paths against the canonical layout (`AGENT.md`, `CREW.md`, `pins.md`, `learned-*.md`, `daily/*.md`), and:
 
 - Skips silently on unknown shapes (`.tmp` staging files, `.lock` files, hidden dotfiles, non-`.md` scratch).
 - Skips silently when the path resolves to an orphaned bind-mount (crew was deleted, files remain on disk).
@@ -46,6 +46,36 @@ Wired at server startup; no operator configuration required beyond having `CREWS
 - Emits the same `memory.updated` journal entry the sidecar emits, so dashboards and consumers don't need to distinguish.
 
 If `CREWSHIP_STORAGE_BASE_PATH` is empty the watcher is disabled and logs a single `info`-level "watcher disabled" line — pre-existing behaviour for hostless builds. If fsnotify init fails the server stays up; the warning is logged but does not gate startup.
+
+### Both halves of a crew directory
+
+A crew directory has two memory trees, and the watcher walks both:
+
+| On disk | Recorded as | Tier |
+|---|---|---|
+| `crews/{crewID}/agents/{slug}/.memory/AGENT.md` | `agent:{slug}/AGENT.md` | `agent` |
+| `crews/{crewID}/agents/{slug}/.memory/daily/{date}.md` | `agent:{slug}/daily/{date}.md` | `agent` |
+| `crews/{crewID}/agents/{slug}/.memory/pins.md` | `agent:{slug}/pins.md` | `pins` |
+| `crews/{crewID}/shared/.memory/CREW.md` | `crew:{crewID}/CREW.md` | `crew` |
+| `crews/{crewID}/shared/.memory/daily/{date}.md` | `crew:{crewID}/daily/{date}.md` | `crew` |
+| `crews/{crewID}/shared/.memory/**/pins.md` | `crew:{crewID}/pins.md` | `pins` |
+| `crews/{crewID}/shared/.memory/**/learned-*.md` | `crew:{crewID}/learned-*.md` | `learned` |
+
+The shared half was added after the 2026-08-13 chat-surface audit. `CREW.md` has always had a writer — `memory.write` with `tier: "CREW"` resolves to `{crew shared memory}/CREW.md` — but nothing projected that write into `memory_versions`, so the dashboard tier that lists `crew:{crewID}/CREW.md` was permanently empty no matter what the crew had written. The bug was in the projection, not in the writer; adding a second writer would have duplicated the capability and left the blind spot in place.
+
+The canonical shape for the shared half is deliberately identical to the one the consolidator records for `pins.md` / `learned-*.md`. That is what makes the 60-second dedup window work between the two writers: whichever lands second sees the first's row and bows out, instead of doubling every consolidation.
+
+Non-canonical subtrees are refused outright — `.proposed/` (consolidator staging, recorded only on approve), `.quarantine/` (content the injection scanner *rejected*), `.snapshots/` (the orchestrator's pre-run copies). Recording any of them would put non-canonical bytes into the trail under a canonical name.
+
+### What the trail cannot see
+
+`memory_versions` is a projection, not the filesystem. Files that no writer records never appear, and an empty result for them says nothing about what is on disk:
+
+- **`lessons.md`** — written straight into the memory directory by the negative-learning evaluator (`consolidate.WriteLesson`) and recorded by nobody. No row, no endpoint. Read it from inside the crew or over the CLI.
+- **`PERSONA.md`** and **peer cards** — have their own endpoints (`GET /api/v1/agents/{id}/persona/history`, `GET /api/v1/agents/{id}/peers`) and are not projected here.
+- **Any tier at all, on a server with no `Storage.MemoryRoot`** — `RecordVersion` refuses without a blob root and the consolidator skips recording, so the trail is empty by configuration.
+
+`GET /api/v1/memory/versions` reports this in a `projection` object beside the rows so an operator surface can tell "nothing has been written" apart from "we cannot see this", rather than drawing both as an empty list. The agent canvas Memory tab renders that distinction.
 
 ## HITL preview workflow
 

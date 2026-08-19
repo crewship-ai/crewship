@@ -1,6 +1,8 @@
 "use client"
 
-import { Bot, CalendarClock, Settings2, Sparkles, Webhook, Wrench } from "lucide-react"
+import { Bot, CalendarClock, ClipboardList, MessageSquareText, Settings2, Sparkles, Webhook, Wrench } from "lucide-react"
+import { useEffect, useId, useRef, useState } from "react"
+import { toast } from "sonner"
 
 import { AgentLearningToggle } from "@/components/features/agents/agent-learning-toggle"
 import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
@@ -8,10 +10,13 @@ import { SystemPromptEditor } from "@/components/features/crews/system-prompt-ed
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 
 import { Appear, DetailCard } from "@/components/ui/detail"
+import { MAX_SUGGESTED_PROMPTS, MAX_SUGGESTED_PROMPT_LENGTH } from "@/lib/agent-suggestions"
+import { MAX_FIELDS_PER_FORM, MAX_FORMS, summarizeAskForms } from "@/lib/ask-template"
 import { AGENT_EXTERNAL_TRIGGERS, AGENT_SELF_LEARNING } from "@/lib/feature-gates"
+import { cn } from "@/lib/utils"
 
 import {
-  ConfigCards, ConfigPresets, ConfigReadOnly, ConfigSelect, ConfigSwitch, ConfigText,
+  ConfigCards, ConfigPresets, ConfigReadOnly, ConfigRow, ConfigSelect, ConfigSwitch, ConfigText,
 } from "../canvas/config-field"
 import { ConfigModel } from "../canvas/config-model"
 import type { AgentRecord } from "./types"
@@ -74,6 +79,215 @@ function providerMark(provider: string | null | undefined) {
   if (p === "GOOGLE") return <GeminiIcon className="h-3.5 w-3.5 shrink-0 text-[#4285F4]" />
   if (p === "ANTHROPIC") return <AnthropicIcon className="h-3.5 w-3.5 shrink-0 text-[#D97757]" />
   return <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+}
+
+// Mirrors `controlBase` in ../canvas/config-field.tsx, which is module-private
+// there. Copied rather than re-derived so this textarea sits on the same line
+// and reacts to focus the same way as every other control on the screen.
+const textareaBase =
+  "type-row w-full rounded-lg border border-border bg-background px-2.5 text-foreground outline-none " +
+  "transition-[border-color,box-shadow] hover:border-foreground/25 " +
+  "focus:border-primary focus:shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_20%,transparent)]"
+
+/**
+ * Suggested questions — the whole of the per-agent chip list (PRD
+ * chat-as-a-primary-surface, Step 7). One question per line.
+ *
+ * The counter and the over-long marks are a courtesy, not the rule: the server
+ * normalises and caps on write (internal/api/agents_suggested_prompts.go) and
+ * names the offending prompt when it refuses. Showing it here only means the
+ * refusal is rarely how anyone finds out. Nothing is blocked client-side —
+ * a field that silently won't submit is worse than a specific error.
+ */
+function SuggestedPromptsField({ value, onSave }: {
+  value: string
+  onSave: (next: string) => Promise<void> | void
+}) {
+  const id = useId()
+  const [local, setLocal] = useState(value)
+  // The prop is the only trustworthy baseline for a rollback: `local` has
+  // moved on with every keystroke. Same reasoning as config-field's
+  // useOptimistic, which this deliberately mirrors.
+  const server = useRef(value)
+  useEffect(() => {
+    server.current = value
+    setLocal(value)
+  }, [value])
+
+  const prompts = parseSuggestedPromptsUncapped(local)
+  const overLong = prompts
+    .map((p, i) => ({ position: i + 1, length: [...p].length }))
+    .filter((p) => p.length > MAX_SUGGESTED_PROMPT_LENGTH)
+  const tooMany = prompts.length > MAX_SUGGESTED_PROMPTS
+
+  async function commit() {
+    if (local === server.current) return
+    try {
+      await onSave(local)
+      server.current = local
+      toast.success("Suggested questions saved")
+    } catch (err) {
+      setLocal(server.current)
+      toast.error(err instanceof Error ? err.message : "Could not save")
+    }
+  }
+
+  return (
+    <ConfigRow
+      full
+      label="Suggested questions"
+      hint="One per line. These appear as buttons under the chat, so the person talking to this agent can start without typing. Leave it empty and the defaults are used."
+      htmlFor={id}
+    >
+      <div className="w-full">
+        <textarea
+          id={id}
+          value={local}
+          rows={5}
+          placeholder={"What shipped this week?\nWhich invoices are overdue?\nDraft a reply to the last email"}
+          onChange={(e) => setLocal(e.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault()
+              setLocal(server.current)
+              ;(e.target as HTMLElement).blur()
+            }
+          }}
+          className={cn(
+            textareaBase,
+            "min-h-[92px] resize-y py-1.5 leading-relaxed",
+            (tooMany || overLong.length > 0) && "border-destructive",
+          )}
+        />
+        <div className="type-meta mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span className={cn("text-muted-foreground-soft", tooMany && "text-destructive")}>
+            {prompts.length} / {MAX_SUGGESTED_PROMPTS}
+          </span>
+          {overLong.length > 0 && (
+            <span className="text-destructive">
+              {overLong.map((p) => `question ${p.position} is ${p.length} characters`).join(", ")}
+              {` — the limit is ${MAX_SUGGESTED_PROMPT_LENGTH}`}
+            </span>
+          )}
+        </div>
+      </div>
+    </ConfigRow>
+  )
+}
+
+/**
+ * Ask forms — the questions that need answers before they can be asked.
+ *
+ * Chat suggestions above are one line of text each; a form collects a
+ * supplier, an amount, a month and a photo of the receipt, then renders them
+ * into an ordinary message. The definition is JSON and is edited as JSON,
+ * deliberately: a schema builder is the right surface once forms are shared
+ * across agents (the pack library in the companion PRD), and until then a
+ * builder would be several hundred lines of UI standing between an author and
+ * a document they can already read.
+ *
+ * The counts and the parse error are a courtesy, not the rule. The server
+ * validates on write (internal/askforms) and names the form and the
+ * placeholder when it refuses — including the one refusal that matters most,
+ * a {{placeholder}} that names no field, which is caught here at SAVE time so
+ * the person talking to the agent never meets a broken template.
+ */
+function AskFormsField({ value, onSave }: {
+  value: string
+  onSave: (next: string) => Promise<void> | void
+}) {
+  const id = useId()
+  const [local, setLocal] = useState(value)
+  const server = useRef(value)
+  useEffect(() => {
+    server.current = value
+    setLocal(value)
+  }, [value])
+
+  const summary = summarizeAskForms(local)
+
+  async function commit() {
+    if (local === server.current) return
+    try {
+      await onSave(local)
+      server.current = local
+      toast.success("Ask forms saved")
+    } catch (err) {
+      setLocal(server.current)
+      toast.error(err instanceof Error ? err.message : "Could not save")
+    }
+  }
+
+  return (
+    <ConfigRow
+      full
+      label="Forms"
+      hint="A JSON array of form definitions. Each one becomes a chip that opens a short questionnaire; submitting it sends an ordinary message built from the template."
+      htmlFor={id}
+    >
+      <div className="w-full">
+        <textarea
+          id={id}
+          value={local}
+          rows={10}
+          spellCheck={false}
+          placeholder={ASK_FORMS_PLACEHOLDER}
+          onChange={(e) => setLocal(e.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault()
+              setLocal(server.current)
+              ;(e.target as HTMLElement).blur()
+            }
+          }}
+          className={cn(
+            textareaBase,
+            "min-h-[180px] resize-y py-1.5 font-mono text-xs leading-relaxed",
+            (summary.error || summary.tooManyForms || summary.overFullForms.length > 0) &&
+              "border-destructive",
+          )}
+        />
+        <div className="type-meta mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span className={cn("text-muted-foreground-soft", summary.tooManyForms && "text-destructive")}>
+            {summary.forms} / {MAX_FORMS} forms · {summary.fields} fields
+          </span>
+          {summary.error && <span className="text-destructive">{summary.error}</span>}
+          {!summary.error && summary.overFullForms.length > 0 && (
+            <span className="text-destructive">
+              {summary.overFullForms.join(", ")} — the limit is {MAX_FIELDS_PER_FORM} fields per form
+            </span>
+          )}
+        </div>
+      </div>
+    </ConfigRow>
+  )
+}
+
+/** Shown in an empty editor: a whole working form, because the fastest way to
+ *  write the second one is to edit the first. */
+const ASK_FORMS_PLACEHOLDER = `[
+  {
+    "id": "receipt",
+    "label": "Add a receipt",
+    "attachment": "required",
+    "template": "Please file this receipt.\\n\\nSupplier: {{supplier}}\\nAmount: {{amount}} {{amount_currency}}\\nPeriod: {{month}}",
+    "fields": [
+      { "name": "supplier", "label": "Supplier", "type": "text", "required": true },
+      { "name": "amount", "label": "Amount", "type": "money", "currency": ["CZK", "EUR"] },
+      { "name": "month", "label": "Period", "type": "month" }
+    ]
+  }
+]`
+
+/**
+ * Like parseSuggestedPrompts but WITHOUT the cap — the editor has to be able
+ * to show a ninth line in order to say there is one. parseSuggestedPrompts is
+ * the render path and truncates on purpose; this is the counting path.
+ */
+function parseSuggestedPromptsUncapped(raw: string): string[] {
+  return raw.split(/\r\n|\r|\n/).map((l) => l.trim()).filter((l) => l.length > 0)
 }
 
 export interface ConfigTabProps {
@@ -277,11 +491,50 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
         </Appear>
       )}
 
+      {/* Per-agent chat suggestions. Without them every agent in the product
+          offers the same four generic chips, which is the most-seen and
+          least-useful text in the app. One column, one textarea — the pack
+          library it could have been is the companion PRD's problem. */}
+      <Appear order={5}>
+        <DetailCard
+          bare icon={MessageSquareText} title="Chat suggestions"
+          footer="Shown only on an empty conversation. Write the questions this agent is actually good at — the ones you would otherwise type every morning."
+        >
+          <SuggestedPromptsField
+            value={(agent as AgentRecord & { suggested_prompts?: string | null }).suggested_prompts ?? ""}
+            onSave={(v) => patch({ suggested_prompts: v })}
+          />
+        </DetailCard>
+      </Appear>
+
+      {/* Ask forms sit next to the suggestions because they are the same
+          feature at two sizes: a question you click, and a question you fill
+          in first. The footer states the one rule an author cannot infer from
+          the JSON — the line-drop — where they will actually read it. */}
+      <Appear order={6}>
+        <DetailCard
+          bare icon={ClipboardList} title="Ask forms"
+          footer={<>
+            Every <code className="font-mono text-foreground/80">{"{{field}}"}</code> in a template must
+            name a field on the same form, or the save is refused. An <b className="font-medium text-foreground">
+            unanswered optional field takes its whole line away</b> — label and all — so
+            {" "}<code className="font-mono text-foreground/80">Period: {"{{month}}"}</code> leaves nothing
+            behind when no month was given. Preview one without a browser with{" "}
+            <code className="font-mono text-foreground/80">crewship agent ask-preview {agent.slug} &lt;form-id&gt; --var k=v</code>.
+          </>}
+        >
+          <AskFormsField
+            value={(agent as AgentRecord & { ask_forms?: string | null }).ask_forms ?? ""}
+            onSave={(v) => patch({ ask_forms: v })}
+          />
+        </DetailCard>
+      </Appear>
+
       {/* The system prompt is the longest thing on this screen and the one
           people actually read, so it takes a column of its own instead of
           being squeezed beside a switch. It stays inside the same bounded
           block — 800 characters of mono set 2000px wide is unreadable. */}
-      <Appear order={6}>
+      <Appear order={7}>
         <SystemPromptEditor
           value={agent.system_prompt}
           onSave={(v) => patch({ system_prompt: v })}
@@ -290,7 +543,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
       </Appear>
 
       {AGENT_SELF_LEARNING && (
-        <Appear order={7}>
+        <Appear order={8}>
           <div data-testid="learning-card">
             <DetailCard
               bare icon={Sparkles} title="Learning posture"

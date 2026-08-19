@@ -33,8 +33,9 @@ import { baseURL, skipWebServer, webServerConfig } from "./playwright.shared"
  *
  * onboarding-wizard.spec.ts is never selected by the workflow: it needs
  * a NEVER-bootstrapped DB and bypasses globalSetup. It has its own
- * config (playwright.fresh.config.ts) and its own job in
- * e2e-devcontainer.yml — leave both alone.
+ * config (playwright.fresh.config.ts) and its own job — `onboarding-journey`
+ * in ci.yml, on every pull request — so it is excluded here as covered
+ * elsewhere, not as stale. Leave both alone.
  */
 export default defineConfig({
   testDir: "./e2e",

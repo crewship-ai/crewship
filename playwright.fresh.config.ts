@@ -12,8 +12,11 @@ import { baseURL, skipWebServer, webServerConfig } from "./playwright.shared"
  *     session, letting the wizard skip the bootstrap step we exist
  *     to test.
  *
- * Used by the e2e-devcontainer nightly workflow. Local devs run the
- * same way against any freshly-started server:
+ * Used by the `onboarding-journey` job in .github/workflows/ci.yml, which
+ * runs on every pull request against a throwaway server with an empty
+ * database. (It ran nightly-only until then, which meant a PR could
+ * reintroduce the dead-route bug this spec was repaired to catch and still
+ * go green.) Local devs run the same way against any freshly-started server:
  *
  *   PLAYWRIGHT_BASE_URL=http://localhost:8080 \
  *     pnpm exec playwright test --config=playwright.fresh.config.ts

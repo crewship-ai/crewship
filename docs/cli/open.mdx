@@ -26,10 +26,10 @@ Cross-platform launcher: `open` (macOS), `cmd /c start ""` (Windows), `xdg-open`
 |---|---|---|
 | `inbox` (`dashboard`, `home`) | — | `/inbox` |
 | `activity` | — | `/activity` |
-| `agents` | — | `/agents` |
-| `agent` | `<slug-or-id>` | `/agents/<id>` |
+| `agents` | — | `/agents` (redirects to `/crews`) |
+| `agent` | `<agent-slug>` | `/crews?agent=<slug>` |
 | `crews` | — | `/crews` |
-| `crew` | `<slug-or-id>` | `/crews/<id>` |
+| `crew` | `<crew-slug>` | `/crews?crew=<slug>` |
 | `chat` | `<agent-slug>` | `/chat/<slug>` |
 | `mission` | `<mission-id>` | `/missions/<id>/timeline` |
 | `journal` | — | `/journal` |
@@ -43,7 +43,13 @@ Cross-platform launcher: `open` (macOS), `cmd /c start ""` (Windows), `xdg-open`
 | `audit` | — | `/audit` |
 | `credentials` | — | `/credentials` |
 
-All IDs are `url.PathEscape`'d, so slugs with `:` or other reserved characters survive.
+IDs that land in a path segment are `url.PathEscape`'d, so slugs with `:` or other reserved characters survive. `agent` and `crew` put their argument in a query value instead and use `url.QueryEscape` — `PathEscape` leaves `&` and `=` alone, since both are legal in a path segment, and either would split the query string.
+
+<Note>
+**`agent` and `crew` take a slug, not an id.** Neither has a detail page: both routes were folded into the `/crews` canvas, which selects from `?agent=<slug>` and `?crew=<slug>` and ignores anything that is not one (`hooks/use-crews-selection.tsx`). Pass an id and you get the canvas with nothing selected — `open` resolves URLs offline and without auth, so it has no way to translate one. `crewship agent get <slug-or-id>` and `crewship crew get <slug-or-id>` print the slug.
+
+`agent` used to build `/agents/<id>` and `crew` used to build `/crews/<id>`. Neither matches a route — the export has `agents.html` and `crews.html` and no directory under either — so both fell through to the SPA root: the dashboard, under a URL that named something else.
+</Note>
 
 ### Examples
 
@@ -52,7 +58,8 @@ crewship open inbox
 crewship open chat viktor
 crewship open mission MIS-42
 crewship open --print-only mission MIS-42       # print URL, don't open
-crewship open agent agt_abc123
+crewship open agent viktor                      # /crews with Viktor selected
+crewship open crew backend-team                 # /crews with the crew selected
 crewship open issues CRE-128
 ```
 

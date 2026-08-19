@@ -23,18 +23,41 @@ interface Agent {
 
 interface CrewAgentsProps {
   agents: Agent[]
+  /**
+   * Kept on the prop surface, no longer read. It used to be interpolated into
+   * the create-agent link's ?crew_id=; see CREATE_AGENT_HREF for why an id
+   * cannot be forwarded to the replacement. Dropping it would be a breaking
+   * signature change for a component this repair is not otherwise touching.
+   */
   crewId: string
   canCreate: boolean
 }
 
-export function CrewAgents({ agents, crewId, canCreate }: CrewAgentsProps) {
+/**
+ * Where "New Agent" goes.
+ *
+ * It was /crews/agents/new?crew_id=<id>, a route the /crews redesign deleted.
+ * Creating an agent has no route now — it is a dialog on /crews, and
+ * ?new=agent is the only deep link into it
+ * (components/features/crews/crews-subbar.tsx:47-63).
+ *
+ * The crew does not survive the trip, deliberately. That handler opens the
+ * dialog without pre-selecting a crew (only the toolbar button does that), and
+ * the pre-selection it would take is a crew *slug* — this component holds an
+ * id. Putting the id in ?crew= would hand use-crews-selection a value it
+ * matches against slugs, which reads as "no such crew" and clears itself. The
+ * dialog lists the crews; one extra click beats a link that lies.
+ */
+const CREATE_AGENT_HREF = "/crews?new=agent"
+
+export function CrewAgents({ agents, crewId: _crewId, canCreate }: CrewAgentsProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-default font-semibold">Agents</h2>
         {canCreate && agents.length > 0 && (
           <Button size="sm" asChild>
-            <Link href={`/crews/agents/new?crew_id=${crewId}`}>New Agent</Link>
+            <Link href={CREATE_AGENT_HREF}>New Agent</Link>
           </Button>
         )}
       </div>
@@ -46,7 +69,7 @@ export function CrewAgents({ agents, crewId, canCreate }: CrewAgentsProps) {
         >
           {canCreate && (
             <Button className="mt-4" size="sm" asChild>
-              <Link href={`/crews/agents/new?crew_id=${crewId}`}>
+              <Link href={CREATE_AGENT_HREF}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Agent
               </Link>

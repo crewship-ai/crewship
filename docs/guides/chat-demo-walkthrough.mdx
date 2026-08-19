@@ -1,0 +1,717 @@
+---
+title: "Chat demo walkthrough"
+description: "Ten minutes from a seeded install to having seen every part of the chat surface work — and four of them refuse, on purpose."
+icon: "play"
+stability: experimental
+tag: Experimental
+---
+
+# Chat demo walkthrough
+
+This is a script, not a reference. It takes a seeded install from "the chat page
+exists" to "I have seen the tree, both kinds of chip, a questionnaire, an
+attachment, ⌘K and the CLI half — and I have seen four of them refuse". Each
+step leaves behind what the next one needs, so run it in order the first time.
+
+A demo that only shows the happy path teaches nothing about the product, so the
+refusals are a step rather than a footnote.
+
+The reference pages behind each step are [Chat & Sessions](/guides/chat-sessions),
+[Ask forms](/guides/ask-forms), [Conversation Search](/guides/conversation-search)
+and [Chat Surface Limits](/guides/chat-surface-limits). This page assumes none
+of them.
+
+## The running order
+
+| # | Step | Where | Roughly |
+|---|---|---|---|
+| 0 | Check what the seed gave you | CLI | 1 min |
+| 1 | `/chat` — the tree, the agent filter, a thread that names itself | Browser | 2 min |
+| 2 | The two kinds of chip | Browser | 1 min |
+| 3 | The questionnaire, end to end | Browser | 2 min |
+| 4 | An attachment, and what the agent is told about it | Browser | 2 min |
+| 5 | ⌘K finds a phrase from step 1 | Browser | 30 s |
+| 6 | The same surface without a browser | CLI | 1 min |
+| 7 | Four refusals, on purpose | Both | 2 min |
+
+## Before you start
+
+State these to your audience. Three of them are the reason a demo falls over.
+
+**A seeded install, and a login.** [`crewship seed`](/cli/seed) prints the
+account it creates. It makes seven demo agents across four crews — comfortably
+under the twelve-agent fan-out cap, so nothing in this walkthrough disappears
+from the tree. On a workspace with more than twelve agents, read
+[the thirteenth agent](/guides/chat-surface-limits#the-thirteenth-agent)
+first: agents past the cap show a thread count of `0` whether or not they have
+history, and this walkthrough would be demonstrating that instead.
+
+**The CLI, pointed at the same server.** Nothing defaults to it:
+
+```bash
+export CREWSHIP_SERVER=http://localhost:8080
+crewship whoami
+```
+
+**A model credential, but only for two moments.** Steps 1 and 5 want the agent
+to actually reply — step 1 so the thread has a second turn, step 5 so there is
+something to find. Everything else here runs without a model: chips, the form
+sheet, the rendered preview, the upload, the provenance line and every CLI
+command are client-and-server work.
+
+**An agent with a crew, and a writable output tree.** An attachment lands in
+`/output/<agent-slug>/attachments/…`, so the agent must have a `crew_id` — an
+agent with none answers `404 Agent not found` on upload, not a friendlier error.
+It does **not** need a running crew. The server writes the bytes host-side
+first, and only replays the write through the crew container when the host write
+comes back with a permission error — which is what happens once a crew has been
+provisioned and chowned its trees to uid 1001. So a never-provisioned crew
+uploads fine, and a provisioned-then-stopped crew answers `409` with the remedy
+in the message. Know which of the two you are standing on before you promise
+either.
+
+**A form configured on the agent.** The questionnaire step has nothing to show
+until one exists. Step 0 checks.
+
+## Step 0 — Check what the seed gave you
+
+<Steps>
+
+<Step title="Read the agent">
+
+```bash
+crewship agent get casey
+```
+
+You are looking for two things near the bottom:
+
+```text
+Suggested Prompts   Review the diff on my branch and list findings as file, line, severity, fix.
+                    Write table-driven tests for the code I'm about to paste, edge cases first.
+                    These tests failed — which are real regressions and which are flakes?
+Ask Forms           Report a bug (bug-report, 5 fields)
+```
+
+<Note>
+The demo seed grew these in parallel with this page. If `crewship agent get
+casey` shows neither, your install predates that work — the rest of the
+walkthrough still runs, but configure them yourself first with the two commands
+below. Everything after step 0 is written against the seeded `casey` /
+`bug-report` pair.
+</Note>
+
+</Step>
+
+<Step title="If they are absent, set them yourself">
+
+This is also the shortest demo of how they are configured. Both columns ride the
+ordinary agent PATCH — there is no prompts endpoint and no forms endpoint.
+
+```bash
+crewship agent update casey --suggested-prompts "$(cat <<'EOF'
+Review the diff on my branch and list findings as file, line, severity, fix.
+Write table-driven tests for the code I'm about to paste, edge cases first.
+These tests failed — which are real regressions and which are flakes?
+EOF
+)"
+
+crewship agent update casey --ask-forms @cmd/crewship/seeddata/askforms/casey.json
+```
+
+Suggested prompts are one question per line, at most 8 lines of at most 120
+characters. Ask forms are a JSON array — at most 4 forms of at most 6 fields —
+and in practice always `@a-file.json`, because a form with five fields and a
+template is not something anyone types on a command line.
+
+</Step>
+
+<Step title="Note who did not get any">
+
+`riley` deliberately has neither. Keep the tab open — the contrast is step 2.
+
+</Step>
+
+</Steps>
+
+## Step 1 — `/chat` is a surface, not a drawer
+
+Open `/chat`. This is the index: one left column, recent threads across every
+agent on the right, the agent roster beneath them. It holds no WebSocket —
+picking a thread is what opens a live connection, on the page below.
+
+<Steps>
+
+<Step title="The tree">
+
+The left column is the same component on `/chat` and on `/chat/<agent>`, built
+out of the same sidebar kit `/routines` and `/issues` use. Search on top, status
+facets under it, agents under that, and each agent's threads as its own
+children — not as a folder you have to open first.
+
+</Step>
+
+<Step title="The agent filter">
+
+**Click an agent's row.** The other agents animate away and that one unfolds.
+Click it again and they come back.
+
+Say what did *not* happen: no navigation, no URL write, no refetch, no page
+transition. Clicking an agent used to be a route change, and the whole dashboard
+chrome tore down and rebuilt every time somebody looked at a different agent.
+Nobody can feel a `useState`; everybody feels a page transition.
+
+The chevron is separate — it opens and closes the branch and does nothing else,
+and so do ← / → on the row.
+
+Two things reach past the filter on purpose: the search box (a search box that
+cannot see six of seven agents is a lie) and the status facets, which count what
+the narrowed list can show and name whose they are in the section header, so the
+number never changes meaning in silence.
+
+</Step>
+
+<Step title="A thread that names itself">
+
+Narrow the tree to `casey` and click **Start a conversation** — the row a
+filtered agent with no threads shows. It opens `/chat/casey` and posts nothing;
+arriving is not sending.
+
+Type a real sentence and send it. Something you will search for in step 5:
+
+```text
+The staging deploy failed on the pipeline worker again last night
+```
+
+Watch the sidebar. The thread appears, and its name is the first message cut to
+**60 characters at a word boundary**, with an ellipsis only if something was
+actually cut. `chats.title` had been in the schema since the first migration
+with nothing writing it, so every thread in every list used to read "Untitled
+session" — which makes a list of conversations useless the moment there is more
+than one.
+
+Three properties worth saying out loud:
+
+- **It fires once.** Rename a thread yourself and nothing overwrites it — not
+  the next message, not a reload.
+- **It never blocks the send.** The message goes first; the title follows as a
+  separate request. If that request fails, nothing is reported and the session
+  stays untitled, which is where it already was.
+- **A message that yields nothing usable leaves the thread untitled.** `???` is
+  not a name, and a thread called `…` is worse than one with no name.
+
+Copy the URL now. The session id is the `?session=` parameter, and step 6 needs
+it.
+
+</Step>
+
+</Steps>
+
+## Step 2 — The two kinds of chip
+
+Chips render under an **empty** conversation, so open a new session on `casey`
+(**New session** in the header). After the first turn they come back as
+follow-ups under an assistant reply, three at a time.
+
+<Steps>
+
+<Step title="Show the fallback first">
+
+Open `/chat/riley` in another tab. Four chips: *Help me get started · What can
+you do? · Show me your skills · Run a quick task*.
+
+That is the built-in role pack, and it is what every unconfigured agent has
+always shown. Ten seconds on it is worth it, because it is what the next tab
+replaces.
+
+</Step>
+
+<Step title="Then the authored ones">
+
+Back on `casey`: three questions somebody wrote for this agent's actual job, and
+one chip that is not a question at all.
+
+</Step>
+
+<Step title="The rule the rail exists to enforce">
+
+> A chip that opens something must not look like a chip that sends something.
+
+A question chip sends its text the instant it is clicked. A form chip opens a
+sheet and sends nothing. Somebody who taps **Report a bug** expecting a form and
+finds a message already on its way to the agent has been lied to — and it is not
+recoverable, because the message is gone.
+
+So the form chip is marked four ways, and none of them is a colour:
+
+| Mark | What it is |
+|---|---|
+| A clipboard glyph | The visible difference |
+| A trailing `…` | The convention for "this opens something first" |
+| `aria-haspopup="dialog"` | The assistive-technology contract |
+| An accessible name reading *"Report a bug — opens a form"* | The difference said in words |
+
+Forms lead the rail: somebody sat down and authored them for this agent, and a
+static question is the cheaper thing. The rail shows six chips under an empty
+conversation and three as follow-ups; anything past that collapses into `+N`,
+which opens the full catalogue **upward**, out of the rail — the rail sits
+directly above the composer, and a panel opening downward would cover the input
+it is offering to fill.
+
+</Step>
+
+</Steps>
+
+## Step 3 — The questionnaire, end to end
+
+<Steps>
+
+<Step title="Open it">
+
+Click **Report a bug**. A sheet grows above the composer, inside the same
+column, capped at 560px, with the conversation still visible above it.
+
+It is deliberately not a centred modal, for two concrete reasons: a centred
+modal over a chat is a drop target sitting on top of the thing you were dragging
+from, and on a phone it hides the keyboard-adjacent composer, which is the one
+piece of UI a phone user needs to stay oriented. Below 900px the same component
+becomes a 90vh bottom sheet instead.
+
+Escape closes it and sends nothing. So does the ✕, so does **Cancel**, and on
+mobile so does tapping the scrim.
+
+</Step>
+
+<Step title="Fill it">
+
+- **What went wrong** — `The credential picker shows no brands on a phone`
+- **Steps to reproduce** — three numbered lines
+- **Severity** — leave it; the field carries a default and the sheet seeds it
+- **First seen** — leave it empty on purpose
+
+</Step>
+
+<Step title="Read the preview">
+
+Click **Preview message**. This is the whole message, verbatim — the rendered
+template plus the attachment block the composer will append, not just the half
+the sheet owns.
+
+Point at what is missing: there is no `First seen:` line. An unanswered optional
+field takes **its whole line with it, label included**. That is the only rule
+here you cannot read off the template.
+
+Submitting sends an ordinary user message, so the person sending it is entitled
+to read it first — and an author writing a template meets a broken one here,
+while writing it, instead of in somebody's transcript.
+
+</Step>
+
+<Step title="Answer the photo field, and send">
+
+**Screenshot or recording** is a `photo` field with its own upload control. Drop
+any small image on it.
+
+Note what the composer does while that control is on screen: it hides its own
+chip list. There is one attachment list per session, and two views of it read as
+two attachments — so the sheet wins, because that is where the question is. The
+chip under the field *is* the field's answer, and removing it there is editing
+that answer.
+
+Press **Send**.
+
+</Step>
+
+<Step title="Read the provenance line">
+
+Above your sent message: a clipboard glyph and **via Report a bug**.
+
+Now reload the page. The badge is still there. That is the part worth demoing
+rather than describing.
+
+Provenance used to be an in-memory map keyed by the rendered message text, and
+text is not an identity: two identical submissions collided, and a reload lost
+every entry. What ships now is a submission envelope carried as metadata **with**
+the message — the form id, its version, the answers, and which upload answered
+which field — minted at Send, persisted by the server, and read back off the
+turn.
+
+Two deliberate holes, worth naming before someone finds them: **Regenerate**
+re-sends the text without the envelope, because a submission id is minted once
+per Send and re-sending would record a submission the user never made; and
+**edit-and-resend strips it**, because an envelope claiming "this is the text the
+form rendered" stops being true the moment the text is edited by hand.
+
+</Step>
+
+</Steps>
+
+## Step 4 — An attachment, and what the agent is told about it
+
+Uploading puts bytes in the container. It does not tell the agent they are
+there. That was the bug, and the fix is the thing to show.
+
+<Steps>
+
+<Step title="Attach from the composer">
+
+Drag a file onto the composer, or use the paperclip. Type a caption:
+
+```text
+what do you make of this?
+```
+
+Send it, and read your own turn in the transcript:
+
+```text
+what do you make of this?
+
+I've attached a file to this message. The path is relative to your working directory:
+
+- attachments/cht_xyz789/att_9f2a1c/invoice.pdf
+```
+
+The transcript shows that block because it is exactly what the agent received.
+Four decisions are visible in five lines:
+
+- **It is an ordinary user message.** No new envelope, no adapter-specific
+  framing, nothing the agent has to be trained for — which is why it works
+  across every CLI adapter.
+- **First person, past tense.** Anything imperative — "Read the following
+  file", `<attachments>…` — reads as an injected system directive, and an
+  adapter hardened against exactly that shape is entitled to ignore it.
+- **The relative path, not the absolute one.** The agent's working directory
+  *is* `/output/<agent-slug>/`, so `attachments/<chat>/<id>/<file>` opens as-is,
+  and the crew slug stays out of the user's own transcript.
+- **One path per line, unquoted.** Spaces, quotes and brackets in filenames are
+  common; the line break is the only delimiter none of them can forge.
+
+Then compare with step 3: the image you dropped into the form's **Screenshot**
+field is **not** in this block. The rendered template already named it under the
+field that asked, and a file announced twice reads as two files.
+
+</Step>
+
+<Step title="Send a photo with no caption">
+
+Clear the text, attach only a file, press Send. It goes. An attachment is
+content — a photo needs no caption, and requiring text was how a picture sent
+from a phone used to disappear without a trace.
+
+If that was a brand-new session, look at its name: a message that is only an
+attachment is named after the **file**.
+
+</Step>
+
+<Step title="The camera">
+
+Narrow the window below **900px**, or open the page on a phone. The composer
+switches to its mobile branch and a camera button appears beside the paperclip.
+
+`capture="environment"` next to `accept="image/*"` is what makes a phone open the
+rear camera instead of the document picker. Without it, the only route to a
+photo is camera app → gallery → file browser: three screens for the most obvious
+thing anyone does from a phone. The mobile composer used to be a bare input with
+no attachments at all, so the one device that actually has a camera was the one
+surface that could not send a picture.
+
+The upload is not a second code path. Camera, paperclip, drop and paste all run
+the same uploader, with the same size guard, the same failure toast and the same
+Retry.
+
+</Step>
+
+</Steps>
+
+## Step 5 — ⌘K finds a phrase, not a name
+
+Go back to `/chat` — the index, which mounts no chat panel — and press **⌘K**
+(Ctrl+K elsewhere). Type a phrase from step 1:
+
+```text
+pipeline worker
+```
+
+<Note>
+This works from inside a conversation too. It did not use to: `/chat/<agent>`
+mounts the chat's own command palette, that palette bound `⌘K` as well, and
+neither listener stopped the other — so one press opened both dialogs stacked.
+The chat palette is `⌘/` now (or the **Commands** button in the chat header),
+and `⌘K` means the same thing on every route.
+</Note>
+
+A **Conversations** group appears: the matched snippet, the agent that said it,
+and how long ago. Selecting a row opens
+`/chat/<agent-slug>?session=<chat-id>` — the same deep link a chat notification
+uses, which is why the session stays a query parameter and never becomes a path
+segment.
+
+What makes this group different from every other group in the palette:
+
+- **It asks the server on every keystroke** — debounced, and each keystroke
+  cancels the request before it. Every other group is fetched once when the
+  palette opens and filtered in the browser. Messages are the largest thing in a
+  workspace and a match is a phrase rather than a name.
+- **Two characters is the minimum** before anything is sent.
+- **A failure renders nothing at all.** Nobody explicitly ran this search, so it
+  never raises an error: if the search mirror is not configured on the
+  deployment, the group simply does not appear.
+- **The search is from-now-on.** Only turns recorded after the mirror was
+  configured are indexed, and there is no backfill. Searching for a phrase you
+  said four minutes ago in step 1 is the demo that always works.
+
+Workspace scope spans at most 400 agents, taking the most recently created ones,
+and nothing in the response says the scope was cut. If you are demoing anywhere
+near that number, say so rather than letting it surprise somebody later.
+
+## Step 6 — The same surface, without a browser
+
+Three commands. The point of each one is different.
+
+<Steps>
+
+<Step title="Render a form with no browser">
+
+```bash
+crewship agent ask-preview casey bug-report \
+  --var summary="The credential picker shows no brands on a phone" \
+  --var steps="1. Open /credentials on a phone" \
+  --var severity=Major \
+  --var screenshot=IMG_4821.heic \
+  --chat-id chat_7f3a
+```
+
+```text
+Please triage this bug.
+
+What went wrong: The credential picker shows no brands on a phone
+
+Steps to reproduce:
+1. Open /credentials on a phone
+
+Severity: Major
+Screenshot: attachments/chat_7f3a/IMG_4821.heic
+
+Give me a verdict (real bug / not a bug / needs more information), the area of the code you would look in first, and the smallest test that would have caught it.
+```
+
+This is the inverse of the house rule that every endpoint gets a CLI command:
+ask forms deliberately have **no** endpoint of their own. So this is not a
+wrapper — it is the only way to answer the question an author actually has,
+which is *"what does this template produce?"*. It renders through the same
+package the server uses, pinned to the browser's renderer by one golden fixture,
+so what it prints is what the composer would send.
+
+No `--var first_seen=` was given, so that line is gone — the drop-the-whole-line
+rule from step 3, seen from outside. And note one honest difference from the
+sheet: the sheet seeds a field's `default`, the CLI does not. `--var
+severity=Major` is here because the CLI answers only what you tell it.
+
+Output is plain text on stdout with no framing, so it pipes into a file, a diff
+or a review comment.
+
+</Step>
+
+<Step title="Rename a thread from the terminal">
+
+Take the session id out of the URL you copied in step 1, and leave that browser
+tab open while you run this:
+
+```bash
+crewship chat rename cht_abc123 "Staging deploy postmortem"
+```
+
+The sidebar row repaints. The new title is broadcast on the workspace channel as
+`chat_renamed`, so an open session list in another tab follows without polling.
+
+And the row does **not** move. A rename is not activity, so the server does not
+bump `last_activity_at` and the client splices only the title into the row it
+already holds — fixing a name never shoves a thread to the top of a list ordered
+by recency.
+
+The title in the success message is the **stored** one, so the server's
+normalisation is visible: folded onto one line, control and invisible formatting
+characters stripped, trimmed.
+
+</Step>
+
+<Step title="List what is attached">
+
+```bash
+crewship chat attachments list cht_abc123
+```
+
+```text
+ID                  FILENAME       SIZE    SHA256        AGENT PATH                                                          CREATED
+cml9x2k4p0001qz8f   evidence.pdf   184320  9f2a1c7d4b30  /output/casey/attachments/cht_abc123/cml9x2k4p0001qz8f/evidence.pdf  2026-08-13 09:41
+```
+
+Attach the same-named file twice and the reason for the `<attachment-id>` segment
+demonstrates itself: two attachments, two checksums, two paths, neither replacing
+the other. The filename used to be the last segment and the second upload
+overwrote the first.
+
+The `ID` column is what `crewship chat attachments delete` takes, and that delete
+is the only way to reclaim a chat attachment's bytes short of deleting the whole
+chat — chat blobs are not content-addressed, because the path is what the agent
+is told to open, so they sit outside the background reclaim sweep.
+
+`--agent` skips the lookup. Without it the CLI walks every visible agent asking
+for its chats until it finds the id.
+
+</Step>
+
+</Steps>
+
+## Step 7 — Four refusals, on purpose
+
+Each is one action, and each shows a different standard.
+
+<Steps>
+
+<Step title="A form that will not submit">
+
+Open **Report a bug**, clear **What went wrong**, press Send:
+
+```text
+What went wrong is required.
+```
+
+Now paste 121 characters into it and press Send again:
+
+```text
+What went wrong must be at most 120 characters.
+```
+
+Then drop four images on the **Screenshot** field:
+
+```text
+Screenshot or recording takes at most 3 files.
+```
+
+Every refusal names the field by its label. "Something is missing" across five
+inputs is not a message. The rules live in one module per language, pinned to
+each other by a shared fixture, so the sheet and the CLI refuse the same answers
+with the **same words**:
+
+```bash
+crewship agent ask-preview casey bug-report \
+  --var summary="$(python3 -c 'print("x" * 121)')" \
+  --var steps="1. Open it" --var severity=Major
+# Error: these answers would be refused in the chat:
+#   What went wrong must be at most 120 characters.
+```
+
+A preview whose whole promise is "this is what gets sent" must not print a
+message the console would have refused.
+
+The sheet surfaces one problem at a time; the CLI prints them all.
+
+</Step>
+
+<Step title="A refused upload">
+
+Make something over the cap and try to attach it in the browser:
+
+```bash
+head -c 27000000 /dev/urandom > big.bin   # the cap is 25 MiB = 26,214,400 bytes
+```
+
+The composer refuses it before anything is uploaded, with a toast reading
+`big.bin exceeds 25 MB` — and **no chip appears**, because nothing was attached.
+The same bound is enforced again server-side, which is what the CLI meets:
+
+```bash
+crewship chat attach cht_abc123 ./big.bin
+# Error: API error (400): invalid multipart form or file too large (max 25MB)
+```
+
+One bound, enforced twice, and both say so.
+
+Contrast it with an upload that fails *after* reaching the network — a
+provisioned-but-stopped crew answers `409` with the remedy in the message. That
+one leaves an error chip on screen with a **Retry**, keeps the bytes in the
+browser so Retry has something to send, and refuses the Send while it is there:
+a composer that visibly holds a file and does nothing when you press Send was
+the original defect. It needs a stopped crew to produce and is not scripted
+here.
+
+</Step>
+
+<Step title="A title the server will not store">
+
+```bash
+crewship chat rename cht_abc123 "$(python3 -c 'print("x" * 201)')"
+# Error: API error (400): title is too long (max 200 characters)
+```
+
+A refusal, never a silent truncation. Put it beside the auto-derived title from
+step 1, which *is* cut — at 60 characters, at a word boundary, with the ellipsis
+visible in the result. One is a value you chose and the server will not quietly
+change; the other is a label the product wrote for you, and it shows you what it
+did.
+
+</Step>
+
+<Step title="A list the server will not take">
+
+```bash
+crewship agent update casey --suggested-prompts "$(printf 'q\n%.0s' {1..9})"
+# Error: API error (400): at most 8 prompts are allowed (got 9)
+```
+
+The refusal names the offending item by position, and **nothing is written** —
+`casey` keeps the three questions from step 0. That is the standard the
+suggested-prompt and ask-form caps all meet: refuse loudly, name what was wrong,
+write nothing.
+
+</Step>
+
+</Steps>
+
+## What this walkthrough leaves out, and why
+
+Say these rather than letting somebody find them.
+
+**There is no interactive approval card in chat.** Approvals are decided on
+`/approvals`. `AskUserQuestion` renders deliberately inert in the transcript, and
+a test pins that it must not look clickable. Two event names are reserved for an
+in-chat decision card so that whoever builds it emits the agreed one — the card
+itself does not exist.
+
+**The chip and form funnel is measured, and the measurement goes nowhere.** The
+event vocabulary ships with a bounded in-memory buffer and no network transport
+at all — no fetch, no beacon, no socket — because `PRIVACY.md` promises that no
+usage analytics leave the install. Nothing in the console or the CLI reads that
+buffer, so there is nothing to put on a screen. See
+[Chat interaction events](/guides/chat-telemetry) for the vocabulary and the
+reasoning; two of its session events are declared and not yet emitted, because
+their call sites live in files another workstream owns.
+
+**The one silent cap has no screen affordance.** Past twelve agents, the
+thirteenth agent's threads are never fetched and its row reads `0` —
+indistinguishable from an agent nobody has talked to. Do not demo on such a
+workspace without saying so first. [Chat Surface Limits](/guides/chat-surface-limits)
+is the honest list of every bound and whether anything tells you.
+
+**Two render bounds truncate silently.** One substituted answer over 2000
+characters, and a finished form message over 32000, are both cut with no
+warning. A valid form cannot reach the message bound, so in practice this is a
+very long `textarea` answer — `ask-preview` shows the truncated result exactly,
+which is the only place an author can see it before a user does.
+
+**Suggested prompts and ask forms are not on the create path.**
+`POST /api/v1/agents` ignores both keys and returns `201` — the columns are left
+null. Everything that sets them, including the seed and `crewship apply`, does it
+with a follow-up PATCH.
+
+## See also
+
+- [Chat & Sessions](/guides/chat-sessions) — the surface, the URL state, the right panel
+- [Ask forms](/guides/ask-forms) — field types, constraints, and where each rule is enforced
+- [Chat Surface Limits](/guides/chat-surface-limits) — every bound, and whether anything tells you
+- [Conversation Search](/guides/conversation-search) — scopes, isolation and the 400-agent bound
+- [Chat interaction events](/guides/chat-telemetry) — what is measured and where it stops
+- [`crewship seed`](/cli/seed) — what a fresh workspace starts with
+- [`crewship chat`](/cli/chat) — rename, attach, attachments list, steer
+- [`crewship agent`](/cli/agent) — `--suggested-prompts`, `--ask-forms`, `ask-preview`
+- [`crewship conversation`](/cli/conversation) — the CLI half of ⌘K

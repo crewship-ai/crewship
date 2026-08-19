@@ -734,8 +734,14 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/files/download", authed(wsCtx(http.HandlerFunc(proxy.AgentFileDownload))))
 	r.authedMut("PUT", "/api/v1/agents/{agentId}/files/save", roleCreate, proxy.AgentFileSave)
 	// Multipart upload tied to a (agent, chat) pair. Lands at
-	// /output/<slug>/attachments/<chatId>/<filename> on the agent side.
+	// /output/<slug>/attachments/<chatId>/<attachmentId>/<filename> on the
+	// agent side — one upload, one identity, one location.
 	r.authedMut("POST", "/api/v1/agents/{agentId}/chats/{chatId}/attachments", roleCreate, proxy.AgentChatAttachment)
+	// The other half of that lifecycle. Without these the bytes could be
+	// created and never enumerated or reclaimed: chat blobs sit outside the
+	// content-addressed sweep by design, so nothing else can collect them.
+	r.mux.Handle("GET /api/v1/agents/{agentId}/chats/{chatId}/attachments", authed(wsCtx(http.HandlerFunc(proxy.ListAgentChatAttachments))))
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}", roleCreate, proxy.DeleteAgentChatAttachment)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files", authed(wsCtx(http.HandlerFunc(proxy.CrewFiles))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files/download", authed(wsCtx(http.HandlerFunc(proxy.CrewFileDownload))))
 	r.authedMut("PUT", "/api/v1/crews/{crewId}/files/save", roleCreate, proxy.CrewFileSave)
@@ -797,6 +803,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// router_internal.go using the same instance.
 	queries := NewQueryHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
 	queries.SetJournal(r.Journal())
+	// Exposed for the boot path's escalation expiry sweeper — same instance,
+	// so an expiry it writes wakes the waiters this handler registered.
+	r.queryHandler = queries
 	// #810: same builder routing for the peer-query path.
 	if dispatchBaseURL := r.internalLoopbackURL; dispatchBaseURL != "" || r.internalBaseURL != "" {
 		if dispatchBaseURL == "" {
@@ -816,12 +825,24 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/standup", authed(wsCtx(http.HandlerFunc(queries.Standup))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/escalations", authed(wsCtx(http.HandlerFunc(queries.ListEscalations))))
 	r.authedMut("PATCH", "/api/v1/escalations/{escalationId}/resolve", roleCreate, queries.ResolveEscalation)
+	// Withdraw a question instead of deciding it. Same MANAGER+ gate as
+	// resolve — closing out a blocking request is the same class of act
+	// whichever way it is closed — but a distinct terminal state, because
+	// "nobody needs this answered any more" is not the same message to an
+	// agent as "no".
+	r.authedMut("POST", "/api/v1/escalations/{escalationId}/cancel", roleCreate, queries.CancelEscalation)
 	// Hard purge of a crew's escalations (admin-only) — teardown primitive for
 	// seed --nuke; escalations have no workspace FK, so a crew delete orphans them.
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}/escalations", roleManage, queries.PurgeEscalations)
 
 	// Workspace-wide escalation count (public, authenticated)
 	r.mux.Handle("GET /api/v1/escalations/pending-count", authed(wsCtx(http.HandlerFunc(queries.PendingEscalationCount))))
+	// Expire every past-deadline question in this workspace, now. The
+	// background sweeper and the read paths already do this; the endpoint
+	// makes the mechanism operable and observable from the CLI instead of only
+	// inferable from a ticker nobody can see. ADMIN+ — it writes terminal
+	// states.
+	r.authedMut("POST", "/api/v1/escalations/sweep-expired", roleManage, queries.SweepExpiredEscalations)
 
 	// Cross-session conversation search (public, authenticated). Backed by
 	// the conversation_messages FTS5 mirror (v111). The handler verifies

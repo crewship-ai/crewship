@@ -1,0 +1,75 @@
+-- An escalation is a question an agent asked a human. Until this migration
+-- there was no way for that question to stop being open.
+--
+-- ── The bug this closes ────────────────────────────────────────────────────
+--
+-- internal/sidecar/query.go gives up on the long poll after 300 s and the
+-- agent proceeds WITHOUT an answer. Nothing told the server that happened, so
+-- the row stayed 'PENDING' forever: `escalation list` and
+-- `escalations/pending-count` accumulated questions nobody would ever answer,
+-- and an operator answering one three hours later delivered the answer to an
+-- agent that had already moved on. The client's give-up and the row's state
+-- disagreed, silently, in every timed-out escalation the system ever raised.
+--
+-- ── The vocabulary, and what was NOT adopted ───────────────────────────────
+--
+-- docs/prd/CHAT-SURFACE-CODE-AUDIT-2026-08-13.md §4.2 proposes
+-- PENDING → ANSWERED | REJECTED | EXPIRED | CANCELLED. What the table and the
+-- handlers actually use today is:
+--
+--     status ∈ {PENDING, RESOLVED}
+--     action ∈ {approve, reject, redirect}    (v26)
+--     resolved_by ∈ {user, system}            (v16)
+--
+-- So two of the four proposed names already exist under other spellings:
+-- ANSWERED is RESOLVED, and REJECTED is RESOLVED + action='reject'. Renaming
+-- RESOLVED to ANSWERED would rewrite every historical row, every WS event name
+-- (`escalation_resolved`), the inbox projection, the CLI, the console and the
+-- sidecar's wire contract — to say the same thing differently. Promoting
+-- REJECTED to a status would give the system two places that record whether a
+-- request was refused, which is the fifth spelling of "done" this migration
+-- exists to avoid.
+--
+-- What genuinely did not exist is a terminal state for a question nobody
+-- answered, and one for a question that was withdrawn. So:
+--
+--     PENDING → RESOLVED    a human decided; `action` says how   (unchanged)
+--             → EXPIRED     the deadline passed, no human decided     (new)
+--             → CANCELLED   a human withdrew the question            (new)
+--
+-- Terminal states are terminal; every transition out of one is refused (409).
+-- No CHECK constraint is added: `status` has never had one, SQLite cannot
+-- ALTER a CHECK, and the enforcement lives where the transitions do
+-- (internal/api/escalation_lifecycle.go) rather than in two places that drift.
+--
+-- ── deadline_at ────────────────────────────────────────────────────────────
+--
+-- RFC3339, matching every other timestamp on this table. Written at raise time
+-- as created_at + the server's escalation TTL, and RETURNED to the sidecar so
+-- the agent's wait is bounded by the server's clock rather than by a constant
+-- that happens to match. The server is authoritative: expiry is decided here,
+-- and the agent is told what was decided.
+--
+-- NULL means no deadline, and NULL is what every pre-existing row keeps. A
+-- backfill would retro-expire questions raised before the concept existed —
+-- rows a human may still be intending to answer — so old rows stay PENDING
+-- until somebody resolves or cancels them, which is what they have always
+-- done. Rows raised from here on always carry one.
+--
+-- The index is on (status, deadline_at) in that order because the sweeper's
+-- predicate is `status = 'PENDING' AND deadline_at <= ?`: the equality column
+-- first, then the range. It is a partial-shaped query over a table where all
+-- but a handful of rows are terminal, so the leading equality is what keeps
+-- the scan proportional to what is actually open rather than to history.
+
+ALTER TABLE escalations ADD COLUMN deadline_at TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_escalation_deadline ON escalations(status, deadline_at);
+
+-- …which makes the older single-column index dead weight. idx_escalation_status
+-- (status) is a strict prefix of the one above, so the planner can never prefer
+-- it, while every insert and every status transition still pays to maintain it.
+-- TestRedundantIndexPolicy in internal/database exists to catch exactly this and
+-- it caught this migration; dropping the covered index here is the answer it
+-- asks for, not a workaround for it.
+DROP INDEX IF EXISTS idx_escalation_status;

@@ -458,8 +458,18 @@ func TestCovWPMAttachmentHappyPath201(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), `"report.pdf"`) {
 		t.Errorf("response = %q, want filename echoed", rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "/output/ag-slug/attachments/ch/report.pdf") {
-		t.Errorf("response = %q, want agent_path", rr.Body.String())
+	// The agent path is /output/<slug>/attachments/<chatId>/<attachmentId>/<file>.
+	// The id segment is not pinned literally — it is a generated CUID — but its
+	// presence is: it is what makes one upload's location unique, so a path
+	// without it is the pre-P0.2 shape where a filename could be overwritten.
+	agentPath := "/output/ag-slug/attachments/ch/"
+	if !strings.Contains(rr.Body.String(), agentPath) ||
+		!strings.Contains(rr.Body.String(), "/report.pdf") {
+		t.Errorf("response = %q, want agent_path under %s ending in /report.pdf", rr.Body.String(), agentPath)
+	}
+	if strings.Contains(rr.Body.String(), agentPath+`report.pdf"`) {
+		t.Errorf("response = %q has no attachment-id segment — the filename is the storage identity again",
+			rr.Body.String())
 	}
 }
 

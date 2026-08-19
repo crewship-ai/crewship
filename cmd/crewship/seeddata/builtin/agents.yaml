@@ -11,6 +11,14 @@ agents:
       timeout_seconds: 3600
       memory_enabled: true
       prompt_slug: alex
+      # The questions a lead types every morning, not a menu of capabilities.
+      # Each one is a delegation or a status question — the two things this
+      # agent's system prompt says it is for.
+      suggested_prompts: |
+        Break the issue I'm about to paste into subtasks and say who takes each one.
+        What is blocking Sam and Robin right now, and what should I clear first?
+        Plan this change: the files to touch, the order to do them in, what to test.
+        Summarise what the engineering crew shipped yesterday, one line per change.
     - name: Sam
       slug: sam
       crew_slug: engineering
@@ -59,6 +67,17 @@ agents:
       timeout_seconds: 2400
       memory_enabled: true
       prompt_slug: casey
+      # Three questions, because Casey also carries the ask form below and the
+      # composer's rail holds six chips in total (askforms PRD §5.1).
+      suggested_prompts: |
+        Review the diff on my branch and list findings as file, line, severity, fix.
+        Write table-driven tests for the code I'm about to paste, edge cases first.
+        These tests failed — which are real regressions and which are flakes?
+      # The one seeded questionnaire. It belongs to Casey because triaging an
+      # input into a structured finding is literally this agent's job, and
+      # because a bug report is the question that cannot be asked as one line:
+      # it needs steps, a severity and a picture before it is answerable.
+      ask_forms_slug: casey
     - name: Morgan
       slug: morgan
       crew_slug: ops
@@ -71,6 +90,12 @@ agents:
       timeout_seconds: 3600
       memory_enabled: true
       prompt_slug: morgan
+      # An incident commander's four: triage, blast radius, rollback, overnight.
+      suggested_prompts: |
+        Triage the alert I'm about to paste: severity, blast radius, first safe action.
+        What changed in the last deploy, and what should I watch for the next hour?
+        Walk me through rolling this release back, and what breaks while I do.
+        Summarise last night's incidents and what is still unresolved.
     - name: Riley
       slug: riley
       crew_slug: ops

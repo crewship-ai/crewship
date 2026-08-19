@@ -13,13 +13,17 @@ import (
 // file actually got served.
 func fakeFS() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":        {Data: []byte("ROOT")},
-		"login.html":        {Data: []byte("LOGIN")},
-		"crews.html":        {Data: []byte("CREWS")},
-		"crews/agents.html": {Data: []byte("CREWS_AGENTS")},
-		"chat/_.html":       {Data: []byte("CHAT_PLACEHOLDER")},
-		"skills/_.html":     {Data: []byte("SKILLS_PLACEHOLDER")},
-		"issues/_.html":     {Data: []byte("ISSUES_PLACEHOLDER")},
+		"index.html": {Data: []byte("ROOT")},
+		"login.html": {Data: []byte("LOGIN")},
+		"crews.html": {Data: []byte("CREWS")},
+		// Nested-exact-path fixture. Deliberately NOT a real route name: it was
+		// `crews/agents.html`, a route the selection-driven redesign deleted, and
+		// a fixture that names a dead page reads as evidence the page is alive
+		// (a link to it was repaired on this branch for exactly that reason).
+		"nested/leaf.html": {Data: []byte("NESTED_LEAF")},
+		"chat/_.html":      {Data: []byte("CHAT_PLACEHOLDER")},
+		"skills/_.html":    {Data: []byte("SKILLS_PLACEHOLDER")},
+		"issues/_.html":    {Data: []byte("ISSUES_PLACEHOLDER")},
 		// Older / directory-style placeholder for parity coverage:
 		"old/_/index.html": {Data: []byte("OLD_DIR_PLACEHOLDER")},
 		"icon.svg":         {Data: []byte("SVG")},
@@ -54,10 +58,35 @@ func TestStaticFileHandler_HtmlExtensionResolution(t *testing.T) {
 
 func TestStaticFileHandler_NestedExactPath(t *testing.T) {
 	h := StaticFileHandler(fakeFS())
-	// /crews/agents → crews/agents.html
-	code, body := get(t, h, "/crews/agents")
-	if code != http.StatusOK || body != "CREWS_AGENTS" {
-		t.Fatalf("/crews/agents → code=%d body=%q; want 200 CREWS_AGENTS", code, body)
+	// /nested/leaf → nested/leaf.html
+	code, body := get(t, h, "/nested/leaf")
+	if code != http.StatusOK || body != "NESTED_LEAF" {
+		t.Fatalf("/nested/leaf → code=%d body=%q; want 200 NESTED_LEAF", code, body)
+	}
+}
+
+// The fixture names in fakeFS are read as a list of routes this app has. They
+// are not one — they are shapes the handler must resolve — and the difference
+// stopped being academic when `crews/agents.html` outlived the route it was
+// named after: the page was deleted in the selection-driven redesign, and the
+// fixture went on quietly asserting it existed until a link pointing at it had
+// to be repaired.
+//
+// So the nested-exact-path fixture is named for its SHAPE. This pins that
+// choice against a future edit that reaches for a familiar-looking route name
+// because it is easier to read.
+func TestStaticFixturesDoNotNameDeletedRoutes(t *testing.T) {
+	deleted := []string{
+		// /crews/agents — no page.tsx, no crews/agents.html in the export.
+		// app/(dashboard)/agents/page.tsx redirects to /crews instead.
+		"crews/agents.html",
+	}
+	fs := fakeFS()
+	for _, name := range deleted {
+		if _, ok := fs[name]; ok {
+			t.Errorf("fakeFS names %q, a route this app deleted — "+
+				"name the fixture for the SHAPE it exercises, not for a page", name)
+		}
 	}
 }
 

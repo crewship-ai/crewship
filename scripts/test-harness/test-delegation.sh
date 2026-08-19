@@ -94,7 +94,12 @@ if cs hire --crew ops --template "$TMPL" --reason "harness: ephemeral hire smoke
 else
   # Most likely gated by crew autonomy → lands as a blocking inbox waitpoint.
   info "hire did not complete outright — checking for an approval gate in the inbox…"
-  if cs inbox list --kind waitpoint --state all 2>/dev/null | grep -qiE 'hire|ephemeral|contractor'; then
+  # Captured first: `grep -q` closes the pipe at its first match and, under
+  # lib.sh's `pipefail`, the writer's SIGPIPE becomes the pipeline's status —
+  # a match that reads as a failure. Same shape that made test-pages.sh report
+  # a registered command as missing once the listing outgrew the pipe buffer.
+  _waitpoints="$(cs inbox list --kind waitpoint --state all 2>/dev/null || true)"
+  if grep -qiE 'hire|ephemeral|contractor' <<<"$_waitpoints"; then
     _pass "gated hire surfaced an approval waitpoint in the inbox (autonomy=guided)"
   else
     skip "ephemeral hire" "hire neither completed nor produced a recognizable waitpoint: $(head -c 160 /tmp/cs-hire.out | tr '\n' ' ')"

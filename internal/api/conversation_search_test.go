@@ -105,11 +105,16 @@ func TestConversationSearchHandler_Errors(t *testing.T) {
 		}
 	})
 
-	t.Run("missing_agent_id", func(t *testing.T) {
+	// A missing agent_id used to be a 400. It is now the workspace scope —
+	// ⌘K searches everything the caller can see and has no agent to name.
+	// The failure it can still produce is a searcher that cannot span
+	// agents (503), never "you forgot a field"; the scope table in
+	// conversation_search_workspace_test.go owns the rest of that contract.
+	t.Run("missing_agent_id_is_workspace_scope_not_400", func(t *testing.T) {
 		h := NewConversationHandler(db, &stubConversationSearcher{})
 		rec := doSearch(t, h, "ws1", `{"query":"x"}`)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want 400", rec.Code)
+		if rec.Code == http.StatusBadRequest {
+			t.Errorf("status = 400; an absent agent_id must mean workspace scope")
 		}
 	})
 

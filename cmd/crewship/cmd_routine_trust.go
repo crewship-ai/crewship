@@ -222,6 +222,16 @@ var routineTrustGrantCmd = &cobra.Command{
 		fmt.Printf("  definition: %s\n", shortID(out.DefinitionHash))
 		fmt.Printf("\nEditing the routine re-arms this gate. Revoke sooner with:\n")
 		fmt.Printf("  crewship routine trust revoke %s %s\n", args[0], out.ID)
+		// The decision was just journaled as approval.trust_granted. Name the
+		// type and print the command, because --type is the ONLY flag that can
+		// select these entries: the emitter sets no crew_id, agent_id,
+		// mission_id or trace_id, so `journal --crew`/`--agent`/`--mission`
+		// all come back empty, and the refs (trust_grant_id and friends) are
+		// not indexed by -q either. Nobody recalls "approval.trust_granted"
+		// three weeks later, so the moment of the decision is the only cheap
+		// place to hand it over.
+		fmt.Printf("\nRecorded in the journal as approval.trust_granted. Read it back with:\n")
+		fmt.Printf("  crewship journal --type approval.trust_granted,approval.trust_revoked\n")
 		return nil
 	},
 }
@@ -254,6 +264,12 @@ var routineTrustRevokeCmd = &cobra.Command{
 			return err
 		}
 		fmt.Printf("Standing grant %s revoked — the gate asks again.\n", args[1])
+		// Same reasoning as the grant path above. A revoke is the entry an
+		// investigation reaches for most often ("it used to auto-approve and
+		// now it does not"), and it is emitted only when the row actually
+		// flipped — so this line marks a withdrawal that really happened.
+		fmt.Printf("\nRecorded in the journal as approval.trust_revoked. Read it back with:\n")
+		fmt.Printf("  crewship journal --type approval.trust_granted,approval.trust_revoked\n")
 		return nil
 	},
 }

@@ -17,8 +17,13 @@ import { cn } from "@/lib/utils"
 import { spring } from "@/lib/motion"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { apiFetch } from "@/lib/api-fetch"
 import { getEditorLanguage } from "../chat-tree-row"
+import {
+  ArtifactContentRefused,
+  readArtifactFile,
+  saveArtifactFile,
+  type ArtifactFile,
+} from "./artifact-file-io"
 
 const FileEditor = dynamic(
   () =>
@@ -49,7 +54,10 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
   const setActive = useArtifactStore((s) => s.setActive)
   const closeTab = useArtifactStore((s) => s.closeTab)
   const pruneToAgent = useArtifactStore((s) => s.pruneToAgent)
-  const [content, setContent] = useState<string | null>(null)
+  // Bytes are held together with the path they came from. Anything the pane
+  // shows or writes is checked against the active tab's path, so a body read
+  // for one file can never be edited — or saved — as another.
+  const [loaded, setLoaded] = useState<ArtifactFile | null>(null)
   const [loading, setLoading] = useState(false)
 
   // Drop tabs that belong to a previously-active agent. Without this,
@@ -66,29 +74,40 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
     [tabs, activeId, agentId],
   )
 
+  // File bytes come from the download route via readArtifactFile, which
+  // refuses any response that isn't a file stream. The pane used to GET the
+  // *listing* route with a `path` query the server ignores, so it rendered a
+  // JSON directory listing as the file — and would save it back over the file.
   useEffect(() => {
     if (!active || !workspaceId) {
-      setContent(null)
+      setLoaded(null)
       setLoading(false)
       return
     }
     const ac = new AbortController()
     setLoading(true)
-    apiFetch(
-      `/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&path=${encodeURIComponent(active.path)}`,
-      { signal: ac.signal },
-    )
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`Failed to load: HTTP ${r.status}`)
-        return r.text()
+    // Drop the previous tab's bytes immediately: nothing may be displayed
+    // under a header/path it did not come from, not even for one frame.
+    setLoaded(null)
+    readArtifactFile({
+      agentId,
+      workspaceId,
+      path: active.path,
+      signal: ac.signal,
+    })
+      .then((file) => {
+        if (!ac.signal.aborted) setLoaded(file)
       })
-      .then((data) => setContent(data))
-      .catch(() => {
+      .catch((err) => {
         if (!ac.signal.aborted) {
           // Distinct from "" (an actually empty file) so a save can't
           // overwrite a real file with empty contents on a load miss.
-          setContent(null)
-          toast.error("Failed to load artifact")
+          setLoaded(null)
+          toast.error(
+            err instanceof ArtifactContentRefused
+              ? "Refused to open artifact: the server did not return the file"
+              : "Failed to load artifact",
+          )
         }
       })
       .finally(() => {
@@ -99,20 +118,25 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
 
   const handleSave = async (next: string) => {
     if (!active || !workspaceId) return
+    // The mirror of the read guard: only a path whose bytes this pane
+    // actually received may be written. Without it a save could target the
+    // active tab while the editor still held another file's (or a refused
+    // response's) contents.
+    if (!loaded || loaded.path !== active.path) {
+      toast.error("Refused to save: this artifact was never loaded")
+      return
+    }
     try {
-      const res = await apiFetch(
-        `/api/v1/agents/${agentId}/files/save?path=${encodeURIComponent(active.path)}&workspace_id=${workspaceId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "text/plain" },
-          body: next,
-        },
-      )
-      if (!res.ok) throw new Error("Save failed")
+      await saveArtifactFile({
+        agentId,
+        workspaceId,
+        path: loaded.path,
+        text: next,
+      })
       // Replace the in-memory baseline with what we just wrote so a
       // remount (mode toggle, tab switch back) doesn't show pre-save
       // text and a Cancel doesn't revert through stale state.
-      setContent(next)
+      setLoaded({ path: loaded.path, text: next })
       toast.success(`${active.title} saved`)
     } catch {
       toast.error("Failed to save file")
@@ -175,9 +199,10 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
             <div className="flex items-center justify-center h-full">
               <Spinner className="h-5 w-5 text-muted-foreground" />
             </div>
-          ) : active && content !== null ? (
+          ) : active && loaded && loaded.path === active.path ? (
             <FileEditor
-              code={content}
+              key={active.id}
+              code={loaded.text}
               language={active.language ?? getEditorLanguage(active.title)}
               onSave={handleSave}
             />

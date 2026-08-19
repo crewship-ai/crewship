@@ -57,6 +57,9 @@ type capResolver struct {
 	runUpdates []runUpdateRec
 	increments []int
 	costCalls  []RunCostUsage
+	// costCtxErrs[i] is the ctx.Err() seen by the i-th RecordCost call — the
+	// difference between a ledger row and a warning line, see RecordCost below.
+	costCtxErrs []error
 }
 
 func (c *capResolver) CreateChat(context.Context, CreateChatRequest) error { return nil }
@@ -104,10 +107,20 @@ func (c *capResolver) UpdateChatTitle(_ context.Context, _, title string) error 
 	return c.titleErr
 }
 
-func (c *capResolver) RecordCost(_ context.Context, usage RunCostUsage) error {
+// RecordCost mirrors the transport the real resolver uses: IPCResolver.RecordCost
+// builds its POST with http.NewRequestWithContext, so a context that is already
+// cancelled fails the request before it ever leaves the process. Reproducing that
+// here is what lets a test tell "the ledger was written" apart from "the ledger
+// write was attempted and lost".
+func (c *capResolver) RecordCost(ctx context.Context, usage RunCostUsage) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.costCalls = append(c.costCalls, usage)
+	err := ctx.Err()
+	c.costCtxErrs = append(c.costCtxErrs, err)
+	if err != nil {
+		return fmt.Errorf("record cost: %w", err)
+	}
 	return nil
 }
 
@@ -1139,5 +1152,54 @@ func TestHandleChatMessage_FailedRunStillBillsTheLedger(t *testing.T) {
 		t.Fatalf("run record reports total_cost_usd=%v but the ledger recorded nothing — "+
 			"the budget cap cannot trip on a run that spends and then fails",
 			last.metadata["total_cost_usd"])
+	}
+}
+
+// …and a run the user STOPPED spent the money too.
+//
+// Billing was hoisted above the runErr branch to end that under-counting, but it
+// was handed `ctx` — the per-turn run context ws.Client.handleCancelMessage
+// cancels on Stop. IPCResolver.RecordCost builds its POST with
+// http.NewRequestWithContext, so on a cancelled context the request dies before
+// it leaves the process and the spend survives only as a WARN line: the same
+// under-counting, moved from failed runs to cancelled ones. Seven lines below,
+// the CANCELLED branch already builds a detached context for exactly this reason.
+func TestHandleChatMessage_CancelledRunStillBillsTheLedger(t *testing.T) {
+	// Tokens are burned and reported before the user presses Stop.
+	const spentThenStopped = `{"type":"system","subtype":"init","model":"claude-test","session_id":"sess-c"}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"half an answ"}}}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":4,"num_turns":9,"usage":{"input_tokens":1000,"output_tokens":500}}
+`
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &scriptedContainer{agentOutput: spentThenStopped, exitCode: 0}
+	b := testBridgeWithContainer(t, resolver, ctr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Stop button, mid-stream: the hub cancels the run context.
+	streamFn := func(e ws.ChatEvent) {
+		if e.Type == "text" {
+			cancel()
+		}
+	}
+
+	err := b.HandleChatMessage(ctx, "user-1", "sess-stopped", "hello", streamFn)
+	if err == nil || !strings.Contains(err.Error(), "run agent") {
+		t.Fatalf("expected the wrapped cancellation error, got: %v", err)
+	}
+	if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != "CANCELLED" {
+		t.Fatalf("runUpdates = %+v, want one CANCELLED", resolver.runUpdates)
+	}
+	if len(resolver.costCalls) != 1 {
+		t.Fatalf("RecordCost calls = %d, want 1 — a cancelled run that burned tokens still owes the ledger",
+			len(resolver.costCalls))
+	}
+	if resolver.costCtxErrs[0] != nil {
+		t.Fatalf("RecordCost got an already-cancelled context (%v): the POST never leaves the process, "+
+			"so `crewship run get` shows the spend and the paymaster ledger has no row",
+			resolver.costCtxErrs[0])
+	}
+	if got := resolver.costCalls[0]; got.InputTokens != 1000 || got.OutputTokens != 500 {
+		t.Errorf("billed tokens = (%d,%d), want (1000,500)", got.InputTokens, got.OutputTokens)
 	}
 }

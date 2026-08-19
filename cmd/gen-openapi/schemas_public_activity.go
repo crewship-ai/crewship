@@ -46,8 +46,8 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 	})
 	reaction := object(map[string]any{"emoji": str(), "count": integer(), "mine": boolean()})
 	searchHit := object(map[string]any{
-		"id": str(), "session_id": str(), "agent_id": str(), "role": str(), "content": str(),
-		"tool_summary": str(), "ts": str(),
+		"id": str(), "session_id": str(), "agent_id": str(), "agent_slug": str(), "agent_name": str(),
+		"role": str(), "content": str(), "tool_summary": str(), "ts": str(),
 	})
 	inboxItem := object(map[string]any{
 		"id": str(), "workspace_id": str(), "kind": str(), "source_id": str(),
@@ -85,7 +85,12 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 	})
 
 	chatCreate := request(map[string]any{"session_id": str(), "origin": str()})
-	conversationSearch := request(map[string]any{"agent_id": str(), "query": str(), "limit": integer()}, "agent_id", "query")
+	// Rename (PRD chat-as-a-primary-surface, Step 2). One field, required: the
+	// endpoint exists to write chats.title and nothing else.
+	chatRename := request(map[string]any{"title": str()}, "title")
+	// agent_id is optional: omitting it searches every agent in the caller's
+	// workspace, which is the scope ⌘K and the CLI's default both use.
+	conversationSearch := request(map[string]any{"agent_id": str(), "query": str(), "limit": integer()}, "query")
 	inboxPatch := request(map[string]any{"state": str(), "resolved_action": str()}, "state")
 	inboxBulk := request(map[string]any{"ids": array(str()), "state": str(), "resolved_action": str()}, "ids", "state")
 	participantAdd := request(map[string]any{"user_id": str(), "role": str()}, "user_id")
@@ -100,6 +105,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"GET /api/v1/agents/{agentId}/chats":                                   {Response: array(chat)},
 		"POST /api/v1/agents/{agentId}/chats":                                  {Request: chatCreate, Response: object(map[string]any{"id": str()})},
 		"PUT /api/v1/agents/{agentId}/chats/{chatId}/read":                     {Response: object(map[string]any{"chat_id": str(), "last_read_at": str()})},
+		"PATCH /api/v1/agents/{agentId}/chats/{chatId}":                        {Request: chatRename, Response: chat},
 		"DELETE /api/v1/agents/{agentId}/chats/{chatId}":                       {Response: object(map[string]any{"id": str(), "deleted": boolean()})},
 		"GET /api/v1/chats/{chatId}/messages":                                  {Response: object(map[string]any{"messages": array(message)})},
 		"GET /api/v1/chats/{chatId}/messages/{messageId}/reactions":            {Response: object(map[string]any{"reactions": array(reaction)})},
@@ -115,7 +121,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"GET /api/v1/chats/{chatId}/stream": {Response: runStreamFrame, ResponseMedia: []string{"application/x-ndjson"}},
 	}
 	conversations := map[string]DomainSchema{
-		"POST /api/v1/conversations/search": {Request: conversationSearch, Response: object(map[string]any{"hits": array(searchHit), "query": str(), "count": integer()})},
+		"POST /api/v1/conversations/search": {Request: conversationSearch, Response: object(map[string]any{"hits": array(searchHit), "query": str(), "count": integer(), "scope": str()})},
 	}
 	inbox := map[string]DomainSchema{
 		"GET /api/v1/inbox":                  {Response: object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer()})},

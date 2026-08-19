@@ -135,6 +135,92 @@ func TestAgentInbox_Consolidated(t *testing.T) {
 	}
 }
 
+// escalations_open counted nothing, for two independent reasons.
+//
+// The query was `status IN ('pending', 'open')`. The column is uppercase
+// (`status TEXT NOT NULL DEFAULT 'PENDING'`, migrate_consts_v02_v15.go) and the
+// vocabulary is PENDING / RESOLVED / EXPIRED / CANCELLED (escalation_lifecycle.go)
+// — 'open' has never been one of them. So the count was structurally 0 and the
+// Crews preview panel showed an empty escalation badge for an agent with a queue.
+//
+// The fix follows countPendingEscalations in crewship_escalation_cap.go: a NOT IN
+// over the TERMINAL statuses rather than an IN over the live one. The direction is
+// the point — a status added later reads as OUTSTANDING and shows up in the badge,
+// instead of vanishing from it the way EXPIRED and CANCELLED would have vanished
+// from an IN list nobody remembered to extend.
+//
+// Table-driven over the whole vocabulary, plus a lowercase row, so neither half of
+// the original bug can come back on its own.
+func TestAgentInbox_EscalationsOpenCountsEveryNonTerminalStatus(t *testing.T) {
+	cases := []struct {
+		name   string
+		status string
+		want   bool // counted as outstanding?
+	}{
+		{"pending is outstanding", escalationStatusPending, true},
+		{"resolved is terminal", escalationStatusResolved, false},
+		{"expired is terminal", escalationStatusExpired, false},
+		{"cancelled is terminal", escalationStatusCancelled, false},
+		// The literal the broken query looked for. Nothing writes it, but if
+		// something ever does it is not a terminal state, so it counts — the
+		// NOT IN gets this right for free where the IN had to guess.
+		{"unknown future status is outstanding", "ACKNOWLEDGED", true},
+		// Regression pin on the casing half of the bug: an uppercase PENDING
+		// must be counted by a query that is not comparing against 'pending'.
+		{"lowercase never appears, uppercase must still count", "PENDING", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
+			h := NewAgentInboxHandler(db, newTestLogger())
+
+			seedCrewRow(t, db, "crew-esc", wsID, "Esc", "esc")
+			seedAgentRow(t, db, "agent-alpha", wsID, "crew-esc", "Alpha", "alpha", "AGENT")
+			seedAgentRow(t, db, "agent-beta", wsID, "crew-esc", "Beta", "beta", "AGENT")
+
+			now := time.Now().Format(time.RFC3339)
+			if _, err := db.Exec(`INSERT INTO chats (id, workspace_id, agent_id, status, created_at)
+				VALUES ('chat-esc', ?, 'agent-alpha', 'ACTIVE', ?)`, wsID, now); err != nil {
+				t.Fatalf("seed chat: %v", err)
+			}
+			// One row in the status under test, raised by alpha; one row in the
+			// same status raised by BETA, which must never land in alpha's count.
+			if _, err := db.Exec(`INSERT INTO escalations
+				(id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+				VALUES ('esc-alpha', ?, 'crew-esc', 'chat-esc', 'agent-alpha', 'stuck', ?, ?),
+				       ('esc-beta',  ?, 'crew-esc', 'chat-esc', 'agent-beta',  'stuck', ?, ?)`,
+				wsID, tc.status, now, wsID, tc.status, now); err != nil {
+				t.Fatalf("seed escalations: %v", err)
+			}
+
+			req := httptest.NewRequest("GET", "/api/v1/agents/agent-alpha/inbox", nil)
+			req.SetPathValue("agentId", "agent-alpha")
+			req = withWorkspaceUser(req, userID, wsID, "OWNER")
+			rr := httptest.NewRecorder()
+			h.Handle(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
+			}
+			var resp agentInboxResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+
+			want := 0
+			if tc.want {
+				want = 1
+			}
+			if resp.EscalationsOpen != want {
+				t.Errorf("escalations_open for status %q = %d, want %d",
+					tc.status, resp.EscalationsOpen, want)
+			}
+		})
+	}
+}
+
 // Pin the JSON shape of GET /api/v1/agents/{agentId}/inbox so the
 // frontend can rely on field names that don't drift.
 //

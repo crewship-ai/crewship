@@ -80,6 +80,11 @@ crewship.db.pre-migrate-*
 
 # Go
 /crewship
+# `go build ./examples/pages/ping-go` with no -o writes the binary here, named
+# after its package directory. One did, a `git add -A` swept it in, and 8.5 MB
+# of ELF reached main carrying every Go stdlib CVE compiled into it — which is
+# what the high-severity code-scanning alerts on /ping-go were.
+/ping-go
 /crewshipd
 /crewship-sidecar
 # `go build ./scripts/<tool>` with no -o drops the binary in the repo root

@@ -30,8 +30,8 @@ The top-level command is the list view. `--follow` opens an SSE connection to `/
 | `--mission` | `string` | | Filter by mission ID. |
 | `--trace-id` | `string` | | Narrow to entries whose `trace_id` column matches. Reaches ad-hoc **agent** runs only — routine runs never set it. |
 | `--run-id` | `string` | | Narrow to one run whichever engine ran it. Matches `trace_id`, `actor_id` and `payload.run_id`, so it reaches both agent runs and routine runs. Prefer this over `--trace-id`. |
-| `--type` | `string` | | Comma-separated entry types (e.g. `peer.escalation,keeper.decision`). |
-| `--exclude-type` | `string` | | Comma-separated entry types to exclude (NOT IN). Useful for hiding `container.metrics` noise. |
+| `--type` | `string` | | Comma-separated entry types (e.g. `peer.escalation,keeper.decision`). Matched **exactly** — no prefix or glob syntax. |
+| `--exclude-type` | `string` | | Comma-separated entry types to exclude (NOT IN). Useful for hiding `container.metrics` noise. Matched exactly, same as `--type`. |
 | `--severity` | `string` | | Comma-separated severities (`info`, `notice`, `warn`, `error`). |
 | `--actor-type` | `string` | | Comma-separated actors (`agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`). |
 | `--priority` | `string` | | Comma-separated priorities (`normal`, `high`, `pin`, `permanent`). |
@@ -40,6 +40,20 @@ The top-level command is the list view. `--follow` opens an SSE connection to `/
 | `--follow` | `bool` | `false` | Live tail via SSE — Ctrl-C to exit, reconnects on transient failure. |
 
 Global output flags apply: `--format text|json|yaml|ndjson` (default text). Enum values for `--severity`, `--actor-type`, and `--priority` are validated client-side before the request goes out, so a typo fails fast with a list of allowed values.
+
+`--type` and `--exclude-type` are **not** validated against a list — entry types are an open set that grows with the features emitting them, and an allowlist here would reject a valid filter every time the server got ahead of the CLI. The one value they do refuse is a wildcard:
+
+```bash
+crewship journal --type 'approval.*'
+# invalid --type value "approval.*": wildcards are not supported — entry types are
+# matched exactly, so this filter would match nothing and return an empty result
+# that looks like 'no such events happened'.
+```
+
+Name the types instead. The catalogue below is the list. The same refusal
+applies to `crewship journal count` and to `crewship watch` — a count prints a
+bare `0` and a live tail prints nothing at all, and neither says the question
+could not be asked.
 
 
 <Note>
@@ -256,6 +270,7 @@ See the [Crew Journal guide](/guides/crew-journal#entry-type-catalog) for the fu
 | `peer.escalation` | Cross-agent handoffs (often tied to `approval.requested`). |
 | `budget.exceeded,budget.warning` | Cost oversight. |
 | `approval.requested,approval.granted,approval.denied,approval.timeout` | HITL audit. |
+| `approval.trust_granted,approval.trust_revoked` | Standing approvals — who disarmed which routine gate, and who took it back. |
 | `hook.fired,hook.blocked` | Lifecycle hook activity. |
 | `eval.regression_detected` | Eval surfaced regression. |
 | `run.started,run.completed,run.failed,run.cancelled,run.timeout` | Run lifecycle (`/runs` page is folded into `/journal` since PR #234). |

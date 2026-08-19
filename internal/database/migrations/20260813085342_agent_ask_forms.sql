@@ -1,0 +1,63 @@
+-- Per-agent ask FORMS — the questions that need a supplier, an amount and a
+-- photo of the receipt before they can be asked.
+--
+-- Companion to suggested_prompts (20260812233006), which holds the questions
+-- with no blanks to fill in. Same philosophy, one step further along: still
+-- per-agent, still on the ordinary agent PATCH, still no new table and no new
+-- endpoint.
+--
+-- ── Why a second column instead of the pack library ────────────────────────
+--
+-- docs/prd/agent-ask-packs-and-document-intake.md §6 designs ask_packs +
+-- ask_items + agent_ask_packs: a workspace-level library with bindings, a
+-- CRUD surface, an ordering story and a join on the chat's hot path. Its own
+-- staging note says that waits for a concrete trigger — a second agent that
+-- wants to SHARE a pack. Nobody has asked to share one. What people have
+-- asked for is to stop retyping "zaúčtuj tuhle fakturu" with the month, the
+-- category and the file spelled out by hand every time, and one column does
+-- that.
+--
+-- Nothing here forecloses the library. When it arrives it reads this column
+-- as a one-agent pack and migrates it, exactly as it will read
+-- suggested_prompts.
+--
+-- ── Why JSON here, when suggested_prompts deliberately refused JSON ────────
+--
+-- That column stores what a textarea produced: one prompt per line, a format
+-- that cannot be malformed by hand-editing, so no read path needs an
+-- unmarshal that can fail. A form is not that shape. It is a list of records
+-- with a template, a policy and a nested list of typed fields, and the honest
+-- options are JSON in one column or three tables. Newline-separated text
+-- would mean inventing a serialisation nobody else in the tree can read.
+--
+-- The cost of JSON — a value that can be malformed — is paid on WRITE, once:
+-- internal/askforms.Parse is the single gate, and internal/api/ask_forms.go
+-- is the only place the API calls it. What is stored has already been parsed,
+-- validated and re-encoded canonically, so the read paths (chat composer, CLI
+-- preview) decode a document that was well-formed when it was written.
+--
+-- ── The caps and the rules live in the application, not in a CHECK ─────────
+--
+-- At most 4 forms, at most 6 fields each, labels at 48 characters, templates
+-- at 2000 — all in internal/askforms, in CHARACTERS not bytes, because a byte
+-- cap silently gives a Czech author a shorter field than an English one.
+--
+-- SQLite has no JSON schema validation worth the name, and the load-bearing
+-- rule is not expressible as a constraint at all: PRD §7 rule 1 says a
+-- template naming a field that does not exist is refused when the form is
+-- SAVED, so the author finds out while authoring and the user never meets a
+-- broken template. A CHECK could express `length(ask_forms) < N` and read as
+-- if it were the rule. A rule enforced twice — once precisely, once
+-- approximately — drifts, and SQLite cannot ALTER a CHECK, so correcting the
+-- approximate half would need a table rebuild.
+--
+-- ── NULL means "not configured" ────────────────────────────────────────────
+--
+-- Nullable, no default. NULL and the empty string both mean unset, and the
+-- write path collapses an emptied editor and an empty array to NULL so there
+-- is one such value. Unset is not a degraded state: an agent with no forms
+-- offers exactly what it offered before this migration ran — its suggested
+-- questions, or the built-in role packs. That is why this is a plain ADD
+-- COLUMN with no backfill: there is nothing to back-fill to.
+
+ALTER TABLE agents ADD COLUMN ask_forms TEXT;

@@ -1,6 +1,6 @@
 ---
 title: "Escalation"
-description: "List, resolve, and count crew escalations — when an agent or peer flags something for human attention."
+description: "List, resolve, cancel, expire, and count crew escalations — when an agent flags something for human attention."
 icon: "triangle-alert"
 stability: experimental
 tag: Experimental
@@ -8,7 +8,36 @@ tag: Experimental
 
 # Escalation
 
-`cmd/crewship/cmd_escalation.go` covers the three escalation verbs: per-crew listing, single-row resolution, and the workspace-wide pending-count aggregator used by dashboards and alerting.
+`cmd/crewship/cmd_escalation.go` covers the escalation verbs: per-crew listing, resolution, withdrawal, the deadline sweep, and the workspace-wide pending-count aggregator used by dashboards and alerting.
+
+## The lifecycle
+
+An escalation is a question an agent asked a human and blocked on. It has one non-terminal state and three terminal ones:
+
+```
+PENDING → RESOLVED    a human decided; --action says approve | reject | redirect
+        → EXPIRED     the ANSWER deadline passed and no human decided
+        → CANCELLED   a human withdrew the question before deciding
+```
+
+Terminal is terminal. Resolving or cancelling a row that already reached one of the three returns **409** naming the state it actually reached — an `EXPIRED` escalation no longer reports itself as "already resolved", which used to tell an operator somebody had decided it when nobody had.
+
+### Two deadlines, and only one of them is yours
+
+Every escalation carries two:
+
+| Field | Bounds | Default |
+|---|---|---|
+| `deadline_at` | how long the **agent** waits on its long poll | 300 s |
+| `answer_deadline_at` | how long **you** can still answer | 7 days |
+
+When `deadline_at` passes, the agent stops waiting and continues without the answer, having been explicitly told so — see [Harbormaster → What happens when nobody answers](/guides/harbormaster#what-happens-when-nobody-answers). **The row stays `PENDING` and you can still answer it.** Only `answer_deadline_at` makes it `EXPIRED`.
+
+<Warning>
+An earlier build used the agent's 300 s for both, so the approval queue expired five minutes after an agent asked and `escalation resolve` answered **409 expired** for questions nobody had ever answered. If you see that on an old row, it is that bug, not a decision.
+</Warning>
+
+`agent_gave_up_at` (in `--format json`) tells you the agent already moved on. Answering is still worthwhile — an approved credential proposal lands in the vault for the next run — but the run that asked will not receive it. `escalation resolve` prints that as a note.
 
 ## `crewship escalation list`
 
@@ -17,15 +46,18 @@ Lists escalations under one crew via `GET /api/v1/crews/{crewId}/escalations`. `
 | Flag | Type | Default | Effect |
 |---|---|---|---|
 | `--crew <slug-or-id>` | string | (required) | Crew to list. Returns `--crew is required (crew slug or ID)` when missing. |
-| `--status <state>` | string | (unset) | `PENDING` or `RESOLVED`. Server-side `?status=`. |
+| `--status <state>` | string | (unset) | `PENDING`, `RESOLVED`, `EXPIRED` or `CANCELLED`. Server-side `?status=`. An unrecognised value returns **nothing**, not everything — a typo must not silently widen the filter. |
 | `--limit <n>` | int | `0` | Cap rows returned **client-side** (0 = unbounded). Server has no `limit=` yet. |
 | `--since <window>` | string | (unset) | Client-side filter — `1h`, `24h`, `7d`, or RFC3339. |
 
-Table columns: `ID`, `TYPE`, `FROM`, `REASON` (50-char truncated), `STATUS`, `CREATED`.
+Table columns: `ID`, `TYPE`, `FROM`, `REASON` (50-char truncated), `STATUS`, `DEADLINE`, `CREATED`. `DEADLINE` prints `—` for rows raised before deadlines existed; those never expire.
+
+Listing also settles any past-**answer**-deadline question in the workspace before it answers, so the list can never show a row as `PENDING` past the point where you could still act on it. A row past its *agent* deadline is untouched — it is still yours to answer.
 
 ```bash
 crewship escalation list --crew backend-team
 crewship escalation list --crew backend-team --status PENDING
+crewship escalation list --crew backend-team --status EXPIRED     # questions nobody answered
 crewship escalation list --crew backend-team --since 7d --limit 20
 crewship escalation list --crew backend-team --format json | jq
 ```
@@ -49,6 +81,8 @@ crewship escalation resolve esc_abc --action redirect --redirect-to viktor
 
 Prints `Escalation <id> resolved.` on success.
 
+Resolving works even after the agent stopped waiting — that is the point of the two deadlines. When it does, the response carries `agent_still_waiting: false` and a note naming what the answer did and did not accomplish: the decision is recorded and an approved credential proposal is activated in the vault for the next run, but the run that asked has already finished without it and is not resumed.
+
 Resolving a `CREDENTIAL` escalation is refused with **403** when the caller is
 recorded as the owner of the agent that raised it — including a workspace OWNER,
 which is not exempt. Two independent things put that
@@ -64,6 +98,40 @@ rule in force, and **either is sufficient**:
 line, so you can check before you are refused rather than after. See
 [Keeper → The switch is a floor, not a master switch](/guides/keeper#the-switch-is-a-floor-not-a-master-switch).
 
+## `crewship escalation cancel <id>`
+
+`POST /api/v1/escalations/{id}/cancel`. Withdraws a question instead of deciding it — the deploy was rolled back, the task was reassigned, the agent was restarted. MANAGER+.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--reason <text>` | string | (unset) | Why the question is being withdrawn. Recorded on the row and in the journal entry. |
+
+```bash
+crewship escalation cancel esc_abc
+crewship escalation cancel esc_abc --reason "the deploy was rolled back"
+```
+
+<Warning>
+**Cancelling is not rejecting.** `resolve --action reject` tells the agent *"no, do not do that"* — a decision it should act on. `cancel` says nobody ever considered the question. Using one for the other makes the agent believe it was refused when it was not.
+</Warning>
+
+Any agent still waiting is unblocked immediately with an explicit "no answer" warning, not left to sit until the deadline. A foreign or unknown id returns **404**, never 403 — the endpoint is not an existence oracle for other tenants.
+
+## `crewship escalation sweep-expired`
+
+`POST /api/v1/escalations/sweep-expired`. Moves every `PENDING` escalation in this workspace past its **`answer_deadline_at`** to `EXPIRED`, and prints how many moved. **ADMIN+** — it writes terminal states.
+
+The agent's `deadline_at` is not swept and never was grounds to expire a row: an agent giving up on a poll is not a human declining to answer. A `CREDENTIAL` escalation that does expire here disposes of its staged credential the way a rejection does, so no unreachable secret is left in the vault.
+
+```bash
+crewship escalation sweep-expired                   # prints "2"
+crewship escalation sweep-expired --format json     # {"expired": 2}
+```
+
+The server already does this on a 60 s timer and on every escalation read, so you rarely need it. It exists because a deadline that can only be observed by waiting five minutes is a deadline nobody can verify — this is how you check the mechanism is alive, and how an acceptance test drives it through the binary.
+
+Running it twice reports `0` the second time: the transition is compare-and-swap guarded, so each escalation expires exactly once no matter how many observers notice.
+
 ## `crewship escalation pending-count`
 
 Workspace-wide aggregate — backs dashboard tiles and alerting that just needs the total without per-crew fan-out. `GET /api/v1/escalations/pending-count` returns `{"count": N}`.
@@ -77,4 +145,5 @@ crewship escalation pending-count --format json     # {"count": 3}
 
 - [`crewship approvals`](/cli/approvals) — the related human-in-the-loop surface (Keeper denials, MCP gates).
 - [`crewship notify`](/cli/notify) — desktop notifications when escalations land.
-- [`crewship journal`](/cli/journal) — live event tail (escalations are journaled).
+- [`crewship journal`](/cli/journal) — live event tail. Every transition emits `peer.escalation` with `payload.state` of `pending` | `resolved` | `expired` | `cancelled`; expiries are severity `warn` so they surface in the default attention filter.
+- [Harbormaster](/guides/harbormaster#escalations-the-other-human-decision) — the state machine, where the deadline is decided, and what an agent does with an unanswered question.

@@ -129,6 +129,13 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "approval.denied",
       "approval.timeout",
       "approval.cancelled",
+      // A trust grant is a standing decision — "approve this gate for me from
+      // now on" — so it belongs with the one-off approvals rather than in a
+      // group of its own. Reading them together is the point: a filter that
+      // showed the decisions but not the standing permission behind them would
+      // hide why later runs stopped asking.
+      "approval.trust_granted",
+      "approval.trust_revoked",
       "credential.revealed",
       "credential.lease_issued",
       "credential.reveal_policy_changed",
