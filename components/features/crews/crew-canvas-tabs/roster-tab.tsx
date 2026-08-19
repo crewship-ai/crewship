@@ -49,7 +49,7 @@ export function RosterTab({ crew, agentsForCrew, members, onSelectAgent }: Roste
                       <span className="font-medium truncate">{a.name}</span>
                       <span className="text-[10px] text-muted-foreground">{a.status?.toLowerCase()}</span>
                       {a.agent_role !== "AGENT" && (
-                        <span className="text-[8px] px-1 rounded bg-purple/20 text-purple">{a.agent_role}</span>
+                        <span className="text-[8px] px-1 rounded bg-purple/20 text-purple-hover">{a.agent_role}</span>
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">{a.role_title || "—"}</div>

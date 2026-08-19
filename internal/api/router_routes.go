@@ -38,6 +38,20 @@ func (r *Router) registerRoutes() {
 		r.assignmentHandler.SetProvisioner(r.provisioning)
 	}
 
+	// Pages — the panel surface (docs/prd/pages.md §11). Workspace-unscoped
+	// routes plus the single panel write path.
+	r.registerPageRoutes()
+
+	// Public pages — the /p/{token} surface (§7.3). Its own registrar because
+	// §7.3.1 makes it a separate product rather than a permission level.
+	r.registerPagePublicRoutes()
+
+	// Inbound panel webhooks (§10b.5c) — a panel written by something that
+	// cannot run the `crewship` binary. Its own registrar because the inbound
+	// door is a token surface with no session, no cookie and no workspace
+	// context, exactly like the public page above.
+	r.registerPageWebhookRoutes()
+
 	// Auth, signup, Google OAuth2, sessions, CLI tokens, NextAuth,
 	// onboarding.
 	r.registerAuthRoutes()

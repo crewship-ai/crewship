@@ -114,7 +114,7 @@ var notifyChannelListCmd = &cobra.Command{
 				cats = strings.Join(c.Categories, ",")
 			}
 			rows = append(rows, []string{
-				truncateString(c.ID, 24),
+				f.ShortID(c.ID, truncateString(c.ID, 24)),
 				c.Type,
 				scope,
 				truncateString(target, 32),
@@ -570,9 +570,9 @@ var notifyDeliveryColumns = []string{
 	"ID", "CHANNEL", "USER", "CATEGORY", "TITLE", "STATUS", "ATTEMPTS", "CREATED",
 }
 
-func notifyDeliveryCells(d notifyDeliveryRow) []string {
+func notifyDeliveryCells(f *cli.Formatter, d notifyDeliveryRow) []string {
 	return []string{
-		truncateString(d.ID, 20), truncateString(d.ChannelID, 20), truncateString(d.UserID, 16),
+		f.ShortID(d.ID, truncateString(d.ID, 20)), truncateString(d.ChannelID, 20), truncateString(d.UserID, 16),
 		d.Category, truncateString(d.Title, 36), d.Status,
 		fmt.Sprintf("%d", d.Attempts), d.CreatedAt,
 	}
@@ -630,7 +630,7 @@ var notifyChannelDeliveriesCmd = &cobra.Command{
 		f := newFormatter()
 		rows := make([][]string, 0, len(body.Deliveries))
 		for _, d := range body.Deliveries {
-			rows = append(rows, notifyDeliveryCells(d))
+			rows = append(rows, notifyDeliveryCells(f, d))
 		}
 		return f.Auto(body.Deliveries, notifyDeliveryColumns, rows)
 	},
@@ -743,7 +743,7 @@ var notifyChannelAgentsListCmd = &cobra.Command{
 			if a.AgentSlug != "" {
 				name = a.AgentSlug
 			}
-			rows = append(rows, []string{truncateString(a.AgentID, 24), name, truncateString(a.GrantedBy, 24), a.CreatedAt})
+			rows = append(rows, []string{f.ShortID(a.AgentID, truncateString(a.AgentID, 24)), name, truncateString(a.GrantedBy, 24), a.CreatedAt})
 		}
 		return f.Auto(body.Agents, headers, rows)
 	},

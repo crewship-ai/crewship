@@ -53,6 +53,10 @@ DELETE /api/v1/milestones/{milestoneId} roleManage
 DELETE /api/v1/notification-channels/{id} roleInline
 DELETE /api/v1/notification-channels/{id}/agents/{agentId} roleInline
 DELETE /api/v1/notification-templates roleManage
+DELETE /api/v1/pages/{slug} roleSelf
+DELETE /api/v1/pages/{slug}/grants roleSelf
+DELETE /api/v1/pages/{slug}/public/{tokenId} roleSelf
+DELETE /api/v1/pages/{slug}/webhooks/{webhookId} roleSelf
 DELETE /api/v1/projects/{projectId} roleManage
 DELETE /api/v1/recurring-issues/{recurringId} roleManage
 DELETE /api/v1/relations/{relationId} roleCreate
@@ -100,6 +104,7 @@ PATCH /api/v1/labels/{labelId} roleManage
 PATCH /api/v1/milestones/{milestoneId} roleCreate
 PATCH /api/v1/notification-channels/{id} roleInline
 PATCH /api/v1/notification-providers/{provider} roleManage
+PATCH /api/v1/pages/{slug} roleSelf
 PATCH /api/v1/projects/{projectId} roleCreate
 PATCH /api/v1/recurring-issues/{recurringId} roleCreate
 PATCH /api/v1/saved-views/{viewId} roleCreate
@@ -230,6 +235,12 @@ POST /api/v1/oauth/initiate roleInline
 POST /api/v1/oauth/loopback roleInline
 POST /api/v1/onboarding/complete roleSelf
 POST /api/v1/onboarding/setup roleSelf
+POST /api/v1/pages roleInline
+POST /api/v1/pages/import roleInline
+POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
+POST /api/v1/pages/{slug}/public roleSelf
+POST /api/v1/pages/{slug}/rollback roleSelf
+POST /api/v1/pages/{slug}/webhooks roleSelf
 POST /api/v1/projects roleCreate
 POST /api/v1/projects/{projectId}/milestones roleCreate
 POST /api/v1/recipes/{slug}/install roleManage
@@ -268,8 +279,8 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run roleCreate
-POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust roleCreate
+POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
 POST /api/v1/workspaces/{workspaceId}/skills/import roleCreate
@@ -297,6 +308,8 @@ PUT /api/v1/integrations/composio/settings roleManage
 PUT /api/v1/me/notification-prefs roleSelf
 PUT /api/v1/me/preferences/{key} roleSelf
 PUT /api/v1/notification-templates roleManage
+PUT /api/v1/pages/{slug}/grants roleSelf
+PUT /api/v1/pages/{slug}/panels/{panelId}/data roleSelf
 PUT /api/v1/users/me/peer-consent roleSelf
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override roleCreate

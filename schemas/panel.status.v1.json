@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crewship.io/schemas/panel.status.v1.json",
+  "title": "Crewship panel payload — status.v1",
+  "description": "A grid of named things and how each of them is doing. The cheapest useful panel and the one the wake gates are built around: a threshold on this payload — `any(state == \"critical\") for: 5m` — is what wakes an agent to write its analysis back onto the same page. Pushed by a routine or by a script running inside a crew container. The server attaches the timestamp, the run id and the producer identity; freshness is computed from the timestamp the server stored, never from anything in this document.",
+  "type": "object",
+  "required": ["items"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference (informational; the server ignores it). Present so a hand-written payload gets inline validation in an editor while a producer script is being developed."
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/StatusItem" },
+      "description": "The rows of the grid, in the order they should be rendered — the producer decides the order, because only the producer knows whether these are services, machines or months. An empty array is a valid measured answer (\"nothing matched\") and renders the panel's empty-state sentence; it is not the same as never having pushed, which renders an em dash."
+    }
+  },
+  "$defs": {
+    "StatusItem": {
+      "type": "object",
+      "required": ["name", "state"],
+      "additionalProperties": false,
+      "description": "One thing being watched. There is no icon, image or link field, and that is deliberate rather than an omission: agent-authored content may not carry URLs or images at all, because both have been used to exfiltrate private data out of a rendered panel through a host the reader trusted.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "What is being watched, in the words the reader will act on (\"api\", \"nightly backup\", \"Sklad Brno\"). Written in the workspace's language by the producing agent; nothing is translated at render time."
+        },
+        "state": {
+          "enum": ["ok", "warning", "critical"],
+          "description": "How it is doing. A closed set of three, because the renderer maps each one to a glyph AND a word — state is never carried by colour alone, and these colours are reserved so they can never also mean \"series 3\"."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "The short detail rendered next to the state (\"200 OK\", \"14 min behind\", \"disk 91 %\"). Plain text: no markup, no URL, no entity reference. Omit it when the state is the whole story."
+        }
+      }
+    }
+  }
+}

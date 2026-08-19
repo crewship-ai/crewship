@@ -200,6 +200,13 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Refs: map[string]any{"peer_conversation_id": convID, "chat_id": body.ChatID},
 	})
 
+	// Session provenance for the terminal run record, filled in once the CLI
+	// stream starts (below). Declared before the early bails so every
+	// finishQuery call site can pass it: those pass it still nil, the getters
+	// are nil-safe, and a query that never reached a CLI records nothing
+	// rather than blank fields.
+	var acc *orchestrator.Accumulator
+
 	// Record the peer-query as an agent run via the journal (single
 	// source of truth post Phase J). trace_id == runID groups the
 	// query's lifecycle entries.
@@ -249,7 +256,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if h.orch == nil {
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", "orchestrator not available", startTime)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", "orchestrator not available", startTime, acc)
 		replyError(w, http.StatusServiceUnavailable, "orchestrator not available")
 		return
 	}
@@ -264,7 +271,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if perr := h.provisioner.EnsureProvisioned(r.Context(), body.CrewID, body.WorkspaceID, 0); perr != nil {
 			h.logger.Error("ensure provisioned for query", "error", perr, "query_id", convID, "crew_id", body.CrewID)
 			h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
-				fmt.Sprintf("preparing the crew container failed: %v", perr), startTime)
+				fmt.Sprintf("preparing the crew container failed: %v", perr), startTime, acc)
 			replyError(w, http.StatusServiceUnavailable, "crew not ready")
 			return
 		}
@@ -274,7 +281,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if cfgErr != nil {
 		h.logger.Error("resolve crew runtime config for query", "error", cfgErr, "crew_id", body.CrewID, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
-			fmt.Sprintf("resolve crew runtime config: %v", cfgErr), startTime)
+			fmt.Sprintf("resolve crew runtime config: %v", cfgErr), startTime, acc)
 		replyError(w, http.StatusInternalServerError, "container error")
 		return
 	}
@@ -286,17 +293,24 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
-			fmt.Sprintf("container error: %v", err), startTime)
+			fmt.Sprintf("container error: %v", err), startTime, acc)
 		replyError(w, http.StatusInternalServerError, "container error")
 		return
 	}
 
-	// Collect agent output
+	// Collect agent output. The shared buffering handler runs underneath for
+	// its session-init capture only; the answer text keeps its own collection
+	// (it is truncated below before it becomes the peer response).
 	var outputParts []string
+	base, bufAcc := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
+		CaptureResultMeta: true,
+	})
+	acc = bufAcc
 	handler := func(event orchestrator.AgentEvent) {
 		if event.Type == "text" && event.Content != "" {
 			outputParts = append(outputParts, event.Content)
 		}
+		base(event)
 	}
 
 	// The [PEER QUERY] block is prepended to the ASSEMBLED system prompt so
@@ -312,7 +326,7 @@ Question: %s`, body.FromSlug, body.Question)
 		// resolver / resolve failure). Fail the query loudly rather than answer
 		// with an MCP-blind, unassembled-prompt degraded run.
 		h.logger.Error("peer query dispatch build failed", "error", buildErr, "query_id", convID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", buildErr.Error(), startTime)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", buildErr.Error(), startTime, acc)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to dispatch peer query", "query_id": convID})
 		return
 	}
@@ -321,7 +335,7 @@ Question: %s`, body.FromSlug, body.Question)
 	guardRelease, guardErr := refuseIfBackupInProgress(r.Context(), h.db, body.WorkspaceID)
 	if guardErr != nil {
 		h.logger.Warn("peer query refused — backup in progress", "query_id", convID, "workspace_id", body.WorkspaceID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", guardErr.Error(), startTime)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", guardErr.Error(), startTime, acc)
 		writeJSON(w, http.StatusConflict, map[string]string{"error": guardErr.Error(), "query_id": convID})
 		return
 	}
@@ -330,7 +344,7 @@ Question: %s`, body.FromSlug, body.Question)
 	if err := h.orch.RunAgentForAssignment(r.Context(), req, handler); err != nil {
 		h.logger.Error("peer query execution failed", "error", err, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
-			fmt.Sprintf("execution error: %v", err), startTime)
+			fmt.Sprintf("execution error: %v", err), startTime, acc)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error":    "query execution failed",
 			"query_id": convID,
@@ -344,7 +358,7 @@ Question: %s`, body.FromSlug, body.Question)
 		result = result[:10000] + "...(truncated)"
 	}
 
-	h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, result, "", startTime)
+	h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, result, "", startTime, acc)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"query_id": convID,
@@ -410,10 +424,15 @@ func (h *QueryHandler) buildPeerQueryRequest(
 // without them, crew/agent-filtered journal views see the running row
 // but never the completion, which makes the UI look like every peer
 // query is permanently running.
+//
+// acc carries the CLI's session-init provenance onto the terminal run entry;
+// it is nil at the call sites that ended the query before an agent ran, and
+// nothing is recorded for those.
 func (h *QueryHandler) finishQuery(
 	ctx context.Context,
 	convID, runID, chatID, fromSlug, targetSlug, workspaceID, crewID, targetAgentID, result, errMsg string,
 	startTime time.Time,
+	acc *orchestrator.Accumulator,
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	durationMs := time.Since(startTime).Milliseconds()
@@ -484,6 +503,11 @@ func (h *QueryHandler) finishQuery(
 		}
 		if runStatus == "COMPLETED" {
 			runPayload["exit_code"] = 0
+		}
+		// Unconditional on status — the failed peer query is the one whose
+		// provenance gets asked about.
+		if md := runSessionProvenance(acc); md != nil {
+			runPayload["metadata"] = md
 		}
 		if _, err := h.journal.Emit(ctx, journal.Entry{
 			WorkspaceID: workspaceID,

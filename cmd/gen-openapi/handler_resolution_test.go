@@ -4,10 +4,85 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 )
+
+// TestRouteDiscoveryScansEveryRegistrarFile is the #1953 guard: which files the
+// generator reads must be decided by what registers routes, not by what
+// somebody named a file.
+//
+// Route discovery used to be `filepath.Glob(routerDir, "router_*.go")`, so a
+// registrar under any other name contributed nothing to the spec — silently,
+// with no error and no missing-route symptom when its routes were reads or
+// lived under an excluded prefix. internal/api/pages_internal.go is exactly
+// such a file (PUT /api/v1/internal/pages/{page}/data), and it is why this test
+// exists rather than a one-name widening of the glob.
+//
+// The detector below shares no code with routeSourceFiles: it is a plain
+// literal-registration match over every non-test file in the package, so a
+// registration shape routeRegistrationCall stops recognising shows up here as
+// a missed file instead of as silence.
+//
+// RED before #1953: pages_internal.go is reported missing.
+func TestRouteDiscoveryScansEveryRegistrarFile(t *testing.T) {
+	reset := func(dir string) {
+		routerDir = dir
+		cachedSourceFiles, cachedSources, cachedPackageSrc = nil, map[string]string{}, ""
+	}
+	t.Cleanup(func() { reset("internal/api") })
+	reset(filepath.Join("..", "..", "internal", "api"))
+
+	scannedFiles, err := routeSourceFiles()
+	if err != nil {
+		t.Fatalf("routeSourceFiles: %v", err)
+	}
+	scanned := map[string]bool{}
+	for _, f := range scannedFiles {
+		scanned[filepath.Base(f)] = true
+	}
+
+	literalRegistration := regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc)\("[A-Z]+ /|\.authed(?:Mut|SelfMut|Admin)\("[A-Z]+"`)
+	all, err := filepath.Glob(filepath.Join(routerDir, "*.go"))
+	if err != nil {
+		t.Fatalf("glob package files: %v", err)
+	}
+	if len(all) == 0 {
+		t.Fatal("no .go files found — every assertion below would be vacuous")
+	}
+
+	var missed []string
+	registrars := 0
+	for _, f := range all {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if !literalRegistration.Match(data) {
+			continue
+		}
+		registrars++
+		if !scanned[filepath.Base(f)] {
+			missed = append(missed, "  "+filepath.Base(f))
+		}
+	}
+	if registrars == 0 {
+		t.Fatal("no route-registering files found — literalRegistration has stopped matching, which would make this test pass vacuously")
+	}
+	if len(missed) > 0 {
+		t.Fatalf(`%d of %d route-registering files were not scanned by the generator:
+%s
+
+Their routes never reach openapi.gen.json, and nothing else reports it. Widen
+routeRegistrationCall to recognise the registration shape they use; do not
+rename the files.`, len(missed), registrars, strings.Join(missed, "\n"))
+	}
+}
 
 // specOperations is the shape every assertion in this file reads: the
 // parameters the published spec attaches to an operation.
@@ -219,6 +294,11 @@ var requiredQueryParametersInSpec = []string{
 	"DELETE /api/v1/feedback ?message_id",
 	"DELETE /api/v1/feedback ?signal",
 	"DELETE /api/v1/notification-templates ?category",
+	// Verified against PageHandler.DeleteGrant (internal/api/pages_grants.go:307):
+	// a revoke naming nobody answers 400 rather than reporting success while
+	// withdrawing nothing, which is how an operator would come to believe an
+	// agent's access was gone. Pinned by TestPageGrants_RevokeWithoutASubjectIs400.
+	"DELETE /api/v1/pages/{slug}/grants ?subject",
 	"GET /api/v1/admin/backups/download ?path",
 	"GET /api/v1/admin/backups/inspect ?path",
 	"GET /api/v1/admin/backups/verify ?path",

@@ -406,7 +406,7 @@ func TestAsgCov2_FinishAssignment_CompletedWithRunID(t *testing.T) {
 
 	// noopEmitter rejects run.* entries → the terminal-entry error branch
 	// runs; the COMPLETED payload (exit_code) is still built first.
-	h.finishAssignment(context.Background(), asgID, "run-asg2", chatID, "asg-worker", wsID, "all done", "")
+	h.finishAssignment(context.Background(), asgID, "run-asg2", chatID, "asg-worker", wsID, "all done", "", nil)
 
 	var status, result string
 	if err := h.db.QueryRow(`SELECT status, COALESCE(result_summary,'') FROM assignments WHERE id = ?`, asgID).
@@ -441,7 +441,7 @@ func TestAsgCov2_FinishAssignment_MissionComment_Handoff(t *testing.T) {
 	covAsg2InsertAssignment(t, h, asgID, wsID, missionID, leadID, workerID)
 
 	result := "preamble\n---HANDOFF---\nsummary: shipped the feature\nconfidence: high\nartifacts: pr#42\n---END HANDOFF---"
-	h.finishAssignment(context.Background(), asgID, "", missionID, "asg-worker", wsID, result, "")
+	h.finishAssignment(context.Background(), asgID, "", missionID, "asg-worker", wsID, result, "", nil)
 
 	var commentBody string
 	if err := h.db.QueryRow(`SELECT body FROM mission_comments WHERE mission_id = ?`, missionID).Scan(&commentBody); err != nil {
@@ -480,7 +480,7 @@ func TestAsgCov2_FinishAssignment_MissionComment_LongPlainResult(t *testing.T) {
 	asgID := "asg2-fin-long"
 	covAsg2InsertAssignment(t, h, asgID, wsID, missionID, leadID, workerID)
 
-	h.finishAssignment(context.Background(), asgID, "", missionID, "asg-worker", wsID, strings.Repeat("r", 600), "")
+	h.finishAssignment(context.Background(), asgID, "", missionID, "asg-worker", wsID, strings.Repeat("r", 600), "", nil)
 
 	var commentBody string
 	if err := h.db.QueryRow(`SELECT body FROM mission_comments WHERE mission_id = ?`, missionID).Scan(&commentBody); err != nil {
@@ -505,7 +505,7 @@ func TestAsgCov2_FinishAssignment_PumpLookupError(t *testing.T) {
 		_, _ = h.db.Exec(`ALTER TABLE agents_broken_asg2 RENAME TO agents`)
 	})
 
-	h.finishAssignment(context.Background(), asgID, "", chatID, "asg-worker", wsID, "", "boom")
+	h.finishAssignment(context.Background(), asgID, "", chatID, "asg-worker", wsID, "", "boom", nil)
 
 	var status string
 	if err := h.db.QueryRow(`SELECT status FROM assignments WHERE id = ?`, asgID).Scan(&status); err != nil {

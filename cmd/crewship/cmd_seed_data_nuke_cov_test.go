@@ -354,6 +354,10 @@ func TestNukeCrewIntegrations(t *testing.T) {
 func covRegisterEmptyNukeStubs(s *clitest.StubServer) {
 	empty := clitest.JSONResponse(200, []map[string]string{})
 	s.OnGet("/api/v1/issues", empty)
+	// Pages come before projects and crews: page_panels.owner_crew_id is
+	// ON DELETE RESTRICT, so a workspace still holding pages cannot have its
+	// crews deleted.
+	s.OnGet("/api/v1/pages", empty)
 	s.OnGet("/api/v1/projects", empty)
 	s.OnGet("/api/v1/labels", empty)
 	s.OnGet("/api/v1/agents", empty)
@@ -379,18 +383,21 @@ func TestSeedNuke_EmptyWorkspaceSucceeds(t *testing.T) {
 	if err := seedNuke(context.Background(), covStubClient(s)); err != nil {
 		t.Fatalf("seedNuke on empty workspace: %v", err)
 	}
-	// All ten list endpoints must have been consulted, plus the four
+	// All eleven list endpoints must have been consulted, plus the four
 	// full-teardown calls: inbox purge (DELETE /inbox), the escalation pass
 	// (a second GET /crews), the crew-runtime teardown (POST prune), and the
-	// keeper decision history (DELETE /admin/keeper/requests) — 14.
+	// keeper decision history (DELETE /admin/keeper/requests) — 15.
+	//
+	// Pages joined the list set: a workspace holding them cannot have its crews
+	// deleted, because page_panels.owner_crew_id is ON DELETE RESTRICT.
 	//
 	// The keeper call joined the set because keeper_requests has no workspace_id
 	// and no ON DELETE CASCADE from agents, so a nuke could not reach it and 115
 	// rows survived one on dev2. Counting the calls is what keeps a piece of the
 	// teardown from being dropped silently, so the number moves with the set
 	// rather than the set being trimmed to the number.
-	if got := len(s.Calls()); got != 14 {
-		t.Errorf("expected 14 calls (10 lists + inbox purge + escalation crew list + runtime prune + keeper history), got %d", got)
+	if got := len(s.Calls()); got != 15 {
+		t.Errorf("expected 15 calls (11 lists + inbox purge + escalation crew list + runtime prune + keeper history), got %d", got)
 	}
 }
 
@@ -569,8 +576,8 @@ func TestSeedNuke_EveryPhaseFailingIsAggregated(t *testing.T) {
 	err := seedNuke(context.Background(), covStubClient(s))
 	// 10 original list phases + 3 full-teardown phases (inbox purge, escalation
 	// pass, crew-runtime teardown), all failing on the unrouted/garbage stubs.
-	if err == nil || !strings.Contains(err.Error(), "workspace cleanup had 13 failures") {
-		t.Fatalf("want 13 aggregated failures, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "workspace cleanup had 14 failures") {
+		t.Fatalf("want 14 aggregated failures, got %v", err)
 	}
 	for _, frag := range []string{"projects:", "labels:", "agents:", "credentials:", "integrations:", "pipeline-webhooks:", "pipeline-schedules:", "pipelines:", "crews:", "inbox:", "escalations:", "crew runtimes:"} {
 		if !strings.Contains(err.Error(), frag) {

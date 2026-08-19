@@ -200,6 +200,46 @@ const (
 	// See the DecideAction arm — the row is flat, and the bound that actually
 	// matters (volume) lives on the door, in crewship_escalation_cap.go.
 	ActionEscalationCreate Action = "escalation_create"
+
+	// ActionPageWrite — #1945: writing one PANEL's payload onto a page
+	// (docs/prd/pages.md §11). The capability the Pages feature turns on: a
+	// cheap script pushes a number, a threshold wakes an agent, and the agent
+	// writes its analysis back onto the same page (§0). Until this Action
+	// existed the verb was refused at SAVE — internal/pipeline/crewship_step.go
+	// refuses any verb with no PolicyAction — so Pages was a read-only
+	// dashboard.
+	//
+	// NOT FOLDED INTO ActionIssueWrite, although the two rows are identical
+	// today. That row covers three verbs of ONE noun and earns the sharing by
+	// showing that no property which decides a cell differs between them. Here
+	// three properties DO differ from an issue write — the door, the ACL, the
+	// lifetime — and they happen to argue to the same answer. Sharing the
+	// constant would claim the reasoning is shared too, and the next time either
+	// row moves, that claim is what would move it silently.
+	//
+	// The three, because they are what the DecideAction arm reasons from:
+	//
+	//   - THE DOOR IS DEFAULT-DENY PER PANEL, AND A HUMAN OPENED IT. An issue
+	//     write reaches any issue in the caller's own crew. A page write reaches
+	//     exactly the panels a human granted `produce` on (§7.1b rule 1: an
+	//     agent may never widen who reaches a page, not even to an agent in its
+	//     own crew), or the one panel whose DECLARED producer is the routine
+	//     doing the writing (§7.1 rule 4). Both are proven server-side before
+	//     the gate, in internal/api/pages_internal.go.
+	//   - IT IS THE HIGHEST-FREQUENCY ACTION IN THIS MATRIX. A panel is pushed
+	//     on its SLA cycle; the PRD's own example is 30 s and the payload ring
+	//     is sized for a push every 5 s (§10b.3).
+	//   - IT IS THE LEAST DURABLE WRITE IN THIS MATRIX. The ring evicts a
+	//     payload after 200 pushes or 7 days, whichever comes first, and a
+	//     rollback deliberately restores structure and never numbers (§10b.1).
+	//
+	// What page_write is NOT is a page's STRUCTURE: adding, removing and
+	// re-arranging panels is the `write` grant (§7.1b rule 2), a separate
+	// authority reached through the public spec routes and never through this
+	// verb. Authority over arrangement and authority over content are kept apart
+	// on purpose, and one Action covering both would be where they quietly
+	// rejoined.
+	ActionPageWrite Action = "page_write"
 )
 
 // Decision is the resolved instruction for the caller. Closed set;
@@ -578,6 +618,66 @@ func (p Policy) DecideAction(a Action) Decision {
 		case AutonomyFull:
 			return DecisionAutoJournal
 		}
+	case ActionPageWrite:
+		// Modify a thing that already exists, create nothing — the shape
+		// skill_assign has and issue_write matches — and this row lands on
+		// issue_write's numbers. The three properties listed on the constant all
+		// point the same way, which is why the cells COINCIDE rather than being
+		// copied across:
+		//
+		//  1. The autonomy cell is the SECOND lock, not the first. A routine can
+		//     only reach a panel a human granted it `produce` on, or the panel
+		//     that names this very routine as its producer. There is no "every
+		//     panel in my crew" reading of this capability the way there is for
+		//     issues.
+		//  2. One inbox item per push, at a 30-second SLA, is not oversight — it
+		//     is an inbox nobody opens again. issue_write's arm already makes
+		//     this argument for a triage routine touching thirty issues; a
+		//     producer pushes more than that before lunch.
+		//  3. The artefact IS the operator-facing one. The push lands on a page a
+		//     human is looking at, carrying server-attached provenance and a
+		//     server-computed freshness verdict (§4 rules 2 and 5). A notice
+		//     about it duplicates the thing itself — escalation_create's "an
+		//     inbox row ABOUT an inbox row", in different clothes.
+		//
+		// STRICT HOLDS, and is not Rejected. Rejected is this matrix's marker for
+		// "creates a durable principal, or keeps firing after everyone stopped
+		// looking" — crew, agent, ephemeral spawn, cron. A payload is the
+		// opposite of both: it creates nobody and the ring throws it away. What
+		// strict does say, literally, is that every governable action needs
+		// operator Approve, and a number other humans read and trust is exactly
+		// the write an operator at that level wants to see before it appears.
+		//
+		// STATE THE COST RATHER THAN IMPLY IT (delegation_limits.go's rule). On
+		// the unattended path a held decision IS a refusal — nobody is attached
+		// to a 03:00 run to approve anything (crewship_actions.go) — so a strict
+		// crew's routines do not write pages at all. Three things make that a
+		// price rather than a hole: the public PUT stays open to a human and to a
+		// script running under a human's CLI token, so the panel is not
+		// unwritable; a panel nobody writes goes `stale` and then reads as
+		// stale, which is the whole point of §4 (silence is visible, not
+		// silent); and the remedy is one command, `crewship policy set`, which
+		// the refusal names.
+		//
+		// GUIDED DOES NOT HOLD, and this is the cell that has to be argued,
+		// because guided's documented meaning is "writes need OK". Both overrides
+		// issue_write's arm gives apply here with more force — the inbox is the
+		// wrong instrument at this frequency (2), and the item would duplicate an
+		// artefact already in front of the operator (3). A hold would buy neither
+		// containment, which (1) already provides per panel and which a human
+		// established, nor visibility, which the page itself provides. What
+		// guided keeps is the journal entry, the panel's own provenance, and the
+		// 403 + journal entry + owner notification that every push OUTSIDE the
+		// grant still gets (§7.1b rule 3) — the case where an operator genuinely
+		// needs to be told something.
+		switch p.AutonomyLevel {
+		case AutonomyStrict:
+			return DecisionInboxApprove
+		case AutonomyGuided, AutonomyTrusted:
+			return DecisionAutoLogJournal
+		case AutonomyFull:
+			return DecisionAutoJournal
+		}
 	}
 	// Defensive default: any (action, level) pair we haven't mapped
 	// gets the safest treatment — inbox approval. Adding a new
@@ -640,6 +740,7 @@ var knownActions = map[Action]struct{}{
 	ActionIssueWrite:            {},
 	ActionAssignmentCreate:      {},
 	ActionEscalationCreate:      {},
+	ActionPageWrite:             {},
 }
 
 // IsKnownAction reports whether a is an Action this package declares.

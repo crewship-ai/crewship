@@ -1,0 +1,1075 @@
+---
+title: "Pages"
+description: "Panel dashboards that producers push to and nobody queries — the page holds no datasource, no credential, and no clock of its own."
+icon: "layout-template"
+stability: experimental
+tag: Experimental
+---
+
+{/* docs-inventory: ignore-api-prefix /api/v1/internal/ reason=internal-IPC-is-not-in-public-OpenAPI */}
+
+A page is a declared arrangement of panels. It contains no query, no connection
+string and no credential for anything it displays: a **producer** — a script, a
+routine step, an agent, or an outside system holding a webhook token — pushes a
+typed payload, and the panel renders the last one that arrived.
+
+Read the [Pages guide](/guides/pages) first for what a page is and is not, the
+freshness contract, and the permission model. This page is the wire contract.
+
+Three properties hold across every endpoint below, and most of the error
+responses exist to keep them true:
+
+- **The server owns the clock and the provenance.** `produced_at`, `producer`
+  and `run_id` are attached server-side. A payload carrying any of them is
+  refused; a producer cannot claim to be fresher than it is.
+- **Freshness is computed on read, never stored.** There is no column holding
+  `fresh` or `stale`, so nothing can be written into one.
+- **Identity comes from the token.** Whichever of the four write doors a push
+  arrives through, the caller's identity is resolved from its credential, never
+  from the body.
+
+Implementation: `internal/api/pages_*.go`, `internal/pages` for the schemas and
+validation.
+
+## Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/pages`](#list-pages) | List the workspace's pages |
+| POST | [`/api/v1/pages`](#create-a-page) | Create a page from a parsed spec |
+| GET | [`/api/v1/pages/{slug}`](#get-a-page) | One page, its panels, and their current data |
+| PATCH | [`/api/v1/pages/{slug}`](#update-a-page) | Change a page's arrangement |
+| DELETE | [`/api/v1/pages/{slug}`](#delete-a-page) | Delete a page |
+| PUT | [`/api/v1/pages/{slug}/panels/{panelId}/data`](#push-panel-data) | Push one panel's payload — the write path |
+| GET | [`/api/v1/pages/{slug}/grants`](#list-grants) | List a page's grants |
+| PUT | [`/api/v1/pages/{slug}/grants`](#issue-a-grant) | Grant read, produce, or write |
+| DELETE | [`/api/v1/pages/{slug}/grants`](#revoke-a-grant) | Revoke a grant |
+| GET | [`/api/v1/pages/{slug}/panels/{panelId}/actions`](#list-a-panels-actions) | The actions a panel declares |
+| POST | [`/api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}`](#dispatch-an-action) | Dispatch a declared action |
+| GET | [`/api/v1/pages/{slug}/versions`](#list-versions) | The page's structural history |
+| POST | [`/api/v1/pages/{slug}/rollback`](#roll-a-page-back) | Restore a previous arrangement |
+| GET | [`/api/v1/pages/{slug}/export`](#export-a-page) | Export the spec as a portable bundle |
+| POST | [`/api/v1/pages/import`](#import-a-page) | Import a bundle, binding its references |
+| GET | [`/api/v1/pages/{slug}/public`](#list-public-links) | List a page's public links |
+| POST | [`/api/v1/pages/{slug}/public`](#publish-a-page) | Mint a public link |
+| DELETE | [`/api/v1/pages/{slug}/public/{tokenId}`](#withdraw-a-public-link) | Withdraw one public link |
+| GET | [`/api/v1/pages/{slug}/webhooks`](#list-webhook-tokens) | List a panel's webhook tokens |
+| POST | [`/api/v1/pages/{slug}/webhooks`](#mint-a-webhook-token) | Mint a webhook token for one panel |
+| DELETE | [`/api/v1/pages/{slug}/webhooks/{webhookId}`](#revoke-a-webhook-token) | Revoke one webhook token |
+| POST | [`/api/v1/page-webhooks/{token}`](#fire-a-webhook) | Outside producer writes one panel |
+| GET | [`/api/v1/public/pages/{token}`](#view-a-public-page) | Public read, no account |
+| POST | [`/api/v1/public/pages/{token}/unlock`](#unlock-a-public-page) | Submit a public link's password |
+
+Routes are workspace-unscoped; the workspace comes from the session context or
+the `workspace_id` query parameter, the same shape saved views and routines use.
+
+---
+
+## List pages
+
+```
+GET /api/v1/pages
+```
+
+**Authentication:** session cookie or CLI token. Any workspace member may list;
+the response holds the pages the caller can reach — their own, their crews', and
+the ones a grant names ([Issue a grant](#issue-a-grant)). A page outside that
+set is absent, not present-and-locked.
+
+**Query parameters:** `workspace_id` (required when the caller's context does
+not supply one).
+
+**Response 200** — an array of page summaries:
+
+```json
+[
+  {
+    "id": "pg_01H...",
+    "slug": "fleet-201",
+    "name": "Fleet 201",
+    "description": "Line 2 uptime",
+    "owner": "crew/ops",
+    "owner_crew_slug": "ops",
+    "panel_count": 5,
+    "panel_states": { "fresh": 4, "stale": 1, "failed": 0, "never_produced": 0 },
+    "last_produced_at": "2026-08-13T17:41:02Z",
+    "created_at": "2026-07-02T09:12:44Z",
+    "updated_at": "2026-08-11T14:03:19Z"
+  }
+]
+```
+
+`panel_count` counts **every** panel including sealed ones, because the grid
+draws a placeholder for those and a count that skipped them would disagree with
+what the reader sees. `last_produced_at` is the newest arrival across visible
+panels — deliberately not `updated_at`, which is when the *spec* last changed:
+a page edited an hour ago whose data last arrived a week ago must not read as
+"updated today".
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Listed. |
+| 400 | No workspace in context and none supplied. |
+| 401 | No session or token. |
+| 403 | Caller is not a member of the workspace. |
+
+---
+
+## Create a page
+
+```
+POST /api/v1/pages
+```
+
+**Authentication:** session cookie or CLI token, plus the `page.create`
+capability. A MEMBER holding that capability passes; the workspace role alone
+is not the answer.
+
+**Request body** — the *parsed* spec. The CLI parses the YAML and sends JSON;
+the server never parses YAML:
+
+```json
+{
+  "name": "Fleet 201",
+  "slug": "fleet-201",
+  "description": "Line 2 uptime",
+  "owner": "crew/ops",
+  "panels": [
+    {
+      "id": "sluzby",
+      "schema": "status.v1",
+      "title": "Služby",
+      "icon": "container",
+      "owner": "crew/ops",
+      "producer": "script/watch-services.sh",
+      "sla": "60s",
+      "span": 12,
+      "tab": "Síť"
+    }
+  ]
+}
+```
+
+`owner` is `user/<id>` or `crew/<slug>` — exactly one of the two. `span` is a
+column count on a 12-column grid; **there is no height field**, a panel is as
+tall as its content.
+
+A panel may also carry `refresh` — `"on:wake"` or `"on:panels-changed"`, and
+nothing else. It is the event that **runs that panel's producer**, not a
+rendering hint, so it requires `producer: "routine/<slug>"`: the server cannot
+execute a `script/`, call a `webhook/` producer, or dispatch an `agent/`. It
+compiles to an `automations` row with `action_kind: routine`. `"on:wake"` is
+additionally refused on a page that declares no `wake` gate — it could never
+fire — and on a panel that declares its own gate, which is a loop. Every one of
+those is a 400 naming the rule; see the
+[Pages guide](/guides/pages#refresh-the-panel-that-pulls-itself).
+
+**Response 201** — the created page, in the same shape [`GET
+/api/v1/pages/{slug}`](#get-a-page) returns.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 201 | Created. |
+| 400 | The spec is malformed, or a panel names a schema, icon, or owner that does not exist. |
+| 401 | No session or token. |
+| 403 | Caller lacks `page.create`, or named an owner crew they do not belong to. |
+| 409 | A page with that slug already exists in the workspace. |
+
+---
+
+## Get a page
+
+```
+GET /api/v1/pages/{slug}
+```
+
+**Authentication:** session cookie or CLI token. Visibility of individual
+panels is decided per panel, server-side, before serialisation.
+
+**Path parameters:** `slug` — the page's slug.
+
+**Response 200** — the page, its panels in spec order, and each panel's current
+data:
+
+```json
+{
+  "id": "pg_01H...",
+  "slug": "fleet-201",
+  "name": "Fleet 201",
+  "owner": "crew/ops",
+  "panels": [
+    {
+      "id": "sluzby",
+      "schema": "status.v1",
+      "title": "Služby",
+      "icon": "container",
+      "span": 12,
+      "state": "fresh",
+      "data": { "items": [{ "name": "api", "state": "ok" }] },
+      "provenance": {
+        "producer": "script/watch-services.sh",
+        "run_id": "push:sluzby:412",
+        "produced_at": "2026-08-13T17:41:02Z"
+      }
+    }
+  ]
+}
+```
+
+A panel owned by a crew the caller does not belong to arrives as a **sealed
+placeholder**: it keeps its id, schema and span so the page has the same shape
+for everyone, and carries no data and no provenance. This is decided server-side
+— nothing is hidden in the client.
+
+An **editor** additionally receives the authored half of each panel — its
+declared `actions`, `wake` gates, `on_failure` and `refresh` — because that is
+what an edit form has to round-trip. A reader does not, and an absent authored
+half is absent, not an empty array.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Returned. |
+| 400 | No workspace in context and none supplied. |
+| 401 | No session or token. |
+| 403 | Caller is not a member of the workspace. |
+| 404 | No page with that slug in this workspace, **or** the caller has no reach to it — see [Issue a grant](#issue-a-grant). The two are deliberately indistinguishable, so this endpoint cannot be walked to learn which pages exist. |
+
+---
+
+## Update a page
+
+```
+PATCH /api/v1/pages/{slug}
+```
+
+**Authentication:** session cookie or CLI token. The page owner, a workspace
+ADMIN/OWNER, or the holder of a `write` grant.
+
+**Request body:** the same shape as [create](#create-a-page). Panels are
+reconciled against the submitted list — a panel absent from it is removed, and
+its payload history goes with it.
+
+**Response 200:** the updated page.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Updated. A new structural version is recorded. |
+| 400 | Malformed spec, or an unresolvable owner/producer/routine reference. |
+| 401 | No session or token. |
+| 403 | Not the owner, not an admin, and holding no `write` grant. |
+| 404 | No such page. |
+
+---
+
+## Delete a page
+
+```
+DELETE /api/v1/pages/{slug}
+```
+
+**Authentication:** session cookie or CLI token. The page owner or a workspace
+ADMIN/OWNER.
+
+**Request:** no body. **Response 204:** no content.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 204 | Deleted, with its panels, payload history, grants, webhook tokens and public links. |
+| 401 | No session or token. |
+| 403 | Not the owner and not an admin. A `write` grant is not enough to delete. |
+| 404 | No such page. |
+
+---
+
+## Push panel data
+
+```
+PUT /api/v1/pages/{slug}/panels/{panelId}/data
+```
+
+The single write path. Everything that produces a number, a status, a table or
+a narrative ends here — whether it arrives directly, through a routine's
+`page.write` verb, through the sidecar from inside a container, or through a
+webhook.
+
+**Authentication:** session cookie or CLI token. Authority is the **producer's**,
+not a workspace role: the caller must be the panel's declared `producer`, or
+hold a `produce` grant covering it.
+
+**Request body:** the payload itself, with no envelope. It must satisfy the
+panel's declared schema (`metric.v1`, `status.v1`, `table.v1`, `series.v1`,
+`narrative.v1`) and is capped at 64 KiB.
+
+```json
+{ "value": 42, "unit": "ms", "delta": -3, "delta_good": "down", "sparkline": [51, 47, 45, 42] }
+```
+
+**Query parameters:** `state` — the producer's own verdict, `ok` (the default)
+or `failed`. Any other value is a **400**, `fresh` and `stale` included: those
+two are the server's arithmetic, and accepting them here would let a producer
+declare itself fresh.
+
+**Response 200:**
+
+```json
+{
+  "accepted": true,
+  "page": "fleet-201",
+  "panel": "latence",
+  "seq": 413,
+  "state": "fresh",
+  "provenance": {
+    "producer": "script/ping-go",
+    "run_id": "push:latence:413",
+    "produced_at": "2026-08-13T17:41:07Z"
+  }
+}
+```
+
+A producer with no run — a script, a container agent, a webhook — carries the
+push's own server-side reference `push:<panel>:<seq>` in place of a run id.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Stored. Connected viewers are notified over the page's websocket channel. |
+| 400 | The payload does not satisfy the panel's schema. The message names the field and why. |
+| 401 | No session or token. |
+| 403 | The caller is not the panel's declared producer and holds no `produce` grant. The refusal writes a journal entry and notifies the page owner — treat it as a signal to investigate, not noise to retry past. |
+| 404 | No such page, or the page has no such panel. |
+| 422 | The payload exceeds 64 KiB. The rejection names the bytes attempted and the limit. |
+| 429 | Faster than one push per two seconds for this panel, or over the per-minute budget. |
+
+---
+
+## List grants
+
+```
+GET /api/v1/pages/{slug}/grants
+```
+
+**Path parameters:** `slug`. **Query parameters:** `workspace_id` when the caller's context supplies none. No request body.
+
+**Authentication:** session cookie or CLI token. The page owner or a workspace
+ADMIN/OWNER.
+
+**Response 200:**
+
+```json
+{
+  "page": "fleet-201",
+  "grants": [
+    {
+      "subject_type": "crew",
+      "subject": "engineering",
+      "subject_id": "crew_01H...",
+      "level": "produce",
+      "panels": ["rozbor"],
+      "granted_by": "srba@unify.cz",
+      "granted_at": "2026-08-01T08:20:11Z",
+      "live": true
+    }
+  ]
+}
+```
+
+`live` is not stored. A grant is only as wide as the human who issued it: if
+that human loses access to the crew the grant names, the grant reports `live:
+false` with an `inert_reason` saying so, and stops working at the same moment.
+That is the only thing that makes a row inert — every level, `read` included,
+decides something while its issuer still stands behind it.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Listed. |
+| 400 | No workspace in context and none supplied. |
+| 401 | No session or token. |
+| 403 | Not the owner and not an admin. |
+
+---
+
+## Issue a grant
+
+```
+PUT /api/v1/pages/{slug}/grants
+```
+
+**Authentication:** session cookie only. **A grant is issued by a human, never
+by an agent** — an agent holding `write` may rebuild a page's layout freely and
+still cannot widen who reaches it, not even to another agent in its own crew.
+
+**Request body:**
+
+```json
+{
+  "subject_type": "crew",
+  "subject": "engineering",
+  "level": "produce",
+  "panels": ["rozbor"]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `subject_type` | string | `user`, `crew`, or `agent`. |
+| `subject` | string | The subject's slug or id. |
+| `level` | string | `read`, `produce`, or `write`. |
+| `panels` | string[] | Optional. Restricts a `produce` grant to named panels; omitted means every panel on the page. |
+
+### What each level decides
+
+| Level | Opens the page | Also |
+|---|---|---|
+| `read` | yes | nothing else |
+| `produce` | yes | may push payloads into the panels it names |
+| `write` | yes | may add, remove and re-arrange panels, and read the page's version history |
+
+`read` is what the other two are built on: a principal who may rewrite a page
+has to be able to open it, so every level reaches the page and the levels differ
+only in what they add.
+
+A grant widens reach to the **page**, never to a crew's data: granting a crew
+`produce` on a panel does not give the grantee anything else that crew owns.
+
+Concretely, a `read` grant makes a page appear in [`GET
+/api/v1/pages`](#list-pages) and open at [`GET
+/api/v1/pages/{slug}`](#get-a-page) for a subject who would otherwise get a
+404 — and changes nothing else. Every panel on it stays sealed unless the
+grantee's own crew membership already opened it, so a grantee can be shown a
+page of nothing but sealed placeholders. That is the grant working, not
+failing: they were given the board, not the numbers on it.
+
+Without any grant a page is reached by its owner, by a workspace ADMIN/OWNER,
+and by members of the crews that own its panels.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Issued, or updated in place if the subject already held one. |
+| 400 | Unknown `subject_type` or `level`, missing subject, or `panels` naming a panel the page does not have. |
+| 401 | No session. |
+| 403 | Not the owner and not an admin, or the caller is an agent rather than a human. |
+
+---
+
+## Revoke a grant
+
+```
+DELETE /api/v1/pages/{slug}/grants
+```
+
+**Authentication:** session cookie or CLI token. The page owner or a workspace
+ADMIN/OWNER.
+
+**Query parameters:** exactly one of `user`, `crew`, or `agent`, naming the
+subject to revoke. A revoke naming nobody answers **400** rather than reporting
+a success it did not perform.
+
+**Response 200:** `{"page": "fleet-201", "changed": 1}`.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Revoked. `changed` is 0 when the subject held no grant. |
+| 400 | No subject named on the query string. |
+| 401 | No session or token. |
+| 403 | Not the owner and not an admin. |
+| 404 | No such page. |
+
+---
+
+## List a panel's actions
+
+```
+GET /api/v1/pages/{slug}/panels/{panelId}/actions
+```
+
+**Path parameters:** `slug`, `panelId`. No request body.
+
+The buttons a panel declares, and what each one runs. The panel author declares
+these in the spec; a caller cannot invent one.
+
+**Authentication:** session cookie or CLI token; the caller must be able to see
+the panel.
+
+**Response 200:**
+
+```json
+{
+  "page": "fleet-201",
+  "panel": "linka",
+  "actions": [
+    {
+      "id": "restart",
+      "kind": "call",
+      "label": "Restartovat linku",
+      "style": "danger",
+      "routine": "line-restart",
+      "confirm": { "title": "Restartovat?", "body": "Linka se zastaví na ~40 s." },
+      "inputs": [{ "name": "duvod", "type": "string", "required": true }]
+    }
+  ]
+}
+```
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Listed. An empty array when the panel declares none. |
+| 400 | No workspace in context and none supplied. |
+| 401 | No session or token. |
+| 403 | The panel is sealed to this caller. |
+
+---
+
+## Dispatch an action
+
+```
+POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}
+```
+
+**Authentication:** session cookie or CLI token, plus the right to dispatch on
+this page. The request names an **action id**, never a routine: what runs is
+what the panel author declared, so a caller cannot redirect a button at
+something else.
+
+**Request body:** the declared inputs, if the action declares any.
+
+```json
+{ "inputs": { "duvod": "vibrace na loži 3" } }
+```
+
+**Request headers:** `Idempotency-Key` is honoured. The key is bound to the
+resolved inputs, so **retrying is safe and replaying with different inputs is
+refused** with 409 rather than silently dispatching a second run.
+
+**Response 202** — the run is *queued*, not finished:
+
+```json
+{
+  "status": "SCHEDULED",
+  "pending_id": "pnd_01H...",
+  "fire_at": "2026-08-13T17:46:00Z",
+  "deduped": false,
+  "coalesced": false,
+  "page": "fleet-201",
+  "panel": "linka",
+  "action": "restart",
+  "routine": "line-restart"
+}
+```
+
+`status` is `SCHEDULED`, or `DEDUPED` when an identical dispatch was already in
+flight.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 202 | Queued. Watch the run for the outcome. |
+| 401 | No session or token. |
+| 403 | Caller may not dispatch on this page, or the panel is sealed to them. |
+| 409 | The same `Idempotency-Key` was already used with different inputs. |
+| 429 | Over the dispatch rate budget. |
+| 503 | The dispatcher is unavailable. |
+
+---
+
+## List versions
+
+```
+GET /api/v1/pages/{slug}/versions
+```
+
+**Path parameters:** `slug`. **Query parameters:** `workspace_id` when the caller's context supplies none. No request body.
+
+The page's **structural** history — which panels existed, their layout, owners
+and producers. Panel data is not versioned.
+
+**Authentication:** session cookie or CLI token; any caller who can see the page.
+
+**Response 200:**
+
+```json
+{
+  "page": "fleet-201",
+  "retained": 50,
+  "versions": [
+    { "seq": 4, "created_at": "2026-08-11T14:03:19Z", "author": "srba@unify.cz", "panel_count": 5, "current": true }
+  ]
+}
+```
+
+`retained` is how many versions this build keeps.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Listed. |
+| 400 | No workspace in context and none supplied. |
+| 401 | No session or token. |
+| 403 | Caller cannot see the page. |
+| 404 | No such page. |
+
+---
+
+## Roll a page back
+
+```
+POST /api/v1/pages/{slug}/rollback
+```
+
+**Authentication:** session cookie or CLI token. A rollback is an edit of the
+arrangement, so it runs the same gate as PATCH: owner, workspace ADMIN/OWNER,
+or a `write` grant.
+
+**Request body:**
+
+```json
+{ "to": 3 }
+```
+
+`to` is required — a rollback names the version to restore.
+
+**Response 200:**
+
+```json
+{
+  "page": { "slug": "fleet-201", "panels": [] },
+  "rolled_back_to": 3,
+  "version": 5,
+  "dimmed": ["rozbor"]
+}
+```
+
+A rollback never resurrects old panel data. A panel it brings back renders in
+the "waiting for first data" state even if rows for it survive in the payload
+ring; showing an old payload as current is exactly the dishonesty the freshness
+contract exists to prevent. `dimmed` names those panels in the response, so the
+operator who ran the rollback learns it here rather than from a blank panel
+five minutes later.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Rolled back. |
+| 400 | `to` missing, or naming a version that is not in the retained history. |
+| 401 | No session or token. |
+| 403 | Not the owner, not an admin, and holding no `write` grant. |
+| 404 | No such page. |
+
+---
+
+## Export a page
+
+```
+GET /api/v1/pages/{slug}/export
+```
+
+**Path parameters:** `slug`. **Query parameters:** `workspace_id` when the caller's context supplies none. No request body.
+
+**Authentication:** session cookie or CLI token; a caller who can see the page.
+
+**Response 200** — a portable bundle: the spec, plus every reference it makes
+to something outside itself, listed so the importer must bind them explicitly:
+
+```json
+{
+  "format": "crewship.page.bundle/v1",
+  "page": { "name": "Fleet 201", "slug": "fleet-201", "panels": [] },
+  "references": [
+    { "ref": "crew/ops", "kind": "crew", "used_by": ["sluzby"], "reason": "panel owner" }
+  ],
+  "metadata": { "exported_at": "2026-08-13T17:44:00Z" }
+}
+```
+
+The bundle carries no data, no grants and no tokens — an export is a shape, not
+a snapshot of what the page was showing.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Exported. |
+| 400 | No workspace in context and none supplied. |
+| 401 | No session or token. |
+| 403 | Caller cannot see the page. |
+| 404 | No such page. |
+
+---
+
+## Import a page
+
+```
+POST /api/v1/pages/import
+```
+
+**Authentication:** session cookie or CLI token, plus `page.create`.
+
+**Request body:** the bundle, the slug to create, and a binding for every
+reference the bundle declares:
+
+```json
+{
+  "format": "crewship.page.bundle/v1",
+  "page": { "name": "Fleet 201", "panels": [] },
+  "references": [{ "ref": "crew/ops", "kind": "crew" }],
+  "slug": "fleet-202",
+  "bind": { "crew/ops": "crew/vyroba" }
+}
+```
+
+An unbound reference is a **422**, not a guess. Importing a bundle that names
+`crew/ops` into a workspace that happens to have a crew called `ops` would
+otherwise hand a page to whoever holds that name.
+
+**Response 201:** the created page.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 201 | Imported. |
+| 400 | Unknown bundle format. |
+| 422 | A reference left unbound, or a binding naming something that does not exist. The response lists each one and what would satisfy it. |
+| 401 | No session or token. |
+| 403 | Caller lacks `page.create`, or bound a reference to a crew they do not belong to. |
+| 409 | A page with the requested slug already exists. |
+
+---
+
+## List public links
+
+```
+GET /api/v1/pages/{slug}/public
+```
+
+**Path parameters:** `slug`. **Query parameters:** `workspace_id` when the caller's context supplies none. No request body.
+
+**Authentication:** session cookie or CLI token. The page owner or a workspace
+ADMIN/OWNER.
+
+**Response 200:** the links, when each expires, whether it carries a password,
+and whether it shows provenance. It cannot show the link itself — see
+[publish](#publish-a-page).
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Listed. |
+| 400 | No workspace in context and none supplied. |
+| 401 | No session or token. |
+| 403 | Not the owner and not an admin. |
+| 404 | No such page. |
+
+---
+
+## Publish a page
+
+```
+POST /api/v1/pages/{slug}/public
+```
+
+**Authentication:** session cookie. Publishing widens reach beyond the
+workspace, so it is a human's decision.
+
+**Request body** — every field optional:
+
+```json
+{ "expires_in_days": 7, "password": "…", "show_provenance": false }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `expires_in_days` | integer | Default 30, maximum 365. Omit the field entirely to take the server's default rather than pinning a number that can drift. |
+| `password` | string | 8–72 bytes. bcrypt silently truncates past 72, so a longer one is refused rather than quietly shortened. |
+| `show_provenance` | boolean | Default `false`. Producer and routine names are internal vocabulary; a public page that leaks them describes your infrastructure to whoever holds the link. |
+
+**Response 201** — the token is returned **once**:
+
+```json
+{ "id": "pgl_01H...", "url": "https://…/p/pgl_…", "expires_at": "2026-08-20T00:00:00Z", "show_provenance": false }
+```
+
+The column holds a SHA-256 digest, so nothing can show the link again. Only
+panels explicitly marked public appear on it.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 201 | Published. |
+| 400 | `expires_in_days` out of range, or a password shorter than 8 or longer than 72 bytes. |
+| 401 | No session. |
+| 403 | Not the owner and not an admin. |
+| 404 | No such page. |
+
+---
+
+## Withdraw a public link
+
+```
+DELETE /api/v1/pages/{slug}/public/{tokenId}
+```
+
+**Path parameters:** `slug`, `tokenId` (from [list public links](#list-public-links)). No request body.
+
+**Authentication:** session cookie or CLI token. The page owner or a workspace
+ADMIN/OWNER.
+
+**Response 200:** `{"id": "pgl_…", "revoked": true}`, plus `"already": true`
+when it was already revoked — revoking twice succeeds, because it is the state
+that matters. Withdraws one link and leaves the others
+working — several links per page is the intended shape.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Withdrawn. |
+| 401 | No session or token. |
+| 403 | Not the owner and not an admin. |
+| 404 | No such page, or no such link on it. |
+
+---
+
+## List webhook tokens
+
+```
+GET /api/v1/pages/{slug}/webhooks
+```
+
+**Path parameters:** `slug`. **Query parameters:** `workspace_id` when the caller's context supplies none. No request body.
+
+**Authentication:** session cookie or CLI token. The page owner or a workspace
+ADMIN/OWNER.
+
+**Response 200:**
+
+```json
+{
+  "page": "fleet-201",
+  "webhooks": [
+    {
+      "id": "pgwh_01H...",
+      "panel": "cron",
+      "name": "PLC hall 2",
+      "created_by": "srba@unify.cz",
+      "created_at": "2026-07-30T11:02:00Z",
+      "last_fired_at": "2026-08-13T17:40:00Z",
+      "fire_count": 4412,
+      "live": true
+    }
+  ]
+}
+```
+
+No `token` field: it is stored as a digest and cannot be re-read.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Listed. |
+| 400 | No workspace in context and none supplied. |
+| 401 | No session or token. |
+| 403 | Not the owner and not an admin. |
+| 404 | No such page. |
+
+---
+
+## Mint a webhook token
+
+```
+POST /api/v1/pages/{slug}/webhooks
+```
+
+For a producer that cannot run the CLI: a cron on someone else's box, a step in
+an automation service, a PLC gateway, a CI job. Anything that *can* run the CLI should use
+[`page set`](/cli/page#crewship-page-set) instead — one write path,
+and no credential to leak.
+
+**Authentication:** session cookie. The page owner or a workspace ADMIN/OWNER.
+
+**Request body:**
+
+```json
+{ "panel": "cron", "name": "PLC hall 2" }
+```
+
+A token is bound to **one panel**. Several tokens per panel is the intended
+shape, so revoking the PLC's does not break the CI job's.
+
+**Response 201** — the URL is returned once and never again:
+
+```json
+{ "id": "pgwh_01H...", "panel": "cron", "url": "https://…/api/v1/page-webhooks/pgw_…", "created_at": "…" }
+```
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 201 | Minted. |
+| 400 | `panel` missing, or naming a panel the page does not have. |
+| 401 | No session. |
+| 403 | Not the owner and not an admin. |
+| 404 | No such page. |
+
+---
+
+## Revoke a webhook token
+
+```
+DELETE /api/v1/pages/{slug}/webhooks/{webhookId}
+```
+
+**Path parameters:** `slug`, `webhookId` (from [list webhook tokens](#list-webhook-tokens)). No request body.
+
+**Authentication:** session cookie or CLI token. The page owner or a workspace
+ADMIN/OWNER.
+
+**Response 200:** `{"id": "pgwh_…", "revoked": true}`, plus `"already": true`
+when it was already revoked.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Revoked. Further pushes with that token answer 403. |
+| 401 | No session or token. |
+| 403 | Not the owner and not an admin. |
+| 404 | No such page, or no such token on it. |
+
+---
+
+## Fire a webhook
+
+```
+POST /api/v1/page-webhooks/{token}
+```
+
+**Authentication:** the token in the path **is** the authentication — no header,
+no session. It is matched against a SHA-256 digest and is bound to exactly one
+panel, so a leaked token can write that panel and nothing else.
+
+**Request body:** the panel's payload, with no envelope — the same bytes
+[`PUT …/data`](#push-panel-data) takes, judged by the same schema.
+
+```json
+{ "items": [{ "name": "linka-2", "state": "ok", "label": "412 ks/h" }] }
+```
+
+**Query parameters:** `state` — `ok` or `failed`, as on the main write path.
+
+**Response 200:** `{"accepted": true, "panel": "cron", "seq": 4413}`.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Stored. |
+| 400 | The payload does not satisfy the panel's schema. |
+| 403 | Token unknown, revoked, or expired. Deliberately the same answer for all three, so probing cannot distinguish them. |
+| 422 | Payload over 64 KiB. |
+| 429 | Over the panel's push-rate budget. |
+
+---
+
+## View a public page
+
+```
+GET /api/v1/public/pages/{token}
+```
+
+**Path parameters:** `token` — the published link's token. No request body, no query parameters.
+
+**Authentication:** the token in the URL. No account, no workspace, no session.
+When the link carries a password, this answers 401 until
+[unlock](#unlock-a-public-page) has been called.
+
+**Response 200** — only the panels marked public, and only what a stranger may
+see:
+
+```json
+{
+  "slug": "uzaverka",
+  "name": "Uzávěrka",
+  "panels": [{ "id": "hotovo", "schema": "metric.v1", "span": 6, "state": "fresh", "data": { "value": 91, "unit": "%" } }],
+  "generated_at": "2026-08-13T17:45:00Z",
+  "show_provenance": false
+}
+```
+
+A stale panel on a public page shows **its age, never the reason**: "last
+updated 3 days ago" is useful to a stranger, "producer script/watch-services.sh
+has not run since Tuesday" describes your infrastructure to them.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Returned. |
+| 401 | The link carries a password and this session has not unlocked it. |
+| 404 | Token unknown, revoked, or expired — one answer for all three, so probing learns nothing. |
+
+---
+
+## Unlock a public page
+
+```
+POST /api/v1/public/pages/{token}/unlock
+```
+
+**Authentication:** the token in the URL, plus the password in the body. The
+password is never in the URL — a URL ends up in browser history, in referrer
+headers, and in whatever chat app the link was pasted into.
+
+**Request body:**
+
+```json
+{ "password": "…" }
+```
+
+**Response 200:** the public page itself — the same body
+[`GET /api/v1/public/pages/{token}`](#view-a-public-page) returns. There is no
+separate "unlocked" acknowledgement to round-trip for, and a correct password
+spends a view from the link's cap, because it is the *serving* that the cap
+bounds.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Correct password; the page follows. |
+| 400 | Malformed JSON body. |
+| 401 | Wrong password, unknown token, or a link that carries no password — deliberately one answer through one code path, so the cases the design requires to be indistinguishable literally are. |
+| 429 | Rate limited. The limit is applied *before* the password is checked, and keyed on the token hash for an unknown token, so guessing is the case that is limited rather than the one that is not. |
+
+---
+
+## Related
+
+- [Pages guide](/guides/pages) — what a page is, the freshness contract, tabs, actions, wake gates and the permission model
+- [Page commands](/cli/page) — the CLI, including the producer form
+- [Internal IPC](/api-reference/internal) — the routine and container write path

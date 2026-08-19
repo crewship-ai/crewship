@@ -64,6 +64,10 @@ const (
 	KeyWebhookAgentPerMin   = "webhook.agent_per_min"
 	KeyKeeperJudgeProbe     = "keeper.judge_probe_per_min"
 	KeyKeeperReviewRun      = "keeper.review_run_per_hour"
+	KeyPagesPushPanelPerMin = "pages.push_panel_per_min"
+	KeyPagesPushPanelBurst  = "pages.push_panel_burst"
+	KeyPagesPushWSPerMin    = "pages.push_workspace_per_min"
+	KeyPagesPublicViewPerHr = "pages.public_view_per_hour"
 )
 
 // hardMax is a generous shared ceiling. It exists only to reject absurd
@@ -179,6 +183,37 @@ var registry = []Meta{
 	// through at once and only the sustained rate is bounded. At the default
 	// that is four runs immediately, then one a minute.
 	{KeyKeeperReviewRun, "Keeper", "Manual review run", "Operator-triggered Keeper Reviews runs (`crewship keeper review run`), instance-wide. Each one spends a full evaluation on a paid model, so this is the cap on what the button can bill. Bursts up to one pass over the four evaluators regardless of this value.", "runs/hour", 60, 1, 3600},
+	// Pages (docs/prd/pages.md §10b.3). The dangerous number in Pages is not
+	// size, it is FREQUENCY: 24 panels × 100 pages × one push every 5 s is
+	// 2 880 writes per second, and SQLite has one writer. So the push rate is
+	// the limiter that keeps the feature affordable, and it is bounded twice.
+	//
+	//   1. Here — a per-process token bucket per panel and per workspace, which
+	//      is what the PRD means by "visible, reviewable and adjustable in
+	//      Settings rather than compiled in".
+	//   2. At the write — a minimum-interval check on produced_at in the same
+	//      transaction as the INSERT (internal/pages/limits.go). config/
+	//      rate-limits.yml's own header records why that second layer exists:
+	//      "MVP: per-process, neskaluje přes více instancí" — with N replicas
+	//      every bucket here becomes N×, and only the DB floor survives that.
+	//
+	// The SIZE and COUNT limits from the same table are deliberately NOT here:
+	// they are Go constants in internal/pages, because a payload cap that
+	// varies per deployment is a payload cap no producer can code against.
+	{KeyPagesPushPanelPerMin, "Pages", "Panel push rate", "Sustained payload pushes accepted for ONE panel. One push per 5 s (12/min) is the fastest producer the feature is designed around.", "pushes/min", 12, 1, hardMax},
+	// The burst is a bucket depth, and it also SETS THE DB FLOOR: the
+	// minimum interval enforced at the write is one window divided by this
+	// value (30 → 2 s). That coupling is deliberate — the floor must never
+	// refuse a push the bucket would have allowed at its most permissive
+	// steady state, or an operator raising the burst would get more 429s
+	// rather than fewer.
+	{KeyPagesPushPanelBurst, "Pages", "Panel push burst", "How many pushes one panel may absorb back-to-back before the sustained rate applies. Also fixes the minimum interval enforced in the database (60s ÷ this), which is the only bound that survives more than one replica.", "pushes", 30, 1, 3600},
+	{KeyPagesPushWSPerMin, "Pages", "Workspace push rate", "Payload pushes accepted across ALL panels in one workspace. The real backstop — per-panel limits do not compose, and 100 pages × 24 panels is what makes that matter.", "pushes/min", 600, 1, hardMax},
+	// §7.3.2 rule 6. Recorded here with the rest of the Pages rates so the set
+	// is complete and one number to tune, even though /p/{token} is not built
+	// yet — a public link is the highest-risk surface in the feature and its
+	// cap should not be invented by whoever writes the handler.
+	{KeyPagesPublicViewPerHr, "Pages", "Public page views", "Views of one public page link (/p/{token}) per hour. Bounds what a leaked link costs before anyone notices it leaked.", "views/hour", 600, 1, hardMax},
 }
 
 var byKey = func() map[string]Meta {

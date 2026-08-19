@@ -114,6 +114,7 @@ These are not configuration — Crewship sets them on the crew container itself,
 | `DATABASE_URL` | (unset) | Direct DSN override for `crewship admin` only. Bypasses `CREWSHIP_DATA_DIR` resolution. Use when running admin commands against a SQLite file outside the standard data-dir tree. |
 | `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Storage backend. `localfs` is the only implemented provider; any other value is refused at startup rather than accepted and ignored. |
 | `CREWSHIP_STORAGE_BASE_PATH` | `/var/lib/crewship` | Base path for local file storage |
+| `CREWSHIP_STORAGE_MEMORY_ROOT` | *(unset)* | Parent directory for the workspace memory tier. Unset disables that tier and memory versioning. `crewship start` derives it from the data directory, but **only when `DATABASE_URL` is unset** — set this explicitly in any deployment that brings its own database |
 | `CREWSHIP_LOG_PATH` | `/var/log/crewship` | Path for log files |
 
 ## State
@@ -128,6 +129,7 @@ These are not configuration — Crewship sets them on the crew container itself,
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CREWSHIP_PUBLIC_URL` | (unset) | Externally-reachable base URL of the Crewship server. Required for password-recovery emails and for `/expose-port` (port-exposed agent containers). Without it the recovery email link is degraded and `/expose-port` returns `503` with a `CREWSHIP_PUBLIC_URL not set` log line. |
+| `CREWSHIP_PAGES_EMBED_SOURCES` | (unset) | Comma-separated `name=https://url` pairs a human has vetted as embeddable in a Pages `embed.v1` panel. Unset means embed panels are disabled and a page spec cannot declare one. A payload names one of these **names**, never a URL — the URL is resolved server-side on read, so nothing a producer pushes can point a reader's browser somewhere new. One malformed entry refuses the whole list rather than being skipped; only `https` is accepted, and a source resolving to this instance's own origin is refused. |
 
 ## Origin enforcement (CORS / EnforceOrigin)
 

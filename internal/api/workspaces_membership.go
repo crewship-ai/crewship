@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -185,6 +186,26 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 }
 
 // RemoveMember removes a user from the workspace (owners cannot remove themselves).
+//
+// docs/prd/pages.md §7.1 rule 1b: "When a user owner leaves the workspace,
+// the page transfers to a crew, it is not deleted." Leaving a workspace
+// happens here (an admin removing a member) and nowhere else in this
+// package — there is no self-service "leave workspace" endpoint (verified:
+// no other handler issues DELETE FROM workspace_members for a single row
+// keyed on the caller's own user_id; workspaces_delete.go's bulk delete is
+// whole-workspace teardown, which takes every page down with it, not a
+// single member departing a workspace that keeps running). So this is the
+// ONLY place pages_transfer_owner.go's transfer needs wiring outside the
+// GDPR erasure cascade (admin_gdpr.go) that already calls it.
+//
+// Before the workspace_members row goes, every page the departing member
+// owns in this workspace is transferred to a crew via
+// transferDepartingUserPages — same resolution order, same refusal
+// semantics, same journal entry + ADMIN/OWNER notice as the GDPR path. If
+// no crew resolves for one or more pages, the WHOLE removal is refused
+// (409) and the membership row survives untouched: a departed member must
+// never keep owner authority over a page (isPageOwner, pages_authz.go)
+// simply because nothing told the page it lost its owner.
 // DELETE /api/v1/workspaces/{workspaceId}/members/{memberId}
 
 func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
@@ -202,10 +223,10 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var memberRole string
+	var memberRole, memberUserID string
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT role FROM workspace_members WHERE id = ? AND workspace_id = ?",
-		memberID, workspaceID).Scan(&memberRole)
+		"SELECT role, user_id FROM workspace_members WHERE id = ? AND workspace_id = ?",
+		memberID, workspaceID).Scan(&memberRole, &memberUserID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Member not found")
@@ -217,6 +238,27 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 
 	if memberRole == "OWNER" {
 		replyError(w, http.StatusForbidden, "Cannot remove workspace owner")
+		return
+	}
+
+	// Transfer BEFORE the membership row goes — a precondition, not a
+	// cleanup step, exactly as admin_gdpr.go's erasure cascade treats it.
+	// A refusal here must leave the member in place: proceeding with the
+	// DELETE anyway is precisely the "worse than the orphan the rule
+	// forbids" state issue #1952 describes — an owner with no standing in
+	// the workspace who still owns the page.
+	actor := UserFromContext(r.Context())
+	var actorID string
+	if actor != nil {
+		actorID = actor.ID
+	}
+	if _, err := transferDepartingUserPages(r.Context(), h.db, h.journal, actorID, workspaceID, memberUserID); err != nil {
+		var needsManual *ErrPagesNeedManualTransfer
+		if errors.As(err, &needsManual) {
+			replyError(w, http.StatusConflict, "cannot remove this member: "+err.Error())
+			return
+		}
+		replyInternalError(w, h.logger, "transfer member's pages ahead of removal", err)
 		return
 	}
 

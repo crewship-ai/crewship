@@ -144,7 +144,7 @@ export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) 
                         />
                         <span className="truncate">{a.name}</span>
                         {a.agent_role !== "AGENT" && (
-                          <span className="text-[8px] px-1 rounded bg-purple/20 text-purple shrink-0">
+                          <span className="text-[8px] px-1 rounded bg-purple/20 text-purple-hover shrink-0">
                             {a.agent_role}
                           </span>
                         )}

@@ -177,6 +177,18 @@ var allowlistedRoutes = []route{
 	{"GET", "/api/auth/csrf"},
 	{"GET", "/api/auth/session"},
 	{"GET", "/api/v1/oauth/callback"},
+	// Public pages (docs/prd/pages.md §7.3.1). A separate URL space that
+	// "shares no session, no cookie and no workspace context with the app" —
+	// the 256-bit token in the path IS the credential, checked against a
+	// SHA-256 hash, an expiry, a revocation and a per-token rate limit inside
+	// the handler. Wrapping either of these in authed(...) would make every
+	// public link unreachable, which is what this row exists to catch.
+	// Its sibling POST …/unlock is deliberately NOT listed here: its own
+	// refusal for an unknown token is a 401 (§7.3.3 — a wrong password and an
+	// unknown token must be indistinguishable), which this test cannot tell
+	// apart from the auth gate firing. The GET carries the same wrapper, or
+	// rather the same absence of one, and is the row that guards both.
+	{"GET", "/api/v1/public/pages/not-a-real-token"},
 }
 
 func TestUnauthenticatedReachability_AllowlistNotGatedByAuth(t *testing.T) {

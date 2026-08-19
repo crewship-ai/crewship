@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -450,6 +451,18 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		defer finish()
 		runCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 		defer cancel()
+		// Put the run on the context so every journal entry the orchestrator
+		// emits beneath it inherits trace_id = runID. Its JournalEntry has no
+		// TraceID field and prepareEntry fills trace_id only from
+		// RunIDFromContext, so without this the run.session_init alarm — the
+		// severity=error entry that says the CLI dropped an MCP server —
+		// lands unlinked and `crewship journal --run-id <id>` cannot find it.
+		//
+		// Every other driver stamps this (chatbridge, scheduler, assignments,
+		// query_handler); #1950 fixed the scheduler and missed the neighbour
+		// (#1954). A webhook run is unattended by definition, which is the
+		// same argument that made it matter for cron.
+		runCtx = journal.WithRunID(runCtx, runID)
 
 		// The in-flight concurrency slot was acquired up front (before any
 		// container/run work); release it when this run finishes.
@@ -480,9 +493,16 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		logBuf := logcollector.NewOutputBuffer(h.logWriter, info.CrewID, info.AgentSlug)
 		defer logBuf.Close()
 
-		base, _ := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
-			LogBuf:    logBuf,
-			AgentSlug: info.AgentSlug,
+		// CaptureResultMeta: the accumulator is what carries the CLI's usage
+		// numbers, the model it actually resolved to, and the session-init
+		// provenance to the run record below. Discarding it left a
+		// webhook-triggered run recording none of the three — and nobody is
+		// watching a webhook run, so the record is the only place to read them
+		// afterwards (#1934).
+		base, acc := orchestrator.NewBufferingHandler(orchestrator.BufferingHandlerOpts{
+			LogBuf:            logBuf,
+			AgentSlug:         info.AgentSlug,
+			CaptureResultMeta: true,
 		})
 		handler := func(event orchestrator.AgentEvent) {
 			base(event)
@@ -525,9 +545,17 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 			exitCode = 1
 		}
 
+		// One metadata map for both outcomes, so the FAILED run carries the
+		// same answers the COMPLETED one does. The guard-refused case above
+		// never started a CLI, and then the accumulator is simply empty —
+		// nothing is invented for it.
 		completedMeta := map[string]interface{}{
 			"duration_ms": time.Since(startedAt).Milliseconds(),
 		}
+		// One call decides what a terminal record carries, so a key added
+		// later applies to every dispatch path rather than to whichever
+		// copies someone remembered to edit (#1949).
+		orchestrator.MergeRunAccumulator(completedMeta, acc, "")
 		if updateErr := h.resolver.UpdateRun(runCtx, runID, status, &exitCode, errMsg, completedMeta); updateErr != nil {
 			h.logger.Warn("failed to update run status", "run_id", runID, "status", status, "error", updateErr)
 		}

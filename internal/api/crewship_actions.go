@@ -76,7 +76,7 @@ func newCrewshipActions(baseURL, internalToken string, pol *policy.Resolver, db 
 			// A redirect from THIS call is never legitimate, which is what makes
 			// refusing it free rather than a trade. baseURL is the daemon's own
 			// loopback address and the path is built from a verb table in this
-			// file: the six routes on the other side answer JSON, and a route
+			// file: every route on the other side answers JSON, and a route
 			// that wanted to send this caller somewhere else would be telling the
 			// daemon to ask itself a different question — which it could simply
 			// have answered. So a 3xx here means something has been inserted into

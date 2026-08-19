@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crewship.io/schemas/panel.series.v1.json",
+  "title": "Crewship panel payload — series.v1",
+  "description": "Named series over shared category labels, rendered as a grouped bar chart (bar is the only form in v1; line and area are v1.1). Pushed by a routine or by a script running inside a crew container. Three rules from §3 are structural rather than advisory and are visible in the shape below: ONE UNIT per panel — `unit` is a single required scalar and a series object has no unit field of its own, because dual axes are the most common chart error and cannot be defended at render time; MAX 5 SERIES — a sixth is merged into an \"other\" series rather than refused, so a producer that grows a dimension keeps pushing and the chart stays inside the five-colour palette; and colour belongs to the ENTITY, so the renderer keys colour off `name` and never off a series' position in this array. The server attaches the timestamp, the run id and the producer identity; freshness is computed from the timestamp the server stored, which is why there is no field here for a producer to supply one.",
+  "type": "object",
+  "required": ["unit", "labels", "series"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference (informational; the server ignores it). Present so a hand-written payload gets inline validation in an editor while a producer script is being developed."
+    },
+    "unit": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 24,
+      "description": "The one unit every value on this panel is measured in (\"ms\", \"req/s\", \"Kč\"). Required and singular: §3 says one unit per panel, and two units is two panels. A compound unit that is genuinely one unit is fine — \"req/s\", \"MB/day\" — but a string that names two (\"ms and %\", \"Kč, ks\", \"count | rate\") is refused at the boundary, because that is the dual-axis error arriving through the only door left open to it."
+    },
+    "labels": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "description": "A named category. Plain text; the renderer truncates what will not fit and keeps the full string in a tooltip."
+          },
+          {
+            "type": "null",
+            "description": "An UNNAMED tick: this category exists, carries a value in every series, and the producer is declining to name it. Not an empty label — the same distinction `values` draws between `0` and `null`, one step to the left."
+          }
+        ],
+        "description": "One category on the shared axis: a non-empty string, or `null` for a tick the producer is deliberately not naming. `\"\"` is neither and is refused, and so is a label of nothing but spaces (which the length check alone cannot catch, so the server does) — an empty string is what a broken format expression produces, and a contract that accepted it could not tell a deliberate blank from a bug."
+      },
+      "description": "The categories, in render order — the producer sorts, because the panel has no query with which to sort anything. Every series carries exactly one value per label, in this order, INCLUDING the unnamed ones: a `null` here removes a name, never a data point. At least one label must be named; an axis of 50 nulls is a chart whose x meaning nobody stated. How many of the named ones are actually drawn is the RENDERER's decision, because only it knows the panel's width — a producer that names every tick of a 24-point window gets an evenly thinned axis, not 24 labels truncated into noise. Bounded at 50: past that the bars are thinner than their gaps and the honest rendering is a table."
+    },
+    "series": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 24,
+      "items": { "$ref": "#/$defs/Series" },
+      "description": "The series. Up to five are drawn in their own colour; from the sixth on they are summed element-wise into a single series named \"other\" (§3), which is a rendering rule and not a rejection — a producer whose dimension grew from four values to nine keeps pushing and keeps getting a readable chart. Bounded at 24 on the wire so the merge itself stays cheap; a producer with more than twenty-four series is aggregating in the wrong place."
+    }
+  },
+  "$defs": {
+    "Series": {
+      "type": "object",
+      "required": ["name", "values"],
+      "additionalProperties": false,
+      "description": "One named series. There is no `unit` here, and that absence is the enforcement of \"one unit per panel\" — the shape gives a producer nowhere to put a second one. There is no `color` here either: colour belongs to the entity and is derived from `name` by the renderer, so a filter that removes a series cannot recolour the rest, and a producer cannot spend a reserved status colour on a series.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The entity this series measures, and its identity for the whole render: the legend text, the direct label, and the key the colour is derived from. Unique within the payload — two series sharing a name would share a colour and a legend row, and the second would be unreadable. \"other\" is a legal name; if the payload declares one, the overflow from the sixth series on is folded into it rather than becoming a second row with the same name."
+        },
+        "values": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": ["number", "null"],
+            "description": "One data point, in the panel's unit. `0` is a measured zero and draws a bar of zero height labelled `0`; `null` is no basis to compute and draws no bar at all, labelled with an em dash (§9b.4). The two are different claims and the renderer keeps them apart per point, so a gap in one series never reads as a floor."
+          },
+          "description": "One value per label, in the same order as `labels`, and exactly as many. The server checks the two lengths agree — JSON Schema cannot cross-reference them, and a short array would silently shift every bar after the gap onto the wrong category."
+        }
+      }
+    }
+  }
+}

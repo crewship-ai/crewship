@@ -389,7 +389,7 @@ func TestFinishAssignment_LateDriver_CannotOverwriteSweptRow(t *testing.T) {
 	entriesAfterSweep := len(rec.snapshot())
 
 	// The still-live driver finishes late with a COMPLETED result.
-	h.finishAssignment(context.Background(), "a_collide", "run_late", chatID, "agent-sweep-a", "test-workspace-id", "late result", "")
+	h.finishAssignment(context.Background(), "a_collide", "run_late", chatID, "agent-sweep-a", "test-workspace-id", "late result", "", nil)
 
 	var status string
 	var result, errMsg sql.NullString

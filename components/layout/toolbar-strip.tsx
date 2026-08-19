@@ -12,6 +12,16 @@ export interface ToolbarTab<T extends string = string> {
   /** Optional badge rendered next to the label (e.g., count). */
   badge?: React.ReactNode
   disabled?: boolean
+  /**
+   * Accessible name for the tab, when the label alone is not the whole story.
+   *
+   * Defaults to `label`. It exists because the button's `aria-label` overrides
+   * everything inside it, badge included: a tab whose badge carries meaning —
+   * Pages draws each tab's worst freshness state there — would announce only
+   * its label, and a reader who cannot see the glyph would be told nothing
+   * about it. Set this to say both.
+   */
+  ariaLabel?: string
 }
 
 interface ToolbarStripProps<T extends string = string> extends React.ComponentProps<"div"> {
@@ -76,7 +86,7 @@ export function ToolbarStrip<T extends string = string>({
                 type="button"
                 role="tab"
                 aria-selected={isActive}
-                aria-label={tab.label}
+                aria-label={tab.ariaLabel ?? tab.label}
                 disabled={tab.disabled}
                 onClick={() => !tab.disabled && onTabChange?.(tab.id)}
                 className={cn(

@@ -322,6 +322,28 @@ const (
 	// pipeline.GuardChainDepth, and emits the same type.
 	EntryAutomationDepthExceeded EntryType = "automation.depth_exceeded"
 
+	// EntryRunSessionInit is the provenance of the agent CLI session a run
+	// happens inside, taken from the CLI's own session-init event and written
+	// once per run: which binary answered (cli_version), which model it
+	// resolved to, which credential path took (api_key_source, constrained to
+	// a known set), the permission mode, the cwd, and COUNTS of the tool /
+	// skill / capability inventory it started with. trace_id == run.id.
+	//
+	// It exists for one field in particular. mcp_server_errors lists
+	// --mcp-config entries the CLI SKIPPED at startup after failing
+	// validation; the run then continues and exits 0, so an agent that lost
+	// crewship-memory that way looks perfectly healthy while being quietly
+	// less capable. Severity is info normally and error when that list is
+	// non-empty — the same call EntrySidecarStale makes, for the same reason.
+	//
+	// The payload carries each skipped server's `name` and closed-category
+	// `type` (unknown_type / url_missing_type / invalid_config / …) but NEVER
+	// its free-text `message`: the emit site sits upstream of the credential
+	// scrubber and journal rows are hash-chained, so anything copied in is
+	// both unscrubbed and unredactable. The verbatim line stays available in
+	// the run's exec.output_chunk entry.
+	EntryRunSessionInit EntryType = "run.session_init"
+
 	// EntryRunAgentSpan is one INTERNAL action of an agent_run step — a single
 	// tool the agent invoked (Bash/Write/Edit/Read/MCP/HTTP). It is the leaf of
 	// the drillable run-trace tree (run → step → tool). trace_id == run.id (so
@@ -484,6 +506,72 @@ const (
 	EntryNotificationDelivered EntryType = "notification.delivered"
 	EntryNotificationFailed    EntryType = "notification.failed"
 	EntryNotificationDropped   EntryType = "notification.dropped"
+
+	// Pages — docs/prd/pages.md §5 and §7.1b. Unknown journal types are
+	// forwarded by design (feed_filter.go:33-35), so these reach the
+	// activity feed with no filter change.
+	//
+	// EntryPageProduceDenied records a push to a panel the caller does
+	// not hold; it was previously declared locally in
+	// internal/api/pages_data.go and should move to use this constant
+	// instead of redeclaring the string.
+	EntryPageProduceDenied EntryType = "page.produce_denied"
+
+	// EntryPagePanelUpdated is emitted on every successful panel push
+	// (§5) and doubles as the realtime broadcast type consumed by
+	// hooks/use-realtime.tsx's VALID_REALTIME_TYPES allowlist.
+	EntryPagePanelUpdated EntryType = "page.panel.updated"
+
+	// EntryPageGrantAdded and EntryPageGrantRemoved record every change
+	// to a page's ACL (§7.1b) — actor and subject are carried in the
+	// payload. "An ACL nobody can audit is not a security control."
+	EntryPageGrantAdded   EntryType = "page.grant_added"
+	EntryPageGrantRemoved EntryType = "page.grant_removed"
+
+	// EntryPageActionDispatched records a click on a panel's declared action
+	// (§8b.2): who clicked, which action, and which routine the SERVER resolved
+	// it to. The routine is in the payload rather than assumed from the action
+	// id because the point of the dispatch design is that the server chose it —
+	// so the audit trail is where that choice is written down.
+	EntryPageActionDispatched EntryType = "page.action.dispatched"
+
+	// EntryPagePanelStale is written ONCE per lapse by the freshness
+	// sweeper: a panel that was reporting is now stale or failed (§4).
+	// It is the producer behind notify.CategoryPagesStale, which was a
+	// registered category with nothing emitting it. Payload: page,
+	// page_id, panel, verdict, age_seconds, sla_seconds, reason, and —
+	// when the panel declared on_failure — issue_id / issue_identifier.
+	//
+	// Once per lapse rather than once per tick: the edge is recorded in
+	// page_panel_alerts, so a panel quiet for a week produces one entry
+	// and one issue rather than one of each per minute.
+	EntryPagePanelStale EntryType = "page.panel.stale"
+
+	// EntryPagePanelRecovered is the other edge: data arrived inside the
+	// SLA again and the open alert was cleared. Emitted so "it fixed
+	// itself at 03:12" is answerable from the journal rather than from
+	// the absence of anything.
+	EntryPagePanelRecovered EntryType = "page.panel.recovered"
+
+	// EntryPageWakeFired records a wake gate waking a crew (§5): the
+	// threshold held for its window, the automation matched, and an issue
+	// was opened. Payload: page, page_id, panel, gate, crew, writes,
+	// issue_id, issue_identifier, coalesced_events.
+	EntryPageWakeFired EntryType = "page.wake.fired"
+
+	// EntryPageSpecChanged records that a page's ARRANGEMENT changed — a
+	// panel added, removed, reordered or edited. It is the event
+	// `refresh: on:panels-changed` is armed on (§12 v1.1), which is why it
+	// is a journal entry rather than only the websocket broadcast that
+	// already existed: an automation matcher can only see the journal.
+	//
+	// Emitted on create and on any update whose panel list differs, and
+	// NOT on a rename — the page's metadata is not its arrangement. That
+	// "differs" is a fingerprint over the panel list, so a producer that
+	// re-applies the same manifest emits nothing and cannot refresh
+	// itself in a circle. Payload: page, page_id, panels, created,
+	// fingerprint.
+	EntryPageSpecChanged EntryType = "page.spec.changed"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI

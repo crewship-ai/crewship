@@ -82,7 +82,7 @@ var checkpointListCmd = &cobra.Command{
 		rows := make([][]string, 0, len(body.Checkpoints))
 		for _, c := range body.Checkpoints {
 			rows = append(rows, []string{
-				truncateString(c.ID, 24),
+				f.ShortID(c.ID, truncateString(c.ID, 24)),
 				truncateString(c.Label, 28),
 				truncateString(c.JournalCursor, 20),
 				c.CreatedAt,

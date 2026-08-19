@@ -79,6 +79,24 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	case "mission":
 		// mission:{missionId} — check mission's workspace membership
 		return a.isMemberOfMissionWorkspace(ctx, userID, chID)
+	case "page":
+		// page:{pageId} — every open page subscribes to one channel and a
+		// push broadcasts an invalidation on it (docs/prd/pages.md §10b.5b).
+		//
+		// Without this case the authorizer fell through to default:false and
+		// no client could ever subscribe — the same failure the "user" case
+		// below records as issue #614. It went unnoticed because Pages also
+		// broadcasts to workspace:{id}, which the app subscribes to by
+		// default, so live updates appeared to work while fanning every push
+		// out to the whole workspace.
+		//
+		// Membership is the gate, not panel visibility, and deliberately: the
+		// broadcast carries ids only and never a payload, so a subscriber who
+		// may not see a panel learns that something changed and re-reads
+		// through the normal authorised path, which seals what they may not
+		// have. That is what keeps the per-panel filter (§7.1 rule 2) in one
+		// place instead of needing a second copy here.
+		return a.isMemberOfPageWorkspace(ctx, userID, chID)
 	case "user":
 		// user:{userId} — the identity-scoped channel. Only the user
 		// themselves may subscribe; there is no workspace membership to
@@ -152,6 +170,16 @@ func (a *DBChannelAuthorizer) isMemberOfMissionWorkspace(ctx context.Context, us
 		`SELECT c.workspace_id FROM missions m
 		 JOIN crews c ON c.id = m.crew_id
 		 WHERE m.id = ?`, missionID).Scan(&wsID)
+	if err != nil {
+		return existsRow(err)
+	}
+	return a.isMemberOfWorkspace(ctx, userID, wsID)
+}
+
+func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userID, pageID string) (bool, error) {
+	var wsID string
+	err := a.db.QueryRowContext(ctx,
+		`SELECT workspace_id FROM pages WHERE id = ?`, pageID).Scan(&wsID)
 	if err != nil {
 		return existsRow(err)
 	}

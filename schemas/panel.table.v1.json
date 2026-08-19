@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crewship.io/schemas/panel.table.v1.json",
+  "title": "Crewship panel payload — table.v1",
+  "description": "Declared columns and keyed rows, rendered as a semantic table that collapses to a card list in a narrow container. Pushed by a routine or by a script running inside a crew container. Cells hold scalars only — there is no cell type that carries markup, a URL or a nested structure, because a table is the panel most likely to be filled from data the producer did not write. The server attaches the timestamp, the run id and the producer identity; freshness is computed from the timestamp the server stored.",
+  "type": "object",
+  "required": ["columns", "rows"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference (informational; the server ignores it). Present so a hand-written payload gets inline validation in an editor while a producer script is being developed."
+    },
+    "columns": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 24,
+      "items": { "$ref": "#/$defs/Column" },
+      "description": "The columns, in render order. Declared once per push and not inferred from the rows, so a push that happens to return no rows still renders a table with headings rather than an empty box."
+    },
+    "rows": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/Row" },
+      "description": "The rows, in the order they should be rendered — the producer sorts, because the panel has no query with which to sort anything. Required even when empty: an empty array is a measured \"nothing matched\", while an absent one is a producer that stopped halfway. Bounded at 200: the 64 KiB payload cap is roughly a thousand rows, which is more than anyone reads and more than we will virtualise, so the byte cap alone would admit a table nobody can use. Above 200 the answer is a narrower query in the producer, not a longer table on the page."
+    }
+  },
+  "$defs": {
+    "Column": {
+      "type": "object",
+      "required": ["key", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "description": "The key this column's cells are stored under in every row. Lowercase alpha-num plus hyphen/underscore, 1-64 chars — the same slug shape the rest of Crewship uses. Unique within the payload: two columns sharing a key means one of them can never be filled."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "The heading a human reads. Written in the workspace's language by the producing agent; nothing is translated at render time."
+        },
+        "align": {
+          "enum": ["left", "right", "center"],
+          "description": "Cell alignment. Numbers belong on the right so their digits line up; omit it and text alignment is used."
+        }
+      }
+    },
+    "Row": {
+      "type": "object",
+      "description": "One row, keyed by column key. This is the one object in the panel vocabulary whose property NAMES are data rather than schema, so it cannot use `additionalProperties: false` — instead the key shape is constrained here and the server checks, after this schema passes, that every key names a declared column and that every declared column is present. A key with no column would be delivered to the client and rendered nowhere; an absent column would be indistinguishable from a measured null.",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+      "additionalProperties": {
+        "type": ["string", "number", "boolean", "null"],
+        "maxLength": 500,
+        "description": "One cell. Scalars only: no markup, no URL, no image, no nested object — a table cell is where untrusted data most often lands, and none of those can be rendered safely from a payload an agent may have been talked into writing. `null` is no data and renders as an em dash, which is a different claim from `0` or an empty string."
+      }
+    }
+  }
+}

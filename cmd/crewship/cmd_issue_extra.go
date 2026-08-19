@@ -57,7 +57,7 @@ var issueCommentsCmd = &cobra.Command{
 		rows := make([][]string, 0, len(comments))
 		for _, c := range comments {
 			rows = append(rows, []string{
-				truncateID(c.ID, 12),
+				f.ShortID(c.ID, truncateID(c.ID, 12)),
 				c.AuthorName,
 				c.AuthorType,
 				truncateStr(strings.ReplaceAll(c.Body, "\n", " "), 60),
@@ -173,7 +173,7 @@ var issueRelationsCmd = &cobra.Command{
 		rows := make([][]string, 0, len(rels))
 		for _, r := range rels {
 			rows = append(rows, []string{
-				truncateID(r.ID, 12),
+				f.ShortID(r.ID, truncateID(r.ID, 12)),
 				r.RelationType,
 				r.TargetIdentifier,
 				truncateStr(r.TargetTitle, 40),
@@ -351,7 +351,7 @@ var issueSubtasksCmd = &cobra.Command{
 		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE"}
 		rows := make([][]string, 0, len(subs))
 		for _, s := range subs {
-			id := derefStr(s.Identifier, s.ID[:min(12, len(s.ID))])
+			id := derefStr(s.Identifier, f.ShortID(s.ID, s.ID[:min(12, len(s.ID))]))
 			rows = append(rows, []string{
 				id,
 				truncateStr(s.Title, 50),

@@ -1,6 +1,6 @@
 ---
 title: "Export"
-description: "Export a crew or workspace as a YAML manifest, or bundle a single run's chat and journal artefacts."
+description: "Export a crew, a page, or the whole workspace as a YAML manifest, or bundle a single run's chat and journal artefacts."
 icon: "file-output"
 stability: experimental
 tag: Experimental
@@ -10,14 +10,14 @@ tag: Experimental
 
 Two distinct things live under `export`:
 
-- **`crewship export crew <slug>`** / **`crewship export workspace`** — render the live workspace as a YAML manifest you can commit to git, share with a teammate, or re-apply on another machine.
+- **`crewship export crew <slug>`** / **`crewship export page [slug]`** / **`crewship export workspace`** — render the live workspace as a YAML manifest you can commit to git, share with a teammate, or re-apply on another machine.
 - **`crewship export <run-id>`** — bundle a single run's prompt, response, journal entries and metadata into a folder for post-mortems.
 
 ```bash
 crewship export <subcommand|run-id> [flags]
 ```
 
-All three forms require an authenticated session and a workspace context (inherited from the current CLI profile, same as `crewship apply`).
+All forms require an authenticated session and a workspace context (inherited from the current CLI profile, same as `crewship apply`).
 
 ## `crewship export crew`
 
@@ -68,6 +68,65 @@ crewship export crew code-review --no-skill-bodies > overview.yaml
 - Workspace members (they're per-user identity, not workspace-shareable)
 - Routines / schedules / inbox / eval scenarios (out of scope for v1 manifests)
 
+## `crewship export page`
+
+Render a page as a `kind: Page` manifest — the document `crewship apply` reads. With no slug, every page in the workspace is emitted as one multi-document YAML stream, sorted by slug so the file is diff-stable.
+
+```bash
+crewship export page [slug] [flags]
+```
+
+### Flags
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `-o`, `--output <path>` | stdout | Write to a file instead of stdout. |
+
+### Examples
+
+```bash
+# One page, into the repo next to the crews its panels belong to
+crewship export page weekly-close > manifests/weekly-close.page.yaml
+
+# Every page in the workspace, one stream
+crewship export page -o ./manifests/pages.yaml
+
+# Append to a workspace bundle — each document carries its own `---`
+crewship export workspace  >  full.workspace.yaml
+crewship export page       >> full.workspace.yaml
+```
+
+### This is not `crewship page export`
+
+The two commands produce different documents on purpose.
+
+| | `crewship export page <slug>` | [`crewship page export <slug>`](/cli/page) |
+| --- | --- | --- |
+| Shape | `apiVersion` + `kind: Page` + `metadata` + `spec` | `format: crewship-page-bundle/v1` + `page` + `references` |
+| Consumed by | `crewship apply -f` | `crewship page import --bind` |
+| Workspace refs | left as-is (`crew/ucetni`, `routine/uzaverka`) | declared in a `references:` block so the importer can rebind them |
+| For | declaring the page you already run, in git, beside the crews it names | carrying a page to a workspace that has never heard of it |
+
+Use the manifest for GitOps and drift checks; use the bundle for transfer and marketplace installs.
+
+### What's not included
+
+A panel's authored half — `public`, `actions`, `wake`, `on_failure`, `refresh` — is echoed **only to an account that may edit the page**. Export as the owner, a workspace admin, or a `write` grantee and the manifest is complete. Export as someone holding `read` or `produce` and the same command emits the grid alone, with no error: an absent field is not evidence, because a panel that declares no actions and a panel whose actions were not echoed look identical on the wire. The command prints that condition on stderr on every run, since it cannot tell which case it is in.
+
+<Warning>
+Re-applying an exported page manifest as-is **removes** the published flag, the buttons and the wake gates from every panel that declared them. Merge the export into the YAML you authored (or into `crewship page create --file` input) rather than replacing it.
+</Warning>
+
+Panels **sealed** to you — owned by a crew you are not in — refuse the export instead of being dropped, because a document missing a panel deletes that panel on the next apply:
+
+```
+Error: export page "fleet-201": panel "tajne" is owned by another crew and is
+sealed to this account; export it as a member of that crew, or the emitted
+document would drop the panel
+```
+
+Nothing is written when the export refuses, so `-o` never truncates an earlier export.
+
 ## `crewship export workspace`
 
 Render every crew in the active workspace as a single `kind: Workspace` bundle. Workspace-level deduplication is applied: skills and credentials used by any agent in any crew are lifted to the workspace scope so consumers see one declaration each.
@@ -98,6 +157,16 @@ ssh other-host crewship apply --file - --from-env < /tmp/acme.yaml
 ### Dedup behaviour
 
 If three crews each declare `house-style`, the workspace export emits **one** skill at workspace scope and per-crew `skills: [house-style]` references. Same for credentials — `ANTHROPIC_API_KEY` becomes a single workspace-scope slot regardless of how many agents reference it.
+
+### Pages are not in the workspace bundle
+
+`kind: Workspace` carries crews, skills and credentials. Pages are a top-level kind and travel as their own documents, so `crewship export workspace` deliberately does **not** include them — adding them would change what an existing workspace backup does when it is applied. Append them instead:
+
+```bash
+crewship export workspace  >  full.workspace.yaml
+crewship export page       >> full.workspace.yaml
+crewship apply --file full.workspace.yaml --dry-run
+```
 
 ## `crewship export <run-id>`
 
@@ -138,7 +207,7 @@ crewship export r_abc --out /tmp/post-mortem --no-journal
 
 ## Round-trip with apply
 
-The manifest exports (`crew` / `workspace`) are designed for round-trip:
+The manifest exports (`crew` / `page` / `workspace`) are designed for round-trip:
 
 ```bash
 crewship export crew code-review > backup.yaml
@@ -151,6 +220,7 @@ A few intentional gaps make this **not byte-exact**:
 - The exporter strips computed fields (IDs, timestamps).
 - Credential values never travel — pass them via `--from-env` / `--secrets-file` on re-apply.
 - URL-fetched skills are re-exported as inline content (the source URL isn't preserved in the DB row).
+- Page panels come back complete **only for an account that may edit the page** — see [`export page`](#crewship-export-page) above. Exported by a reader or a producer, `public`, `actions`, `wake`, `on_failure` and `refresh` are absent and the round trip is lossy.
 
 For a `--dry-run` check that confirms the round-trip is clean:
 
@@ -167,3 +237,4 @@ The plan should show every resource as `=` (unchanged).
 - [Guides → Workspace Manifests](/guides/manifests) — narrative tour of the manifest format
 - [Guides → Activity](/guides/activity) — UI view that lists run-ids you can pass to `crewship export <run-id>`
 - [CLI → journal](/cli/journal) — query journal entries directly without bundling a full run
+- [CLI → page](/cli/page) — `page export` / `page import`, the portable bundle for cross-workspace transfer

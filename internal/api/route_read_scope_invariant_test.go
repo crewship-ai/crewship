@@ -2,7 +2,6 @@ package api
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -108,6 +107,20 @@ var readRoutesWithoutWorkspace = map[string]string{
 	"GET /api/v1/system/setup-status": "pre-auth: decides whether to redirect a visitor to /bootstrap " +
 		"on an empty database",
 	"GET /api/v1/system/telemetry": "pre-auth read-only consent state; consent is flipped via the CLI, not HTTP",
+
+	// Token-scoped: the credential IS the scope.
+	//
+	// A public page link is served from its own URL space to somebody with no
+	// account, no session and no workspace (docs/prd/pages.md §7.3.1), so there
+	// is no wsCtx to wrap it in — the workspace is resolved FROM the token, and
+	// the token is the only thing that resolves it. Wrapping it would require a
+	// session that by construction does not exist.
+	//
+	// What keeps it honest is that the token names exactly one page: the handler
+	// reads that page's workspace, serves only the panels a HUMAN marked public,
+	// and strips provenance. The scope is narrower than a workspace, not wider.
+	"GET /api/v1/public/pages/{token}": "public link: the token names one page and resolves its own workspace; " +
+		"there is no session to scope from (§7.3.1)",
 
 	// Caller-scoped: the row set is the caller's own, keyed on user id.
 	"GET /api/v1/workspaces":               "caller's own memberships — this is what RESOLVES a workspace, so it cannot be scoped by one",
@@ -294,13 +307,17 @@ func (r readRoute) key() string { return r.verb + " " + r.path }
 func scanReadRoutes(t *testing.T) []readRoute {
 	t.Helper()
 
-	routerFiles, err := filepath.Glob("router_*.go")
-	if err != nil {
-		t.Fatalf("glob router files: %v", err)
-	}
-	if len(routerFiles) == 0 {
-		t.Fatal("no router_*.go files found — test is looking in the wrong directory")
-	}
+	// Discovery is by CONTENT, not by filename, and shares routeRegistrarFiles
+	// with the mutation twin so the two invariants can never disagree about
+	// what the route surface is.
+	//
+	// This used to glob router_*.go. #1953 fixed that on the mutation side and
+	// left this one, on the correct reading that it was latent — no file
+	// outside the naming convention registered a READ route at the time. That
+	// is not a property anything enforces, and the mutation hole was latent
+	// too right up until pages_internal.go existed. A gate that is only sound
+	// while a convention holds is a gate whose soundness nobody is checking.
+	routerFiles := routeRegistrarFiles(t)
 
 	var routes []readRoute
 	scanned := 0
