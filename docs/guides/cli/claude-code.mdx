@@ -46,7 +46,7 @@ Crewship's adapter builds:
 ```bash
 claude --print --output-format stream-json --include-partial-messages \
        --dangerously-skip-permissions --verbose \
-       [--bare] --setting-sources "" --strict-mcp-config --no-session-persistence \
+       --setting-sources "" --strict-mcp-config --no-session-persistence \
        --model <model> --system-prompt <preamble+persona> \
        --tools <per-profile built-in allowlist> \
        --max-turns 50 \
@@ -54,9 +54,26 @@ claude --print --output-format stream-json --include-partial-messages \
        -- <user message>
 ```
 
-`--bare` disables auto-discovery of `~/.claude/CLAUDE.md`, plugins, hooks, skills, and MCP — Crewship sets all of those explicitly via flags. **It is appended only when the agent's credential is an API key.** Claude Code 2.x changed the `--bare` auth contract: it now strictly requires `ANTHROPIC_API_KEY` (or an `apiKeyHelper` via `--settings`) and IGNORES `CLAUDE_CODE_OAUTH_TOKEN`. To keep OAuth-seeded workspaces working (`AI_CLI_TOKEN` credentials with `sk-ant-oat*` values), the adapter drops `--bare` when it detects OAuth on the run, so the normal Claude auth flow can pick up `CLAUDE_CODE_OAUTH_TOKEN`. API-key runs keep the isolation win. See `claudeCodeAdapter.BuildCommand` in `internal/orchestrator/adapter_claude.go` (OAuth detection at lines 84-101).
+**`--bare` is deliberately not passed, on any auth path.** It reads like the isolation flag for scripted calls, but it also replaces the built-in tool catalogue with `{Bash, Edit, Read}`, and `--tools` can only subtract from that set — never add back. Measured against 2.1.226 with the same `--tools` value in every row:
 
-`--tools` is **always** passed with the agent's per-profile built-in allowlist (`MINIMAL` → `Read,Glob,Grep,ToolSearch`; `CODING` → `+Write,Edit,Bash,WebFetch,WebSearch`; `FULL` → `+NotebookEdit`). This removes harness-internal tools (`TaskCreate`, `Agent`, `Workflow`, `Cron*`, …) that have no Crewship backing from the agent's context. `ToolSearch` is kept so deferred MCP tools (crewship-memory, Composio) stay discoverable; MCP tools themselves are not affected by `--tools`. See [Tool profiles & the built-in tool allowlist](/guides/cli-adapters#tool-profiles-the-built-in-tool-allowlist).
+| argv | tools the model actually got |
+|---|---|
+| `--bare --tools "default"` | `Bash Edit Read` |
+| `--bare --tools "<CODING allowlist>"` | `Bash Edit Read` |
+| `--bare --tools "Read,Glob,Grep,ToolSearch"` | `Read` |
+| `--tools "<CODING allowlist>"` | `Bash Edit Glob Grep Read ToolSearch WebFetch WebSearch Write` |
+
+`--bare` was previously appended for API-key credentials only — it was already dropped for OAuth, whose auth contract it breaks (it strictly requires `ANTHROPIC_API_KEY` or an `apiKeyHelper` via `--settings`, and never reads `CLAUDE_CODE_OAUTH_TOKEN` or the keychain). So every API-key run silently lost `Write`, `Glob`, `Grep`, `WebFetch` and `WebSearch` whatever its tool profile said.
+
+What `--bare` was covering is now covered explicitly, verified against 2.1.226 on a project carrying both a `CLAUDE.md` and a `.claude/settings.json` declaring a `SessionStart` hook:
+
+- **`--setting-sources ""`** — the hook did not fire, and the model answered NO when asked whether the repo's `CLAUDE.md` marker was in its context (with and without `--system-prompt`). This flag is load-bearing: it is what stands between an agent and a cloned repository's hooks. It also suppresses **project-level skill discovery**, which is why materialised `SKILL.md` files are not natively discovered today.
+- **`--strict-mcp-config`** — only the servers Crewship wrote in `.mcp.json` load.
+- **`--tools`** — keeps the harness catalogue out of the model's context; that catalogue *is* present without `--bare`, so this flag is what does that work now.
+
+See `claudeCodeAdapter.BuildCommand` in `internal/orchestrator/adapter_claude.go`.
+
+`--tools` is **always** passed with the agent's per-profile built-in allowlist (`MINIMAL` → `Read,Glob,Grep,ToolSearch`; `CODING` → `+Write,Edit,Bash,WebFetch,WebSearch`; `FULL` → `+NotebookEdit`). This removes harness-internal tools (`TaskCreate`, `Agent`, `Workflow`, `Cron*`, …) that have no Crewship backing from the agent's context. `ToolSearch` is kept so that large MCP catalogues stay reachable if the CLI defers them rather than listing them in context; MCP tools themselves are not affected by `--tools` (measured on 2.1.226: an 80-tool MCP server is listed in full even with no `ToolSearch` present). See [Tool profiles & the built-in tool allowlist](/guides/cli-adapters#tool-profiles-the-built-in-tool-allowlist).
 
 ## MCP
 
@@ -92,7 +109,7 @@ of the same name wins.
 
 ## Memory
 
-Same canonical memory file set as every other adapter — `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/crewship.md`, `.factory/AGENTS.md` — written to `/output/<slug>/`. Even though `--bare` skips Claude Code's own `CLAUDE.md` discovery (system prompt arrives via `--system-prompt`), Crewship writes the file so a customer SSH-ing into the container sees the same context the agent operates on.
+Same canonical memory file set as every other adapter — `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/crewship.md`, `.factory/AGENTS.md` — written to `/output/<slug>/`. Even though `--setting-sources ""` suppresses Claude Code's own `CLAUDE.md` discovery (the system prompt arrives via `--system-prompt`), Crewship writes the file so a customer SSH-ing into the container sees the same context the agent operates on.
 
 ## Output stream
 
@@ -103,6 +120,36 @@ JSONL events documented at [code.claude.com/docs/en/cli-reference](https://code.
 - `assistant` (tool_use, tool_result blocks)
 - `tool` / `user` (tool result blocks)
 - `result` (terminal envelope with usage + cost)
+
+`system`/`init` also carries session provenance, all recorded on the event's metadata:
+
+| Field | Why it is kept |
+|---|---|
+| `claude_code_version` | The adapter is validated against a pinned npm version while containers install the `claude-code:2` feature — latest. Without this, the two drift apart with nothing in a run saying which answered. |
+| `apiKeySource` | Which auth path resolved, i.e. whether the credential Crewship mounted is the one in use. |
+| `permissionMode` | Proof `--dangerously-skip-permissions` took effect. |
+| `capabilities` | The CLI's own list of protocol behaviours. Feature-detect on this instead of comparing version strings. |
+| `skills` | Whether materialised `SKILL.md` files were discovered (today they are not — see `--setting-sources ""` above). |
+| `mcp_server_errors` | `--mcp-config` entries dropped by validation. The run continues and exits 0 without them, so an agent that lost `crewship-memory` this way otherwise looks healthy. Requires 2.1.219+. |
+| `session_id` | The CLI's own correlation key for the run. |
+
+The `result` envelope adds `terminal_reason`, `api_error_status`, `stop_reason`, `session_id` and `permission_denials`. `terminal_reason` is not derivable from `subtype`: a hard authentication failure arrives as `subtype: "success"` with `is_error: true` and `terminal_reason: "api_error"`, so in-band failures are labelled from `terminal_reason` when the subtype names nothing.
+
+### Where the provenance lands
+
+Parsing a field is not the same as being able to reach it, so each of these has a surface:
+
+| Surface | Carries | Durability |
+| --- | --- | --- |
+| **Run record** — `crewship run get <id>` | `cli_version`, `api_key_source`, `permission_mode`, `session_id`, `mcp_server_errors`, `permission_denials` | Durable. Written on **every** terminal status, not just `COMPLETED` — a failed run is the one you need it for. |
+| **Journal** — `crewship journal --type run.session_init` | The full session inventory as counts, plus MCP server names and statuses. Severity escalates to `error` when a server was skipped. | Durable, hash-chained. Emitted at session start, so a degraded session is visible while the run is still going. |
+| **Chat** — the "Session started" card | Everything, including each skipped server's error message | Live stream only. Session events are never persisted as conversation parts, so this card is gone on a refresh. |
+| **Log** — `agent model resolved` | `cli_version`, `api_key_source` | One greppable line per run. |
+
+Two deliberate asymmetries in what gets stored:
+
+- **`api_key_source` is never stored verbatim.** It is an upstream field we do not control, and everything above is persisted, so only a member of a known set is kept; anything else is recorded as `other`.
+- **`mcp_server_errors[].message` reaches the chat card but not the run record or the journal.** It is CLI-supplied free text describing a config file, and the credential scrubber only rewrites an event's `Content` — it never touches `Metadata`. The journal is hash-chained and cannot be redacted after the fact, so the durable copies carry the server name and the error category only. The message stays where it is bounded and ephemeral.
 
 ## Troubleshooting
 

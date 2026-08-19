@@ -246,7 +246,7 @@ var issueListCmd = &cobra.Command{
 		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "CREATOR", "CREW", "LABELS", "UPDATED"}
 		var rows [][]string
 		for _, iss := range issues {
-			id := derefStr(iss.Identifier, iss.ID[:min(12, len(iss.ID))])
+			id := derefStr(iss.Identifier, f.ShortID(iss.ID, iss.ID[:min(12, len(iss.ID))]))
 			title := truncateStr(iss.Title, 40)
 			assignee := derefStr(iss.AssigneeName, "-")
 			creator := truncateStr(creatorLabel(iss.CreatedBy), 24)

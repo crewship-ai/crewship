@@ -113,7 +113,7 @@ var issueLinksCmd = &cobra.Command{
 				branch = sanitizeTerminal(*l.SourceBranch) + " → " + sanitizeTerminal(*l.TargetBranch)
 			}
 			rows = append(rows, []string{
-				truncateID(l.ID, 12),
+				f.ShortID(l.ID, truncateID(l.ID, 12)),
 				state,
 				fmt.Sprintf("%s/%s#%d", l.Owner, l.Repo, l.Number),
 				// A pull-request title is written by whoever opened it.
