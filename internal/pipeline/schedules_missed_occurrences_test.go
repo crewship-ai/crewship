@@ -2,11 +2,14 @@ package pipeline
 
 // Missed-occurrence visibility on recovery (#1409 item 2).
 //
-// fireOne always computes next_run_at from the scheduler clock, so
-// downtime spanning N cron occurrences yields at most one fire — the
-// rest are silently absorbed with no trace. This is explicitly NOT a
-// backfill fix (the routine still only fires once for the current
-// occurrence); it's an observability fix: emit ONE journal event per
+// fireOne computes next_run_at from the scheduler clock, so under
+// CatchupOnce — the default, and what every schedule in this file uses —
+// downtime spanning N cron occurrences yields exactly one fire and the
+// rest are silently absorbed with no trace. (The other policies added by
+// #1422 answer the backlog differently: CatchupSkip fires nothing and
+// CatchupAll fires every due occurrence; both are covered in
+// schedules_catchup_test.go.) The breadcrumb below is explicitly NOT a
+// backfill fix — it's an observability fix: emit ONE journal event per
 // schedule reporting how many occurrences were skipped and the time
 // window they fell in, so an operator reviewing an incident can see
 // "this schedule was dark for 3 hours and missed 11 fires" instead of
