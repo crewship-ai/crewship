@@ -28,7 +28,9 @@ These are the paid models in the Keeper stack. The credential-access judge
 ('crewship keeper config') is a local model and costs nothing per decision; each
 of these slots calls a hosted model and bills per token:
 
-  curator        skill review + memory consolidation
+  curator        skill review + memory consolidation (the consolidation
+                 summariser resolves this slot per run, falling back to
+                 KEEPER_OLLAMA_URL + KEEPER_MODEL when it cannot be built)
   behavior       tool-call behaviour monitor
   memory_health  memory-health audit
   negative       failure → lessons extraction
@@ -39,7 +41,10 @@ Each field either has an instance override or inherits the CREWSHIP_AUX_* value
 the server booted with, and 'aux list' shows which — "instance" means set here,
 "env" means inherited, "default" means the shipped value.
 
-Every slot applies on the next evaluation — no restart, for any of them.
+Every slot applies on the next evaluation — no restart, for any of them, and
+that includes '--timeout': it is a real per-call deadline on every slot above.
+The one exception is the memory-consolidation prompt behind 'curator', which is
+batch work and stays on its provider's client timeout.
 
 A hosted slot bills a key. By default that is the one in the server's own
 environment; 'aux set <slot> --credential <name>' points it at a stored vault

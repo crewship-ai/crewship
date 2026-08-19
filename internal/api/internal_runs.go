@@ -408,9 +408,12 @@ func (h *InternalHandler) generateRunVerdict(ctx context.Context, workspaceID, a
 		TraceID:     runID,
 	}
 	// Resolved here rather than held on the handler: an aux-slot edit made
-	// while the server was up must reach THIS verdict (#1556).
-	provider, model := h.runVerdict()
-	if err := runverdict.GenerateAndEmit(ctx, h.journal, provider, model, base, entries); err != nil {
+	// while the server was up must reach THIS verdict (#1556) — including
+	// the slot's per-call budget, which bounds the model call below. ctx is
+	// a background context (this runs after the request that spawned it has
+	// returned), so without that budget nothing here has a deadline (#1615).
+	provider, model, budget := h.runVerdict()
+	if err := runverdict.GenerateAndEmit(ctx, h.journal, provider, model, budget, base, entries); err != nil {
 		h.logger.Debug("run verdict: generate", "error", err, "run_id", runID)
 	}
 	// Same async-queue caveat as above: drain the verdict entry itself

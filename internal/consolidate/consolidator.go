@@ -150,8 +150,9 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 		return ConsolidationResult{Skipped: true, EntriesScanned: len(filtered)}, nil
 	}
 
-	// Heuristic Curator path: when no LLM Summarizer is wired (operator
-	// hasn't set KEEPER_OLLAMA_URL + KEEPER_MODEL), we still want the
+	// Heuristic Curator path: when no LLM Summarizer is wired — the curator
+	// aux slot has no buildable provider AND the operator has not set
+	// KEEPER_OLLAMA_URL + KEEPER_MODEL — we still want the
 	// pin snapshot above to run, version rows to land, and the journal
 	// to record an entry for this tick — but we can't extract new
 	// learned rules without an LLM. Pre-fix the tick would nil-panic on
@@ -160,7 +161,7 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 	// even though the pins snapshot was already producing useful state
 	// on its own. (Issue #543.)
 	if c.Summarizer == nil {
-		logger.Debug("consolidate: no Summarizer; running pin-snapshot path only (set KEEPER_OLLAMA_URL + KEEPER_MODEL for full Curator)",
+		logger.Debug("consolidate: no Summarizer; running pin-snapshot path only (point the curator aux slot at a buildable model, or set KEEPER_OLLAMA_URL + KEEPER_MODEL, for full Curator)",
 			"crew_id", cfg.CrewID)
 		return ConsolidationResult{
 			Skipped:        false,

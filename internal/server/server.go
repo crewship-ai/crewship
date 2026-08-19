@@ -837,29 +837,30 @@ func (s *Server) mountAPIRouter(
 
 	// Build the shared Consolidator so the router-backed manual
 	// trigger (/api/v1/consolidate/run) and the 6-hourly background
-	// runner use the same instance. Summarizer is nil when Ollama
-	// isn't configured; the handler surfaces that as 202 +
-	// "no summarizer configured, skipping" so operators see the
-	// feature is off without the request failing outright.
-	var summarizerEarly consolidate.SummarizerClient
+	// runner use the same instance.
+	//
+	// Its Summarizer is wired below, once the Router exists, because the
+	// model it calls comes from the CURATOR aux slot and the Router is what
+	// resolves that slot per use (#1695). This value is only the FALLBACK:
+	// the boot-time KEEPER_OLLAMA_URL + KEEPER_MODEL client, kept so an
+	// install running a local judge with no API key does not lose
+	// consolidation to a slot it cannot build — the same degradation
+	// buildAuxGatekeeper gives the four evaluators.
+	//
+	// A nil Summarizer at the end of that wiring means this instance cannot
+	// summarise at all; the handler surfaces it as 202 + "no summarizer
+	// configured, skipping" so operators see the feature is off without the
+	// request failing outright.
+	var keeperSummarizer consolidate.SummarizerClient
 	if s.cfg.Keeper.OllamaURL != "" && s.cfg.Keeper.Model != "" {
 		summBase := llm.NewOllama(s.cfg.Keeper.OllamaURL, s.cfg.Keeper.Model)
 		summWrapped := llm.Middleware(summBase, s.journalWriter, s.db)
-		summarizerEarly = newLLMSummarizer(summWrapped, s.cfg.Keeper.Model)
-	}
-	// Reuse the same aux-LLM summarizer for mid-conversation compaction:
-	// when older turns overflow the budget, buildConversationContext
-	// compacts the overflow slice into a summary block instead of
-	// dropping it. Nil (no aux model configured) leaves the orchestrator
-	// on its plain newest-first truncation fallback.
-	if summarizerEarly != nil {
-		orch.SetConversationSummarizer(summarizerEarly)
+		keeperSummarizer = newLLMSummarizer(summWrapped, s.cfg.Keeper.Model)
 	}
 	s.consolidator = &consolidate.Consolidator{
-		DB:         deps.DB,
-		Journal:    s.journalWriter,
-		Summarizer: summarizerEarly,
-		Logger:     logger,
+		DB:      deps.DB,
+		Journal: s.journalWriter,
+		Logger:  logger,
 	}
 	opts = append(opts, goapi.WithConsolidator(s.consolidator))
 	// PR-E F6: persona + peer card endpoints resolve host paths
@@ -1068,6 +1069,46 @@ func (s *Server) mountAPIRouter(
 			}()
 		}
 	}
+
+	// Memory consolidation's model (#1695). The curator aux slot has always
+	// been described as "Skill review + memory consolidation" — on the Judge
+	// models card, in keepercfg.AuxLabels and in /api/v1/system/aux-status —
+	// while the consolidator read KEEPER_OLLAMA_URL + KEEPER_MODEL directly
+	// and never consulted the slot at all. Resolving it through the Router
+	// here is what makes the second half of that description true, and makes
+	// an edit apply on the next consolidation rather than the next restart
+	// (#1556's shape, which this wiring had all along).
+	//
+	// Wired after the Router exists and before anything serves. When the
+	// Router failed to build there is no resolver, and the KEEPER_* fallback
+	// alone is what consolidation runs on — exactly the pre-#1695 behaviour.
+	var curatorAux auxResolver
+	if s.apiRouter != nil {
+		curatorAux = s.apiRouter.ConsolidatorAux
+	}
+	summarizer := newAuxSummarizer(
+		curatorAux,
+		// The middleware stack the boot-time summariser was built with — cost
+		// ledger, lookout, telemetry. The Router hands back a bare provider
+		// (its callers wrap it themselves), so consolidation must keep doing
+		// so or it stops appearing in the cost ledger.
+		func(p llm.Provider) llm.Provider { return llm.Middleware(p, s.journalWriter, s.db) },
+		keeperSummarizer,
+		logger,
+	)
+	if summarizer != nil {
+		s.consolidator.Summarizer = summarizer
+		// The same summariser backs mid-conversation compaction: when older
+		// turns overflow the budget, buildConversationContext compacts the
+		// overflow slice into a summary block instead of dropping it. Nil (no
+		// curator slot and no KEEPER_* model) leaves the orchestrator on its
+		// plain newest-first truncation fallback.
+		orch.SetConversationSummarizer(summarizer)
+	} else {
+		logger.Info("memory consolidation disabled: the curator aux slot has no buildable provider and no KEEPER_OLLAMA_URL + KEEPER_MODEL is set",
+			"impact", "consolidation runs the pin-snapshot path only; conversation compaction falls back to truncation")
+	}
+
 	// Static UI: wrap mux with SPA handler to avoid ServeMux redirect issues
 	if deps.WebFS != nil {
 		s.spaHandler = goapi.StaticFileHandler(deps.WebFS)

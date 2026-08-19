@@ -326,11 +326,17 @@ type Router struct {
 	// verdict and an unchanged wiring still reuses one HTTP client.
 	runVerdictCache auxProviderCache
 
-	// userModelCache backs the operator-model extractor's curator slot
-	// (#1669), on the same terms: resolved per sweep so an aux-slot edit
-	// is live on the next one, cached on the wiring so an unchanged slot
-	// reuses one HTTP client.
-	userModelCache auxProviderCache
+	// curatorCache backs every consumer of the curator slot — the
+	// operator-model extractor's daily sweep (#1669) and memory
+	// consolidation (#1695) — on the same terms: resolved per use so an
+	// aux-slot edit is live on the next one, cached on the wiring so an
+	// unchanged slot reuses one HTTP client.
+	//
+	// One cache for one slot rather than one per caller: they resolve the
+	// same provider, model and endpoint, so a cache each would mean two
+	// keep-alive'd clients (and for Ollama two model loads) for a wiring
+	// that is by construction identical.
+	curatorCache auxProviderCache
 
 	// internalHandler is retained (it is otherwise local to
 	// registerInternalRoutes) so shutdown can drain its in-flight
@@ -353,9 +359,17 @@ func (r *Router) DrainVerdicts(timeout time.Duration) {
 	}
 }
 
-// RunVerdict resolves the run_summary aux slot to the LLM provider and model in
-// force RIGHT NOW, for the post-run outcome verdict (#1403). It matches
-// runverdict.Resolver, so call sites pass the method rather than its result.
+// activeContainer returns the container provider this process is holding, or
+// nil when it has none. One field, one object: server.go wires deps.Container
+// into keeperContainer, and that is the provider every crew container is
+// created through — reading it under this name keeps the "which runtime is
+// actually in use" question from looking like a keeper concern.
+func (r *Router) activeContainer() provider.ContainerProvider { return r.keeperContainer }
+
+// RunVerdict resolves the run_summary aux slot to the LLM provider, model and
+// per-call budget in force RIGHT NOW, for the post-run outcome verdict
+// (#1403). It matches runverdict.Resolver, so call sites pass the method
+// rather than its result.
 //
 // Resolved per verdict, not once at boot (#1556). run_summary and the fallback
 // slot behind it are runtime-settable from the console; a provider built once
@@ -366,24 +380,21 @@ func (r *Router) DrainVerdicts(timeout time.Duration) {
 // cold model load — the same cache shape the four Keeper Reviews slots use in
 // internal/server/keeper_aux_live.go.
 //
+// The budget is the third return, applied by runverdict.GenerateAndEmit
+// (#1615). It used to be dropped here, which made run_summary the one aux
+// budget nothing read: both production call sites hand the verdict a
+// background context, so the operator's number bounded nothing at all while
+// sitting on the Judge models card beside four that #1601 had made live. It
+// is deliberately NOT part of the provider's identity — lowering a timeout
+// must not rebuild a client — so it is re-read from the slot on every call,
+// cache hit included.
+//
 // A nil provider means the slot is unconfigured or unbuildable (e.g. no
 // ANTHROPIC_API_KEY). Callers must read that as "verdict generation is off",
 // not as an error; a later fix to the wiring is picked up on the next call.
-// activeContainer returns the container provider this process is holding, or
-// nil when it has none. One field, one object: server.go wires deps.Container
-// into keeperContainer, and that is the provider every crew container is
-// created through — reading it under this name keeps the "which runtime is
-// actually in use" question from looking like a keeper concern.
-func (r *Router) activeContainer() provider.ContainerProvider { return r.keeperContainer }
-
-func (r *Router) RunVerdict() (llm.Provider, string) {
-	p, m, _ := r.auxProvider(llm.SlotRunSummary, &r.runVerdictCache,
+func (r *Router) RunVerdict() (llm.Provider, string, time.Duration) {
+	return r.auxProvider(llm.SlotRunSummary, &r.runVerdictCache,
 		"run verdict: run_summary", "outcome verdicts disabled")
-	// The budget is dropped here on purpose: the post-run verdict is
-	// bounded by the caller's context (see internal/runverdict), which is
-	// the run's own teardown deadline, and narrowing it to the slot's
-	// number would be a behaviour change this PR has no business making.
-	return p, m
 }
 
 // UserModelAux resolves the curator aux slot for the operator-model
@@ -393,11 +404,10 @@ func (r *Router) RunVerdict() (llm.Provider, string) {
 // pair the operator's edit cannot reach.
 //
 // The curator slot is the right one by its own documented purpose —
-// "memory consolidation, skill review" (internal/llm/aux.go). Note that
-// nothing else routes memory work through it today: the consolidator
-// builds its summariser directly from cfg.Keeper.OllamaURL and never
-// consults the aux slots at all, so an operator repointing curator has
-// until now changed only skill review.
+// "memory consolidation, skill review" (internal/llm/aux.go) — and since
+// #1695 the consolidator resolves it through ConsolidatorAux, so the two
+// memory consumers of the slot no longer disagree about where their model
+// comes from.
 //
 // The third return is the slot's per-call budget, which the extractor
 // applies. #1601 was that field reaching no evaluator; here an unbounded
@@ -406,8 +416,33 @@ func (r *Router) RunVerdict() (llm.Provider, string) {
 //
 // A nil provider means "extraction is off", not an error.
 func (r *Router) UserModelAux() (llm.Provider, string, time.Duration) {
-	return r.auxProvider(llm.SlotCurator, &r.userModelCache,
+	return r.auxProvider(llm.SlotCurator, &r.curatorCache,
 		"user model: curator", "operator-model extraction disabled")
+}
+
+// ConsolidatorAux resolves the curator aux slot for memory consolidation
+// (#1695) — the subsystem the slot's own description has always named
+// ("Skill review + memory consolidation" on the Judge models card, in
+// keepercfg.AuxLabels and in the aux-status endpoint).
+//
+// It did not read it. The summariser was built in server bootstrap straight
+// from KEEPER_OLLAMA_URL + KEEPER_MODEL, once, and bypassed
+// AuxiliaryModels / ResolveAux / the override store entirely — so an
+// operator repointing curator changed only skill review, consolidation was
+// Ollama-only whatever the slot said, and the same instance backed the
+// orchestrator's conversation compaction on that unadvertised wiring.
+//
+// Same per-use terms as RunVerdict and UserModelAux: resolved on each
+// consolidation rather than captured, because the consolidator is built at
+// boot and lives for the process. internal/server's auxSummarizer is the
+// consumer, and it keeps cfg.Keeper.* as the fallback for the
+// no-API-key install the way buildAuxGatekeeper does.
+//
+// A nil provider means "this slot has nothing buildable behind it", which
+// the caller reads as "use the local fallback", not as an error.
+func (r *Router) ConsolidatorAux() (llm.Provider, string, time.Duration) {
+	return r.auxProvider(llm.SlotCurator, &r.curatorCache,
+		"memory consolidation: curator", "consolidation falls back to KEEPER_OLLAMA_URL")
 }
 
 // auxProviderCache memoises one slot's built (provider, model) pair
