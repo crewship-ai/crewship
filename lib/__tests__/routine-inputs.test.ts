@@ -172,6 +172,27 @@ describe("coerceRoutineInput", () => {
     expect(typeof coerceRoutineInput("integer", "42")).toBe("number")
   })
 
+  it("refuses an integer too large to send exactly", () => {
+    // Number("9007199254740993") is 9007199254740992. The routine would
+    // run on a value nobody typed and nothing downstream would say so —
+    // and an integer input holding an account id or an invoice number is
+    // exactly where that lands. The repl agrees: strconv.ParseInt errors
+    // on overflow rather than rounding.
+    expect(() => coerceRoutineInput("integer", "9007199254740993", "invoice")).toThrow(
+      RoutineInputError,
+    )
+    expect(() => coerceRoutineInput("integer", "9007199254740993", "invoice")).toThrow(
+      /too large to send exactly/,
+    )
+    // The boundary itself still goes through.
+    expect(coerceRoutineInput("integer", String(Number.MAX_SAFE_INTEGER))).toBe(
+      Number.MAX_SAFE_INTEGER,
+    )
+    expect(coerceRoutineInput("integer", String(-Number.MAX_SAFE_INTEGER))).toBe(
+      -Number.MAX_SAFE_INTEGER,
+    )
+  })
+
   it("treats an unknown or absent value_type as a string", () => {
     // Every field in the static slash catalog, and every field from a
     // server older than this build.

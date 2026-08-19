@@ -784,7 +784,7 @@ spec:
 
 That routine is then offered as `/msn-etn-podklady` in both chat and the repl:
 
-```
+```text
 crewship › /msn-etn-podklady obdobi=2026-07
 ```
 
@@ -838,7 +838,7 @@ operator. Rename the routine to reclaim it.
 `crewship shell` loads the same capability-filtered catalog at start-up and
 registers each entry, so the command exists at that prompt too:
 
-```
+```text
 crewship › /msn-etn-podklady obdobi=2026-07
 [/msn-etn-podklady] ✓
 ```
@@ -861,7 +861,7 @@ which routines exist **and what each one's inputs are**, and instructed to ask
 you for any value it does not have rather than guess or run with an empty
 `inputs` object:
 
-```
+```text
 You:    run the monthly accounting pack
 Agent:  Which period? (obdobi, YYYY-MM — leave it and it uses last month.)
         I'll use the defaults for ucetnictvi_root ("Unify - Účetnictví")

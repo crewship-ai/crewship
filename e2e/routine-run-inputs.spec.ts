@@ -30,6 +30,13 @@ test.describe.configure({ mode: "serial" })
 
 const TIMEOUT = 20_000
 
+/** A period string no other invocation will have used. The probe routine
+ *  echoes its inputs, so this is what lets a test recognise ITS run among
+ *  whatever earlier runs are still on the record. */
+function uniquePeriod() {
+  return `2026-07-${Date.now().toString(36)}`
+}
+
 /** The routine this feature was built against, reduced to something
  *  agentless and instant: three declared inputs, two with defaults, and a
  *  transform that echoes what it was given so the run's own output proves
@@ -132,7 +139,7 @@ async function probeRuns(page: Page, workspaceId: string) {
   return page.evaluate(
     async ([ws, slug]) => {
       const res = await fetch(
-        `/api/v1/workspaces/${ws}/pipelines/${slug}/run-records?limit=10`,
+        `/api/v1/workspaces/${ws}/pipelines/${slug}/run-records?limit=50`,
       )
       if (!res.ok) return []
       const body = await res.json()
@@ -207,34 +214,37 @@ test.describe("Run a routine with its inputs — routines detail page", () => {
   })
 
   test("submitting the form starts a run carrying the typed values", async ({ page }) => {
-    const before = await probeRuns(page, seeded.workspaceId)
+    // A value only this invocation uses. Counting runs cannot work — the
+    // records endpoint is paginated, so once history reaches the page size
+    // the count stops growing and "more than before" is unsatisfiable. And
+    // polling for a FIXED output is worse than useless: a run left by an
+    // earlier invocation carries the same string, so the assertion passes
+    // without anything having happened. A unique input fixes both, because
+    // only the run this test started can produce this output.
+    const period = uniquePeriod()
 
     await page.goto(`/routines?slug=${SLUG}`)
     await page.getByRole("button", { name: /^Run$/ }).click()
     const dialog = page.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: TIMEOUT })
 
-    await dialog.getByLabel(/obdobi/i).fill("2026-07")
+    await dialog.getByLabel(/obdobi/i).fill(period)
     await dialog.getByRole("button", { name: /^Run$/ }).click()
     await expect(dialog).toBeHidden({ timeout: TIMEOUT })
 
     // The run's own output is the assertion. The routine echoes
-    // `obdobi|ucetnictvi_root|limit`, so this proves three separate things
-    // at once: the typed value arrived, the untouched default arrived, and
-    // the integer arrived as 42 rather than as the string a text box holds.
+    // `obdobi|ucetnictvi_root|limit`, so this proves three things at once:
+    // the typed value arrived, the untouched default arrived, and the
+    // integer arrived as 42 rather than as the string a text box holds.
+    const want = `${period}|Unify - Účetnictví|42`
     await expect
-      .poll(async () => (await probeRuns(page, seeded.workspaceId)).length, { timeout: TIMEOUT })
-      .toBeGreaterThan(before.length)
+      .poll(
+        async () => (await probeRuns(page, seeded.workspaceId)).find((r) => r.output === want),
+        { timeout: TIMEOUT },
+      )
+      .toBeTruthy()
 
-    // Asserted as "a run with this output exists", not "runs[0] has it".
-    // The seed's own test_run leaves a record too, so indexing into the list
-    // is a bet on an ordering this endpoint has never promised.
-    const runs = await probeRuns(page, seeded.workspaceId)
-    const match = runs.find((r) => r.output === "2026-07|Unify - Účetnictví|42")
-    expect(
-      match,
-      `no run carried the typed inputs — got ${JSON.stringify(runs.map((r) => r.output))}`,
-    ).toBeTruthy()
+    const match = (await probeRuns(page, seeded.workspaceId)).find((r) => r.output === want)
     expect(match!.status?.toLowerCase()).toBe("completed")
   })
 
@@ -248,7 +258,7 @@ test.describe("Run a routine with its inputs — routines detail page", () => {
     await page.getByRole("button", { name: /^Run$/ }).click()
     const dialog = page.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: TIMEOUT })
-    await dialog.getByLabel(/obdobi/i).fill("2026-08")
+    await dialog.getByLabel(/obdobi/i).fill(uniquePeriod())
     await dialog.getByRole("button", { name: /^Run$/ }).click()
     await expect(dialog).toBeHidden({ timeout: TIMEOUT })
 

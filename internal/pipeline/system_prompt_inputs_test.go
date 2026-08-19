@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -143,6 +144,37 @@ func TestPromptInputLinesCapsRunawayInputs(t *testing.T) {
 	}
 	if !strings.Contains(got, "…5 more") {
 		t.Errorf("truncation was silent — the agent must be told the list is partial:\n%s", got)
+	}
+}
+
+// The truncation line counts what it did NOT show, and the loop skips
+// unnamed inputs — so counting off the raw slice overstates the remainder.
+// One unnamed input among fourteen named ones rendered twelve and claimed
+// three were left, when two were. A number in a system prompt is a claim
+// the model repeats to the user.
+func TestPromptInputLinesTruncationCountsOnlyRenderableInputs(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`{"inputs":[{"name":"","type":"string"}`)
+	for i := 0; i < promptInputCap+2; i++ {
+		fmt.Fprintf(&b, `,{"name":"field%d","type":"string"}`, i)
+	}
+	b.WriteString(`]}`)
+
+	got := promptInputLines(b.String())
+	if n := strings.Count(got, "    - "); n != promptInputCap {
+		t.Errorf("rendered %d input lines, want the cap of %d", n, promptInputCap)
+	}
+	if !strings.Contains(got, "…2 more") {
+		t.Errorf("remainder counted the unnamed input it never rendered:\n%s", got)
+	}
+}
+
+// Only-unnamed inputs render nothing at all — not a header over an empty
+// list, which would tell the agent to ask the user for something the
+// routine does not declare.
+func TestPromptInputLinesAllUnnamedRendersNothing(t *testing.T) {
+	if got := promptInputLines(`{"inputs":[{"name":""},{"name":""}]}`); got != "" {
+		t.Errorf("got %q, want empty", got)
 	}
 }
 

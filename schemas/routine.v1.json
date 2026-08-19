@@ -136,8 +136,8 @@
         "icon": {
           "type": "string",
           "maxLength": 40,
-          "pattern": "^[a-z0-9-]+$",
-          "description": "Lucide icon name, lowercase kebab-case (e.g. 'receipt'). The set is open — an unknown name renders a generic icon rather than failing."
+          "pattern": "^[a-z0-9-]*$",
+          "description": "Lucide icon name, lowercase kebab-case (e.g. 'receipt'). Empty is allowed and means 'derive one' — validateSlashIcon accepts it, so the schema must too or a manifest sending \"icon\": \"\" fails before it reaches the server. The set is open: an unknown name renders a generic icon rather than failing."
         }
       },
       "description": "Offers this routine as /<slug> in chat and the CLI repl, with a form built from its inputs. Requires the caller to hold the routine.run capability. See docs/guides/slash-commands."

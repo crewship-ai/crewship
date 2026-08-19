@@ -194,15 +194,27 @@ func promptInputLines(definitionJSON string) string {
 		return ""
 	}
 
+	// Drop the unrenderable ones BEFORE counting. The truncation line
+	// reports what it did not show, and computing that from the raw slice
+	// counted inputs the loop skips: one unnamed input among thirteen named
+	// ones rendered twelve and then claimed two were left, when one was.
+	// A number in a system prompt is a claim the model will repeat.
+	named := make([]InputSpec, 0, len(def.Inputs))
+	for _, in := range def.Inputs {
+		if in.Name != "" {
+			named = append(named, in)
+		}
+	}
+	if len(named) == 0 {
+		return ""
+	}
+
 	var b strings.Builder
 	b.WriteString("  inputs (ask the user for any you do not have):\n")
 	shown := 0
-	for _, in := range def.Inputs {
-		if in.Name == "" {
-			continue
-		}
+	for _, in := range named {
 		if shown >= promptInputCap {
-			fmt.Fprintf(&b, "    …%d more — GET http://localhost:9119/pipelines for the full spec\n", len(def.Inputs)-shown)
+			fmt.Fprintf(&b, "    …%d more — GET http://localhost:9119/pipelines for the full spec\n", len(named)-shown)
 			break
 		}
 		typ := in.Type

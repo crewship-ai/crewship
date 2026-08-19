@@ -186,10 +186,24 @@ export function coerceRoutineInput(
       // Number() accepts "4.5" and " 42 " and ""; an integer input is
       // narrower than that, and nothing downstream will say so — a
       // fractional value simply flows into the routine as declared-int.
-      if (!/^[+-]?\d+$/.test(raw.trim())) {
+      const text = raw.trim()
+      if (!/^[+-]?\d+$/.test(text)) {
         throw new RoutineInputError(field, `"${raw}" is not a whole number`)
       }
-      return Number(raw.trim())
+      const n = Number(text)
+      // Past 2^53 a JS number cannot hold every integer, and Number()
+      // rounds without complaint: "9007199254740993" comes back as
+      // ...992. The routine would then run on a value nobody typed, and
+      // an integer input holding an account id or an invoice number is
+      // exactly where that lands. Refusing is the only honest option —
+      // the repl agrees, because strconv.ParseInt errors on overflow.
+      if (!Number.isSafeInteger(n)) {
+        throw new RoutineInputError(
+          field,
+          `"${raw}" is too large to send exactly — the largest whole number this form can carry is ${Number.MAX_SAFE_INTEGER}`,
+        )
+      }
+      return n
     }
     case "number": {
       const n = Number(raw.trim())

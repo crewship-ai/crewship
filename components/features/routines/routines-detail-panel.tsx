@@ -178,6 +178,10 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     // manually dismisses it — a confusing "this report doesn't match
     // what I'm looking at" surface bug.
     setLastRunId(null)
+    // And close any open input form. It belongs to the routine that was
+    // selected when Run was pressed, and the panel has just been pointed
+    // at a different one — see the note on pendingRun.
+    setPendingRun(null)
     fetchRoutine()
     return () => {
       abortRef.current?.abort()
@@ -185,11 +189,23 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, slug])
 
-  // Run asks for the routine's inputs first, when it declares any. Held
-  // as the spec list rather than a boolean so the dialog renders from the
-  // routine that was current at the click, not from whatever the list
-  // selection has become since.
-  const [pendingRunInputs, setPendingRunInputs] = useState<RoutineInputSpec[] | null>(null)
+  // Run asks for the routine's inputs first, when it declares any.
+  //
+  // The slug is carried WITH the specs, and both halves matter. This panel
+  // is a detail view over a list: picking another row changes `slug` under
+  // a dialog that is already open, and `triggerAction` posts to whatever
+  // `slug` is at submit time. Holding only the specs meant the form could
+  // show routine A's fields, above routine B's name, and start routine B
+  // with A's values — the wrong routine, with inputs it never declared.
+  //
+  // Two guards rather than one: the effect above closes the form on a
+  // selection change, and the submit below refuses a mismatch anyway. The
+  // first is the behaviour; the second is what makes a missed re-render
+  // or a future extra dependency harmless instead of expensive.
+  const [pendingRun, setPendingRun] = useState<{
+    slug: string
+    inputs: RoutineInputSpec[]
+  } | null>(null)
 
   // The Run button's two paths. A routine with declared inputs opens the
   // form; one without runs immediately, which is what that button has
@@ -201,7 +217,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
       void triggerAction("run")
       return
     }
-    setPendingRunInputs(specs)
+    setPendingRun({ slug, inputs: specs })
   }
 
   const triggerAction = async (action: "run", inputs: Record<string, unknown> = {}) => {
@@ -668,12 +684,19 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         </div>
       )}
       <RoutineRunInputsDialog
-        inputs={pendingRunInputs}
+        inputs={pendingRun?.slug === slug ? pendingRun.inputs : null}
         routineName={routine?.name || slug}
         submitting={busyAction === "run"}
-        onCancel={() => setPendingRunInputs(null)}
+        onCancel={() => setPendingRun(null)}
         onRun={(inputs) => {
-          setPendingRunInputs(null)
+          // Refuse a submit whose form was built for a different routine.
+          // Unreachable while the effect above closes the dialog on every
+          // selection change — which is the point of having it.
+          if (pendingRun?.slug !== slug) {
+            setPendingRun(null)
+            return
+          }
+          setPendingRun(null)
           void triggerAction("run", inputs)
         }}
       />

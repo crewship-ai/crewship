@@ -232,3 +232,97 @@ describe("<RoutinesDetailPanel> — 422 missing-integration toast", () => {
     expect(opts.action?.label).toBe("Manage integrations")
   })
 })
+
+// ── The open input form belongs to the routine that opened it ────────────
+//
+// This panel is a detail view over a list. Picking another row changes the
+// `slug` prop under a dialog that is already open, and the submit posts to
+// whatever `slug` is at that moment — so a form built from routine A's
+// declared inputs could start routine B with values B never declared. Not a
+// theoretical ordering: clicking a second row while the form is up is the
+// obvious thing to do when you realise you opened the wrong one.
+describe("<RoutinesDetailPanel> — the input form and the selected routine", () => {
+  const WITH_INPUTS = {
+    ...ROUTINE,
+    slug: "routine-a",
+    name: "Routine A",
+    definition: { inputs: [{ name: "obdobi", type: "string", default: "2026-01" }] },
+  }
+  const OTHER = {
+    ...ROUTINE,
+    slug: "routine-b",
+    name: "Routine B",
+    definition: { inputs: [{ name: "quarter", type: "string" }] },
+  }
+
+  function mockFor(routine: typeof ROUTINE) {
+    vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+      const u = String(url)
+      if (init?.method === "POST" && u.endsWith("/run")) {
+        return okJSON({ run_id: "run-x", status: "running" })
+      }
+      return okJSON(u.includes("routine-b") ? OTHER : routine)
+    })
+  }
+
+  it("closes the form when the selection moves to another routine", async () => {
+    mockFor(WITH_INPUTS)
+    const { rerender } = render(
+      <RoutinesDetailPanel {...defaultProps} slug="routine-a" />,
+    )
+    await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
+    expect(screen.getByLabelText(/obdobi/i)).toBeInTheDocument()
+
+    rerender(<RoutinesDetailPanel {...defaultProps} slug="routine-b" />)
+
+    // Gone, rather than left showing A's fields above B's name.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+
+  it("never posts a run for a routine the form was not built from", async () => {
+    mockFor(WITH_INPUTS)
+    const { rerender } = render(
+      <RoutinesDetailPanel {...defaultProps} slug="routine-a" />,
+    )
+    await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
+
+    vi.mocked(apiFetch).mockClear()
+    rerender(<RoutinesDetailPanel {...defaultProps} slug="routine-b" />)
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+
+    // Whatever else happened, no run was started — and in particular not
+    // one addressed to routine-b carrying routine-a's obdobi.
+    const runPosts = vi
+      .mocked(apiFetch)
+      .mock.calls.filter(([u, init]) => init?.method === "POST" && String(u).endsWith("/run"))
+    expect(runPosts).toEqual([])
+  })
+
+  it("still runs the selected routine with its own inputs", async () => {
+    // The guard must not cost the ordinary path.
+    mockFor(WITH_INPUTS)
+    render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
+    await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText(/obdobi/i), { target: { value: "2026-07" } })
+    fireEvent.click(screen.getByRole("dialog").querySelector("button[type=submit]")!)
+
+    await waitFor(() => {
+      const post = vi
+        .mocked(apiFetch)
+        .mock.calls.find(([u, init]) => init?.method === "POST" && String(u).endsWith("/run"))
+      expect(post).toBeTruthy()
+      expect(String(post![0])).toContain("/pipelines/routine-a/run")
+      expect(JSON.parse((post![1] as RequestInit).body as string)).toEqual({
+        inputs: { obdobi: "2026-07" },
+      })
+    })
+  })
+})

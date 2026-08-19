@@ -82,7 +82,8 @@ crewship [riley] › /msn-etn-podklady obdobi=2026-07
 
 A routine appears here when it carries a
 [`slash` block](/manifest/routine#slash-offering-a-routine-as-a-command) and you
-hold `routine.run`. Arguments are `key=value`, quoted for spaces, and each value
+hold `routine.run` **or** are `MANAGER` and above, who clear the run gate on role
+alone. Arguments are `key=value`, quoted for spaces, and each value
 is sent as the type the routine declared — a number unquoted, a boolean as
 `true`/`yes`/`on` or `false`/`no`/`off`. A value that cannot be restored to its
 declared type is refused at the prompt with the field named, before anything is

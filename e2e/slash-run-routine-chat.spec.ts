@@ -22,6 +22,13 @@ test.describe.configure({ mode: "serial" })
 
 const TIMEOUT = 20_000
 const SLUG = "e2e-chat-slash-probe"
+
+/** A period string no other invocation will have used — see the note in
+ *  routine-run-inputs.spec.ts. Counting paginated records cannot prove a run
+ *  started, and a fixed value matches an earlier invocation's run. */
+function uniquePeriod() {
+  return `2026-07-${Date.now().toString(36)}`
+}
 const LABEL = "E2E chat slash probe"
 
 /** Agentless and instant, and it echoes its inputs so the run itself says
@@ -64,8 +71,14 @@ async function seedProbe(page: Page): Promise<Seeded> {
   const seeded = await page.evaluate(async (def) => {
     const workspaces = await (await fetch("/api/v1/workspaces")).json()
     for (const ws of Array.isArray(workspaces) ? workspaces : []) {
+      // Filtered on `slug`, not just on the list being non-empty. An agent
+      // record without one yields `/chat/undefined`, and the failure then
+      // surfaces as a missing chat-commands-trigger — which accuses the
+      // palette of a fault in the seed.
       const agents = await (await fetch(`/api/v1/agents?workspace_id=${ws.id}`)).json()
-      const agentList = Array.isArray(agents) ? agents : []
+      const agentList = (Array.isArray(agents) ? agents : []).filter(
+        (a: { slug?: string }) => typeof a?.slug === "string" && a.slug.length > 0,
+      )
       if (!agentList.length) continue
       const crews = await (await fetch(`/api/v1/crews?workspace_id=${ws.id}`)).json()
       const crewList = Array.isArray(crews) ? crews : (crews?.crews ?? [])
@@ -100,7 +113,7 @@ async function seedProbe(page: Page): Promise<Seeded> {
 
   expect(
     seeded,
-    "no workspace on this instance has both an agent and a crew — seed one first",
+    "no workspace on this instance has both a crew and an agent with a slug — seed one first",
   ).not.toBeNull()
   return seeded!
 }
@@ -108,7 +121,7 @@ async function seedProbe(page: Page): Promise<Seeded> {
 async function probeRuns(page: Page, workspaceId: string) {
   return page.evaluate(
     async ([ws, slug]) => {
-      const res = await fetch(`/api/v1/workspaces/${ws}/pipelines/${slug}/run-records?limit=10`)
+      const res = await fetch(`/api/v1/workspaces/${ws}/pipelines/${slug}/run-records?limit=50`)
       if (!res.ok) return []
       const body = await res.json()
       const rows = Array.isArray(body) ? body : (body.records ?? body.items ?? [])
@@ -202,7 +215,7 @@ test.describe("Run a routine from the chat slash palette", () => {
   })
 
   test("picking it opens its inputs and running starts a run with them", async ({ page }) => {
-    const before = await probeRuns(page, seeded.workspaceId)
+    const period = uniquePeriod()
 
     await page.goto(`/chat/${seeded.agentSlug}`)
     await openSlashPalette(page)
@@ -215,27 +228,23 @@ test.describe("Run a routine from the chat slash palette", () => {
     await expect(dialog.getByLabel(/limit/i)).toHaveValue("42")
     await expect(dialog.getByLabel(/obdobi/i)).toHaveValue("")
 
-    await dialog.getByLabel(/obdobi/i).fill("2026-07")
+    await dialog.getByLabel(/obdobi/i).fill(period)
     await dialog.getByRole("button", { name: /^Run$/ }).click()
     await expect(dialog).toBeHidden({ timeout: TIMEOUT })
 
+    // The run's own output. `<period>|42` proves the typed string arrived and
+    // that the integer arrived as a NUMBER — the one the browser holds as the
+    // string "42", and which a `code` step would fail the run on if it were
+    // sent that way.
+    const want = `${period}|42`
     await expect
-      .poll(async () => (await probeRuns(page, seeded.workspaceId)).length, { timeout: TIMEOUT })
-      .toBeGreaterThan(before.length)
+      .poll(
+        async () => (await probeRuns(page, seeded.workspaceId)).find((r) => r.output === want),
+        { timeout: TIMEOUT },
+      )
+      .toBeTruthy()
 
-    // The run's own output. `2026-07|42` proves the typed string arrived, the
-    // untouched default arrived, and the integer arrived as a NUMBER — the one
-    // the browser holds as the string "42" and which a `code` step would fail
-    // the run on if it were sent that way.
-    // "A run with this output exists", not "runs[0] has it" — the seed's own
-    // test_run leaves a record too, and indexing is a bet on an ordering this
-    // endpoint has never promised.
-    const runs = await probeRuns(page, seeded.workspaceId)
-    const match = runs.find((r) => r.output === "2026-07|42")
-    expect(
-      match,
-      `no run carried the typed inputs — got ${JSON.stringify(runs.map((r) => r.output))}`,
-    ).toBeTruthy()
+    const match = (await probeRuns(page, seeded.workspaceId)).find((r) => r.output === want)
     expect(match!.status?.toLowerCase()).toBe("completed")
   })
 })
