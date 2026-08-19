@@ -115,7 +115,9 @@ func (h *AssignmentHandler) failInterruptedAssignment(ctx context.Context, assig
 		return false, fmt.Errorf("load routing fields for recovered assignment %s: %w", assignmentID, err)
 	}
 
-	if !h.finishAssignment(ctx, assignmentID, "", chatID, targetSlug.String, workspaceID, "", reason) {
+	// nil accumulator: recovery never ran the agent, so there is no session
+	// provenance to record and none is invented.
+	if !h.finishAssignment(ctx, assignmentID, "", chatID, targetSlug.String, workspaceID, "", reason, nil) {
 		// Lost the terminal CAS — a live driver (or another recovery
 		// pass) finished the row first and owns the completion signals.
 		return false, nil

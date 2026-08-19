@@ -41,11 +41,61 @@ type runResponse struct {
 	// Model is the model the run actually resolved to (session-init ground
 	// truth) — lets an operator verify Opus-vs-Sonnet on a subscription.
 	// Omitted when unknown (older runs, non-Claude adapters).
-	Model     *string `json:"model,omitempty"`
-	CreatedAt string  `json:"created_at"`
-	AgentName *string `json:"agent_name,omitempty"`
-	AgentSlug *string `json:"agent_slug,omitempty"`
-	CrewName  *string `json:"crew_name,omitempty"`
+	Model *string `json:"model,omitempty"`
+	// Session provenance: how this run was actually served. CLIVersion is the
+	// binary that answered (the adapter is pinned while containers install
+	// latest), APIKeySource the credential path that resolved, PermissionMode
+	// the posture in force, SessionID the CLI's own key for cross-referencing
+	// its transcript. Each is nil when unknown — older runs and non-Claude
+	// adapters report no session-init at all, and "" would read as "asked and
+	// got nothing back" rather than "never asked".
+	CLIVersion     *string `json:"cli_version,omitempty"`
+	APIKeySource   *string `json:"api_key_source,omitempty"`
+	PermissionMode *string `json:"permission_mode,omitempty"`
+	SessionID      *string `json:"session_id,omitempty"`
+	// MCPServerErrors lists the MCP servers the CLI skipped at startup: the
+	// run lost a capability and still exited 0, so this is the one field here
+	// a consumer acts on rather than displays.
+	//
+	// Typed, not json.RawMessage: the server would otherwise be a blind pipe
+	// for whatever the CLI wrote, and every consumer — this CLI, the UI —
+	// would re-sniff the same shape. Typing it at the journal boundary means a
+	// malformed value degrades to "absent" instead of reaching clients. The
+	// cost is that a field the CLI adds later is dropped until the struct
+	// learns it; a stable operator-facing contract is worth that.
+	//
+	// Omitted, never [], when nothing was skipped: absence is the signal a
+	// gate keys off, so it has to keep meaning "nothing was lost".
+	MCPServerErrors []journal.MCPServerError `json:"mcp_server_errors,omitempty"`
+	// MCPServerErrorCount is how many servers the CLI reported skipping, which
+	// can exceed len(MCPServerErrors): the producer stores only the entries it
+	// could project. Without it a client renders the shorter list as the whole
+	// truth, with no field to contradict it. Omitted for runs that recorded no
+	// count, so a client compares and reports a gap only when this is larger.
+	MCPServerErrorCount int `json:"mcp_server_error_count,omitempty"`
+	// MCPServerErrorsTruncated / PermissionDenialsTruncated say the list above
+	// was capped. Both lists are capped at the producer; a marker that reaches
+	// no client is an alarm that does not exist.
+	MCPServerErrorsTruncated bool `json:"mcp_server_errors_truncated,omitempty"`
+	// PermissionDenials names the tools the CLI refused to let the agent use,
+	// with how many times each was refused. Names and counts only — the
+	// producer drops the denied input, which is arbitrary agent text, before it
+	// reaches the hash-chained run record.
+	//
+	// The count is part of the answer, not decoration: one refusal is an agent
+	// that tried something once, forty is an agent hammering a wall it cannot
+	// see, and those send an operator to different fixes. It is absent (0) on
+	// runs recorded before the producer attached it.
+	//
+	// Same omitted-never-empty rule: a run blocked by permissions otherwise
+	// reads as a run that chose not to act, and an empty array would make
+	// "nothing was denied" and "we did not look" indistinguishable.
+	PermissionDenials          []journal.DeniedTool `json:"permission_denials,omitempty"`
+	PermissionDenialsTruncated bool                 `json:"permission_denials_truncated,omitempty"`
+	CreatedAt                  string               `json:"created_at"`
+	AgentName                  *string              `json:"agent_name,omitempty"`
+	AgentSlug                  *string              `json:"agent_slug,omitempty"`
+	CrewName                   *string              `json:"crew_name,omitempty"`
 }
 
 type runListResponse struct {
@@ -483,7 +533,21 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			ErrorMessage: stringPtrOrNil(r.ErrorMessage),
 			ExitCode:     r.ExitCode,
 			Model:        stringPtrOrNil(r.Model),
-			CreatedAt:    formatRFC3339(r.CreatedAt),
+			// Provenance rides the same nil-when-empty convention as Model, so
+			// a run that recorded nothing serialises no keys at all.
+			CLIVersion:        stringPtrOrNil(r.CLIVersion),
+			APIKeySource:      stringPtrOrNil(r.APIKeySource),
+			PermissionMode:    stringPtrOrNil(r.PermissionMode),
+			SessionID:         stringPtrOrNil(r.SessionID),
+			MCPServerErrors:   r.MCPServerErrors,
+			PermissionDenials: r.PermissionDenials,
+			// The counts and markers travel with the lists they qualify —
+			// separating them is how a capped or shrunken list came to read as
+			// complete.
+			MCPServerErrorCount:        r.MCPServerErrorCount,
+			MCPServerErrorsTruncated:   r.MCPServerErrorsTruncated,
+			PermissionDenialsTruncated: r.PermissionDenialsTruncated,
+			CreatedAt:                  formatRFC3339(r.CreatedAt),
 		}
 		if r.ChatID != "" {
 			c := r.ChatID

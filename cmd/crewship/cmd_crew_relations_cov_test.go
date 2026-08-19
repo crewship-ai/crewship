@@ -237,6 +237,96 @@ func TestCrewPeerConvsRunE(t *testing.T) {
 	}
 }
 
+// peer-conversations was shortening its id column through a private helper of
+// its own while the rest of the package had standardised on truncateID +
+// Formatter.ShortID. Two shorteners in one package drift, and the drift lands on
+// the behaviour that sweep existed to protect: `--format quiet` prints column 0
+// and nothing else so a script can pipe ids into the next command, and an
+// 8-character prefix piped back answers 404.
+//
+// So the assertion is on what the COMMAND renders, not on a helper: a helper
+// test would keep passing while the call site quietly stopped using it. The
+// short-id row is the guard the deleted helper carried — an id the server
+// returns shorter than the cut must render whole rather than panic the whole
+// list command.
+func TestCrewPeerConvsRunE_IDColumnPerFormat(t *testing.T) {
+	cases := []struct {
+		name    string
+		format  string
+		want    []string
+		notWant []string
+		why     string
+	}{
+		{
+			name:   "table shows the cut prefix",
+			format: "table",
+			want:   []string{"conv1234", "Viktor"},
+			// The ninth character pins the width: it is what tells a change of
+			// shortener from a change of length, which is the drift a second
+			// private shortener in this package would have introduced.
+			notWant: []string{"conv12345678abcdef", "conv12345"},
+			why:     "the id column is cut to exactly 8 so the QUESTION column stays readable",
+		},
+		{
+			name:   "quiet shows the whole id",
+			format: "quiet",
+			want:   []string{"conv12345678abcdef\n", "short\n"},
+			// Quiet is column 0 only: no other cell may reach stdout, or the
+			// pipe on the other end gets a table row instead of an id.
+			notWant: []string{"Viktor", "answered"},
+			why:     "a prefix is not an id — feeding one back to the API answers 404",
+		},
+		{
+			name:    "an id shorter than the cut survives whole",
+			format:  "table",
+			want:    []string{"short"},
+			notWant: []string{},
+			why:     "cutting past the end of the string is a crash in a list command, not a truncated cell",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := clitest.NewStubServer()
+			defer s.Close()
+			covSetupCLI(t, s)
+			covCrewsList(s)
+			s.OnGet("/api/v1/crews/ccrewa1234567890123456789/peer-conversations", clitest.JSONResponse(200, []map[string]any{
+				{
+					"id": "conv12345678abcdef", "from_name": "Viktor", "to_name": "Eva",
+					"question": "why?", "status": "answered", "escalated": false,
+					"created_at": "2026-06-02",
+				},
+				{
+					"id": "short", "from_name": "Eva", "to_name": "Viktor",
+					"question": "how?", "status": "pending", "escalated": false,
+					"created_at": "2026-06-03",
+				},
+			}))
+			origFormat := flagFormat
+			flagFormat = tc.format
+			t.Cleanup(func() { flagFormat = origFormat })
+
+			out, err := covCaptureStdoutCli7(t, func() error {
+				return crewPeerConvsCmd.RunE(crewPeerConvsCmd, []string{"alpha"})
+			})
+			if err != nil {
+				t.Fatalf("peer-conversations: %v", err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Errorf("output is missing %q — %s:\n%s", want, tc.why, out)
+				}
+			}
+			for _, unwanted := range tc.notWant {
+				if strings.Contains(out, unwanted) {
+					t.Errorf("output contains %q — %s:\n%s", unwanted, tc.why, out)
+				}
+			}
+		})
+	}
+}
+
 // ─── additional error paths ──────────────────────────────────────────────
 
 func TestCrewRelations_NoWorkspace(t *testing.T) {

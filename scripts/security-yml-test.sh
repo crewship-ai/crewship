@@ -44,42 +44,55 @@ FAILURES=0
 pass() { printf '  ok   %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; FAILURES=$((FAILURES + 1)); }
 
-# Print the body of the `scheduled-report` job — everything from its key to the
-# next job at the same indent. Extraction is scoped to this FIRST, so a marked
-# block that has been moved out of the job (into another job, or into a dead
-# comment island) is not found at all rather than being tested where it can no
-# longer run.
-scheduled_report_job() {
-  awk '
-    /^  scheduled-report:[[:space:]]*$/ { inside = 1; print; next }
+# Print the body of a named job — everything from its key to the next job at
+# the same indent. Extraction is scoped to the job FIRST, so a marked block
+# that has been moved out of it (into another job, or into a dead comment
+# island) is not found at all rather than being tested where it can no longer
+# run.
+job_body() {
+  awk -v job="$1" '
+    $0 ~ "^  " job ":[[:space:]]*$" { inside = 1; print; next }
     inside && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { inside = 0 }
     inside { print }
   ' "$WORKFLOW"
 }
 
-JOB_SRC="$(scheduled_report_job)"
+JOB_SRC="$(job_body scheduled-report)"
+VULN_JOB_SRC="$(job_body govulncheck)"
 
-# Print the lines between `# <name>:begin` and `# <name>:end` within the job
+# Called at top level ON PURPOSE. Folding this into a `$(job_body ...)` wrapper
+# puts the `exit 1` inside a command substitution, where it kills the subshell
+# and lets the script run on with an empty job body — reaching the marker check
+# below and reporting "markers gone" for a job that was merely renamed.
+require_job_found() {
+  if [ -z "$2" ]; then
+    echo "FATAL: could not find the '$1' job in $WORKFLOW" >&2
+    echo "       (renamed? then this test is covering nothing — fix the name here)" >&2
+    exit 1
+  fi
+}
+
+require_job_found scheduled-report "$JOB_SRC"
+require_job_found govulncheck "$VULN_JOB_SRC"
+
+# Print the lines between `# <name>:begin` and `# <name>:end` within a job
 # body, dedented out of the YAML block scalar. Empty if the markers are absent.
-extract_block() {
-  printf '%s\n' "$JOB_SRC" | awk -v name="$1" '
+extract_block_from() {
+  printf '%s\n' "$2" | awk -v name="$1" '
     $0 ~ "^[[:space:]]*# " name ":begin[[:space:]]*$" { inside = 1; next }
     $0 ~ "^[[:space:]]*# " name ":end[[:space:]]*$"   { inside = 0 }
     inside { sub(/^ {10}/, ""); print }
   '
 }
 
+extract_block() { extract_block_from "$1" "$JOB_SRC"; }
+
 # Count assignments to a shell variable in a block of text.
 count_assign() { printf '%s\n' "$2" | grep -cE "^[[:space:]]*$1=" || true; }
 
-if [ -z "$JOB_SRC" ]; then
-  echo "FATAL: could not find the 'scheduled-report' job in $WORKFLOW" >&2
-  echo "       (renamed? then this test is covering nothing — fix the name here)" >&2
-  exit 1
-fi
-
 GATE_SRC="$(extract_block gate)"
 LOOKUP_SRC="$(extract_block lookup)"
+ALLOWLIST_SRC="$(extract_block_from allowlist "$VULN_JOB_SRC")"
 
 if [ -z "$GATE_SRC" ]; then
   echo "FATAL: could not extract the 'gate' block from the scheduled-report job" >&2
@@ -88,6 +101,11 @@ if [ -z "$GATE_SRC" ]; then
 fi
 if [ -z "$LOOKUP_SRC" ]; then
   echo "FATAL: could not extract the 'lookup' block from the scheduled-report job" >&2
+  echo "       (markers gone, or the block was moved out of the job)" >&2
+  exit 1
+fi
+if [ -z "$ALLOWLIST_SRC" ]; then
+  echo "FATAL: could not extract the 'allowlist' block from the govulncheck job" >&2
   echo "       (markers gone, or the block was moved out of the job)" >&2
   exit 1
 fi
@@ -101,16 +119,36 @@ fi
 # So: every assignment to these variables inside the job must live inside the
 # marked span. A second one outside it means the workflow's real value is not
 # the value under test, and that is fatal, not a warning.
-for pair in "not_green:GATE" "results_clean:GATE" "existing:LOOKUP"; do
+for pair in \
+  "not_green:GATE:scheduled-report" \
+  "results_clean:GATE:scheduled-report" \
+  "existing:LOOKUP:scheduled-report" \
+  "accepted_pattern:ALLOWLIST:govulncheck" \
+  "all_vulns:ALLOWLIST:govulncheck" \
+  "unexpected:ALLOWLIST:govulncheck"; do
   var="${pair%%:*}"
-  case "${pair##*:}" in
-    GATE) marked="$GATE_SRC" ;;
-    *)    marked="$LOOKUP_SRC" ;;
+  rest="${pair#*:}"
+  job="${rest#*:}"
+  # Every block token is an explicit arm. A catch-all that fell through to one
+  # of the real blocks would make a mistyped token silently self-satisfying:
+  # count_assign returns 0 for a variable that does not appear in the block it
+  # was wrongly pointed at, 0 == 0 passes, and the guard reports green while
+  # covering nothing — the exact shape of the bypass this loop exists to catch.
+  case "${rest%%:*}" in
+    GATE)      marked="$GATE_SRC"      ; job_src="$JOB_SRC" ;;
+    LOOKUP)    marked="$LOOKUP_SRC"    ; job_src="$JOB_SRC" ;;
+    ALLOWLIST) marked="$ALLOWLIST_SRC" ; job_src="$VULN_JOB_SRC" ;;
+    *)
+      echo "FATAL: unknown block token '${rest%%:*}' for variable '$var'." >&2
+      echo "       Add an explicit arm — the catch-all is a hard error on" >&2
+      echo "       purpose, because a typo here guards nothing but looks green." >&2
+      exit 1
+      ;;
   esac
-  in_job="$(count_assign "$var" "$JOB_SRC")"
+  in_job="$(count_assign "$var" "$job_src")"
   in_marked="$(count_assign "$var" "$marked")"
   if [ "$in_job" -ne "$in_marked" ]; then
-    echo "FATAL: '$var' is assigned $in_job time(s) in the scheduled-report job" >&2
+    echo "FATAL: '$var' is assigned $in_job time(s) in the $job job" >&2
     echo "       but only $in_marked time(s) inside the tested markers." >&2
     echo "       An assignment outside the markers is not covered by this test," >&2
     echo "       and silently decides what production actually does." >&2
@@ -302,6 +340,173 @@ expect_lookup "null body -> no crash, not selected" "" \
   "[{\"number\":1008,\"title\":\"unrelated\",\"body\":null,\"author\":$BOT}]"
 
 expect_lookup "no open issues -> nothing selected" "" '[]'
+
+# ---------------------------------------------------------------------------
+# The govulncheck allowlist
+# ---------------------------------------------------------------------------
+# This block decides which govulncheck findings are allowed to keep the build
+# green. It is the mirror image of the gate above: there, the danger is closing
+# a tracking issue that should stay open; here, it is passing a build that
+# should go red.
+#
+# The allowlist is currently EMPTY, and the empty case is the one worth
+# pinning. These are characterization tests, not a regression test for a bug
+# that shipped: the gate's allowlist arm had no coverage at all, and "nothing
+# is accepted, so every finding is reported" is the behaviour the whole gate
+# now rests on.
+#
+# They deliberately do NOT discriminate between the explicit `if [ -z ... ]`
+# branch in the workflow and the one-liner it replaced. Under GNU grep — what
+# ubuntu-latest runs — `grep -vE "^()$"` keeps every line, so both forms agree
+# and no fixture can tell them apart. The branch exists because ugrep, which
+# the crewship-dev workstations resolve `grep` to, errors on the empty group
+# instead; `|| true` would turn that into an empty `unexpected` and pass the
+# build. What is asserted here is the behaviour, not the spelling.
+#
+# Runs the extracted block against a govulncheck log fixture. Sets ALLOW_RC and
+# ALLOW_OUT. Shell options mirror the step: `set +e`, nothing else.
+run_allowlist() {
+  local fixture="$1" src="${2:-$ALLOWLIST_SRC}" tmp
+  tmp="$(mktemp)"
+  printf '%s' "$fixture" > "$tmp"
+  ALLOW_OUT="$(govuln_log="$tmp" bash -c '
+    set +e
+    exec 3>&1 1>/dev/null
+    '"$src"'
+    printf "%s" "$unexpected" >&3
+  ')"
+  ALLOW_RC=$?
+  rm -f "$tmp"
+}
+
+# want_rc of 0 means the block ran to completion; the fixture then decides
+# whether `unexpected` is empty (gate passes) or not (gate fails).
+expect_allowlist() {
+  local label="$1" want_rc="$2" want_out="$3" fixture="$4" src="${5:-$ALLOWLIST_SRC}"
+  run_allowlist "$fixture" "$src"
+  if [ "$ALLOW_RC" != "$want_rc" ]; then
+    fail "$label (want exit $want_rc, got $ALLOW_RC)"
+    return
+  fi
+  if [ "$ALLOW_OUT" = "$want_out" ]; then
+    pass "$label"
+  else
+    fail "$label (want unexpected='${want_out:-<none>}', got '${ALLOW_OUT:-<none>}')"
+  fi
+}
+
+echo
+echo "govulncheck allowlist (non-empty 'unexpected' fails the build):"
+
+# Both halves of the behaviour are tested against a DERIVED copy of the block —
+# one with the allowlist forced empty, one with it forced to a known ID —
+# rather than against whatever is committed today.
+#
+# Binding the fixtures to the committed value would make this suite the thing
+# that blocks the workflow's own documented escape hatch: the job header tells a
+# maintainer facing an unfixable advisory to add an ID with a dated
+# justification, and the moment they did, hard-coded "empty allowlist"
+# expectations would start asserting the wrong thing and the `shell` job would
+# go red on a legitimate change. A test that punishes the documented procedure
+# is worse than no test.
+#
+# What stays pinned to the real file is the assignment's SHAPE: if
+# `accepted_pattern=` stops existing in the marked block, both derivations are
+# meaningless and that is fatal below.
+seed_allowlist() {
+  printf '%s\n' "$ALLOWLIST_SRC" | sed "s/^accepted_pattern=.*/accepted_pattern='$1'/"
+}
+
+if ! printf '%s\n' "$ALLOWLIST_SRC" | grep -qE "^accepted_pattern="; then
+  echo "FATAL: no 'accepted_pattern=' assignment in the marked allowlist block." >&2
+  echo "       The derivations below would test nothing — fix this test to" >&2
+  echo "       match the block's new shape." >&2
+  exit 1
+fi
+
+ALLOWLIST_EMPTY="$(seed_allowlist '')"
+ALLOWLIST_SEEDED="$(seed_allowlist 'GO-2026-6218')"
+
+# A govulncheck log in the shape the real tool emits.
+VULN_LOG='=== Symbol Results ===
+
+Vulnerability #1: GO-2026-6218
+    Avoid quadratic complexity in resolvePath in net/url
+  More info: https://pkg.go.dev/vuln/GO-2026-6218
+  Standard library
+    Found in: net/url@go1.26.5
+    Fixed in: net/url@go1.26.6
+
+Your code is affected by 1 vulnerability from the Go standard library.
+'
+
+# The resting state, and the whole point of emptying the list: with nothing
+# accepted, a reported vulnerability reaches `unexpected` and reddens the gate.
+expect_allowlist "empty allowlist + one finding -> reported, not swallowed" \
+  0 'GO-2026-6218' "$VULN_LOG" "$ALLOWLIST_EMPTY"
+
+# The eight advisories this branch actually cleared. If the empty pattern were
+# matching every line, this fixture would come back empty and the build would
+# pass with all eight live.
+expect_allowlist "empty allowlist + the eight pre-1.26.6 findings -> all reported" \
+  0 $'GO-2026-5026\nGO-2026-5972\nGO-2026-6088\nGO-2026-6089\nGO-2026-6090\nGO-2026-6091\nGO-2026-6218\nGO-2026-6222' \
+  'Vulnerability #1: GO-2026-6222
+Vulnerability #2: GO-2026-6218
+Vulnerability #3: GO-2026-6091
+Vulnerability #4: GO-2026-6090
+Vulnerability #5: GO-2026-6089
+Vulnerability #6: GO-2026-6088
+Vulnerability #7: GO-2026-5972
+Vulnerability #8: GO-2026-5026
+' "$ALLOWLIST_EMPTY"
+
+# The same ID appears on the "Vulnerability #N" line and again in the More-info
+# URL. `sort -u` must collapse them, or the error output double-reports.
+expect_allowlist "an ID repeated in the log -> deduplicated" \
+  0 'GO-2026-6218' \
+  'Vulnerability #1: GO-2026-6218
+  More info: https://pkg.go.dev/vuln/GO-2026-6218
+' "$ALLOWLIST_EMPTY"
+
+# Defensive branch: exit 3 with nothing parseable means govulncheck changed its
+# output format. Allowlisting against IDs we failed to read is not safe, so the
+# step must abort rather than fall through to an empty `unexpected`.
+expect_allowlist "exit 3 but no parseable IDs -> hard fail, no silent pass" \
+  1 '' 'govulncheck: some unrecognised output format
+' "$ALLOWLIST_EMPTY"
+
+# A malformed ID must not be silently accepted by being unparseable — the
+# regex requires GO-YYYY-N+, so a truncated one reads as "nothing parseable"
+# and takes the defensive branch above rather than passing.
+expect_allowlist "malformed ID only -> hard fail" \
+  1 '' 'Vulnerability #1: GO-26-1
+' "$ALLOWLIST_EMPTY"
+
+# The else-branch has to work the day someone legitimately adds an ID — today
+# it is unreachable from the file as committed, and it is the branch a
+# maintainer will lean on under time pressure.
+expect_allowlist "seeded allowlist filters its own ID" \
+  0 '' "$VULN_LOG" "$ALLOWLIST_SEEDED"
+
+expect_allowlist "seeded allowlist still reports an ID it does not cover" \
+  0 'GO-2026-9999' \
+  'Vulnerability #1: GO-2026-6218
+Vulnerability #2: GO-2026-9999
+' "$ALLOWLIST_SEEDED"
+
+# Substring matching would let GO-2026-621 accept GO-2026-6218; the anchors
+# are what stop a short entry from covering a longer, unrelated ID.
+expect_allowlist "allowlist entry does not match by prefix" \
+  0 'GO-2026-62180' \
+  'Vulnerability #1: GO-2026-62180
+' "$ALLOWLIST_SEEDED"
+
+# Whatever is committed, a finding outside it must still be reported. This is
+# the one case that reads the REAL block, so the suite keeps saying something
+# about production rather than only about its own two derivations.
+expect_allowlist "as committed: an ID outside the allowlist is reported" \
+  0 'GO-2026-9999' 'Vulnerability #1: GO-2026-9999
+'
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

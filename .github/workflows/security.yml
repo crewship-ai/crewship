@@ -41,7 +41,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.26.5"
+  GO_VERSION: "1.26.6"
 
 jobs:
   # ── Router: which scanner inputs can this PR have changed? ──
@@ -122,20 +122,32 @@ jobs:
 
   # ── Go vulnerability scan: govulncheck ──
   #
-  # Known accepted vulnerabilities (as of 2026-06-26):
-  #   - GO-2026-4887 (docker/docker AuthZ plugin bypass) — no upstream fix,
-  #     not reachable in Crewship's usage (we don't use AuthZ plugins)
-  #   - GO-2026-4883 (docker/docker plugin privilege off-by-one) — no upstream
-  #     fix, not reachable in Crewship's usage
-  #   - GO-2026-5746 / GO-2026-5668 / GO-2026-5617 (docker/docker, v28.5.2) — a
-  #     June-2026 advisory wave with no upstream fix yet (Fixed in: N/A).
-  #     Reachable via the container provider (we run Docker for crew runtimes);
-  #     accepted pending an upstream release. Repo-wide, not tied to any change.
-  #   All documented in THIRD-PARTY-NOTICES.md.
+  # Known accepted vulnerabilities (as of 2026-08-18): NONE.
   #
-  # We wrap govulncheck in a script that accepts these specific CVE IDs and
-  # fails ONLY on new/unknown vulnerabilities. This way the check stays GREEN
-  # in the PR UI while still alerting on any new vulns that appear.
+  # "None" is about THIS allowlist, which is not the same set as
+  # THIRD-PARTY-NOTICES.md §Known accepted vulnerabilities. That section still
+  # documents GO-2026-5932 (x/crypto/openpgp, no upstream fix, never imported).
+  # It needs no entry here because govulncheck reports it as informational —
+  # "modules you require, but your code doesn't appear to call" — which is a
+  # COUNT with no GO-id in the default output, so the `grep -oE` below never
+  # sees it and it cannot reach `unexpected`. Verified against a real exit-3
+  # run: the eight ids parsed did not include it. An id belongs here only once
+  # it is reachable enough for govulncheck to name it.
+  #
+  # The five docker/docker advisories this list used to carry (GO-2026-4887,
+  # -4883, -5746, -5668, -5617) are gone with the module: the container
+  # provider moved to github.com/moby/moby, and `go mod why -m
+  # github.com/docker/docker` now reports it out of the graph entirely. An
+  # allowlist entry for a module we no longer require is not harmless — it
+  # would silently re-accept those IDs if docker/docker ever came back
+  # transitively, so they are removed rather than left to rot.
+  #
+  # We wrap govulncheck in a script that accepts specific CVE IDs and fails
+  # ONLY on new/unknown vulnerabilities. With the list empty, every reported
+  # vulnerability fails the gate — which is the intended resting state. Adding
+  # an entry silences that ID repo-wide and indefinitely, so do it only with a
+  # dated justification in THIRD-PARTY-NOTICES.md §Known accepted
+  # vulnerabilities.
   govulncheck:
     name: Go Vuln Scan
     runs-on: ubuntu-latest
@@ -160,9 +172,12 @@ jobs:
       - name: Run govulncheck (known-accepted CVEs allowlisted)
         run: |
           set +e
-          govulncheck ./... > /tmp/govuln.log 2>&1
+          # Indirected so scripts/security-yml-test.sh can point the extracted
+          # allowlist block at a fixture instead of a real scan.
+          govuln_log="${govuln_log:-/tmp/govuln.log}"
+          govulncheck ./... > "$govuln_log" 2>&1
           exit_code=$?
-          cat /tmp/govuln.log
+          cat "$govuln_log"
 
           # Exit 0 = clean, pass immediately.
           if [ $exit_code -eq 0 ]; then
@@ -179,8 +194,15 @@ jobs:
 
           # exit_code == 3: vulnerabilities were reported. Extract the GO IDs
           # and verify every one of them is on the known-accepted list.
-          accepted_pattern='GO-2026-4887|GO-2026-4883|GO-2026-5746|GO-2026-5668|GO-2026-5617'
-          all_vulns=$(grep -oE 'GO-[0-9]{4}-[0-9]+' /tmp/govuln.log | sort -u)
+          #
+          # Covered by scripts/security-yml-test.sh, which extracts everything
+          # between these markers VERBATIM and runs it against fixtures. Keep
+          # every assignment to accepted_pattern / all_vulns / unexpected inside
+          # them — one outside decides production while the suite reports green.
+          # allowlist:begin
+          # Empty = nothing is accepted; see the job header before adding an ID.
+          accepted_pattern=''
+          all_vulns=$(grep -oE 'GO-[0-9]{4}-[0-9]+' "$govuln_log" | sort -u)
           echo ""
           echo "=== Detected vulnerability IDs ==="
           echo "$all_vulns"
@@ -194,7 +216,22 @@ jobs:
             exit 1
           fi
 
-          unexpected=$(echo "$all_vulns" | grep -vE "^($accepted_pattern)$" || true)
+          # An empty allowlist means nothing is accepted. Branch on that
+          # explicitly rather than interpolating nothing and asking grep to
+          # match "^()$", whose meaning depends on which grep is on PATH: GNU
+          # grep (the ubuntu-latest runner) reads the empty group as matching
+          # only the empty string, so -v keeps every ID and the result is right
+          # by luck; ugrep (what the crewship-dev workstations resolve `grep`
+          # to) rejects an empty subexpression outright, and the `|| true`
+          # below would swallow that error into an empty `unexpected` — a gate
+          # that passes every vulnerability. Neither reading should be load-
+          # bearing for whether this build goes red.
+          if [ -z "$accepted_pattern" ]; then
+            unexpected="$all_vulns"
+          else
+            unexpected=$(echo "$all_vulns" | grep -vE "^($accepted_pattern)$" || true)
+          fi
+          # allowlist:end
           if [ -n "$unexpected" ]; then
             echo "::error::New unexpected vulnerability detected — not in accepted list:"
             echo "$unexpected"

@@ -92,6 +92,26 @@ func (f *Formatter) Table(headers []string, rows [][]string) {
 	fmt.Fprintln(f.Writer, t.Render())
 }
 
+// ShortID picks which rendering of an identifier belongs in a list row: the
+// shortened one for a table, the whole one under "quiet".
+//
+// Quiet prints rows[i][0] and nothing else, and it exists so a script can pipe
+// ids into the next command — a 16-character prefix is not an id, and feeding
+// one back answers 404. Shortening is a column-width decision and quiet has no
+// columns. `run list` first fixed this at its own call site, which is a fix the
+// next list command reintroduces by default; deciding it here, next to the
+// quiet branch that caused it, is what makes that impossible.
+//
+// Both renderings are arguments rather than a width because HOW an id is cut is
+// per-column — a bare prefix, a prefix plus an ellipsis, a middle elision — and
+// only the choice to cut at all is the one quiet has to be able to veto.
+func (f *Formatter) ShortID(full, short string) string {
+	if f.Format == "quiet" {
+		return full
+	}
+	return short
+}
+
 // Detail prints key-value pairs for a single entity.
 func (f *Formatter) Detail(pairs [][]string) {
 	w := tabwriter.NewWriter(f.Writer, 0, 0, 2, ' ', 0)

@@ -22,14 +22,17 @@ import "strings"
 // messaging) are sidecar HTTP endpoints the system prompt advertises, not CLI
 // tools. The escalation ladder is: read-only → +write/exec → +network/notebooks.
 //
-// ToolSearch is included in EVERY profile on purpose. Claude Code defers MCP
-// tools by default (tool search enabled) and the model discovers them via the
-// built-in ToolSearch tool; drop ToolSearch and the agent can no longer see or
-// call ANY MCP tool — crewship-memory, Composio/YouTube, everything. Verified:
-// with ToolSearch in --tools, MCP tools load on demand while a builtin NOT in
-// the allowlist (e.g. TaskCreate) stays NOT_FOUND even via ToolSearch — so the
-// allowlist still removes the dead harness tools. Keeping deferral also scales
-// to large MCP catalogs (e.g. GitHub's ~846 tools) without bloating context.
+// ToolSearch is included in EVERY profile so that large MCP catalogues (e.g.
+// GitHub's ~846 tools) stay reachable if the CLI decides to defer them rather
+// than list them all in context.
+//
+// It is NOT the lifeline the original comment here claimed — that dropping it
+// left the agent unable to see any MCP tool at all. Measured on 2.1.226 with a
+// synthetic 80-tool MCP server: all 80 appear in the session's tool list with
+// no ToolSearch present, so MCP tools are not deferred behind it at that size.
+// The allowlist's real job is the other direction — a builtin NOT listed here
+// (e.g. TaskCreate) stays unavailable, and cannot be reached via ToolSearch
+// either.
 //
 // An unknown or empty profile falls back to CODING, matching the
 // `tool_profile TEXT NOT NULL DEFAULT 'CODING'` column default.
