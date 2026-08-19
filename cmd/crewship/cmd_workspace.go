@@ -725,7 +725,7 @@ var workspaceInviteListCmd = &cobra.Command{
 		headers := []string{"ID", "EMAIL", "ROLE", "EXPIRES", "CREATED"}
 		var rows [][]string
 		for _, inv := range invitations {
-			rows = append(rows, []string{truncateID(inv.ID, 12), inv.Email, inv.Role, inv.ExpiresAt, inv.CreatedAt})
+			rows = append(rows, []string{f.ShortID(inv.ID, truncateID(inv.ID, 12)), inv.Email, inv.Role, inv.ExpiresAt, inv.CreatedAt})
 		}
 		return f.Auto(invitations, headers, rows)
 	},

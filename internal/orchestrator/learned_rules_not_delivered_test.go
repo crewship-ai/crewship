@@ -69,8 +69,8 @@ import (
 //	(orchestrator_run.go:1113-1115, buildExecCommand at :1335).
 //	/crew/shared/.memory/... is on a different mount entirely, so the
 //	CLAUDE.md / AGENTS.md working-directory conventions cannot see it
-//	(and adapter_claude.go:72 runs Claude Code with --bare, which
-//	disables CLAUDE.md auto-discovery outright).
+//	(and adapter_claude.go runs Claude Code with --setting-sources "",
+//	which disables CLAUDE.md auto-discovery outright).
 //
 // A fix has to close GAP 1 or GAP 2 deliberately — either read
 // learned-*.md in buildCrewMemoryBlock/buildPinsBlock (a new prompt

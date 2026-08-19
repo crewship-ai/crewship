@@ -79,7 +79,7 @@ var exposeListCmd = &cobra.Command{
 		for _, it := range items {
 			idStr := it.ID
 			if len(idStr) > 14 {
-				idStr = idStr[:14]
+				idStr = f.ShortID(it.ID, idStr[:14])
 			}
 			desc := it.Description
 			if len(desc) > 40 {

@@ -231,6 +231,32 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **Go toolchain bumped 1.26.5 → 1.26.6, clearing eight advisories (#1959).**
+  Seven were in the standard library and reachable from real call paths —
+  `crypto/tls` post-handshake message flooding (GO-2026-6090), `net/http`
+  missing `ReadHeaderTimeout` on the unencrypted HTTP/2 check (GO-2026-6089)
+  and its IDNA Punycode label handling (GO-2026-5026), quadratic
+  `net/url.resolvePath` (GO-2026-6218), unbounded recursion in `encoding/xml`
+  (GO-2026-6088) and `encoding/asn1` (GO-2026-5972), and JavaScript regexp
+  context tracking in `html/template` (GO-2026-6091). The eighth,
+  GO-2026-6222, was excessive memory allocation decoding VP8L in
+  `golang.org/x/image`, reachable from avatar upload, and is fixed by that
+  module's 0.44.0 → 0.45.0 bump.
+
+  Dependabot proposed the toolchain move in the `Dockerfile` alone; the
+  version is pinned in **thirteen** places (`go.mod`, the `Dockerfile` and
+  eleven workflow pins), and only moving them together changes what the
+  released binary and CI are actually built with. `govulncheck ./...` now
+  reports zero.
+
+  The govulncheck allowlist is emptied in the same change. Its five entries
+  were all `docker/docker` advisories, and that module left the graph when the
+  container provider moved to `github.com/moby/moby` — a dead entry would have
+  silently re-accepted those IDs had it ever returned transitively. The
+  allowlist arm of the gate now has unit coverage in
+  `scripts/security-yml-test.sh`, extracted verbatim from the workflow the way
+  the scheduled-report gate already was.
+
 - **Capability tokens are hashed at rest (#1888).** `port_exposures.token` and
   `pipeline_webhooks.token` were stored in the clear and looked up by equality.
   Neither `/exposed/{token}/…` nor `POST /api/v1/webhooks/{token}` has any

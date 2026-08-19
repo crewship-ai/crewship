@@ -64,7 +64,7 @@ var projectMilestoneListCmd = &cobra.Command{
 				target = *m.TargetDate
 			}
 			rows = append(rows, []string{
-				truncateID(m.ID, 12),
+				f.ShortID(m.ID, truncateID(m.ID, 12)),
 				m.Name,
 				m.Status,
 				target,
