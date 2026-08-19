@@ -162,7 +162,7 @@ runner, a quarterly compliance script).`,
 			if len(displayID) > 12 {
 				displayID = displayID[:12]
 			}
-			rows = append(rows, []string{displayID, tok.Name, created, lastUsed, status})
+			rows = append(rows, []string{f.ShortID(tok.ID, displayID), tok.Name, created, lastUsed, status})
 		}
 		if err := f.Auto(result.Data, headers, rows); err != nil {
 			return err

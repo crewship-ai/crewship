@@ -358,7 +358,7 @@ func TestFinishAssignment_CompletedWithMissionComment(t *testing.T) {
 	}
 
 	h.finishAssignment(context.Background(), "asg-fin-1", "", chatID, "asg-worker", wsID,
-		"the work result", "")
+		"the work result", "", nil)
 
 	var status, result string
 	if err := h.db.QueryRow(
@@ -404,7 +404,7 @@ func TestFinishAssignment_FailedWritesIssueComment(t *testing.T) {
 	}
 
 	h.finishAssignment(context.Background(), "asg-fin-2", "", chatID, "asg-worker", wsID,
-		"", "container exploded: exec /bin/sh: no such file or directory")
+		"", "container exploded: exec /bin/sh: no such file or directory", nil)
 
 	var status, errMsg string
 	if err := h.db.QueryRow(
@@ -575,7 +575,7 @@ func TestFinishAssignment_TerminalAppearsInActivityFeed(t *testing.T) {
 
 		// runID="" on purpose — proves the terminal feed row is NOT gated on
 		// having a run trace (early-failure + recovery both pass none).
-		if ok := h.finishAssignment(context.Background(), asgID, "", chatID, "asg-worker", wsID, result, errMsg); !ok {
+		if ok := h.finishAssignment(context.Background(), asgID, "", chatID, "asg-worker", wsID, result, errMsg, nil); !ok {
 			t.Fatal("finishAssignment should have won the terminal CAS")
 		}
 		if err := jw.Flush(context.Background()); err != nil {

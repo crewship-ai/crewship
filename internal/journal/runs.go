@@ -68,8 +68,90 @@ type RunAggregated struct {
 	// Model is the model the run ACTUALLY resolved to (session-init ground
 	// truth), recorded on the terminal run.* entry's metadata by the run
 	// driver. Empty for runs predating the field or non-Claude adapters.
-	Model     string
-	CreatedAt time.Time // == StartedAt for runs (we don't track a separate creation moment)
+	Model string
+	// Session provenance the run driver merges into the terminal entry's
+	// metadata from the CLI's session-init event: which binary answered
+	// (the adapter is pinned while containers install latest), which
+	// credential path resolved, whether the permission bypass took, and the
+	// CLI's own correlation key for the transcript. All empty for runs
+	// predating the fields and for adapters that emit no session-init.
+	CLIVersion     string
+	APIKeySource   string
+	PermissionMode string
+	SessionID      string
+	// MCPServerErrors are the --mcp-config entries the CLI refused to load at
+	// startup. Non-empty means the agent ran with less capability than it was
+	// configured for — exit code 0 does not contradict it, which is exactly
+	// why the loss needs its own field rather than a line in a log.
+	MCPServerErrors []MCPServerError
+	// MCPServerErrorCount is how many servers the CLI said it skipped, which is
+	// not always len(MCPServerErrors): the producer drops entries whose fields
+	// it could not read, so the list is what this build understood and the count
+	// is what happened. Zero for runs predating the field — a reader compares
+	// the two and only reports a gap when the count is the larger.
+	MCPServerErrorCount int
+	// MCPServerErrorsTruncated reports that the stored list was capped, so the
+	// servers it names are not all of them.
+	MCPServerErrorsTruncated bool
+	// PermissionDenials names the tools the CLI refused to let the agent use.
+	// Tool NAMES only: the producer drops the denied input before storing it,
+	// because that input is arbitrary agent-generated text and this record is
+	// hash-chained. "Bash was denied" is the diagnosis; the command line is
+	// not ours to keep forever.
+	//
+	// Empty is the normal case and means nothing was denied — which matters,
+	// because a run blocked by permissions otherwise reads as a run that CHOSE
+	// not to act, sending an operator after a prompt problem.
+	//
+	// One entry per denied TOOL, not per refusal: the producer collapses an
+	// agent's forty retries of the same blocked Bash into one entry carrying
+	// the count. A single "unrecognized_shape" entry means the CLI reported a
+	// refusal in a shape the producer could not read — the run WAS blocked and
+	// the tool is not knowable.
+	PermissionDenials []DeniedTool
+	// PermissionDenialsTruncated reports that the stored denial list was capped,
+	// so the tools it names are not all of them.
+	PermissionDenialsTruncated bool
+	CreatedAt                  time.Time // == StartedAt for runs (we don't track a separate creation moment)
+}
+
+// DeniedTool is one tool the CLI refused to let the agent use, with how many
+// times it refused it.
+//
+// The count is the reason this is a struct and not a name. The producer
+// deliberately collapses repeats and attaches the tally, because one refusal is
+// an agent that tried something once and forty is an agent hammering a wall it
+// cannot see — different diagnoses, different fixes. It was a []string here, so
+// the tally died one hop after it was created.
+//
+// Zero means the record predates the count, NOT "denied zero times": a run
+// record only carries a tool it was denied at least once, and inventing a 1
+// would be a claim the row does not make.
+type DeniedTool struct {
+	// ToolName is the tool the CLI named — or, when it named none, the CATEGORY
+	// the producer recorded instead (its unrecognized_shape sentinel). The
+	// fallback is applied at decode so every renderer shows the alarm; a
+	// sentinel nobody can display keeps the alarm and destroys the ability to
+	// act on it.
+	ToolName string `json:"tool_name"`
+	Count    int    `json:"count,omitempty"`
+}
+
+// MCPServerError is one MCP server the CLI skipped at startup, as reported on
+// its session-init event. Field names match the CLI's own, and this struct is
+// what the API serialises, so renaming a field here changes the wire.
+type MCPServerError struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Message is normally EMPTY, and that is not a bug. The producer
+	// (orchestrator.MergeSessionInitMeta) projects each entry down to name +
+	// category before it reaches a run record, because the message is
+	// CLI-supplied free text describing a config file and the run's terminal
+	// journal entry is hash-chained — what lands there cannot be redacted.
+	// The field stays so a run recorded before that projection still renders,
+	// and so a consumer that has the full text from elsewhere can fill it.
+	// The live chat card is where an operator reads the message.
+	Message string `json:"message,omitempty"`
 }
 
 // RunsQuery filters ListRuns. WorkspaceID is required; rest are
@@ -421,10 +503,140 @@ func scanRunAggregated(rows *sql.Rows, workspaceID string) (RunAggregated, error
 				if m, ok := v["model"].(string); ok && m != "" {
 					r.Model = m
 				}
+				r.applySessionProvenance(v)
 			}
 		}
 	}
 	return r, nil
+}
+
+// applySessionProvenance reads the session-init provenance out of a terminal
+// entry's metadata (written by orchestrator.MergeSessionInitMeta).
+//
+// Terminal-only, unlike model, which also honours run.started as a fallback:
+// these fields describe how the CLI was invoked and only the run driver can
+// know them, while run.started's metadata is caller-supplied on API-triggered
+// runs. Reading them there too would let a caller stamp its own answer to
+// "which key served this run".
+func (r *RunAggregated) applySessionProvenance(md map[string]any) {
+	for _, f := range []struct {
+		key string
+		dst *string
+	}{
+		{"cli_version", &r.CLIVersion},
+		{"api_key_source", &r.APIKeySource},
+		{"permission_mode", &r.PermissionMode},
+		{"session_id", &r.SessionID},
+	} {
+		if v, ok := md[f.key].(string); ok && v != "" {
+			*f.dst = v
+		}
+	}
+	if v, ok := md["mcp_server_errors"]; ok {
+		r.MCPServerErrors = decodeMCPServerErrors(v)
+	}
+	if v, ok := md["permission_denials"]; ok {
+		r.PermissionDenials = decodeDeniedTools(v)
+	}
+	// The counts and the truncation markers the producer writes alongside those
+	// two lists. Both lists are lossy by design — one drops entries it cannot
+	// project, both are capped — and these are the only fields that say so.
+	// Reading them nowhere is what made the alarms unreachable.
+	r.MCPServerErrorCount = provenanceInt(md["mcp_server_error_count"])
+	r.MCPServerErrorsTruncated, _ = md["mcp_server_errors_truncated"].(bool)
+	r.PermissionDenialsTruncated, _ = md["permission_denials_truncated"].(bool)
+}
+
+// provenanceInt reads a count that may have been stored in-process (int) or read
+// back through JSON (float64). Anything else yields 0: a count we cannot read is
+// a count we do not report, and a coerced one would be a number an operator
+// trusts.
+func provenanceInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil {
+			return 0
+		}
+		return int(i)
+	}
+	return 0
+}
+
+// decodeDeniedTools pulls the denied tools out of the projected denial list,
+// tolerating both the in-process []map form and the raw JSON a DB read yields.
+// A malformed value degrades to no denials rather than a partial list: this
+// drives an operator's reading of why a run did nothing, and half an answer is
+// worse than none.
+//
+// The count is carried through. The producer attaches it deliberately so that
+// one refusal reads differently from forty; a decoder that kept only the name
+// threw that away at the first hop and no surface downstream could get it back.
+// Absent on rows written before the producer attached it, and 0 there means
+// "not recorded" rather than a tally.
+//
+// Type is read as a fallback for the name because the producer records a
+// CATEGORY there, with no tool_name, when the CLI reported a refusal in a shape
+// it could not read (orchestrator's unrecognized_shape sentinel) — it will not
+// invent a tool name, and reading tool_name only would drop that entry and put
+// the run back to reading as one that CHOSE not to act, which is the reason the
+// sentinel is written at all. The same fallback carries any future entry the CLI
+// describes by category rather than by name.
+func decodeDeniedTools(v any) []DeniedTool {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var entries []struct {
+		ToolName string `json:"tool_name"`
+		Type     string `json:"type"`
+		Count    int    `json:"count"`
+	}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	out := make([]DeniedTool, 0, len(entries))
+	for _, e := range entries {
+		name := e.ToolName
+		if name == "" {
+			name = e.Type
+		}
+		if name == "" {
+			continue
+		}
+		out = append(out, DeniedTool{ToolName: name, Count: e.Count})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// decodeMCPServerErrors types the array the adapter deliberately passed
+// through unparsed. Re-encoding and decoding beats asserting element by
+// element: the value arrives as []any after a DB round-trip but as a
+// json.RawMessage from an in-process caller, and one path should not read
+// differently from the other.
+//
+// A value that does not fit the shape yields nil. The field's contract is
+// "these servers were skipped" — a half-decoded entry would misreport which,
+// and that is worse than reporting none.
+func decodeMCPServerErrors(v any) []MCPServerError {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var out []MCPServerError
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // countRuns mirrors the ListRuns CTE but selects COUNT(*). Kept as a

@@ -105,7 +105,7 @@ session-cookie expiry (30 days). Pass 0 to disable the check.`,
 			if ip == "" {
 				ip = "-"
 			}
-			rows = append(rows, []string{truncateString(s.ID, 16), status, created, lastUsed, ip, ua})
+			rows = append(rows, []string{f.ShortID(s.ID, truncateString(s.ID, 16)), status, created, lastUsed, ip, ua})
 		}
 		if err := f.Auto(sessions, headers, rows); err != nil {
 			return err
