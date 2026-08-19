@@ -22,6 +22,7 @@ import (
 	"database/sql"
 	"math"
 	"net/http"
+	"sort"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -145,6 +146,16 @@ func (h *CrewHandler) Containers(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, entry)
 	}
+	// Docker returns containers newest-first, which reorders the table on
+	// every poll as sidecars are recycled. Fixed order instead: the crew's own
+	// runtime first — it is what the reader came for — then sidecars by name.
+	sort.SliceStable(out, func(i, j int) bool {
+		ci, cj := out[i].Kind == provider.CrewContainerKindCrew, out[j].Kind == provider.CrewContainerKindCrew
+		if ci != cj {
+			return ci
+		}
+		return out[i].Name < out[j].Name
+	})
 	writeJSON(w, http.StatusOK, crewContainersResponse{Containers: out})
 }
 

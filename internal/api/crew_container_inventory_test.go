@@ -115,9 +115,12 @@ func TestCrewContainers_RuntimeAndSidecars(t *testing.T) {
 		}
 	}
 
+	// Deliberately runtime-LAST, the order docker's newest-first listing can
+	// produce: the response must still put the crew's own container first.
 	lister := newFakeCrewContainerLister([]provider.CrewContainerInfo{
-		{ID: "team-cid", Name: "crewship-team-acct-crew-ctr", Image: "crewship/agent:latest", Kind: provider.CrewContainerKindCrew, State: "running"},
+		{ID: "redis-cid", Name: "crewship-svc-acct-crew-ctr-redis", Image: "redis:7", Kind: provider.CrewContainerKindSidecar, State: "stopped"},
 		{ID: "pg-cid", Name: "crewship-svc-acct-crew-ctr-postgres", Image: "postgres:16", Kind: provider.CrewContainerKindSidecar, State: "stopped"},
+		{ID: "team-cid", Name: "crewship-team-acct-crew-ctr", Image: "crewship/agent:latest", Kind: provider.CrewContainerKindCrew, State: "running"},
 	}, nil)
 	lister.stats["team-cid"] = &provider.ContainerMetrics{CPUPercent: 3.4666, MemoryUsed: 412 * 1024 * 1024}
 
@@ -133,13 +136,20 @@ func TestCrewContainers_RuntimeAndSidecars(t *testing.T) {
 	}
 
 	out := decodeContainers(t, w)
-	if len(out.Containers) != 2 {
-		t.Fatalf("expected 2 containers, got %d: %+v", len(out.Containers), out.Containers)
+	if len(out.Containers) != 3 {
+		t.Fatalf("expected 3 containers, got %d: %+v", len(out.Containers), out.Containers)
 	}
 
 	runtime := out.Containers[0]
 	if runtime.Kind != provider.CrewContainerKindCrew {
-		t.Fatalf("first row kind = %q, want %q", runtime.Kind, provider.CrewContainerKindCrew)
+		t.Fatalf("first row kind = %q, want %q — the crew's own container leads, "+
+			"whatever order the daemon listed in", runtime.Kind, provider.CrewContainerKindCrew)
+	}
+	// Sidecars follow, by name, so the table does not reshuffle on every poll.
+	if out.Containers[1].Name != "crewship-svc-acct-crew-ctr-postgres" ||
+		out.Containers[2].Name != "crewship-svc-acct-crew-ctr-redis" {
+		t.Errorf("sidecars are not name-ordered: %q then %q",
+			out.Containers[1].Name, out.Containers[2].Name)
 	}
 	if runtime.Name != "crewship-team-acct-crew-ctr" || runtime.Image != "crewship/agent:latest" {
 		t.Errorf("runtime row = %+v", runtime)
