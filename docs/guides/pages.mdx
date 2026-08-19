@@ -32,7 +32,7 @@ Two layers, two formats, both validated:
   who may produce their data.
 - **Layer 2 — the panel payload.** Machine-produced JSON, one push per
   update, validated against the panel's declared schema. See [`crewship page
-  set`](/cli/page#crewship-page-set-slug-panel) for how a producer pushes it.
+  set`](/cli/page#crewship-page-set) for how a producer pushes it.
 
 ```yaml
 apiVersion: crewship/v1
@@ -263,7 +263,14 @@ drawn as one, with the reason:
 | more than 8 tabs on a page | past that the bar cannot be scanned, and the page is a site |
 
 `tab: ""` is treated as "no tab", the same way an empty `title:` or `icon:` is —
-omitting the key and declaring it empty mean the same thing. Names are trimmed
+omitting the key and declaring it empty mean the same thing.
+
+**`tab: "   "` is not the same as `tab: ""`**, which is why the table above
+refuses one and this paragraph accepts the other. An empty string says "this
+panel has no tab". A string of spaces says "this panel has a tab" and then names
+it nothing — the shape a broken template expression produces — so it is refused
+rather than quietly read as the first. Same distinction the payload layer draws
+between a `null` and a measured `0`. Names are trimmed
 but never case-folded: the bar draws the word you wrote.
 
 ## Where a producer pushes from
@@ -618,7 +625,7 @@ actions:
 ```
 
 Dispatch one with
-[`crewship page action`](/cli/page#crewship-page-action-slug-panel-action-id),
+[`crewship page action`](/cli/page#crewship-page-action),
 or from the panel itself.
 
 ### The button posts an id, not a routine
@@ -782,7 +789,7 @@ sensitive, move it to its own page.
 
 Being able to *see* a panel does not mean you can *write* it. Only the
 declared producer for a panel may push its payload — see
-[`crewship page set`](/cli/page#crewship-page-set-slug-panel).
+[`crewship page set`](/cli/page#crewship-page-set).
 
 ### Only a human issues a grant
 
@@ -1004,6 +1011,26 @@ already strip provenance for a smaller version of the same reason.
   enables the panel on the server side and the frame is still blocked in the
   browser.
 </Note>
+
+## Seeing one without building one
+
+`crewship seed` creates a page called **Přehled provozu** with five panels — one
+per schema — and pushes a payload into each, so a fresh workspace opens on a
+page that shows something rather than on five panels reading "never produced".
+
+Its panels are owned by different seeded crews on purpose. Log in as a member of
+only one of them and the rest arrive as sealed placeholders, which is the
+per-panel permission model doing its job rather than a rendering fault.
+
+The definition is `cmd/crewship/seeddata/builtin/pages.yaml`, and it is a
+readable example of the authoring format: five schemas, a sparse series axis, an
+em-dash cell, a `delta_good`, and the icons. Every payload in it is validated
+against its panel's schema at build time, so a demo that would refuse to load
+fails the test suite instead.
+
+`crewship seed --nuke` removes pages before crews, because a panel's owning crew
+carries `ON DELETE RESTRICT` — a workspace still holding pages cannot have its
+crews deleted.
 
 ## Related
 

@@ -52,7 +52,7 @@ func confirmNuke(cmd *cobra.Command, client *cli.Client, server string) error {
 
 	fmt.Fprintf(os.Stderr, "\n⚠️  NUKE permanently deletes ALL contents of workspace %q (%s)\n", wsName, wsSlug)
 	fmt.Fprintf(os.Stderr, "    on %s — %d crew(s), %d agent(s), plus every issue, project,\n", server, crews, agents)
-	fmt.Fprintln(os.Stderr, "    label, pipeline, schedule, webhook, credential, inbox item, and")
+	fmt.Fprintln(os.Stderr, "    label, page, pipeline, schedule, webhook, credential, inbox item,")
 	fmt.Fprintln(os.Stderr, "    escalation, and each crew's docker container(s)+volumes (cached")
 	fmt.Fprintln(os.Stderr, "    images are kept). This cannot be undone.")
 
@@ -253,6 +253,20 @@ func nukeData(ctx context.Context, client *cli.Client) ([]string, error) {
 		}
 	}
 	fmt.Fprintf(os.Stderr, "  Deleted %d issues\n", totalDeleted)
+
+	// Delete pages BEFORE anything that owns a panel.
+	//
+	// page_panels.owner_crew_id is `REFERENCES crews(id) ON DELETE RESTRICT`,
+	// so a workspace holding pages cannot have its crews deleted — the crew
+	// delete fails and takes the rest of the cleanup's ordering with it. The
+	// RESTRICT is deliberate (a page must never lose a panel to a cascade
+	// nobody saw), which makes this ordering a consequence of the schema
+	// rather than a preference.
+	//
+	// Pages key by SLUG, like pipelines below.
+	if err := nukeListBySlug(ctx, client, "/api/v1/pages", "/api/v1/pages/"); err != nil {
+		failures = append(failures, fmt.Sprintf("pages: %v", err))
+	}
 
 	// Delete projects
 	if err := nukeList(ctx, client, "/api/v1/projects", "/api/v1/projects/"); err != nil {

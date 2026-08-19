@@ -296,8 +296,9 @@ Keeper Phase 2 (aux-LLM evaluators, PR-C / PRD §6 F4). All four are wrapped in 
 
 The body is an **envelope**, not the payload: `workspace_id`, `crew_id`,
 `agent_id` and `author_run_id` are injected by the caller (the dispatcher for
-the `page.write` verb, the sidecar for an agent) and the payload rides in
-`data`. `author_run_id` is optional — an agent in a container has no run, and
+the `page.write` verb, the sidecar for an agent), `panel` names which panel of
+the page to write, `state` carries the producer's own verdict (`ok` or
+`failed`, absent meaning ok), and the payload rides in `data`. `author_run_id` is optional — an agent in a container has no run, and
 the provenance column is nullable for exactly that caller.
 
 Producer authority is checked here, not upstream: the panel's declared

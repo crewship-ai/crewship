@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -147,7 +148,7 @@ func push(base, token, ws, panel string, payload any) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := pushClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -167,7 +168,16 @@ func env(k, def string) string {
 	return def
 }
 
-func round1(f float64) float64 { return float64(int(f*10+0.5)) / 10 }
+// pushClient exists because http.DefaultClient has NO timeout: a server that
+// accepts the connection and then says nothing hangs this loop forever, and a
+// producer that stops pushing is exactly what the freshness contract reports as
+// a fault. Better to fail the push, print it, and be back in five seconds.
+var pushClient = &http.Client{Timeout: 15 * time.Second}
+
+// round1 rounds to one decimal. math.Round rather than int(f*10+0.5), which
+// truncates toward zero and so rounds NEGATIVE values the wrong way — and a
+// delta here is negative half the time.
+func round1(f float64) float64 { return math.Round(f*10) / 10 }
 
 func trim(s string, n int) string {
 	if len(s) <= n {
