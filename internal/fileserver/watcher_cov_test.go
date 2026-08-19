@@ -100,8 +100,13 @@ func waitForEvent(t *testing.T, ch <-chan FileEvent, event, relPath string) File
 // waited out, so the pass condition no longer contains a bet on when the
 // registration lands.
 //
-// The reported events are drained continuously while waiting, so the caller's
-// channel cannot fill up with the retries' own churn.
+// stimulus must also not block. ch is drained only between stimulus calls, so
+// a stimulus that blocks on a full ch wedges the helper before it can reach
+// its own abandon timer, and the test then hangs to the package -timeout
+// rather than failing. Returning an error instead is always the better trade.
+//
+// Non-matching events are drained continuously while waiting, so the caller's
+// channel does not fill up with the retries' own churn.
 func driveForEvent(
 	t *testing.T,
 	ch <-chan FileEvent,
@@ -181,7 +186,13 @@ func TestDriveForEvent_SurvivesADroppedEdge(t *testing.T) {
 			// The first two stimuli vanish, like a write to a descriptor the
 			// backend has not registered yet. Only the third is observed.
 			if attempts > 2 {
-				ch <- FileEvent{Event: "file_modified", Path: "report.md", Size: 9}
+				// Non-blocking, per the helper's contract: a stimulus that
+				// blocks would wedge the wait instead of failing it.
+				select {
+				case ch <- FileEvent{Event: "file_modified", Path: "report.md", Size: 9}:
+				default:
+					return fmt.Errorf("event channel full at attempt %d", attempts)
+				}
 			}
 			return nil
 		},
@@ -298,6 +309,12 @@ func TestWatch_NewSubdirGetsWatched(t *testing.T) {
 	base := t.TempDir()
 	events := make(chan FileEvent, 64)
 	w := NewWatcher(base, discardLogger(), func(_ string, fe FileEvent) { events <- fe })
+	// Registered before cancel so the LIFO order is cancel-then-Close, which is
+	// what Close's contract requires. It matters more here since the retries
+	// below can churn the watched tree repeatedly: on kqueue that is exactly
+	// the NOTE_DELETE flood #1286 was about, and t.TempDir's RemoveAll runs
+	// after this defer.
+	defer w.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
