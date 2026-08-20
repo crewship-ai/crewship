@@ -242,49 +242,58 @@ func TestCheckpointerBoundsWAL(t *testing.T) {
 	// nothing resets the file between them.
 	peak := make([]int64, len(tests))
 	windowCost := make([]int64, len(tests))
+	samplesByCase := make([][]int64, len(tests))
+
+	// Both arms are measured here, in the parent, and NOT inside the subtests
+	// below. The comparison at the end needs both, so a `-run` filter that
+	// selected one subtest would otherwise leave the other at zero and the
+	// bound would collapse to truncAt with no measured window cost to add —
+	// a verdict invented from an arm that never ran.
+	for i, tc := range tests {
+		samples := writeBurst(t, tc.tick)
+		if len(samples) != rows/window {
+			t.Fatalf("%s: got %d samples, want %d", tc.name, len(samples), rows/window)
+		}
+		var prev int64
+		for _, s := range samples {
+			if s > peak[i] {
+				peak[i] = s
+			}
+			if tc.wantGrowsForever {
+				if g := s - prev; g > windowCost[i] {
+					windowCost[i] = g
+				}
+			}
+			prev = s
+		}
+		samplesByCase[i] = samples
+	}
 
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			samples := writeBurst(t, tc.tick)
-			if len(samples) != rows/window {
-				t.Fatalf("got %d samples, want %d", len(samples), rows/window)
-			}
-			var prev int64
-			for n, s := range samples {
-				if s > peak[i] {
-					peak[i] = s
-				}
-				if tc.wantGrowsForever {
-					if s < prev {
-						t.Errorf("WAL shrank %d -> %d at sample %d; with autocheckpoint off "+
-							"and no checkpointer, nothing may reclaim it", prev, s, n)
-					}
-					if g := s - prev; g > windowCost[i] {
-						windowCost[i] = g
-					}
-				}
-				prev = s
-			}
 			if peak[i] == 0 {
 				t.Fatal("expected the workload to produce a WAL, got 0 bytes throughout")
 			}
-			if tc.wantGrowsForever {
-				t.Logf("peak WAL = %d bytes, largest %d-row window = %d bytes",
-					peak[i], window, windowCost[i])
-			} else {
+			if !tc.wantGrowsForever {
 				t.Logf("peak WAL = %d bytes", peak[i])
+				return
 			}
+			var prev int64
+			for n, s := range samplesByCase[i] {
+				if s < prev {
+					t.Errorf("WAL shrank %d -> %d at sample %d; with autocheckpoint off "+
+						"and no checkpointer, nothing may reclaim it", prev, s, n)
+				}
+				prev = s
+			}
+			t.Logf("peak WAL = %d bytes, largest %d-row window = %d bytes",
+				peak[i], window, windowCost[i])
 		})
 	}
 
 	const unmanagedArm, managedArm = 0, 1
 	if t.Failed() {
-		return // the numbers below are only meaningful if both arms ran
-	}
-	if peak[unmanagedArm] == 0 || peak[managedArm] == 0 {
-		// A -run filter selected a single subtest. Comparing one arm against a
-		// zeroed other one would invent a verdict, so say nothing instead.
-		t.Skip("both arms are needed to compare peaks; run the whole test")
+		return // the numbers below are only meaningful if both arms held up
 	}
 
 	// One un-checkpointed window of this exact workload, measured rather than
