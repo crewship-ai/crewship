@@ -250,6 +250,25 @@ Next: build crew containers with:
 
 The original design auto-provisioned containers, but the apply CLI had already exited by the time provisioning streamed progress — so we surface the chained command instead of hiding it behind a flag. Run the printed line(s) to build the crew's container image.
 
+<Warning>
+`crew provision` builds an **image**. It does not start a container, and
+on a cache hit it finishes in seconds having started nothing — the
+container is created lazily on the crew's first agent run.
+
+This matters when a manifest ships `crew_files` into `shared/`: those
+paths are owned by the container user, so overwriting one on a stopped
+crew returns `409 file is owned by the crew runtime`. Start the crew,
+then re-apply:
+
+```bash
+crewship crew start <crew>
+crewship apply --file workspace.yaml --yes
+```
+
+`crew start` is idempotent, so it is safe to put in front of every
+apply that ships crew files.
+</Warning>
+
 ## See also
 
 - [Guides → Workspace Manifests](/guides/manifests) — the narrative tour

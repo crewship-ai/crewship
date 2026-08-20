@@ -68,6 +68,30 @@ func normalizeDomain(raw string) string {
 // testable and works with provisioning disabled (nil = skip).
 type crewProvisionEnqueuer interface {
 	EnqueueForCrew(ctx context.Context, crewID, workspaceID string) (EnqueueResult, error)
+	// EnsureProvisioned blocks until the crew's image exists, building it
+	// if it does not. ContainerStart gates on it for the same reason the
+	// dispatch path does: a crew started with no provisioned image comes
+	// up on the bare runtime, which has no agent CLI. Returns immediately
+	// when the crew needs no provisioning or its image is already local.
+	EnsureProvisioned(ctx context.Context, crewID, workspaceID string, timeout time.Duration) error
+}
+
+// crewActivityNoter records that a crew's container was just used, so the
+// orchestrator's idle-TTL reaper knows the container exists and when its
+// clock started. Satisfied by *orchestrator.Orchestrator; an interface so
+// the crew handler stays testable and works with no orchestrator wired
+// (nil = skip, as on a server started without one).
+//
+// Narrow on purpose. ContainerStart needs exactly one method, and taking
+// the concrete type would drag the whole orchestrator into every test
+// that starts a crew.
+type crewActivityNoter interface {
+	NoteCrewActivity(crewID, containerID string, ttlHours int)
+	// ForgetCrewActivity drops the crew from the reaper's bookkeeping
+	// because its container is already stopped. ContainerStop calls it so
+	// the reaper does not go on evaluating an entry that points at a dead
+	// container and then log an idle-expiry for something a human stopped.
+	ForgetCrewActivity(crewID string)
 }
 
 type CrewHandler struct {
@@ -82,6 +106,9 @@ type CrewHandler struct {
 	// --no-docker) — Services then answers an empty list rather than
 	// erroring. Set via SetContainer.
 	container provider.ContainerProvider
+	// activity reports crew container starts to the idle-TTL reaper. nil
+	// when no orchestrator is wired. See SetActivityNoter.
+	activity crewActivityNoter
 }
 
 // NewCrewHandler creates a CrewHandler with the given database and logger.
@@ -141,6 +168,18 @@ func (h *CrewHandler) SetSocketPath(path string) { h.socketPath = path }
 // inventory endpoint (GET /api/v1/crews/{crewId}/services).
 func (h *CrewHandler) SetContainer(cp provider.ContainerProvider) { h.container = cp }
 
+// SetActivityNoter wires the idle-TTL reaper's activity feed, used by
+// ContainerStart.
+//
+// Orchestrator.NoteCrewActivity states the invariant: every path that
+// calls EnsureCrewRuntime must call it, because the reaper only knows
+// about containers it has been told about. Every other start site is
+// covered incidentally — an agent run follows and reports the activity.
+// `crew start` is the first whose whole purpose is to start a container
+// with no run behind it, so an unreported start would run past its
+// container_ttl_hours until crewshipd restarted and rediscovered it.
+func (h *CrewHandler) SetActivityNoter(n crewActivityNoter) { h.activity = n }
+
 // restartCrewContainer stops the crew container via IPC so it gets recreated
 // with the new network policy on the next agent run.
 //
@@ -150,6 +189,44 @@ func (h *CrewHandler) SetContainer(cp provider.ContainerProvider) { h.container 
 // want its OTel span + auth values so the sidecar call is
 // observable and audited). 60-second timeout still applies via
 // the http.Client to bound the outbound call.
+
+// stopCrewContainerIPC asks crewshipd to stop a crew's runtime container
+// and its sidecars, returning crewshipd's status code.
+//
+// The stop lives on crewshipd, not here, because crewshipd already owns
+// the whole operation: handleContainerStop resolves the container name,
+// stops the runtime, and then stops the crew's sidecars through the
+// optional SidecarProvider (internal/server/routes_container.go). Doing
+// it in this process would mean a second implementation of the sidecar
+// half — and sidecar teardown is the exact area where a duplicated,
+// slightly-different implementation once reached into another tenant's
+// Postgres (#1732, see crew_sidecar_teardown.go).
+//
+// Asymmetric with ContainerStart on purpose: starting needs the crew's
+// DB-resolved config (cached image, mounts, env, declared services),
+// which lives in THIS process; stopping needs only the container name,
+// which crewshipd can resolve itself.
+func (h *CrewHandler) stopCrewContainerIPC(ctx context.Context, crewID string) (int, error) {
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", h.socketPath)
+			},
+		},
+	}
+	reqURL := fmt.Sprintf("http://crewshipd/crews/%s/container/stop", url.PathEscape(crewID))
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, nil
+}
 
 func (h *CrewHandler) restartCrewContainer(ctx context.Context, crewID string) {
 	if h.socketPath == "" {

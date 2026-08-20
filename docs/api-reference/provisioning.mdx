@@ -180,6 +180,17 @@ POST /api/v1/crews/{crewId}/provision
 
 Requires the `create` role action (OWNER, ADMIN, MANAGER). Returns 202 immediately and runs the pipeline in a background goroutine; poll the status endpoint for progress.
 
+<Warning>
+**This builds an image. It does not start a container.** A completed provision
+leaves the crew's `cached_image` set and its container `stopped` — the container
+is created lazily on the crew's first agent run. On a cache hit the job reaches
+`completed` in seconds having started nothing at all.
+
+To start the container, call
+[`POST /api/v1/crews/{crewId}/container-start`](/api-reference/crews#start-container),
+which provisions first if the crew has no image and then starts it.
+</Warning>
+
 **Response:** `202 Accepted`
 
 ```json

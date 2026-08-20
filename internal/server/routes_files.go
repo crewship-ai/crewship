@@ -652,8 +652,15 @@ func containerSaveErrorResponse(err error, fence string) (int, string) {
 			return http.StatusConflict,
 				"the agent's output directory is owned by the crew runtime; files can only be written there while the crew container is running — start the crew and retry"
 		}
+		// The shared tree is reached from `crewship crew files save`, so
+		// its reader has a shell. Name the command: "start the crew"
+		// reads as `crewship crew provision`, which builds an image and
+		// — on a cache hit — reports success while the container stays
+		// stopped, so the obvious next move reproduced this same 409.
 		return http.StatusConflict,
-			"file is owned by the crew runtime; it can only be overwritten while the crew container is running — start the crew and retry"
+			"file is owned by the crew runtime; it can only be overwritten while the crew container is running. " +
+				"Start it with `crewship crew start <crew>` and retry — note that `crewship crew provision` " +
+				"only builds the image and does not start anything."
 	default:
 		return http.StatusInternalServerError, "failed to save file"
 	}

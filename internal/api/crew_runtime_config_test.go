@@ -146,6 +146,13 @@ type fakeEnqueuer struct {
 	err   error
 }
 
+// EnsureProvisioned is part of crewProvisionEnqueuer because ContainerStart
+// gates on it. This fake is only used for the enqueue-on-create path, so it
+// answers "nothing to do" — the start path has its own fake.
+func (f *fakeEnqueuer) EnsureProvisioned(_ context.Context, _, _ string, _ time.Duration) error {
+	return nil
+}
+
 func (f *fakeEnqueuer) EnqueueForCrew(_ context.Context, crewID, _ string) (EnqueueResult, error) {
 	f.calls++
 	f.last = crewID

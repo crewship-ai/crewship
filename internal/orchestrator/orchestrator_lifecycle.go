@@ -435,6 +435,27 @@ func (o *Orchestrator) checkTTLs(ctx context.Context) {
 
 // forgetCrew drops a crew from the reaper's tracking map, unless an occupant
 // took a hold while we were deciding.
+// ForgetCrewActivity drops a crew from the idle-TTL bookkeeping because
+// its container is already gone — the exported counterpart to
+// NoteCrewActivity, for the one caller that stops a container on
+// purpose rather than by expiry.
+//
+// Without it a deliberate `crewship crew stop` leaves a live entry
+// pointing at a dead container: the reaper keeps evaluating it every
+// tick, eventually probes a container that is not there, and logs
+// "stopping idle crew container (TTL expired)" for something a human
+// stopped minutes earlier. Harmless to the machine, misleading to
+// whoever reads the log.
+//
+// A crew with an occupant inside it is left alone, exactly as
+// forgetCrew does — the hold outranks the request.
+func (o *Orchestrator) ForgetCrewActivity(crewID string) {
+	if crewID == "" {
+		return
+	}
+	o.forgetCrew(crewID)
+}
+
 func (o *Orchestrator) forgetCrew(crewID string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
