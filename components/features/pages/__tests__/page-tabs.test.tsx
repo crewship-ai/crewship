@@ -391,8 +391,20 @@ describe("PageView with tabs", () => {
     fireEvent.keyDown(tabButtons()[2], { key: "ArrowRight" })
     expect(screen.getByRole("tab", { name: /Síť/ }).getAttribute("aria-selected")).toBe("true")
 
-    fireEvent.keyDown(tabButtons()[0], { key: "Home" })
+    // Home must be pressed from somewhere other than the first tab. The
+    // handler computes `next = 0` and then bails on `target.id === activeTab`,
+    // so pressing it while Síť is already selected returns before anything
+    // happens — and an assertion that Síť is selected would pass on a Home
+    // key that does nothing at all. Go back to the end first, so the jump is
+    // actually exercised.
+    fireEvent.keyDown(tabButtons()[0], { key: "End" })
+    expect(screen.getByRole("tab", { name: /Disk/ }).getAttribute("aria-selected")).toBe("true")
+
+    fireEvent.keyDown(tabButtons()[2], { key: "Home" })
     expect(screen.getByRole("tab", { name: /Síť/ }).getAttribute("aria-selected")).toBe("true")
+    // The panel followed the tab, not just the aria state.
+    expect(group(container, "sit").hidden).toBe(false)
+    expect(group(container, "disk").hidden).toBe(true)
   })
 
   it("renders a page with no tabs exactly as it did before tabs existed", () => {
