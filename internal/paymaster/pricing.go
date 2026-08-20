@@ -107,8 +107,19 @@ var providerFallback = map[string]modelPrice{
 	// a renamed or brand-new slug. A loud over-estimate on a slug nobody
 	// recognises is the signal; billing it at $0 was the bug (a call to an
 	// unknown openrouter model priced at zero until this row existed).
-	"openrouter":     {InputPerM: 150.00, OutputPerM: 600.00, CachedInputPerM: 7.50, CacheWritePerM: 37.50},
-	"amazon-bedrock": {InputPerM: 16.50, OutputPerM: 82.50, CachedInputPerM: 1.65, CacheWritePerM: 20.625},
+	// All four channels are the per-channel maximum over every cost block and
+	// every tier in the snapshot, taken AFTER the nil-mirror convention is
+	// applied — a model with no cache_read charges its input rate for cache
+	// reads, so it counts as a cache-read candidate. The first version of this
+	// row read raw JSON keys instead and derived the two cache channels from
+	// the input rate by Anthropic's ratios, which billed a cache-heavy unknown
+	// openrouter slug at $7.50 against a real ceiling of $150 — 20x under, the
+	// same failure this row was added to prevent, one order of magnitude down.
+	// A per-channel max is the right shape precisely BECAUSE this row does not
+	// describe a real model: it is the bound below which no known model of this
+	// provider can be under-billed.
+	"openrouter":     {InputPerM: 150.00, OutputPerM: 600.00, CachedInputPerM: 150.00, CacheWritePerM: 150.00},
+	"amazon-bedrock": {InputPerM: 16.50, OutputPerM: 82.50, CachedInputPerM: 2.50, CacheWritePerM: 20.625},
 
 	"ollama": {},
 	"local":  {},

@@ -443,3 +443,131 @@ func TestLookupPrice_LocalRuntimesStayFree(t *testing.T) {
 		}
 	}
 }
+
+// A gateway's fallback row must not be under the highest rate the snapshot
+// publishes for that gateway, on ANY of the four channels.
+//
+// This exists because the first version of those rows got it wrong in a way
+// review caught and tests did not: input and output were computed from the
+// snapshot, but the two cache channels were derived from the input rate by
+// Anthropic's ratios. That billed a cache-read-heavy unknown openrouter slug at
+// $7.50 against a real ceiling of $150. The row had been added precisely to
+// stop unknown models billing too little, and it under-billed by 20x on a
+// channel nobody checked.
+//
+// The check walks the shipped snapshot rather than hardcoding the maxima, so a
+// refresh that raises a rate fails here instead of silently lowering the floor.
+// Note it compares against CeilingRates(), which applies the nil-mirror
+// convention — a model with no cache_read charges its input rate for cache
+// reads and is therefore a cache-read candidate. Reading raw cost keys is the
+// exact mistake this test was written to prevent recurring.
+func TestProviderFallback_GatewayRowsAreNotUnderTheSnapshotCeiling(t *testing.T) {
+	cat := modelcatalog.Default()
+	for _, prov := range []string{"openrouter", "amazon-bedrock"} {
+		row, ok := providerFallback[prov]
+		if !ok {
+			t.Errorf("%s has no providerFallback row — an unknown model of this provider bills at $0", prov)
+			continue
+		}
+		var maxIn, maxOut, maxCacheRead, maxCacheWrite float64
+		var seen int
+		for _, m := range cat.Models(prov) {
+			in, out, cacheRead, cacheWrite, has := m.CeilingRates()
+			if !has {
+				continue
+			}
+			seen++
+			maxIn = maxFloat(maxIn, in)
+			maxOut = maxFloat(maxOut, out)
+			maxCacheRead = maxFloat(maxCacheRead, cacheRead)
+			maxCacheWrite = maxFloat(maxCacheWrite, cacheWrite)
+		}
+		if seen == 0 {
+			t.Errorf("%s: snapshot carries no priced model — the trim no longer covers this provider, so this test is vacuous", prov)
+			continue
+		}
+		for _, c := range []struct {
+			channel string
+			got     float64
+			want    float64
+		}{
+			{"input", row.InputPerM, maxIn},
+			{"output", row.OutputPerM, maxOut},
+			{"cached input", row.CachedInputPerM, maxCacheRead},
+			{"cache write", row.CacheWritePerM, maxCacheWrite},
+		} {
+			if c.got < c.want {
+				t.Errorf("%s %s ceiling = $%g, below the snapshot maximum $%g — an unknown %s model would be under-billed on this channel",
+					prov, c.channel, c.got, c.want, prov)
+			}
+		}
+	}
+}
+
+func maxFloat(a, b float64) float64 {
+	if b > a {
+		return b
+	}
+	return a
+}
+
+// staleTableRows are hand-written rows the snapshot prices HIGHER than the
+// table. The table wins the lookup, so each one under-bills until a human
+// re-checks it against the provider's published price and either corrects the
+// row or records why the table is deliberately lower.
+//
+// This list is not an excuse — it is the open work, tracked in #2013. An entry
+// stays only as long as nobody has verified it. Adding a new entry to silence a
+// failure is the wrong move: a table row below the catalogue is under-billing,
+// which is the one direction this whole rate card refuses to be wrong in.
+var staleTableRows = map[string]string{
+	"google/gemini-2.5-flash":      "table 0.10/0.40 vs catalogue 0.30/2.50 — 6.25x under on output",
+	"google/gemini-2.5-flash-lite": "table 0.05/0.20 vs catalogue 0.10/0.40 — 2x under on both",
+	"openai/gpt-5.4-nano":          "table 0.10/0.40 vs catalogue 0.20/1.25 — 3.1x under on output",
+	"openai/gpt-5.5":               "table 4.00/24.00 vs catalogue 10.00/45.00 — 1.9x under on output",
+}
+
+// A hand-written row must not be cheaper than what the snapshot says the model
+// costs. priceTable wins the lookup by design (it carries verified corrections
+// a bulk import must not overwrite), which means a stale row silently
+// under-bills for as long as it sits there — and the table is dated months
+// before the snapshot.
+//
+// The existing drift guard only watched google/gemini-2.5-pro. This walks every
+// non-wildcard row.
+func TestPriceTable_IsNotCheaperThanTheCatalogue(t *testing.T) {
+	cat := modelcatalog.Default()
+	var checked int
+	for key := range priceTable {
+		prov, mod, found := strings.Cut(key, "/")
+		if !found || mod == "*" {
+			continue
+		}
+		m, ok := cat.Lookup(prov, mod)
+		if !ok {
+			continue // no catalogue opinion; providerFallback covers the unknown case
+		}
+		catIn, catOut, _, _, has := m.CeilingRates()
+		if !has || (catIn == 0 && catOut == 0) {
+			continue
+		}
+		checked++
+		row := priceTable[key]
+		if row.InputPerM >= catIn && row.OutputPerM >= catOut {
+			if why, listed := staleTableRows[key]; listed {
+				t.Errorf("%s is listed as stale (%q) but no longer under-bills — delete the entry", key, why)
+			}
+			continue
+		}
+		why, listed := staleTableRows[key]
+		if !listed {
+			t.Errorf("%s under-bills: table $%g/$%g is below the catalogue's $%g/$%g. Verify the provider's published price and correct the row, or add it to staleTableRows with a reason and a tracking issue.",
+				key, row.InputPerM, row.OutputPerM, catIn, catOut)
+			continue
+		}
+		t.Logf("known stale: %s (%s)", key, why)
+	}
+	if checked < 10 {
+		t.Fatalf("only %d table rows had a catalogue counterpart — the trim or the key format changed and this guard has gone vacuous", checked)
+	}
+}
