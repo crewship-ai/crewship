@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -294,5 +295,36 @@ func TestModelsList_OllamaUsesServerGlobal(t *testing.T) {
 	doModelsList(t, h, wsID, "?provider=OLLAMA")
 	if gotURL != "http://ollama.test:11434" {
 		t.Errorf("fallback lister built with %q, want the server-global URL", gotURL)
+	}
+}
+
+// Every provider the llm registry can actually call must be answerable by
+// /api/v1/models, or a workspace that configures it gets a 400 from the one
+// endpoint whose job is to say which models it can use.
+//
+// supportedModelProviders is deliberately still a literal rather than derived
+// from llm.RegisteredProviders(). GOOGLE is in it and has no registered codec —
+// it answers from a curated list — so a naive derivation would DROP google and
+// regress model discovery for every workspace on it. The right shape is a
+// superset: the API may know about more providers than the registry can dial,
+// never fewer.
+//
+// This exists because the same hardcoded four-name list used to live in four
+// places across two files, and the CLI copies were removed in #2001 while this
+// one could not be. When phase 2 registers openrouter or amazon-bedrock, this
+// fails and names the file to edit — instead of the provider silently 400ing at
+// the one surface an operator checks first.
+func TestSupportedModelProviders_CoversEveryRegisteredCodec(t *testing.T) {
+	registered := llm.RegisteredProviders()
+	if len(registered) == 0 {
+		t.Fatal("llm registry is empty — this guard has gone vacuous")
+	}
+	for _, id := range registered {
+		key := strings.ToUpper(id)
+		if !supportedModelProviders[key] {
+			t.Errorf("llm registers provider %q but supportedModelProviders (internal/api/models.go) does not list %q — "+
+				"GET /api/v1/models will 400 for a workspace configured to use it. Add the row, and check "+
+				"defaultModelLister can answer for it too.", id, key)
+		}
 	}
 }

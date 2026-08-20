@@ -643,9 +643,25 @@ key is allowed to live.
 |---|---|---|
 | Where | Admin → Keeper → **Credential access judge**, or `crewship keeper config` | Admin → Keeper → **Judge for this workspace**, or `crewship keeper model` |
 | Applies to | every workspace on this server, as the default | one workspace, overriding the instance judge |
-| Providers | native Ollama **only** | `ollama`, `anthropic`, `openai_compat` |
+| Providers | native Ollama **only** | `ollama`, `anthropic`, `openai_compat` (see the note below) |
 | Secrets | none — the row holds no credential reference | an `ENDPOINT_URL` or `API_KEY` credential from that workspace's vault |
 | Also sets | whether Keeper runs at all, and the per-decision time budget — the budget bounds the credential decision whichever of the two scopes answers it | the auxiliary evaluators too (behaviour watchdog, skill review, memory health, negative learning), which resolve the same setting per request |
+
+<Warning>
+  **There are two provider vocabularies on this page and they are not the same
+  list.**
+
+  | Where | Accepts | Read from |
+  |---|---|---|
+  | Governance judge — `crewship keeper model set --provider` | `ollama`, `anthropic`, `openai_compat` | `internal/keeper/governance` |
+  | Auxiliary evaluator slots — `crewship keeper aux set --provider` | `anthropic`, `openai`, `ollama` | the LLM provider registry (`internal/llm/registry.go`) |
+
+  `openai_compat` is a *governance* wire: a tenant-supplied endpoint dialled
+  through the SSRF fence. It is not a registry row, so passing it to an aux slot
+  is a registry miss and a 400. Conversely `openai` means the server's own
+  OpenAI key and only exists on the aux side. See
+  [Multi-provider LLM configuration](/guides/multi-provider-llm#the-provider-registry).
+</Warning>
 
 Which one you want:
 
@@ -1461,16 +1477,25 @@ the server's configuration.
 
 <Note>
   Providers are `anthropic`, `openai`, and `ollama` — the set this build can
-  actually construct. Google/Gemini ids appear in model pickers elsewhere in the
+  actually construct, served from the provider registry rather than written out,
+  so this list and the builder cannot disagree (`crewship provider list` prints
+  it). Google/Gemini ids appear in model pickers elsewhere in the
   app, but there is no Gemini provider in the evaluator path, so choosing one here
   is refused with that reason rather than saved into a slot that fails at first
   use. `ollama` means the **instance judge's** endpoint (`crewship keeper config`),
   not `KEEPER_OLLAMA_URL` from the environment the server booted in — so moving the
-  judge moves these with it.
+  judge moves these with it. `openai_compat` is *not* valid here; it belongs to
+  the governance-judge vocabulary described earlier on this page.
 </Note>
 
 A slot with no override inherits `CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT}`,
-or the shipped default (`anthropic` / `claude-haiku-4-5`) when that is unset.
+or the shipped default (`anthropic` / `claude-haiku-4-5`) when that is unset —
+retargeted at the first registry provider whose key you actually have, so an
+instance holding only an `OPENAI_API_KEY` boots on `openai` / `gpt-5.4-mini`
+instead of six slots demanding a key nobody owns. An instance holding both keys
+keeps the Anthropic default; declaration order breaks the tie, so adding a
+second key never silently repoints a working evaluator
+([details](/guides/multi-provider-llm)).
 `aux list` labels each field `set here`, `from server config`, or `shipped
 default`, so you can tell whether a reset would change anything. An override that
 cannot be built — `anthropic` with neither a pinned key nor an

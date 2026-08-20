@@ -21,7 +21,7 @@ Each layer matches the `paymaster.LLMCaller` signature so they compose as plain 
 ```go
 import "github.com/crewship-ai/crewship/internal/llm"
 
-base := anthropic.NewProvider(apiKey)
+base := llm.NewAnthropic(apiKey)
 wrapped := llm.Middleware(base, journalEmitter, db)
 
 // From this point, wrapped.Complete() flows through all layers.
@@ -30,6 +30,21 @@ resp, err := wrapped.Complete(ctx, llm.Request{
     Messages: []llm.Message{{Role: llm.RoleUser, Content: "..."}},
 })
 ```
+
+Every constructor in `internal/llm` returns something the middleware accepts, so
+which backend you wrap is a construction detail the stack never sees:
+
+```go
+base := llm.NewAnthropic(apiKey)                       // hosted Anthropic
+base = llm.NewAnthropicWith(llm.AnthropicConfig{...})  // configurable: endpoint, version, betas
+base = llm.NewOpenAI(apiKey)                           // hosted OpenAI
+base = llm.NewOpenAICompat(cfg)                        // any OpenAI-compatible backend
+base = llm.NewOllama(baseURL, model)                   // local daemon, native protocol
+```
+
+`llm.BuildAuxProvider` does the same resolution from a provider **id** rather
+than a constructor, via the registry — see
+[Multi-provider LLM configuration](/guides/multi-provider-llm).
 
 The request context MUST carry a `lookout.Scope` (set by the HTTP handler chain). Without it, paymaster rejects the call because `WorkspaceID` is empty -- calls without a workspace are not billable.
 
@@ -59,8 +74,8 @@ An SRE looking at a slow trace must see every contributor: budget check, guardra
 
 A future request-level cache layer would sit here. Anthropic and OpenAI prompt caching is handled wire-side today:
 
-- **Anthropic** — `internal/llm/anthropic.go` ships `anthropic-beta: prompt-caching-2024-07-31` by default and stamps `cache_control: ephemeral` on the system prompt and the last tool definition (tool schemas are usually large and stable across turns — single highest-leverage breakpoint). Response usage parses `cache_read_input_tokens` + `cache_creation_input_tokens`.
-- **OpenAI** — auto-activates for prompts ≥1024 tokens (Sept 2025). Response usage parses `prompt_tokens_details.cached_tokens` (no separate creation counter).
+- **Anthropic** — `internal/llm/anthropic.go` ships `anthropic-beta: prompt-caching-2024-07-31` by default and stamps `cache_control: ephemeral` on the system prompt and the last tool definition (tool schemas are usually large and stable across turns — single highest-leverage breakpoint). Response usage parses `cache_read_input_tokens` + `cache_creation_input_tokens`. The header set is no longer fixed: `AnthropicConfig.Version` and `.Beta` are configurable, and a **non-nil empty** `Beta` slice sends no beta header at all — for a proxy that rejects unknown betas. A nil slice keeps the default set, so the zero config is byte-identical to the old hard-coded client.
+- **OpenAI** — auto-activates for prompts ≥1024 tokens (Sept 2025). Response usage parses `prompt_tokens_details.cached_tokens` (no separate creation counter), and the codec **subtracts** it from `prompt_tokens` before storing `Response.InputToks`, because OpenAI's count includes the cached read. `InputToks` therefore means *fresh* input on every provider — see [Paymaster](/guides/paymaster#prompt-cache-token-flow).
 
 Both counts plumb through `Response.CachedInputToks` + `.CacheCreationToks` into `paymaster.CallResponse` and onto the `cost_ledger` row + the OTel `llm.call` span. See [Paymaster](/guides/paymaster#prompt-cache-token-flow) and [Tracing](/guides/tracing#prompt-cache-attributes) for the downstream details.
 
@@ -117,5 +132,6 @@ If you rearrange, understand the reasoning above. A PR that moves paymaster insi
 
 - [Paymaster](/guides/paymaster) -- layer 2. Cost + budget.
 - [Lookout](/guides/lookout) -- layer 3. Guardrails.
+- [Multi-provider LLM configuration](/guides/multi-provider-llm) -- layer 5. Which provider you are wrapping, and how it is built.
 - [Tracing](/guides/tracing) -- layer 1. OTel spans.
 - [Architecture](/architecture#crew-journal-platform) -- where this stack fits.

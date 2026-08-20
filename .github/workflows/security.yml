@@ -31,9 +31,15 @@ on:
   # Manual full run for triage.
   workflow_dispatch: {}
 
+# PR runs supersede each other; `main` runs never do. `github.ref` is the
+# constant `refs/heads/main` on a merge, so one shared group meant each merge
+# cancelled the previous merge's scan (#1998). Keying `main` on the SHA gives
+# every commit its own group — necessary because merely turning cancellation
+# off would queue the newcomer and cancel the previously PENDING run instead.
+# See the long-form note in ci.yml.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Least-privilege permissions. Jobs that need more (e.g. grype's SARIF upload
 # to the GitHub Security tab) grant it explicitly at the job level.

@@ -93,17 +93,22 @@ func KnownAuxSlot(s string) bool {
 	return false
 }
 
-// auxProviders are the providers an evaluator can actually be BUILT from — the
-// llm.BuildAuxProviderAt switch, in lowercase as llm.AuxModel stores it.
+// auxProviders are the providers an evaluator can actually be BUILT from, read
+// straight off the llm provider registry that llm.BuildAuxProviderAt resolves
+// against — in lowercase as llm.AuxModel stores it, and in the registry's
+// declaration order, which is the order this list has always been in and the
+// order the console's picker renders.
 //
-// Google is absent on purpose: the model catalogue offers Gemini ids, but this
-// package has no Provider implementation for them, so accepting one would give
-// the operator a slot that saves cleanly and then fails at first use. Rejecting
-// it with a reason is the honest surface. "ollama" means the instance judge's
-// endpoint, so pointing a slot there costs nothing per call.
-func auxProviders() []string {
-	return []string{"anthropic", "openai", "ollama"}
-}
+// It used to be a literal here, which meant the validator and the builder could
+// disagree: a provider added to one was not added to the other, and the
+// operator found out at first use. Now there is one table.
+//
+// Google is absent on purpose: the model catalogue offers Gemini ids, but the
+// llm package has no Provider implementation for them, so accepting one would
+// give the operator a slot that saves cleanly and then fails at first use.
+// Rejecting it with a reason is the honest surface. "ollama" means the instance
+// judge's endpoint, so pointing a slot there costs nothing per call.
+func auxProviders() []string { return llm.RegisteredProviders() }
 
 // AuxProviders is the provider vocabulary a picker may offer, served to the
 // console so it cannot hardcode a list that drifts from what the server accepts.
@@ -327,7 +332,25 @@ func resolveAuxSlot(slot string, dflt, builtin llm.AuxiliaryModels, o AuxOverrid
 		UpdatedAt:  o.UpdatedAt,
 		UpdatedBy:  o.UpdatedBy,
 	}
-	eff.Provider = pickAux(o.Provider, base.Provider, shipped.Provider)
+	// A slot that pins a vault credential but NOT a provider keeps the shipped
+	// provider, not the environment-derived one.
+	//
+	// #1554 lets an operator move a key out of the process environment and into
+	// the vault, pinned per slot. #2001 then made an unconfigured slot follow
+	// whichever provider's key IS in the environment. Those two compose badly:
+	// an instance holding an Anthropic key in the vault and an OPENAI_API_KEY in
+	// the env for agent runs would see its evaluator slots retargeted to openai
+	// while still being built with the Anthropic vault key — a 401 on first use,
+	// with nothing saying the vendor moved.
+	//
+	// A pinned credential is a vendor choice even when the provider field is
+	// blank, because a key is only valid at one vendor. Availability may pick
+	// for a slot that has expressed no preference; it may not overrule one.
+	providerBase := base.Provider
+	if o.CredentialID != "" && o.Provider == "" {
+		providerBase = shipped.Provider
+	}
+	eff.Provider = pickAux(o.Provider, providerBase, shipped.Provider)
 	eff.Model = pickAux(o.Model, base.Model, shipped.Model)
 	// No env layer to inherit from — see AuxEffective.CredentialID.
 	if o.CredentialID != "" {
@@ -647,7 +670,9 @@ func persistAuxTx(ctx context.Context, tx *sql.Tx, slot string, o AuxOverride, a
 func validateAux(o AuxOverride) error {
 	if o.Provider != "" && !KnownAuxProvider(o.Provider) {
 		if o.Provider == "google" || o.Provider == "gemini" {
-			return newValidation("google models cannot back an evaluator — this build has no Gemini provider; use anthropic, openai, or ollama")
+			return newValidation(fmt.Sprintf(
+				"google models cannot back an evaluator — this build has no Gemini provider; use one of %s",
+				strings.Join(auxProviders(), ", ")))
 		}
 		return newValidation(fmt.Sprintf("unknown evaluator provider %q — use one of %s",
 			o.Provider, strings.Join(auxProviders(), ", ")))

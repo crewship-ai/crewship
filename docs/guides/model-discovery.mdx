@@ -60,6 +60,21 @@ reached, the endpoint returns **502 Bad Gateway** rather than an empty list, so
 An unknown or unsupported `provider` returns **400 Bad Request**. `CURSOR` and
 `FACTORY` route through CLI adapters and have no model-discovery surface.
 
+<Note>
+  **Discovery is not pricing, and the two answer for different provider sets.**
+  This endpoint covers the four providers above, from a live call or a curated
+  list, and answers *"which model ids may I type"*. What a model **costs** comes
+  from an embedded models.dev snapshot covering eight providers —
+  `amazon-bedrock`, `anthropic`, `deepseek`, `google`, `mistral`, `openai`,
+  `openrouter`, `xai` — which is neither a discovery surface nor a claim that
+  Crewship can call those models. `crewship model price` queries it offline.
+  See [Multi-provider LLM configuration](/guides/multi-provider-llm#the-model-catalog).
+
+  `GOOGLE` is the visible seam between the two: its models are discoverable here
+  and priced by the catalog, but there is no Gemini codec in the provider
+  registry, so it cannot back an evaluator slot.
+</Note>
+
 ## CLI
 
 Every API endpoint has a matching CLI command. Use `crewship model list`:

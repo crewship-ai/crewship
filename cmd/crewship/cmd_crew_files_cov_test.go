@@ -110,6 +110,11 @@ func TestPutBytes(t *testing.T) {
 // ─── crew files list ─────────────────────────────────────────────────────
 
 func TestCrewFilesListRunE(t *testing.T) {
+	// Must be here, not in the subtests: guardCLIState no-ops when handed a
+	// subtest's *testing.T, so every call the fixtures below make from inside
+	// a t.Run body registers nothing.
+	guardCLIState(t)
+
 	t.Run("table output with subdir and recursive", func(t *testing.T) {
 		s := clitest.NewStubServer()
 		defer s.Close()
@@ -119,16 +124,12 @@ func TestCrewFilesListRunE(t *testing.T) {
 			{"name": "notes.md", "size": 1234, "modified": "2026-06-01T10:00:00Z"},
 		}))
 
+		covResetFlags(t, crewFilesListCmd)
 		for _, set := range [][2]string{{"path", "shared/notes"}, {"recursive", "true"}} {
 			if err := crewFilesListCmd.Flags().Set(set[0], set[1]); err != nil {
 				t.Fatal(err)
 			}
 		}
-		t.Cleanup(func() {
-			_ = crewFilesListCmd.Flags().Set("path", "")
-			_ = crewFilesListCmd.Flags().Set("recursive", "false")
-			_ = crewFilesListCmd.Flags().Set("filter", "")
-		})
 
 		out, err := covCaptureStdoutCli7(t, func() error {
 			return crewFilesListCmd.RunE(crewFilesListCmd, []string{"alpha"})
@@ -173,6 +174,8 @@ func TestCrewFilesListRunE(t *testing.T) {
 // ─── crew files get ──────────────────────────────────────────────────────
 
 func TestCrewFilesGetRunE(t *testing.T) {
+	guardCLIState(t)
+
 	dlPath := "/api/v1/crews/" + covCrewIDCli7 + "/files/download"
 
 	t.Run("stdout by default", func(t *testing.T) {
@@ -388,6 +391,10 @@ func TestCrewFiles_UnknownCrew(t *testing.T) {
 }
 
 func TestCrewFilesListRunE_Formats(t *testing.T) {
+	// See TestCrewFilesListRunE: the guard has to be registered on the
+	// top-level t, and newListStub below is always called with a subtest's.
+	guardCLIState(t)
+
 	newListStub := func(t *testing.T) *clitest.StubServer {
 		t.Helper()
 		s := clitest.NewStubServer()
@@ -439,10 +446,10 @@ func TestCrewFilesListRunE_Formats(t *testing.T) {
 		lookPath = func(string) (string, error) { return "", os.ErrNotExist }
 		t.Cleanup(func() { lookPath = origLookPath })
 
+		covResetFlags(t, crewFilesListCmd)
 		if err := crewFilesListCmd.Flags().Set("filter", ".[].name"); err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = crewFilesListCmd.Flags().Set("filter", "") })
 
 		out, err := covCaptureStdoutCli7(t, func() error {
 			return crewFilesListCmd.RunE(crewFilesListCmd, []string{"alpha"})
@@ -457,6 +464,8 @@ func TestCrewFilesListRunE_Formats(t *testing.T) {
 }
 
 func TestCrewFilesGetRunE_TransportAndAtomicErrors(t *testing.T) {
+	guardCLIState(t)
+
 	t.Run("transport error", func(t *testing.T) {
 		saveCLIState(t)
 		flagServer = ""

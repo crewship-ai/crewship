@@ -14,6 +14,8 @@ import (
 // These drive rootCmd.RunE directly (no server, no login) — the guard
 // returns before anything network-touching, which is the whole point.
 func TestRootHeadlessRejectsTypoTwoArgs(t *testing.T) {
+	guardCLIState(t)
+
 	// Belt-and-braces: if the guard regresses, RunE would fall through to
 	// the real ask path. Stub it so a regression fails the assertion
 	// rather than dialing out.
@@ -62,6 +64,8 @@ func TestRootHeadlessRejectsTypoTwoArgs(t *testing.T) {
 // ArbitraryArgs on the root threw them away along with the unknown-command
 // error, so a typo lost the one thing that makes it self-correcting.
 func TestRootHeadlessTypoErrorSuggests(t *testing.T) {
+	guardCLIState(t)
+
 	stubAskCmdRunE(t)
 	flagRootPrompt = ""
 
@@ -80,6 +84,8 @@ func TestRootHeadlessTypoErrorSuggests(t *testing.T) {
 // "slow" all match the subcommand regex) — so the guard cannot key on
 // token shape alone. The rule is shape AND brevity: <= 2 tokens.
 func TestRootHeadlessAllowsBareMultiWordPrompt(t *testing.T) {
+	guardCLIState(t)
+
 	stubAskCmdRunE(t)
 	flagRootPrompt = ""
 
@@ -106,6 +112,8 @@ func TestRootHeadlessAllowsBareMultiWordPrompt(t *testing.T) {
 // -p opted in explicitly; the guard must never second-guess that, however
 // slug-shaped the value is.
 func TestRootHeadlessExplicitDashPBypassesMultiArgGuard(t *testing.T) {
+	guardCLIState(t)
+
 	stubAskCmdRunE(t)
 	flagRootPrompt = "schedule list"
 

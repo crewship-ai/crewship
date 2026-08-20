@@ -210,3 +210,53 @@ func TestAuxCredentialFor_FollowsTheFallbackOnlyWhenTheModelDoes(t *testing.T) {
 func auxRowCount(s *AuxStore, slot string, out *int) error {
 	return s.db.QueryRow(`SELECT COUNT(*) FROM keeper_aux_settings WHERE slot = ?`, slot).Scan(out)
 }
+
+// A pinned credential is a vendor choice, so availability must not overrule it.
+//
+// #1554 lets an operator move a key out of the process environment into the
+// vault, pinned per slot. #2001 then made an unconfigured slot follow whichever
+// provider's key IS in the environment. Composed naively, an instance holding
+// an Anthropic key in the vault and an OPENAI_API_KEY in the env — which is a
+// perfectly ordinary shape, the env key being there for agent runs — has its
+// evaluator slots retargeted to openai while still being built with the
+// Anthropic vault key. Every evaluator 401s on first use and nothing says the
+// vendor moved under it.
+func TestAuxCredential_PinnedKeyIsNotRetargetedByAvailability(t *testing.T) {
+	shipped := llm.AuxiliaryModels{
+		Behavior: llm.AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5"},
+	}
+	// What LoadAuxiliaryModels resolves on a box whose env holds only an
+	// OpenAI key: every slot retargeted away from the shipped vendor.
+	available := llm.AuxiliaryModels{
+		Behavior: llm.AuxModel{Provider: "openai", Model: "gpt-5.4-mini"},
+	}
+
+	t.Run("credential pinned, no provider: keeps the shipped vendor", func(t *testing.T) {
+		eff := resolveAuxSlot(string(llm.SlotBehavior), available, shipped, AuxOverride{
+			CredentialID: "cred_anthropic_vault_key",
+		})
+		if eff.Provider.Value != "anthropic" {
+			t.Errorf("provider = %q, want anthropic — a pinned key is only valid at one vendor, so availability must not move the slot out from under it", eff.Provider.Value)
+		}
+		if eff.CredentialID.Value != "cred_anthropic_vault_key" {
+			t.Errorf("credential = %q, want it preserved", eff.CredentialID.Value)
+		}
+	})
+
+	t.Run("credential pinned WITH a provider: the operator's provider wins", func(t *testing.T) {
+		eff := resolveAuxSlot(string(llm.SlotBehavior), available, shipped, AuxOverride{
+			CredentialID: "cred_openai_vault_key",
+			Provider:     "openai",
+		})
+		if eff.Provider.Value != "openai" {
+			t.Errorf("provider = %q, want openai — an explicit provider is the operator saying it outright", eff.Provider.Value)
+		}
+	})
+
+	t.Run("no credential: availability still chooses", func(t *testing.T) {
+		eff := resolveAuxSlot(string(llm.SlotBehavior), available, shipped, AuxOverride{})
+		if eff.Provider.Value != "openai" {
+			t.Errorf("provider = %q, want openai — a slot expressing no preference is exactly what availability is for", eff.Provider.Value)
+		}
+	})
+}

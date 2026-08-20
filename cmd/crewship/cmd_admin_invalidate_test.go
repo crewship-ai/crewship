@@ -213,6 +213,8 @@ func TestAdminInvalidateSessionsCmd_Wiring(t *testing.T) {
 //
 // NOT parallel: see TestAdminInvalidateSessionsCmd_Wiring comment.
 func TestAdminInvalidateSessionsCmd_EmailRequired(t *testing.T) {
+	guardCLIState(t)
+
 	// Snapshot prior state so the next test in this file (or a
 	// later run via -count=N) doesn't inherit our mutations.
 	prevEmail, _ := adminInvalidateSessionsCmd.Flags().GetString("email")

@@ -380,6 +380,8 @@ func TestPromptList_PromptsDirIsAFile(t *testing.T) {
 }
 
 func TestPromptSaveEdit_MkdirFails(t *testing.T) {
+	guardCLIState(t)
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	// ~/.crewship is a FILE → MkdirAll(~/.crewship/prompts) fails.

@@ -113,6 +113,8 @@ func TestRootHeadlessRejectsTypoSingleArg(t *testing.T) {
 // error; the downstream ask path will fail on its own (no default agent,
 // no auth), and that's the existing behaviour we're preserving.
 func TestRootHeadlessAllowsRealPrompt(t *testing.T) {
+	guardCLIState(t)
+
 	stubAskCmdRunE(t)
 	flagRootPrompt = ""
 
@@ -126,6 +128,8 @@ func TestRootHeadlessAllowsRealPrompt(t *testing.T) {
 // explicit `-p <word>` is honored even when the value matches the slug
 // heuristic — they typed -p, they meant a one-shot ask.
 func TestRootHeadlessAllowsExplicitDashPSingleWord(t *testing.T) {
+	guardCLIState(t)
+
 	stubAskCmdRunE(t)
 	flagRootPrompt = "status"
 

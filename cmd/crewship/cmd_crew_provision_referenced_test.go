@@ -38,11 +38,13 @@ func TestCrewProvisionExists_BecauseTheRestorePreflightNamesIt(t *testing.T) {
 			strings.Join(have, ", "))
 	}
 
-	// Pin the absence too. If a `crew start` is ever added, the preflight
-	// message is probably the better place to point — but that has to be
-	// a decision someone makes, not a message that silently becomes
-	// correct after being wrong.
-	if names["start"] {
-		t.Errorf("`crewship crew start` now exists; revisit the restore preflight's remediation in internal/backup/restorer.go, which deliberately names `provision` because start did not")
+	// `crew start` has since been added, and the decision this tripwire
+	// asked for was made: internal/backup/restorer.go's preflight now
+	// names it, because the container being stopped is exactly what
+	// start fixes and provision only ever fixed by accident. Both
+	// commands must stay registered — the preflight names start, and
+	// image-only rebuild flows elsewhere still name provision.
+	if !names["start"] {
+		t.Errorf("`crewship crew start` is not registered, but internal/backup's restore preflight and the crew-file 409 both tell operators to run it")
 	}
 }

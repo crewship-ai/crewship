@@ -47,10 +47,7 @@ func TestStrandedCrewIsFoundAndDisarmed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 
-	image := os.Getenv("CREWSHIP_CONFORMANCE_IMAGE")
-	if image == "" {
-		image = "debian:bookworm-slim"
-	}
+	image := conformanceImageRef()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// The crew data dir has to be bindable from the OLD daemon. Reuse the
@@ -99,6 +96,14 @@ func TestStrandedCrewIsFoundAndDisarmed(t *testing.T) {
 	// abandoned container's write access to the shared /crew tree, which is the
 	// same hazard whichever manifest the image resolved to. Logged and dropped.
 	_ = ensureConformanceImage(ctx, t, old, image)
+
+	// This test builds its Provider by hand and owns its own data dir, so it
+	// does not get newConformanceProvider's cleanup — but it runs the same
+	// product chown a line below, so it needs the same reclaim or the
+	// os.RemoveAll deferred above cannot delete the tree (#2005). Registered
+	// AFTER that defer and BEFORE the chown: defers run last-in-first-out, so
+	// this one reclaims and the earlier one then removes.
+	defer reclaimBindOwnership(t, oldDaemon, image, base)
 
 	crew := provider.CrewConfig{ID: "conf1704crew", Slug: "stranded", MemoryMB: 512, CPUs: 1}
 	dirs, err := old.prepareCrewDirs(crew)

@@ -154,6 +154,18 @@ func resetCLIState() {
 // which is what makes it safe to put inside shared helpers rather than
 // auditing three thousand test functions.
 //
+// CALL IT FROM THE TOP-LEVEL TEST FUNCTION, not from inside a t.Run body.
+// Because of the carve-out below this is a silent no-op when handed a
+// subtest's *testing.T, and that includes the indirect route: covSetupCLI,
+// saveCLIState, covStub, covResetFlags and the covCapture* helpers all call it
+// with whatever t they were given, so a test whose ONLY fixture calls happen
+// inside its subtests registers no reset at all and leaks for the rest of the
+// process. That is #2027 — TestCrewFilesListRunE dirtied crewFilesListCmd's
+// --path/--recursive/--filter and TestCLIStateIsPristine failed on any seed
+// that ordered it later. A guard at the top of the parent costs nothing when
+// a fixture has already registered one, so add it whenever the test mutates
+// shared CLI state, even if a helper looks like it has you covered.
+//
 // Subtests are deliberately skipped. The unit of isolation here is the
 // top-level test, because that is the unit -shuffle=on reorders; a subtest's
 // cleanup fires while its siblings still have to run, and wiping the state its

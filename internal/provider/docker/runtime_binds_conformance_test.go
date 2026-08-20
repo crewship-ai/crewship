@@ -100,10 +100,7 @@ func TestBindSourceReachability(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 
-	image := os.Getenv("CREWSHIP_CONFORMANCE_IMAGE")
-	if image == "" {
-		image = "debian:bookworm-slim"
-	}
+	image := conformanceImageRef()
 
 	// A bare provider, only to ask the daemon questions. Its cfg is replaced
 	// below for the crew-start half.
@@ -193,6 +190,13 @@ func TestBindSourceReachability(t *testing.T) {
 		}
 		defer os.RemoveAll(d)
 	}
+	// The data dir is the one that gets handed to uid 1001 by the product's own
+	// chown below, so it is the one the host user cannot delete afterwards
+	// (#2005). Here that showed up as a silent leak rather than a red run —
+	// os.RemoveAll's error is discarded above — which is worse, not better.
+	// Registered after those defers so it reclaims before they remove.
+	defer reclaimBindOwnership(t, probeP.detected.Host, image, dataDir)
+
 	sidecar := filepath.Join(installPrefix, "crewship-sidecar")
 	if err := os.WriteFile(sidecar, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1, 0}, 0o755); err != nil {
 		t.Fatal(err)

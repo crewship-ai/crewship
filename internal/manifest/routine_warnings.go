@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/crewship-ai/crewship/internal/manifest/kinds"
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -31,6 +32,31 @@ func routinePlanWarnings(doc *kinds.RoutineDocument) []string {
 		return nil
 	}
 	var out []string
+
+	// Keys the manifest passes through untouched but this build's DSL
+	// has no field for. RoutineSpec.Rest exists so a newer server can
+	// receive fields an older CLI never heard of — that forward
+	// compatibility is deliberate and must not become an error. But it
+	// also means a typo is no longer caught anywhere: `guardrail:` for
+	// `guardrails:` now reaches the server, which discards it just as
+	// quietly. Naming it here is the only moment anyone looks.
+	//
+	// Sorted, because warnings get diffed and pasted into issues and Go
+	// map order would reshuffle them between two runs on one file.
+	unknown := make([]string, 0, len(doc.Spec.Rest))
+	for key := range doc.Spec.Rest {
+		if !pipeline.IsKnownDSLKey(key) {
+			unknown = append(unknown, key)
+		}
+	}
+	sort.Strings(unknown)
+	for _, key := range unknown {
+		out = append(out, fmt.Sprintf(
+			"routine %q: spec key %q is not a routine DSL field — it is sent as-is and the server ignores it (misspelled? see `crewship routine schema`)",
+			doc.Metadata.Slug, key,
+		))
+	}
+
 	for _, step := range doc.Spec.Steps {
 		if step.Type != "code" {
 			continue

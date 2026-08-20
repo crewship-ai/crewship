@@ -206,6 +206,13 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 // (409) and the membership row survives untouched: a departed member must
 // never keep owner authority over a page (isPageOwner, pages_authz.go)
 // simply because nothing told the page it lost its owner.
+//
+// Because this is the only door out, it is also the only place that can
+// unwind what workspace membership implied: the departure deletes the
+// user's crew_members rows in this workspace alongside the
+// workspace_members row, in one transaction (issue #1976). AddMember does
+// not inspect crew_members, so anything left here would come back with the
+// user if they are ever re-added — at whatever crew role they used to hold.
 // DELETE /api/v1/workspaces/{workspaceId}/members/{memberId}
 
 func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
@@ -262,11 +269,55 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	_, err = h.db.ExecContext(r.Context(),
-		"DELETE FROM workspace_members WHERE id = ? AND workspace_id = ?",
-		memberID, workspaceID)
+	// The departure itself: the workspace_members row AND every crew
+	// membership the user held in this workspace, in one transaction. Both or
+	// neither — a member who is workspace-removed but still crew-attached is
+	// the exact state issue #1976 reports, and a crash between two separate
+	// Execs would manufacture it. The DB opens transactions with
+	// _txlock=immediate (internal/database/database.go), so BeginTx takes the
+	// write lock up front (same idiom as workspaces_delete.go).
+	//
+	// Ordering is load-bearing: the crew purge runs AFTER
+	// transferDepartingUserPages above, because §7.1 rule 1b's rule 2 ("else
+	// the crew the departing user belonged to", resolveTransferTargetCrew in
+	// pages_transfer_owner.go) resolves the page's new owner by reading these
+	// very rows. Purge them first and rule 2 stops resolving, turning
+	// removals that should succeed into 409 refusals.
+	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
+		replyInternalError(w, h.logger, "begin member removal tx", err)
+		return
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(r.Context(),
+		"DELETE FROM workspace_members WHERE id = ? AND workspace_id = ?",
+		memberID, workspaceID); err != nil {
 		replyInternalError(w, h.logger, "delete member", err)
+		return
+	}
+
+	// crew_members has no workspace_id of its own (prisma/schema.prisma:
+	// crew_id + user_id only), so the purge is scoped through crews.
+	// Unscoped, this would evict the user from crews in every OTHER workspace
+	// on the instance. Left behind, these rows keep granting: CrewRoleFromDB
+	// (rbac.go) folds a stale crew role into effectiveRole and re-elevates the
+	// user if they are ever re-added at a lower role, crew membership alone
+	// opens crew-owned pages (pages_authz.go) and crew credentials
+	// (credentials_loaders.go). Soft-deleted crews are included deliberately —
+	// a departing member should hold no membership row in this workspace at
+	// all, whatever state the crew is in.
+	if _, err := tx.ExecContext(r.Context(), `
+		DELETE FROM crew_members
+		WHERE user_id = ?
+		  AND crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)
+	`, memberUserID, workspaceID); err != nil {
+		replyInternalError(w, h.logger, "purge departing member's crew memberships", err)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit member removal", err)
 		return
 	}
 

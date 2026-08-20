@@ -169,6 +169,14 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}/members/{memberId}", roleManage, crews.RemoveMember)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/apply-avatar-style", roleManage, crews.ApplyAvatarStyle)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/container-status", authed(wsCtx(http.HandlerFunc(crews.ContainerStatus))))
+	// roleCreate, matching provision / rebuild / restart-agents: starting a
+	// container spends host memory and CPU, so it sits with the other
+	// operations that do, not with the reads.
+	r.authedMut("POST", "/api/v1/crews/{crewId}/container-start", roleCreate, crews.ContainerStart)
+	// Stop is roleCreate too, not a lower bar: stopping a crew a colleague
+	// is working in interrupts them, so it is not a read-shaped operation
+	// just because it frees memory rather than spending it.
+	r.authedMut("POST", "/api/v1/crews/{crewId}/container-stop", roleCreate, crews.ContainerStop)
 
 	// Crew Connections
 	conns := NewCrewConnectionHandler(r.db, r.logger)
@@ -513,6 +521,14 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// a crew is created or its config changes (CrewHandler.maybeAutoProvision),
 	// so it's ready before the first dispatch — no manual "Build now" step.
 	crews.SetProvisioner(provisioning)
+	// ContainerStart is the one EnsureCrewRuntime caller with no agent run
+	// behind it to report the activity, so it reports its own. Guarded on
+	// non-nil: assigning a nil *Orchestrator to the interface would make a
+	// non-nil interface value holding a nil pointer, and the nil check at
+	// the call site would not catch it.
+	if r.orch != nil {
+		crews.SetActivityNoter(r.orch)
+	}
 	// Mirror provisioning lifecycle (queued / building / complete /
 	// failed) into the unified Crew Journal alongside the existing WS
 	// broadcast. Skipped when no journal is wired (early bring-up).

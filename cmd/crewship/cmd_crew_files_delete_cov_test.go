@@ -13,6 +13,8 @@ import (
 )
 
 func TestCrewFilesDeleteRunE(t *testing.T) {
+	guardCLIState(t)
+
 	delPath := "/api/v1/crews/" + covCrewIDCli7 + "/files/delete"
 
 	// --yes skips the interactive confirmation; set it for every case that

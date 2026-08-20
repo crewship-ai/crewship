@@ -232,9 +232,24 @@ provenance, and the available provider vocabulary:
  "model":{"value":"claude-sonnet-4-20250514","source":"default","editable":true},
  "timeout_ms":{"value":30000,"source":"default","editable":true},
  "credential_id":{"value":"cred_...","source":"instance","editable":true},
- "overridden":true}], "providers":["anthropic","ollama","openai_compat"],
+ "overridden":true}], "providers":["anthropic","openai","ollama"],
  "judge_provider":"ollama","judge_model":"qwen3.5:9b","any_overridden":true}
 ```
+
+`providers` is **served from the LLM provider registry**, not written out here:
+`keepercfg.AuxProviders()` returns `llm.RegisteredProviders()` verbatim, in
+declaration order, so a picker rendering this array can never offer a provider
+the builder would refuse. Adding a registry row changes this response with no
+edit to the handler. See
+[Multi-provider LLM configuration](/guides/multi-provider-llm#the-provider-registry).
+
+<Note>
+  **`openai_compat` is not an aux-slot provider.** It belongs to the separate
+  *governance judge* vocabulary (`ollama`, `anthropic`, `openai_compat`) used by
+  `gov_model_provider` below — a different table, for a per-workspace model that
+  dials a tenant-supplied endpoint through the SSRF fence. Sending it to
+  `PUT /api/v1/admin/keeper/aux/{slot}` is a registry miss and a `400`.
+</Note>
 
 ### `PUT /api/v1/admin/keeper/aux/{slot}`
 

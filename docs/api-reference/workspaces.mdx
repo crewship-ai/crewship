@@ -381,10 +381,37 @@ Removes a workspace member. **You cannot remove the workspace OWNER.**
 { "success": true }
 ```
 
+Removal is not just the membership row. Two other things happen, in this
+order:
+
+- **Pages the member owns in this workspace are transferred to a crew**
+  first, per `docs/prd/pages.md` §7.1 rule 1b: the crew owning the most
+  panels on the page, else a crew the departing member belongs to. If any
+  page resolves to neither, the **whole removal is refused with `409`**
+  and nothing changes — reassign those pages by hand and retry.
+- **Every crew membership the user holds in this workspace is deleted**,
+  in the same transaction as the `workspace_members` row: both or
+  neither. Crew membership grants on its own (crew-owned pages, crew
+  credentials, and a per-crew role override folded into the effective
+  role), so it cannot outlive the workspace membership it was predicated
+  on.
+
+<Warning>
+Re-adding someone does **not** restore their crews. `POST .../members`
+creates a workspace membership and nothing else, so a returning member
+must be added back to each crew by hand, including any per-crew role
+override they held. This is deliberate: an override that survived a
+departure would silently re-elevate a user re-added at a lower role.
+</Warning>
+
+Crews in **other** workspaces are untouched — the purge is scoped through
+`crews.workspace_id`.
+
 | Status | Condition |
 |---|---|
 | `403` | Caller not `OWNER`/`ADMIN`, **or** target member is the `OWNER` |
 | `404` | `memberId` not found in this workspace |
+| `409` | The member owns a page that resolves to no crew (see above) |
 
 ---
 

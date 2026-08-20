@@ -92,6 +92,21 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		"crew_id": str(), "image": str(), "previous_digest": str(), "new_digest": str(),
 		"container_removed": boolean(),
 	}))
+	// container-start gets a real shape rather than the `action` envelope
+	// for the same reason refresh-image does: the caller's next step reads
+	// `container_id` off it, and `notices` is how it learns the crew came
+	// up WITHOUT something it declared — a fact an "ok, something
+	// happened" envelope would swallow.
+	add("POST", "/api/v1/crews/{crewId}/container-start", "RemainingCrewContainerStartedV1", object(map[string]any{
+		"crew_id": str(), "slug": str(), "container_id": str(), "status": str(),
+		"notices": array(str()),
+	}))
+	// Stop carries no container_id: the container it names is gone by the
+	// time the caller reads the answer, so returning one would invite a
+	// follow-up call against a dead id.
+	add("POST", "/api/v1/crews/{crewId}/container-stop", "RemainingCrewContainerStoppedV1", object(map[string]any{
+		"crew_id": str(), "slug": str(), "status": str(),
+	}))
 
 	// Agent lifecycle and subresource mutations.
 	add("POST", "/api/v1/agents", "RemainingAgentCreatedV1", ref("Agent"))

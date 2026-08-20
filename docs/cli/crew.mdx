@@ -36,6 +36,8 @@ crewship crew <subcommand> [flags]
 | `mcp` | Show or set MCP server configuration for a crew |
 | `config` | Manage runtime configuration (devcontainer, mise, runtime image) |
 | `credential-readiness` | Report credentials whose CLI is missing from the crew's container |
+| `start` | Start the crew's runtime container (builds its image first if needed) |
+| `stop` | Stop the crew's runtime container and its sidecar services |
 | `container-status` | Show the crew's runtime container state and whether its configuration is current |
 | `services` | Show the live sidecar service inventory |
 | `containers` | Show every live container the crew has, with state and usage |
@@ -756,6 +758,18 @@ crewship crew provision <slug-or-id> --no-watch
 |------|------|---------|-------------|
 | `--no-watch` | `bool` | `false` | Do not watch progress; return immediately after triggering. |
 
+<Warning>
+**Provision builds an image. It does not start a container.**
+
+`Crew "x" provisioned.` means the image exists — nothing is running.
+The container is created lazily on the crew's first agent run, and
+`crewship crew container-status <crew>` reports `stopped` until then. On
+a cache hit provision prints `Using cached image` and finishes in
+seconds having started nothing at all.
+
+To start the container, use [`crewship crew start`](#crewship-crew-start).
+</Warning>
+
 ### `crewship crew provision status`
 
 Check provisioning status for a crew. Prints the current status, cached image tag, config hash, and resolved devcontainer config. Pass `--watch` to stream live progress until the build completes. Exit code is always `0` — branch on the `Status` field (`ready`, `building`, `failed`, `not-provisioned`) in downstream scripts rather than relying on the exit code.
@@ -785,6 +799,101 @@ crewship crew rebuild <slug-or-id> --no-watch
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--no-watch` | `bool` | `false` | Do not watch progress; return immediately after triggering. |
+
+---
+
+## `crewship crew start`
+
+Start a crew's runtime container and wait until it is running.
+
+```bash
+crewship crew start <slug-or-id>
+crewship crew start <slug-or-id> --timeout 30m
+```
+
+```
+Starting crew "uctarna"…
+Container: running
+ID:        3f9a1c02b7de
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--timeout` | `duration` | `20m` | Max wait for the container to come up. The default clears the server's own 15-minute provisioning ceiling, so a cold crew's image build is not cut off mid-flight; raise it for a slow daemon or a very large base image. |
+
+This is **not** `crew provision`. Provision builds the container *image*;
+this creates and starts the container itself, running the same sequence
+an agent run performs — the crew's provisioned image, its mounts, env,
+capabilities and resource limits, and any declared sidecar services. A
+crew with no image yet is provisioned first, so `start` works on a cold
+crew (that build can take minutes).
+
+**Idempotent.** Starting a running crew returns its container and exits
+`0`, so a deploy script can start-then-write without branching.
+
+Reach for it when you need the container up without spending tokens:
+
+```bash
+crewship crew start uctarna
+crewship crew files save uctarna shared/scripts/archiv.py --file scripts/archiv.py
+```
+
+Files under `shared/` are owned by the container user, so the server
+replays the write inside the container. On a stopped crew that write
+fails with `409 file is owned by the crew runtime` — this is the command
+that answers it.
+
+Anything the start had to do without (a container provider with no
+sidecar support, for instance) is printed under `Notices:` rather than
+logged, because "up, but without its declared postgres" changes what you
+do next.
+
+| Exit | Meaning |
+|------|---------|
+| `0` | Container is running |
+| non-zero | `503` no container runtime on this server, or `502` the image build or the start itself failed |
+
+---
+
+## `crewship crew stop`
+
+Stop a crew's runtime container, along with any sidecar services it
+declared.
+
+```bash
+crewship crew stop <slug-or-id>
+```
+
+```
+Container: stopped
+```
+
+The crew's image and its shared files are untouched — only the running
+container goes away. The next agent run (or `crewship crew start`) brings
+it back.
+
+Because container memory and CPU limits are fixed at container-create
+time, this is also how a resize takes effect: `crew stop` then `crew
+start` recreates the container with the crew's current limits. See
+[`container-status`](#crewship-crew-container-status), whose
+`config_drift` block reports when a running container no longer matches
+its crew.
+
+Stopping an already-stopped crew succeeds — the caller asked for a
+stopped crew and got one, so a script never has to bracket the call in a
+status check.
+
+| Exit | Meaning |
+|------|---------|
+| `0` | Container is stopped |
+| non-zero | `503` no container runtime on this server, or `502` crewshipd refused the stop |
+
+<Note>
+Sidecars stop with the crew. A crew that declares `services:` gets them
+stopped on the same call, which is the point — a "stopped" crew whose
+Postgres still held its memory would not be stopped in any sense the
+operator meant. Named volumes are **not** removed, so data survives.
+</Note>
 
 ---
 

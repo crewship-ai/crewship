@@ -49,6 +49,8 @@ func TestIssueWorkflow_NoAuth(t *testing.T) {
 }
 
 func TestIssueCommentRunE(t *testing.T) {
+	guardCLIState(t)
+
 	commentPath := "/api/v1/crews/" + covCrewIDCli7 + "/issues/ENG-1/comments"
 
 	t.Run("body from positional args", func(t *testing.T) {
@@ -193,6 +195,8 @@ func TestIssueStartStopRunE(t *testing.T) {
 }
 
 func TestIssueReviewRunE(t *testing.T) {
+	guardCLIState(t)
+
 	reviewPath := "/api/v1/crews/" + covCrewIDCli7 + "/issues/ENG-4/review"
 
 	resetReviewFlags := func(t *testing.T) {
@@ -369,6 +373,8 @@ func TestIssueStartStopReview_FetchIssueErrors(t *testing.T) {
 }
 
 func TestIssueStopReview_PostRejected(t *testing.T) {
+	guardCLIState(t)
+
 	t.Run("stop rejection", func(t *testing.T) {
 		s := clitest.NewStubServer()
 		defer s.Close()
