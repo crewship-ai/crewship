@@ -44,9 +44,22 @@ var errCrewSlugConflict = errors.New("crew slug already exists")
 // operator customise a shipped template in place instead of renaming it —
 // renaming would break every reference to the old slug.
 //
+// The `is_builtin = 1 AND workspace_id IS NULL` half is one condition, not
+// two spellings of the same thing. is_builtin is a plain INTEGER DEFAULT 0
+// with no CHECK tying it to workspace_id, so a WORKSPACE-OWNED row carrying
+// is_builtin = 1 is expressible — and under the pre-#1796 predicate
+// (`is_builtin = 1 OR workspace_id = ?`) it matched for every tenant, and
+// sorted at 0, ahead of the genuine builtin and tied with the caller's own
+// override. The global UNIQUE is what used to keep that unreachable: a
+// foreign row could not share a slug with a builtin. Splitting it into the
+// two partial indexes is what makes the collision expressible, so the
+// predicate is written to match those indexes exactly — the builtin namespace
+// is `workspace_id IS NULL`, everything else belongs to exactly one tenant.
+// Covered by crew_templates_foreign_builtin_test.go.
+//
 // Takes two placeholders, in order: slug, workspace id.
 const crewTemplateBySlugScope = `
-	WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)
+	WHERE slug = ? AND ((is_builtin = 1 AND workspace_id IS NULL) OR workspace_id = ?)
 	ORDER BY (workspace_id IS NULL)
 	LIMIT 1`
 
@@ -336,11 +349,19 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	// one Get and Deploy refuse to return, since those resolve to the
 	// override. Only rows the caller's own workspace owns shadow anything;
 	// another tenant's template is not visible here and cannot hide a builtin.
+	//
+	// The visibility predicate is the list-shaped spelling of
+	// crewTemplateBySlugScope and has to stay identical to it: a row owned by
+	// ANOTHER workspace that carries is_builtin = 1 is expressible (see the
+	// note there), and `is_builtin = 1 OR workspace_id = ?` admits it. The
+	// NOT EXISTS below would not save us either — it only drops builtins with
+	// workspace_id IS NULL — so the foreign row would come back as a second
+	// copy of a slug the caller has already overridden.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT ct.id, ct.name, ct.slug, ct.description, ct.icon, ct.color,
 		       ct.category, ct.agents_json, ct.is_builtin, ct.created_at
 		FROM crew_templates ct
-		WHERE (ct.is_builtin = 1 OR ct.workspace_id = ?)
+		WHERE ((ct.is_builtin = 1 AND ct.workspace_id IS NULL) OR ct.workspace_id = ?)
 		  AND NOT (ct.workspace_id IS NULL AND EXISTS (
 		        SELECT 1 FROM crew_templates ov
 		        WHERE ov.slug = ct.slug AND ov.workspace_id = ?))

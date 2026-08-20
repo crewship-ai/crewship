@@ -1,8 +1,15 @@
 package database
 
 import (
+	"context"
+	"database/sql"
+	"io"
+	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
 // crew_templates.slug carried a global UNIQUE from v23 (`slug TEXT NOT NULL
@@ -241,6 +248,106 @@ func TestCrewTemplateWorkspaceCascadeSurvivedRebuild(t *testing.T) {
 	if n != 0 {
 		t.Errorf("%d template(s) outlived their workspace — the rebuild dropped "+
 			"ON DELETE CASCADE from workspace_id", n)
+	}
+}
+
+// crewTemplateScopeVersion locates the rebuild in the registry so the orphan
+// test below can land the schema one version short of it.
+func crewTemplateScopeVersion() int {
+	for _, m := range migrations {
+		if m.name == "crew_template_slug_workspace_scope" {
+			return m.version
+		}
+	}
+	return 0
+}
+
+// TestCrewTemplateRebuildSurvivesOrphanedWorkspaceRow is the boot-safety half.
+// The rebuild copies rows into a table whose workspace_id carries a real FK, on
+// a connection that has foreign_keys ON — so a row whose workspace_id names a
+// workspace that is already gone fails the copy with SQLITE_CONSTRAINT_FOREIGNKEY
+// (787) and takes the whole startup down. Nobody can log in to fix it, and the
+// error names neither the table nor the row.
+//
+// Such a row should not exist — ON DELETE CASCADE has been declared on
+// workspace_id since v26 — but "should not exist" is not the same as "cannot",
+// and a row that outlived its workspace under `PRAGMA foreign_keys=OFF` is
+// exactly the class 20260820074400_issue_counters_crew_not_null guards against
+// with an explicit EXISTS. This one does the same.
+func TestCrewTemplateRebuildSurvivesOrphanedWorkspaceRow(t *testing.T) {
+	t.Parallel()
+
+	version := crewTemplateScopeVersion()
+	if version == 0 {
+		t.Fatal("no migration named `crew_template_slug_workspace_scope` in the registry")
+	}
+
+	path := filepath.Join(t.TempDir(), "orphan.db")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.Background()
+
+	// Phase 1: land the pre-rebuild schema on a handle with foreign_keys OFF,
+	// which is the only way to manufacture the orphan at all.
+	loose, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(OFF)")
+	if err != nil {
+		t.Fatalf("open loose handle: %v", err)
+	}
+	if err := applyMigrationsUpTo(ctx, loose, version-1, logger); err != nil {
+		t.Fatalf("migrate to the version before the rebuild: %v", err)
+	}
+	mustExec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := loose.ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("seed %q: %v", query, err)
+		}
+	}
+	mustExec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws_live','Live','ws-live')`)
+	mustExec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws_gone','Gone','ws-gone')`)
+	mustExec(`INSERT INTO crew_templates (id, name, slug, category, agents_json, is_builtin, workspace_id)
+		VALUES ('ct_live','Live Team','live-team','GENERAL','[]',0,'ws_live')`)
+	mustExec(`INSERT INTO crew_templates (id, name, slug, category, agents_json, is_builtin, workspace_id)
+		VALUES ('ct_orphan','Orphan Team','orphan-team','GENERAL','[]',0,'ws_gone')`)
+	mustExec(`INSERT INTO crew_templates (id, name, slug, category, agents_json, is_builtin, workspace_id)
+		VALUES ('ct_builtin','Shipped','shipped-team','GENERAL','[]',1,NULL)`)
+	// No cascade fires: this handle has foreign_keys OFF.
+	mustExec(`DELETE FROM workspaces WHERE id = 'ws_gone'`)
+	if err := loose.Close(); err != nil {
+		t.Fatalf("close loose handle: %v", err)
+	}
+
+	// Phase 2: boot the way the server boots — foreign_keys ON.
+	db, err := Open("file:" + path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := Migrate(ctx, db.DB, logger); err != nil {
+		t.Fatalf("the rebuild refused to boot over an orphaned template row: %v\n"+
+			"a row whose workspace_id names a workspace that no longer exists must be "+
+			"dropped by the copy, not handed to the FK checker — the failure is a boot "+
+			"failure with no way in to repair it", err)
+	}
+
+	var live, orphan, builtin int
+	for _, tc := range []struct {
+		id  string
+		out *int
+	}{{"ct_live", &live}, {"ct_orphan", &orphan}, {"ct_builtin", &builtin}} {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM crew_templates WHERE id = ?`, tc.id).Scan(tc.out); err != nil {
+			t.Fatalf("count %s: %v", tc.id, err)
+		}
+	}
+	if live != 1 {
+		t.Error("the template of a LIVE workspace did not make the trip — the guard is " +
+			"dropping more than the orphans")
+	}
+	if builtin != 1 {
+		t.Error("a builtin (workspace_id NULL) did not make the trip — NULL references " +
+			"nothing and must never be treated as a dangling reference")
+	}
+	if orphan != 0 {
+		t.Errorf("the orphaned template survived the rebuild (%d row(s)) — it is invisible "+
+			"to every scoped query and rides along in every backup", orphan)
 	}
 }
 

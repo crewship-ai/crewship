@@ -47,8 +47,19 @@
 -- Together they are what the old constraint should have been. Note this is a
 -- widening in one direction only: any row set that satisfied the global
 -- UNIQUE(slug) satisfies both of these by construction, so the copy below
--- cannot fail on existing data. There is no backfill and no row class to
--- drop — unlike the issue_counters rebuild, every row makes the trip.
+-- cannot fail on a UNIQUE. There is no backfill.
+--
+-- One row class does not make the trip, and it is the same unreachable class
+-- 20260820074400_issue_counters_crew_not_null drops:
+--
+--   * workspace_id naming a workspace that no longer exists — an orphan the
+--     declared ON DELETE CASCADE says should already be gone. It survives only
+--     where the row outlived its workspace under `PRAGMA foreign_keys=OFF`.
+--     Copying it would fail the FK check on a target that has foreign_keys ON
+--     and take the whole boot down with it (SQLITE_CONSTRAINT_FOREIGNKEY, 787)
+--     — the migration runner has no way to attribute that to one stale row, so
+--     the guard is in the SELECT rather than left to the engine. Builtins
+--     (workspace_id IS NULL) are unaffected: NULL references nothing.
 --
 -- # Precedence: a workspace template SHADOWS a builtin of the same slug
 --
@@ -61,6 +72,21 @@
 -- onboarding.go's crew-name default) could read it with no tie-break. After
 -- this migration a builtin and a workspace template can both match, so the
 -- rule has to be stated rather than inherited from the schema:
+--
+-- That predicate also has to be RETIGHTENED, not merely ordered. is_builtin is
+-- a plain INTEGER with no CHECK tying it to workspace_id, so a row owned by one
+-- workspace can carry is_builtin = 1 — and `is_builtin = 1 OR workspace_id = ?`
+-- then matches it for EVERY tenant. The old global UNIQUE is what kept that
+-- harmless: such a row could not share a slug with a builtin, so it could not
+-- be reached under a slug anyone else asks for. The two partial indexes below
+-- permit exactly that collision, so every reader now says
+--
+--     ((is_builtin = 1 AND workspace_id IS NULL) OR workspace_id = ?)
+--
+-- which is the predicate form of those two indexes: the builtin namespace is
+-- `workspace_id IS NULL`, and every other row belongs to one tenant. The same
+-- correction applies to the seeder's UPDATE in seed_crew_templates.go, which
+-- addresses the builtin namespace and must not reach into a tenant's rows.
 --
 --     the more specific row wins — a workspace template of slug X shadows the
 --     builtin of slug X for that workspace, and only for that workspace.
@@ -101,10 +127,12 @@ CREATE TABLE crew_templates_v2 (
 INSERT INTO crew_templates_v2 (id, name, slug, description, icon, color,
                                category, agents_json, is_builtin,
                                created_at, updated_at, workspace_id)
-SELECT id, name, slug, description, icon, color,
-       category, agents_json, is_builtin,
-       created_at, updated_at, workspace_id
-FROM crew_templates;
+SELECT ct.id, ct.name, ct.slug, ct.description, ct.icon, ct.color,
+       ct.category, ct.agents_json, ct.is_builtin,
+       ct.created_at, ct.updated_at, ct.workspace_id
+FROM crew_templates ct
+WHERE ct.workspace_id IS NULL
+   OR EXISTS (SELECT 1 FROM workspaces w WHERE w.id = ct.workspace_id);
 
 DROP TABLE crew_templates;
 

@@ -155,11 +155,22 @@ func SeedBuiltinCrewTemplates(ctx context.Context, db *sql.DB, logger *slog.Logg
 		// Try update first — touches only builtin rows; rowsAffected=0 means we
 		// need to insert. Avoids ON CONFLICT(slug) which would also update a
 		// user-created row that happened to share the slug.
+		//
+		// `workspace_id IS NULL` is what makes "builtin row" mean the row this
+		// seeder owns. is_builtin is a plain column with no CHECK tying it to
+		// workspace_id, so a workspace-owned row carrying is_builtin = 1 is
+		// expressible, and matching it here would rewrite another tenant's
+		// template with the embedded roster — and, because rowsAffected would
+		// then be non-zero, skip inserting the genuine builtin entirely. Under
+		// the old global UNIQUE(slug) such a row at least excluded the builtin;
+		// after #1796 scoped that constraint the two can coexist, so the
+		// namespace this statement addresses has to be named explicitly. It is
+		// the same namespace idx_crew_templates_global_slug indexes.
 		res, err := db.ExecContext(ctx, `
 			UPDATE crew_templates
 			SET name = ?, description = ?, icon = ?, color = ?,
 			    category = ?, agents_json = ?, updated_at = ?
-			WHERE slug = ? AND is_builtin = 1`,
+			WHERE slug = ? AND is_builtin = 1 AND workspace_id IS NULL`,
 			bt.Name, bt.Description, bt.Icon, bt.Color, bt.Category, string(agentsJSON), now, bt.Slug)
 		if err != nil {
 			logger.Warn("failed to update builtin crew template", "slug", bt.Slug, "error", err)
