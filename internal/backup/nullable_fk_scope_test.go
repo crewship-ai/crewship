@@ -69,27 +69,34 @@ func TestScopedFilters_NeverTraverseANullableFK(t *testing.T) {
 			continue
 		}
 		filter, _ := st.WorkspaceScopeFilter("ws")
-		col := leadingFilterColumn(filter)
-		if col == "" {
-			continue
-		}
-		// A nullable workspace_id filtered DIRECTLY is not this bug. There,
-		// NULL means the row belongs to no workspace — a global template, an
-		// instance-wide setting — and excluding it from a workspace bundle is
-		// the correct answer, not a silent loss. What this test is about is an
-		// INDIRECT path: a row that does belong to the workspace, reached
-		// through a column that happens to be NULL for it.
-		if col == "workspace_id" {
-			continue
-		}
-		notNull, err := columnIsNotNull(ctx, db, st.Name, col)
-		if err != nil {
-			t.Fatalf("inspect %s.%s: %v", st.Name, col, err)
-		}
-		if !notNull {
-			offenders = append(offenders, fmt.Sprintf(
-				"  %s is scoped through NULLABLE %s.%s\n    filter: %s",
-				st.Name, st.Name, col, filter))
+		// EVERY hop, not just the leading one. A filter reads
+		//
+		//   a_id IN (SELECT id FROM a WHERE b_id IN (SELECT id FROM b WHERE …))
+		//
+		// and it omits a row when ANY column in that chain is NULL, not only
+		// the outermost. Checking the first hop alone passes a table whose own
+		// FK is NOT NULL but whose parent was reached through a nullable one —
+		// a shape the NOT NULL-only first walk cannot produce, but the second
+		// walk can, and it loses rows exactly as quietly.
+		for _, edge := range st.JoinPath {
+			// A nullable workspace_id filtered DIRECTLY is not this bug. There,
+			// NULL means the row belongs to no workspace — a global template, an
+			// instance-wide setting — and excluding it from a workspace bundle is
+			// the correct answer, not a silent loss. What this test is about is an
+			// INDIRECT path: a row that does belong to the workspace, reached
+			// through a column that happens to be NULL for it.
+			if edge.ToTable == "workspaces" {
+				continue
+			}
+			notNull, err := columnIsNotNull(ctx, db, edge.FromTable, edge.FromColumn)
+			if err != nil {
+				t.Fatalf("inspect %s.%s: %v", edge.FromTable, edge.FromColumn, err)
+			}
+			if !notNull {
+				offenders = append(offenders, fmt.Sprintf(
+					"  %s is scoped through NULLABLE %s.%s\n    filter: %s",
+					st.Name, edge.FromTable, edge.FromColumn, filter))
+			}
 		}
 	}
 
@@ -100,21 +107,6 @@ func TestScopedFilters_NeverTraverseANullableFK(t *testing.T) {
 			"add an exception list: the failure it prevents is a backup that succeeds and restores "+
 			"less than it was given.", strings.Join(offenders, "\n"))
 	}
-}
-
-// leadingFilterColumn pulls the column name out of the `"col" IN (SELECT …)`
-// shape WorkspaceScopeFilter produces. A filter of another shape returns "" and
-// is skipped rather than guessed at.
-func leadingFilterColumn(filter string) string {
-	filter = strings.TrimSpace(filter)
-	if !strings.HasPrefix(filter, `"`) {
-		return ""
-	}
-	end := strings.Index(filter[1:], `"`)
-	if end <= 0 {
-		return ""
-	}
-	return filter[1 : end+1]
 }
 
 func columnIsNotNull(ctx context.Context, db *sql.DB, table, column string) (bool, error) {

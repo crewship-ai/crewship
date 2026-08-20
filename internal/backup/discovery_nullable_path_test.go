@@ -146,3 +146,138 @@ func TestDiscoverScopedTables_IsDeterministicAcrossRuns(t *testing.T) {
 			"would take it out of the --replace wipe")
 	}
 }
+
+// newAncestorNullDB is the hazard a first-hop-only check misses: `leaf` has two
+// NOT NULL foreign keys, so whichever one is chosen the leading column looks
+// clean — but one of the parents was itself reached through a nullable column,
+// and a filter that goes that way drops every leaf whose p1 has no workspace.
+// Nullability has to be counted over the WHOLE path or it is not counted.
+func newAncestorNullDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+t.TempDir()+"/ancestor.db?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		CREATE TABLE roots (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id)
+		);
+		-- Two hops from workspaces, but one of them is nullable.
+		CREATE TABLE p1 (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT REFERENCES workspaces(id)
+		);
+		-- Three hops from workspaces, and every one of them is NOT NULL.
+		CREATE TABLE p2 (
+			id TEXT PRIMARY KEY,
+			root_id TEXT NOT NULL REFERENCES roots(id)
+		);
+		CREATE TABLE leaf (
+			id TEXT PRIMARY KEY,
+			p1_id TEXT NOT NULL REFERENCES p1(id),
+			p2_id TEXT NOT NULL REFERENCES p2(id)
+		);
+	`); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	return db
+}
+
+func TestDiscoverScopedTables_CountsNullableHopsAcrossTheWholePath(t *testing.T) {
+	scoped, err := DiscoverScopedTables(context.Background(), newAncestorNullDB(t))
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	const want = `"p2_id" IN (SELECT "id" FROM "p2" WHERE "root_id" IN ` +
+		`(SELECT "id" FROM "roots" WHERE "workspace_id" = ?))`
+	if got := filterFor(t, scoped, "leaf"); got != want {
+		t.Errorf("leaf filter:\n  got  %s\n  want %s\n"+
+			"the p1 route is one hop shorter and its leading column is NOT NULL, so a "+
+			"check that stops at the first hop calls it clean — but p1.workspace_id is "+
+			"nullable and every leaf under an unscoped p1 falls out of the bundle", got, want)
+	}
+}
+
+// A table with its own foreign key into workspaces is anchored on that column
+// even when a NOT NULL route to some other workspace-scoped parent exists,
+// because DumpWorkspace scopes such a table by `workspace_id = ?` and a
+// --replace DELETE that disagreed would remove rows the bundle never carried.
+// credential_audit is the live case: nullable workspace_id, NOT NULL
+// credential_id.
+func TestDiscoverScopedTables_AnchorsOnItsOwnWorkspaceFK(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+t.TempDir()+"/anchor.db?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		CREATE TABLE creds (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id)
+		);
+		CREATE TABLE audit (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+			cred_id TEXT NOT NULL REFERENCES creds(id) ON DELETE CASCADE
+		);
+	`); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	scoped, err := DiscoverScopedTables(context.Background(), db)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	const want = `"workspace_id" = ?`
+	if got := filterFor(t, scoped, "audit"); got != want {
+		t.Errorf("audit filter:\n  got  %s\n  want %s\n"+
+			"DumpWorkspace short-circuits any table carrying workspace_id to that column; "+
+			"discovery choosing another route makes the --replace DELETE wider than the "+
+			"bundle that replaces it", got, want)
+	}
+}
+
+// Where two paths are otherwise equal, the CASCADE one wins. page_panels is the
+// live case: NOT NULL to its page (CASCADE) and NOT NULL to its owning crew
+// (RESTRICT), both two hops out. The page is the parent the row cannot outlive,
+// and scoping by containment keeps a page and its panels in the same bundle
+// without depending on an API invariant about where a crew may live.
+func TestDiscoverScopedTables_PrefersTheCascadingParent(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+t.TempDir()+"/cascade.db?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		CREATE TABLE crews (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id)
+		);
+		CREATE TABLE pages (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id)
+		);
+		-- owner_crew_id sorts BEFORE page_id, so the alphabetical last resort
+		-- would take it. ON DELETE is the reason it does not.
+		CREATE TABLE panels (
+			id TEXT PRIMARY KEY,
+			owner_crew_id TEXT NOT NULL REFERENCES crews(id) ON DELETE RESTRICT,
+			page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE
+		);
+	`); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	scoped, err := DiscoverScopedTables(context.Background(), db)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	const want = `"page_id" IN (SELECT "id" FROM "pages" WHERE "workspace_id" = ?)`
+	if got := filterFor(t, scoped, "panels"); got != want {
+		t.Errorf("panels filter:\n  got  %s\n  want %s\n"+
+			"a panel is deleted with its page, not with the crew that owns it", got, want)
+	}
+}

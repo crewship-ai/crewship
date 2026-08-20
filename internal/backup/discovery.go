@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // discovery.go — runtime schema introspection. Walks SQLite FK graph
@@ -35,8 +36,19 @@ import (
 // NOT NULL foreign keys, which yields a filter that is TOTAL over the
 // table: every row is either in the workspace or in another one, and
 // none falls through. The second pass picks up whatever the first
-// could not reach, where a nullable hop is the only hop there is.
-// A longer NOT NULL path always beats a shorter nullable one.
+// could not reach, ranking what is left by how many nullable hops the
+// WHOLE path carries — a NOT NULL column hanging off a parent that was
+// itself reached through a nullable one loses rows just the same. A
+// longer NOT NULL path always beats a shorter nullable one.
+//
+// Two rules sit above that, and both are about agreeing with somebody
+// else. A table with its own foreign key into `workspaces` is anchored
+// on that column even when it is nullable, because DumpWorkspace
+// short-circuits to `workspace_id = ?` for any table carrying it and a
+// `--replace` DELETE that scopes differently would remove rows the
+// bundle never contained. And where two paths are otherwise equal, an
+// ON DELETE CASCADE edge wins: a row the database deletes with its
+// parent belongs to that parent, and belonging is what scope means.
 //
 // The walk is also LEVEL-SYNCHRONOUS and its adjacency is built in
 // sorted table order, because two parents at the same depth used to
@@ -200,22 +212,27 @@ func discoverScopedTables(ctx context.Context, q scopeQuerier) ([]ScopedTable, e
 	if err != nil {
 		return nil, fmt.Errorf("backup: discover scoped tables: %w", err)
 	}
-	// reverseFK[parent] = edges that name `parent` as ToTable, and
-	// notNull[table][column] = "this column is declared NOT NULL".
+	// outgoing[table] = that table's own FK edges, in the order
+	// PRAGMA reports them; notNull[table][column] and cascade[table][column]
+	// answer "declared NOT NULL" and "declared ON DELETE CASCADE".
 	//
-	// Both are filled by iterating allTables in the sorted order
-	// listAllTables returns, so every adjacency list is in a stable
-	// order regardless of Go's map iteration.
-	reverseFK := map[string][]ScopeEdge{}
+	// All three are filled by iterating allTables in the sorted order
+	// listAllTables returns, so nothing downstream depends on Go's map
+	// iteration order.
+	outgoing := map[string][]ScopeEdge{}
 	notNull := map[string]map[string]bool{}
+	cascade := map[string]map[string]bool{}
 	for _, t := range allTables {
 		edges, err := tableFKEdges(ctx, q, t)
 		if err != nil {
 			return nil, fmt.Errorf("backup: discover scoped tables: introspect %q: %w", t, err)
 		}
-		for _, e := range edges {
-			reverseFK[e.ToTable] = append(reverseFK[e.ToTable], e)
+		outgoing[t] = edges
+		onDelete, err := cascadingFKColumns(ctx, q, t)
+		if err != nil {
+			return nil, fmt.Errorf("backup: discover scoped tables: fk actions of %q: %w", t, err)
 		}
+		cascade[t] = onDelete
 		cols, err := notNullColumns(ctx, q, t)
 		if err != nil {
 			return nil, fmt.Errorf("backup: discover scoped tables: columns of %q: %w", t, err)
@@ -223,50 +240,90 @@ func discoverScopedTables(ctx context.Context, q scopeQuerier) ([]ScopedTable, e
 		notNull[t] = cols
 	}
 
-	// visited[table] = the JoinPath we settled on. `workspaces` is the
-	// anchor and carries the empty path.
-	visited := map[string][]ScopeEdge{"workspaces": nil}
+	// The walk is a shortest-path relaxation, not a plain BFS, because
+	// the cost being minimised is not distance. cost[table] is
+	// (nullable hops, total hops) and a table's assignment is REVISED
+	// whenever a cheaper route turns up — which is the whole point: a
+	// breadth-first walk commits a table the first level it is reachable
+	// from, and the cheaper route usually lies through a parent that is
+	// itself further out and therefore not resolved yet.
+	path := map[string][]ScopeEdge{"workspaces": nil}
+	cost := map[string]scopeCost{"workspaces": {}}
+	pinned := map[string]bool{"workspaces": true}
+	rank := scopeRank{path: path, cost: cost, notNull: notNull, cascade: cascade}
 
-	// walk expands `visited` one level at a time. requireNotNull=true
-	// is the first pass: it only follows NOT NULL foreign keys, so a
-	// table it reaches gets a filter that holds for EVERY one of its
-	// rows. The second pass (false) fills in the tables for which no
-	// such chain exists at all.
-	walk := func(requireNotNull bool) {
-		frontier := sortedKeys(visited)
-		for len(frontier) > 0 {
-			// Collect every candidate edge for the whole level BEFORE
-			// choosing any, so no child is claimed by whichever parent
-			// happened to be dequeued first.
-			best := map[string]ScopeEdge{}
-			for _, parent := range frontier {
-				for _, edge := range reverseFK[parent] {
-					if _, seen := visited[edge.FromTable]; seen {
-						continue
-					}
-					if requireNotNull && !notNull[edge.FromTable][edge.FromColumn] {
-						continue
-					}
-					cur, have := best[edge.FromTable]
-					if !have || betterScopeEdge(edge, cur, visited, notNull) {
-						best[edge.FromTable] = edge
-					}
-				}
+	// A table with its OWN foreign key into `workspaces` is anchored on
+	// that column and nothing else — even when the column is nullable,
+	// and even when a cheaper route exists. Hence `pinned`: no later
+	// relaxation may move it.
+	//
+	// Not a preference, a requirement. DumpWorkspace short-circuits to
+	// `workspace_id = ?` for any table carrying that column (see
+	// dbdump.go), while ReplaceWorkspaceContents scopes its DELETE by
+	// the path found here. Let the two disagree and `--replace` deletes
+	// rows the bundle it is making room for never contained —
+	// credential_audit, whose workspace_id is nullable and whose
+	// credential_id is not, is exactly that shape.
+	//
+	// A NULL here is also not the loss this file is about: it means the
+	// row belongs to no workspace, and leaving it out of a workspace
+	// bundle is the right answer. See the note in
+	// TestScopedFilters_NeverTraverseANullableFK.
+	for _, table := range allTables {
+		var anchor *ScopeEdge
+		for _, edge := range outgoing[table] {
+			if edge.ToTable != "workspaces" {
+				continue
 			}
-			next := sortedKeys(best)
-			for _, table := range next {
-				edge := best[table]
-				parentPath := visited[edge.ToTable]
-				path := make([]ScopeEdge, 0, len(parentPath)+1)
-				path = append(path, edge)
-				path = append(path, parentPath...)
-				visited[table] = path
+			if anchor == nil || rank.betterEdge(edge, *anchor) {
+				e := edge
+				anchor = &e
 			}
-			frontier = next
+		}
+		if anchor != nil {
+			path[table] = []ScopeEdge{*anchor}
+			cost[table] = scopeCost{nullHops: boolToInt(!notNull[table][anchor.FromColumn]), hops: 1}
+			pinned[table] = true
 		}
 	}
-	walk(true)
-	walk(false)
+
+	// Relax until nothing improves. Each pass sweeps the tables in sorted
+	// order and each assignment strictly lowers that table's cost, so the
+	// loop settles; the bound is belt-and-braces against a comparison bug
+	// turning a cycle in the FK graph into a hang.
+	for round := 0; round <= len(allTables); round++ {
+		changed := false
+		for _, table := range allTables {
+			if pinned[table] {
+				continue
+			}
+			for _, edge := range outgoing[table] {
+				parentPath, resolved := path[edge.ToTable]
+				if !resolved {
+					continue
+				}
+				// Never route a table through a path that already passes
+				// through it: the filter would be circular and the FK graph
+				// does contain cycles.
+				if pathVisits(parentPath, table) {
+					continue
+				}
+				if _, have := path[table]; have && !rank.betterEdge(edge, path[table][0]) {
+					continue
+				}
+				next := make([]ScopeEdge, 0, len(parentPath)+1)
+				next = append(next, edge)
+				next = append(next, parentPath...)
+				path[table] = next
+				cost[table] = rank.costVia(edge)
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	visited := path
 
 	// Result excludes `workspaces` itself (it's the anchor, not a
 	// "scoped" table). Sort for determinism.
@@ -281,27 +338,72 @@ func discoverScopedTables(ctx context.Context, q scopeQuerier) ([]ScopedTable, e
 	return out, nil
 }
 
-// betterScopeEdge reports whether candidate `a` is a better way to
-// reach a.FromTable than the incumbent `b`. Both edges are known to
-// point at tables that are already resolved, so the comparison is
-// total and does not depend on iteration order:
+// scopeCost is what the walk minimises for each table, in order:
+// nullable hops first, then total hops.
 //
-//  1. fewer hops back to `workspaces` — a shorter filter is a cheaper
-//     one, and among correct filters brevity is the tiebreak we want;
-//  2. a NOT NULL column beats a nullable one. Within the first walk
-//     every candidate is NOT NULL so this never fires; in the second
-//     it picks the least-lossy of the remaining options;
-//  3. column then target name, alphabetically — an arbitrary but
-//     STABLE last resort, which is the whole point.
-func betterScopeEdge(a, b ScopeEdge, visited map[string][]ScopeEdge, notNull map[string]map[string]bool) bool {
-	aHops, bHops := len(visited[a.ToTable]), len(visited[b.ToTable])
-	if aHops != bHops {
-		return aHops < bHops
+// Nullable hops come first because they are the only part of a filter
+// that can be WRONG. Every hop of a path costs a subquery; a NULLABLE
+// hop costs rows. So a four-hop path with no nullable column beats a
+// one-hop path with one, every time.
+type scopeCost struct {
+	nullHops int
+	hops     int
+}
+
+func (c scopeCost) cheaperThan(o scopeCost) bool {
+	if c.nullHops != o.nullHops {
+		return c.nullHops < o.nullHops
 	}
-	aNotNull := notNull[a.FromTable][a.FromColumn]
-	bNotNull := notNull[b.FromTable][b.FromColumn]
-	if aNotNull != bNotNull {
-		return aNotNull
+	return c.hops < o.hops
+}
+
+// scopeRank holds what the walk needs to compare two candidate edges.
+// Bundled into one value because every criterion below reads a
+// different map and threading four of them through a comparison
+// function is how the criteria get quietly reordered.
+type scopeRank struct {
+	path    map[string][]ScopeEdge
+	cost    map[string]scopeCost
+	notNull map[string]map[string]bool
+	cascade map[string]map[string]bool
+}
+
+// costVia is what reaching edge.FromTable would cost if it went through
+// this edge. The parent must already be resolved.
+func (r scopeRank) costVia(edge ScopeEdge) scopeCost {
+	parent := r.cost[edge.ToTable]
+	return scopeCost{
+		nullHops: parent.nullHops + boolToInt(!r.notNull[edge.FromTable][edge.FromColumn]),
+		hops:     parent.hops + 1,
+	}
+}
+
+// betterEdge reports whether reaching a.FromTable through `a` beats
+// reaching it through the incumbent `b`. Both edges point at tables
+// that are already resolved, so the comparison is total and does not
+// depend on iteration order. In priority:
+//
+//  1. the cheaper scopeCost — fewer nullable hops, then fewer hops.
+//     Nullability is measured over the WHOLE path, not the edge,
+//     because a NOT NULL column hanging off a parent that was itself
+//     reached through a nullable one loses rows just the same.
+//  2. ON DELETE CASCADE over anything else. A row the database deletes
+//     with its parent belongs to that parent, and belonging is what
+//     scope means: page_panels can be reached through its page
+//     (CASCADE) or its owning crew (RESTRICT), and the page is the
+//     answer that stays true if a crew is ever allowed to sit in
+//     another workspace.
+//  3. column then target name, alphabetically — an arbitrary but STABLE
+//     last resort, which is the whole point.
+func (r scopeRank) betterEdge(a, b ScopeEdge) bool {
+	aCost, bCost := r.costVia(a), r.costVia(b)
+	if aCost != bCost {
+		return aCost.cheaperThan(bCost)
+	}
+	aCascade := r.cascade[a.FromTable][a.FromColumn]
+	bCascade := r.cascade[b.FromTable][b.FromColumn]
+	if aCascade != bCascade {
+		return aCascade
 	}
 	if a.FromColumn != b.FromColumn {
 		return a.FromColumn < b.FromColumn
@@ -312,16 +414,49 @@ func betterScopeEdge(a, b ScopeEdge, visited map[string][]ScopeEdge, notNull map
 	return a.ToColumn < b.ToColumn
 }
 
-// sortedKeys returns a map's keys in ascending order. The walk uses it
-// everywhere it would otherwise iterate a map, because "which table
-// claimed this child" must not be a coin flip.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+// pathVisits reports whether `table` already appears as a hop on the
+// path. The FK graph has cycles, and a filter that routed a table
+// through itself would be nonsense.
+func pathVisits(path []ScopeEdge, table string) bool {
+	for _, e := range path {
+		if e.FromTable == table || e.ToTable == table {
+			return true
+		}
 	}
-	sort.Strings(out)
-	return out
+	return false
+}
+
+// cascadingFKColumns returns the set of FK columns on `table` declared
+// ON DELETE CASCADE — the schema's own statement that a row here is
+// owned by the row it points at.
+func cascadingFKColumns(ctx context.Context, q scopeQuerier, table string) (map[string]bool, error) {
+	if !sqlIdentifierRe.MatchString(table) {
+		return nil, fmt.Errorf("backup: invalid table identifier %q", table)
+	}
+	rows, err := q.QueryContext(ctx, `PRAGMA foreign_key_list(`+table+`)`)
+	if err != nil {
+		return nil, fmt.Errorf("backup: foreign_key_list(%s): %w", table, err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var (
+			id, seq            int
+			refTable, from, to string
+			onUpdate, onDelete sql.NullString
+			matchClause        sql.NullString
+		)
+		if err := rows.Scan(&id, &seq, &refTable, &from, &to, &onUpdate, &onDelete, &matchClause); err != nil {
+			return nil, fmt.Errorf("backup: scan FK action row for %q: %w", table, err)
+		}
+		if strings.EqualFold(onDelete.String, "CASCADE") {
+			out[from] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("backup: iterate FK action rows for %q: %w", table, err)
+	}
+	return out, nil
 }
 
 // notNullColumns returns the set of columns on `table` declared NOT
