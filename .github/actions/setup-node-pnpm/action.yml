@@ -31,8 +31,22 @@ runs:
         node-version: ${{ inputs.node-version }}
         cache: pnpm
 
+    # Bounded, because this is a third-party registry and #1998 is what a
+    # third-party registry hanging inside an unbounded step costs: the job
+    # budget is spent in silence and GitHub reports the result as `cancelled`.
+    # Composite-action steps cannot carry `timeout-minutes`, so the deadline is
+    # `timeout(1)` — which is the innermost one anyway, and therefore the one
+    # that should fire first. ~40 s warm; 8 minutes is "the registry is gone",
+    # not a budget.
     - shell: bash
-      run: pnpm install --frozen-lockfile
+      run: |
+        set -uo pipefail
+        rc=0
+        timeout --kill-after=30s 8m pnpm install --frozen-lockfile || rc=$?
+        if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+          echo "::error::'pnpm install --frozen-lockfile' exceeded 8 minutes and was killed. That is a registry/network stall, not a lockfile problem."
+        fi
+        exit "$rc"
 
     - shell: bash
       env:
