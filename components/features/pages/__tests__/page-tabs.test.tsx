@@ -301,6 +301,33 @@ describe("PageView with tabs", () => {
     }
   })
 
+  it("emits no tab at all when the body will not render the groups", () => {
+    // `tabs` is derived from the last page the query HELD, and TanStack keeps
+    // that data when a refetch fails — so `error` and `notFound` both arrive
+    // with a page still in hand (a realtime invalidation that 500s, or the
+    // page deleted under the viewer). `PageBody` returns early in either case
+    // and mounts no group, so a bar drawn anyway points every aria-controls at
+    // nothing: the dangling reference `pageTabIds` exists to prevent, and an
+    // aria-valid-attr-value failure on a live screen.
+    for (const state of [
+      { error: "network unreachable", notFound: false },
+      { error: "not found", notFound: true },
+    ]) {
+      cleanup()
+      const { container } = render(
+        <PageView
+          page={toPageView(WIRE)} slug="sit" loading={false}
+          error={state.error} notFound={state.notFound} onBack={vi.fn()} now={NOW}
+        />,
+      )
+      const dangling = Array.from(container.querySelectorAll("[aria-controls]"))
+        .map((el) => el.getAttribute("aria-controls")!)
+        .filter((id) => !container.querySelector(`#${CSS.escape(id)}`))
+      expect(dangling, `dangling aria-controls with ${JSON.stringify(state)}`).toEqual([])
+      expect(screen.queryAllByRole("tab")).toEqual([])
+    }
+  })
+
   it("keeps a hidden panel addressable, since every group stays mounted", () => {
     // aria-controls may point at a hidden element, and here it always does for
     // the tabs that are not selected — which is exactly why this is worth

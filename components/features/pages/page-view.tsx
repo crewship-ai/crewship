@@ -336,7 +336,17 @@ export function PageView({
         </div>
       </div>
 
-      {tabs.length > 0 && (
+      {/* The bar renders only when the groups it points at will render too.
+          `tabs` is derived from the LAST page the query held, and TanStack
+          keeps that data when a refetch fails (`usePage` sets `error` and
+          `notFound` from `query.error` while `query.data` stands) — so
+          `error` and `notFound` are both reachable with a page still in hand.
+          `PageBody` returns early in either case and mounts no group at all,
+          which would leave every `aria-controls` here resolving to nothing:
+          the dangling reference `pageTabIds` exists to prevent, and an
+          `aria-valid-attr-value` failure. A bar whose tabs reveal nothing is
+          also the wrong thing to draw above an error. */}
+      {tabs.length > 0 && !error && !notFound && (
         <PageTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} idScope={tabIdScope} />
       )}
 
