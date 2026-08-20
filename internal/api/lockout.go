@@ -65,8 +65,11 @@ var ErrInvalidCredentials = errors.New("invalid credentials")
 // compare (~250ms at cost=12), exposing which addresses have accounts.
 //
 // The hash itself is the bcrypt of an arbitrary string the production
-// signin path will never produce; cost is 12 to match the real hashes
-// in users.hashed_password.
+// signin path will never produce; its cost is bcryptCost — the same
+// number the signup/bootstrap/recovery paths hash with — because the
+// equalisation only holds while the dummy compare costs what a real
+// compare costs. Reading the shared var, rather than repeating the
+// literal, is what keeps those two in step (#2031).
 //
 // Generated lazily on first use (memoized), NOT at package init: the
 // full crewship binary links this package into the same entry point
@@ -80,7 +83,7 @@ var ErrInvalidCredentials = errors.New("invalid credentials")
 var dummyBcryptHash = sync.OnceValue(mustGenerateDummyBcryptHash)
 
 func mustGenerateDummyBcryptHash() string {
-	h, err := bcrypt.GenerateFromPassword([]byte("crewship-timing-equalizer-not-a-real-credential"), 12)
+	h, err := bcrypt.GenerateFromPassword([]byte("crewship-timing-equalizer-not-a-real-credential"), bcryptCost)
 	if err != nil {
 		panic("lockout: pre-generate dummy bcrypt hash: " + err.Error())
 	}

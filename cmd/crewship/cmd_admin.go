@@ -17,6 +17,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
 
+	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/database"
 )
@@ -488,7 +489,12 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 		return errors.New("password must be at least 8 characters")
 	}
 
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	// api.ProductionBcryptCost, not a second copy of 12: this writes into
+	// the same users.hashed_password column the signup path does, and
+	// docs/guides/auth.mdx claims the cost is held constant across signup,
+	// admin-CLI reset and pairing redemption. Until #2031 that was two
+	// literals agreeing by coincidence.
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), api.ProductionBcryptCost)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}

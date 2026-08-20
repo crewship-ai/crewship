@@ -348,7 +348,7 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	if err != nil {
 		replyInternalError(w, h.logger, "reset password: hash failed", err)
 		return

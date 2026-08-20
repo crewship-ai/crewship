@@ -157,17 +157,33 @@ feature correctness.
   local command tree instead. `cobra_sort_parallel_guard_test.go`
   fails the build on both halves.
 - **`go test -race ./internal/api/` needs `-timeout`.** That package
-  takes ~10m 15s under the race detector and `go test`'s default
-  timeout is 10m, so a plain run is **killed mid-test** — it prints a
-  goroutine dump headed by whichever `t.Parallel()` test was running
-  when the axe fell, and **zero `WARNING: DATA RACE`**. That reads
-  exactly like a failure and it is not one; it is the same ghost people
-  chased in #1597. Run it as `go test -race -timeout 25m ./internal/api/`
-  (`ok … 615s`). CI's dedicated **Go Race (internal/api)** job already
-  passes a longer timeout, so a green CI and a red local run are
-  consistent, not contradictory. Before blaming your diff, check the log
-  for `WARNING: DATA RACE` — no such line plus a `panic: test timed out`
-  means you hit the ceiling, not a race.
+  takes ~23m under the race detector (`ok … 1405s` on a CI runner,
+  measured 2026-08-20; local numbers on crewship-dev swing with what
+  else is running) and `go test`'s default timeout is 10m,
+  so a plain run is **killed mid-test** — it prints a goroutine dump
+  headed by whichever `t.Parallel()` test was running when the axe
+  fell, and **zero `WARNING: DATA RACE`**. That reads exactly like a
+  failure and it is not one; it is the same ghost people chased in
+  #1597. Run it as `go test -race -timeout 40m ./internal/api/`.
+  CI's dedicated **Go Race (internal/api)** job passes a timeout
+  derived from a measured baseline (`RACE_API_BASELINE_SECONDS` in
+  `.github/workflows/ci.yml`), so a green CI and a red local run are
+  consistent, not contradictory. Before blaming your diff, check the
+  log for `WARNING: DATA RACE` — no such line plus a `panic: test
+  timed out` means you hit the ceiling, not a race. That ceiling is
+  #2031's subject: the CI job now prints its own `ok … Ns` into the
+  run summary and warns when it crosses 1.6x the baseline, so budget
+  erosion is reported as budget erosion rather than as your bug.
+- **Don't hash at production strength in a test.** `internal/api`
+  hashes passwords with `bcryptCost` (`internal/api/bcrypt_cost.go`),
+  which `TestMain` lowers to `bcrypt.MinCost` for the test binary
+  only. bcrypt's cost is exponential, so production's 12 is ~256x
+  MinCost, and under `-race` — where blowfish's key schedule is
+  instrumented on every array access — a single cost-12 hash costs
+  seconds. Never write a literal cost at a call site: four guard tests
+  in `bcrypt_cost_test.go` pin the production value at 12, prove the
+  test binary really lowered it, reject any call site that passes its
+  own number, and reject any write to the var outside the test binary.
 
 ## Frontend data fetching
 
