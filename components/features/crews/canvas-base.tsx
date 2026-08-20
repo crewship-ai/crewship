@@ -287,10 +287,16 @@ export function CanvasTabs<TTab extends string>({
             onClick={() => onChange(t.id)}
             aria-selected={selected}
             // Only the selected panel is mounted — the canvases render their
-            // tabs as `{tab === "x" && <XTab/>}`. Pointing aria-controls at an
-            // id that is not in the DOM is itself a violation
-            // (aria-valid-attr-value), and the APG allows omitting it while
-            // the panel is unrendered.
+            // tabs as `{tab === "x" && <XTab/>}`, and the APG allows omitting
+            // aria-controls while the panel is unrendered. What it would
+            // otherwise be is a reference the ARIA spec says must resolve
+            // within the document and that a reader following it lands
+            // nowhere on. It is NOT an axe failure: checked against axe-core
+            // 4.12.1, a dangling aria-controls PASSES aria-valid-attr-value —
+            // the rule exempts it because the target may be rendered later.
+            // (A dangling aria-labelledby is only "incomplete".) So no gate
+            // would ever have caught the broken version; the reason to omit
+            // it is the spec and the reader, not the scanner.
             aria-controls={selected ? panelId : undefined}
             className={cn(
               "text-sm py-2 px-1 border-b-2 transition-colors shrink-0",
