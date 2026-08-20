@@ -280,7 +280,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback roleManage
-POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run roleInline
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/trust roleCreate

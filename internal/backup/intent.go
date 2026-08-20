@@ -199,11 +199,25 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// nothing in the target's vault — and these five slots are the PAID half of
 	// the Keeper stack, so the damage is a silent spend against the wrong
 	// subscription rather than a cosmetic drift.
+	//
+	// One thing to settle BEFORE anyone flips this to IntentInclude (#1973):
+	// credential_id is the table's only route to a workspace and it is
+	// nullable, so a scope filter built from it omits every slot not tied to a
+	// credential — which is most of them. That filter is computed and thrown
+	// away today precisely because the table is excluded, and
+	// TestScopedFilters_NeverTraverseANullableFK starts failing on this table
+	// the moment that stops being true. Including it means giving it a real
+	// scope column, not just changing the constant here.
 	"keeper_aux_settings": IntentExcludeOperational,
 
 	// === Runtime state (regenerates on restore) =====================
-	"user_sessions":   IntentExcludeRuntime,
-	"cli_pairings":    IntentExcludeRuntime,
+	"user_sessions": IntentExcludeRuntime,
+	"cli_pairings":  IntentExcludeRuntime,
+	// keeper_requests carries the same caveat as keeper_aux_settings above
+	// (#1973): its only FKs out are a nullable credential_id and a nullable
+	// requesting_agent_id — requesting_crew_id is a bare TEXT column with no
+	// foreign key, so the walk cannot see it — and there is no NOT NULL route
+	// to a workspace to prefer. Safe while excluded; not safe to include as-is.
 	"keeper_requests": IntentExcludeRuntime,
 	// keeper_request_events (v166) is the append-only transition ledger behind
 	// keeper_requests. It follows its projection: both are per-instance runtime

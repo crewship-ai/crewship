@@ -173,8 +173,13 @@ func TestBundleCapabilities(t *testing.T) {
 		want   []string
 	}{
 		{BundleChat, []string{"chat"}},
-		{BundlePower, []string{"chat", "routine.create", "issue.create", "memory.write"}},
-		{BundleAdmin, []string{"chat", "routine.create", "skill.create", "credential.create", "credential.rotate", "issue.create", "memory.write"}},
+		// routine.run sits beside routine.create in both: a preset is
+		// what an admin applies today, so it is free to carry a
+		// capability the v109 backfill never wrote. What that backfill
+		// wrote lives in v109BackfillCapabilities and is pinned
+		// separately by TestMigrationBundleDriftV109.
+		{BundlePower, []string{"chat", "routine.create", "routine.run", "issue.create", "memory.write"}},
+		{BundleAdmin, []string{"chat", "routine.create", "routine.run", "skill.create", "credential.create", "credential.rotate", "issue.create", "memory.write"}},
 		{"unknown", nil},
 	}
 	for _, c := range cases {
@@ -226,6 +231,9 @@ func TestAllCapabilities(t *testing.T) {
 		// the reason recorded on the constant.
 		"page.create",
 		"routine.create",
+		// Invoking a saved routine, as opposed to authoring one. Sorts
+		// after routine.create because 'c' < 'r'.
+		"routine.run",
 		"skill.create",
 	}
 	if !reflect.DeepEqual(got, want) {

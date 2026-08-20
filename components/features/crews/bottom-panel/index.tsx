@@ -269,7 +269,7 @@ export function BottomPanel({
           {tab === "messages" && <MessagesTab workspaceId={workspaceId} context={context} />}
           {tab === "exec" && <ExecTab workspaceId={workspaceId} context={context} />}
           {tab === "yaml" && <YamlTab workspaceId={workspaceId} context={context} />}
-          {tab === "docker" && <DockerTab />}
+          {tab === "docker" && <DockerTab workspaceId={workspaceId} context={context} />}
           {tab === "files" && (context === null || context.kind === "agent" || context.kind === "crew") && (
             <FilesTab workspaceId={workspaceId} context={context} />
           )}

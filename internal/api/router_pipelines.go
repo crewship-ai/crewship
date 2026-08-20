@@ -31,7 +31,18 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	pipes.SetCrewshipActions(newCrewshipActions(r.internalLoopbackURL, r.internalToken, r.PolicyResolver(), r.db, r.logger))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Get))))
-	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", roleCreate, pipes.Run)
+	// roleInline: Run enforces its own layered gate (MANAGER+ role OR an
+	// explicit routine.run capability), the same arrangement
+	// POST /pipeline-schedules uses below. Leaving roleCreate here would
+	// have 403'd a capability-granted MEMBER in the middleware, before the
+	// handler that knows about the grant ever ran — the route's role and
+	// the handler's rule have to be the same rule, and the handler is
+	// where the capability lookup lives.
+	//
+	// run_batch stays roleCreate on purpose: the capability is scoped to
+	// invoking A routine, and fanning one out across a 50-item batch is a
+	// different amount of spend to hand a member.
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", roleInline, pipes.Run)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch", roleCreate, pipes.RunBatch)
 	// Per-step prompt/model override layer (v121) — tweak a step without
 	// bumping the routine version.

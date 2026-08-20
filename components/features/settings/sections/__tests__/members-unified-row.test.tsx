@@ -3,6 +3,7 @@ import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { MembersSection } from "../members-section"
+import { ALL_CAPABILITIES } from "@/lib/capabilities"
 
 /**
  * #1517 — Settings → Members used to render the roster and a per-member
@@ -126,9 +127,13 @@ describe("MembersSection — expanding a row", () => {
 
     expand(/expand permissions for Mel Member/i)
 
-    // Nine capabilities for Mel and nobody else. The old grid rendered
-    // N × every member at once; the row keys the disclosure to the identity.
-    expect(screen.getAllByRole("switch")).toHaveLength(9)
+    // Every capability for Mel and nobody else. The old grid rendered
+    // N × every member at once; the row keys the disclosure to the
+    // identity. Counted from ALL_CAPABILITIES rather than a literal:
+    // this assertion is about WHOSE toggles are on screen, and a literal
+    // made it fail every time the vocabulary grew (routine.run took it
+    // from 9 to 10) for a reason it was not testing.
+    expect(screen.getAllByRole("switch")).toHaveLength(ALL_CAPABILITIES.length)
     expect(screen.getByRole("switch", { name: /Revoke issue.create from Mel Member/i })).toBeTruthy()
     expect(screen.queryByRole("switch", { name: /Vic Viewer/i })).toBeNull()
   })
@@ -208,7 +213,10 @@ describe("MembersSection — expanding a row", () => {
     // capability across people) without the table.
     const pips = await screen.findByLabelText(/Mel Member: chat, issue.create/i)
     const granted = pips.querySelectorAll('[data-granted="true"]')
-    expect(pips.querySelectorAll("[data-capability]")).toHaveLength(9)
+    // One pip per capability, counted from the vocabulary rather than a
+    // literal — what this test is about is which two are GRANTED, not how
+    // many capabilities the platform has this month.
+    expect(pips.querySelectorAll("[data-capability]")).toHaveLength(ALL_CAPABILITIES.length)
     expect(granted).toHaveLength(2)
     expect(
       Array.from(granted).map((n) => n.getAttribute("data-capability")),

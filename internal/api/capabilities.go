@@ -32,6 +32,24 @@ const (
 	// command surface and the new sidecar /routines/schedules route.
 	CapabilityRoutineCreate = "routine.create"
 
+	// CapabilityRoutineRun gates INVOKING an existing routine —
+	// POST /workspaces/{ws}/pipelines/{slug}/run, and the per-routine
+	// entries in the slash palette that post to it.
+	//
+	// Separate from routine.create because the two are different powers.
+	// Creating a routine writes a definition somebody still has to
+	// approve; running one executes inside the author crew's container
+	// with its credentials and its connected integrations, right now.
+	// A workspace that wants a bookkeeper to trigger the monthly
+	// accounting pack has no reason to also let them author routines.
+	//
+	// It grants no exemption from anything else the run path enforces:
+	// governance status (proposed / disabled never run), the
+	// integrations, resources and credentials gates, and the routine's
+	// own spend caps all still apply. This capability decides who may
+	// ask, not what the platform will agree to.
+	CapabilityRoutineRun = "routine.run"
+
 	// CapabilitySkillCreate gates skills.Generate + skills.Import.
 	// Distinct from routine.create because skill authoring is the
 	// higher-trust action (skills run inside agent prompts; routines
@@ -107,6 +125,7 @@ const (
 var allCapabilities = map[string]struct{}{
 	CapabilityChat:             {},
 	CapabilityRoutineCreate:    {},
+	CapabilityRoutineRun:       {},
 	CapabilitySkillCreate:      {},
 	CapabilityCredentialCreate: {},
 	CapabilityCredentialRotate: {},
@@ -181,6 +200,7 @@ func BundleCapabilities(b CapabilityBundle) []string {
 		return []string{
 			CapabilityChat,
 			CapabilityRoutineCreate,
+			CapabilityRoutineRun,
 			CapabilityIssueCreate,
 			CapabilityMemoryWrite,
 		}
@@ -188,6 +208,7 @@ func BundleCapabilities(b CapabilityBundle) []string {
 		return []string{
 			CapabilityChat,
 			CapabilityRoutineCreate,
+			CapabilityRoutineRun,
 			CapabilitySkillCreate,
 			CapabilityCredentialCreate,
 			CapabilityCredentialRotate,
@@ -282,6 +303,56 @@ func HasCapability(caps map[string]struct{}, capability string) bool {
 	return ok
 }
 
+// v109BackfillCapabilities is what migration v109 WROTE into
+// workspace_members.capabilities, per role, frozen.
+//
+// It is a transcription of the migration's `CASE role WHEN … THEN …`
+// literals and it must stay one. TestMigrationBundleDriftV109 compares
+// the two and fails on any difference, which is the point: a row whose
+// column the migration filled and a row whose column is still NULL have
+// to resolve to the same capability set, and the migration's half of
+// that pair already ran in databases nobody can go back and edit.
+//
+// It used to be expressed as "whatever BundleCapabilities returns for
+// the matching bundle", which read as economical until the first
+// capability was added to a preset — BundleAdmin grew routine.run and
+// every NULL-column OWNER silently grew it too, while every OWNER the
+// backfill had already written did not. The two concepts had never been
+// the same thing; they had only had the same contents. So they are two
+// tables now.
+//
+// Adding a capability here is a data-migration decision, not a code
+// decision. Add it to a BUNDLE instead (BundleCapabilities), which is
+// what an admin applies today and is free to grow.
+var v109BackfillCapabilities = map[string][]string{
+	"OWNER": {
+		CapabilityChat,
+		CapabilityRoutineCreate,
+		CapabilitySkillCreate,
+		CapabilityCredentialCreate,
+		CapabilityCredentialRotate,
+		CapabilityIssueCreate,
+		CapabilityMemoryWrite,
+	},
+	"ADMIN": {
+		CapabilityChat,
+		CapabilityRoutineCreate,
+		CapabilitySkillCreate,
+		CapabilityCredentialCreate,
+		CapabilityCredentialRotate,
+		CapabilityIssueCreate,
+		CapabilityMemoryWrite,
+	},
+	"MANAGER": {
+		CapabilityChat,
+		CapabilityRoutineCreate,
+		CapabilityIssueCreate,
+		CapabilityMemoryWrite,
+	},
+	"MEMBER": {CapabilityChat},
+	"VIEWER": {CapabilityChat},
+}
+
 // FallbackCapabilitiesForRole returns the role-derived default set
 // when a workspace_members row has NULL capabilities. The v109
 // backfill populates these into the column directly, so in practice
@@ -289,24 +360,16 @@ func HasCapability(caps map[string]struct{}, capability string) bool {
 // migration apply and the application-layer write that should fill
 // capabilities, or (b) an older sidecar binary still runs against a
 // post-v109 schema and didn't write the column. Both cases degrade
-// to the role-mapped bundle so behaviour matches the migration.
+// to what the migration wrote, so behaviour matches it exactly.
+//
+// An unknown role gets the chat baseline — fail-closed, since a role
+// string the runtime doesn't recognise is not a licence to guess
+// upward.
 func FallbackCapabilitiesForRole(role string) map[string]struct{} {
-	bundle := BundleChat
-	switch role {
-	case "OWNER", "ADMIN":
-		bundle = BundleAdmin
-	case "MANAGER":
-		// MANAGER-equivalent: chat + routine + issue + memory.
-		// Same set BundlePower exposes, used internally rather than
-		// as a named preset for the reason noted on BundleCapabilities.
-		return map[string]struct{}{
-			CapabilityChat:          {},
-			CapabilityRoutineCreate: {},
-			CapabilityIssueCreate:   {},
-			CapabilityMemoryWrite:   {},
-		}
+	caps, ok := v109BackfillCapabilities[role]
+	if !ok {
+		caps = []string{CapabilityChat}
 	}
-	caps := BundleCapabilities(bundle)
 	out := make(map[string]struct{}, len(caps))
 	for _, c := range caps {
 		out[c] = struct{}{}

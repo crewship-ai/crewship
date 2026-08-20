@@ -164,7 +164,10 @@ func TestPatchCapabilities_PresetApplies(t *testing.T) {
 	}
 	var got capabilitiesGetResponse
 	_ = json.NewDecoder(w.Body).Decode(&got)
-	want := []string{"chat", "issue.create", "memory.write", "routine.create"}
+	// `power` carries routine.run: the preset is what an admin applies
+	// TODAY, so unlike FallbackCapabilitiesForRole it is free to grow
+	// past what the v109 backfill wrote.
+	want := []string{"chat", "issue.create", "memory.write", "routine.create", "routine.run"}
 	if !stringSliceEqual(got.Capabilities, want) {
 		t.Errorf("got %v, want %v", got.Capabilities, want)
 	}

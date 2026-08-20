@@ -20,7 +20,7 @@ Problem Details shape (`error` is the human-readable message).
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | delete | Soft-delete |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/save` | create | Create/update a definition |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/test_run` | create | Validate an unsaved definition and mint `save_token` |
-| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run` | create | Execute a saved, active pipeline |
+| POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run` | create **or** `routine.run` | Execute a saved, active pipeline |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch` | create | Execute multiple input items |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run` | create | Static WouldExecute preview; no agent invocation |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run` | create | Execute one step against a fixture |
@@ -151,8 +151,16 @@ non-empty `items` array and accepts at most 100 items; violations return `400`.
 
 ### Run statuses and responses
 
-`POST .../pipelines/{slug}/run` requires `member` plus `create` (normally
-MANAGER+), and returns `200 OK` with a run result for an immediate execution.
+`POST .../pipelines/{slug}/run` requires `member` plus either `create`
+(normally MANAGER+) **or** the `routine.run` capability, which an admin can
+grant to a specific member so they can trigger routines without being able to
+author them. The capability grants the right to ask and nothing more: the
+governance status gate, the integrations / resources / credentials
+preconditions and the routine's spend caps all still apply, and refuse a
+capability-admitted member exactly as they refuse an admin. `run_batch` is
+NOT covered by it and stays MANAGER+.
+
+The endpoint returns `200 OK` with a run result for an immediate execution.
 The immediate result includes `run_id`, `pipeline_id`, `pipeline_slug`,
 `status`, `output`, `step_outputs`, `duration_ms`, and `cost_usd` (plus
 failure/wait fields when applicable). A deferred request (`delay_seconds > 0`

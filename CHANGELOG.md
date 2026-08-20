@@ -587,6 +587,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **The crew bottom panel's Docker tab could never show a container (#1697).**
+  It fetched `GET /api/v1/system/runtime` — the HOST runtime inventory — and
+  read `data.containers` off it, a field that endpoint has never sent. The
+  guard was `Array.isArray(data?.containers) ? data.containers : []`, so the
+  absent field became an empty list and the tab rendered "No containers
+  running." on every crew, forever, with every container up: the line that
+  would have surfaced the mismatch was the same line that swallowed it.
+
+  Nothing served the data, so there is now something that does.
+  **`GET /api/v1/crews/{crewId}/containers`** returns the crew's live
+  containers — its agent runtime *and* its sidecars — with state, CPU, memory
+  and the runtime row's agent count, read straight from the container runtime;
+  `crewship crew containers <crew>` is its CLI counterpart. `/system/runtime`
+  keeps answering the host question it was built for.
+
+  The client no longer has a fallback to swallow anything: a response without a
+  `containers` array is reported as a broken contract, not as an empty crew, so
+  the next rename fails loudly instead of quietly. Absent numbers stay absent
+  end to end — a stopped container and a runtime without stats support both
+  report `null`, rendered "—", never a `0%` that would draw an idle container
+  where nothing was measured.
+
 - **The status chips on `/issues` could only ever select one status.** The
   chip row was handed the list `useFilteredIssues` had *already* narrowed by
   status, so picking "Backlog" dropped every other chip's count to 0 — and a
