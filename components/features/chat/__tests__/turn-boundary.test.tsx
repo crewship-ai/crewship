@@ -232,7 +232,13 @@ describe("the resetKeys trap — a turn that threw must recover on new content",
     expect(after).not.toBe(before)
   })
 
-  it("moves the content key when only the metadata shape changes", () => {
+  it("moves the content key when the metadata ARITY changes (1 key → 2)", () => {
+    // Named for what it actually exercises. `turnContentKey` folds metadata in
+    // as `Object.keys(...).length`, so this fixture — one throwing `model`
+    // getter, then `model` + `claude_code_version` — moves the key because the
+    // COUNT went 1 → 2. It says nothing about the values, and the previous name
+    // ("when only the metadata shape changes") claimed otherwise; see the next
+    // test for what the count genuinely cannot see.
     const before = turnContentKey(hostileInitTurn())
     const fixed: ChatTurn = {
       ...hostileInitTurn(),
@@ -245,6 +251,34 @@ describe("the resetKeys trap — a turn that threw must recover on new content",
       ],
     }
     expect(turnContentKey(fixed)).not.toBe(before)
+  })
+
+  it("does NOT move the content key when metadata changes shape at constant arity", () => {
+    // A documented limit, pinned rather than papered over. `turnContentKey`'s
+    // doc comment is explicit that metadata contributes only its KEY COUNT, so
+    // a payload that swaps a throwing `model` for a readable one — same single
+    // key, same part id, same (empty) content, same timestamp — is invisible to
+    // it. A turn that crashed on the hostile value therefore does NOT reset on
+    // the fixed one; it stays on the error card until something else about the
+    // turn moves.
+    //
+    // That is a deliberate trade (the key must never throw, and reading values
+    // is exactly what throws), not an oversight, and it is not a regression:
+    // an id-only `resetKeys` could not see this either. Asserted so that anyone
+    // who later makes the key value-sensitive gets a red test pointing at the
+    // decision instead of a silent behaviour change.
+    const hostile = turnContentKey(hostileInitTurn())
+    const readable: ChatTurn = {
+      ...hostileInitTurn(),
+      parts: [
+        part({
+          id: "sys-init-p",
+          type: "system_init",
+          metadata: { model: "claude-opus-4" },
+        }),
+      ],
+    }
+    expect(turnContentKey(readable)).toBe(hostile)
   })
 
   it("moves the content key when the turn's own metadata arrives", () => {
