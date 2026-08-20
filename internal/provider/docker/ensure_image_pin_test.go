@@ -79,6 +79,12 @@ func TestEnsureImage_PullsByDigestNotTag(t *testing.T) {
 	p, ref := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+			// A real daemon accepts the re-tag that follows a pinned pull, and
+			// since #2006 a REFUSED one is no longer ignored — it downgrades the
+			// provenance. This case is what keeps the fake honest about the
+			// scenario the test is actually describing.
+			w.WriteHeader(http.StatusCreated)
 		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
 			http.Error(w, `{"message":"No such image"}`, http.StatusNotFound)
 		case strings.HasSuffix(path, "/images/create"):
@@ -163,6 +169,345 @@ func TestEnsureImage_PinnedPullRestoresTheLocalTag(t *testing.T) {
 	}
 	if !strings.HasSuffix(tags[0], ":tag") {
 		t.Errorf("ImageTag target = %q, want the ORIGINAL tag restored", tags[0])
+	}
+}
+
+// TestEnsureImage_FailedRetag_DoesNotJournalTheRemoteDigest is #2006.
+//
+// The re-tag above is best-effort, and that is fine — what was NOT fine is what
+// followed it: ensureImage returned {remoteDigest, Verified:true} without ever
+// re-reading what `ref` points at. When a stale local copy of the tag exists,
+// the pull lands the new manifest but the tag still names the OLD one, and
+// everything downstream (ContainerCreate, the drift check) addresses the image
+// by tag. The container ran the old image while the tamper-evident journal
+// attested the new digest as verified — the one failure mode the whole pinning
+// change exists to prevent.
+//
+// The rule is the one the escape-hatch branch already follows: report what will
+// actually run. So after a failed re-tag we read the tag back and either
+// confirm it carries the digest we pulled, or report the digest it does carry
+// with Verified false — and record nothing at all when the tag is absent
+// entirely, letting the real daemon error surface at ContainerCreate as before.
+//
+// The stale case additionally REFUSES to start (see
+// TestEnsureImage_FailedRetag_StaleTagFailsClosed), so what it asserts here is
+// the property that survives the escape hatch: an operator who opts out of the
+// refusal still gets an honest audit row. The hatch relaxes execution, never
+// the journal.
+func TestEnsureImage_FailedRetag_DoesNotJournalTheRemoteDigest(t *testing.T) {
+	// Not parallel: the stale case sets the escape-hatch env var, which is
+	// process-global.
+	tests := []struct {
+		name       string
+		localStale bool // does `ref` still resolve locally, to the OLD manifest?
+		allowStale bool // operator set CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE
+		wantDigest string
+		why        string
+	}{
+		{
+			name:       "stale local tag under the escape hatch reports the digest that will run",
+			localStale: true,
+			allowStale: true,
+			wantDigest: pinLocalDigest,
+			why:        "the tag still names the old manifest, so that is what the container executes",
+		},
+		{
+			name:       "absent local tag records nothing",
+			localStale: false,
+			wantDigest: "",
+			why:        "nothing on disk answers to the tag; the honest audit row is no digest at all, and ContainerCreate surfaces the real daemon error",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.allowStale {
+				t.Setenv(staleImageEscapeHatchEnv, "1")
+			}
+
+			var rec pullRecorder
+			var ref string
+			p, ref := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
+				path := r.URL.Path
+				switch {
+				case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+					// The re-tag fails — a name conflict, a read-only image
+					// store, a daemon that lost the layer mid-pull.
+					rec.recordTag(path, r.URL.Query())
+					http.Error(w, `{"message":"conflict: cannot restore tag"}`, http.StatusInternalServerError)
+				case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+					if !tc.localStale {
+						http.Error(w, `{"message":"No such image"}`, http.StatusNotFound)
+						return
+					}
+					// Both the pre-pull inspect and the post-tag read-back see
+					// the same stale local copy: the pull never renamed it.
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"Id":          "sha256:local",
+						"RepoDigests": []string{strings.TrimSuffix(ref, ":tag") + "@" + pinLocalDigest},
+					})
+				case strings.HasSuffix(path, "/images/create"):
+					rec.record(r.URL.Query().Get("tag"))
+					_, _ = w.Write([]byte("{}"))
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			})
+
+			prov, err := p.ensureImage(context.Background(), ref)
+			if err != nil {
+				// Neither case may fail here: the absent-tag one because the
+				// image is merely unnamed and the real daemon error belongs to
+				// ContainerCreate, the stale one because the operator has
+				// explicitly accepted the stale copy.
+				t.Fatalf("ensureImage must not fail in this case: %v", err)
+			}
+			if tags := rec.tagSnapshot(); len(tags) != 1 {
+				t.Fatalf("ImageTag calls = %d (%v), want exactly 1 — the test is not exercising the re-tag failure", len(tags), tags)
+			}
+			if prov.Digest == pinRemoteDigest {
+				t.Errorf("ensureImage journalled the remote digest %q after the re-tag failed — %s", pinRemoteDigest, tc.why)
+			}
+			if prov.Digest != tc.wantDigest {
+				t.Errorf("digest = %q, want %q — %s", prov.Digest, tc.wantDigest, tc.why)
+			}
+			if prov.Verified {
+				t.Error("nothing confirmed that `ref` resolves to the pulled manifest, so Verified would attest a claim we did not check")
+			}
+		})
+	}
+}
+
+// TestEnsureImage_FailedRetag_StaleTagFailsClosed is the second half of #2019:
+// the two routes to a known-stale runtime image now answer the same way.
+//
+// A failed re-tag over a surviving stale copy of the tag lands in EXACTLY the
+// state the #1825 pull-failure branch refuses to run: the registry answered, the
+// manifest it names is not what `ref` resolves to, and ContainerCreate would
+// start the old image. Journalling that honestly (#2006) fixed the audit record
+// but left execution fail-open — one route stopped the fleet, the sibling route
+// shrugged and started the wrong image with an Error log. An operator cannot be
+// asked to reason about which of the two internal paths their host took.
+//
+// So it refuses, through the same env-var opt-out, and the error has to be
+// actionable on its own: both digests, the escape-hatch name, and the fact that
+// the correct manifest is already on disk and merely needs a name.
+func TestEnsureImage_FailedRetag_StaleTagFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	var ref string
+	p, ref := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+			// The re-tag fails — a read-only image store, a daemon that lost
+			// the layer mid-pull, a name conflict.
+			http.Error(w, `{"message":"conflict: cannot restore tag"}`, http.StatusInternalServerError)
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+			// Both the pre-pull inspect and the post-tag read-back see the same
+			// stale local copy: the pull never renamed it.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id":          "sha256:local",
+				"RepoDigests": []string{strings.TrimSuffix(ref, ":tag") + "@" + pinLocalDigest},
+			})
+		case strings.HasSuffix(path, "/images/create"):
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	prov, err := p.ensureImage(context.Background(), ref)
+	if err == nil {
+		t.Fatalf("a stale tag that survived a failed re-tag must not be started silently; got %+v, nil error", prov)
+	}
+	if prov.Digest != "" || prov.Verified {
+		t.Errorf("a refusal must report no provenance at all, got %+v — nothing ran, so nothing may be journalled", prov)
+	}
+	if !strings.Contains(err.Error(), pinLocalDigest) || !strings.Contains(err.Error(), pinRemoteDigest) {
+		t.Errorf("error must name both digests so an operator can see the drift: %v", err)
+	}
+	if !strings.Contains(err.Error(), staleImageEscapeHatchEnv) {
+		t.Errorf("error must name the escape hatch %s, or the operator has no way to act on it: %v", staleImageEscapeHatchEnv, err)
+	}
+	// The distinguishing fact of THIS route: the manifest we wanted is already
+	// on disk, unnamed. The error must hand over the command that names it,
+	// otherwise the only remedy an operator can infer is the escape hatch —
+	// i.e. the insecure one.
+	if !strings.Contains(err.Error(), "docker tag ") {
+		t.Errorf("error must offer the re-tag that fixes this properly, not just the opt-out: %v", err)
+	}
+}
+
+// TestEnsureImage_FailedRetag_UnreadableReadBackIsNotAbsence separates the two
+// things a failed read-back can mean, which the first cut of #2019 conflated.
+//
+// After a failed re-tag we ask the daemon what `ref` resolves to. A 404 is an
+// ANSWER — nothing answers to the tag, there is no stale image to run — and
+// keeps the deliberate pass-through to ContainerCreate. A timeout or a 500 is
+// not an answer, it is a failure to look, and treating it as absence would let
+// a struggling daemon wave through exactly the state the fail-closed branch
+// exists to refuse.
+//
+// The evidence for refusing does not come from the unknown, it comes from
+// before the pull: reaching the pull with a local copy present means the
+// registry HEAD succeeded and the local copy did not carry its digest, and the
+// re-tag that would have fixed that just failed. So the pre-pull inspect is
+// still the best reading of what `ref` names, and it says stale.
+func TestEnsureImage_FailedRetag_UnreadableReadBackIsNotAbsence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		localPresent bool // was a stale copy of the tag on disk before the pull?
+		wantErr      bool
+		why          string
+	}{
+		{
+			name:         "stale copy on disk and the read-back is unreadable",
+			localPresent: true,
+			wantErr:      true,
+			why:          "the pre-pull inspect already proved drift and the re-tag failed to fix it; an unreadable daemon does not un-prove that",
+		},
+		{
+			name:         "nothing was on disk and the read-back is unreadable",
+			localPresent: false,
+			wantErr:      false,
+			why:          "there was no stale image to inherit the tag, so there is nothing to refuse — ContainerCreate surfaces the real error",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var mu sync.Mutex
+			inspects := 0
+			var ref string
+			p, ref := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
+				path := r.URL.Path
+				switch {
+				case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+					http.Error(w, `{"message":"conflict: cannot restore tag"}`, http.StatusInternalServerError)
+				case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+					mu.Lock()
+					inspects++
+					first := inspects == 1
+					mu.Unlock()
+					if !first {
+						// The post-tag read-back: the daemon is struggling and
+						// cannot say what the tag resolves to. NOT a 404.
+						http.Error(w, `{"message":"daemon overloaded"}`, http.StatusInternalServerError)
+						return
+					}
+					if !tc.localPresent {
+						http.Error(w, `{"message":"No such image"}`, http.StatusNotFound)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"Id":          "sha256:local",
+						"RepoDigests": []string{strings.TrimSuffix(ref, ":tag") + "@" + pinLocalDigest},
+					})
+				case strings.HasSuffix(path, "/images/create"):
+					_, _ = w.Write([]byte("{}"))
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			})
+
+			prov, err := p.ensureImage(context.Background(), ref)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want a refusal (%s); got %+v, nil error", tc.why, prov)
+				}
+				if !strings.Contains(err.Error(), pinLocalDigest) || !strings.Contains(err.Error(), staleImageEscapeHatchEnv) {
+					t.Errorf("the refusal must stay actionable — digest and escape hatch: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("must not fail (%s): %v", tc.why, err)
+			}
+			if prov.Digest != "" || prov.Verified {
+				t.Errorf("provenance = %+v, want empty — nothing confirmed anything here", prov)
+			}
+		})
+	}
+}
+
+// TestEnsureImage_FailedRetag_StillVerifiesWhenTheTagCarriesTheDigest is the
+// other half of #2006, and the only branch of the read-back that hands out
+// Verified:true.
+//
+// A failed re-tag is not proof that the tag is wrong — only that WE did not put
+// the right manifest there. The daemon may have named it for us, or a concurrent
+// start of another crew on the same host may have won the race and created the
+// tag a microsecond before ours, which is exactly what makes the re-tag fail
+// with a conflict. In that state the tag already resolves to the manifest we
+// pulled, so the guarantee the re-tag existed to create is present anyway and
+// downgrading the audit row would understate what we actually proved.
+//
+// Left untested, the failure mode is silent and permanent: every host that
+// loses that race writes `pinned: false` for a pull that was in fact pinned and
+// confirmed, and the one field an auditor uses to separate "the daemon fetched
+// the manifest we verified" from "we read a digest off local disk" stops
+// meaning anything. It cannot be folded into the table above, whose whole
+// thesis is that the remote digest must NOT be journalled.
+func TestEnsureImage_FailedRetag_StillVerifiesWhenTheTagCarriesTheDigest(t *testing.T) {
+	t.Parallel()
+
+	var rec pullRecorder
+	var mu sync.Mutex
+	inspects := 0
+	var ref string
+	p, ref := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+			// "conflict: the tag is already in use" — the race, not a fault.
+			rec.recordTag(path, r.URL.Query())
+			http.Error(w, `{"message":"conflict: tag already exists"}`, http.StatusConflict)
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+			mu.Lock()
+			inspects++
+			first := inspects == 1
+			mu.Unlock()
+			if first {
+				// Pre-pull: nothing on disk, so ensureImage must pull.
+				http.Error(w, `{"message":"No such image"}`, http.StatusNotFound)
+				return
+			}
+			// Post-tag read-back: the tag exists and carries the manifest we
+			// just pulled.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id":          "sha256:pulled",
+				"RepoDigests": []string{strings.TrimSuffix(ref, ":tag") + "@" + pinRemoteDigest},
+			})
+		case strings.HasSuffix(path, "/images/create"):
+			rec.record(r.URL.Query().Get("tag"))
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	prov, err := p.ensureImage(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("a best-effort re-tag failure must not be fatal: %v", err)
+	}
+	if tags := rec.tagSnapshot(); len(tags) != 1 {
+		t.Fatalf("ImageTag calls = %d (%v), want exactly 1 — the test is not exercising the re-tag failure", len(tags), tags)
+	}
+	if prov.Digest != pinRemoteDigest {
+		t.Errorf("digest = %q, want %q — the tag resolves to the manifest we pulled, so that is what runs",
+			prov.Digest, pinRemoteDigest)
+	}
+	if !prov.Verified {
+		t.Error("the tag carries the digest the registry reported and the pull was digest-addressed; reporting Verified false here writes `pinned: false` for a pull that WAS pinned and confirmed")
 	}
 }
 
