@@ -57,7 +57,9 @@ func TestScopedFilters_NeverTraverseANullableFK(t *testing.T) {
 		//
 		// This is a structural exemption, not an allowlist: flip either table
 		// to IntentInclude and this guard starts failing on it the same day,
-		// which is the day it would start losing rows.
+		// which is the day it would start losing rows. It also fails the safe
+		// way for a table with NO entry at all — IntentInclude is the zero
+		// value, so an undeclared table is checked rather than skipped.
 		if BackupTableIntent[st.Name] != IntentInclude {
 			continue
 		}
