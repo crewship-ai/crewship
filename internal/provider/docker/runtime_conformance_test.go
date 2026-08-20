@@ -63,6 +63,7 @@ import (
 	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -245,13 +246,26 @@ func imageProvenanceProbes(prov imageProvenance) []probe {
 // a conformance matrix that reports a runtime honoured 27 invariants without
 // saying which image it honoured them FOR is a result nobody can reproduce.
 //
-// The tag check is the second half. ensureImage pulls digest-pinned and then
+// The tag check is the second half, and it is deliberately an identity check
+// rather than an existence one. ensureImage pulls digest-pinned and then
 // re-creates the local tag itself (docker.go ~904), because `pull repo@sha256:…`
 // leaves the image unnamed while everything downstream here still addresses it
 // by tag — buildCrewContainerConfig, ContainerCreate, the drift check. That
-// re-tag is a daemon call like any other, and a runtime that quietly declines
-// it fails in this suite's signature style: not here, but forty lines later at
-// ContainerCreate, as an opaque `No such image` that reads like a harness bug.
+// re-tag is best-effort: it logs a Warn and ensureImage still returns the digest
+// it resolved.
+//
+// So "the tag resolves to something" is not enough, and asserting only that
+// would have made the digest probe above a liar in exactly one case — the case
+// this suite exists for. When a stale local copy is re-pulled and the re-tag
+// then fails, the tag still points at the OLD image: the inspect succeeds, the
+// container runs the old manifest, and the harness reports the new digest as
+// the one that ran. Nothing errors. Requiring the tag's own RepoDigests to
+// carry the reported digest closes it, and reuses the comparison ensureImage
+// makes on its own verified fast path rather than inventing a second one.
+//
+// Skipped when the digest is empty, which is legitimate and not a failure: a
+// locally-built crewship-cache:* derivative has no registry digest at all, and
+// its provenance is the provisioning.step chain naming what it was built FROM.
 func ensureConformanceImage(ctx context.Context, t *testing.T, p *Provider, image string) imageProvenance {
 	t.Helper()
 	prov, err := p.ensureImage(ctx, image)
@@ -260,9 +274,14 @@ func ensureConformanceImage(ctx context.Context, t *testing.T, p *Provider, imag
 	}
 	t.Logf("image under test: %s digest=%s verified=%t",
 		image, emptyAs(prov.Digest, "(none reported)"), prov.Verified)
-	if _, err := p.client.ImageInspect(ctx, image); err != nil {
+	inspect, err := p.client.ImageInspect(ctx, image)
+	if err != nil {
 		t.Fatalf("%s reported a successful pull of %s but the tag does not resolve afterwards — a digest-pinned pull left the image unnamed, and every later lookup by tag will fail: %v",
 			p.detected.Runtime, image, err)
+	}
+	if prov.Digest != "" && !dockerutil.RepoDigestsContain(inspect.RepoDigests, prov.Digest) {
+		t.Fatalf("%s resolves %s to a different manifest than the one ensureImage says it pulled — everything below addresses the image by tag, so this run would report a digest it did not execute\n  reported: %s\n  tag carries: %v",
+			p.detected.Runtime, image, prov.Digest, inspect.RepoDigests)
 	}
 	return prov
 }
