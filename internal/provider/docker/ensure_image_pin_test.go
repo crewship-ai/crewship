@@ -268,6 +268,79 @@ func TestEnsureImage_FailedRetag_DoesNotJournalTheRemoteDigest(t *testing.T) {
 	}
 }
 
+// TestEnsureImage_FailedRetag_StillVerifiesWhenTheTagCarriesTheDigest is the
+// other half of #2006, and the only branch of the read-back that hands out
+// Verified:true.
+//
+// A failed re-tag is not proof that the tag is wrong — only that WE did not put
+// the right manifest there. The daemon may have named it for us, or a concurrent
+// start of another crew on the same host may have won the race and created the
+// tag a microsecond before ours, which is exactly what makes the re-tag fail
+// with a conflict. In that state the tag already resolves to the manifest we
+// pulled, so the guarantee the re-tag existed to create is present anyway and
+// downgrading the audit row would understate what we actually proved.
+//
+// Left untested, the failure mode is silent and permanent: every host that
+// loses that race writes `pinned: false` for a pull that was in fact pinned and
+// confirmed, and the one field an auditor uses to separate "the daemon fetched
+// the manifest we verified" from "we read a digest off local disk" stops
+// meaning anything. It cannot be folded into the table above, whose whole
+// thesis is that the remote digest must NOT be journalled.
+func TestEnsureImage_FailedRetag_StillVerifiesWhenTheTagCarriesTheDigest(t *testing.T) {
+	t.Parallel()
+
+	var rec pullRecorder
+	var mu sync.Mutex
+	inspects := 0
+	var ref string
+	p, ref := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+			// "conflict: the tag is already in use" — the race, not a fault.
+			rec.recordTag(path, r.URL.Query())
+			http.Error(w, `{"message":"conflict: tag already exists"}`, http.StatusConflict)
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+			mu.Lock()
+			inspects++
+			first := inspects == 1
+			mu.Unlock()
+			if first {
+				// Pre-pull: nothing on disk, so ensureImage must pull.
+				http.Error(w, `{"message":"No such image"}`, http.StatusNotFound)
+				return
+			}
+			// Post-tag read-back: the tag exists and carries the manifest we
+			// just pulled.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id":          "sha256:pulled",
+				"RepoDigests": []string{strings.TrimSuffix(ref, ":tag") + "@" + pinRemoteDigest},
+			})
+		case strings.HasSuffix(path, "/images/create"):
+			rec.record(r.URL.Query().Get("tag"))
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	prov, err := p.ensureImage(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("a best-effort re-tag failure must not be fatal: %v", err)
+	}
+	if tags := rec.tagSnapshot(); len(tags) != 1 {
+		t.Fatalf("ImageTag calls = %d (%v), want exactly 1 — the test is not exercising the re-tag failure", len(tags), tags)
+	}
+	if prov.Digest != pinRemoteDigest {
+		t.Errorf("digest = %q, want %q — the tag resolves to the manifest we pulled, so that is what runs",
+			prov.Digest, pinRemoteDigest)
+	}
+	if !prov.Verified {
+		t.Error("the tag carries the digest the registry reported and the pull was digest-addressed; reporting Verified false here writes `pinned: false` for a pull that WAS pinned and confirmed")
+	}
+}
+
 // TestEnsureImage_AlreadyDigestRefIsNotRetagged covers the operator who wrote
 // `image: repo@sha256:…` straight into a crew manifest. There is no tag to
 // restore, and the Docker API refuses to create one from a digest reference

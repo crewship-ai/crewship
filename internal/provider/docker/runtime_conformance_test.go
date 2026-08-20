@@ -251,17 +251,21 @@ func imageProvenanceProbes(prov imageProvenance) []probe {
 // re-creates the local tag itself (docker.go ~904), because `pull repo@sha256:…`
 // leaves the image unnamed while everything downstream here still addresses it
 // by tag — buildCrewContainerConfig, ContainerCreate, the drift check. That
-// re-tag is best-effort: it logs a Warn and ensureImage still returns the digest
-// it resolved.
+// re-tag is best-effort in the sense that it cannot fail the start.
 //
 // So "the tag resolves to something" is not enough, and asserting only that
 // would have made the digest probe above a liar in exactly one case — the case
 // this suite exists for. When a stale local copy is re-pulled and the re-tag
-// then fails, the tag still points at the OLD image: the inspect succeeds, the
-// container runs the old manifest, and the harness reports the new digest as
-// the one that ran. Nothing errors. Requiring the tag's own RepoDigests to
-// carry the reported digest closes it, and reuses the comparison ensureImage
-// makes on its own verified fast path rather than inventing a second one.
+// then fails, the tag still points at the OLD image: the inspect succeeds and
+// the container runs the old manifest. Nothing errors. ensureImage no longer
+// reports the new digest there — since #2006 it reads the tag back and reports
+// what the tag carries, Verified false — but that read-back is code, and this
+// check is the independent oracle over a REAL daemon that the read-back is
+// telling the truth. It stays an identity check for that reason: it must keep
+// failing if the read-back is ever weakened back to an assumption. Requiring
+// the tag's own RepoDigests to carry the reported digest reuses the comparison
+// ensureImage makes on its own verified fast path rather than inventing a
+// second one.
 //
 // Skipped when the digest is empty, which is legitimate and not a failure: a
 // locally-built crewship-cache:* derivative has no registry digest at all, and
