@@ -22,24 +22,23 @@ import (
 //      cannot leave orphan rows behind because we forgot to add a
 //      table to a hand-maintained list.
 //
-// The walk is BREADTH-FIRST from `workspaces`, following REVERSE FK
-// edges (i.e. "which tables reference this one?"). Any table reachable
-// from `workspaces` by reverse-FK traversal is workspace-scoped. The
-// path back to `workspaces` is recorded so callers can synthesise a
+// The walk follows FOREIGN KEYS from each table towards `workspaces`.
+// Any table that can reach `workspaces` that way is workspace-scoped,
+// and the path it takes is recorded so callers can synthesise a
 // JOIN-based WHERE clause without hardcoding it.
 //
 // NULLABILITY IS PART OF THE CHOICE (#1973). The path a table gets is
-// not merely the shortest one: a filter on a NULLABLE column omits
-// every row where that column is NULL, and it omits them silently —
-// the backup succeeds, the bundle verifies, and the rows are simply
-// not in it. So the walk runs in two passes. The first follows only
-// NOT NULL foreign keys, which yields a filter that is TOTAL over the
-// table: every row is either in the workspace or in another one, and
-// none falls through. The second pass picks up whatever the first
-// could not reach, ranking what is left by how many nullable hops the
-// WHOLE path carries — a NOT NULL column hanging off a parent that was
-// itself reached through a nullable one loses rows just the same. A
-// longer NOT NULL path always beats a shorter nullable one.
+// not the shortest one: a filter on a NULLABLE column omits every row
+// where that column is NULL, and it omits them silently — the backup
+// succeeds, the bundle verifies, and the rows are simply not in it. So
+// what the walk minimises is (nullable hops, total hops), in that
+// order. Every hop of a path costs a subquery; a NULLABLE hop costs
+// rows. A four-hop path with no nullable column beats a one-hop path
+// with one, every time.
+//
+// Nullable hops are counted over the WHOLE path, not per edge: a NOT
+// NULL column hanging off a parent that was itself reached through a
+// nullable one loses rows just the same.
 //
 // Two rules sit above that, and both are about agreeing with somebody
 // else. A table with its own foreign key into `workspaces` is anchored
@@ -50,12 +49,17 @@ import (
 // ON DELETE CASCADE edge wins: a row the database deletes with its
 // parent belongs to that parent, and belonging is what scope means.
 //
-// The walk is also LEVEL-SYNCHRONOUS and its adjacency is built in
-// sorted table order, because two parents at the same depth used to
-// race to claim a child through map iteration order — the same schema
-// produced `keeper_requests` scoped through `credential_id` on one run
-// and `requesting_agent_id` on the next, which made a bundle's
-// contents depend on the Go runtime.
+// It is a RELAXATION, not a breadth-first walk. BFS commits a table at
+// the first level it is reachable from, and the cheaper route usually
+// lies through a parent that is further out and therefore not resolved
+// yet. Sweeps repeat until nothing moves.
+//
+// Everything is iterated in sorted table order and nothing is decided
+// by ranging a map, because two parents the same distance from
+// `workspaces` used to race to claim a child through map iteration
+// order — the same schema produced `keeper_requests` scoped through
+// `credential_id` on one run and `requesting_agent_id` on the next,
+// which made a bundle's contents depend on the Go runtime.
 //
 // What this deliberately does NOT do: probe content. A table that
 // references workspaces but is "operational state that stays with the
@@ -287,16 +291,25 @@ func discoverScopedTables(ctx context.Context, q scopeQuerier) ([]ScopedTable, e
 		}
 	}
 
-	// Relax until nothing improves. Each pass sweeps the tables in sorted
-	// order and each assignment strictly lowers that table's cost, so the
-	// loop settles; the bound is belt-and-braces against a comparison bug
-	// turning a cycle in the FK graph into a hang.
+	// Relax until nothing moves. Each sweep RE-DERIVES every unpinned
+	// table's whole answer from the current state rather than only
+	// improving on its own last one — because a table's path embeds its
+	// parent's path, and a parent that gets a better route leaves its
+	// children holding a stale copy even though the edge they chose is
+	// still the right edge. Recomputing is cheap here (a few hundred
+	// tables) and "improve in place" is how the stale copy survives to
+	// be read by a grandchild.
+	//
+	// The round bound is belt-and-braces: the sweep is a fixpoint
+	// iteration and settles on its own, but a comparison bug plus a
+	// cycle in the FK graph should cost a wrong answer, not a hang.
 	for round := 0; round <= len(allTables); round++ {
 		changed := false
 		for _, table := range allTables {
 			if pinned[table] {
 				continue
 			}
+			var best *ScopeEdge
 			for _, edge := range outgoing[table] {
 				parentPath, resolved := path[edge.ToTable]
 				if !resolved {
@@ -308,16 +321,25 @@ func discoverScopedTables(ctx context.Context, q scopeQuerier) ([]ScopedTable, e
 				if pathVisits(parentPath, table) {
 					continue
 				}
-				if _, have := path[table]; have && !rank.betterEdge(edge, path[table][0]) {
-					continue
+				if best == nil || rank.betterEdge(edge, *best) {
+					e := edge
+					best = &e
 				}
-				next := make([]ScopeEdge, 0, len(parentPath)+1)
-				next = append(next, edge)
-				next = append(next, parentPath...)
-				path[table] = next
-				cost[table] = rank.costVia(edge)
-				changed = true
 			}
+			if best == nil {
+				continue
+			}
+			parentPath := path[best.ToTable]
+			next := make([]ScopeEdge, 0, len(parentPath)+1)
+			next = append(next, *best)
+			next = append(next, parentPath...)
+			nextCost := rank.costVia(*best)
+			if current, have := path[table]; have && cost[table] == nextCost && sameScopePath(current, next) {
+				continue
+			}
+			path[table] = next
+			cost[table] = nextCost
+			changed = true
 		}
 		if !changed {
 			break
@@ -412,6 +434,21 @@ func (r scopeRank) betterEdge(a, b ScopeEdge) bool {
 		return a.ToTable < b.ToTable
 	}
 	return a.ToColumn < b.ToColumn
+}
+
+// sameScopePath reports whether two join paths are the same chain of
+// edges. Used to tell "this sweep re-derived the answer it already had"
+// from "this sweep moved something", which is what ends the loop.
+func sameScopePath(a, b []ScopeEdge) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // pathVisits reports whether `table` already appears as a hop on the

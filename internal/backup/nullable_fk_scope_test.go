@@ -24,11 +24,11 @@ import (
 // payload rows and restored to pages reading never_produced.
 //
 // The fix is usually not an explicit case in workspaceFilterSQL but the walk
-// itself: DiscoverScopedTables now runs a first pass restricted to NOT NULL
-// foreign keys, so a longer total path beats a shorter lossy one, and a table
-// only falls back to a nullable hop when no other hop exists. #1973 emptied
-// the allowlist this test used to carry — it is now a guard with no
-// exceptions, which is the only kind worth having.
+// itself: DiscoverScopedTables minimises (nullable hops, total hops) over the
+// whole path, so a longer total path beats a shorter lossy one and a table only
+// falls back to a nullable hop when no other hop exists. #1973 emptied the
+// allowlist this test used to carry — it is now a guard with no exceptions,
+// which is the only kind worth having.
 func TestScopedFilters_NeverTraverseANullableFK(t *testing.T) {
 	db := openMigratedDBCov(t)
 	ctx := context.Background()
