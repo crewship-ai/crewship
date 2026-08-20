@@ -36,6 +36,7 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 
 	add("/api/v1/crews/{crewId}/capabilities", "CrewCapabilitiesResponseV1", object(map[string]any{"crew_id": str(), "crew_slug": str(), "container": anyObject(), "integrations": array(anyObject()), "agents": array(object(map[string]any{"slug": str(), "name": str()})), "runtimes": anyObject(), "schema": anyObject()}))
 	add("/api/v1/crews/{crewId}/services", "CrewServicesResponseV1", object(map[string]any{"services": array(object(map[string]any{"name": str(), "image": str(), "type": str(), "status": str(), "ports": array(str())}))}))
+	add("/api/v1/crews/{crewId}/containers", "CrewContainersResponseV1", object(map[string]any{"containers": array(object(map[string]any{"name": str(), "image": str(), "kind": str(), "status": str(), "cpu_percent": number(), "memory_mb": integer(), "agent_count": integer()}))}))
 	add("/api/v1/crews/{crewId}/credential-readiness", "CrewCredentialReadinessResponseV1", object(map[string]any{"crew_id": str(), "ready": boolean(), "credentials": array(object(map[string]any{"id": str(), "name": str(), "type": str(), "reason": str()}))}))
 	add("/api/v1/crews/{crewId}/container-status", "CrewContainerStatusResponseV1", object(map[string]any{"status": str(), "container_id": str(), "crew_id": str(), "running": boolean(), "message": str()}))
 	addList("/api/v1/crews/{crewId}/members", "CrewMembersResponseV1", member)

@@ -5,8 +5,8 @@ import "testing"
 func TestCrewWorkspaceGETSchemaCatalogV1CoversPriorGenericRoutes(t *testing.T) {
 	catalog, components := crewWorkspaceGETSchemaCatalogV1()
 	routes := catalog["crew-workspace-get"]
-	if got := len(routes); got != 41 {
-		t.Fatalf("audited crew/workspace GET route count = %d, want 41", got)
+	if got := len(routes); got != 42 {
+		t.Fatalf("audited crew/workspace GET route count = %d, want 42", got)
 	}
 	for key, contract := range routes {
 		if contract.Response == nil || contract.Response["$ref"] == nil {

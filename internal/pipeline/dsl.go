@@ -149,6 +149,7 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	}
 
 	errs.add("/agentless", validateAgentless(dsl))
+	errs.add("/slash", validateSlash(dsl))
 	errs.add("/integrations_required", validateIntegrationsRequired(dsl))
 	errs.add("/resources", validateResources(dsl))
 

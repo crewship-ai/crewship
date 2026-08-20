@@ -140,6 +140,22 @@ feature correctness.
   `storageDir(t)`, not `t.TempDir()` — `t.TempDir()` fails the test when
   its `RemoveAll` races a late write, and a `t.TempDir()` taken after
   `setupTestDB` is cleaned up *before* the drain runs.
+- **`Commands()` on a shared Cobra command is a *write*.** Cobra sorts
+  the child slice in place on first call, behind an unsynchronised bool
+  — and `ExecuteC` re-arms that bool on **every** run, because
+  `InitDefaultHelpCmd` unconditionally removes and re-adds the help
+  command. In `cmd/crewship` that let 34 `t.Parallel()` tests enumerate
+  `rootCmd` at once, sort the same slice concurrently, and hand back a
+  corrupted list — a `WARNING: DATA RACE` blaming a random test in a
+  package the PR never touched (#1989). Its `TestMain` now freezes the
+  order with `cobra.EnableCommandSorting = false`, taken **after** the
+  pristine walk has sorted the tree, so `Commands()` is a pure read for
+  the rest of the test binary. Test-scoped: production `main()` still
+  sorts, so `crewship --help` ordering is unchanged. What that does
+  *not* make safe is **executing** a shared command from a parallel
+  test — `ExecuteC` still rewrites the child slice — so don't; build a
+  local command tree instead. `cobra_sort_parallel_guard_test.go`
+  fails the build on both halves.
 - **`go test -race ./internal/api/` needs `-timeout`.** That package
   takes ~10m 15s under the race detector and `go test`'s default
   timeout is 10m, so a plain run is **killed mid-test** — it prints a

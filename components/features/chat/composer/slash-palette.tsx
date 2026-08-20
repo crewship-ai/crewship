@@ -16,6 +16,11 @@ import {
   AlertCircle,
   Brain,
   Key,
+  Receipt,
+  Play,
+  FileText,
+  Mail,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react"
 
@@ -30,6 +35,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command"
 import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
+import { routineSlugFromSlashId, slashCommandName } from "@/lib/routine-inputs"
 import {
   useSlashCommands,
   type SlashActionSchema as ServerSlashCommand,
@@ -166,6 +172,13 @@ function classifyClient(id: string): SlashActionClassification {
 }
 
 function classifyServer(id: string): SlashActionClassification {
+  // A per-routine entry is enabled by construction. Its id names a
+  // routine the SERVER decided this caller may run, and the dispatcher
+  // knows what to do with it from the prefix alone — so unlike the four
+  // static ids there is nothing per-entry for this build to know, and
+  // nothing to enumerate in the contract below. Without this branch every
+  // routine would fall to UNCLASSIFIED and render permanently disabled.
+  if (routineSlugFromSlashId(id)) return { state: "enabled" }
   return SERVER_ACTION_CONTRACT[id] ?? UNCLASSIFIED_SERVER_ACTION
 }
 
@@ -179,6 +192,15 @@ const ICON_BY_NAME: Record<string, LucideIcon> = {
   brain: Brain,
   sparkles: Sparkles,
   key: Key,
+  // Named by routine authors in their `slash.icon`, which is an open set
+  // — a name that isn't here still renders (Sparkles), so this table is
+  // a courtesy to the common cases, not a gate. Grow it when a routine
+  // asks for something that keeps coming up.
+  receipt: Receipt,
+  play: Play,
+  "file-text": FileText,
+  mail: Mail,
+  "bar-chart": BarChart3,
 }
 
 interface SlashCommand {
@@ -449,11 +471,18 @@ export function SlashPalette({
               {visibleActions.map((cmd) => {
                 const Icon = (cmd.icon && ICON_BY_NAME[cmd.icon]) || Sparkles
                 const reason = reasonFor(classifyServer(cmd.id), disabledCommands?.[cmd.id])
+                // What the user types. Same as the id for the platform
+                // catalog; the bare slug for a routine. It goes into the
+                // search value because typing /msn-etn-podklady is how
+                // somebody who was TOLD the command finds it — matching
+                // on the label alone would hide it from the one search
+                // term they were given.
+                const typed = slashCommandName(cmd.id)
                 return (
                   <CommandItem
                     key={`server-${cmd.id}`}
                     data-testid={`slash-action-${cmd.id}`}
-                    value={`${cmd.label} ${cmd.label_cs ?? ""}`}
+                    value={`${typed} ${cmd.label} ${cmd.label_cs ?? ""}`}
                     disabled={reason !== null}
                     onSelect={() => {
                       if (reason !== null) return
@@ -463,6 +492,14 @@ export function SlashPalette({
                   >
                     <Icon className="h-4 w-4" />
                     <span>{cmd.label}</span>
+                    {/* Routines only: the label is prose the author chose,
+                        and the command is the slug. Showing the slug beside
+                        it is how the row teaches what to type next time. */}
+                    {typed !== cmd.id && reason === null && (
+                      <span className="ml-auto font-mono text-xs text-muted-foreground truncate">
+                        /{typed}
+                      </span>
+                    )}
                     {reason !== null && (
                       <span data-slash-reason className="ml-auto text-xs text-muted-foreground truncate">
                         {reason}

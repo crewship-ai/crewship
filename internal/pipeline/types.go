@@ -86,6 +86,17 @@ type DSL struct {
 	// Empty leaves online grading disabled (existing replay/regression
 	// suites still work).
 	Eval *EvalConfig `json:"eval,omitempty"`
+	// Slash opts this routine into the slash-command palette — chat and
+	// the CLI repl both offer `/<slug>`, which opens a form built from
+	// Inputs and runs the routine with what the user fills in. Absent or
+	// enabled:false keeps it out, which is why every routine written
+	// before this block existed behaves exactly as it did.
+	//
+	// Opt-in rather than automatic: a workspace's routine list is the
+	// wrong size for a palette, and which handful of them a human is
+	// meant to trigger by hand is a judgement the author makes, not one
+	// the platform can infer from the step graph.
+	Slash *SlashSpec `json:"slash,omitempty"`
 	// Agentless is the token-zero guarantee: a routine that declares
 	// it can never invoke an LLM. Save-time validation rejects
 	// agent_run (the obvious spend), call_pipeline (its target
@@ -137,6 +148,34 @@ type EvalConfig struct {
 type OnlineEvalConfig struct {
 	SampleRate      float64 `json:"sample_rate"`
 	GraderAgentSlug string  `json:"grader_agent_slug,omitempty"`
+}
+
+// SlashSpec is the routine's entry in the slash-command palette.
+//
+// The label is what a human reads in the palette; the command they TYPE
+// is always the routine's slug, so `/msn-etn-podklady` is the same
+// string in chat, in the repl, and in the routine's own manifest. Two
+// names for one thing would be a lookup nobody can do from memory.
+//
+// LabelCS mirrors the `label_cs` field the static slash catalog carries
+// (internal/api/slash_commands_handler.go) — the dashboard picks by user
+// locale without a translation step. Empty falls back to Label.
+type SlashSpec struct {
+	// Enabled is the opt-in switch. False (and an absent block) keeps the
+	// routine out of the palette entirely.
+	Enabled bool `json:"enabled,omitempty"`
+	// Label is the palette row's text. Empty falls back to the routine's
+	// display name, then its slug — a routine that opts in without
+	// naming itself still renders as something readable.
+	Label string `json:"label,omitempty"`
+	// LabelCS is the Czech label. Empty falls back to Label.
+	LabelCS string `json:"label_cs,omitempty"`
+	// Icon is a lucide icon name ("receipt", "calendar-clock", …). The
+	// set is open: the dashboard resolves the string to a component and
+	// falls back to a generic icon for a name it doesn't carry, so a new
+	// icon name never needs a coordinated frontend release. Validation
+	// only bounds the shape, it does not enumerate the names.
+	Icon string `json:"icon,omitempty"`
 }
 
 // GuardrailsConfig is the per-routine safety policy. Currently scoped
