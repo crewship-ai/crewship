@@ -22,6 +22,26 @@ export interface ToolbarTab<T extends string = string> {
    * about it. Set this to say both.
    */
   ariaLabel?: string
+  /**
+   * DOM id for the tab button, and the id of the panel it controls.
+   *
+   * A tab and its panel are two halves of one control, and `role="tab"` alone
+   * says only that a button is a tab: it does not say what it revealed. A
+   * reader who activates it is left to find the new content by hunting. The
+   * pair is what makes the relationship announceable — the button points at
+   * the panel with `aria-controls`, and the panel points back at the button
+   * with `aria-labelledby`, which is why the button needs an id of its own.
+   *
+   * Both are optional because a strip whose panels are not separately
+   * addressable is better off saying nothing than pointing at an id that does
+   * not resolve. Pass both or neither; `domId` alone is harmless, and
+   * `ariaControls` alone is a dangling reference.
+   *
+   * Ids must be unique in the DOCUMENT, not in the strip — see `page-tabs.tsx`
+   * for the `useId` scoping that makes two of the same view on one page safe.
+   */
+  domId?: string
+  ariaControls?: string
 }
 
 interface ToolbarStripProps<T extends string = string> extends React.ComponentProps<"div"> {
@@ -46,6 +66,11 @@ interface ToolbarStripProps<T extends string = string> extends React.ComponentPr
  * Layout: full-width strip with bottom hairline border, leading slot, tab group,
  * flex spacer, trailing actions slot. Active tab gets `bg-accent text-foreground`;
  * inactive tabs get `text-muted-foreground`.
+ *
+ * Keyboard: the WAI-ARIA tabs pattern, as in
+ * `components/features/admin/keeper-queue-panel.tsx` — ArrowLeft/ArrowRight
+ * cycle, Home/End jump to the ends, and a roving `tabIndex` keeps the whole
+ * group to one stop in the document's tab order.
  */
 export function ToolbarStrip<T extends string = string>({
   tabs,
@@ -58,6 +83,55 @@ export function ToolbarStrip<T extends string = string>({
   className,
   ...props
 }: ToolbarStripProps<T>) {
+  // Focus is moved through refs rather than by querying the DOM for the tab
+  // that should get it: a tab id is caller data, and building a selector out
+  // of it would need escaping to survive an id with a quote or a bracket in
+  // it. The map is keyed by the same ids the caller passed.
+  const buttons = React.useRef(new Map<T, HTMLButtonElement>())
+
+  // Roving tabIndex: exactly one tab is in the document's tab order, so Tab
+  // steps over the group instead of once per tab, and the arrow keys move
+  // within it. Disabled tabs are not focusable, so the roving stop falls to
+  // the first enabled one when the active tab is disabled or unset — a group
+  // where nothing is reachable by Tab would be worse than no roving at all.
+  const rovingId =
+    tabs?.find((t) => t.id === activeTab && !t.disabled)?.id ?? tabs?.find((t) => !t.disabled)?.id
+
+  /**
+   * ArrowLeft/Right cycle, Home/End jump — the WAI-ARIA tabs pattern.
+   *
+   * Activation follows focus, the pattern's default and what
+   * `keeper-queue-panel.tsx` already does here: it is the right choice when
+   * switching is cheap, and the one caller with panels keeps all of them
+   * mounted. A strip that has to fetch on select would want the manual variant
+   * (move focus, activate on Enter/Space) instead.
+   *
+   * Only the tablist listens, so a search box or a button in `leading` /
+   * `actions` keeps its own arrow keys.
+   */
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
+    const order = tabs?.filter((t) => !t.disabled) ?? []
+    if (order.length === 0) return
+    event.preventDefault()
+
+    const found = order.findIndex((t) => t.id === activeTab)
+    const current = found === -1 ? 0 : found
+    let next = current
+    if (event.key === "ArrowLeft") next = (current - 1 + order.length) % order.length
+    if (event.key === "ArrowRight") next = (current + 1) % order.length
+    if (event.key === "Home") next = 0
+    if (event.key === "End") next = order.length - 1
+
+    const target = order[next]
+    if (target.id === activeTab) return
+    onTabChange?.(target.id)
+    // Move DOM focus with the selection so the visual and the a11y state stay
+    // in sync. The button is already mounted — React keys it by tab id — so
+    // this needs no wait for the re-render.
+    buttons.current.get(target.id)?.focus()
+  }
+
   return (
     <div
       role="toolbar"
@@ -76,6 +150,7 @@ export function ToolbarStrip<T extends string = string>({
           className="flex gap-0.5 bg-muted/40 rounded-md p-0.5 shrink-0"
           role="tablist"
           aria-label={ariaLabel ? `${ariaLabel} tabs` : undefined}
+          onKeyDown={onKeyDown}
         >
           {tabs.map((tab) => {
             const Icon = tab.icon
@@ -85,8 +160,15 @@ export function ToolbarStrip<T extends string = string>({
                 key={tab.id}
                 type="button"
                 role="tab"
+                id={tab.domId}
                 aria-selected={isActive}
+                aria-controls={tab.ariaControls}
                 aria-label={tab.ariaLabel ?? tab.label}
+                tabIndex={tab.id === rovingId ? 0 : -1}
+                ref={(node) => {
+                  if (node) buttons.current.set(tab.id, node)
+                  else buttons.current.delete(tab.id)
+                }}
                 disabled={tab.disabled}
                 onClick={() => !tab.disabled && onTabChange?.(tab.id)}
                 className={cn(

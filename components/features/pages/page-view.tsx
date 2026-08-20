@@ -288,6 +288,22 @@ export function PageView({
   const tabs = React.useMemo<PageTabView[]>(() => derivePageTabs(page?.panels ?? []), [page])
   const [activeTab, selectTab] = usePageTabState(tabs)
 
+  // The bar and the groups are two halves of one control and have to agree on
+  // the ids that pair them (`pageTabIds`). They are also far apart in this
+  // tree — the bar sits outside the scroll area, the groups are down inside
+  // PanelGrid — so the scope is minted HERE, at the one component that renders
+  // both, and threaded down.
+  //
+  // Deriving the ids from the tab slug alone would be shorter and would make
+  // "one PageView per document" a rule this component does not state and
+  // nothing enforces: a second one — a preview beside the page, a future embed
+  // that reuses this rather than `public-page-view.tsx`, a test — would emit
+  // every id twice, and each reference would then resolve to whichever half
+  // rendered first, silently pairing one view's tabs with the other's panels.
+  // `useId` is the cheap way not to owe that rule; it is also SSR-stable,
+  // which a module-level counter is not.
+  const tabIdScope = React.useId()
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumb back-bar — inside the content area, matching /routines and
@@ -320,8 +336,18 @@ export function PageView({
         </div>
       </div>
 
-      {tabs.length > 0 && (
-        <PageTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} />
+      {/* The bar renders only when the groups it points at will render too.
+          `tabs` is derived from the LAST page the query held, and TanStack
+          keeps that data when a refetch fails (`usePage` sets `error` and
+          `notFound` from `query.error` while `query.data` stands) — so
+          `error` and `notFound` are both reachable with a page still in hand.
+          `PageBody` returns early in either case and mounts no group at all,
+          which would leave every `aria-controls` here resolving to nothing:
+          the dangling reference `pageTabIds` exists to prevent, and an
+          `aria-valid-attr-value` failure. A bar whose tabs reveal nothing is
+          also the wrong thing to draw above an error. */}
+      {tabs.length > 0 && !error && !notFound && (
+        <PageTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} idScope={tabIdScope} />
       )}
 
       <div className="flex-1 overflow-auto">
@@ -336,6 +362,7 @@ export function PageView({
             workspaceId={workspaceId}
             tabs={tabs}
             activeTab={activeTab}
+            tabIdScope={tabIdScope}
           />
         </div>
       </div>
@@ -353,7 +380,12 @@ function PageBody({
   workspaceId,
   tabs,
   activeTab,
-}: Omit<PageViewProps, "onBack"> & { tabs: PageTabView[]; activeTab: string }) {
+  tabIdScope,
+}: Omit<PageViewProps, "onBack"> & {
+  tabs: PageTabView[]
+  activeTab: string
+  tabIdScope: string
+}) {
   if (notFound) {
     return (
       <EmptyState
@@ -433,6 +465,7 @@ function PageBody({
         workspaceId={workspaceId}
         tabs={tabs}
         activeTab={activeTab}
+        tabIdScope={tabIdScope}
       />
     </>
   )
@@ -461,6 +494,7 @@ function PanelGrid({
   workspaceId,
   tabs,
   activeTab,
+  tabIdScope,
 }: {
   panels: NonNullable<PageRecord["panels"]>
   slug: string
@@ -468,6 +502,7 @@ function PanelGrid({
   workspaceId?: string | null
   tabs: PageTabView[]
   activeTab: string
+  tabIdScope: string
 }) {
   const actions = React.useMemo(() => {
     const map = new Map<string, readonly PageAction[]>()
@@ -491,7 +526,12 @@ function PanelGrid({
             // is what lets print reveal them all (§10b.8) — and what keeps a
             // panel's "the data just changed" baseline from resetting every
             // time somebody clicks back to its tab.
-            <PageTabGroup key={tab.id} tab={tab} active={tab.id === activeTab}>
+            <PageTabGroup
+              key={tab.id}
+              tab={tab}
+              active={tab.id === activeTab}
+              idScope={tabIdScope}
+            >
               <PanelGridCells panels={tab.panels} now={now} />
             </PageTabGroup>
           ))}
