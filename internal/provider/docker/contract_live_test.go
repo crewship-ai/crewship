@@ -41,9 +41,12 @@ func TestDockerProvider_LiveContractSuite(t *testing.T) {
 		p, cleanupProvider := newConformanceProvider(ctx, t)
 		t.Cleanup(cleanupProvider)
 
-		if err := p.ensureImage(ctx, image); err != nil {
-			t.Fatalf("pull %s: %v", image, err)
-		}
+		// Provenance is logged by the helper and asserted by
+		// TestRuntimeConformance, which is the harness that owns "which image
+		// ran". This one owns exec semantics — stdin, exit codes, stderr — on a
+		// container it merely borrows, so a second copy of the digest matrix
+		// here would be a fourth place to update and no extra signal.
+		_ = ensureConformanceImage(ctx, t, p, image)
 
 		crew := provider.CrewConfig{
 			ID:       "contract-crew-id",
