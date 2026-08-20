@@ -49,6 +49,14 @@ var unregisteredSpawnSites = map[string]string{
 	"router.go:NewRouter": "one-shot bcrypt warmup: touches no database and no filesystem, so it " +
 		"cannot race a teardown. Left unregistered so router construction — which every test does — " +
 		"does not add a CPU-bound wait to every teardown.",
+	"crew_container_inventory.go:Containers": "request-scoped fan-out, not detached work: the " +
+		"handler's own wg.Wait() joins every stats read before it writes the response, so the " +
+		"goroutines cannot outlive the request — let alone the test — and a drain would have " +
+		"nothing left to catch. They also carry r.Context(), so a cancelled request cancels them " +
+		"rather than stranding one. Registering them would say the opposite of what is true: that " +
+		"there is detached work in flight after the handler returned. The join is not left as a " +
+		"promise — TestCrewContainers_StatsAreConcurrentAndJoinedBeforeReturn asserts every read " +
+		"has finished by the time Containers returns, and fails if the fan-out is serialized.",
 }
 
 // TestBackgroundWork_EverySpawnSiteIsAccountedFor walks this package's
