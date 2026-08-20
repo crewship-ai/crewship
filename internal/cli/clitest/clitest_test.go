@@ -98,17 +98,23 @@ func TestStubServer_CallsFor(t *testing.T) {
 	s.OnPost("/api/v1/agents", JSONResponse(201, map[string]string{"id": "a1"}))
 	s.OnGet("/api/v1/agents", JSONResponse(200, []string{}))
 
-	// Each call's body must be closed so the underlying connection goes
-	// back to the pool rather than leaking; otherwise a package this
-	// parallel eventually runs into "too many open files" on CI.
-	// Requests go through s.Client() — see StubServer.Client — so the
-	// pool in question is this server's own, not the process-global one.
+	// Each response body must be drained to EOF and then closed. Closing
+	// alone frees the fd but does NOT return the connection to the pool
+	// when unread bytes remain — net/http only reuses a connection whose
+	// body was read to completion — so a package this parallel would
+	// otherwise keep dialling fresh sockets and eventually hit "too many
+	// open files" on CI. Requests go through s.Client(), so the pool in
+	// question is this server's own, not the process-global one.
+	drain := func(resp *http.Response) {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
 	postOnce := func() {
 		resp, err := s.Client().Post(s.URL()+"/api/v1/agents", "application/json", strings.NewReader(`{}`))
 		if err != nil {
 			t.Fatalf("POST: %v", err)
 		}
-		_ = resp.Body.Close()
+		drain(resp)
 	}
 	postOnce()
 	postOnce()
@@ -116,7 +122,7 @@ func TestStubServer_CallsFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	_ = resp.Body.Close()
+	drain(resp)
 
 	if got := len(s.CallsFor("POST", "/api/v1/agents")); got != 2 {
 		t.Errorf("CallsFor(POST) = %d, want 2", got)

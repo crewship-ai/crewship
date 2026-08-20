@@ -73,7 +73,10 @@
 //
 // Note that cli.NewClient leaves Transport nil — i.e.
 // http.DefaultTransport — so a cli.Client pointed at a stub without the
-// assignment above inherits exactly the same exposure.
+// assignment above inherits exactly the same exposure. The same trap
+// applies to any hand-rolled client: an http.Client with a nil
+// Transport is on the shared pool, so &http.Client{Timeout: d} is not
+// an escape from this. Use [StubServer.Client].
 //
 // # Stability
 //

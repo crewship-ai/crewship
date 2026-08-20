@@ -100,9 +100,15 @@ func NewStubServer() *StubServer {
 func (s *StubServer) URL() string { return s.srv.URL }
 
 // Client returns an *http.Client dedicated to this server. ALWAYS use
-// it (or a client you built yourself) to talk to a StubServer — never
-// http.DefaultClient, and never the http.Get / http.Post / http.Head
-// package-level wrappers, which are http.DefaultClient in disguise.
+// it to talk to a StubServer — never http.DefaultClient, and never the
+// http.Get / http.Post / http.Head package-level wrappers, which are
+// http.DefaultClient in disguise.
+//
+// Rolling your own client is only safe if you also give it its own
+// Transport. A nil Transport means http.DefaultTransport, so
+// &http.Client{} — or an http.Client that only sets Timeout — lands
+// back on the shared pool and is no better than http.DefaultClient.
+// Prefer this method; it is already correct.
 //
 // The reason is [StubServer.Close]. httptest.Server.Close does not
 // only shut down its own listener; it also calls
