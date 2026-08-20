@@ -272,7 +272,19 @@ func catalogFactsFor(m modelcatalog.Model) *modelCatalogFacts {
 		ToolCall:        m.ToolCall,
 		Reasoning:       m.Reasoning,
 	}
-	if in, out, _, _, ok := m.Rates(); ok {
+	// CeilingRates, and the zero-cost guard, because this must agree with what
+	// the ledger will actually bill — paymaster prices from CeilingRates and
+	// deliberately refuses an all-zero cost block, falling through to the
+	// provider ceiling. Reading base Rates() here made `model list` and
+	// `model price` disagree about the same model in the same build: on
+	// openrouter/qwen/qwen3.7-flash the list said $0.03/$0.13 while the ledger
+	// billed $0.20/$0.80, and on the 23 zero-cost rows the list rendered
+	// "$0/$0" — free — for hosted models paymaster charges a ceiling for.
+	//
+	// A price shown next to a model is a promise about the invoice. Where the
+	// two cannot agree the honest answer is to show nothing (nil leaves it
+	// rendering as unknown), never the cheaper of two numbers.
+	if in, out, _, _, ok := m.CeilingRates(); ok && !(in == 0 && out == 0) {
 		facts.InputPerMTok = &in
 		facts.OutputPerMTok = &out
 	}

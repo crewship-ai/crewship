@@ -87,8 +87,11 @@ server.
 A provider that needs no credential (a local runtime) shows "-".
 
 With --all, providers that exist only in the embedded models.dev catalog are
-listed too. Those have no codec here — they can be listed and priced by
-'crewship model list', but nothing in this build can call them.
+listed too. Those have no REGISTRY row, so they cannot back an evaluator slot
+and 'crewship provider list' cannot report an endpoint or key for them — but
+some are still reachable: an OpenAI-compatible backend can be called through
+'crewship provider check --provider <preset>', or through the openai codec with
+--base-url. Run 'crewship provider check --help' for the preset names.
 
 Examples:
   crewship provider list

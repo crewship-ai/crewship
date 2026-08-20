@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/llm/endpoint"
@@ -655,14 +656,21 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	}
 
 	final.Content = strings.Join(textParts, "")
-	// NOTE: this walks 0..len(toolMap)-1, which assumes the backend numbers its
-	// tool_calls contiguously from zero. That is true of hosted OpenAI and not
-	// of the vLLM / Mistral-compat builds that start at 1 or leave gaps, where
-	// tool calls are dropped. The fix is to sort the map's keys and iterate
-	// those — NOT done here because openai_cov_test.go's
-	// TestOpenAIParseSSEStream_EdgeCases pins the current behaviour and that
-	// file is read-only for this change. See the report accompanying this work.
-	for i := 0; i < len(toolMap); i++ {
+	// Iterate the map's own keys in order, not 0..len-1. The counting loop that
+	// used to be here assumed every backend numbers its tool_calls contiguously
+	// from zero: with indices {0, 2} it read len==2, walked i=0 and i=1, and
+	// never reached the call at index 2 — silently emitting one tool call where
+	// the model asked for two. Hosted OpenAI numbers contiguously so it never
+	// showed there, but the vLLM and Mistral-compat builds start at 1 or leave
+	// gaps, and this package now ships a vllm preset and a `provider check
+	// --provider vllm` path. A dropped tool call in an agent loop is not a
+	// visible failure; it is the model appearing to decline to act.
+	indices := make([]int, 0, len(toolMap))
+	for i := range toolMap {
+		indices = append(indices, i)
+	}
+	sort.Ints(indices)
+	for _, i := range indices {
 		ptc := toolMap[i]
 		if ptc == nil {
 			continue

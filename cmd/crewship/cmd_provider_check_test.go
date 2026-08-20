@@ -763,3 +763,58 @@ func TestRunProviderCheck_AnthropicWireShape(t *testing.T) {
 		})
 	}
 }
+
+// A key supplied to a keyless preset must actually be sent. The vllm and
+// ollama-openai presets carry NoAuth, and OpenAI.applyHeaders returns early on
+// it, so assigning APIKey without clearing NoAuth silently drops the
+// credential — the operator sees a 401 next to "api key --api-key" and goes
+// looking at the key's value instead of at the missing header.
+func TestBuildFromPreset_SuppliedKeyClearsNoAuth(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Pong"},"finish_reason":"stop"}],
+		                        "usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p, target, err := buildCheckProvider(checkOptions{
+		Provider: "vllm", BaseURL: srv.URL + "/v1", Model: "m", APIKey: "sk-test-key",
+	}, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("buildCheckProvider: %v", err)
+	}
+	if target.KeySource != "--api-key" {
+		t.Fatalf("KeySource = %q, want --api-key", target.KeySource)
+	}
+	if _, err := runProviderCheck(context.Background(), p, target, ""); err != nil {
+		t.Fatalf("runProviderCheck: %v", err)
+	}
+	if gotAuth != "Bearer sk-test-key" {
+		t.Errorf("Authorization = %q, want %q — a preset's NoAuth must not swallow an explicit key", gotAuth, "Bearer sk-test-key")
+	}
+}
+
+// The endpoint is echoed into human output, JSON, and therefore bug reports.
+// A base URL carrying userinfo must not take the credential with it.
+func TestBuildCheckProvider_RedactsUserinfoInReportedEndpoint(t *testing.T) {
+	for _, provider := range []string{"openai", "vllm"} {
+		t.Run(provider, func(t *testing.T) {
+			_, target, err := buildCheckProvider(checkOptions{
+				Provider: provider,
+				BaseURL:  "https://user:supersecret@example.invalid/v1",
+				Model:    "m",
+			}, func(string) string { return "" })
+			if err != nil {
+				t.Fatalf("buildCheckProvider: %v", err)
+			}
+			if strings.Contains(target.Endpoint, "supersecret") {
+				t.Errorf("Endpoint = %q leaks the credential", target.Endpoint)
+			}
+			if !strings.Contains(target.Endpoint, "example.invalid") {
+				t.Errorf("Endpoint = %q lost the host — redaction must not destroy the diagnosis", target.Endpoint)
+			}
+		})
+	}
+}

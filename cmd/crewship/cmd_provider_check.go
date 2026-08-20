@@ -146,8 +146,23 @@ Examples:
 			return err
 		}
 
-		ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
-		defer cancel()
+		// A non-positive deadline would make context.WithTimeout return an
+		// ALREADY-expired context, so the call fails before a packet leaves and
+		// checkExitCode classifies it as exit 8 — "nothing answered at that
+		// address". That is a fabricated connectivity failure: the endpoint was
+		// never contacted. `--timeout 0` is a natural spelling of "no limit",
+		// so it means that; anything negative is a mistake and is named as one.
+		ctx := cmd.Context()
+		if timeout < 0 {
+			return cli.WithExitCode(
+				fmt.Errorf("--timeout must not be negative (got %s); use 0 for no deadline", timeout),
+				cli.ExitValidation)
+		}
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
 
 		res, err := runProviderCheck(ctx, prov, target, prompt)
 		if err != nil {
@@ -217,7 +232,7 @@ func buildFromSpec(spec llm.ProviderSpec, o checkOptions, base, model string, ge
 		Provider:   spec.ID,
 		PricingKey: spec.ID,
 		Codec:      string(spec.Codec),
-		Endpoint:   base,
+		Endpoint:   redactURL(base),
 		Model:      model,
 		KeySource:  keySource,
 	}
@@ -280,12 +295,21 @@ func buildFromPreset(id string, preset llm.OpenAICompatConfig, o checkOptions, b
 	}
 	key, keySource := resolveCheckKey(o.APIKey, keyEnv, getenv)
 	preset.APIKey = key
+	// The keyless presets (vllm, ollama-openai) carry NoAuth, and applyHeaders
+	// returns early on it — so assigning APIKey alone would drop the key on the
+	// floor and send no Authorization header at all. A vLLM started with
+	// --api-key then answers 401 while this command reports `api key --api-key`,
+	// pointing the operator at the key's value instead of at the header that was
+	// never sent. Supplying a key is an unambiguous request to authenticate.
+	if key != "" {
+		preset.NoAuth = false
+	}
 
 	return llm.NewOpenAICompat(preset), checkTarget{
 		Provider:   id,
 		PricingKey: preset.Name,
 		Codec:      string(llm.CodecOpenAICompat),
-		Endpoint:   preset.BaseURL,
+		Endpoint:   redactURL(preset.BaseURL),
 		Model:      model,
 		KeySource:  keySource,
 	}, nil
