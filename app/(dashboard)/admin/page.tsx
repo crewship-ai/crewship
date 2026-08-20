@@ -466,7 +466,17 @@ export default function AdminPage() {
         </aside>
 
         {/* ── Content ─────────────────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto">
+        {/* tabIndex + role/label, not decoration: this pane scrolls, and the
+            default section (Overview) renders nothing focusable inside it, so
+            without a tab stop a keyboard-only admin cannot scroll it at all
+            (axe: scrollable-region-focusable). The label names the section
+            rather than saying "content", so the landmark list stays useful. */}
+        <div
+          className="flex-1 overflow-y-auto"
+          tabIndex={0}
+          role="region"
+          aria-label={activeItem ? `Admin ${activeItem.label}` : "Admin content"}
+        >
         <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
           {activeItem && (
             <div className="space-y-1">

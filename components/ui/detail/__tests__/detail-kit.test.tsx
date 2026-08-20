@@ -138,6 +138,26 @@ describe("shared roles", () => {
     expect(screen.getByText("pending")).toHaveClass("text-warn")
   })
 
+  // `--purple` is a fill/stroke token: on the `bg-purple/20` tint it measures
+  // 4.48:1, under the 4.5:1 floor. `--purple-hover` is the text-safe pair, and
+  // this is the same swap #1921 made on the other tinted rows — asserted by
+  // class rather than by ratio, because a ratio is a browser measurement and
+  // this suite runs in happy-dom with no real stylesheet.
+  it("tints purple text with the text-safe token, not the fill token", () => {
+    render(<Pill tone="purple">lead</Pill>)
+    const pill = screen.getByText("lead")
+    expect(pill).toHaveClass("bg-purple/20")
+    expect(pill).toHaveClass("text-purple-hover")
+    expect(pill.className).not.toMatch(/(^|\s)text-purple(\s|$)/)
+  })
+
+  it("uses the same text-safe purple on EntityChip", () => {
+    render(<EntityChip label="@casey" tone="purple" />)
+    const chip = screen.getByText("@casey").parentElement!
+    expect(chip).toHaveClass("text-purple-hover")
+    expect(chip.className).not.toMatch(/(^|\s)text-purple(\s|$)/)
+  })
+
   it("EmptyState renders title, description and action", () => {
     render(
       <EmptyState icon={Workflow} title="Nothing yet" description="Description" action={<button>Add</button>} />,
