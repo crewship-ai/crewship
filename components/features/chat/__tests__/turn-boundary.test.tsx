@@ -258,6 +258,24 @@ describe("the resetKeys trap — a turn that threw must recover on new content",
     expect(turnContentKey(withEnvelope)).not.toBe(before)
   })
 
+  it("still contains the turn when the crash REPORTER throws", () => {
+    // `onError` runs in the boundary's own componentDidCatch, outside what the
+    // boundary catches — so an unguarded throw there escapes to the route
+    // boundary and replaces the page, which is the whole failure this change
+    // exists to prevent. Verified by execution: without the guard this render
+    // rejects with "sentry is down" and the card never appears.
+    captureException.mockImplementationOnce(() => {
+      throw new Error("sentry is down")
+    })
+
+    expect(() =>
+      render(<ChatHarness turns={[userTurn("u1", "first message"), hostileInitTurn()]} />),
+    ).not.toThrow()
+
+    expect(screen.getByTestId("turn-error")).toBeTruthy()
+    expect(screen.getByText("first message")).toBeTruthy()
+  })
+
   it("never throws on the payload that made the turn throw", () => {
     // The key is computed OUTSIDE the boundary. A throw here would escape to
     // the route boundary — the failure this whole change exists to prevent.

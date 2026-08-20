@@ -562,9 +562,20 @@ export const TurnRenderer = React.memo(function TurnRenderer(props: TurnRenderer
       // after the text that follows it renders perfectly.
       resetKeys={[turn.id, turnContentKey(turn)]}
       onError={(error) => {
-        Sentry.captureException(error, {
-          tags: { boundary: "chat-turn", turnId: turn.id, turnRole: turn.role },
-        })
+        // Reporting runs in the boundary's own `componentDidCatch`, which is
+        // OUTSIDE anything this boundary catches: a throw here propagates to
+        // the route boundary and replaces the page — the exact failure the
+        // boundary exists to prevent, reintroduced at the one moment it
+        // matters, when a turn has already thrown. Same reasoning as
+        // `turnContentKey`'s catch: the reporting path is never allowed to
+        // cost more than the turn it is reporting on.
+        try {
+          Sentry.captureException(error, {
+            tags: { boundary: "chat-turn", turnId: turn.id, turnRole: turn.role },
+          })
+        } catch {
+          // Losing one crash report is strictly cheaper than losing the session.
+        }
       }}
       fallbackRender={({ resetErrorBoundary }) => (
         <TurnErrorCard turn={turn} onRetry={resetErrorBoundary} />
