@@ -587,6 +587,28 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Leaving a workspace kept every crew membership (#1976).** `RemoveMember`
+  deleted the `workspace_members` row and nothing else, so each `crew_members`
+  row the departing user held in that workspace outlived their departure —
+  and those rows grant on their own. Crew membership alone opens crew-owned
+  pages (`pages_authz.go`) and crew credentials (`credentials_loaders.go`),
+  and `CrewRoleFromDB` folds `crew_members.role` into
+  `effectiveRole(workspace, crew)`. So a user removed while holding a per-crew
+  ADMIN override and later re-added as a plain MEMBER came back **as crew
+  ADMIN**: `AddMember` inserts a workspace_members row and never looks at
+  `crew_members`, so nothing on the way back in could notice the elevation
+  nobody granted.
+
+  The removal now deletes both, in one transaction — both or neither, because
+  workspace-removed-but-crew-attached is exactly the state being fixed. The
+  purge is scoped through `crews` (`crew_members` has no `workspace_id` of its
+  own), so the same person's crews in other workspaces are untouched, and it
+  runs *after* the page-owner transfer, whose "else the crew the departing
+  user belonged to" fallback reads the very rows being purged.
+
+  **Behaviour change:** re-adding someone to a workspace no longer restores
+  their crews. A returning member must be added back to each crew by hand —
+  including any per-crew role override they used to hold.
 - **"Waiting on you" counted things nobody was waiting on (#1876).**
   `scopeOf` — the classifier the Activity rail, feed and status segments all
   read — put every human-source journal row in the `waiting` bucket. But the
