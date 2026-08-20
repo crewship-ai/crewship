@@ -41,7 +41,7 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_SIDECAR_PATH` | autodetected | Absolute host path to the `crewship-sidecar` Go binary. See [Devcontainers reference](/configuration/devcontainers#environment-variables) for autodetect order. |
 | `CREWSHIP_ENTRYPOINT_PATH` | autodetected | Absolute host path to `entrypoint.sh`. |
 | `CREWSHIP_SKIP_SIDECAR` | (unset) | Set to `1` to bypass fail-fast autodetect (tests only — never set in production). |
-| `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE` | (unset — fail closed) | Set to `1`/`true` to let a crew container start from a **known-stale** local image when the registry pull fails. See [Runtime image pinning](#runtime-image-pinning) below. |
+| `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE` | (unset — fail closed) | Set to `1`/`true` to let a crew container start from a **known-stale** local image — whether the registry pull failed or the pull succeeded but the local tag could not be moved onto it. See [Runtime image pinning](#runtime-image-pinning) below. |
 
 ### Runtime image pinning
 
@@ -70,32 +70,62 @@ reached at all, the digest lookup returns nothing and Crewship keeps using the
 local copy exactly as before — it just logs the local digest alongside, so even
 an offline run is attributable.
 
-**When the pull fails but the registry answered.** This is the one case that
-changed. Reaching a pull with a local copy present means the registry *did*
-answer the digest check and the local image is a **different** manifest than
-the tag now names — provable drift, not a guess. Crewship refuses to start the
-container rather than silently running the wrong image:
+**When the local image is provably stale.** This is the case that changed.
+Two different failures land a host in the same state — the registry answered
+the digest check, and the tag the container will start from resolves to a
+**different** manifest. That is provable drift, not a guess, so Crewship
+refuses to start the container rather than silently running the wrong image.
+`CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1` is the single host-wide opt-out for
+**both** routes.
+
+*Route 1 — the pull failed.* Reaching a pull with a local copy present means the
+digest check succeeded and the local copy did not match it:
 
 ```
-pull image ghcr.io/example/runtime:latest: toomanyrequests: rate limit exceeded
-(local copy is sha256:bbbb… but the tag now resolves to sha256:aaaa…;
-refusing to run a known-stale runtime image — set
-CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1 to accept the stale copy)
+runtime image ghcr.io/example/runtime:latest is known-stale: the registry pull
+failed: toomanyrequests: rate limit exceeded; ghcr.io/example/runtime:latest
+resolves to sha256:bbbb… on this host while the registry names sha256:aaaa…;
+refusing to start a crew on an image the registry contradicts — re-run once the
+registry accepts the pull again (a rate limit clears on its own), or set
+CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1 to accept the stale copy host-wide
 ```
 
 The most common cause is a registry rate limit (Docker Hub answers `HEAD`
-generously and throttles blob pulls). If you would rather keep running on the
-older image than stop the fleet, set `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1`.
-The journal then records the **local** digest — what actually ran — not the one
-that was wanted, and each start logs a warning naming both.
+generously and throttles blob pulls).
 
-The same rule holds when the pull succeeds but the local tag cannot be restored
-afterwards. A digest-pinned pull leaves the image unnamed, so Crewship re-creates
-the `repo:tag` alias itself; if the daemon refuses that, and an older copy of the
-tag is still on disk, the container starts from the **old** manifest. Crewship
-re-reads the tag before writing the journal, records the digest that tag actually
-carries with `payload.pinned: false`, and logs an error naming both digests. The
-`provisioning.step` row never claims a digest that did not run.
+*Route 2 — the pull succeeded but the tag could not be moved.* A digest-pinned
+pull leaves the image on disk **unnamed**, so Crewship re-creates the `repo:tag`
+alias itself. If the daemon refuses that and an older copy of the tag is still
+there, the tag keeps pointing at the old manifest and every downstream lookup —
+`ContainerCreate` included — addresses the image by tag. Crewship re-reads the
+tag before deciding, and refuses on the same terms:
+
+```
+runtime image ghcr.io/example/runtime:latest is known-stale: the pull succeeded
+but the local tag could not be moved onto the pulled manifest: conflict: cannot
+restore tag; ghcr.io/example/runtime:latest resolves to sha256:bbbb… on this
+host while the registry names sha256:aaaa…; refusing to start a crew on an
+image the registry contradicts — the pulled manifest is already on disk, name
+it with `docker tag ghcr.io/example/runtime@sha256:aaaa…
+ghcr.io/example/runtime:latest`, or re-run once the daemon accepts the re-tag,
+or set CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1 to accept the stale copy host-wide
+```
+
+This route is the more recoverable of the two: the manifest you wanted is
+already on disk, it just has no name, which is why the error hands you the
+`docker tag` that fixes it properly.
+
+**What the opt-out does and does not relax.** With
+`CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1` both routes proceed, log a warning naming
+both digests, and journal the **local** digest — what actually ran — with
+`payload.pinned: false`. The escape hatch relaxes *execution* only. It never
+relaxes the audit record: a `provisioning.step` row never claims a digest that
+did not run, opt-out or not.
+
+One case is deliberately left alone: if the re-tag fails and **nothing** answers
+to the tag afterwards, there is no stale image to run and no digest to record.
+Crewship records nothing and lets the daemon's own error surface at container
+create, which is where it is most legible.
 
 Locally built devcontainer cache images (`crewship-cache:*`) exist in no
 registry and therefore have no digest. Their `provisioning.step` rows omit the

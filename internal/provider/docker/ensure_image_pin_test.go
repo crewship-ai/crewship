@@ -188,18 +188,26 @@ func TestEnsureImage_PinnedPullRestoresTheLocalTag(t *testing.T) {
 // confirm it carries the digest we pulled, or report the digest it does carry
 // with Verified false — and record nothing at all when the tag is absent
 // entirely, letting the real daemon error surface at ContainerCreate as before.
+//
+// The stale case additionally REFUSES to start (see
+// TestEnsureImage_FailedRetag_StaleTagFailsClosed), so what it asserts here is
+// the property that survives the escape hatch: an operator who opts out of the
+// refusal still gets an honest audit row. The hatch relaxes execution, never
+// the journal.
 func TestEnsureImage_FailedRetag_DoesNotJournalTheRemoteDigest(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: the stale case sets the escape-hatch env var, which is
+	// process-global.
 	tests := []struct {
 		name       string
-		localStale bool   // does `ref` still resolve locally, to the OLD manifest?
-		wantDigest string // what the journal is allowed to record
+		localStale bool // does `ref` still resolve locally, to the OLD manifest?
+		allowStale bool // operator set CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE
+		wantDigest string
 		why        string
 	}{
 		{
-			name:       "stale local tag reports the digest that will run",
+			name:       "stale local tag under the escape hatch reports the digest that will run",
 			localStale: true,
+			allowStale: true,
 			wantDigest: pinLocalDigest,
 			why:        "the tag still names the old manifest, so that is what the container executes",
 		},
@@ -213,7 +221,9 @@ func TestEnsureImage_FailedRetag_DoesNotJournalTheRemoteDigest(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+			if tc.allowStale {
+				t.Setenv(staleImageEscapeHatchEnv, "1")
+			}
 
 			var rec pullRecorder
 			var ref string
@@ -247,10 +257,11 @@ func TestEnsureImage_FailedRetag_DoesNotJournalTheRemoteDigest(t *testing.T) {
 
 			prov, err := p.ensureImage(context.Background(), ref)
 			if err != nil {
-				// A failed re-tag must stay non-fatal: the daemon may still be
-				// able to run the image, and this path is not the one that gets
-				// to stop a fleet.
-				t.Fatalf("a best-effort re-tag failure must not be fatal: %v", err)
+				// Neither case may fail here: the absent-tag one because the
+				// image is merely unnamed and the real daemon error belongs to
+				// ContainerCreate, the stale one because the operator has
+				// explicitly accepted the stale copy.
+				t.Fatalf("ensureImage must not fail in this case: %v", err)
 			}
 			if tags := rec.tagSnapshot(); len(tags) != 1 {
 				t.Fatalf("ImageTag calls = %d (%v), want exactly 1 — the test is not exercising the re-tag failure", len(tags), tags)
@@ -265,6 +276,68 @@ func TestEnsureImage_FailedRetag_DoesNotJournalTheRemoteDigest(t *testing.T) {
 				t.Error("nothing confirmed that `ref` resolves to the pulled manifest, so Verified would attest a claim we did not check")
 			}
 		})
+	}
+}
+
+// TestEnsureImage_FailedRetag_StaleTagFailsClosed is the second half of #2019:
+// the two routes to a known-stale runtime image now answer the same way.
+//
+// A failed re-tag over a surviving stale copy of the tag lands in EXACTLY the
+// state the #1825 pull-failure branch refuses to run: the registry answered, the
+// manifest it names is not what `ref` resolves to, and ContainerCreate would
+// start the old image. Journalling that honestly (#2006) fixed the audit record
+// but left execution fail-open — one route stopped the fleet, the sibling route
+// shrugged and started the wrong image with an Error log. An operator cannot be
+// asked to reason about which of the two internal paths their host took.
+//
+// So it refuses, through the same env-var opt-out, and the error has to be
+// actionable on its own: both digests, the escape-hatch name, and the fact that
+// the correct manifest is already on disk and merely needs a name.
+func TestEnsureImage_FailedRetag_StaleTagFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	var ref string
+	p, ref := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+			// The re-tag fails — a read-only image store, a daemon that lost
+			// the layer mid-pull, a name conflict.
+			http.Error(w, `{"message":"conflict: cannot restore tag"}`, http.StatusInternalServerError)
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+			// Both the pre-pull inspect and the post-tag read-back see the same
+			// stale local copy: the pull never renamed it.
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"Id":          "sha256:local",
+				"RepoDigests": []string{strings.TrimSuffix(ref, ":tag") + "@" + pinLocalDigest},
+			})
+		case strings.HasSuffix(path, "/images/create"):
+			_, _ = w.Write([]byte("{}"))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+
+	prov, err := p.ensureImage(context.Background(), ref)
+	if err == nil {
+		t.Fatalf("a stale tag that survived a failed re-tag must not be started silently; got %+v, nil error", prov)
+	}
+	if prov.Digest != "" || prov.Verified {
+		t.Errorf("a refusal must report no provenance at all, got %+v — nothing ran, so nothing may be journalled", prov)
+	}
+	if !strings.Contains(err.Error(), pinLocalDigest) || !strings.Contains(err.Error(), pinRemoteDigest) {
+		t.Errorf("error must name both digests so an operator can see the drift: %v", err)
+	}
+	if !strings.Contains(err.Error(), staleImageEscapeHatchEnv) {
+		t.Errorf("error must name the escape hatch %s, or the operator has no way to act on it: %v", staleImageEscapeHatchEnv, err)
+	}
+	// The distinguishing fact of THIS route: the manifest we wanted is already
+	// on disk, unnamed. The error must hand over the command that names it,
+	// otherwise the only remedy an operator can infer is the escape hatch —
+	// i.e. the insecure one.
+	if !strings.Contains(err.Error(), "docker tag ") {
+		t.Errorf("error must offer the re-tag that fixes this properly, not just the opt-out: %v", err)
 	}
 }
 

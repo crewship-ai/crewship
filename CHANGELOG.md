@@ -268,6 +268,40 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **A crew no longer starts on a known-stale runtime image, whichever way the
+  host got there (#2006, #2019).** ⚠️ **Behaviour change:** a start that used to
+  succeed can now fail.
+
+  Crewship pulls the runtime image **by digest** and then re-creates the
+  `repo:tag` alias itself, because everything downstream — `ContainerCreate`
+  included — addresses the image by tag. When that re-tag failed and an older
+  copy of the tag was still on disk, the tag kept pointing at the **old**
+  manifest: the container ran the old image, and the `provisioning.step` journal
+  attested the newly pulled digest as verified. The journal half is fixed first
+  — the digest recorded is now read back off disk, so a run is never attributed
+  to a manifest it did not execute, and `{}` is recorded when nothing answers to
+  the tag at all.
+
+  Execution is now fixed too. That state is bit-for-bit the state a **failed
+  pull** over a stale local copy reaches, which has refused to start since
+  #1825 — so one route stopped the fleet while its sibling shrugged and started
+  the wrong image with an error log. Both routes now go through one decision:
+  refuse by default, with the existing host-wide opt-out
+  `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1`, and the error names both digests, what
+  happened, and how to fix it properly. This route is the more recoverable one —
+  the manifest you wanted is already on disk and merely unnamed — so the error
+  hands over the exact `docker tag` that names it.
+
+  **Who is affected:** a host whose registry answers the digest check while its
+  local tag resolves to something else. An air-gapped or offline host is not
+  affected (no digest answer, so nothing is provably stale) and neither is a tag
+  that is simply absent. **If a start now fails**, re-pull or run the `docker
+  tag` the error prints; if you would rather run the older image than stop the
+  fleet, set `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1`. The opt-out relaxes
+  execution only — it still journals the **local** digest with
+  `payload.pinned: false`, because a tamper-evident log that attests a digest
+  which never ran is worse than one that records nothing.
+
 - **Go toolchain bumped 1.26.5 → 1.26.6, clearing eight advisories (#1959).**
   Seven were in the standard library and reachable from real call paths —
   `crypto/tls` post-handshake message flooding (GO-2026-6090), `net/http`

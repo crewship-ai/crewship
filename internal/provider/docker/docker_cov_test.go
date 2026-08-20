@@ -357,6 +357,13 @@ func TestEnsureImage_StaleLocal_Repulls(t *testing.T) {
 	p, ref := newCovImageProvider(t, covDigest, func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
+		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+			// A real daemon accepts the re-tag that follows a pinned pull, and
+			// since #2019 a REFUSED one over a surviving stale tag is fatal —
+			// which is a different test (ensure_image_pin_test.go), not this
+			// one. Answering it keeps the fake honest about the scenario this
+			// test actually describes: a stale copy that gets re-pulled.
+			w.WriteHeader(http.StatusCreated)
 		case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
