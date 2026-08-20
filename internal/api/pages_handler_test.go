@@ -166,6 +166,41 @@ func pagesPanel(t *testing.T, doc map[string]any, panelID string) map[string]any
 	return nil
 }
 
+// pagesAssertSealedPlaceholder asserts that a panel object is the sealed
+// placeholder and carries NOTHING beyond it.
+//
+// It is an allow-list rather than a list of fields known to be dangerous, and
+// that is the whole point. `data`, `schema`, `producer`, `sla_seconds`,
+// `state` and `provenance` are the fields pagePanelWire happens to carry
+// today; a check that names them keeps passing, unchanged and silent, the day
+// a seventh is added. The placeholder's key set is closed by §11b decision 14,
+// so the test closes it too: widening what a sealed panel discloses now
+// requires a deliberate edit here.
+func pagesAssertSealedPlaceholder(t *testing.T, panel map[string]any, panelID string) {
+	t.Helper()
+	// pageSealedPanelWire's whole field set and nothing else. `tab` is in the
+	// set but optional — it is `omitempty`, so a page with no tabs authored on
+	// it sends none.
+	allowed := map[string]bool{
+		"panel_id":        true,
+		"span":            true,
+		"sealed":          true,
+		"owner_crew_name": true,
+		"tab":             true,
+	}
+	if sealed, _ := panel["sealed"].(bool); !sealed {
+		t.Fatalf("panel %q is not sealed for a viewer outside its owning crew — a grant widens access "+
+			"to the PAGE and never to a crew's data (§7.1 rule 3): %s", panelID, mustPagesJSON(t, panel))
+	}
+	for key := range panel {
+		if !allowed[key] {
+			t.Errorf("the sealed placeholder for %q carries %q; §11b decision 14 pins it to "+
+				"{panel_id, span, sealed, owner_crew_name} plus an optional tab: %s",
+				panelID, key, mustPagesJSON(t, panel))
+		}
+	}
+}
+
 func mustPagesJSON(t *testing.T, v any) string {
 	t.Helper()
 	b, _ := json.MarshalIndent(v, "", "  ")

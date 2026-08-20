@@ -537,10 +537,34 @@ type PipelineScheduler struct {
 	// silently queueing.
 	dispatchSaturatedCount atomic.Int64
 
+	// nowFn is the clock fireOne reads. Declared as a field rather than
+	// called as time.Now() at each use site because fireOne's decisions
+	// are all RELATIVE to the cron grid: whether an occurrence falls in
+	// (next_run_at, now] decides emitMissedOccurrences, and where the
+	// same instant sits relative to a cron boundary decides the catchup
+	// branch. Reading the ambient wall clock made those outcomes depend
+	// on what time of day the test happened to run — #1740, where
+	// TestPipelineScheduler_FireOne_NoMissedOccurrences_NoEvent went red
+	// on CI for ~1 second in every 3600 and looked like -shuffle order
+	// dependence. Reading it once per fireOne also makes the four reads
+	// coherent: nextRun and the missed-occurrence window can no longer
+	// straddle a boundary between two separate time.Now() calls.
+	// Defaults to time.Now; tests override it directly (in-package).
+	nowFn func() time.Time
+
 	stopCh    chan struct{}
 	stopped   chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
+}
+
+// now reads the scheduler's clock, defaulting to time.Now so a
+// PipelineScheduler built as a bare struct literal still works.
+func (s *PipelineScheduler) now() time.Time {
+	if s.nowFn == nil {
+		return time.Now()
+	}
+	return s.nowFn()
 }
 
 // defaultScheduleDispatchConcurrency bounds how many due schedules fire
@@ -572,6 +596,7 @@ func NewPipelineScheduler(store *ScheduleStore, pipelines *Store, executor *Exec
 		executor:  executor,
 		logger:    logger,
 		emitter:   nopEmitter{},
+		nowFn:     time.Now,
 		stopCh:    make(chan struct{}),
 		stopped:   make(chan struct{}),
 	}
@@ -719,7 +744,11 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 		_, _ = s.store.db.ExecContext(ctx, `UPDATE pipeline_schedules SET enabled = 0 WHERE id = ?`, sched.ID)
 		return
 	}
-	nextRun := cronSched.Next(time.Now().In(loc))
+	// One clock read for the whole fire. Every decision below is relative
+	// to this instant, so two reads either side of a cron boundary can no
+	// longer disagree about whether an occurrence has passed (#1740).
+	now := s.now()
+	nextRun := cronSched.Next(now.In(loc))
 
 	// Missed-occurrence visibility (#1409): if this row's due bar
 	// (NextRunAt) lagged behind now by more than one cron interval —
@@ -728,9 +757,9 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	// only fire ONCE here (no backfill), but the silent loss is worth a
 	// single breadcrumb so an incident review can see it.
 	if sched.NextRunAt != nil {
-		now := time.Now().In(loc)
-		if missed := countMissedOccurrences(cronSched, *sched.NextRunAt, now); missed > 0 {
-			s.emitMissedOccurrences(ctx, sched, missed, *sched.NextRunAt, now)
+		localNow := now.In(loc)
+		if missed := countMissedOccurrences(cronSched, *sched.NextRunAt, localNow); missed > 0 {
+			s.emitMissedOccurrences(ctx, sched, missed, *sched.NextRunAt, localNow)
 		}
 	}
 
@@ -754,8 +783,8 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 		if !proceed {
 			return
 		}
-		dueAt := scheduleDueAt(sched)
-		missed := len(missedOccurrencesSince(cronSched, dueAt, time.Now()))
+		dueAt := scheduleDueAt(sched, now)
+		missed := len(missedOccurrencesSince(cronSched, dueAt, now))
 		s.notifyMissedOccurrences(ctx, sched, dueAt, missed, CatchupOnce)
 		s.fireSingleOccurrence(ctx, sched, dueAt, nextRun, missed)
 		return
@@ -765,8 +794,8 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	// (#1422 item 2). dueAt is the occurrence that made this row due;
 	// extra is every ADDITIONAL occurrence that also came due before now
 	// (scheduler downtime, a long disable/re-enable gap, …).
-	dueAt := scheduleDueAt(sched)
-	extra := missedOccurrencesSince(cronSched, dueAt, time.Now())
+	dueAt := scheduleDueAt(sched, now)
+	extra := missedOccurrencesSince(cronSched, dueAt, now)
 	if len(extra) == 0 {
 		// Common case: on time. Behaviour is identical regardless of
 		// catchup_policy — there is no backlog to apply a policy to.
@@ -810,11 +839,11 @@ const maxCatchupFireOccurrences = 20
 // it doubles as the idempotency bucket for the occurrence. Defensive
 // fallback (should never be nil for a due row): a minute bucket so
 // distinct minutes still fire and we never dedupe forever.
-func scheduleDueAt(sched *Schedule) time.Time {
+func scheduleDueAt(sched *Schedule, now time.Time) time.Time {
 	if sched.NextRunAt != nil {
 		return sched.NextRunAt.UTC()
 	}
-	return time.Now().UTC().Truncate(time.Minute)
+	return now.UTC().Truncate(time.Minute)
 }
 
 // missedOccurrencesSince returns the cron occurrences strictly after

@@ -126,7 +126,7 @@ func TestResolveTargetWorkspaceIDs_Dedupe(t *testing.T) {
 	})
 }
 
-func TestListAllTablesTx_FiltersInternals(t *testing.T) {
+func TestListAllTablesOnTx_FiltersInternals(t *testing.T) {
 	ctx := context.Background()
 	db := newRunnerCovDB(t, `
 		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
@@ -135,7 +135,7 @@ func TestListAllTablesTx_FiltersInternals(t *testing.T) {
 		CREATE TABLE notes_fts_idx (id TEXT);
 	`)
 	tx := beginCovTx(t, db)
-	tables, err := listAllTablesTx(ctx, tx)
+	tables, err := listAllTables(ctx, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestListAllTablesTx_FiltersInternals(t *testing.T) {
 	}
 }
 
-func TestTableFKEdgesTx_Guards(t *testing.T) {
+func TestTableFKEdgesOnTx_Guards(t *testing.T) {
 	ctx := context.Background()
 	db := newRunnerCovDB(t, `
 		CREATE TABLE parents (id TEXT PRIMARY KEY);
@@ -154,13 +154,13 @@ func TestTableFKEdgesTx_Guards(t *testing.T) {
 	tx := beginCovTx(t, db)
 
 	t.Run("invalid identifier rejected", func(t *testing.T) {
-		_, err := tableFKEdgesTx(ctx, tx, "kids; DROP TABLE kids")
+		_, err := tableFKEdges(ctx, tx, "kids; DROP TABLE kids")
 		if err == nil || !strings.Contains(err.Error(), "invalid table identifier") {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("edges resolved with default to-column", func(t *testing.T) {
-		edges, err := tableFKEdgesTx(ctx, tx, "kids")
+		edges, err := tableFKEdges(ctx, tx, "kids")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +173,7 @@ func TestTableFKEdgesTx_Guards(t *testing.T) {
 		}
 	})
 	t.Run("no edges on a leaf table", func(t *testing.T) {
-		edges, err := tableFKEdgesTx(ctx, tx, "parents")
+		edges, err := tableFKEdges(ctx, tx, "parents")
 		if err != nil || len(edges) != 0 {
 			t.Errorf("edges = %v, err = %v", edges, err)
 		}

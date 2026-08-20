@@ -59,6 +59,38 @@ func pagesListSlugs(t *testing.T, h *PageHandler, wsID, userID, role string) []s
 	return out
 }
 
+// pagesCanaryLookout and pagesCanaryEngine are payload values planted by the
+// leak test below so that it can look for them BY NAME.
+//
+// It used to look for the shared fixture payloads' own values instead — the
+// literal `"200 OK"` out of pagesStatusPayload and the literal `"42"` out of
+// pagesMetricPayload — by scanning the whole serialised page document for them.
+// Two digits are not a payload marker. Page ids are cuids, so roughly one run
+// in twenty drew an id like `cmt17gjk2004624a421aa`, the scan hit the `42`
+// inside it, and the test reported a data leak that had not happened (#2000).
+//
+// A canary planted by the test is the fix rather than a narrower needle,
+// because it makes the string being searched for something no generated id,
+// timestamp, count or offset can produce: the only way it appears in the
+// document is if the payload did. Two of them, one per crew, so a failure
+// names whose data escaped.
+//
+// Both fit their schema's length cap: `label` allows 200 characters and `unit`
+// allows 24 (schemas/panel.status.v1.json, schemas/panel.metric.v1.json).
+const (
+	pagesCanaryLookout = "canary-lookout-8f3a1c"
+	pagesCanaryEngine  = "canary-engine-8f3a1c"
+
+	// pagesCanaryStatusPayload is a valid status.v1 payload carrying the
+	// lookout canary in the one free-text field status.v1 has.
+	pagesCanaryStatusPayload = `{"items":[{"name":"api","state":"ok","label":"` + pagesCanaryLookout + `"}]}`
+
+	// pagesCanaryMetricPayload is a valid metric.v1 payload carrying the engine
+	// canary in `unit`. The value stays 42 so the fixture still reads like the
+	// shared one; it is simply no longer what anything asserts on.
+	pagesCanaryMetricPayload = `{"value":42,"unit":"` + pagesCanaryEngine + `"}`
+)
+
 func pagesSlugListed(slugs []string, want string) bool {
 	for _, s := range slugs {
 		if s == want {
@@ -88,12 +120,31 @@ func TestPageGrants_ReadGrantReachesThePageAndNotTheData(t *testing.T) {
 	h, _, wsID, ownerID, _ := pagesGrantFixture(t, "")
 	pagesSeedUser(t, h, wsID, "outsider", "outsider@example.com", "MEMBER")
 
-	// Real data on both panels, so there is something to leak.
-	if rr := pagesPush(t, h, wsID, ownerID, "OWNER", "fleet-201", "sluzby", pagesStatusPayload); rr.Code != http.StatusOK {
+	// Real data on both panels, so there is something to leak, each carrying
+	// its crew's canary.
+	if rr := pagesPush(t, h, wsID, ownerID, "OWNER", "fleet-201", "sluzby", pagesCanaryStatusPayload); rr.Code != http.StatusOK {
 		t.Fatalf("seed push sluzby: %d %s", rr.Code, rr.Body.String())
 	}
-	if rr := pagesPush(t, h, wsID, ownerID, "OWNER", "fleet-201", "zatizeni", pagesMetricPayload); rr.Code != http.StatusOK {
+	if rr := pagesPush(t, h, wsID, ownerID, "OWNER", "fleet-201", "zatizeni", pagesCanaryMetricPayload); rr.Code != http.StatusOK {
 		t.Fatalf("seed push zatizeni: %d %s", rr.Code, rr.Body.String())
+	}
+
+	// The positive control, and it is not ceremony: "the canary is absent" is
+	// only evidence of a seal if the canary would otherwise be present. Read
+	// the same page as somebody entitled to both panels first. Without this, a
+	// push that started failing, a payload field that got renamed, or a canary
+	// that never reached the database would make every assertion below pass —
+	// including on the day the seal actually breaks.
+	entitled := pagesGetStatus(t, h, wsID, ownerID, "OWNER", "fleet-201")
+	if entitled.Code != http.StatusOK {
+		t.Fatalf("the page's own owner got %d seeding the leak check; body: %s",
+			entitled.Code, entitled.Body.String())
+	}
+	for _, canary := range []string{pagesCanaryLookout, pagesCanaryEngine} {
+		if !strings.Contains(entitled.Body.String(), canary) {
+			t.Fatalf("a viewer entitled to both panels was not served %q, so the leak check below "+
+				"would pass whatever the server did; body: %s", canary, entitled.Body.String())
+		}
 	}
 
 	if rr := pagesGetStatus(t, h, wsID, "outsider", "MEMBER", "fleet-201"); rr.Code != http.StatusNotFound {
@@ -120,21 +171,26 @@ func TestPageGrants_ReadGrantReachesThePageAndNotTheData(t *testing.T) {
 		t.Fatalf("the page has %d panels for a read grantee, want both slots — the grid must have the "+
 			"same shape for everyone (§2.3): %s", len(panels), mustPagesJSON(t, doc))
 	}
+	// Half one, structural: every panel is the placeholder and is ONLY the
+	// placeholder. The key set is closed, so a field added to the full panel
+	// wire cannot start riding along on a sealed one unnoticed.
 	for _, panelID := range []string{"sluzby", "zatizeni"} {
-		panel := pagesPanel(t, doc, panelID)
-		if sealed, _ := panel["sealed"].(bool); !sealed {
-			t.Fatalf("panel %q was unsealed by a `read` grant: a grant widens access to the PAGE and "+
-				"never to a crew's data (§7.1 rule 3): %s", panelID, mustPagesJSON(t, panel))
-		}
-		for _, leaked := range []string{"data", "schema", "producer", "sla_seconds", "state", "provenance", "owner"} {
-			if _, present := panel[leaked]; present {
-				t.Errorf("the sealed placeholder for %q carries %q: %s", panelID, leaked, mustPagesJSON(t, panel))
-			}
-		}
+		pagesAssertSealedPlaceholder(t, pagesPanel(t, doc, panelID), panelID)
 	}
+
+	// Half two, by value: neither crew's payload reached them in ANY form. The
+	// structural half above proves nothing arrived under a field name we know
+	// to withhold; this one proves the bytes are not in the document at all —
+	// nested, re-encoded, or on the page object rather than on a panel.
 	raw := mustPagesJSON(t, doc)
-	if strings.Contains(raw, "200 OK") || strings.Contains(raw, "42") {
-		t.Error("a payload from a crew the read grantee is not in reached them through the page")
+	for crew, canary := range map[string]string{
+		"lookout": pagesCanaryLookout,
+		"engine":  pagesCanaryEngine,
+	} {
+		if strings.Contains(raw, canary) {
+			t.Errorf("crew/%s's payload reached a read grantee who is not in that crew — a grant widens "+
+				"access to the PAGE and never to a crew's data (§7.1 rule 3): %s", crew, raw)
+		}
 	}
 }
 

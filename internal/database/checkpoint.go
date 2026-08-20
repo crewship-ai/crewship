@@ -198,6 +198,24 @@ func Checkpoint(ctx context.Context, db *DB, mode CheckpointMode) (CheckpointRes
 	return res, nil
 }
 
+// checkpointTick performs exactly one iteration of the checkpoint policy:
+// PASSIVE to keep frames moving cheaply, escalating to TRUNCATE only once
+// the -wal file has actually grown past cfg.TruncateBytes. See the package
+// comment for why that split, rather than "checkpoint more often", is what
+// bounds the file.
+//
+// This is the whole mechanism the loop exists to run on a schedule, factored
+// out so a test can apply it at a deterministic point in a workload instead
+// of racing a wall-clock ticker against a write loop. cfg must already have
+// been through withDefaults.
+func checkpointTick(ctx context.Context, db *DB, cfg CheckpointerConfig) (CheckpointResult, error) {
+	mode := CheckpointPassive
+	if db.walBytes() > cfg.TruncateBytes {
+		mode = CheckpointTruncate
+	}
+	return Checkpoint(ctx, db, mode)
+}
+
 // CheckpointerConfig tunes StartCheckpointer. The zero value is valid and
 // means "use the measured defaults".
 type CheckpointerConfig struct {
@@ -301,11 +319,7 @@ func StartCheckpointer(ctx context.Context, db *DB, logger *slog.Logger, cfg Che
 			return
 
 		case <-t.C:
-			mode := CheckpointPassive
-			if db.walBytes() > cfg.TruncateBytes {
-				mode = CheckpointTruncate
-			}
-			res, err := Checkpoint(ctx, db, mode)
+			res, err := checkpointTick(ctx, db, cfg)
 			switch {
 			case errors.Is(err, ErrNotWAL):
 				// Permanent for this handle — nothing to retry. Say so once
@@ -333,7 +347,7 @@ func StartCheckpointer(ctx context.Context, db *DB, logger *slog.Logger, cfg Che
 			// Only worth a line when the expensive mode ran, and only at
 			// debug — this fires every few seconds under sustained load and
 			// has no operator action attached to it.
-			if mode == CheckpointTruncate {
+			if res.Mode == CheckpointTruncate {
 				logger.Debug("wal checkpoint truncated",
 					"wal_bytes_before", res.WALBytesBefore,
 					"wal_bytes_after", res.WALBytesAfter,
