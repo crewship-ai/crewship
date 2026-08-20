@@ -101,6 +101,34 @@ func TestCanonicalWrites_AreNeverObservableAsZeroBytes(t *testing.T) {
 				}
 			},
 		},
+		{
+			// #1999. approve.go's appendToCanonical is the third
+			// writer of this same file class — the HITL approval
+			// path merges an approved proposal into the very
+			// learned-YYYY-MM-DD.md that appendRules above writes.
+			// It was left on the O_CREATE|O_APPEND shape when #1807
+			// converted the other two, purely to keep that diff
+			// reviewable, so it still had the zero-byte window: the
+			// memory.FileLock on <path>.lock serialises approvers
+			// against each other and does nothing for the audit
+			// watcher, the proposal-diff endpoint or an agent
+			// reading its own learned rules. On the parent commit this
+			// case observed the empty file in 55/300 runs — a smaller
+			// window than the two above (there is less work between
+			// the O_CREATE and the write here), but 0.82^150 is still
+			// about one miss in 10^13.
+			name: "learned-*.md via appendToCanonical",
+			file: fmt.Sprintf("learned-%s.md", time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC).Format("2006-01-02")),
+			write: func(t *testing.T, dir string, iter int) {
+				t.Helper()
+				now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+				path := CanonicalPathForProposal(filepath.Join(dir, ".proposed", "proposal-x.md"), now)
+				body := fmt.Sprintf("- **pattern-%d** → escalate to the on-call human\n", iter)
+				if err := appendToCanonical(path, now, body); err != nil {
+					t.Errorf("appendToCanonical: %v", err)
+				}
+			},
+		},
 	}
 
 	for _, tc := range cases {
