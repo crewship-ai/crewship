@@ -70,9 +70,10 @@ func newRunVerdictHook(db *sql.DB, emitter Emitter, resolve runverdict.Resolver,
 			Payload: map[string]any{"pipeline_id": pipelineID, "pipeline_slug": pipelineSlug, "run_id": runID},
 		}
 		// Resolved per run, so an aux-slot edit made while this executor was
-		// already running reaches THIS verdict (#1556).
-		provider, model := resolve()
-		if err := runverdict.GenerateAndEmit(ctx, emitter, provider, model, base, entries); err != nil {
+		// already running reaches THIS verdict (#1556) — the slot's per-call
+		// budget included, which is what bounds the model call (#1615).
+		provider, model, budget := resolve()
+		if err := runverdict.GenerateAndEmit(ctx, emitter, provider, model, budget, base, entries); err != nil {
 			logger.Debug("run verdict: generate", "error", err, "run_id", runID)
 		}
 	}

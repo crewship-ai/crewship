@@ -86,6 +86,12 @@ const (
 	sidecarSvcLabel     = "crewship.svc"
 	sidecarVolNameLabel = "crewship.svc.volume"
 
+	// crewRuntimeKind is the crewship.kind value the crew's own agent
+	// runtime container carries (see the Labels block in
+	// docker_container.go's assembleCrewSpec). Named here, next to the
+	// label keys and the sidecar kinds, so the discovery paths match a
+	// constant rather than re-spelling the string.
+	crewRuntimeKind   = "crew"
 	sidecarKind       = "sidecar"
 	sidecarVolumeKind = "sidecar-volume"
 )

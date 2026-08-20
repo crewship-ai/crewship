@@ -20,13 +20,24 @@ freshly seeded instance then found **24 of 78 passing**: the application was
 healthy and the specs had drifted. So the nightly splits them:
 
 - **gate bucket** (`GATE_SPECS` in the workflow) — verified green, hard-fails
-  the nightly. Today that is `create-crew-wizard.spec.ts`.
+  the nightly. Today that is `create-crew-wizard.spec.ts`,
+  `routine-run-inputs.spec.ts` and `slash-run-routine-chat.spec.ts`.
+  "Verified" is literal: a spec is placed here after it has been run against a
+  seeded instance under `playwright.nightly.config.ts`, at the nightly's own
+  `CI=1 --workers=2`, not because it looks current.
 - **drift bucket** (`DRIFT_SPECS`) — run every night, never fatal, summarised
   into one auto-refreshed `e2e-drift` tracking issue with per-spec failure
   counts. Repair a spec, move it to `GATE_SPECS`, and it starts gating.
 
 A `coverage-guard` job fails if any `e2e/*.spec.ts` belongs to neither bucket,
 so a new spec cannot silently skip nightly coverage.
+
+Both jobs get their browser from `.github/actions/setup-playwright-browser`,
+which caches the download and only shells out to `apt` when the browser will
+not launch without it. That is not a speed optimisation: an unbounded
+`playwright install --with-deps` hanging on an Ubuntu mirror is what reaped
+two `ci.yml` jobs at their budget in #1998, and GitHub reports a budget reap
+as `cancelled` rather than `failure`.
 
 The PR subset covers login, crew creation, agent creation, issue creation, and
 dialog cancellation in one serial browser scenario so session-cookie rotation

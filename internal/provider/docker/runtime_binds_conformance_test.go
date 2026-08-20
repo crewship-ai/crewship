@@ -227,9 +227,13 @@ func TestBindSourceReachability(t *testing.T) {
 		cgroupVersion:         probeP.cgroupVersion,
 		digestResolver:        probeP.digestResolver,
 	}
-	if err := p.ensureImage(ctx, image); err != nil {
-		t.Fatalf("pull %s: %v", image, err)
-	}
+	// This harness is about #1706 — whether the daemon can reach the BIND
+	// SOURCES after staging moved them under the data dir. The image is a
+	// prerequisite, not the subject, so the provenance is logged and dropped.
+	// The helper's tag check still earns its place: this Provider is
+	// hand-assembled around a staged Config, and an unnamed image would surface
+	// as a create failure that reads exactly like the bind bug under test.
+	_ = ensureConformanceImage(ctx, t, p, image)
 
 	crew := provider.CrewConfig{ID: "conf1706crew", Slug: "binds", MemoryMB: 512, CPUs: 1}
 	dirs, err := p.prepareCrewDirs(crew)

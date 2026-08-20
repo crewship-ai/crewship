@@ -1,0 +1,248 @@
+name: Install Playwright browser (cached)
+description: >
+  Installs one Playwright browser with the download CACHED and the apt half
+  (`--with-deps`) kept off the critical path. Replaces the four identical
+  `pnpm exec playwright install --with-deps chromium` steps that were the
+  single largest source of cancelled CI runs (#1998).
+
+# WHY THIS EXISTS
+# ---------------
+# `pnpm exec playwright install --with-deps chromium` is one command doing two
+# very different jobs:
+#
+#   1. download the browser  — our network, our cache, bounded and repeatable;
+#   2. `apt-get install` the system libraries — a third-party Ubuntu mirror,
+#      unbounded, and the thing that actually hangs.
+#
+# #1998 measured the damage: 8 of 20 `ci.yml` runs on `main` were `cancelled`,
+# and the two Playwright jobs died at exactly their job budget — `playwright-pr`
+# at 40m, `onboarding-journey` at 20m18s — with **17 minutes of silence inside
+# apt-get** after a fallback to azure.archive.ubuntu.com, simultaneously across
+# unrelated branches. A `timeout-minutes` reap is reported by GitHub as
+# `cancelled`, not `failure`, so every one of those runs looked like somebody
+# had pressed stop and `gh pr checks` rendered it as a plain red X.
+#
+# So this action does three things the one-liner could not:
+#
+#   * CACHES the download, keyed on the installed Playwright version, so the
+#     common path does not touch the network at all;
+#   * PROBES whether the browser launches with the libraries the runner image
+#     already carries, and shells out to apt ONLY if it does not. The runner
+#     image usually has them; when it does, the hanging half never runs;
+#   * BOUNDS every network call with its own `timeout` and retries it once, so
+#     a wedged mirror costs a named step failure in minutes instead of a whole
+#     job budget spent in silence.
+#
+# ⚠ INVARIANT, same one as the API contract gate in ci.yml: the per-attempt
+#   deadlines below < the CALLER's step `timeout-minutes` < the job's
+#   `timeout-minutes`. Composite-action steps cannot carry `timeout-minutes`
+#   (GitHub does not support it), which is exactly why the inner deadlines are
+#   `timeout(1)` calls and why every caller puts `timeout-minutes` on the
+#   `uses:` step. Worst case here, added up rather than estimated:
+#
+#     2 x 3m   download attempts          6m00s
+#     1 x 1m   launch probe               1m00s
+#     2 x 2m   apt attempts               4m00s   (only if the probe failed)
+#     1 x 1m   re-probe after apt         1m00s
+#     3 x 10s  backoff between attempts   0m30s
+#                                        ───────
+#                                        12m30s
+#
+#   so callers use `timeout-minutes: 14`. Change any of those numbers and
+#   re-do this addition — the whole point is that the step cap is a backstop
+#   the inner deadlines cannot reach.
+#
+# REQUIRES: `pnpm install` has already run (i.e. call this after
+# ./.github/actions/setup-node-pnpm), because the Playwright version is read
+# from the installed package and `pnpm exec` needs node_modules.
+
+inputs:
+  browser:
+    description: Playwright browser to install (chromium | firefox | webkit).
+    required: false
+    default: chromium
+  download-attempt-seconds:
+    description: >
+      Per-attempt deadline for the browser download, in seconds. Two attempts
+      are made. The observed cold download ranges from 24 s to 521 s across
+      nightly runs, but that spread is what the cache exists to remove; a cold
+      download that cannot finish in 3 minutes is a network problem, not a slow
+      one.
+    required: false
+    default: "180"
+  deps-attempt-seconds:
+    description: >
+      Per-attempt deadline for `playwright install-deps` (apt), in seconds. Two
+      attempts. This is the call that hung for 17 minutes in #1998.
+    required: false
+    default: "120"
+
+runs:
+  using: composite
+  steps:
+    # Pin the download location instead of inheriting the per-OS default
+    # (~/.cache/ms-playwright on Linux, ~/Library/Caches on macOS), so the
+    # cache `path:` below and the browser Playwright looks for at test time
+    # are the same directory by construction rather than by coincidence.
+    # $GITHUB_ENV persists for the rest of the job, which is what makes the
+    # later `playwright test` steps agree with this one.
+    - name: Pin the browser download location
+      shell: bash
+      run: echo "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" >> "$GITHUB_ENV"
+
+    # The version of the RESOLVED package, not the range in package.json:
+    # browser revisions are pinned per Playwright release, so a lockfile bump
+    # must miss the cache, and a package.json range that resolves to the same
+    # version must hit it.
+    - name: Resolve the installed Playwright version
+      id: pw
+      shell: bash
+      env:
+        BROWSER: ${{ inputs.browser }}
+      run: |
+        set -euo pipefail
+        # Validated here so a typo fails with a sentence, rather than as
+        # `TypeError: Cannot read properties of undefined` out of the launch
+        # probe three steps later.
+        case "$BROWSER" in
+          chromium|firefox|webkit) ;;
+          *)
+            echo "::error::browser input must be chromium, firefox or webkit; got '${BROWSER}'"
+            exit 1
+            ;;
+        esac
+        version="$(node -p "require('@playwright/test/package.json').version")"
+        echo "Playwright ${version}, browser ${BROWSER}"
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+    # No `restore-keys`. A near-miss restore would hand us a DIFFERENT
+    # Playwright version's browser directory, which the install step below
+    # would then have to re-download anyway — and, worse, would make a cache
+    # hit stop meaning "the right browser is here".
+    - name: Restore the browser cache
+      id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.browser }}-${{ steps.pw.outputs.version }}
+
+    # Run unconditionally, even on a cache hit. With the browser already in
+    # place this is a sub-second no-op that prints "browser is already
+    # installed" and makes no network call, and running it anyway is what
+    # repairs a cache entry that was saved half-written — the failure mode that
+    # otherwise turns a cache into a way to fail the same run every time.
+    #
+    # NOTE the deliberate absence of `--with-deps`: the apt half is handled
+    # separately below, and only when it is actually needed.
+    - name: Download the browser
+      shell: bash
+      env:
+        BROWSER: ${{ inputs.browser }}
+        ATTEMPT_SECONDS: ${{ inputs.download-attempt-seconds }}
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+      run: |
+        set -uo pipefail
+        echo "cache-hit=${CACHE_HIT:-false}"
+        for attempt in 1 2; do
+          # rc captured on the command itself: after `if cmd; then ...; fi`
+          # with no else branch, $? is the status of the compound (0), not of
+          # cmd — which would silently report every timeout as exit 0.
+          rc=0
+          timeout --kill-after=30s "${ATTEMPT_SECONDS}s" \
+            pnpm exec playwright install "$BROWSER" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            exit 0
+          fi
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            echo "::warning::attempt ${attempt}: 'playwright install ${BROWSER}' exceeded ${ATTEMPT_SECONDS}s and was killed"
+          else
+            echo "::warning::attempt ${attempt}: 'playwright install ${BROWSER}' exited ${rc}"
+          fi
+          sleep 10
+        done
+        echo "::error::could not download the ${BROWSER} browser in two attempts of ${ATTEMPT_SECONDS}s. This is a download failure, named as itself — it is NOT the job budget being reaped (#1998)."
+        exit 1
+
+    # The question apt is the answer to is "can this browser launch here?", and
+    # that question is cheap to ask directly. GitHub's ubuntu images normally
+    # ship the libraries chromium needs, in which case `install-deps` is a
+    # minute of apt spent to change nothing — and, on the night #1998
+    # documents, seventeen minutes of it spent to change nothing.
+    #
+    # Asking also covers the case the cache made possible: a restored browser
+    # directory that is present but unusable now fails here, in a step whose
+    # name says what happened, instead of inside globalSetup.
+    - name: Probe whether the browser launches as-is
+      id: probe
+      shell: bash
+      env:
+        BROWSER: ${{ inputs.browser }}
+      run: |
+        set -uo pipefail
+        if timeout --kill-after=15s 60s node -e '
+          const pw = require("@playwright/test");
+          const name = process.env.BROWSER;
+          pw[name].launch()
+            .then((b) => b.close())
+            .then(() => process.exit(0))
+            .catch((e) => { console.error(String((e && e.message) || e)); process.exit(1); });
+        '; then
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+          echo "${BROWSER} launched with the libraries already on this runner — skipping the apt step entirely."
+        else
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::${BROWSER} did not launch on this runner image; falling back to 'playwright install-deps' (the apt path)."
+        fi
+
+    # Only reached when the probe says the libraries really are missing.
+    #
+    # Two attempts, each bounded. A caveat worth stating rather than hiding:
+    # `timeout` kills the playwright process, and the `sudo apt-get` it spawned
+    # may survive long enough to still hold /var/lib/dpkg/lock when the second
+    # attempt starts. The retry is therefore best-effort — its value is against
+    # a mirror that answers slowly, not against one that has wedged apt itself.
+    # In the wedged case both attempts fail and the step says so in 4 minutes,
+    # which is the whole point: 4 minutes and a name beats 17 minutes and a
+    # `cancelled` badge.
+    - name: Install the system libraries (apt) — only if the probe failed
+      if: steps.probe.outputs.ok != 'true'
+      shell: bash
+      env:
+        BROWSER: ${{ inputs.browser }}
+        ATTEMPT_SECONDS: ${{ inputs.deps-attempt-seconds }}
+      run: |
+        set -uo pipefail
+        installed=0
+        for attempt in 1 2; do
+          # See the note in the download step: $? after a failed `if` compound
+          # is 0, so the status has to be captured on the command itself.
+          rc=0
+          timeout --kill-after=30s "${ATTEMPT_SECONDS}s" \
+            pnpm exec playwright install-deps "$BROWSER" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            installed=1
+            break
+          fi
+          if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+            echo "::warning::attempt ${attempt}: 'playwright install-deps' exceeded ${ATTEMPT_SECONDS}s and was killed — an unresponsive Ubuntu mirror looks exactly like this (#1998)"
+          else
+            echo "::warning::attempt ${attempt}: 'playwright install-deps' exited ${rc}"
+          fi
+          sleep 10
+        done
+        if [ "$installed" -ne 1 ]; then
+          echo "::error::'playwright install-deps ${BROWSER}' failed twice at ${ATTEMPT_SECONDS}s per attempt. apt could not reach a working Ubuntu mirror; re-run the job."
+          exit 1
+        fi
+        # Re-probe: apt succeeding and the browser launching are different
+        # claims, and only the second one is what the rest of the job needs.
+        if ! timeout --kill-after=15s 60s node -e '
+          const pw = require("@playwright/test");
+          pw[process.env.BROWSER].launch()
+            .then((b) => b.close())
+            .then(() => process.exit(0))
+            .catch((e) => { console.error(String((e && e.message) || e)); process.exit(1); });
+        '; then
+          echo "::error::${BROWSER} still will not launch after installing its system libraries — this is not a mirror problem."
+          exit 1
+        fi

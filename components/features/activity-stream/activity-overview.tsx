@@ -65,6 +65,7 @@ import {
   activitySource,
   dailyCounts,
   formatDurationMs,
+  scopeByEntry,
   type ActivityScope,
   type ActivitySource,
   type SpineLabels,
@@ -182,8 +183,14 @@ export function ActivityOverview({
     [],
   )
 
+  // Every row on this page draws its dot from the SAME window the cards count
+  // over (#1876), so an approval already granted cannot wear a pulsing "waiting
+  // on you" dot underneath a card that has correctly stopped counting it.
+  const scopes = React.useMemo(() => scopeByEntry(entries), [entries])
+
   const rowProps = (e: JournalEntry) => ({
     entry: e,
+    scope: scopes.get(e.id),
     icon: iconFor(e),
     labels,
     actorName: agentName(e.agent_id),

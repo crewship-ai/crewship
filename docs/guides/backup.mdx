@@ -98,6 +98,17 @@ Inside `payload.age`, bundles carry three distinct notions of "memory" — don't
 
 From `format_version` 3 onward every per-crew inclusion flag in the manifest is derived from what the collector observed itself writing, not from what it expected to write. A section that captured nothing reports `false`, which is also what stops the restore preflight from demanding a provisioned container for a crew that has no data.
 
+### Which rows a bundle carries
+
+A workspace bundle is not "the whole database minus other workspaces" — it is one `SELECT … WHERE …` per table, and the `WHERE` is derived, not hand-written. `DiscoverScopedTables` walks the schema's foreign keys backwards from `workspaces` and records, for each table, the chain of hops that ties one of its rows to a workspace. `crews` is one hop (`workspace_id`); `agents` is two (`crew_id → crews.workspace_id`); `agent_skills` is three.
+
+Most tables have more than one such chain, and **which one is chosen decides which rows exist as far as the bundle is concerned**. Two rules govern the choice:
+
+- **A `NOT NULL` chain beats a shorter nullable one.** A filter on a nullable column silently omits every row where that column is NULL — and for a column like "the run that produced this" or "the agent who claimed this task", NULL is the ordinary state, not the exception. The walk therefore makes a first pass that follows only `NOT NULL` foreign keys, so a three-hop total path is preferred over a one-hop lossy one. A table that has no `NOT NULL` route out at all needs an explicit filter in `workspaceFilterSQL`, and `TestScopedFilters_NeverTraverseANullableFK` fails the build until it gets one.
+- **Ties are broken deterministically.** Two parents the same distance from `workspaces` used to race through Go map iteration order, so the same schema could produce different filters on consecutive runs. The walk is now level-synchronous over a sorted adjacency, so a bundle's contents depend on the schema and nothing else.
+
+The practical consequence for an operator: a table added by a migration is picked up automatically, but only once it declares an intent in `BackupTableIntent`. Until then, restore-time drift detection refuses rather than guessing — see [`migrations`](/guides/migrations).
+
 `memory_included` counts **files inside a `.memory` directory**, not tar entries. The distinction matters because the container runtime creates `crews/<id>/shared` and `crews/<id>/agents` when a crew container is created, so counting entries would report memory for every provisioned crew whether or not an agent had ever written a note. `crew_files_included` is the separate flag for "the `/crew` section carries something" — `init.sh` and other crew-level content — and is what decides whether the section is restored at all.
 
 ## Create a workspace backup
@@ -156,6 +167,10 @@ crewship backup verify ~/.crewship/backups/crewship-workspace-acme-…tar.zst
 ```
 
 `inspect` only reads the plaintext MANIFEST — it never touches the sealed payload, so no passphrase is needed. `verify` recomputes the SHA-256 of the sealed bytes against the manifest and fails if the bundle was truncated or tampered with. Neither decrypts.
+
+<Warning>
+`verify` proves **integrity, not completeness**. It answers "are these the bytes we wrote?" — it cannot answer "are these all the rows there were", because the manifest records no per-table row counts to compare against. A bundle that was written short reports `✓ VALID`. The guard against writing one short is on the create side (see [Which rows a bundle carries](#which-rows-a-bundle-carries)), not here.
+</Warning>
 
 ## Restore
 

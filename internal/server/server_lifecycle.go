@@ -286,15 +286,16 @@ func (s *Server) Start(ctx context.Context) error {
 		// schedules (6h consolidation, daily 03:00 UTC compaction).
 		// Reuse the summarizer already built for the shared
 		// consolidator (router path), so the background + manual runs
-		// go through one LLM instance with one set of middleware.
+		// resolve the same curator aux slot through one cached client
+		// with one set of middleware (#1695).
+		//
+		// No log line for which model here on purpose: the summariser
+		// resolves the slot per consolidation, so any model named at boot
+		// would be a guess about what the next tick will call. mountAPIRouter
+		// logs the enabled/disabled decision once, where it is made.
 		var summarizer consolidate.SummarizerClient
 		if s.consolidator != nil {
 			summarizer = s.consolidator.Summarizer
-		}
-		if summarizer != nil {
-			s.logger.Info("memory consolidation enabled", "model", s.cfg.Keeper.Model)
-		} else {
-			s.logger.Info("memory consolidation disabled (set KEEPER_OLLAMA_URL + KEEPER_MODEL to enable)")
 		}
 		// Versioning blob root: feeds consolidate's RecordVersion call
 		// on every successful appendRules / snapshotPins. Empty when

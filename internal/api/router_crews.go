@@ -132,6 +132,15 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// catch-all the same way "capabilities" does above, so no ordering
 	// hazard.
 	r.mux.Handle("GET /api/v1/crews/{crewId}/services", authed(wsCtx(http.HandlerFunc(crews.Services))))
+	// The whole-crew container inventory: the agent runtime AND the sidecars,
+	// with live state and usage. Wider than /services (which is sidecars
+	// only, renamed to their manifest service names) and the surface the
+	// crew bottom panel's Docker tab reads — that tab asked
+	// /api/v1/system/runtime for a `containers` field the host-inventory
+	// endpoint has never sent, so it reported "no containers running" on
+	// every crew (#1697). Literal "containers" beats the {crewId} catch-all
+	// the same way "services" does above.
+	r.mux.Handle("GET /api/v1/crews/{crewId}/containers", authed(wsCtx(http.HandlerFunc(crews.Containers))))
 	// Read-only credential↔tool gap report: which of this crew's
 	// credentials are for a CLI its container doesn't have (a GitHub PAT
 	// with no github-cli feature, etc). Advisory only — it never edits

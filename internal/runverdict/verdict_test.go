@@ -72,7 +72,7 @@ func TestGenerateAndEmit_ValidVerdict_Emits(t *testing.T) {
 	provider := &stubProvider{content: `{"outcome":"goal_met","verdict":"Tests pass and the fix landed.","summary":"The agent ran the test suite, fixed a failing test, and confirmed green."}`}
 	emitter := &recordingEmitter{}
 
-	err := GenerateAndEmit(context.Background(), emitter, provider, testModel, baseEntry(), multiEntryRun())
+	err := GenerateAndEmit(context.Background(), emitter, provider, testModel, 0, baseEntry(), multiEntryRun())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestGenerateAndEmit_MergesCallerPayloadFields(t *testing.T) {
 	base := baseEntry()
 	base.Payload = map[string]any{"pipeline_id": "pln_1", "pipeline_slug": "my-routine", "run_id": "run_1"}
 
-	if err := GenerateAndEmit(context.Background(), emitter, provider, testModel, base, multiEntryRun()); err != nil {
+	if err := GenerateAndEmit(context.Background(), emitter, provider, testModel, 0, base, multiEntryRun()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := emitter.entries[0].Payload
@@ -127,7 +127,7 @@ func TestGenerateAndEmit_SingleEntryRun_Skipped(t *testing.T) {
 	emitter := &recordingEmitter{}
 
 	entries := []journal.Entry{{Type: journal.EntryRunStarted, Summary: "run started"}}
-	if err := GenerateAndEmit(context.Background(), emitter, provider, testModel, baseEntry(), entries); err != nil {
+	if err := GenerateAndEmit(context.Background(), emitter, provider, testModel, 0, baseEntry(), entries); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if provider.called {
@@ -142,7 +142,7 @@ func TestGenerateAndEmit_EmptyEntries_Skipped(t *testing.T) {
 	provider := &stubProvider{content: `{"outcome":"goal_met","verdict":"x","summary":"y"}`}
 	emitter := &recordingEmitter{}
 
-	if err := GenerateAndEmit(context.Background(), emitter, provider, testModel, baseEntry(), nil); err != nil {
+	if err := GenerateAndEmit(context.Background(), emitter, provider, testModel, 0, baseEntry(), nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if provider.called {
@@ -157,7 +157,7 @@ func TestGenerateAndEmit_MalformedJSON_NoEmit(t *testing.T) {
 	provider := &stubProvider{content: `not json at all`}
 	emitter := &recordingEmitter{}
 
-	err := GenerateAndEmit(context.Background(), emitter, provider, testModel, baseEntry(), multiEntryRun())
+	err := GenerateAndEmit(context.Background(), emitter, provider, testModel, 0, baseEntry(), multiEntryRun())
 	if err == nil {
 		t.Fatal("expected error for malformed LLM response")
 	}
@@ -170,7 +170,7 @@ func TestGenerateAndEmit_UnrecognizedOutcome_NoEmit(t *testing.T) {
 	provider := &stubProvider{content: `{"outcome":"vibes_immaculate","verdict":"x","summary":"y"}`}
 	emitter := &recordingEmitter{}
 
-	err := GenerateAndEmit(context.Background(), emitter, provider, testModel, baseEntry(), multiEntryRun())
+	err := GenerateAndEmit(context.Background(), emitter, provider, testModel, 0, baseEntry(), multiEntryRun())
 	if err == nil {
 		t.Fatal("expected error for unrecognized outcome value")
 	}
@@ -183,7 +183,7 @@ func TestGenerateAndEmit_LLMError_NoEmit(t *testing.T) {
 	provider := &stubProvider{err: context.DeadlineExceeded}
 	emitter := &recordingEmitter{}
 
-	err := GenerateAndEmit(context.Background(), emitter, provider, testModel, baseEntry(), multiEntryRun())
+	err := GenerateAndEmit(context.Background(), emitter, provider, testModel, 0, baseEntry(), multiEntryRun())
 	if err == nil {
 		t.Fatal("expected error propagated from provider.Complete")
 	}
@@ -275,7 +275,7 @@ func TestGenerateAndEmit_InjectionInSummary_VerdictNotForged(t *testing.T) {
 		{Type: journal.EntryRunCompleted, Summary: "run completed", TS: base.Add(2 * time.Second)},
 	}
 
-	if err := GenerateAndEmit(context.Background(), emitter, provider, testModel, baseEntry(), entries); err != nil {
+	if err := GenerateAndEmit(context.Background(), emitter, provider, testModel, 0, baseEntry(), entries); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -303,7 +303,7 @@ func TestGenerateAndEmit_NilProvider_Skipped(t *testing.T) {
 	// nil when unavailable.
 	emitter := &recordingEmitter{}
 
-	err := GenerateAndEmit(context.Background(), emitter, nil, testModel, baseEntry(), multiEntryRun())
+	err := GenerateAndEmit(context.Background(), emitter, nil, testModel, 0, baseEntry(), multiEntryRun())
 	if err != nil {
 		t.Fatalf("unexpected error for nil provider: %v", err)
 	}

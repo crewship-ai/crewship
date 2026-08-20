@@ -1,23 +1,23 @@
 {
   "summary": {
-    "api_operations": 583,
-    "api_exact_docs": 583,
+    "api_operations": 584,
+    "api_exact_docs": 584,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 785,
-    "cli_exact_docs": 785,
-    "cli_root_docs_present": 785,
+    "cli_operations": 786,
+    "cli_exact_docs": 786,
+    "cli_root_docs_present": 786,
     "cli_root_docs_missing": 0,
-    "api_with_test_signals": 434,
-    "api_with_concrete_response_schemas": 568,
+    "api_with_test_signals": 435,
+    "api_with_concrete_response_schemas": 569,
     "api_generic_response_schemas": 0,
     "api_with_request_bodies": 248,
     "api_with_concrete_json_requests": 244,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 770,
-    "cli_with_flags": 374,
-    "cli_with_all_flags_documented": 374,
+    "cli_with_test_signals": 771,
+    "cli_with_flags": 375,
+    "cli_with_all_flags_documented": 375,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 102,
@@ -9391,6 +9391,47 @@
         "semantic_runtime": {
           "openapi_operation": true,
           "source_file": "cmd/gen-openapi/schemas_final_request_crews_agents_workspaces_chats.go"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/crews/{crewId}/containers",
+      "operation_id": "get_api_v1_crews_crewId_containers",
+      "tag": "crews",
+      "source_file": "cmd/gen-openapi/schemas_crews_workspaces_v1.go",
+      "exact_docs": [
+        "docs/api-reference/crews.mdx",
+        "docs/cli/crew.mdx"
+      ],
+      "resource_docs": [
+        "docs/api-reference/crews.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "internal/api/crew_container_inventory_test.go",
+        "internal/provider/docker/crew_container_inventory_test.go"
+      ],
+      "concrete_response_schema": true,
+      "generic_response_schema": false,
+      "request_body_present": false,
+      "concrete_json_request": false,
+      "generic_json_request": false,
+      "contract": {
+        "structural": {
+          "canonical_method_path": true,
+          "auth": true,
+          "request": true,
+          "response": true,
+          "statuses": true
+        },
+        "semantic_runtime": {
+          "openapi_operation": true,
+          "source_file": "cmd/gen-openapi/schemas_crews_workspaces_v1.go",
+          "test_signals": [
+            "internal/api/crew_container_inventory_test.go",
+            "internal/provider/docker/crew_container_inventory_test.go"
+          ]
         }
       }
     },
@@ -29628,9 +29669,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -29660,9 +29701,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -29708,9 +29749,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -29742,9 +29783,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -29790,9 +29831,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -29820,9 +29861,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -29845,9 +29886,33 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "crew containers",
+      "use": "containers \u003ccrew-slug-or-id\u003e",
+      "short": "Show a crew's live containers (runtime + sidecars) with state and usage",
+      "root": "crew",
+      "exact_docs": [
+        "docs/cli/crew.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/crew.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_crew_avatar_test.go",
+        "cmd/crewship/cmd_crew_cache_cov_test.go",
+        "cmd/crewship/cmd_crew_config_cov_test.go",
+        "cmd/crewship/cmd_crew_container_cov_test.go",
+        "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
+        "cmd/crewship/cmd_crew_cov_test.go",
+        "cmd/crewship/cmd_crew_credential_readiness_test.go",
         "…"
       ]
     },
@@ -29922,9 +29987,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -29946,9 +30011,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -29976,9 +30041,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30006,7 +30071,7 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
-        "cmd/crewship/cmd_crew_cov_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "…"
       ]
     },
@@ -30031,9 +30096,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30062,9 +30127,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30092,9 +30157,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30126,9 +30191,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30159,9 +30224,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30183,9 +30248,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30239,9 +30304,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30274,9 +30339,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30298,9 +30363,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30322,9 +30387,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30346,9 +30411,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30370,9 +30435,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30402,9 +30467,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30433,9 +30498,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30463,9 +30528,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30493,9 +30558,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30517,9 +30582,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30541,9 +30606,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30565,9 +30630,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30597,9 +30662,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30627,9 +30692,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ]
     },
@@ -30651,10 +30716,16 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
+      ],
+      "flags": [
+        "timeout"
+      ],
+      "documented_flags": [
+        "timeout"
       ]
     },
     {
@@ -30675,9 +30746,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -30705,9 +30776,9 @@
         "cmd/crewship/cmd_crew_config_cov_test.go",
         "cmd/crewship/cmd_crew_container_cov_test.go",
         "cmd/crewship/cmd_crew_container_resources_integration_test.go",
+        "cmd/crewship/cmd_crew_containers_cov_test.go",
         "cmd/crewship/cmd_crew_cov_test.go",
         "cmd/crewship/cmd_crew_credential_readiness_test.go",
-        "cmd/crewship/cmd_crew_delete_prompt_test.go",
         "…"
       ],
       "flags": [
@@ -48208,11 +48279,13 @@
         "docs/api-reference/workspaces.mdx",
         "docs/changelog/overview.mdx",
         "docs/cli/export.mdx",
+        "docs/cli/keeper.mdx",
         "docs/cli/skill.mdx",
         "docs/cli/system.mdx",
         "docs/concepts.mdx",
         "docs/configuration/manifest-schema.mdx",
         "docs/guides/autonomy-and-self-learning.mdx",
+        "docs/guides/consolidate.mdx",
         "docs/guides/inbox.mdx",
         "docs/guides/keeper-reviews-panel.mdx",
         "docs/guides/manifests.mdx",
@@ -48342,11 +48415,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4304,
-    "api_path_references": 2152,
+    "command_references": 4311,
+    "api_path_references": 2155,
     "environment_references": 425,
     "manifest_kind_references": 229,
-    "flag_references": 1987,
+    "flag_references": 1993,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

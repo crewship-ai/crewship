@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -48,22 +49,29 @@ type Verdict struct {
 	Summary string  `json:"summary"` // 2-3 sentence recap
 }
 
-// Resolver hands back the provider and model to use for the NEXT
-// verdict. Call sites hold one of these rather than a resolved
-// (provider, model) pair (#1556): the run_summary aux slot and the
-// fallback behind it are runtime-settable, and a pair captured into a
-// handler or a pipeline executor at construction is a pair no override
-// can reach — which is exactly what made those two slots the only ones
-// that needed a server restart.
+// Resolver hands back the provider, model and per-call budget to use for
+// the NEXT verdict. Call sites hold one of these rather than a resolved
+// triple (#1556): the run_summary aux slot and the fallback behind it are
+// runtime-settable, and a value captured into a handler or a pipeline
+// executor at construction is a value no override can reach — which is
+// exactly what made those two slots the only ones that needed a server
+// restart.
 //
-// Implementations are expected to cache: a Resolver is called once per
-// terminal run, and building an LLM client per call would put a fresh
-// connection (for Ollama, a possible cold model load) into every verdict.
-// internal/api's Router.RunVerdict is the production one.
+// The budget is the third return for the same reason it is on
+// Router.UserModelAux and not on the built provider: it is the operator's
+// number, it changes without the client changing, and a call site that
+// captured it would be back to needing a restart to lower it (#1615). Zero
+// means "no deadline of ours" — the call is then bounded only by the
+// caller's context, which is what test and embedded wirings get.
+//
+// Implementations are expected to cache the provider: a Resolver is called
+// once per terminal run, and building an LLM client per call would put a
+// fresh connection (for Ollama, a possible cold model load) into every
+// verdict. internal/api's Router.RunVerdict is the production one.
 //
 // A nil provider means "verdict generation is off" — an unconfigured or
 // unbuildable slot — not an error.
-type Resolver func() (llm.Provider, string)
+type Resolver func() (llm.Provider, string, time.Duration)
 
 // Emitter is the narrow write surface GenerateAndEmit needs — a single
 // Emit method, deliberately narrower than journal.Emitter (which also
@@ -106,12 +114,28 @@ const (
 // stamp onto the emitted entry — Type/Severity/ActorType/Summary/
 // Payload are overwritten here.
 //
-// provider/model are resolved by the caller through a Resolver just
-// before the call, so an operator's edit to the run_summary (or
+// provider/model/budget are resolved by the caller through a Resolver
+// just before the call, so an operator's edit to the run_summary (or
 // fallback) aux slot is in force on the next verdict. A nil provider
 // means that slot has no buildable provider (e.g. no ANTHROPIC_API_KEY
 // configured) — that's a normal "feature is off" state, not an error,
 // so this no-ops silently.
+//
+// budget is the run_summary slot's per-call deadline and bounds the model
+// call, the way #1601 made the same field bound the four Keeper Reviews
+// evaluators. Until #1615 this path read no budget at all: the number was
+// settable, validated and rendered on the Judge models card next to four
+// that worked, and the call was bounded only by whatever context the
+// caller happened to pass (a background context, at both production call
+// sites). A non-positive budget keeps that behaviour — the caller's
+// context is then the only bound — which is what a resolver-less test or
+// embedded wiring gets.
+//
+// The deadline is applied here rather than by the two callers so they
+// cannot drift, and it covers the MODEL CALL only. Extending it over the
+// emit would mean a verdict that answered at 19.9s of a 20s budget was
+// generated (and billed) and then dropped on the way to the journal —
+// the one outcome worse than either bound alone.
 //
 // Trivial runs (<=1 entry — just a run.started with nothing else) are
 // also skipped without an LLM call: there's no outcome to assess yet.
@@ -121,7 +145,7 @@ const (
 // is a narrative aid, not part of run correctness — callers must not
 // let a failure here fail the run being narrated; they should log the
 // returned error and continue.
-func GenerateAndEmit(ctx context.Context, emitter Emitter, provider llm.Provider, model string, entry journal.Entry, entries []journal.Entry) error {
+func GenerateAndEmit(ctx context.Context, emitter Emitter, provider llm.Provider, model string, budget time.Duration, entry journal.Entry, entries []journal.Entry) error {
 	if provider == nil {
 		return nil
 	}
@@ -129,7 +153,14 @@ func GenerateAndEmit(ctx context.Context, emitter Emitter, provider llm.Provider
 		return nil
 	}
 
-	resp, err := provider.Complete(ctx, llm.Request{
+	callCtx := ctx
+	if budget > 0 {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, budget)
+		defer cancel()
+	}
+
+	resp, err := provider.Complete(callCtx, llm.Request{
 		Model:     model,
 		System:    systemPrompt,
 		MaxTokens: 400,

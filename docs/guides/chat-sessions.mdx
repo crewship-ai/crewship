@@ -151,7 +151,7 @@ When the incident closes, the session row survives — it stays as a permanent r
 
 A session is durable on disk, but each agent turn only sees as much of the transcript as fits the model's context window. The orchestrator (`internal/orchestrator/orchestrator_run_conv.go`) sizes a conversation budget and fills it newest-first, so the most recent turns are always present in full.
 
-When a conversation outgrows that budget, the older turns are **compacted** rather than dropped. If an auxiliary model is configured (the same summarizer slot Crewship uses for memory consolidation — `KEEPER_OLLAMA_URL` + `KEEPER_MODEL`), the overflow is summarized into a short block prepended to the verbatim recent window:
+When a conversation outgrows that budget, the older turns are **compacted** rather than dropped. If an auxiliary model is configured (the same summarizer Crewship uses for memory consolidation — the `curator` aux slot, falling back to `KEEPER_OLLAMA_URL` + `KEEPER_MODEL`), the overflow is summarized into a short block prepended to the verbatim recent window:
 
 ```
 [EARLIER CONVERSATION — SUMMARY of older messages no longer shown in full]

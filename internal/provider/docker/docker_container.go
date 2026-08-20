@@ -1303,10 +1303,10 @@ func (p *Provider) assembleCrewSpec(team provider.CrewConfig, runtimeImage, runt
 		// has carried the same label set since the H7 audit (sidecar.go).
 		//
 		Labels: map[string]string{
-			"managed-by":       "crewship",
-			"crewship.kind":    "crew",
-			"crewship.crew":    team.Slug,
-			"crewship.crew-id": team.ID,
+			"managed-by":    "crewship",
+			crewKindLabel:   crewRuntimeKind,
+			crewCrewLabel:   team.Slug,
+			crewCrewIDLabel: team.ID,
 			// …and one label set for what it is NOT (#1644). The provisioner
 			// labels its scratch container crewship.temp=provision and commits
 			// it into crewship-cache:<hash>; commit copies the source

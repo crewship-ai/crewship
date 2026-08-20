@@ -230,13 +230,30 @@ func TestPostRunTrigger_WritesIntoTheCrewBindSource(t *testing.T) {
 		hostPathForContainerPath(t, basePath, crewID, memory.ContainerCrewTopicsDir(crewSlug)),
 		"pins.md",
 	)
+	// Poll for CONTENT, not existence. The original loop broke out on
+	// the first successful os.ReadFile, and os.ReadFile of an empty
+	// file returns a non-nil zero-length slice — so it accepted a
+	// zero-byte pins.md, stopped polling, and asserted against "".
+	// snapshotPins used to leave exactly that state on disk between its
+	// O_CREATE and its write (#1807, fixed by the atomic replace in
+	// consolidator.go), which is how this test failed Go Race on a
+	// loaded runner while the race detector reported nothing.
+	//
+	// The writer is atomic now, so this can no longer see a half-state
+	// from that source. Polling on the needle is kept anyway: it drops
+	// the "the file appeared, therefore it is written" assumption
+	// entirely, so the test stays honest no matter what the writer does
+	// later, and a genuine failure now reports at the deadline instead
+	// of on the first read that happens to win the race.
 	deadline := time.Now().Add(2 * time.Second)
 	var body []byte
 	for time.Now().Before(deadline) {
 		b, err := os.ReadFile(wantPins)
 		if err == nil {
 			body = b
-			break
+			if strings.Contains(string(b), needle) {
+				break
+			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -245,7 +262,7 @@ func TestPostRunTrigger_WritesIntoTheCrewBindSource(t *testing.T) {
 			wantPins, memory.ContainerCrewTopicsDir(crewSlug))
 	}
 	if !strings.Contains(string(body), needle) {
-		t.Errorf("pins.md missing the pinned entry:\n%s", body)
+		t.Errorf("pins.md missing the pinned entry (%d bytes):\n%s", len(body), body)
 	}
 }
 

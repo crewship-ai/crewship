@@ -73,6 +73,8 @@ The counts are taken over the window **with the search applied but not the segme
 
 The same choice narrows the journal query server-side (`active`/`waiting` become an `entry_type` filter, `failed` becomes `severity=error`); `done` is the one bucket with no server-side expression, so it is filtered client-side.
 
+**Waiting** is narrowed twice, and the second pass is the one that matters. The journal is an *event log*, so the `entry_type` query returns ask-shaped **rows** — including an `approval.requested` whose approval was granted an hour ago, and a `peer.escalation` that is the *resolution* of one (ask and answer share that one entry type, separated only by `payload.state`). A row is only still waiting on somebody while its ask is **open**, so each ask is joined to its answer on kind + id over the loaded window, and the answered ones fall into **Completed**. An ask whose answer lies outside the window, or that carries no id to join on, stays under Waiting: over-reporting one row is a smaller failure than hiding something a person is blocking on. One function (`scopeOf` in `lib/activity-stream.ts`) does this for the segment count, the feed list, every row's status dot and the Overview's **Waiting on you** card, so those four cannot disagree.
+
 ### Search and filters
 
 The search box narrows two things at once: the rail's workflow list (client-side, over the loaded index page — matching the routine's name and slug, what started the chain, the handle, and the identifiers, titles and agent names it touched) and the journal query (server-side, as `q`).
@@ -111,7 +113,7 @@ One selection, one column — never a stack.
 
 ### Overview (Workflows lens)
 
-Four KPI cards — **Running now**, **Waiting on you**, **Failures**, **Spend** — where the first three are places to go rather than numbers to read (clicking one selects that status segment). Under them: **Open asks** and **What is broken** side by side with their evidence, then **Latest activity** and, only when the loaded window spans two days or more, a **Failures · N days** bar chart. A zero says *which* zero it is: "nothing broke" is a claim about the world, and this window only ever knew about itself.
+Four KPI cards — **Running now**, **Waiting on you**, **Failures**, **Spend** — where the first three are places to go rather than numbers to read (clicking one selects that status segment). Under them: **Open asks** and **What is broken** side by side with their evidence, then **Latest activity** and, only when the loaded window spans two days or more, a **Failures · N days** bar chart. **Waiting on you** and **Open asks** count asks that are still open — the same join the Waiting segment uses, not a second opinion about it. A zero says *which* zero it is: "nothing broke" is a claim about the world, and this window only ever knew about itself.
 
 ### Issues, Agents, Routines
 

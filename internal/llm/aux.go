@@ -52,9 +52,11 @@ const (
 	SlotRunSummary   Slot = "run_summary"
 )
 
-// auxDefaultTimeout is the shipped per-call budget for the slots whose evaluators
-// enforce one (curator, behavior, memory_health, negative, and the fallback
-// behind them — internal/server/keeper_phase2.go).
+// auxDefaultTimeout is the shipped per-call budget for the slots whose callers
+// enforce one: the four Keeper Reviews evaluators (curator, behavior,
+// memory_health, negative — internal/server/keeper_phase2.go), the post-run
+// verdict (run_summary — internal/runverdict, #1615), and the fallback behind
+// them all.
 //
 // It is 20s because that is the bound those calls have ACTUALLY been running
 // under: the field reached no evaluator until #1601, so every one of them was
@@ -72,12 +74,19 @@ const (
 const auxDefaultTimeout = 20 * time.Second
 
 // DefaultAuxiliaryModels returns the MVP-default config: every slot
-// on claude-haiku-4-5, with the per-call budget each evaluator enforces.
+// on claude-haiku-4-5, with the per-call budget its caller enforces.
 //
-// Keeper and RunSummary keep their PRD §6 F3 numbers: nothing resolves
-// SlotKeeper (see keepercfg.AuxSlots, which deliberately omits it), and the
-// run_summary path bounds its call by the caller's context rather than by this
-// field — neither is a budget an evaluator reads.
+// Keeper alone keeps its PRD §6 F3 number, because nothing resolves SlotKeeper
+// (see keepercfg.AuxSlots, which deliberately omits it) — it is the one budget
+// here that no call site reads.
+//
+// RunSummary used to be the second such number, at the PRD's 15s. #1615 made
+// the field live on that path, and it moves to auxDefaultTimeout for exactly
+// the reason given there: the verdict call had been running under the caller's
+// context (a background one at both call sites), so shipping 15s as its first
+// real deadline would TIGHTEN it — and the fully-local wiring, where the slot
+// degrades to a 7B judge, is where that bites. The operator's own number is
+// still whatever they set.
 func DefaultAuxiliaryModels() AuxiliaryModels {
 	haiku := func(timeout time.Duration) AuxModel {
 		return AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: timeout}
@@ -88,7 +97,7 @@ func DefaultAuxiliaryModels() AuxiliaryModels {
 		Behavior:     haiku(auxDefaultTimeout),
 		MemoryHealth: haiku(auxDefaultTimeout),
 		Negative:     haiku(auxDefaultTimeout),
-		RunSummary:   haiku(15 * time.Second),
+		RunSummary:   haiku(auxDefaultTimeout),
 		Fallback:     haiku(auxDefaultTimeout),
 	}
 }

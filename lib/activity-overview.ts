@@ -15,7 +15,7 @@
 // Nothing here fetches, and nothing here names a colour: tokens stay in
 // globals.css and the component resolves them.
 
-import { entryCostUSD, entryDurationMs, scopeOf } from "@/lib/activity-stream"
+import { entriesInScope, entryCostUSD, entryDurationMs, scopeOf } from "@/lib/activity-stream"
 import type { JournalEntry } from "@/lib/types/journal"
 
 /* ------------------------------------------------------------------ *
@@ -78,104 +78,30 @@ export function zeroCopy(kind: ZeroKind, windowTotal: number, subject: string): 
  *  What counts as waiting on a person
  * ------------------------------------------------------------------ */
 
-export type AskKind = "approval" | "escalation" | "keeper"
-
-export interface AskRef {
-  kind: AskKind
-  id: string
-}
-
-function idFrom(entry: JournalEntry, ...keys: string[]): string | undefined {
-  for (const k of keys) {
-    const v = entry.refs?.[k] ?? entry.payload?.[k]
-    if (typeof v === "string" && v !== "") return v
-  }
-  return undefined
-}
-
-/** True once an escalation row carries its terminal state. */
-function escalationResolved(entry: JournalEntry): boolean {
-  return entry.payload?.["state"] === "resolved"
-}
-
-/**
- * The ask an entry IS, or null.
- *
- * Three things block a person, and each names its id on both the ask and the
- * answer, so the two can be joined:
- *
- *   approval.requested   refs.approval_id        (harbormaster/store_mutate.go:83)
- *   keeper.request       refs.keeper_request_id  (api/keeper_request.go:235)
- *   peer.escalation      refs.escalation_id      (api/escalation_handler.go:255)
- *
- * `peer.escalation` is the awkward one: the SAME entry_type is emitted for
- * the ask and for its resolution, separated only by `payload.state`
- * ("pending" vs "resolved"). Reading the type alone therefore counts every
- * resolution as a fresh thing waiting on you — which is most of them, since
- * an instance that works resolves what it asks.
- */
-export function askRef(entry: JournalEntry): AskRef | null {
-  switch (entry.entry_type) {
-    case "approval.requested":
-      return { kind: "approval", id: idFrom(entry, "approval_id") ?? "" }
-    case "keeper.request":
-      return { kind: "keeper", id: idFrom(entry, "keeper_request_id", "request_id") ?? "" }
-    case "peer.escalation":
-      if (escalationResolved(entry)) return null
-      return { kind: "escalation", id: idFrom(entry, "escalation_id") ?? "" }
-    default:
-      return null
-  }
-}
-
-/**
- * The ask an entry CLOSES, or null.
- *
- * Approvals and keeper requests are closed by a different entry_type;
- * escalations are closed by their own type carrying state "resolved",
- * whether a person did it (escalation_handler.go:607) or the system did
- * (escalation_autoresolve.go:172).
- */
-export function answerRef(entry: JournalEntry): AskRef | null {
-  switch (entry.entry_type) {
-    case "approval.granted":
-    case "approval.denied":
-    case "approval.cancelled":
-    case "approval.timeout":
-      return { kind: "approval", id: idFrom(entry, "approval_id") ?? "" }
-    case "keeper.decision":
-      return { kind: "keeper", id: idFrom(entry, "keeper_request_id", "request_id") ?? "" }
-    case "peer.escalation":
-      if (!escalationResolved(entry)) return null
-      return { kind: "escalation", id: idFrom(entry, "escalation_id") ?? "" }
-    default:
-      return null
-  }
-}
+// The ask/answer vocabulary moved down into activity-stream (#1876) because
+// `scopeOf` — which the rail, the feed and the scope facets all read — has to
+// consult it too. Two joins with two sets of rules is how the rail came to
+// read "Waiting 4" beside this card reading 0. Re-exported here so the
+// overview's own vocabulary still reads from the overview.
+export { answerRef, askRef, answeredAsks, type AskKind, type AskRef } from "@/lib/activity-stream"
 
 /**
  * The asks in this window that nothing in it has answered — the real
  * "waiting on you" list, in feed order.
  *
+ * This IS the `waiting` bucket, not a second opinion about it: one
+ * implementation, so the card's list and the rail's count cannot drift.
+ * A test pins `openAsks(feed).length === scopeCounts(feed).waiting`.
+ *
  * An ask carrying no id is KEPT. It cannot be joined to an answer, so it
  * cannot be proven answered, and showing one row too many is a smaller
- * failure than hiding something a person is blocking.
+ * failure than hiding something a person is blocking on.
  *
  * The join is on kind AND id, so an approval decision cannot close a keeper
  * request that happens to share an id string.
  */
 export function openAsks(entries: JournalEntry[]): JournalEntry[] {
-  const answered = new Set<string>()
-  for (const e of entries) {
-    const a = answerRef(e)
-    if (a && a.id !== "") answered.add(`${a.kind}:${a.id}`)
-  }
-  return entries.filter((e) => {
-    const ask = askRef(e)
-    if (!ask) return false
-    if (ask.id === "") return true
-    return !answered.has(`${ask.kind}:${ask.id}`)
-  })
+  return entriesInScope(entries, "waiting")
 }
 
 /* ------------------------------------------------------------------ *
