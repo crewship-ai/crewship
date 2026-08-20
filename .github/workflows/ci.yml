@@ -1469,12 +1469,22 @@ jobs:
           # ── The one number to maintain ──
           #
           # Binary seconds for this package on a TYPICAL ubuntu-latest
-          # runner — the median of the green `main` runs tabulated in the
-          # job comment above, re-measured after #2031 lowered the test
-          # binary's bcrypt cost.
+          # runner, re-measured after #2031 lowered the test binary's
+          # bcrypt cost.
           #
           #   measured:  2026-08-20
-          #   value:     1400s   (run TBD, `ok … Ns`)
+          #   value:     1405.3s, rounded down to 1400 — run 32395823919,
+          #              job 96512768782, `ok … 1405.311s`, the first green
+          #              run carrying the lowered test-binary bcrypt cost.
+          #              For scale, the five pre-#2031 green `main` runs
+          #              tabulated on the job above ran 1155.7-1708.1s.
+          #
+          # It is a point estimate and cannot be anything else: the spread
+          # between two runners on the same tree is 1.48x, so no number of
+          # re-measurements produces a "true" value. That is why the
+          # multipliers below are sized to absorb the spread rather than to
+          # sit just above the last observation, which is the mistake this
+          # budget made before.
           #
           # Everything below is derived from it, so no multiplier can be
           # true in a comment and false in the YAML:

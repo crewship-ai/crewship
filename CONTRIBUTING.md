@@ -157,8 +157,9 @@ feature correctness.
   local command tree instead. `cobra_sort_parallel_guard_test.go`
   fails the build on both halves.
 - **`go test -race ./internal/api/` needs `-timeout`.** That package
-  takes ~22m under the race detector (`ok … 1332s`, measured
-  2026-08-20 on crewship-dev) and `go test`'s default timeout is 10m,
+  takes ~23m under the race detector (`ok … 1405s` on a CI runner,
+  measured 2026-08-20; local numbers on crewship-dev swing with what
+  else is running) and `go test`'s default timeout is 10m,
   so a plain run is **killed mid-test** — it prints a goroutine dump
   headed by whichever `t.Parallel()` test was running when the axe
   fell, and **zero `WARNING: DATA RACE`**. That reads exactly like a

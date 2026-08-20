@@ -95,7 +95,7 @@ func TestBcryptCost_EverySiteReadsTheVar(t *testing.T) {
 	t.Parallel()
 
 	var offenders []string
-	forEachNonTestFile(t, func(path string, fset *token.FileSet, file *ast.File) {
+	forEachNonTestFile(t, func(fset *token.FileSet, file *ast.File) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || !isPkgCall(call.Fun, "bcrypt", "GenerateFromPassword") {
@@ -136,7 +136,7 @@ func TestBcryptCost_OnlyTheTestBinaryWrites(t *testing.T) {
 	note := func(fset *token.FileSet, pos token.Pos) {
 		offenders = append(offenders, srcPos(fset, pos))
 	}
-	forEachNonTestFile(t, func(path string, fset *token.FileSet, file *ast.File) {
+	forEachNonTestFile(t, func(fset *token.FileSet, file *ast.File) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch s := n.(type) {
 			case *ast.AssignStmt:
@@ -214,7 +214,7 @@ func TestSignup_StoresARealBcryptHashAtTheConfiguredCost(t *testing.T) {
 // directory and hands it to fn. Test files are excluded on purpose: they are
 // where the cost is allowed to be lowered, and they never link into a
 // released binary.
-func forEachNonTestFile(t *testing.T, fn func(path string, fset *token.FileSet, file *ast.File)) {
+func forEachNonTestFile(t *testing.T, fn func(fset *token.FileSet, file *ast.File)) {
 	t.Helper()
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -232,7 +232,7 @@ func forEachNonTestFile(t *testing.T, fn func(path string, fset *token.FileSet, 
 			t.Fatalf("parse %s: %v", name, err)
 		}
 		seen++
-		fn(name, fset, file)
+		fn(fset, file)
 	}
 	// A scan that silently matched nothing is a scan that proves nothing —
 	// the same failure mode route_read_scope_invariant_test.go was fixed for.
