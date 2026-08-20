@@ -4,7 +4,6 @@ package docker
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -33,10 +32,7 @@ func TestDockerProvider_LiveContractSuite(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 		t.Cleanup(cancel)
 
-		image := os.Getenv("CREWSHIP_CONFORMANCE_IMAGE")
-		if image == "" {
-			image = "debian:bookworm-slim"
-		}
+		image := conformanceImageRef()
 
 		p, cleanupProvider := newConformanceProvider(ctx, t)
 		t.Cleanup(cleanupProvider)

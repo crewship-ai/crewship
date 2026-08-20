@@ -887,9 +887,14 @@ export function ChatPageClient() {
             {agent.crew && (
               <>
                 {" · "}
+                {/* Underlined at rest, not on hover: this link sits inside a
+                    block of text, so colour alone would be its only
+                    distinguishing mark (WCAG 1.4.1). And `text-purple` is a
+                    fill token measured at 4.48:1 — `text-purple-hover` is the
+                    text-safe one. */}
                 <Link
                   href={`/crews?crew=${encodeURIComponent(agent.crew.slug)}`}
-                  className="text-purple hover:underline"
+                  className="text-purple-hover underline"
                 >
                   {agent.crew.name}
                 </Link>

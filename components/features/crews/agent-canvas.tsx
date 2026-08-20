@@ -32,6 +32,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import {
   CanvasShell,
   CanvasTabs,
+  CanvasTabPanel,
   useEntityFetch,
   usePatchEntity,
   useResetTabOnSlugChange,
@@ -512,7 +513,7 @@ export function AgentCanvas({
 
       {/* Menu — two entries plus the one link that leaves the screen */}
       <div className="flex items-center gap-4 border-b border-border">
-        <CanvasTabs<AgentTab> tabs={TABS} active={tab} onChange={setTab} />
+        <CanvasTabs<AgentTab> tabs={TABS} active={tab} onChange={setTab} idPrefix="agent-canvas" label="Agent sections" />
         <Link
           href={`/journal?agent=${encodeURIComponent(agent.slug)}`}
           className="ml-auto inline-flex shrink-0 items-center gap-1 pb-2 text-label text-muted-foreground transition-colors hover:text-primary"
@@ -522,6 +523,7 @@ export function AgentCanvas({
         </Link>
       </div>
 
+      <CanvasTabPanel idPrefix="agent-canvas" active={tab} className="space-y-6">
       {tab === "overview" && (
         <OverviewTab
           workspaceId={workspaceId}
@@ -545,6 +547,7 @@ export function AgentCanvas({
       {tab === "config" && (
         <ConfigTab agent={agent} crews={crews} patch={patch} onSelectCrew={onSelectCrew} />
       )}
+      </CanvasTabPanel>
 
       <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[820px]">

@@ -170,6 +170,12 @@ const defaultBuildIdleTimeout = 5 * time.Minute
 // its whole job is to answer or get out of the way.
 const imageProbeTimeout = 20 * time.Second
 
+// cancelKillInterval is how often the watchdog re-signals a cancelled build's
+// process group while it waits for the pipe to close. Short, because the
+// caller is already gone and the only thing left to do is stop holding their
+// resources; cheap, because signalling an empty group is one failing syscall.
+const cancelKillInterval = 250 * time.Millisecond
+
 // NewAppleContainerBuilder probes for Apple's `container` CLI on PATH.
 //
 // Unlike the Docker builder there is no daemon to pin: `container` talks to the
@@ -226,6 +232,18 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 	// #nosec G204 — bin is PATH-resolved; every argument is internally built.
 	cmd := exec.CommandContext(ctx, b.bin, args...)
 
+	// StdoutPipe, not a bytes.Buffer, and that choice decides which rescues are
+	// available here. Both ends of a StdoutPipe are *os.File, so exec starts no
+	// copying goroutines, never allocates c.goroutineErr, and its watchCtx
+	// therefore never closes the parent's pipe ends — that cleanup sits inside
+	// `if c.goroutineErr != nil`.
+	//
+	// The consequence, since it has already been proposed once as a follow-up:
+	// setting cmd.WaitDelay would NOT rescue a stuck read in this function.
+	// Verified by execution — the scanner below is still blocked after
+	// WaitDelay elapses. Process-group signalling is the only lever here.
+	// WaitDelay does work at the sibling site that buffers into memory, which
+	// is #2037 (internal/provider/apple/apple_exec.go); fix that one there.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("build stdout pipe: %w", err)
@@ -236,6 +254,22 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 	// the read below then blocks until they happen to exit — which is the very
 	// hang the watchdog exists to end.
 	ownProcessGroup(cmd)
+	kill := func() { killProcessGroup(cmd) }
+	// exec's own cancellation has to be the same kill, not a second one.
+	// CommandContext's default Cancel is Process.Kill(), which signals the
+	// direct `container` process alone — and it wakes on the same ctx.Done()
+	// as the watchdog below. When exec's kill won that race the child could be
+	// an exited, not-yet-reaped zombie before the group kill resolved it, which
+	// on Darwin is unresolvable (getpgid returns ESRCH for a zombie), so the
+	// group was never signalled and the descendants kept stdout open forever
+	// (#2030). One killer, no race left to lose — the same shape runCLIWithin
+	// in internal/provider/apple already uses.
+	//
+	// Returning nil rather than os.ErrProcessDone is deliberate: exec then
+	// reports ctx.Err() if the process happens to exit 0 as it is cancelled,
+	// so a cancelled build can never come back as a success. A non-zero exit —
+	// what SIGKILL actually produces — still wins over it in Wait.
+	cmd.Cancel = func() error { kill(); return nil }
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting container build: %w", err)
@@ -254,7 +288,6 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 	}
 	watchdogDone := make(chan struct{})
 	var wedged atomic.Bool
-	kill := func() { killProcessGroup(cmd) }
 	go func() {
 		tick := idle / 4
 		if tick <= 0 {
@@ -262,11 +295,12 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 		}
 		ticker := time.NewTicker(tick)
 		defer ticker.Stop()
+		cancelled := ctx.Done()
 		for {
 			select {
 			case <-watchdogDone:
 				return
-			case <-ctx.Done():
+			case <-cancelled:
 				// exec.CommandContext kills the `container` process and
 				// nothing else. Its descendants can still hold the write end
 				// of stdout, so scanner.Scan() below keeps blocking after
@@ -274,8 +308,40 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 				// timer fires — minutes after the caller gave up. kill()
 				// takes the whole process group, which closes the pipe.
 				kill()
-				return
+				// Keep signalling instead of returning. A closed Done channel
+				// stays ready, so drop it from the select and re-signal on a
+				// short cadence; the loop ends when the scanner drains and
+				// Build closes watchdogDone.
+				//
+				// Be precise about what this buys, because it is easy to read
+				// as more than it is. The pgid is now static and SIGKILL is
+				// uncatchable, so the FIRST kill already reaches every member
+				// of the group that exists when it runs. What repeating adds
+				// is exactly one case: a member that forks between the kernel
+				// walking the group and the signal landing, whose child is
+				// therefore in the group but was never signalled. The next
+				// tick catches it.
+				//
+				// It is NOT a rescue for a holder outside the group — one that
+				// called setsid, say. Nothing here can reach that process, so
+				// the pipe never closes, the scanner never drains and Build
+				// never returns. Note also that once cancelled is nil the
+				// quiet >= idle branch below is unreachable for the rest of
+				// the build, so there is no idle-timeout backstop either.
+				// Neither of those is a regression — `main` hangs identically,
+				// and worse, because it stops signalling after one attempt —
+				// but neither is fixed here.
+				cancelled = nil
+				ticker.Reset(cancelKillInterval)
 			case <-ticker.C:
+				if cancelled == nil {
+					// Cancelled: re-signal only. The idle check below is
+					// deliberately not reachable from here — the caller is
+					// already gone, so "has this gone quiet for five minutes"
+					// is no longer a question worth asking.
+					kill()
+					continue
+				}
 				quiet := time.Since(time.Unix(0, lastOutput.Load()))
 				// Only prolonged silence ends a build. The export marker is
 				// NOT the end: after BuildKit reports the export DONE the CLI

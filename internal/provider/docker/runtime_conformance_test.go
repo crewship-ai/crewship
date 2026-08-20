@@ -60,6 +60,7 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
@@ -99,10 +100,7 @@ func TestRuntimeConformance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 
-	image := os.Getenv("CREWSHIP_CONFORMANCE_IMAGE")
-	if image == "" {
-		image = "debian:bookworm-slim"
-	}
+	image := conformanceImageRef()
 
 	p, cleanupProvider := newConformanceProvider(ctx, t)
 	defer cleanupProvider()
@@ -251,17 +249,21 @@ func imageProvenanceProbes(prov imageProvenance) []probe {
 // re-creates the local tag itself (docker.go ~904), because `pull repo@sha256:…`
 // leaves the image unnamed while everything downstream here still addresses it
 // by tag — buildCrewContainerConfig, ContainerCreate, the drift check. That
-// re-tag is best-effort: it logs a Warn and ensureImage still returns the digest
-// it resolved.
+// re-tag is best-effort in the sense that it cannot fail the start.
 //
 // So "the tag resolves to something" is not enough, and asserting only that
 // would have made the digest probe above a liar in exactly one case — the case
 // this suite exists for. When a stale local copy is re-pulled and the re-tag
-// then fails, the tag still points at the OLD image: the inspect succeeds, the
-// container runs the old manifest, and the harness reports the new digest as
-// the one that ran. Nothing errors. Requiring the tag's own RepoDigests to
-// carry the reported digest closes it, and reuses the comparison ensureImage
-// makes on its own verified fast path rather than inventing a second one.
+// then fails, the tag still points at the OLD image: the inspect succeeds and
+// the container runs the old manifest. Nothing errors. ensureImage no longer
+// reports the new digest there — since #2006 it reads the tag back and reports
+// what the tag carries, Verified false — but that read-back is code, and this
+// check is the independent oracle over a REAL daemon that the read-back is
+// telling the truth. It stays an identity check for that reason: it must keep
+// failing if the read-back is ever weakened back to an assumption. Requiring
+// the tag's own RepoDigests to carry the reported digest reuses the comparison
+// ensureImage makes on its own verified fast path rather than inventing a
+// second one.
 //
 // Skipped when the digest is empty, which is legitimate and not a failure: a
 // locally-built crewship-cache:* derivative has no registry digest at all, and
@@ -319,13 +321,37 @@ func contractLabelProbe(ctx context.Context, t *testing.T, p *Provider, id strin
 // runByoiSidecarCheck's job, on the EnsureCrewRuntime path this test
 // deliberately does not take). A real sidecar build would make the harness
 // depend on `make build:sidecar` for no added signal about the runtime.
+//
+// The temp root is os.MkdirTemp + an explicit cleanup rather than t.TempDir,
+// and that is load-bearing — see reclaimBindOwnership. t.TempDir registers its
+// RemoveAll at the moment it is called, which is before this helper has a
+// provider to reclaim ownership with, and t.Cleanup is LIFO, so no reclaim
+// registered later in this function could ever run after it. Owning the
+// directory puts both steps in one cleanup, in the order they have to happen,
+// without changing this helper's signature or any of its three call sites.
 func newConformanceProvider(ctx context.Context, t *testing.T) (*Provider, func()) {
 	t.Helper()
 
-	base := t.TempDir()
+	// Under os.TempDir() deliberately: t.TempDir() was too, and the comment
+	// above explains why that matters for VM-backed runtimes. An arbitrary
+	// path would not be bind-mountable by the daemon.
+	base, err := os.MkdirTemp("", "crewship-conformance-")
+	if err != nil {
+		t.Fatalf("create conformance temp dir: %v", err)
+	}
+	// Every failure between here and the t.Cleanup below has to take the temp
+	// root with it. Nothing has been chowned yet at any of these points — the
+	// product only touches ownership from ensureCrewVolumesOwned onwards — so a
+	// plain RemoveAll is enough and no reclaim is needed.
+	bail := func(format string, args ...any) {
+		t.Helper()
+		_ = os.RemoveAll(base)
+		t.Fatalf(format, args...)
+	}
+
 	sidecar := filepath.Join(base, "crewship-sidecar")
 	if err := os.WriteFile(sidecar, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1, 0}, 0o755); err != nil {
-		t.Fatalf("write sidecar stub: %v", err)
+		bail("write sidecar stub: %v", err)
 	}
 
 	// Copy the entrypoint next to the sidecar stub rather than bind-mounting it
@@ -333,15 +359,16 @@ func newConformanceProvider(ctx context.Context, t *testing.T) (*Provider, func(
 	// that are shared into its VM — podman machine shares /Users, /private and
 	// /var/folders and nothing else — so a repo living anywhere outside that set
 	// fails the create with `mkdir /Volumes: operation not permitted`, which is
-	// a fact about where this clone sits and not about the runtime. t.TempDir()
-	// is under TMPDIR, which is shared everywhere this runs.
+	// a fact about where this clone sits and not about the runtime. The base is
+	// under TMPDIR (os.MkdirTemp with an empty dir), which is shared everywhere
+	// this runs.
 	entrypoint := filepath.Join(base, "entrypoint.sh")
 	src, err := os.ReadFile(repoFile(t, "scripts", "entrypoint.sh"))
 	if err != nil {
-		t.Fatalf("read entrypoint: %v", err)
+		bail("read entrypoint: %v", err)
 	}
 	if err := os.WriteFile(entrypoint, src, 0o755); err != nil {
-		t.Fatalf("stage entrypoint: %v", err)
+		bail("stage entrypoint: %v", err)
 	}
 
 	cfg := Config{
@@ -356,9 +383,122 @@ func newConformanceProvider(ctx context.Context, t *testing.T) (*Provider, func(
 		// here means somebody asked for a conformance run — and reporting "ok"
 		// because there was no runtime to test against is precisely the silent
 		// non-coverage scripts/skip-budget.sh exists to prevent.
+		_ = os.RemoveAll(base)
 		t.Fatalf("no container runtime reachable: %v — start one, or point DOCKER_HOST at it", err)
 	}
+
+	// The one cleanup that can actually delete this tree: reclaim first, then
+	// remove. Registered after New so it has a runtime to reclaim through, and
+	// deliberately independent of the returned closure — callers `defer` that,
+	// and defers run before any t.Cleanup, so p.client is already closed by the
+	// time this fires. reclaimBindOwnership dials its own client for exactly
+	// that reason.
+	t.Cleanup(func() {
+		if os.Getenv("CREWSHIP_CONFORMANCE_KEEP") != "" {
+			t.Logf("CREWSHIP_CONFORMANCE_KEEP set: leaving %s in place", base)
+			return
+		}
+		reclaimBindOwnership(t, p.detected.Host, conformanceImageRef(), base)
+		_ = p.client.Close()
+		if err := os.RemoveAll(base); err != nil {
+			t.Logf("could not remove %s (leaking it rather than failing the run): %v", base, err)
+		}
+	})
+
 	return p, func() { _ = p.client.Close() }
+}
+
+// conformanceImageRef is the image every harness in this package runs against.
+// One function rather than the four copies of the same env lookup that used to
+// sit in the four conformance tests, because the reclaim container has to run
+// the SAME image the run already pulled — a second default that drifts would
+// make cleanup pull an image nothing else in the run uses.
+func conformanceImageRef() string {
+	if image := os.Getenv("CREWSHIP_CONFORMANCE_IMAGE"); image != "" {
+		return image
+	}
+	return "debian:bookworm-slim"
+}
+
+// reclaimBindOwnership hands the harness's temp tree back to the user running
+// the test, through a root container, so the tree can be deleted afterwards.
+//
+// Why it has to exist at all: the product deliberately chowns the crew's bind
+// dirs to 1001:1001 (fixBindMountOwnership), which is the behaviour these
+// harnesses exist to exercise. Removing a directory needs write permission on
+// its PARENT, and chmod needs ownership — neither of which a host user that is
+// not uid 1001 has once the product has run. So the leftover tree is not merely
+// awkward to delete, it is undeletable from the host, and every conformance run
+// on a host whose uid is not 1001 failed in cleanup with every assertion green
+// (#2005). The only tool that can undo a root container's chown is another root
+// container, which is the same trick fixBindMountOwnership itself uses.
+//
+// # Which uid to chown to
+//
+// Not $(id -u) read inside the container, and not a hardcoded number. Under a
+// ROOTLESS runtime the container's uid 0 IS the invoking host user, so the
+// right target is 0:0; under a rootful one it is the host user's real uid.
+// Rather than detect rootless-ness — nothing in this package models it, and the
+// answer differs again on VM-backed runtimes — the target is read off the bind
+// itself: `stat` the mount point, which is this temp root, created by this
+// process and never handed to the product. Whatever uid the container sees for
+// it is by construction the container-side name for "the user running this
+// test", on either kind of runtime. Chowning the tree to that is correct
+// without anything having to know which kind it is.
+//
+// Best-effort by contract: a reclaim that can fail the suite would reintroduce
+// exactly the class of failure #2005 is about — a green run reported as red by
+// its own cleanup. Every error is logged and the tree is leaked instead.
+func reclaimBindOwnership(t *testing.T, host, image, base string) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	cli, err := client.New(client.WithHost(host))
+	if err != nil {
+		t.Logf("ownership reclaim: client for %s: %v (leaking %s)", host, err, base)
+		return
+	}
+	defer cli.Close()
+
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
+			Image: image,
+			User:  "0:0",
+			// `-h` so a symlink in the tree cannot redirect the chown outside
+			// the bind, and `--` so a path is never read as an option.
+			Entrypoint: []string{"sh", "-c", `own=$(stat -c '%u:%g' /mnt) && exec chown -Rh "$own" -- /mnt`},
+		},
+		HostConfig: &container.HostConfig{
+			Mounts: []mount.Mount{{Type: mount.TypeBind, Source: base, Target: "/mnt"}},
+		},
+	})
+	if err != nil {
+		t.Logf("ownership reclaim: create: %v (leaking %s)", err, base)
+		return
+	}
+	defer func() {
+		rmCtx, rmCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer rmCancel()
+		_, _ = cli.ContainerRemove(rmCtx, created.ID, client.ContainerRemoveOptions{Force: true})
+	}()
+
+	if _, err := cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+		t.Logf("ownership reclaim: start: %v (leaking %s)", err, base)
+		return
+	}
+	wait := cli.ContainerWait(ctx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	select {
+	case res := <-wait.Result:
+		if res.StatusCode != 0 {
+			t.Logf("ownership reclaim: chown container exited %d (leaking %s)", res.StatusCode, base)
+		}
+	case werr := <-wait.Error:
+		t.Logf("ownership reclaim: wait: %v (leaking %s)", werr, base)
+	case <-ctx.Done():
+		t.Logf("ownership reclaim: timed out: %v (leaking %s)", ctx.Err(), base)
+	}
 }
 
 // repoFile resolves a path relative to the repository root from this test's own

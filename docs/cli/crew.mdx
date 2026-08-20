@@ -298,6 +298,32 @@ crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
 | `--allowed-domains` | `string` | | Comma-separated allowed domains. Supports `*.example.com` subdomain wildcards. Pass empty string to clear. |
 | `--allow-package-registries` | `bool` | `false` | Append the common package registries (npm, pip, cargo, go, apt, Docker Hub) to the crew's allowed domains. When passed alone it unions onto the crew's existing domains rather than replacing them. |
 | `--allow-private-endpoints` | `bool` | `false` | Allow agents to reach a private/LAN model endpoint (RFC1918/loopback). Link-local and cloud-metadata addresses stay blocked. Subject to the instance ceiling `CREWSHIP_ALLOW_PRIVATE_ENDPOINTS`. |
+| `--issue-prefix` | `string` | | Prefix for this crew's issue identifiers — `ENG` gives `ENG-42`. Pass an empty string to clear it, after which identifiers use the first three letters of the crew slug upper-cased. See [Issue prefixes](#issue-prefixes). |
+
+### Issue prefixes
+
+An issue identifier is `<prefix>-<n>`. The prefix is the crew's
+`--issue-prefix`, or, when it is not set, the first three letters of the crew
+slug upper-cased — so a crew slugged `engineering` files `ENG-1` without anyone
+configuring anything.
+
+```bash
+crewship crew update engineering --issue-prefix ENG
+crewship issue create --crew engineering --title "Ship it"
+# ✓ Created issue ENG-1: Ship it
+
+crewship crew update engineering --issue-prefix ""   # back to the slug
+```
+
+**Two crews in a workspace may share a prefix.** They then share one sequence
+and interleave — `engineering` files `ENG-1`, `engine` files `ENG-2` — because
+the number comes from a counter keyed on the workspace and the prefix, not on
+the crew. Nothing is rejected and nothing collides: identifiers are unique per
+workspace, and one sequence per prefix is what makes that true by construction.
+
+Changing a crew's prefix does not renumber or rewrite the identifiers it has
+already minted, and does not restart numbering: the new prefix picks up above
+whatever that prefix already holds in the workspace.
 
 <Note>
 **`--memory-mb` and `--cpus` reach a running container only when it is

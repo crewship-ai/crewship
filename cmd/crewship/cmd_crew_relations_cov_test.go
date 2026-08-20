@@ -143,6 +143,8 @@ func TestCrewConnectionsRunE(t *testing.T) {
 }
 
 func TestCrewStandupRunE(t *testing.T) {
+	guardCLIState(t)
+
 	t.Run("text summary with --since", func(t *testing.T) {
 		s := clitest.NewStubServer()
 		defer s.Close()

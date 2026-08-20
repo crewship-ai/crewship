@@ -408,7 +408,73 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   their canary. Removing it belongs with #1768 item 8, together with moving those
   guards.
 
+### Fixed
+
+- **Two crews with the same issue prefix no longer wedge each other (#1797).**
+  An identifier is `<prefix>-<n>`, where the prefix is the crew's
+  `issue_prefix` or the first three letters of its slug — so `engineering` and
+  `engine` both derive `ENG` with nothing configured. The number came from a
+  counter keyed **per crew**, while identifiers are unique **per workspace**, so
+  both crews minted `ENG-1` and the second one's insert was rejected.
+
+  It was not a one-off 500. The counter increment and the issue insert shared
+  one transaction, so the rejection rolled the increment back too: the losing
+  crew asked for the same identifier on every subsequent create and **could
+  never file an issue again**, with no message naming the cause. Any workspace
+  with two such crews had one of them silently out of service.
+
+  The counter is now keyed on `(workspace_id, prefix)`, which is the namespace
+  it feeds. Two crews sharing a prefix share one sequence and interleave
+  (`ENG-1`, `ENG-2`) instead of colliding — no validation to remember at each
+  write site, and no legitimate crew refused for its name. The migration
+  collapses colliding counters onto the highest of them, which also unwedges a
+  crew that was stuck, and seeds each prefix above the identifiers it has
+  already minted so a crew that changed its prefix cannot restart into an
+  existing range. The two duplicate identifier generators (the REST create and
+  the agent/recurring path) are now one.
+
+- **`crewship crew update --issue-prefix` (#1797).** `issue_prefix` has been
+  accepted by `PATCH /api/v1/crews/{id}` since v38 and had no CLI flag at all;
+  it was reachable only from the web UI. Pass an empty string to clear it and
+  fall back to the slug.
+
 ### Security
+
+- **A crew no longer starts on a known-stale runtime image, whichever way the
+  host got there (#2006, #2019).** ⚠️ **Behaviour change:** a start that used to
+  succeed can now fail.
+
+  Crewship pulls the runtime image **by digest** and then re-creates the
+  `repo:tag` alias itself, because everything downstream — `ContainerCreate`
+  included — addresses the image by tag. When that re-tag failed and an older
+  copy of the tag was still on disk, the tag kept pointing at the **old**
+  manifest: the container ran the old image, and the `provisioning.step` journal
+  attested the newly pulled digest as verified. The journal half is fixed first
+  — the digest recorded is now read back off disk, so a run is never attributed
+  to a manifest it did not execute, and no digest at all is recorded when the
+  daemon answers 404 for the tag. A read-back that *fails* is not read as a 404:
+  a timeout says nothing about what the tag resolves to, so the decision falls
+  back on what was proved before the pull.
+
+  Execution is now fixed too. That state is bit-for-bit the state a **failed
+  pull** over a stale local copy reaches, which has refused to start since
+  #1825 — so one route stopped the fleet while its sibling shrugged and started
+  the wrong image with an error log. Both routes now go through one decision:
+  refuse by default, with the existing host-wide opt-out
+  `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1`, and the error names both digests, what
+  happened, and how to fix it properly. This route is the more recoverable one —
+  the manifest you wanted is already on disk and merely unnamed — so the error
+  hands over the exact `docker tag` that names it.
+
+  **Who is affected:** a host whose registry answers the digest check while its
+  local tag resolves to something else. An air-gapped or offline host is not
+  affected (no digest answer, so nothing is provably stale) and neither is a tag
+  that is simply absent. **If a start now fails**, re-pull or run the `docker
+  tag` the error prints; if you would rather run the older image than stop the
+  fleet, set `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1`. The opt-out relaxes
+  execution only — it still journals the **local** digest with
+  `payload.pinned: false`, because a tamper-evident log that attests a digest
+  which never ran is worse than one that records nothing.
 
 - **Go toolchain bumped 1.26.5 → 1.26.6, clearing eight advisories (#1959).**
   Seven were in the standard library and reachable from real call paths —
@@ -651,6 +717,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **A `container` CLI call that finished microseconds before its deadline no
+  longer reports a timeout (#2030).** The `internal/provider/apple` half of the
+  process-group fix below is a user-visible behaviour change, not only an
+  internal cleanup. `killProcessGroup` is `runCLIWithin`'s `cmd.Cancel`, and it
+  used to return a bare `ESRCH` when the process group emptied between the
+  lookup and the signal — the case where the command finished in the instant its
+  deadline fired. `os/exec` wraps any error from `Cancel` other than
+  `os.ErrProcessDone` as `exec: canceling Cmd: …` and, because the command
+  itself exited 0, hands that to `Wait`; `runCLIWithin` then saw
+  `ctx.Err() == DeadlineExceeded` and reported
+  `container …: timed out after 20m0s`, throwing away output the command had
+  already produced. That `ESRCH` is now mapped to `os.ErrProcessDone`, which
+  `os/exec` treats as "the process already finished, don't inject a needless
+  error", so the call returns its real stdout and a nil error. Callers or
+  operators matching on the old timeout string for these races will stop seeing
+  it — those calls were successes misreported as timeouts.
 - **Agent-driven creation is now gated on the crew's `autonomy_level`, and on
   the default level (`guided`) some of it blocks (#1768).** This is a
   behaviour change on default settings, not only a bug fix — a crew that has
@@ -729,6 +811,59 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Leaving a workspace kept every crew membership (#1976).** `RemoveMember`
+  deleted the `workspace_members` row and nothing else, so each `crew_members`
+  row the departing user held in that workspace outlived their departure —
+  and those rows grant on their own. Crew membership alone opens crew-owned
+  pages (`pages_authz.go`) and crew credentials (`credentials_loaders.go`),
+  and `CrewRoleFromDB` folds `crew_members.role` into
+  `effectiveRole(workspace, crew)`. So a user removed while holding a per-crew
+  ADMIN override and later re-added as a plain MEMBER came back **as crew
+  ADMIN**: `AddMember` inserts a workspace_members row and never looks at
+  `crew_members`, so nothing on the way back in could notice the elevation
+  nobody granted.
+
+  The removal now deletes both, in one transaction — both or neither, because
+  workspace-removed-but-crew-attached is exactly the state being fixed. The
+  purge is scoped through `crews` (`crew_members` has no `workspace_id` of its
+  own), so the same person's crews in other workspaces are untouched, and it
+  runs *after* the page-owner transfer, whose "else the crew the departing
+  user belonged to" fallback reads the very rows being purged.
+
+  **Behaviour change:** re-adding someone to a workspace no longer restores
+  their crews. A returning member must be added back to each crew by hand —
+  including any per-crew role override they used to hold.
+
+- **Cancelling a devcontainer build on macOS could leak the process tree
+  forever (#2030).** `AppleContainerBuilder.Build` left `cmd.Cancel` at
+  `os/exec`'s default, `Process.Kill()` — the direct `container` process and
+  nothing under it — while its own watchdog killed the whole process group.
+  Both woke on the same cancellation, and when exec's kill landed first the
+  child could already be an exited, unreaped zombie by the time the group kill
+  asked which group it was in. Darwin cannot answer that: XNU's `getpgid(2)`
+  goes through `proc_find`, which excludes exited processes, so it returns
+  `ESRCH` where Linux still reports the group. The kill then fell back to
+  re-killing the corpse, the CLI's helpers kept the write end of stdout, the
+  log scanner blocked on a pipe nobody would ever close, and `cmd.Wait()` was
+  never reached. A cancelled provision leaked the goroutine, the pipe and the
+  process tree indefinitely.
+
+  The group id is now derived from what the command was started with — `Setpgid`
+  makes the child its own group leader, so pgid == pid for the pid's whole life,
+  including as a zombie — instead of being looked up at kill time, and `Cancel`
+  is that same group kill, so exec no longer sends a second, racing signal. The
+  watchdog also keeps signalling after a cancellation instead of stopping after
+  one attempt; that closes a narrow gap, a group member that forks between the
+  kernel walking the group and the signal landing, rather than being a general
+  rescue — SIGKILL is uncatchable and the pgid no longer moves, so the first
+  kill already reaches everything in the group. A holder that has left the group
+  entirely (via `setsid`) is still unreachable and still wedges the build, as it
+  does today; note also that once a build is cancelled the idle-timeout branch
+  no longer runs. `internal/provider/apple`'s copy of the helper had the same
+  lookup-at-kill-time shape on its timeout path and got the same fix. The
+  regression tests reap the direct child before killing, which makes Linux's
+  `getpgid` answer `ESRCH` too — so a macOS-only hang is now provable on the
+  Linux runners that gate every PR.
 - **"Waiting on you" counted things nobody was waiting on (#1876).**
   `scopeOf` — the classifier the Activity rail, feed and status segments all
   read — put every human-source journal row in the `waiting` bucket. But the

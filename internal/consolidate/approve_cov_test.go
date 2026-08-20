@@ -295,16 +295,87 @@ func TestAppendToCanonical_MkdirFails(t *testing.T) {
 	}
 }
 
-func TestAppendToCanonical_OpenFails(t *testing.T) {
+// TestAppendToCanonical_UnreadableTargetIsAnError pins the rule #1999
+// carried over from #1807: only fs.ErrNotExist may be read as "this is
+// the first approval of the day". The write is a whole-file replace
+// now, so a read failure we shrugged off would mean writing the
+// first-run header over content we never read — where the old O_APPEND
+// could append blind and survive it. A directory at the canonical path
+// is the cheap portable way to make the pre-read fail with something
+// that is not ErrNotExist.
+func TestAppendToCanonical_UnreadableTargetIsAnError(t *testing.T) {
 	dir := t.TempDir()
 	asDir := filepath.Join(dir, "learned-x.md")
 	if err := os.Mkdir(asDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	// Canonical path is a directory → OpenFile fails after the lock.
 	err := appendToCanonical(asDir, time.Now(), "body")
-	if err == nil || !strings.Contains(err.Error(), "open canonical") {
-		t.Errorf("expected open error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "read canonical") {
+		t.Errorf("expected read error, got %v", err)
+	}
+}
+
+// TestAppendToCanonical_RefusesSymlinkedTarget is the guard the
+// whole-file replace needs and the O_APPEND shape did not.
+//
+// appendRules — the OTHER writer of this same learned-YYYY-MM-DD.md, in
+// the same directory, under the same <path>.lock — Lstats the target and
+// refuses a symlink ("refusing symlinked target"). appendToCanonical now
+// writes with the same shape, so it needs the same refusal, and for a
+// sharper reason: the pre-read is what supplies the prefix of the new
+// file. os.ReadFile FOLLOWS a planted final-component symlink, so
+// without this check the link target's bytes are copied verbatim into
+// the crew's canonical learned file — which the HITL diff endpoint, the
+// audit watcher, every agent projecting shared memory, and the
+// memory_versions audit blob all read. The old O_APPEND wrote THROUGH
+// the link instead (#1039's confused-deputy write); neither is
+// acceptable, and internal/memory already refuses the shape for the
+// host-side card writers.
+func TestAppendToCanonical_RefusesSymlinkedTarget(t *testing.T) {
+	dir := t.TempDir()
+	secretDir := t.TempDir()
+	secret := filepath.Join(secretDir, "secret.txt")
+	const secretBody = "content the approver may not copy into crew memory\n"
+	if err := os.WriteFile(secret, []byte(secretBody), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	canonical := filepath.Join(dir, "learned-2026-06-01.md")
+	// Fatal, not Skip. CI runs `go test ./...` on ubuntu-latest,
+	// macos-14 and ubuntu-24.04-arm only — Windows is cross-COMPILED
+	// (`GOOS=windows go build`) and never tested. On all three an
+	// unprivileged os.Symlink succeeds, so a skip here could not fire in
+	// CI; it could only turn "this security guard was never exercised"
+	// into a green `ok`, which is the exact failure mode
+	// scripts/skip-budget.txt was opened to stop. A box that supports
+	// symlinks and then refuses to make one is broken, not a reason to
+	// report ok.
+	if err := os.Symlink(secret, canonical); err != nil {
+		t.Fatalf("plant symlink: %v", err)
+	}
+
+	err := appendToCanonical(canonical, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC), "- **rule**\n")
+	if err == nil {
+		t.Fatal("appendToCanonical accepted a symlinked canonical path")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("error = %v, want it to name the symlink refusal", err)
+	}
+
+	// The refusal must come BEFORE anything is read or written: the link
+	// still points at the secret, and the secret is untouched.
+	fi, lerr := os.Lstat(canonical)
+	if lerr != nil {
+		t.Fatalf("lstat canonical: %v", lerr)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Error("the symlink was replaced by a regular file — the refusal came too late")
+	}
+	got, rerr := os.ReadFile(canonical)
+	if rerr != nil {
+		t.Fatalf("read through link: %v", rerr)
+	}
+	if string(got) != secretBody {
+		t.Errorf("the link target was modified: %q", got)
 	}
 }
 

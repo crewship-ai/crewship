@@ -119,6 +119,8 @@ func covResetAgentMCPAddFlags(t *testing.T) {
 }
 
 func TestAgentMCPAddRunE(t *testing.T) {
+	guardCLIState(t)
+
 	bindPath := "/api/v1/agents/" + covAgentIDCli7 + "/integrations"
 
 	t.Run("invalid scope", func(t *testing.T) {

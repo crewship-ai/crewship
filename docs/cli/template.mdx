@@ -10,6 +10,17 @@ tag: Experimental
 
 `cmd/crewship/cmd_template.go` manages crew templates: named bundles of a crew plus its agents that you can stamp out fresh in one call. Useful for "every new project gets a backend + frontend + reviewer triad" workflows. Backed by `/api/v1/crew-templates`.
 
+## Slug scope and shadowing
+
+Built-in templates share one catalog; a workspace's own templates are unique
+within that workspace, so two workspaces may both hold `backend-team`.
+
+When both exist under one slug, **the workspace's template wins**: `list`
+shows the slug once (the workspace's version, `BUILTIN` = false), and `get`
+and `deploy` resolve to it. Other workspaces still see the built-in. Delete
+the workspace template to fall back to the built-in — it was hidden, not
+changed. Full rules in [Templates](/guides/templates#slugs-workspaces-and-shadowing).
+
 ## `crewship template list`
 
 `GET /api/v1/crew-templates`. Table: `SLUG`, `NAME`, `CATEGORY`, `AGENTS` (count), `BUILTIN`, `DESCRIPTION` (40-char truncated).

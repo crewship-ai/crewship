@@ -676,8 +676,13 @@ func (p *Provider) ImagePresentLocally(ctx context.Context, ref string) (bool, e
 
 // staleImageEscapeHatchEnv opts an operator OUT of the fail-closed decision
 // documented at the pull-failure branch of ensureImage below. Set to a truthy
-// value ("1", "true", "yes") to restore the pre-#1825 behaviour: when the pull
-// fails and a local copy exists, run the local copy anyway.
+// value ("1", "true", "yes") to run a known-stale local image anyway.
+//
+// It gates BOTH routes into that state — a failed pull over a stale local copy
+// (#1825) and a failed re-tag that leaves the stale copy holding the name
+// (#2019) — because they are the same state and an operator cannot be asked to
+// know which internal path their host took. See resolveStaleImageDrift, which
+// is the one place either route is answered.
 //
 // It exists because the fail-closed default trades availability for integrity
 // in exactly one scenario — a registry that answers a manifest HEAD but refuses
@@ -850,21 +855,14 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 			// its HEAD returns "" and it exits at the `remoteDigest == ""`
 			// branch above, never reaching this line. Failing closed here
 			// costs offline installs nothing.
-			localDigest := dockerutil.LocalRepoDigest(inspect.RepoDigests, ref)
-			if staleRuntimeImageAllowed() {
-				p.logger.Warn("runtime image pull failed; proceeding with the local copy because "+staleImageEscapeHatchEnv+" is set — this crew is running a KNOWN-STALE image",
-					"image", ref, "local_digest", localDigest, "expected_digest", remoteDigest, "error", err)
-				// Report the LOCAL digest, not the one we wanted, and leave
-				// Verified false. The journal has to say what ran; recording
-				// remoteDigest here would put a falsehood into a tamper-evident
-				// log, which is worse than recording nothing.
-				return imageProvenance{Digest: localDigest}, nil
-			}
-			p.logger.Error("runtime image pull failed and the local copy is provably stale; refusing to start the container",
-				"image", ref, "local_digest", localDigest, "expected_digest", remoteDigest, "error", err)
-			return imageProvenance{}, fmt.Errorf(
-				"pull image %s: %w (local copy is %s but the tag now resolves to %s; refusing to run a known-stale runtime image — set %s=1 to accept the stale copy)",
-				ref, err, orNone(localDigest), remoteDigest, staleImageEscapeHatchEnv)
+			return p.resolveStaleImageDrift(staleImageDrift{
+				ref:            ref,
+				localDigest:    dockerutil.LocalRepoDigest(inspect.RepoDigests, ref),
+				expectedDigest: remoteDigest,
+				happened:       "the registry pull failed",
+				remedy:         "re-run once the registry accepts the pull again (a rate limit clears on its own)",
+				cause:          err,
+			})
 		}
 		return imageProvenance{}, fmt.Errorf("pull image %s: %w", pullRef, err)
 	}
@@ -898,18 +896,94 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 	// "index.docker.io/library/alpine@sha256:…" — and the string comparison
 	// would warn on every start for the users doing the most correct thing.
 	//
-	// Best-effort: a tagging failure means the image is present but unnamed, so
-	// the caller's own ImageInspect is the honest place for that to surface,
-	// with the real daemon error rather than one invented here.
+	// Best-effort ONLY in the case it was written for: `ref` was absent locally,
+	// so a tagging failure leaves the image present but unnamed, and the
+	// caller's own ImageInspect is the honest place for that to surface — with
+	// the real daemon error rather than one invented here.
+	//
+	// That rationale does not survive a stale copy of the tag already being on
+	// disk. Then the failed re-tag leaves it pointing at the OLD manifest,
+	// nothing downstream errors, and the run is journalled under a digest it did
+	// not execute (#2006) and starts an image the registry contradicts (#2019).
+	// So the outcome below is never taken on trust when the re-tag failed: the
+	// tag is read back off disk, and the stale answer is refused rather than
+	// merely recorded.
+	var retagErr error
 	if pinned && !dockerutil.IsDigestRef(ref) {
 		if _, tagErr := p.client.ImageTag(ctx, client.ImageTagOptions{Source: pullRef, Target: ref}); tagErr != nil {
+			retagErr = tagErr
 			p.logger.Warn("pulled by digest but could not restore the local tag; downstream lookups by tag may fail",
 				"image", ref, "pull_ref", pullRef, "error", tagErr)
 		}
 	}
 
 	if remoteDigest != "" {
-		return imageProvenance{Digest: remoteDigest, Verified: pinned}, nil
+		if retagErr == nil {
+			return imageProvenance{Digest: remoteDigest, Verified: pinned}, nil
+		}
+		// The re-tag failed, so we no longer know that `ref` names the manifest
+		// we just fetched. Ask the daemon instead of assuming, on a FRESH
+		// timeout — inspectCtx above was bounded before the pull and is long
+		// expired by now.
+		postCtx, postCancel := context.WithTimeout(ctx, dockerutil.DefaultHeadTimeout)
+		defer postCancel()
+		post, postErr := p.client.ImageInspect(postCtx, ref)
+		if postErr != nil {
+			// A 404 is an ANSWER: nothing on this host answers to the tag, so
+			// there is no stale image to run and the pulled one is merely
+			// unnamed — the case the best-effort comment above describes.
+			// Record nothing and let the caller's own daemon call fail with the
+			// real error; this path does not get to stop a fleet.
+			//
+			// Any other error is not an answer, it is a failure to look, and
+			// reading it as "absent" would wave through the very state the
+			// branch below refuses. So fall back on what was already proved
+			// BEFORE the pull: reaching the pull with localPresent means the
+			// registry HEAD succeeded and the local copy did not carry its
+			// answer, and the re-tag that would have fixed that just failed.
+			// The pre-pull inspect is therefore still the best evidence of what
+			// `ref` names, and it says stale. Refusing here rests on that proof,
+			// not on the unknown — an unreadable daemon is not a licence to
+			// start a container we cannot vouch for.
+			if !cerrdefs.IsNotFound(postErr) && localPresent {
+				return p.resolveStaleImageDrift(staleImageDrift{
+					ref:            ref,
+					localDigest:    dockerutil.LocalRepoDigest(inspect.RepoDigests, ref),
+					expectedDigest: remoteDigest,
+					happened:       "the local tag could not be moved onto the pulled manifest, and re-reading the tag afterwards failed too",
+					remedy:         "the pulled manifest is already on disk, name it with `docker tag " + pullRef + " " + ref + "` once the daemon answers again",
+					cause:          fmt.Errorf("re-tag: %w; read-back: %w", retagErr, postErr),
+				})
+			}
+			return imageProvenance{}, nil
+		}
+		if dockerutil.RepoDigestsContain(post.RepoDigests, remoteDigest) {
+			// The tag already resolved to the pulled manifest (the daemon named
+			// it for us, or a concurrent start won the race). Same guarantee the
+			// re-tag was there to create.
+			return imageProvenance{Digest: remoteDigest, Verified: true}, nil
+		}
+		// The tag resolves to a DIFFERENT manifest than we pulled — the stale
+		// local copy survived, and every downstream caller addresses the image
+		// by tag, so ContainerCreate would start the old one.
+		//
+		// That is bit-for-bit the state the pull-failure branch above refuses
+		// to run: the registry answered, and what `ref` resolves to is provably
+		// not what it names. Until #2019 these two routes disagreed — one
+		// stopped the fleet, the other logged an Error and started the wrong
+		// image anyway — which made the guarantee depend on which internal path
+		// a host happened to take. Both now go through the one decision below.
+		//
+		// This route is the more recoverable of the two: the manifest we wanted
+		// is already on disk, it merely has no name, so the remedy names it.
+		return p.resolveStaleImageDrift(staleImageDrift{
+			ref:            ref,
+			localDigest:    dockerutil.LocalRepoDigest(post.RepoDigests, ref),
+			expectedDigest: remoteDigest,
+			happened:       "the pull succeeded but the local tag could not be moved onto the pulled manifest",
+			remedy:         "the pulled manifest is already on disk, name it with `docker tag " + pullRef + " " + ref + "`, or re-run once the daemon accepts the re-tag",
+			cause:          retagErr,
+		})
 	}
 	// Unpinned pull (registry digest was never resolvable but the image was
 	// also absent locally). Read back what the daemon actually landed so the
@@ -921,6 +995,62 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 		return imageProvenance{}, nil
 	}
 	return imageProvenance{Digest: dockerutil.LocalRepoDigest(post.RepoDigests, ref)}, nil
+}
+
+// staleImageDrift describes a host that holds PROOF the runtime image it is
+// about to start is not the one its tag names: the registry answered with
+// expectedDigest, and `ref` resolves locally to localDigest instead.
+//
+// It exists so the two routes into that state cannot answer it differently.
+// Only the two site-specific strings vary — how the host got here, and what
+// fixes it properly — because those are the two things an operator reading the
+// error actually needs and they genuinely differ between the routes.
+type staleImageDrift struct {
+	ref            string // the tag the crew is configured to run
+	localDigest    string // what `ref` resolves to on this host — what would execute
+	expectedDigest string // what the registry says `ref` names
+	happened       string // lowercase clause: how the host reached this state
+	remedy         string // lowercase clause: what fixes it PROPERLY, i.e. not the opt-out
+	cause          error  // the daemon error behind `happened`; wrapped, may be nil
+}
+
+// resolveStaleImageDrift applies the fail-closed decision documented at the
+// pull-failure branch of ensureImage to whichever route reached it.
+//
+// #1825 introduced it for a failed pull. #2006 established that a failed re-tag
+// over a surviving stale tag reaches the identical end state, and #2019 made
+// that route refuse too — through this function rather than a second copy of
+// the same policy, so a third route cannot quietly grow a third answer.
+//
+// Two invariants a future caller must not break:
+//
+//   - The refusal is the DEFAULT and the opt-out is host-wide and explicit; see
+//     staleImageEscapeHatchEnv for why it exists at all.
+//   - The escape hatch relaxes EXECUTION, never the audit record. Opting out
+//     still journals the local digest with Verified false, because that is what
+//     runs. Reporting expectedDigest to buy a tidier audit row would put a
+//     falsehood into a tamper-evident log — strictly worse than recording
+//     nothing.
+func (p *Provider) resolveStaleImageDrift(d staleImageDrift) (imageProvenance, error) {
+	logArgs := []any{"image", d.ref, "local_digest", d.localDigest, "expected_digest", d.expectedDigest, "reason", d.happened}
+	if d.cause != nil {
+		logArgs = append(logArgs, "error", d.cause)
+	}
+	if staleRuntimeImageAllowed() {
+		p.logger.Warn("proceeding with the local copy because "+staleImageEscapeHatchEnv+" is set — this crew is running a KNOWN-STALE image", logArgs...)
+		return imageProvenance{Digest: d.localDigest}, nil
+	}
+	p.logger.Error("the local runtime image is provably stale; refusing to start the container", logArgs...)
+
+	// One %w so the daemon error stays in the chain for callers that unwrap it,
+	// and so `happened` reads as the cause it is.
+	reason := errors.New(d.happened)
+	if d.cause != nil {
+		reason = fmt.Errorf("%s: %w", d.happened, d.cause)
+	}
+	return imageProvenance{}, fmt.Errorf(
+		"runtime image %s is known-stale: %w; %s resolves to %s on this host while the registry names %s; refusing to start a crew on an image the registry contradicts — %s, or set %s=1 to accept the stale copy host-wide",
+		d.ref, reason, d.ref, orNone(d.localDigest), d.expectedDigest, d.remedy, staleImageEscapeHatchEnv)
 }
 
 // staleRuntimeImageAllowed reports whether the operator has opted out of the

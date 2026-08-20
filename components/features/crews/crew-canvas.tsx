@@ -12,6 +12,7 @@ import { ProvisioningBanner } from "./crew-canvas-banner"
 import { CrewPrivilegedBadge } from "./crew-privileged-badge"
 import {
   CanvasShell,
+  CanvasTabPanel,
   CanvasTabs,
   useEntityFetch,
   usePatchEntity,
@@ -299,8 +300,9 @@ export function CrewCanvas({
       <ProvisioningBanner crewId={crew.id} crewSlug={crew.slug} workspaceId={workspaceId} />
 
       {/* Tabs */}
-      <CanvasTabs<CrewTab> tabs={TABS} active={tab} onChange={setTab} />
+      <CanvasTabs<CrewTab> tabs={TABS} active={tab} onChange={setTab} idPrefix="crew-canvas" label="Crew sections" />
 
+      <CanvasTabPanel idPrefix="crew-canvas" active={tab} className="space-y-6">
       {tab === "overview" && (
         <OverviewTab
           workspaceId={workspaceId}
@@ -347,6 +349,7 @@ export function CrewCanvas({
           onDelete={handleDelete}
         />
       )}
+      </CanvasTabPanel>
     </CanvasShell>
   )
 }

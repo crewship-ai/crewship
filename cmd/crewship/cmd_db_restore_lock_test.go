@@ -339,6 +339,8 @@ func holdDatabase(t *testing.T, dbPath string) {
 // The prompt is where the window is, so the test takes the database inside the
 // prompt.
 func TestRestoreSnapshotRechecksBeforeTheSwap(t *testing.T) {
+	guardCLIState(t)
+
 	tests := []struct {
 		name string
 		// takeDatabaseAtThePrompt: crewshipd comes back while the operator is
@@ -419,6 +421,8 @@ func TestRestoreSnapshotRechecksBeforeTheSwap(t *testing.T) {
 // use": that answer is knowable, and writing anyway tears the file under a
 // running server, which is the defect this whole guard exists for.
 func TestRestoreSnapshotForce(t *testing.T) {
+	guardCLIState(t)
+
 	tests := []struct {
 		name string
 		// corrupt: the live database is not a SQLite file, so the probe

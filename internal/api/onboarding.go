@@ -518,8 +518,11 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 	crewName := strings.TrimSpace(req.CrewName)
 	if crewName == "" {
 		// Look up template's display name for a sane default.
+		// Same shadowing tail as the deploy that follows — if the
+		// workspace overrides this slug, the crew is named after the
+		// override, not after the builtin it hides.
 		_ = h.db.QueryRowContext(r.Context(),
-			"SELECT name FROM crew_templates WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)",
+			"SELECT name FROM crew_templates"+crewTemplateBySlugScope,
 			req.CrewTemplateSlug, workspaceID).Scan(&crewName)
 		if crewName == "" {
 			crewName = req.CrewTemplateSlug
