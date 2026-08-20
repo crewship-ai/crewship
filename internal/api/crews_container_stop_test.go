@@ -165,3 +165,35 @@ func TestContainerStop_NoRuntimeConfigured(t *testing.T) {
 		t.Errorf("503 does not name the cause: %s", rec.Body.String())
 	}
 }
+
+// "Stopping an already-stopped crew succeeds" has to hold for a crew
+// that has no container AT ALL — one that was never started, or whose
+// container `refresh-image` removed.
+//
+// Docker's stop is idempotent for an `exited` container but 404s when
+// the container object is gone, and crewshipd mapped every stop error to
+// 500, which this handler turned into 502. So `crewship crew stop
+// <fresh-crew>` exited non-zero, contradicting its own documentation and
+// breaking the start-then-stop bracketing the command exists for.
+//
+// Fixed at the source (internal/server: containerGone → 200), so what
+// this pins is the handler's half of the contract: a 200 from crewshipd
+// is a success no matter why the container was already absent.
+func TestContainerStop_SucceedsWhenThereIsNoContainer(t *testing.T) {
+	h, wsID, crewID := startTestHandler(t, nil)
+	// crewshipd answers 200 for "nothing to stop" — the case a crew that
+	// never ran produces.
+	h.SetSocketPath(startFakeIPC(t, &stopIPCRecorder{status: http.StatusOK}))
+	act := &startFakeActivity{}
+	h.SetActivityNoter(act)
+
+	rec := httptest.NewRecorder()
+	h.ContainerStop(rec, stopRequest(crewID, wsID, "OWNER"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for a crew with no container: %s", rec.Code, rec.Body.String())
+	}
+	if act.forgotten != 1 {
+		t.Errorf("did not clear the reaper entry for a crew with no container")
+	}
+}

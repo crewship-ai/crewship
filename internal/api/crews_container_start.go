@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/crewstart"
@@ -264,17 +265,33 @@ func (h *CrewHandler) containerRunning(ctx context.Context, containerID string) 
 	)
 	for i := 0; i < attempts; i++ {
 		st, err := h.container.ContainerStatus(ctx, containerID)
-		if err != nil || st == nil {
-			return true // cannot tell — see above
-		}
-		switch st.State {
-		case "running", "idle":
-			return true
-		case "creating":
-			// Still coming up; keep waiting.
-		default:
-			// "stopped" / "error" — a later poll can still see it come up
-			// if a start is racing us, so do not bail on the first look.
+		if err != nil {
+			// "No such container" is not "cannot tell" — it is the most
+			// definitive possible no, and the exact state this check
+			// exists to catch. Treating it as unknown would fail open in
+			// the one case that matters most.
+			if containerGoneErr(err) {
+				return false
+			}
+			// Any other error: one transient daemon hiccup must not
+			// short-circuit the whole poll, so keep trying and only give
+			// up if it never clears.
+			if i == attempts-1 {
+				return true // never got a straight answer — see above
+			}
+		} else if st == nil {
+			return true // provider has no opinion — see above
+		} else {
+			switch st.State {
+			case "running", "idle":
+				return true
+			case "creating":
+				// Still coming up; keep waiting.
+			default:
+				// "stopped" / "error" — a later poll can still see it come
+				// up if a start is racing us, so do not bail on the first
+				// look.
+			}
 		}
 		if i < attempts-1 {
 			select {
@@ -285,4 +302,21 @@ func (h *CrewHandler) containerRunning(ctx context.Context, containerID string) 
 		}
 	}
 	return false
+}
+
+// containerGoneErr reports whether a container-runtime error means the
+// container does not exist.
+//
+// Matched on the message rather than errdefs types because the error
+// reaches this layer through the provider interface and at least one
+// fmt.Errorf wrap, so the concrete SDK type is not reliably recoverable.
+// internal/server/container_gone.go makes the same call for the same
+// reason; the literals are stable parts of the Docker SDK contract.
+func containerGoneErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "no such container") ||
+		strings.Contains(s, "not found")
 }

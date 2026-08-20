@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -27,7 +28,7 @@ func warnPlan(t *testing.T, status string, crewID string, fileCount int) []strin
 			return false, false
 		}
 	}
-	pb.warnIfCrewStopped("uctarna", crewID, fileCount)
+	pb.warnIfCrewStopped(context.Background(), "uctarna", crewID, fileCount)
 	return pb.plan.Warnings
 }
 

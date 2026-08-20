@@ -127,7 +127,13 @@ Starting an already-running crew is a no-op that succeeds.`,
 // rescue.
 const crewStartTimeout = 20 * time.Minute
 
+// crewStopTimeout clears crewshipd's own 60s ceiling for the whole
+// teardown (runtime container + every sidecar), with room to spare.
+const crewStopTimeout = 3 * time.Minute
+
 func init() {
+	crewStopCmd.Flags().Duration("timeout", 0,
+		"Max wait for the container and its sidecars to stop (default 3m)")
 	crewStartCmd.Flags().Duration("timeout", 0,
 		"Max wait for the container to come up (default 20m; a cold crew is provisioned first)")
 	crewCmd.AddCommand(crewStartCmd)
@@ -174,7 +180,20 @@ Stopping an already-stopped crew succeeds.`,
 			return err
 		}
 
-		resp, err := client.Post("/api/v1/crews/"+crewID+"/container-stop", nil)
+		// Same reasoning as start's timeout, one layer down. crewshipd
+		// allows 60s for the whole teardown, and StopCrewRuntime alone
+		// hands Docker a 30s stop timeout — before sidecars, each of which
+		// gets its own. A crew whose agent ignores SIGTERM, or one with a
+		// couple of declared services, blows the CLI's 30s default; Go
+		// then cancels the request, which cancels the handler's context,
+		// which kills the teardown MID-FLIGHT and skips the reaper
+		// bookkeeping at the end of it. A partly-stopped crew reported as
+		// `context deadline exceeded` is the worst of both.
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+		if timeout <= 0 {
+			timeout = crewStopTimeout
+		}
+		resp, err := client.WithTimeout(timeout).Post("/api/v1/crews/"+crewID+"/container-stop", nil)
 		if err != nil {
 			return err
 		}

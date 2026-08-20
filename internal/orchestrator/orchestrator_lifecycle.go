@@ -433,8 +433,6 @@ func (o *Orchestrator) checkTTLs(ctx context.Context) {
 	}
 }
 
-// forgetCrew drops a crew from the reaper's tracking map, unless an occupant
-// took a hold while we were deciding.
 // ForgetCrewActivity drops a crew from the idle-TTL bookkeeping because
 // its container is already gone — the exported counterpart to
 // NoteCrewActivity, for the one caller that stops a container on
@@ -447,15 +445,25 @@ func (o *Orchestrator) checkTTLs(ctx context.Context) {
 // stopped minutes earlier. Harmless to the machine, misleading to
 // whoever reads the log.
 //
-// A crew with an occupant inside it is left alone, exactly as
-// forgetCrew does — the hold outranks the request.
+// Unlike forgetCrew this ignores holds, and the difference is the whole
+// point. forgetCrew is the REAPER deciding whether to stop a container,
+// so a hold is a veto: someone is inside, leave it running. Here the
+// container has ALREADY been stopped by the caller, so a hold is not a
+// reason to keep the entry — it is a stale record of an occupant whose
+// container went away underneath them. Honouring it would preserve
+// exactly the dangling entry this function exists to remove, and only in
+// the case where it is most misleading.
 func (o *Orchestrator) ForgetCrewActivity(crewID string) {
 	if crewID == "" {
 		return
 	}
-	o.forgetCrew(crewID)
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.crews, crewID)
 }
 
+// forgetCrew drops a crew from the reaper's tracking map, unless an occupant
+// took a hold while we were deciding.
 func (o *Orchestrator) forgetCrew(crewID string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()

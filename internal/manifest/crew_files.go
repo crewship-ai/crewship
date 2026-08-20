@@ -57,8 +57,8 @@ func (v *validator) checkFiles(scope string, files []CrewFile) {
 // — one write path, one validation surface. When the parent crew is new,
 // crewID is empty and the closure resolves it by slug at apply time, exactly
 // like the other crew children.
-func (pb *planBuilder) planCrewFiles(crewSlug, crewID string, files []CrewFile) error {
-	pb.warnIfCrewStopped(crewSlug, crewID, len(files))
+func (pb *planBuilder) planCrewFiles(ctx context.Context, crewSlug, crewID string, files []CrewFile) error {
+	pb.warnIfCrewStopped(ctx, crewSlug, crewID, len(files))
 	for i := range files {
 		f := files[i]
 		dest, err := normalizeCrewFileDest(f.Src, f.Dest)
@@ -115,14 +115,14 @@ func (pb *planBuilder) planCrewFiles(crewSlug, crewID string, files []CrewFile) 
 // Only for crews that already exist: a crew being created in this same
 // apply has no container yet, its files are a first write to an
 // unowned path, and warning about it would fire on every fresh install.
-func (pb *planBuilder) warnIfCrewStopped(crewSlug, crewID string, fileCount int) {
+func (pb *planBuilder) warnIfCrewStopped(ctx context.Context, crewSlug, crewID string, fileCount int) {
 	if crewID == "" || fileCount == 0 {
 		return
 	}
 	statusFn := pb.containerStatusFn
 	if statusFn == nil {
 		statusFn = func(id string) (bool, bool) {
-			return pb.client.CrewContainerStatus(context.Background(), id)
+			return pb.client.CrewContainerStatus(ctx, id)
 		}
 	}
 	running, known := statusFn(crewID)

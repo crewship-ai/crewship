@@ -36,6 +36,7 @@ type startFakeProvider struct {
 	calls       int
 	ensureErr   error
 	statusState string // "" = provider cannot tell
+	statusErr   error  // when set, ContainerStatus fails with it
 }
 
 func (p *startFakeProvider) EnsureCrewRuntime(_ context.Context, cfg provider.CrewConfig) (string, error) {
@@ -53,6 +54,9 @@ func (p *startFakeProvider) RemoveCrewRuntime(_ context.Context, _ string) error
 // state) means "cannot tell", which the handler treats as running — the
 // existing tests keep their behaviour; the new one sets it explicitly.
 func (p *startFakeProvider) ContainerStatus(_ context.Context, _ string) (*provider.ContainerStatus, error) {
+	if p.statusErr != nil {
+		return nil, p.statusErr
+	}
 	if p.statusState == "" {
 		return nil, nil
 	}
@@ -372,5 +376,39 @@ func TestContainerStart_AcceptsARunningContainer(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// containerRunning used to return true on ANY ContainerStatus error,
+// including "no such container" — which is not "cannot tell", it is the
+// most definitive possible no and the exact state the check exists to
+// catch. Failing open there meant reporting `"status": "running"` for a
+// container the runtime says does not exist.
+func TestContainerStart_TreatsNoSuchContainerAsNotRunning(t *testing.T) {
+	cp := &startFakeProvider{statusErr: errors.New("Error: No such container: crew-uctarna")}
+	h, wsID, crewID := startTestHandler(t, cp)
+
+	rec := httptest.NewRecorder()
+	h.ContainerStart(rec, startRequest(crewID, wsID, "OWNER"))
+
+	if rec.Code == http.StatusOK {
+		t.Fatalf("claimed running for a container the runtime says is gone: %s", rec.Body.String())
+	}
+}
+
+// Any OTHER status error is genuinely "cannot tell". One transient
+// daemon hiccup must not fail a start that worked — providers whose
+// status probe is weaker than Docker's would never be able to start a
+// crew.
+func TestContainerStart_TolerantOfAnUninformativeStatusProbe(t *testing.T) {
+	cp := &startFakeProvider{statusErr: errors.New("connection reset by peer")}
+	h, wsID, crewID := startTestHandler(t, cp)
+
+	rec := httptest.NewRecorder()
+	h.ContainerStart(rec, startRequest(crewID, wsID, "OWNER"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 — an unreadable probe is not evidence the crew is down: %s",
+			rec.Code, rec.Body.String())
 	}
 }

@@ -236,7 +236,7 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		// package has no warnings channel, and giving it one for a single
 		// advisory is more plumbing than the warning is worth.
 		if remote != nil {
-			pb.warnIfCrewStopped(doc.Metadata.Slug, remote.ID, len(doc.Spec.Files))
+			pb.warnIfCrewStopped(ctx, doc.Metadata.Slug, remote.ID, len(doc.Spec.Files))
 		}
 		pb.appendKindItems(items)
 	}
