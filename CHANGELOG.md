@@ -717,6 +717,22 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **A `container` CLI call that finished microseconds before its deadline no
+  longer reports a timeout (#2030).** The `internal/provider/apple` half of the
+  process-group fix below is a user-visible behaviour change, not only an
+  internal cleanup. `killProcessGroup` is `runCLIWithin`'s `cmd.Cancel`, and it
+  used to return a bare `ESRCH` when the process group emptied between the
+  lookup and the signal — the case where the command finished in the instant its
+  deadline fired. `os/exec` wraps any error from `Cancel` other than
+  `os.ErrProcessDone` as `exec: canceling Cmd: …` and, because the command
+  itself exited 0, hands that to `Wait`; `runCLIWithin` then saw
+  `ctx.Err() == DeadlineExceeded` and reported
+  `container …: timed out after 20m0s`, throwing away output the command had
+  already produced. That `ESRCH` is now mapped to `os.ErrProcessDone`, which
+  `os/exec` treats as "the process already finished, don't inject a needless
+  error", so the call returns its real stdout and a nil error. Callers or
+  operators matching on the old timeout string for these races will stop seeing
+  it — those calls were successes misreported as timeouts.
 - **Agent-driven creation is now gated on the crew's `autonomy_level`, and on
   the default level (`guided`) some of it blocks (#1768).** This is a
   behaviour change on default settings, not only a bug fix — a crew that has
@@ -817,6 +833,37 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   **Behaviour change:** re-adding someone to a workspace no longer restores
   their crews. A returning member must be added back to each crew by hand —
   including any per-crew role override they used to hold.
+
+- **Cancelling a devcontainer build on macOS could leak the process tree
+  forever (#2030).** `AppleContainerBuilder.Build` left `cmd.Cancel` at
+  `os/exec`'s default, `Process.Kill()` — the direct `container` process and
+  nothing under it — while its own watchdog killed the whole process group.
+  Both woke on the same cancellation, and when exec's kill landed first the
+  child could already be an exited, unreaped zombie by the time the group kill
+  asked which group it was in. Darwin cannot answer that: XNU's `getpgid(2)`
+  goes through `proc_find`, which excludes exited processes, so it returns
+  `ESRCH` where Linux still reports the group. The kill then fell back to
+  re-killing the corpse, the CLI's helpers kept the write end of stdout, the
+  log scanner blocked on a pipe nobody would ever close, and `cmd.Wait()` was
+  never reached. A cancelled provision leaked the goroutine, the pipe and the
+  process tree indefinitely.
+
+  The group id is now derived from what the command was started with — `Setpgid`
+  makes the child its own group leader, so pgid == pid for the pid's whole life,
+  including as a zombie — instead of being looked up at kill time, and `Cancel`
+  is that same group kill, so exec no longer sends a second, racing signal. The
+  watchdog also keeps signalling after a cancellation instead of stopping after
+  one attempt; that closes a narrow gap, a group member that forks between the
+  kernel walking the group and the signal landing, rather than being a general
+  rescue — SIGKILL is uncatchable and the pgid no longer moves, so the first
+  kill already reaches everything in the group. A holder that has left the group
+  entirely (via `setsid`) is still unreachable and still wedges the build, as it
+  does today; note also that once a build is cancelled the idle-timeout branch
+  no longer runs. `internal/provider/apple`'s copy of the helper had the same
+  lookup-at-kill-time shape on its timeout path and got the same fix. The
+  regression tests reap the direct child before killing, which makes Linux's
+  `getpgid` answer `ESRCH` too — so a macOS-only hang is now provable on the
+  Linux runners that gate every PR.
 - **"Waiting on you" counted things nobody was waiting on (#1876).**
   `scopeOf` — the classifier the Activity rail, feed and status segments all
   read — put every human-source journal row in the `waiting` bucket. But the
