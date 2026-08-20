@@ -32,8 +32,8 @@ const Announcement = "holding\n"
 //
 // The tests read Announcement and take it as proof that the holder is already
 // a member of the process group, because the very next thing they do is kill
-// that group and assert the holder died. Only this ordering makes the proof
-// hold, and only on some shells does the obvious alternative:
+// that group and assert the holder died. The obvious alternative only makes
+// that proof hold on some shells; this ordering makes it hold on all of them:
 //
 //   - `( echo holding; sleep 60 ) &` — dash and bash 5.2 exec the last command
 //     of a subshell in place, so the process that writes the announcement *is*
@@ -54,7 +54,12 @@ const Announcement = "holding\n"
 //
 // Note that a Linux run cannot tell these two apart: there, a kill landing in
 // the gap kills the subshell before it forks, which is harmless. Only a Darwin
-// host exercises the failing case.
+// host exercises the failing case, so do not treat a green Linux run as
+// evidence that a change to this script is safe.
+//
+// One further trap: this relies on job control being OFF, which it is for a
+// non-interactive script. Adding `set -m` would make `&` put the holder in a
+// NEW process group, and the tests' kill(-pgid) would then miss it by design.
 const script = "#!/bin/sh\n( sleep 60 & echo holding ) &\n"
 
 // WriteFakeCLI writes the fake CLI into dir and returns its path.
