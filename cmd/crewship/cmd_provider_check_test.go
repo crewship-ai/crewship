@@ -660,3 +660,106 @@ func TestAcceptance_ProviderCheck_ExitCodes(t *testing.T) {
 		})
 	}
 }
+
+// anthropicStub serves one canned /v1/messages response — the real wire shape,
+// not an OpenAI body with the fields renamed.
+func anthropicStub(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// The Anthropic codec is the one this command has never been run against for
+// real — nobody on this project has held an ANTHROPIC_API_KEY while the command
+// existed, and every other RunProviderCheck case drives an OpenAI-shaped body.
+// That leaves the second of the two shipped codecs proven only by construction:
+// TestBuildCheckProvider asserts it resolves to the right endpoint and codec
+// name, and nothing asserts a response ever parses.
+//
+// The wire shapes differ in exactly the places a bug hides. Anthropic returns
+// content BLOCKS rather than a message string, names its stop reason
+// "end_turn" rather than "stop", and — the one that matters for billing —
+// reports cache_read_input_tokens SEPARATELY from input_tokens, where OpenAI
+// reports cached_tokens INSIDE prompt_tokens. A codec that mixed those up
+// double-counts, which is the bug already fixed on the OpenAI side; this pins
+// that Anthropic's (correct, untouched) accounting stays that way.
+func TestRunProviderCheck_AnthropicWireShape(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantIn     int
+		wantOut    int
+		wantCached int
+		wantCreate int
+		wantStop   string
+		wantReply  string
+	}{
+		{
+			name: "plain reply",
+			body: `{"content":[{"type":"text","text":"Pong"}],"stop_reason":"end_turn",
+			        "usage":{"input_tokens":1000,"output_tokens":500}}`,
+			wantIn: 1000, wantOut: 500, wantStop: "end_turn", wantReply: "Pong",
+		},
+		{
+			// input_tokens must be carried through UNCHANGED. Subtracting the
+			// cache read here — the fix the OpenAI codec needed — would
+			// under-report input by 1200 on this body.
+			name: "cache read is separate from input, not inside it",
+			body: `{"content":[{"type":"text","text":"Pong"}],"stop_reason":"end_turn",
+			        "usage":{"input_tokens":300,"output_tokens":50,
+			                 "cache_read_input_tokens":1200,"cache_creation_input_tokens":80}}`,
+			wantIn: 300, wantOut: 50, wantCached: 1200, wantCreate: 80,
+			wantStop: "end_turn", wantReply: "Pong",
+		},
+		{
+			name: "truncation is reported, not hidden",
+			body: `{"content":[{"type":"text","text":"Po"}],"stop_reason":"max_tokens",
+			        "usage":{"input_tokens":10,"output_tokens":64}}`,
+			wantIn: 10, wantOut: 64, wantStop: "max_tokens", wantReply: "Po",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := anthropicStub(t, tc.body)
+			p := llm.NewAnthropicWith(llm.AnthropicConfig{
+				BaseURL: srv.URL + "/v1/messages", APIKey: "test-key",
+			})
+			target := checkTarget{
+				Provider: "anthropic", PricingKey: "anthropic",
+				Codec: string(llm.CodecAnthropicMessages), Endpoint: srv.URL + "/v1/messages",
+				Model: "claude-haiku-4-5", KeySource: "--api-key",
+			}
+
+			res, err := runProviderCheck(context.Background(), p, target, "")
+			if err != nil {
+				t.Fatalf("runProviderCheck: %v", err)
+			}
+			if res.InputToks != tc.wantIn {
+				t.Errorf("InputToks = %d, want %d — the anthropic codec must carry input_tokens through unchanged", res.InputToks, tc.wantIn)
+			}
+			if res.OutputToks != tc.wantOut {
+				t.Errorf("OutputToks = %d, want %d", res.OutputToks, tc.wantOut)
+			}
+			if res.CachedInputToks != tc.wantCached {
+				t.Errorf("CachedInputToks = %d, want %d", res.CachedInputToks, tc.wantCached)
+			}
+			if res.CacheCreationToks != tc.wantCreate {
+				t.Errorf("CacheCreationToks = %d, want %d", res.CacheCreationToks, tc.wantCreate)
+			}
+			if res.StopReason != tc.wantStop {
+				t.Errorf("StopReason = %q, want %q", res.StopReason, tc.wantStop)
+			}
+			if res.Reply != tc.wantReply {
+				t.Errorf("Reply = %q, want %q — content blocks must be flattened to text", res.Reply, tc.wantReply)
+			}
+			if res.CostUSD <= 0 {
+				t.Errorf("CostUSD = %v, want > 0 — anthropic/claude-haiku-4-5 is a priced model", res.CostUSD)
+			}
+		})
+	}
+}
