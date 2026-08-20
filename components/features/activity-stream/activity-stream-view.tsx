@@ -35,8 +35,9 @@ import {
   ACTIVE_ENTRY_TYPES,
   ACTIVITY_SCOPES,
   NOISE_ENTRY_TYPES,
+  entriesInScope,
   narrowToFocus,
-  scopeOf,
+  scopeByEntry,
   shortId,
   sourceEntryTypes,
   sourceMeta,
@@ -338,10 +339,23 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   // two answers to "did anything break", and the reassuring one was wrong.
   const visible = React.useMemo(() => {
     // `done` has no server-side expression (it is "everything else"), so it
-    // is the one scope narrowed client-side.
-    if (facets.scope === "done") return focusScoped.filter((e) => scopeOf(e) === "done")
+    // is narrowed client-side.
+    //
+    // `waiting` is narrowed here too (#1876), even though the fetch already
+    // asked for `sourceEntryTypes("human")`. That query returns ask-shaped
+    // ROWS, and the journal is an event log: a granted approval's request and
+    // a resolved escalation both stay in it. Listing them under "Waiting on
+    // you" is the rail contradicting the card beside it, which counts asks
+    // that are still open. Same join, one function.
+    if (facets.scope === "done" || facets.scope === "waiting") {
+      return entriesInScope(focusScoped, facets.scope)
+    }
     return focusScoped
   }, [focusScoped, facets.scope])
+
+  // Each row's dot, resolved over the window it is rendered in. A row cannot
+  // see its neighbours, and "is this ask still open" is a question about them.
+  const scopes = React.useMemo(() => scopeByEntry(visible), [visible])
 
   const crewCounts = React.useMemo(() => {
     const c: Record<string, number> = {}
@@ -1065,6 +1079,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
                             <FeedRow
                               key={e.id}
                               entry={e}
+                              scope={scopes.get(e.id)}
                               icon={iconFor(e)}
                               labels={labels}
                               actorName={agentName(e.agent_id)}

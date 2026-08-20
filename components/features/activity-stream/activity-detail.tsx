@@ -34,6 +34,7 @@ import {
   chainElapsedMs,
   formatDurationMs,
   runIdOf,
+  scopeByEntry,
   scopeOf,
   severityTone,
   sourceMeta,
@@ -160,8 +161,15 @@ export function ActivityDetail({
   // measure between, which the card says rather than showing a confident zero.
   const chainElapsed = React.useMemo(() => chainElapsedMs(chain), [chain])
 
+  // Buckets resolved over the chain rather than per row (#1876). An ask and
+  // the approval that answered it share a trace, so the chain is exactly the
+  // set that can tell an open ask from a closed one — and the opened event
+  // itself is included so its own KPI reads the same answer as its row.
+  const scopes = React.useMemo(() => scopeByEntry([entry, ...chain]), [entry, chain])
+
   const rowProps = (e: JournalEntry) => ({
     entry: e,
+    scope: scopes.get(e.id),
     icon: iconFor(e),
     labels,
     actorName: agentName(e.agent_id),
@@ -244,7 +252,7 @@ export function ActivityDetail({
           <KpiCard
             label="This event"
             value={formatDurationMs(duration)}
-            subtitle={cost != null ? `$${cost.toFixed(4)}` : scopeOf(entry)}
+            subtitle={cost != null ? `$${cost.toFixed(4)}` : (scopes.get(entry.id) ?? scopeOf(entry))}
           />
           <KpiCard
             label="Chain duration"
