@@ -430,12 +430,13 @@ Drive it from the CLI with [`crewship workspace member role`](/cli/workspace).
 
 **Capabilities** are per-member string grants layered *on top of* a member's RBAC role. They let a workspace admin hand an individual user a specific higher-tier action -- "let this `MEMBER` create routines" -- without promoting them to `MANAGER`. The role still sets the baseline; capabilities only ever widen it.
 
-The closed set of seven capabilities:
+The closed set of eight capabilities:
 
 | Capability | Gates |
 |---|---|
 | `chat` | Baseline -- talk to agents. **Always implied**; every member has it even when the stored set omits it, and it cannot be revoked (remove the member instead). |
 | `routine.create` | Create pipeline schedules (cron-driven routines) |
+| `routine.run` | Invoke an existing routine, and see it in the slash palette. Distinct from `routine.create`: authoring a routine writes a definition somebody still has to approve, while running one executes inside the author crew's container with its credentials, now. |
 | `skill.create` | Generate / import skills |
 | `credential.create` | Create credential rows (fresh secret material in the vault) |
 | `credential.rotate` | Rotate an existing credential's value |
@@ -447,10 +448,17 @@ The closed set of seven capabilities:
 | Preset | Capabilities |
 |---|---|
 | `chat` | `chat` |
-| `power` | `chat`, `routine.create`, `issue.create`, `memory.write` |
-| `admin` | all seven |
+| `power` | `chat`, `routine.create`, `routine.run`, `issue.create`, `memory.write` |
+| `admin` | all eight |
 
-A member with no explicit set falls back to a role-derived default (`OWNER`/`ADMIN` → `admin` bundle, `MANAGER` → power-equivalent, others → `chat`). The capability lists returned by these endpoints are always sorted alphabetically.
+A member with no explicit set falls back to a role-derived default (`OWNER`/`ADMIN` → the admin set, `MANAGER` → chat + `routine.create` + `issue.create` + `memory.write`, others → `chat`).
+
+That fallback is **not** the preset of the same name. It reproduces what the
+v109 migration wrote into the capability column, so a row the migration filled
+and a row still `NULL` resolve identically -- and that migration ran before
+`routine.run` existed, so the fallback does not include it while the `power`
+and `admin` presets do. Nothing rests on the difference: every role at
+`MANAGER`+ clears the run gate on role alone. The capability lists returned by these endpoints are always sorted alphabetically.
 
 All three endpoints require the caller to be `ADMIN` or `OWNER`.
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -482,32 +484,43 @@ func snapshotPins(cfg Config, entries []journal.Entry) (wrote bool, err error) {
 	}
 	defer func() { _ = lk.Unlock() }()
 
-	// Pre-read existing pins to skip IDs already captured. pins.md is
-	// an append-only human-curated reference — rewriting or deduping
-	// the entire file would surprise operators who annotated entries
-	// by hand.
+	// Pre-read the file once, inside the lock. The same bytes drive
+	// three things: the dedup scan below, the first-write header
+	// decision, and — since the write at the bottom is a whole-file
+	// replace rather than an O_APPEND — the prefix the new block is
+	// appended to. pins.md stays an append-only human-curated
+	// reference: `prior` goes back out verbatim, nothing is rewritten
+	// or deduped, so operators' hand annotations survive.
+	prior, readErr := root.ReadFile(name)
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		// "Not there yet" is the normal first-run case. Any other read
+		// failure means we do not know what we would be replacing, and
+		// a whole-file write would silently drop it — where the old
+		// O_APPEND could shrug and append blind. Refuse instead.
+		return false, fmt.Errorf("pins read: %w", readErr)
+	}
+	exists := readErr == nil
+
 	existing := map[string]bool{}
-	if data, err := root.ReadFile(name); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if i := strings.Index(line, "pin-id:"); i >= 0 {
-				// Strip the HTML-comment close marker that we wrote when
-				// the pin was appended (`<!-- pin-id:j_123 -->`). Without
-				// this, the recorded ID ends up as "j_123 -->" and every
-				// rerun re-appends the same pin because the lookup misses.
-				rest := line[i+len("pin-id:"):]
-				if j := strings.Index(rest, "-->"); j >= 0 {
-					rest = rest[:j]
-				}
-				id := strings.TrimSpace(rest)
-				if id != "" {
-					existing[id] = true
-				}
+	for _, line := range strings.Split(string(prior), "\n") {
+		if i := strings.Index(line, "pin-id:"); i >= 0 {
+			// Strip the HTML-comment close marker that we wrote when
+			// the pin was appended (`<!-- pin-id:j_123 -->`). Without
+			// this, the recorded ID ends up as "j_123 -->" and every
+			// rerun re-appends the same pin because the lookup misses.
+			rest := line[i+len("pin-id:"):]
+			if j := strings.Index(rest, "-->"); j >= 0 {
+				rest = rest[:j]
+			}
+			id := strings.TrimSpace(rest)
+			if id != "" {
+				existing[id] = true
 			}
 		}
 	}
 
 	var block strings.Builder
-	if _, err := root.Stat(name); err != nil {
+	if !exists {
 		block.WriteString("# Pinned entries\n\n")
 		block.WriteString("Entries explicitly pinned by operators (`priority=pin`). The consolidator\n")
 		block.WriteString("appends them here so they stay visible outside the rule stream.\n\n")
@@ -532,19 +545,27 @@ func snapshotPins(cfg Config, entries []journal.Entry) (wrote bool, err error) {
 	if info, err := root.Lstat(name); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return false, fmt.Errorf("pins open: refusing symlinked target %s", name)
 	}
-	f, err := root.OpenFile(name, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return false, fmt.Errorf("pins open: %w", err)
-	}
-	defer f.Close()
-	if _, err := f.WriteString(block.String()); err != nil {
+	// Whole-file replace through the durable helper — write a sibling
+	// tempfile, fsync it, atomically rename it over pins.md, fsync the
+	// parent dir — rather than O_CREATE followed by a separate write.
+	//
+	// The old pair left pins.md on disk with ZERO BYTES between the two
+	// syscalls (#1807). The flock above only serialises consolidator
+	// runs against each other; every other reader of this file — the
+	// audit watcher (internal/memory/audit_watcher.go maps pins.md to
+	// TierPins), an agent, a test polling for the file — takes no lock
+	// and could observe that empty file instead of the previous
+	// contents. A rename is atomic, so those readers now see either the
+	// whole old file or the whole new one.
+	//
+	// Note this resets the file mode to 0o644, as every rename-based
+	// replace in the repo does; an operator chmod on pins.md does not
+	// survive a consolidation tick.
+	content := make([]byte, 0, len(prior)+block.Len())
+	content = append(content, prior...)
+	content = append(content, block.String()...)
+	if err := memory.WriteFileDurableRoot(root, name, content, 0o644); err != nil {
 		return false, fmt.Errorf("pins write: %w", err)
-	}
-	// fsync before close, same rationale (and same convention) as
-	// appendRules below: an append that returns success but never
-	// reaches disk is a silently lost pin.
-	if err := f.Sync(); err != nil {
-		return false, fmt.Errorf("pins sync: %w", err)
 	}
 	return true, nil
 }
@@ -589,7 +610,27 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 	if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
 		return "", nil, fmt.Errorf("open %s: refusing symlinked target", path)
 	}
+	if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+		// Only "not there yet" may be read as "this is the first write
+		// of the day". Any other stat failure and we do not know
+		// whether there is content underneath — the whole-file replace
+		// below would drop it, and we would write the first-run header
+		// over the top. Same rule as snapshotPins.
+		return "", nil, fmt.Errorf("stat %s: %w", path, statErr)
+	}
 	exists := statErr == nil
+	// Read the prior content inside the lock. This is not extra I/O:
+	// the pre-#1807 code already read the whole file back after
+	// appending, to hand the caller the exact post-write bytes. That
+	// read simply moves ahead of the write, and now also supplies the
+	// prefix for the whole-file replace below.
+	var prior []byte
+	if exists {
+		prior, err = root.ReadFile(fname)
+		if err != nil {
+			return "", nil, fmt.Errorf("read %s: %w", path, err)
+		}
+	}
 	if !exists {
 		block.WriteString("# Learned rules — ")
 		block.WriteString(now.Format("2006-01-02"))
@@ -616,26 +657,24 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 	}
 	block.WriteByte('\n')
 
-	f, err := root.OpenFile(fname, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return "", nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-	if _, err := f.WriteString(block.String()); err != nil {
+	// Whole-file replace through the durable helper instead of
+	// O_CREATE + a separate write, for the same reason as snapshotPins
+	// (#1807): the two-syscall shape left learned-YYYY-MM-DD.md on disk
+	// with zero bytes in between, visible to every reader that does not
+	// take this flock — the audit watcher, the proposal-diff endpoint,
+	// an agent reading its own learned rules. The rename is atomic, so
+	// they see either the whole old file or the whole new one.
+	//
+	// `content` is also what the caller hands to
+	// recordCanonicalVersion. Building it here rather than re-reading
+	// after the write keeps the property the read-back was there for —
+	// the audit blob is exactly the state this run produced — and is
+	// now true by construction rather than by holding the lock.
+	content := make([]byte, 0, len(prior)+block.Len())
+	content = append(content, prior...)
+	content = append(content, block.String()...)
+	if err := memory.WriteFileDurableRoot(root, fname, content, 0o644); err != nil {
 		return "", nil, fmt.Errorf("write %s: %w", path, err)
-	}
-	// Read back the full file content WHILE STILL HOLDING THE LOCK so
-	// the bytes the caller hands to recordCanonicalVersion match the
-	// exact post-append state. Reading outside the lock would race
-	// with the next consolidator tick's append.
-	if err := f.Sync(); err != nil {
-		// fsync failure surfaces as a wrapped error rather than
-		// silent half-write; the lockfile + defer-unlock still run.
-		return "", nil, fmt.Errorf("sync %s: %w", path, err)
-	}
-	content, err := root.ReadFile(fname)
-	if err != nil {
-		return "", nil, fmt.Errorf("read back %s: %w", path, err)
 	}
 	return path, content, nil
 }

@@ -182,113 +182,12 @@ func resolveTargetWorkspaceIDs(ctx context.Context, tx *sql.Tx, bundleID, bundle
 // discoverScopedTablesTx is the tx-bound twin of DiscoverScopedTables.
 // Used inside RestoreDumpTx so the discovery sees the same schema
 // the impending INSERTs will see (matters for in-flight migrations).
+//
+// It is a thin alias rather than a copy on purpose: this is the call
+// that decides which rows a `--replace` restore DELETES, and while it
+// was a copy it silently missed every fix the exported walk received.
 func discoverScopedTablesTx(ctx context.Context, tx *sql.Tx) ([]ScopedTable, error) {
-	allTables, err := listAllTablesTx(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	outgoing := map[string][]ScopeEdge{}
-	for _, t := range allTables {
-		edges, err := tableFKEdgesTx(ctx, tx, t)
-		if err != nil {
-			return nil, err
-		}
-		outgoing[t] = edges
-	}
-	reverseFK := map[string][]ScopeEdge{}
-	for table, edges := range outgoing {
-		for _, e := range edges {
-			e.FromTable = table
-			reverseFK[e.ToTable] = append(reverseFK[e.ToTable], e)
-		}
-	}
-	visited := map[string][]ScopeEdge{}
-	queue := []string{"workspaces"}
-	visited["workspaces"] = nil
-	for len(queue) > 0 {
-		parent := queue[0]
-		queue = queue[1:]
-		parentPath := visited[parent]
-		for _, edge := range reverseFK[parent] {
-			if _, seen := visited[edge.FromTable]; seen {
-				continue
-			}
-			path := make([]ScopeEdge, 0, len(parentPath)+1)
-			path = append(path, edge)
-			path = append(path, parentPath...)
-			visited[edge.FromTable] = path
-			queue = append(queue, edge.FromTable)
-		}
-	}
-	out := make([]ScopedTable, 0, len(visited)-1)
-	for table, path := range visited {
-		if table == "workspaces" {
-			continue
-		}
-		out = append(out, ScopedTable{Name: table, JoinPath: path})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
-func listAllTablesTx(ctx context.Context, tx *sql.Tx) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT name FROM sqlite_master
-		WHERE type = 'table'
-		  AND name NOT LIKE 'sqlite_%'
-		  AND name NOT LIKE '%_fts'
-		  AND name NOT LIKE '%_fts_%'
-		ORDER BY name
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var t string
-		if err := rows.Scan(&t); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
-}
-
-func tableFKEdgesTx(ctx context.Context, tx *sql.Tx, table string) ([]ScopeEdge, error) {
-	if !sqlIdentifierRe.MatchString(table) {
-		return nil, fmt.Errorf("backup: invalid table identifier %q", table)
-	}
-	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_list(`+table+`)`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []ScopeEdge
-	for rows.Next() {
-		var (
-			id, seq            int
-			refTable, from, to string
-			onUpdate, onDelete sql.NullString
-			matchClause        sql.NullString
-		)
-		if err := rows.Scan(&id, &seq, &refTable, &from, &to, &onUpdate, &onDelete, &matchClause); err != nil {
-			return nil, err
-		}
-		if from == "" || refTable == "" {
-			continue
-		}
-		if to == "" {
-			to = "id"
-		}
-		out = append(out, ScopeEdge{
-			FromTable:  table,
-			FromColumn: from,
-			ToTable:    refTable,
-			ToColumn:   to,
-		})
-	}
-	return out, rows.Err()
+	return discoverScopedTables(ctx, tx)
 }
 
 // resolveDeletionOrder returns the input tables in a topological
@@ -337,7 +236,7 @@ func resolveDeletionOrder(ctx context.Context, tx *sql.Tx, in []ScopedTable) ([]
 	inDegree := make(map[string]int, len(in))
 	parents := make(map[string][]string, len(in))
 	for _, st := range in {
-		edges, err := tableFKEdgesTx(ctx, tx, st.Name)
+		edges, err := tableFKEdges(ctx, tx, st.Name)
 		if err != nil {
 			// Table missing on target / introspection failed —
 			// treat as zero in-degree; the DELETE itself will

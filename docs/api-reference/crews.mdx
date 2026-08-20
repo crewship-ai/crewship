@@ -46,6 +46,7 @@ workspace ID or slug.
 | DELETE | [`/api/v1/crews/{crewId}/files/delete`](#delete-a-crew-file) | Delete a file |
 | GET | [`/api/v1/crews/{crewId}/git-diff`](#crew-git-diff) | Read the crew's base-branch diff |
 | GET | [`/api/v1/crews/{crewId}/services`](#live-service-inventory) | List live sidecar services |
+| GET | [`/api/v1/crews/{crewId}/containers`](#live-container-inventory) | List the crew's live containers |
 | GET | [`/api/v1/crews/{crewId}/assignments`](#crew-assignments) | List task assignments |
 | GET | [`/api/v1/crews/{crewId}/peer-conversations`](#crew-peer-conversations) | List peer conversations |
 | GET | [`/api/v1/crews/{crewId}/standup`](#crew-standup) | Get the crew standup summary |
@@ -1084,6 +1085,73 @@ provider without live service-list capability returns `200` with an empty
 
 **Statuses:** `401` unauthenticated; `403` insufficient role/capability; `404`
 crew not found in the workspace; `500` crew lookup or service-list failure.
+
+---
+
+## Live Container Inventory
+
+### Live Container Inventory
+
+`GET /api/v1/crews/{crewId}/containers`
+
+Returns every container the crew has on the runtime right now — its agent
+runtime container **and** its sidecars — with live state and usage. Wider than
+[Live Service Inventory](#live-service-inventory), which answers about sidecars
+only and renames them to their manifest service names; here `name` is the
+container's real runtime name, the one `docker logs` takes.
+
+**Auth:** Authenticated workspace member with the `read` capability. The crew
+must belong to the selected workspace.
+
+**Request:** No body. `workspace_id` query parameter (or the `X-Workspace-ID`
+header) selects the workspace.
+
+**Response:** `200 OK`:
+
+```json
+{
+  "containers": [
+    {
+      "name": "crewship-team-backend-ckcrew0001",
+      "image": "crewship/agent:latest",
+      "kind": "crew",
+      "status": "running",
+      "cpu_percent": 3.5,
+      "memory_mb": 412,
+      "agent_count": 4
+    },
+    {
+      "name": "crewship-svc-backend-ckcrew0001-postgres",
+      "image": "postgres:16",
+      "kind": "sidecar",
+      "status": "stopped",
+      "cpu_percent": null,
+      "memory_mb": null,
+      "agent_count": null
+    }
+  ]
+}
+```
+
+`kind` is `crew` (the agent runtime) or `sidecar` (a declared service).
+`status` is the live state — `running`, `stopped`, `creating` or `error` — the
+same vocabulary [Container Status](#container-status) reports.
+
+**`null` means unmeasured, never zero.** A stopped container has no CPU or
+memory reading, a runtime without stats support (apple-container) has none for
+anything, and `agent_count` is set on the `crew` row only — no agent runs in a
+postgres container. Render an absent number as "—"; rendering it as `0` draws
+an idle container where nothing was measured.
+
+A provider without live container-list capability returns `200` with an empty
+`containers` array. The array is always present: a client that treats a missing
+`containers` field as "nothing is running" reproduces the defect this endpoint
+was added to fix (#1697) — treat it as a broken response instead.
+
+**Statuses:** `400` missing `crewId`; `401` unauthenticated; `403` insufficient
+role/capability; `404` crew not found in the workspace; `500` crew lookup or
+container-list failure. A failed per-container stats read is not an error: that
+row's `cpu_percent` and `memory_mb` come back `null`.
 
 ---
 

@@ -63,6 +63,7 @@ import (
 	dockernetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -108,9 +109,7 @@ func TestRuntimeConformance(t *testing.T) {
 
 	t.Logf("runtime under test: %s %s (%s)", p.detected.Runtime, p.detected.Version, p.detected.Socket)
 
-	if err := p.ensureImage(ctx, image); err != nil {
-		t.Fatalf("pull %s: %v", image, err)
-	}
+	imageProv := ensureConformanceImage(ctx, t, p, image)
 
 	crew := provider.CrewConfig{
 		ID:       "conformance-crew-id",
@@ -190,7 +189,101 @@ func TestRuntimeConformance(t *testing.T) {
 	facts := readContainerFacts(ctx, t, p, created.ID)
 	probes := evaluate(t, p, hostCfg, facts)
 	probes = append(probes, contractLabelProbe(ctx, t, p, created.ID))
+	probes = append(probes, imageProvenanceProbes(imageProv)...)
 	report(t, p, probes)
+}
+
+// imageProvenanceProbes turn what ensureImage established about the image under
+// test into matrix rows (#1827, #2003).
+//
+// This is the one part of the contract that is about WHICH image ran rather
+// than what the kernel did with it, and it belongs here for the same reason
+// everything else does: it fails open and silent. ensureImage resolves a
+// manifest digest, pulls pinned to it and hands the result to the caller, which
+// journals it as a ProvisionEvent into the tamper-evident chain. A runtime
+// whose ImageInspect does not report RepoDigests breaks none of that visibly —
+// crews start, agents run, and every audit row simply records an empty digest
+// forever. The supply-chain guarantee the product advertises evaporates without
+// a single error.
+//
+// Split in two on purpose, because the two halves have different owners:
+//
+//   - Whether a digest exists at all is a property of the RUNTIME, and is
+//     load-bearing. Note it does not depend on the registry being reachable:
+//     if the HEAD fails, ensureImage still reads the digest back off the
+//     daemon's own RepoDigests, so an empty result here means the daemon had
+//     nothing to give.
+//   - Whether it was VERIFIED against the registry on this start is a property
+//     of the NETWORK — a Docker Hub rate limit or a blocked egress on the
+//     runner turns it false while the runtime is behaving perfectly. Recorded,
+//     never blocking, exactly like the host-alias probes above.
+func imageProvenanceProbes(prov imageProvenance) []probe {
+	return []probe{
+		{
+			name: "a manifest digest is recorded for the image that ran",
+			want: "a sha256 digest", got: emptyAs(prov.Digest, "(none reported)"),
+			honoured: strings.HasPrefix(prov.Digest, "sha256:"), loadBearing: true,
+			why: "the digest is the whole supply-chain record; a runtime that reports none makes every provisioning journal row say nothing about which image executed the agent",
+		},
+		{
+			name: "the digest was confirmed against the registry", want: "true",
+			got:      strconv.FormatBool(prov.Verified),
+			honoured: prov.Verified,
+			why:      "false is usually the runner's network (rate-limited or air-gapped registry), not the runtime — it means the digest is a read-back of local disk that nothing confirmed this start",
+		},
+	}
+}
+
+// ensureConformanceImage pulls the image under test through the product's own
+// ensureImage and hands back the provenance it recorded.
+//
+// Every harness in this package needs this pull, and all four used to throw the
+// second return value away — which is how the package stopped compiling the day
+// ensureImage grew one (#1827, and #2003 thirteen days later). One call site
+// instead of four means the next signature change lands in one place.
+//
+// It also logs the provenance on every leg, which is worth more than it looks:
+// a conformance matrix that reports a runtime honoured 27 invariants without
+// saying which image it honoured them FOR is a result nobody can reproduce.
+//
+// The tag check is the second half, and it is deliberately an identity check
+// rather than an existence one. ensureImage pulls digest-pinned and then
+// re-creates the local tag itself (docker.go ~904), because `pull repo@sha256:…`
+// leaves the image unnamed while everything downstream here still addresses it
+// by tag — buildCrewContainerConfig, ContainerCreate, the drift check. That
+// re-tag is best-effort: it logs a Warn and ensureImage still returns the digest
+// it resolved.
+//
+// So "the tag resolves to something" is not enough, and asserting only that
+// would have made the digest probe above a liar in exactly one case — the case
+// this suite exists for. When a stale local copy is re-pulled and the re-tag
+// then fails, the tag still points at the OLD image: the inspect succeeds, the
+// container runs the old manifest, and the harness reports the new digest as
+// the one that ran. Nothing errors. Requiring the tag's own RepoDigests to
+// carry the reported digest closes it, and reuses the comparison ensureImage
+// makes on its own verified fast path rather than inventing a second one.
+//
+// Skipped when the digest is empty, which is legitimate and not a failure: a
+// locally-built crewship-cache:* derivative has no registry digest at all, and
+// its provenance is the provisioning.step chain naming what it was built FROM.
+func ensureConformanceImage(ctx context.Context, t *testing.T, p *Provider, image string) imageProvenance {
+	t.Helper()
+	prov, err := p.ensureImage(ctx, image)
+	if err != nil {
+		t.Fatalf("pull %s: %v", image, err)
+	}
+	t.Logf("image under test: %s digest=%s verified=%t",
+		image, emptyAs(prov.Digest, "(none reported)"), prov.Verified)
+	inspect, err := p.client.ImageInspect(ctx, image)
+	if err != nil {
+		t.Fatalf("%s reported a successful pull of %s but the tag does not resolve afterwards — a digest-pinned pull left the image unnamed, and every later lookup by tag will fail: %v",
+			p.detected.Runtime, image, err)
+	}
+	if prov.Digest != "" && !dockerutil.RepoDigestsContain(inspect.RepoDigests, prov.Digest) {
+		t.Fatalf("%s resolves %s to a different manifest than the one ensureImage says it pulled — everything below addresses the image by tag, so this run would report a digest it did not execute\n  reported: %s\n  tag carries: %v",
+			p.detected.Runtime, image, prov.Digest, inspect.RepoDigests)
+	}
+	return prov
 }
 
 // contractLabelProbe checks that the runtime-contract stamp survives the round

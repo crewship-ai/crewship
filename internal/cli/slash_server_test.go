@@ -129,25 +129,34 @@ func TestSlashCommandEndpoint(t *testing.T) {
 // submit the wrong field names to the backend.
 func TestSlashCommandPayload(t *testing.T) {
 	t.Run("routine", func(t *testing.T) {
-		got := slashCommandPayload("routine", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "routine"}, map[string]string{
 			"name": "Weekly", "cron": "0 7 * * MON", "timezone": "UTC",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["cron_expr"] != "0 7 * * MON" {
 			t.Errorf("cron→cron_expr mapping broken: %v", got)
 		}
 	})
 	t.Run("skill", func(t *testing.T) {
-		got := slashCommandPayload("skill", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "skill"}, map[string]string{
 			"slug": "x", "prompt": "Use when …",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["slug"] != "x" || got["prompt"] != "Use when …" {
 			t.Errorf("skill mapping broken: %v", got)
 		}
 	})
 	t.Run("unknown id passes raw values", func(t *testing.T) {
-		got := slashCommandPayload("future-command", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "future-command"}, map[string]string{
 			"x": "1", "y": "2",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["x"] != "1" || got["y"] != "2" {
 			t.Errorf("fall-through mapping dropped fields: %v", got)
 		}
