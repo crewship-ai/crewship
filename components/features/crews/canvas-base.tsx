@@ -239,34 +239,100 @@ export function CanvasShell({ loading, error, notLoadedLabel, children }: Canvas
 
 
 /**
+ * The two ids that pair a tab with the panel it controls. Both halves derive
+ * them from the same prefix, so a caller cannot wire one and forget the other.
+ */
+export function canvasTabIds(idPrefix: string, tab: string) {
+  return { tabId: `${idPrefix}-tab-${tab}`, panelId: `${idPrefix}-panel-${tab}` }
+}
+
+/**
  * Tab strip rendered under the canvas header. Generic over the tab id so the
  * caller's `tab` state stays strongly typed (`CrewTab` / `AgentTab`).
+ *
+ * The buttons carried `aria-selected` on an implicit `button` role, which that
+ * attribute is not allowed on (axe: aria-allowed-attr) — a screen reader was
+ * told nothing about selection and the strip did not read as a tab set. The
+ * roles below are the actual fix; `idPrefix` is required rather than optional
+ * so the tab→panel pairing cannot be skipped the way #1978 describes.
  */
 export interface CanvasTabsProps<TTab extends string> {
   tabs: ReadonlyArray<{ id: TTab; label: string }>
   active: TTab
   onChange: (tab: TTab) => void
+  /** Namespaces the tab/panel ids. Must match the sibling `CanvasTabPanel`. */
+  idPrefix: string
+  /** Names the tab set — two strips on one screen otherwise read alike. */
+  label: string
 }
 
-export function CanvasTabs<TTab extends string>({ tabs, active, onChange }: CanvasTabsProps<TTab>) {
+export function CanvasTabs<TTab extends string>({
+  tabs, active, onChange, idPrefix, label,
+}: CanvasTabsProps<TTab>) {
   return (
-    <div className="flex items-center gap-5 border-b border-white/8 -mx-6 md:-mx-8 lg:-mx-12 px-6 md:px-8 lg:px-12 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-      {tabs.map((t) => (
-        <button
-          key={t.id}
-          type="button"
-          onClick={() => onChange(t.id)}
-          aria-selected={active === t.id}
-          className={cn(
-            "text-sm py-2 px-1 border-b-2 transition-colors shrink-0",
-            active === t.id
-              ? "border-primary text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground/80",
-          )}
-        >
-          {t.label}
-        </button>
-      ))}
+    <div
+      role="tablist"
+      aria-label={label}
+      className="flex items-center gap-5 border-b border-white/8 -mx-6 md:-mx-8 lg:-mx-12 px-6 md:px-8 lg:px-12 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+    >
+      {tabs.map((t) => {
+        const selected = active === t.id
+        const { tabId, panelId } = canvasTabIds(idPrefix, t.id)
+        return (
+          <button
+            key={t.id}
+            id={tabId}
+            type="button"
+            role="tab"
+            onClick={() => onChange(t.id)}
+            aria-selected={selected}
+            // Only the selected panel is mounted — the canvases render their
+            // tabs as `{tab === "x" && <XTab/>}`, and the APG allows omitting
+            // aria-controls while the panel is unrendered. What it would
+            // otherwise be is a reference the ARIA spec says must resolve
+            // within the document and that a reader following it lands
+            // nowhere on. It is NOT an axe failure: checked against axe-core
+            // 4.12.1, a dangling aria-controls PASSES aria-valid-attr-value —
+            // the rule exempts it because the target may be rendered later.
+            // (A dangling aria-labelledby is only "incomplete".) So no gate
+            // would ever have caught the broken version; the reason to omit
+            // it is the spec and the reader, not the scanner.
+            aria-controls={selected ? panelId : undefined}
+            className={cn(
+              "text-sm py-2 px-1 border-b-2 transition-colors shrink-0",
+              selected
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground/80",
+            )}
+          >
+            {t.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * The panel half of the pairing. Wraps whatever the active tab renders, so the
+ * tab's `aria-controls` resolves and the panel names itself from the tab —
+ * without that, a screen reader announces "tab" and "tab panel" as unrelated
+ * regions and switching tabs does not move the reading position (#1978).
+ */
+export interface CanvasTabPanelProps {
+  /** Must match the sibling `CanvasTabs`. */
+  idPrefix: string
+  /** The currently active tab id. */
+  active: string
+  className?: string
+  children: React.ReactNode
+}
+
+export function CanvasTabPanel({ idPrefix, active, className, children }: CanvasTabPanelProps) {
+  const { tabId, panelId } = canvasTabIds(idPrefix, active)
+  return (
+    <div id={panelId} role="tabpanel" aria-labelledby={tabId} className={className}>
+      {children}
     </div>
   )
 }

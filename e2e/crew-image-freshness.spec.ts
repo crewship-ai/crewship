@@ -31,9 +31,12 @@ test.describe("Crew image freshness card", () => {
     await crewRow.click()
     await expect(page).toHaveURL(/[?&]crew=/, { timeout: QUICK })
 
-    // CanvasTabs buttons carry aria-selected but no role="tab", so select by
-    // accessible name rather than by role.
-    await page.getByRole("button", { name: /^Settings$/i }).first().click()
+    // CanvasTabs is a real tablist now, so select by role — narrower than the
+    // old button-by-name match, which would have taken any button reading
+    // "Settings" anywhere on the screen. `.first()` stays: other surfaces on
+    // this page own tab strips too, and a strict-mode failure here would read
+    // as a freshness-card regression.
+    await page.getByRole("tab", { name: /^Settings$/i }).first().click()
 
     // The card lives inside the "Container image & features" collapsible.
     await page.getByText(/Container image & features/i).first().click()

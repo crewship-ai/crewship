@@ -147,7 +147,9 @@ const TONE_FILL: Record<DetailTone, string> = {
   destructive: "bg-destructive/20 text-destructive",
   warn: "bg-warn/20 text-warn",
   blue: "bg-primary/20 text-primary",
-  purple: "bg-purple/20 text-purple",
+  // text-purple-hover, not text-purple: the fill token measures 4.48:1 on this
+  // tint, below the 4.5:1 floor. Same swap #1921 made on the other tinted rows.
+  purple: "bg-purple/20 text-purple-hover",
 }
 
 const TONE_ICON: Record<DetailTone, string> = {
