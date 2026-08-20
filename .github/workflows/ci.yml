@@ -39,9 +39,59 @@ on:
       - '.factory/**'
       - '.cloud/**'
 
+# ── CONCURRENCY: PR runs supersede, `main` runs never do ──
+#
+# On a PR branch `github.ref` changes per branch, so the group is per-branch
+# and `cancel-in-progress: true` does what it is there for: push twice, the
+# first run dies, we stop paying for superseded work.
+#
+# On `main` `github.ref` is the CONSTANT `refs/heads/main`, so before #1998
+# every merge shared one group and each merge killed the previous merge's
+# run. 14 of 20 runs on `main` ended `cancelled` — the gate never reached a
+# verdict, and `gh pr checks` renders `cancelled` as a plain red X.
+#
+# Note that flipping `cancel-in-progress` alone would NOT have fixed it. With
+# a shared group and no cancellation, GitHub queues the newcomer and cancels
+# the previously PENDING run instead ("any previously pending job or workflow
+# in the concurrency group will be canceled") — a burst of 10 merges would
+# still leave 8 cancelled, just cancelled earlier. So `main` also gets its own
+# group PER COMMIT, keyed on the SHA: no contention, nothing to supersede,
+# every commit runs to a verdict. `cancel-in-progress: false` on `main` is
+# then belt-and-braces for the cases that can still put two runs in one group.
+# A manual RE-RUN is not one of them: GitHub re-runs the existing run in place
+# rather than creating a second one, so a re-run cannot contend with its own
+# original. What can is a *new* run created at a SHA that already has one:
+#
+#   * `workflow_dispatch` on `main` — this file has one, and so does
+#     security.yml;
+#   * `schedule` firing while `main`'s head has not moved (codeql.yml's weekly
+#     cron, security.yml's daily one).
+#
+# Either of those would otherwise kill the merge run that is still the gate.
+#
+# ⚠ TRAP FOR WHOEVER ADDS THE NEXT TRIGGER: on `pull_request_target`,
+# `github.ref` is `refs/heads/main` — the BASE branch, not the PR's merge ref.
+# Both expressions below read `github.ref` alone, so such an event would be
+# treated as `main`: keyed on `github.sha` and with cancellation OFF, meaning
+# pushing twice to a PR would stop superseding and we would pay for every
+# superseded run. None of the five workflows changed for #1998 uses
+# `pull_request_target` today (only `labeler.yml`, which has no `concurrency:`
+# block at all), so nothing is broken now — but if one ever gains it, key on
+# `github.event_name == 'push' && github.ref == 'refs/heads/main'` rather than
+# on `github.ref`.
+#
+# COST, accepted deliberately: with cancellation off, the burst above (10
+# pushes in 197 s on 2026-08-20) no longer collapses to 1 run — all 10 reach a
+# verdict instead of 9 being thrown away. They do not all execute at once: the
+# org is on the Team plan, whose 60-concurrent-job cap is well under 10 × ~16
+# jobs, so the surplus queues and drains rather than running in parallel. The
+# bill still rises on merge-heavy days — we are paying for runs we used to
+# cancel — but the wall-clock cost lands as queueing, not as a 10× burst. A
+# merge queue is the alternative if that ever stops being worth it: it
+# serialises `main` without throwing away verdicts.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Default least-privilege. Individual jobs widen only when required.
 permissions:
@@ -57,9 +107,32 @@ env:
 # Every job in this file has a `timeout-minutes`. A job that hits it is
 # reported by GitHub as `cancelled`, NOT `failure` — indistinguishable from a
 # human pressing stop, from a concurrency-key supersession, and (in
-# `gh pr checks`) from a real red. #1998 measured what that costs: 8 of 20
-# `ci.yml` runs on `main` were `cancelled`, and every merge decision taken
-# against them carried less evidence than it appeared to.
+# `gh pr checks`) from a real red. #1998 measured what that costs: 14 of the
+# last 20 `ci.yml` runs on `main` were `cancelled`, and every merge decision
+# taken against them carried less evidence than it appeared to.
+#
+# ── CORRECTION, 2026-08-20 (later the same day) ──
+#
+# The paragraph above, and the audit below, were written believing the reaps
+# WERE the cancellations (and on a smaller sample that put the count at 8 of
+# 20). Re-measured, the reaps are the minority cause and the count is the 14
+# of 20 quoted above: most of those died seconds after they started —
+# 32356432719 was created at 09:56:28 and killed at
+# 09:56:45, exactly when the next push created 32356452709; three others
+# (32356321890, 32356397221, 32364012813) never got a job assigned at all.
+# That is not a timeout, that is the concurrency group: `github.ref` is
+# constant on `main`, so every merge cancelled the previous merge's run. Run
+# 32364033660 is the clearest case — 14 of its 16 jobs had already SUCCEEDED
+# and it was still stamped `cancelled`. Fixed in the `concurrency:` block
+# above; commit 042b4bef, which is the fix this audit describes, was itself
+# never gated because of it.
+#
+# The step-bound work below is still correct and still worth keeping — a
+# reaped job is genuinely unreadable, and two of them were genuinely reaped.
+# It was just never the main reason `main` was red. Both causes produce the
+# identical `cancelled` verdict, which is precisely why one hid behind the
+# other; when triaging the next one, check the run's timestamps and job count
+# BEFORE assuming a budget was exceeded.
 #
 # So the rule, already written out at length above the API contract gate in
 # `harness-pr` and above the `go` job's test step:

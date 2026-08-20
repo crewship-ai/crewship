@@ -23,9 +23,16 @@ on:
 permissions:
   contents: read
 
+# PR runs supersede each other; `main` runs never do. `github.ref` is the
+# constant `refs/heads/main` on a merge, so one shared group meant each merge
+# cancelled the previous merge's run (#1998) — and this guard exists to catch
+# a marker that reached `main`, which is exactly the run that was being
+# thrown away. Keying `main` on the SHA gives every commit its own group;
+# merely turning cancellation off would queue the newcomer and cancel the
+# previously PENDING run instead. See the long-form note in ci.yml.
 concurrency:
-  group: merge-marker-guard-${{ github.ref }}
-  cancel-in-progress: true
+  group: merge-marker-guard-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   scan:

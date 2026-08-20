@@ -38,9 +38,16 @@ on:
     # 06:00 UTC = low-traffic window for both EU and US contributors.
     - cron: '0 6 * * 0'
 
+# PR runs supersede each other; `main` runs never do. `github.ref` is the
+# constant `refs/heads/main` on a merge, so one shared group meant each merge
+# cancelled the previous merge's analysis (#1998) — and a cancelled CodeQL run
+# uploads no SARIF, so the Security tab silently kept stale results. Keying
+# `main` on the SHA gives every commit its own group; merely turning
+# cancellation off would queue the newcomer and cancel the previously PENDING
+# run instead. See the long-form note in ci.yml.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
