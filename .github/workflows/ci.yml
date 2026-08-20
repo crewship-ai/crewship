@@ -924,6 +924,30 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      # #2003 — COMPILE THE `conformance` BUILD TAG.
+      #
+      # Six files sit behind `//go:build conformance`, and until this step no
+      # PR job compiled any of them. A build-tagged file that nothing builds
+      # rots by default, not by accident: #1827 gave `ensureImage` a second
+      # return value, four conformance-tagged call sites were never updated,
+      # and the nightly `Runtime Conformance` workflow then failed to BUILD for
+      # 13 days — 23 consecutive red runs, with no green run in its whole
+      # 25-run history. `go vet -tags conformance ./...` reproduces that break
+      # in seconds and would have failed #1827's own pull request.
+      #
+      # VET, not test: running the suite needs a container daemon (and, for the
+      # apple leg, macOS 26). Building it needs neither. This gate is about the
+      # code continuing to compile, which is the part that broke.
+      - name: Go vet (conformance build tag)
+        run: go vet -tags conformance ./...
+
+      # internal/provider/apple/runtime_conformance_darwin_test.go is behind
+      # BOTH the conformance tag and GOOS=darwin, so the step above — which
+      # runs on linux — does not see it, and it would keep rotting exactly as
+      # the docker ones did. Same idea as the windows cross-compiles below.
+      - name: Go vet (conformance build tag, darwin)
+        run: GOOS=darwin go vet -tags conformance ./internal/provider/apple/
+
       - name: Go build
         run: go build ./cmd/crewship
 
