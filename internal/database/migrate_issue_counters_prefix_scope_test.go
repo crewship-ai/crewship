@@ -3,10 +3,14 @@ package database
 import (
 	"context"
 	"database/sql"
+	"io"
 	"log/slog"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
 // migrate_issue_counters_prefix_scope_test.go — #1797.
@@ -313,5 +317,77 @@ func TestIssueCountersPrefixScope_PrefixChangeDoesNotRestartNumbering(t *testing
 			"a backfill that just chops the last token off an identifier invents a prefix from it; "+
 			"the reconstruction test in the migration is what keeps identifiers that are not "+
 			"<prefix>-<number> out", got)
+	}
+}
+
+// TestIssueCountersPrefixScope_SurvivesOrphanedWorkspaceRows is the boot-safety
+// half. The re-key copies into a table whose workspace_id is NOT NULL and
+// carries its own FK, on a connection with foreign_keys ON — so a crew or a
+// mission whose workspace is already gone fails the copy with
+// SQLITE_CONSTRAINT_FOREIGNKEY (787) and takes startup down, naming neither the
+// table nor the row. Nobody can log in to repair it.
+//
+// Such rows should not exist — ON DELETE CASCADE has been declared on both
+// parents for as long as the columns have — but "should not exist" is not
+// "cannot", and a row that outlived its workspace under `PRAGMA
+// foreign_keys=OFF` is the same class
+// 20260820074400_issue_counters_crew_not_null guards with an explicit EXISTS.
+// This migration now guards it the same way, which is what its header claims.
+func TestIssueCountersPrefixScope_SurvivesOrphanedWorkspaceRows(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "orphan.db")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx := context.Background()
+
+	// Phase 1: the pre-rekey schema on a handle with foreign_keys OFF, which is
+	// the only way to manufacture the orphan at all.
+	loose, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(OFF)")
+	if err != nil {
+		t.Fatalf("open loose handle: %v", err)
+	}
+	version := prefixScopeVersion(t)
+	if err := applyMigrationsUpTo(ctx, loose, version-1, logger); err != nil {
+		t.Fatalf("migrate to the version before the re-key: %v", err)
+	}
+	prefixScopeExec(t, loose, ctx, `INSERT INTO workspaces (id, name, slug) VALUES ('ws_live','Live','ws-live')`)
+	prefixScopeExec(t, loose, ctx, `INSERT INTO workspaces (id, name, slug) VALUES ('ws_gone','Gone','ws-gone')`)
+	seedPrefixScopeCrew(t, loose, ctx, "ws_live", "crew_live", "engineering", "")
+	seedPrefixScopeCrew(t, loose, ctx, "ws_gone", "crew_orphan", "design", "")
+	prefixScopeExec(t, loose, ctx, `INSERT INTO issue_counters (crew_id, next_number) VALUES ('crew_live', 12)`)
+	prefixScopeExec(t, loose, ctx, `INSERT INTO issue_counters (crew_id, next_number) VALUES ('crew_orphan', 5)`)
+	// The mission arm of the UNION ALL needs an orphan too: it reads
+	// missions.workspace_id directly, not through crews.
+	seedPrefixScopeMission(t, loose, ctx, "ws_live", "crew_live", "ENG-12", 12)
+	seedPrefixScopeMission(t, loose, ctx, "ws_gone", "crew_orphan", "DES-5", 5)
+	// No cascade fires: this handle has foreign_keys OFF.
+	prefixScopeExec(t, loose, ctx, `DELETE FROM workspaces WHERE id = 'ws_gone'`)
+	if err := loose.Close(); err != nil {
+		t.Fatalf("close loose handle: %v", err)
+	}
+
+	// Phase 2: boot the way the server boots — foreign_keys ON.
+	db, err := Open("file:" + path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := Migrate(ctx, db.DB, logger); err != nil {
+		t.Fatalf("the re-key refused to boot over rows whose workspace is gone: %v\n"+
+			"they must be dropped by the copy, not handed to the FK checker — the failure "+
+			"is a boot failure with no way in to repair it", err)
+	}
+
+	if n, ok := prefixScopeCounter(t, db.DB, ctx, "ws_live", "ENG"); !ok || n != 12 {
+		t.Errorf("the live counter = %d (present=%v), want 12 — the guard dropped more than "+
+			"the orphans", n, ok)
+	}
+	var orphans int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM issue_counters WHERE workspace_id = 'ws_gone'`).Scan(&orphans); err != nil {
+		t.Fatalf("count orphan counters: %v", err)
+	}
+	if orphans != 0 {
+		t.Errorf("%d counter row(s) for a workspace that no longer exists survived the re-key", orphans)
 	}
 }

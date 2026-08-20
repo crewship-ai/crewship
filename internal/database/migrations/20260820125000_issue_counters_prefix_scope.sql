@@ -59,6 +59,44 @@
 --     one. Seeding that new row from 1 would walk straight back into the
 --     collision, so both the backfill here and the runtime allocator seed from
 --     the highest number already minted under that prefix.
+--
+-- # Rows that do not make the trip
+--
+-- 20260820074400_issue_counters_crew_not_null lists two unreachable classes it
+-- drops; the JOIN to crews below drops the same two (a NULL crew_id and a
+-- crew_id naming a crew that is gone). There is a THIRD here, because the new
+-- table's workspace_id is NOT NULL and carries its own FK: a crew or a mission
+-- whose WORKSPACE no longer exists. Like the others it survives only where the
+-- row outlived its parent under `PRAGMA foreign_keys=OFF`, and like the others
+-- it must be dropped rather than handed to the FK checker — the copy runs with
+-- foreign_keys ON, so it would fail with SQLITE_CONSTRAINT_FOREIGNKEY (787) and
+-- take the whole boot down, naming neither the table nor the row. That is the
+-- explicit EXISTS in the outer WHERE, which is the guard the precedent uses and
+-- the reason this migration can claim to follow it.
+--
+-- # Two derivations of the high-water mark, and why they agree
+--
+-- This backfill reads the high-water mark out of missions.number; the runtime
+-- allocator (nextIssueIdentifierTx, internal/api/issue_create_core.go) reads it
+-- out of the identifier TEXT — MAX(CAST(SUBSTR(identifier, LENGTH(prefix)+2) AS
+-- INTEGER)) — because at runtime the question is literally "does <prefix>-<n>
+-- already exist", which is what idx_mission_workspace_identifier checks. The
+-- two can only disagree for a row whose identifier tail is not its number.
+--
+-- No such row is produced. missions.identifier has exactly two writers —
+-- issue_create_core.go's insertIssueTx and issue_handler_create.go's REST
+-- create — and both take `identifier, number` from one nextIssueIdentifierTx
+-- call in the same INSERT, where the identifier IS prefix + "-" + number.
+-- Nothing else writes the column, and no path updates it afterwards. The
+-- reconstruction test in the WHERE clause below is what makes that assumption
+-- checkable rather than assumed: an identifier that does not rebuild from its
+-- own number is discarded here instead of contributing a wrong prefix.
+--
+-- The backfill uses number rather than the text because it is a one-shot scan
+-- over every identified mission in the database, and comparing an indexed
+-- integer beats parsing a substring per row. The allocator cannot make that
+-- trade: it is asking about ONE prefix, and a crew that changed prefix has
+-- identifiers under a prefix its number sequence says nothing about.
 
 CREATE TABLE issue_counters_v3 (
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -76,7 +114,9 @@ FROM (
     -- Carry the per-crew counters over under each crew's effective prefix,
     -- derived exactly as the allocator derives it: issue_prefix, else the first
     -- three characters of the slug upper-cased. Counters whose crew is gone are
-    -- dropped — the same two unreachable classes the previous rebuild dropped.
+    -- dropped by the JOIN — the same two unreachable classes the previous
+    -- rebuild dropped. The third class, a row that reaches a workspace which is
+    -- itself gone, is dropped by the EXISTS below.
     SELECT c.workspace_id AS ws,
            COALESCE(NULLIF(c.issue_prefix, ''), UPPER(SUBSTR(c.slug, 1, 3))) AS prefix,
            ic.next_number AS n
@@ -102,6 +142,12 @@ FROM (
       AND m.identifier = SUBSTR(m.identifier, 1, LENGTH(m.identifier) - LENGTH('-' || m.number))
                          || '-' || m.number
 )
+-- workspace_id is NOT NULL and carries a real FK on the target, and this runs
+-- on a connection with foreign_keys ON. A crew or a mission whose workspace is
+-- already gone would therefore fail the copy with SQLITE_CONSTRAINT_FOREIGNKEY
+-- (787) and abort the boot, naming neither the table nor the row. One EXISTS
+-- covers both arms of the UNION ALL — see the note above the CREATE.
+WHERE EXISTS (SELECT 1 FROM workspaces w WHERE w.id = ws)
 GROUP BY ws, prefix;
 
 DROP TABLE issue_counters;
