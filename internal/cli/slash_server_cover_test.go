@@ -71,11 +71,11 @@ func newTestREPL() *REPL {
 // TestLoadServerSlashCommands_NilGuards: nil client or nil repl
 // returns 0 without panicking. Defence at the boundary.
 func TestLoadServerSlashCommands_NilGuards(t *testing.T) {
-	if got := LoadServerSlashCommands(context.Background(), nil, &fakeSlashClient{wsID: "ws"}); got != 0 {
-		t.Errorf("nil repl: got %d, want 0", got)
+	if got := LoadServerSlashCommands(context.Background(), nil, &fakeSlashClient{wsID: "ws"}); len(got) != 0 {
+		t.Errorf("nil repl: got %v, want 0", got)
 	}
-	if got := LoadServerSlashCommands(context.Background(), newTestREPL(), nil); got != 0 {
-		t.Errorf("nil client: got %d, want 0", got)
+	if got := LoadServerSlashCommands(context.Background(), newTestREPL(), nil); len(got) != 0 {
+		t.Errorf("nil client: got %v, want 0", got)
 	}
 }
 
@@ -84,8 +84,8 @@ func TestLoadServerSlashCommands_NilGuards(t *testing.T) {
 func TestLoadServerSlashCommands_EmptyWorkspace(t *testing.T) {
 	c := &fakeSlashClient{wsID: ""}
 	got := LoadServerSlashCommands(context.Background(), newTestREPL(), c)
-	if got != 0 {
-		t.Errorf("got %d, want 0", got)
+	if len(got) != 0 {
+		t.Errorf("got %v, want 0", got)
 	}
 	if c.getCalls != 0 {
 		t.Errorf("getCalls = %d, want 0 (early-return before HTTP)", c.getCalls)
@@ -103,8 +103,8 @@ func TestLoadServerSlashCommands_GetError(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	repl.Err = errBuf
 	got := LoadServerSlashCommands(context.Background(), repl, c)
-	if got != 0 {
-		t.Errorf("got %d, want 0", got)
+	if len(got) != 0 {
+		t.Errorf("got %v, want 0", got)
 	}
 	if !strings.Contains(errBuf.String(), "failed to fetch") {
 		t.Errorf("expected 'failed to fetch' in stderr, got %q", errBuf.String())
@@ -122,8 +122,8 @@ func TestLoadServerSlashCommands_Non200(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	repl.Err = errBuf
 	got := LoadServerSlashCommands(context.Background(), repl, c)
-	if got != 0 {
-		t.Errorf("got %d, want 0", got)
+	if len(got) != 0 {
+		t.Errorf("got %v, want 0", got)
 	}
 	if !strings.Contains(errBuf.String(), "500") {
 		t.Errorf("expected 500 in stderr, got %q", errBuf.String())
@@ -141,8 +141,8 @@ func TestLoadServerSlashCommands_MalformedJSON(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	repl.Err = errBuf
 	got := LoadServerSlashCommands(context.Background(), repl, c)
-	if got != 0 {
-		t.Errorf("got %d, want 0", got)
+	if len(got) != 0 {
+		t.Errorf("got %v, want 0", got)
 	}
 	if !strings.Contains(errBuf.String(), "decode failed") {
 		t.Errorf("expected 'decode failed' in stderr, got %q", errBuf.String())
@@ -163,8 +163,8 @@ func TestLoadServerSlashCommands_RegistersAll(t *testing.T) {
 	}
 	repl := newTestREPL()
 	got := LoadServerSlashCommands(context.Background(), repl, c)
-	if got != 3 {
-		t.Errorf("got %d, want 3", got)
+	if len(got) != 3 {
+		t.Errorf("got %v, want 3", got)
 	}
 	for _, id := range []string{"routine", "issue", "remember"} {
 		if _, ok := repl.Slash[id]; !ok {
@@ -335,8 +335,8 @@ func TestLoadServerSlashCommands_RegistersHandlerWithReplOut(t *testing.T) {
 	out := &bytes.Buffer{}
 	repl.Out = out
 	got := LoadServerSlashCommands(context.Background(), repl, c)
-	if got != 1 {
-		t.Fatalf("registered %d, want 1", got)
+	if len(got) != 1 {
+		t.Fatalf("registered %v, want 1", got)
 	}
 	handler, ok := repl.Slash["routine"]
 	if !ok {
@@ -355,17 +355,23 @@ func TestLoadServerSlashCommands_RegistersHandlerWithReplOut(t *testing.T) {
 // hit (credential, issue, remember).
 func TestSlashCommandPayload_AllIDs(t *testing.T) {
 	t.Run("credential", func(t *testing.T) {
-		got := slashCommandPayload("credential", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "credential"}, map[string]string{
 			"name": "GH_PAT", "type": "SECRET", "value": "ghp_x",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["name"] != "GH_PAT" || got["type"] != "SECRET" || got["value"] != "ghp_x" {
 			t.Errorf("credential reshape: %v", got)
 		}
 	})
 	t.Run("issue", func(t *testing.T) {
-		got := slashCommandPayload("issue", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "issue"}, map[string]string{
 			"title": "Bug", "description": "It broke", "priority": "high",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["title"] != "Bug" || got["priority"] != "high" {
 			t.Errorf("issue reshape: %v", got)
 		}
@@ -382,33 +388,45 @@ func TestSlashCommandPayload_AllIDs(t *testing.T) {
 	// REPL and the UI. slashCommandPayload now applies the same
 	// fallbacks inline.
 	t.Run("routine timezone defaults to UTC", func(t *testing.T) {
-		got := slashCommandPayload("routine", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "routine"}, map[string]string{
 			"name": "Daily", "cron": "0 7 * * *", "timezone": "",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["timezone"] != "UTC" {
 			t.Errorf("timezone default lost: %v", got)
 		}
 	})
 	t.Run("routine timezone explicit override wins", func(t *testing.T) {
-		got := slashCommandPayload("routine", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "routine"}, map[string]string{
 			"name": "Daily", "cron": "0 7 * * *", "timezone": "Europe/Prague",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["timezone"] != "Europe/Prague" {
 			t.Errorf("explicit timezone overridden: %v", got)
 		}
 	})
 	t.Run("credential type defaults to SECRET", func(t *testing.T) {
-		got := slashCommandPayload("credential", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "credential"}, map[string]string{
 			"name": "Test", "value": "v",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["type"] != "SECRET" {
 			t.Errorf("type default lost: %v", got)
 		}
 	})
 	t.Run("issue priority defaults to none", func(t *testing.T) {
-		got := slashCommandPayload("issue", map[string]string{
+		got, err := slashCommandPayload(ServerSlashCommand{ID: "issue"}, map[string]string{
 			"title": "T",
 		})
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
 		if got["priority"] != "none" {
 			t.Errorf("priority default lost: %v", got)
 		}

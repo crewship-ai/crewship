@@ -587,6 +587,49 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **"Waiting on you" counted things nobody was waiting on (#1876).**
+  `scopeOf` — the classifier the Activity rail, feed and status segments all
+  read — put every human-source journal row in the `waiting` bucket. But the
+  journal is an EVENT LOG: an `approval.requested` row stays in it after the
+  approval was granted, and `peer.escalation` is emitted for both the ask
+  (`escalation_handler.go:255`) and its resolution (`:607`,
+  `escalation_autoresolve.go:172`), separated only by `payload.state`. So on
+  any instance that resolves what it asks — which is every working instance —
+  the segment could read `Waiting 4` beside an Overview card reading `0`. Two
+  answers to one question on one screen, and the wrong one was the reassuring
+  direction to be wrong in.
+
+  `scopeOf` now takes the same view the card takes: a human-source row is
+  `waiting` only while its ask is still OPEN. A resolved escalation says so on
+  its own face; an approval or keeper request is closed by a *different* entry
+  type, so the join runs over the window (`answeredAsks` → `scopeCounts`,
+  `entriesInScope`, `scopeByEntry`). The card's `openAsks` is now that same
+  bucket rather than a second opinion about it, and a test pins
+  `openAsks(feed).length === scopeCounts(feed).waiting`. An ask whose answer is
+  outside the window, or that carries no id to join on, stays in `waiting` —
+  over-reporting one row beats hiding something a person is blocking on.
+- **The crew bottom panel's Docker tab could never show a container (#1697).**
+  It fetched `GET /api/v1/system/runtime` — the HOST runtime inventory — and
+  read `data.containers` off it, a field that endpoint has never sent. The
+  guard was `Array.isArray(data?.containers) ? data.containers : []`, so the
+  absent field became an empty list and the tab rendered "No containers
+  running." on every crew, forever, with every container up: the line that
+  would have surfaced the mismatch was the same line that swallowed it.
+
+  Nothing served the data, so there is now something that does.
+  **`GET /api/v1/crews/{crewId}/containers`** returns the crew's live
+  containers — its agent runtime *and* its sidecars — with state, CPU, memory
+  and the runtime row's agent count, read straight from the container runtime;
+  `crewship crew containers <crew>` is its CLI counterpart. `/system/runtime`
+  keeps answering the host question it was built for.
+
+  The client no longer has a fallback to swallow anything: a response without a
+  `containers` array is reported as a broken contract, not as an empty crew, so
+  the next rename fails loudly instead of quietly. Absent numbers stay absent
+  end to end — a stopped container and a runtime without stats support both
+  report `null`, rendered "—", never a `0%` that would draw an idle container
+  where nothing was measured.
+
 - **The status chips on `/issues` could only ever select one status.** The
   chip row was handed the list `useFilteredIssues` had *already* narrowed by
   status, so picking "Backlog" dropped every other chip's count to 0 — and a

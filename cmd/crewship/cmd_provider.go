@@ -240,15 +240,31 @@ func resolveProviderEndpoint(spec llm.ProviderSpec, lookupEnv lookupEnvFunc) str
 // identical. An operator-set endpoint may be https://user:token@host, and this
 // command's output is the kind that gets pasted into a bug report.
 //
-// Unparseable input is returned unchanged: it is an operator's own string, it
-// cannot have been a URL with credentials in it if url.Parse choked on it, and
-// silently blanking it would hide the typo that is the actual problem.
+// Unparseable input containing "@" is redacted by hand rather than returned
+// unchanged. The earlier reasoning here — that a string url.Parse choked on
+// cannot have carried credentials — is false: Parse fails for reasons that have
+// nothing to do with userinfo (a raw space, as in "http://a b@c", which this
+// package's own test pins), and the credential in such a string is just as real.
+// Returning it verbatim printed the secret into human output, JSON, and any bug
+// report either got pasted into.
+//
+// So the fallback keeps everything from the last "@" onward — the part that
+// identifies the endpoint and is the actual diagnosis — and replaces whatever
+// preceded it, which is where a credential can hide.
 func redactURL(raw string) string {
 	if raw == "" || !strings.Contains(raw, "@") {
 		return raw
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
+	if err != nil {
+		at := strings.LastIndex(raw, "@")
+		scheme := ""
+		if i := strings.Index(raw, "://"); i >= 0 && i < at {
+			scheme = raw[:i+3]
+		}
+		return scheme + "redacted@" + raw[at+1:]
+	}
+	if u.User == nil {
 		return raw
 	}
 	u.User = url.User("redacted")

@@ -226,8 +226,12 @@ func TestLookupPrice_TieredCatalogModelUsesTheCeiling(t *testing.T) {
 	if !ok {
 		t.Skip(provider + "/" + model + " is not in this snapshot")
 	}
-	if len(m.Cost.Tiers) != 2 {
-		t.Skipf("%s/%s no longer has the 2 tiers this test was written against (%d)", provider, model, len(m.Cost.Tiers))
+	// Lookup succeeding says the model is IN the snapshot, not that it carries
+	// a cost block — 23 of them do not. Dereferencing m.Cost on that assumption
+	// panics the moment a refresh drops this model's pricing, which is exactly
+	// when a skip is wanted instead.
+	if m.Cost == nil || len(m.Cost.Tiers) != 2 {
+		t.Skipf("%s/%s no longer has the 2 tiers this test was written against", provider, model)
 	}
 
 	got := lookupPrice(provider, model)
@@ -277,7 +281,7 @@ func TestLookupPrice_HandWrittenTableStillWinsOnATieredModel(t *testing.T) {
 		t.Skip(key + " is no longer hand-priced")
 	}
 	m, inCatalog := modelcatalog.Default().Lookup("google", "gemini-2.5-pro")
-	if !inCatalog || len(m.Cost.Tiers) == 0 {
+	if !inCatalog || m.Cost == nil || len(m.Cost.Tiers) == 0 {
 		t.Skip(key + " is not tiered in this snapshot")
 	}
 
@@ -569,5 +573,50 @@ func TestPriceTable_IsNotCheaperThanTheCatalogue(t *testing.T) {
 	}
 	if checked < 10 {
 		t.Fatalf("only %d table rows had a catalogue counterpart — the trim or the key format changed and this guard has gone vacuous", checked)
+	}
+}
+
+// ExplainRate must resolve to exactly what lookupPrice bills. Two functions
+// walking the same list is the obvious way for a label to drift off the number
+// it describes, so this walks a spread of pairs covering every step.
+func TestExplainRate_AgreesWithLookupPrice(t *testing.T) {
+	pairs := []struct {
+		provider, model string
+		want            RateSource
+	}{
+		{"anthropic", "claude-opus-4-7", SourceTable},
+		{"ollama", "anything-at-all", SourceWildcard},
+		{"local", "qwen2.5-7b-instruct", SourceWildcard},
+		{"openrouter", "qwen/qwen3-coder-flash", SourceCatalog},
+		{"openrouter", "totally/made-up-slug", SourceFallback},
+		{"anthropic", "claude-not-a-real-model-zzz", SourceFallback},
+		{"nosuchvendor", "nosuchmodel", SourceNone},
+		{"", "", SourceNone},
+	}
+	for _, tc := range pairs {
+		t.Run(tc.provider+"/"+tc.model, func(t *testing.T) {
+			got, src := ExplainRate(tc.provider, tc.model)
+			if want := lookupPrice(tc.provider, tc.model); got != want {
+				t.Errorf("ExplainRate rate = %+v, lookupPrice = %+v — the label and the bill disagree", got, want)
+			}
+			if src != tc.want {
+				t.Errorf("source = %q, want %q", src, tc.want)
+			}
+		})
+	}
+}
+
+// The case the inference layer could not decide: a hand-written row whose rates
+// are byte-identical to the provider ceiling below it.
+func TestExplainRate_HandWrittenRowEqualToTheCeilingIsStillTable(t *testing.T) {
+	row, ok := priceTable["openai/o3-pro"]
+	if !ok {
+		t.Skip("openai/o3-pro is no longer in the hand-written table")
+	}
+	if row != providerFallback["openai"] {
+		t.Skip("openai/o3-pro no longer equals the openai ceiling — this test's whole premise is that they collide")
+	}
+	if _, src := ExplainRate("openai", "o3-pro"); src != SourceTable {
+		t.Errorf("source = %q, want %q — a row that exists in the table is table-sourced no matter what it equals", src, SourceTable)
 	}
 }

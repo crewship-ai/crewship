@@ -1340,7 +1340,7 @@ models** or the CLI. OWNER/ADMIN only.
 
 | Slot | What it evaluates |
 |------|-------------------|
-| `curator` | skill review + memory consolidation |
+| `curator` | skill review + memory consolidation (the [consolidation](/guides/consolidate) summarizer, which also compacts long conversations) |
 | `behavior` | tool-call behaviour monitor |
 | `memory_health` | memory-health audit |
 | `negative` | failure → lessons extraction |
@@ -1349,7 +1349,10 @@ models** or the CLI. OWNER/ADMIN only.
 
 Every slot resolves its provider from the instance configuration at the moment it
 is used, so a change is in force on the next evaluation — no restart, for any of
-them. The client behind a slot is still built once per distinct provider/model,
+them. That includes the two consumers of `curator`: the memory consolidator
+resolves the slot per consolidation, and falls back to the boot-time
+`KEEPER_OLLAMA_URL` + `KEEPER_MODEL` client only when the slot has nothing
+buildable behind it. The client behind a slot is still built once per distinct provider/model,
 so leaving a slot alone costs nothing extra.
 
 <Note>
@@ -1374,7 +1377,7 @@ crewship keeper aux reset --all
 
 Each slot carries a per-call budget — the `--timeout` above, and the seconds
 figure on each row of the Judge models card. It bounds one model call for that
-evaluator, the way `--judge-timeout` bounds one credential decision:
+slot, the way `--judge-timeout` bounds one credential decision:
 
 ```bash
 crewship keeper aux set behavior --timeout 40s   # a slower local model needs longer
@@ -1395,6 +1398,17 @@ sweeps that keep asking for review.
   budget changed nothing. It is live now. The shipped defaults are 20s — the bound
   those calls were already running under — so an instance nobody has configured
   behaves exactly as it did.
+
+  `run_summary` was the last row where that was still true: the post-run verdict
+  never read the field, so its number bounded nothing at all while sitting beside
+  four that worked. It is enforced now, and its shipped default moved from 15s to
+  the same 20s for the same reason the others did — the first real deadline on a
+  call must not be a tighter one.
+
+  One deliberate exception remains, and the card does not claim otherwise: the
+  memory-consolidation prompt behind `curator` is batch work over hundreds of
+  journal entries, so it stays on the provider's own client timeout rather than
+  the slot's evaluator budget. The `curator` number still bounds skill review.
 </Note>
 
 ### Which key an evaluator spends

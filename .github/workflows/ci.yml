@@ -52,6 +52,64 @@ env:
   PNPM_VERSION: "10"
   GO_VERSION: "1.26.6"
 
+# ── ⚠ THE STEP-BOUND INVARIANT, AND WHY IT IS STATED HERE TOO ──
+#
+# Every job in this file has a `timeout-minutes`. A job that hits it is
+# reported by GitHub as `cancelled`, NOT `failure` — indistinguishable from a
+# human pressing stop, from a concurrency-key supersession, and (in
+# `gh pr checks`) from a real red. #1998 measured what that costs: 8 of 20
+# `ci.yml` runs on `main` were `cancelled`, and every merge decision taken
+# against them carried less evidence than it appeared to.
+#
+# So the rule, already written out at length above the API contract gate in
+# `harness-pr` and above the `go` job's test step:
+#
+#   innermost deadline (the tool's own) < the step's timeout-minutes
+#                                       < the job's timeout-minutes
+#
+# Whoever wins that race decides how debuggable the failure is, and the job
+# budget is always the worst possible winner.
+#
+# AUDIT, 2026-08-20 (#1998 item 3) — every job in this file was checked for
+# the asymmetry "a long step with no step-level bound inside a job that has
+# one", and for bounds that assume an unloaded runner:
+#
+#   FIXED  playwright-pr / onboarding-journey — the two `playwright install
+#          --with-deps chromium` steps that caused the reaps. Now a cached,
+#          bounded, retried composite action; see
+#          .github/actions/setup-playwright-browser.
+#   FIXED  onboarding-journey's 20m job budget, which was sized on the
+#          Chromium download's worst case — the step that is now cached.
+#   FIXED  harness-pr: the harness subset had the inner deadline
+#          (HARNESS_SUITE_TIMEOUT) and no step cap; the PyPI install had
+#          neither.
+#   FIXED  go-lint: the module-proxy install and golangci-lint itself.
+#   FIXED  go-platforms: `go test -timeout 20m` in a 25m job on the two
+#          slowest runners in the fleet left no daylight for overhead.
+#   FIXED  (codeql.yml) `Analyze (go, manual)`, observed hitting its 30m cap
+#          mid-build and passing on rerun.
+#   OK     go / go-shuffle / go-race / go-race-api — each already keeps ≥5 min
+#          between (overhead + `go test -timeout`) and its job cap, and the
+#          `-timeout` values (12m/15m/25m/30m) are already well above Go's
+#          600s per-package default, which #1998 reports two packages
+#          exceeding on a loaded box.
+#   FIXED  (setup-node-pnpm) `pnpm install --frozen-lockfile` — same hazard
+#          class, a third-party registry. Bounded with `timeout(1)` inside the
+#          composite action, because composite-action steps cannot carry
+#          `timeout-minutes`.
+#   OK     merge-conflict-markers (2m), shell (5m), cli-command-smoke (15m),
+#          frontend (10m), frontend-test (10m), binary (15m) — short jobs
+#          whose caps are themselves at the scale of a legible failure.
+#   NOT DONE, and named rather than quietly skipped: `actions/setup-go` inside
+#          setup-go-embed downloads the toolchain and restores the module
+#          cache, and it is a JS action, so `timeout(1)` cannot reach it and
+#          the only bound available is `timeout-minutes` on all 12 `uses:` call
+#          sites. No reap has ever been observed there, so it is left alone in
+#          this pass rather than spent on a 12-site mechanical diff.
+#
+# Adding a step that downloads from anywhere we do not control? Give it its
+# own `timeout-minutes`. That is the whole lesson of #1813 and #1998.
+
 jobs:
   # ── Sentinel: reject leaked git merge-conflict markers ──
   #
@@ -264,7 +322,12 @@ jobs:
           done
           cat /tmp/crewship-pr-harness.log >&2
           exit 1
+      # HARNESS_SUITE_TIMEOUT (480s) < this step's cap (12m) < the job's (30m).
+      # The suite's own deadline is the innermost, so a wedged suite is named
+      # by the harness rather than reaped anonymously — the #1998 audit found
+      # this step had the inner deadline but not the step cap.
       - name: Run named PR harness subset
+        timeout-minutes: 12
         env:
           CREWSHIP: ${{ github.workspace }}/crewship
           CREWSHIP_SERVER: http://localhost:8080
@@ -274,7 +337,11 @@ jobs:
           POLL_INTERVAL: "2"
           HARNESS_SUITE_TIMEOUT: "480"
         run: bash scripts/test-harness/pr-subset.sh
+      # Bounded because it is a third-party package index, which is the same
+      # class of dependency as the Ubuntu mirror that reaped two jobs in #1998:
+      # a slow PyPI has no reason to spend this job's 30-minute budget.
       - name: Install pinned API contract checker
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           python3 -m venv /tmp/crewship-api-contract-venv
@@ -405,6 +472,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
       - name: Build web UI and CLI from this commit
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           pnpm build
@@ -421,8 +489,20 @@ jobs:
             echo "NEXTAUTH_SECRET=$nextauth"
             echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
-      - name: Install Playwright Chromium
-        run: pnpm exec playwright install --with-deps chromium
+      #
+      # ⚠ INVARIANT: the action's own per-attempt deadlines (12m30s worst
+      #   case, added up in its header) < this step's timeout-minutes < the
+      #   job's timeout-minutes.
+      #   Same rule, same reason, as the API contract gate at :285 — and this
+      #   is the step that proved the rule by not having it. #1998: this job
+      #   died at exactly its 40-minute budget, reported as `cancelled`, with
+      #   17 minutes of silence inside apt-get.
+      #
+      - name: Install Playwright Chromium (cached)
+        timeout-minutes: 14
+        uses: ./.github/actions/setup-playwright-browser
+        with:
+          browser: chromium
       - name: Start ephemeral browser server
         env:
           CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
@@ -461,6 +541,10 @@ jobs:
           ws="$(./crewship whoami --format json --server "$CREWSHIP_SERVER" | jq -r '.workspace.id')"
           CREWSHIP_WORKSPACE="$ws" ./crewship admin ratelimits set http.api_per_min 1000 --server "$CREWSHIP_SERVER"
       - name: Run named Playwright PR subset
+        # Five deterministic checks with retries: 0. Twelve minutes is ~10x
+        # their observed cost and still 28 minutes clear of the job budget, so
+        # a hung browser is reported as a hung browser.
+        timeout-minutes: 12
         env:
           CI: "1"
           PLAYWRIGHT_BASE_URL: http://localhost:8080
@@ -523,10 +607,21 @@ jobs:
     needs: [merge-conflict-markers]
     name: Onboarding journey (fresh DB)
     runs-on: ubuntu-latest
-    # Above the ~11.7 min worst case observed nightly (a 521 s Chromium
-    # download), and still under the Go Race critical path, so even a hang
-    # cannot extend the pipeline.
-    timeout-minutes: 20
+    # Was 20, sized on "the ~11.7 min worst case observed nightly (a 521 s
+    # Chromium download)". That number was the download, and the download is
+    # now cached — but sizing a JOB budget on the volatile step's worst case is
+    # what made this job the second-largest source of the `cancelled` runs in
+    # #1998: it died at 20m18s with no step-level bound anywhere, so the job
+    # budget was the only thing that could fire, and GitHub reports that as
+    # `cancelled` rather than `failure`.
+    #
+    # Inverted now. Every long step below carries its own cap (12 for the
+    # browser install, 12 for the UI build, 10 for the spec), the job budget is
+    # raised to 25 so it stays the outermost bound rather than the first one to
+    # fire, and no single step can reach it. The old note that 20 kept the job
+    # "under the Go Race critical path" was never load-bearing: this job runs
+    # in parallel with `Go Race`, whose own cap is 35.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -542,6 +637,7 @@ jobs:
           pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Build web UI into the embed dir
+        timeout-minutes: 12
         # A bare checkout carries only web/out/.placeholder.html, which is
         # enough for `go:embed` to compile (#1567) and fine for the API-only
         # jobs — but this job drives the UI with a browser, and against the
@@ -571,11 +667,22 @@ jobs:
             echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
 
-      - name: Install Playwright browsers
-        # `--with-deps` pulls the apt packages chromium needs on the
-        # GitHub-hosted ubuntu runner. Without it, the headless launch
-        # fails with cryptic .so lookups.
-        run: pnpm exec playwright install --with-deps chromium
+      #
+      # ⚠ INVARIANT: the action's per-attempt deadlines (12m30s worst case,
+      #   added up in its header) < this step's timeout-minutes < the job's.
+      #
+      # The step this replaced carried a comment asserting that `--with-deps`
+      # is required or the headless launch dies on .so lookups. The action
+      # stops asserting it and asks: it launches the browser, and runs apt only
+      # if that fails. On the runner image that answer is normally "it
+      # launches", which is how the apt call that hung for 17 minutes in #1998
+      # leaves the critical path.
+      #
+      - name: Install Playwright browsers (cached)
+        timeout-minutes: 14
+        uses: ./.github/actions/setup-playwright-browser
+        with:
+          browser: chromium
 
       - name: Start crewship server on an empty database
         env:
@@ -621,6 +728,9 @@ jobs:
           }
 
       - name: Run onboarding-wizard Playwright spec
+        # The spec itself is ~12 s. Ten minutes is the "something wedged"
+        # bound, not a budget.
+        timeout-minutes: 10
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:8080
         run: pnpm exec playwright test --config=playwright.fresh.config.ts
@@ -802,7 +912,12 @@ jobs:
     # Whoever wins the race decides how debuggable the failure is, so
     # Go must always win. Budget below keeps ≥5 min of daylight between
     # (overhead + go test -timeout) and this cap.
-    timeout-minutes: 20
+    #
+    # 20 → 22 with the two `-tags conformance` vet steps added below (#2003).
+    # A second tag set is a second compile of the affected packages, so it is
+    # real overhead, not free — and the honest place to pay for it is this cap
+    # rather than the daylight the invariant above depends on.
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -814,6 +929,30 @@ jobs:
 
       - name: Go vet
         run: go vet ./...
+
+      # #2003 — COMPILE THE `conformance` BUILD TAG.
+      #
+      # Six files sit behind `//go:build conformance`, and until this step no
+      # PR job compiled any of them. A build-tagged file that nothing builds
+      # rots by default, not by accident: #1827 gave `ensureImage` a second
+      # return value, four conformance-tagged call sites were never updated,
+      # and the nightly `Runtime Conformance` workflow then failed to BUILD for
+      # 13 days — 23 consecutive red runs, with no green run in its whole
+      # 25-run history. `go vet -tags conformance ./...` reproduces that break
+      # in seconds and would have failed #1827's own pull request.
+      #
+      # VET, not test: running the suite needs a container daemon (and, for the
+      # apple leg, macOS 26). Building it needs neither. This gate is about the
+      # code continuing to compile, which is the part that broke.
+      - name: Go vet (conformance build tag)
+        run: go vet -tags conformance ./...
+
+      # internal/provider/apple/runtime_conformance_darwin_test.go is behind
+      # BOTH the conformance tag and GOOS=darwin, so the step above — which
+      # runs on linux — does not see it, and it would keep rotting exactly as
+      # the docker ones did. Same idea as the windows cross-compiles below.
+      - name: Go vet (conformance build tag, darwin)
+        run: GOOS=darwin go vet -tags conformance ./internal/provider/apple/
 
       - name: Go build
         run: go build ./cmd/crewship
@@ -1335,7 +1474,19 @@ jobs:
     needs: [merge-conflict-markers]
     name: Go (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 25
+    #
+    # ⚠ Same invariant as `go`: cap MUST exceed (pre-test overhead) +
+    #   (`go test -timeout`), with daylight, so Go's goroutine dump wins the
+    #   race against GitHub's opaque cancel.
+    #
+    # Was 25 against a `go test -timeout 20m`, which left the arithmetic with
+    # only whatever is not spent on checkout, the Go SDK download and a cold
+    # build — and these are the macOS and arm64 runners, the two slowest and
+    # least predictable in the fleet. That is the exact shape the `go` job's
+    # comment above warns about: a bound that works on a quiet machine and is
+    # decided by a busy one (#1998, item 3). 30 restores the ≥5 min of daylight
+    # the `go` job's invariant asks for.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -1406,11 +1557,17 @@ jobs:
       # to v2.1.6) ship with Go ≤1.24 and refuse to analyze code targeting a
       # newer language version. Costs ~30s on cache miss; removable once an
       # upstream release is built with Go 1.26+.
+      # Bounded: this reaches the Go module proxy, and a slow proxy is the same
+      # class of hazard as the apt mirror in #1998. ~30 s in practice.
       - name: Install golangci-lint from source
         if: steps.lint-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_VERSION }}
 
+      # --timeout=5m (golangci's own) < 8m (this step) < 15m (the job). The
+      # inner deadline is the one that names the linter that hung.
       - name: Run golangci-lint
+        timeout-minutes: 8
         run: ${{ steps.gopath.outputs.bin }}/golangci-lint run --timeout=5m ./...
 
       # tsformat proximity lint (#990, #1073c): flags any RFC3339Nano

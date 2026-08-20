@@ -5,12 +5,15 @@ import { resolve } from "node:path"
 import {
   ACTIVITY_SOURCES,
   activitySource,
+  answeredAsks,
   buildSpine,
   chainElapsedMs,
+  entriesInScope,
   formatDurationMs,
   groupIntoBuckets,
   severityTone,
   sourceEntryTypes,
+  scopeCounts,
   scopeOf,
   sourceMix,
   dailyCounts,
@@ -20,6 +23,10 @@ import {
   runIdOf,
   timeBucket,
 } from "@/lib/activity-stream"
+// The one cross-module import in this file, and the point of it: the rail's
+// count and the overview card's list must be the same answer, so the test
+// that says so has to see both.
+import { openAsks } from "@/lib/activity-overview"
 import { JOURNAL_ENTRY_TYPES, type JournalEntry } from "@/lib/types/journal"
 
 function entry(over: Partial<JournalEntry> = {}): JournalEntry {
@@ -212,6 +219,184 @@ describe("scopeOf", () => {
   it("does not let a failed run be counted as active as well", () => {
     const e = entry({ entry_type: "run.failed", severity: "error" })
     expect(scopeOf(e)).not.toBe("active")
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ *  What is still waiting on a person — #1876
+ *
+ *  The journal is an EVENT LOG, so an ask stays in it after it was
+ *  answered, and `peer.escalation` is emitted for the ask AND for its
+ *  resolution. Bucketing by entry type alone therefore reports a queue
+ *  that has already been cleared — the rail reading "Waiting 4" beside a
+ *  card reading 0.
+ *
+ *  Every fixture below is copied from the Go emit site that writes it,
+ *  cited by file:line, for the same reason activity-overview.test.ts
+ *  does it: a helper that only handles payloads the backend never writes
+ *  is a helper that handles nothing.
+ * ------------------------------------------------------------------ */
+
+// internal/api/escalation_handler.go:255 — the ask. Severity warn, state pending.
+const escalationAsk = (id: string) =>
+  entry({
+    id: `ask-${id}`,
+    entry_type: "peer.escalation",
+    severity: "warn",
+    summary: "escalation from scout: needs a prod credential",
+    payload: { reason: "needs a prod credential", escalation_type: "CREDENTIAL", from_slug: "scout", state: "pending" },
+    refs: { escalation_id: id, chat_id: "chat1" },
+  })
+
+// internal/api/escalation_handler.go:607 — the SAME entry_type, resolved by a person.
+const escalationResolved = (id: string) =>
+  entry({
+    id: `res-${id}`,
+    entry_type: "peer.escalation",
+    severity: "notice",
+    summary: `escalation ${id} resolved (approve)`,
+    payload: { resolution: "granted", action: "approve", state: "resolved", escalation_type: "CREDENTIAL" },
+    refs: { escalation_id: id },
+  })
+
+// internal/api/escalation_autoresolve.go:172 — resolved by the system instead.
+const escalationAutoResolved = (id: string) =>
+  entry({
+    id: `auto-${id}`,
+    entry_type: "peer.escalation",
+    severity: "notice",
+    summary: `escalation ${id} auto-resolved: matching credential assigned`,
+    payload: { resolution: "assigned", action: "approve", state: "resolved", auto_resolved: true },
+    refs: { escalation_id: id },
+  })
+
+// internal/harbormaster/store_mutate.go:83 / :232 — the ask and its grant.
+const approvalAsk = (id: string) =>
+  entry({
+    id: `ask-${id}`,
+    entry_type: "approval.requested",
+    severity: "notice",
+    summary: "approval requested: exec — deploy to prod",
+    payload: { approval_id: id, kind: "exec" },
+    refs: { approval_id: id },
+  })
+
+const approvalGranted = (id: string) =>
+  entry({
+    id: `grant-${id}`,
+    entry_type: "approval.granted",
+    severity: "notice",
+    summary: "approval granted by demo@crewship.ai",
+    payload: { approval_id: id, kind: "exec" },
+    refs: { approval_id: id },
+  })
+
+// internal/api/keeper_request.go:235 / :381.
+const keeperAsk = (id: string) =>
+  entry({
+    id: `ask-${id}`,
+    entry_type: "keeper.request",
+    severity: "notice",
+    summary: "scout requested credential STRIPE_KEY",
+    payload: { request_id: id },
+    refs: { keeper_request_id: id },
+  })
+
+const keeperDecision = (id: string) =>
+  entry({
+    id: `dec-${id}`,
+    entry_type: "keeper.decision",
+    severity: "notice",
+    summary: "keeper allowed STRIPE_KEY",
+    payload: { request_id: id, decision: "allow" },
+    refs: { keeper_request_id: id },
+  })
+
+describe("scopeOf — a resolved ask is not waiting on anyone", () => {
+  // Needs no window: the resolution carries its own terminal state, and the
+  // old rule ("human source ⇒ waiting") called it a fresh ask anyway.
+  it("does not call a resolved escalation waiting", () => {
+    expect(scopeOf(escalationResolved("e1"))).not.toBe("waiting")
+    expect(scopeOf(escalationResolved("e1"))).toBe("done")
+    expect(scopeOf(escalationAutoResolved("e2"))).toBe("done")
+  })
+
+  it("still calls a pending escalation waiting", () => {
+    expect(scopeOf(escalationAsk("e1"))).toBe("waiting")
+  })
+
+  // Needs the window: an approval's grant is a DIFFERENT entry type, so the
+  // ask row can only be shown answered by joining it to the answer beside it.
+  it("does not call an ask waiting once the same window answered it", () => {
+    const feed = [approvalGranted("a1"), approvalAsk("a1"), keeperDecision("k1"), keeperAsk("k1")]
+    const answered = answeredAsks(feed)
+    expect(scopeOf(approvalAsk("a1"), answered)).toBe("done")
+    expect(scopeOf(keeperAsk("k1"), answered)).toBe("done")
+  })
+
+  it("keeps an ask nothing in the window answered", () => {
+    const feed = [approvalGranted("a1"), approvalAsk("a1"), approvalAsk("a2")]
+    expect(scopeOf(approvalAsk("a2"), answeredAsks(feed))).toBe("waiting")
+  })
+
+  it("keeps an ask carrying no id rather than silently closing it", () => {
+    // It cannot be joined, so it cannot be PROVEN answered. One row too many
+    // beats hiding something a person is blocking on.
+    const e = entry({ entry_type: "approval.requested", payload: {}, refs: {} })
+    expect(scopeOf(e, answeredAsks([e, approvalGranted("a1")]))).toBe("waiting")
+  })
+
+  it("does not let one kind's answer close another kind's ask", () => {
+    const feed = [approvalGranted("x"), keeperAsk("x")]
+    expect(scopeOf(keeperAsk("x"), answeredAsks(feed))).toBe("waiting")
+  })
+
+  it("leaves the other three buckets alone", () => {
+    const answered = answeredAsks([escalationResolved("e1")])
+    expect(scopeOf(entry({ entry_type: "run.started" }), answered)).toBe("active")
+    expect(scopeOf(entry({ entry_type: "run.failed", severity: "error" }), answered)).toBe("failed")
+    expect(scopeOf(entry({ entry_type: "run.completed" }), answered)).toBe("done")
+  })
+})
+
+describe("scopeCounts / entriesInScope — the rail counts what the card counts", () => {
+  // The screen this fixes: five human-source rows, of which exactly one is
+  // still an open ask. Counting rows gives "Waiting 5" beside a card reading 1.
+  const feed = [
+    escalationResolved("e1"),
+    escalationAsk("e1"),
+    keeperDecision("k1"),
+    keeperAsk("k1"),
+    approvalGranted("a1"),
+    approvalAsk("a1"),
+    keeperAsk("k2"), // the only one still open
+    entry({ entry_type: "run.completed" }),
+    entry({ entry_type: "run.started" }),
+    entry({ entry_type: "run.failed", severity: "error" }),
+  ]
+
+  it("counts open asks, not ask-shaped rows", () => {
+    expect(scopeCounts(feed).waiting).toBe(1)
+  })
+
+  it("agrees with the overview card, which is the number that was right", () => {
+    // One question, one answer. This equality IS the bug's absence.
+    expect(scopeCounts(feed).waiting).toBe(openAsks(feed).length)
+  })
+
+  it("keeps the four buckets mutually exclusive and complete", () => {
+    const c = scopeCounts(feed)
+    expect(c.active + c.waiting + c.failed + c.done).toBe(feed.length)
+  })
+
+  it("puts an answered ask in done rather than dropping it from the feed", () => {
+    const done = entriesInScope(feed, "done")
+    expect(done.map((e) => e.id)).toContain("ask-a1")
+    expect(done.map((e) => e.id)).toContain("res-e1")
+  })
+
+  it("lists exactly the open asks under the waiting scope, in feed order", () => {
+    expect(entriesInScope(feed, "waiting").map((e) => e.id)).toEqual(["ask-k2"])
   })
 })
 

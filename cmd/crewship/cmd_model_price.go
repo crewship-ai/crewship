@@ -39,8 +39,6 @@ type rateCard struct {
 	CacheWritePerM  float64 `json:"cache_write_per_mtok"`
 }
 
-func (c rateCard) isZero() bool { return c == rateCard{} }
-
 // cardFor asks paymaster what it would bill for this pair — the real lookup,
 // not a re-implementation of it.
 func cardFor(provider, model string) rateCard {
@@ -61,7 +59,12 @@ const (
 	rateFromWildcard rateSource = "wildcard"
 	rateFromCatalog  rateSource = "catalog"
 	rateFromFallback rateSource = "fallback"
-	rateFromFree     rateSource = "free"
+	// rateFromNone is what paymaster reports when nothing prices the pair at
+	// all — an unknown vendor. It replaced a "free" value that the old inference
+	// layer produced for BOTH an ollama-style wildcard and an unknown vendor;
+	// ExplainRate tells those apart, and conflating them told an operator that a
+	// vendor typo was a free local model.
+	rateFromNone rateSource = "none"
 )
 
 // describe is the one-line explanation printed next to the label. It says what
@@ -74,11 +77,11 @@ func (s rateSource) describe() string {
 	case rateFromWildcard:
 		return "provider wildcard row \"<provider>/*\" — every model of this provider bills at this rate"
 	case rateFromCatalog:
-		return "embedded models.dev snapshot (internal/modelcatalog) — accurate as of the snapshot's fetch date, not hand-verified; a hand-written row carrying this exact rate would be indistinguishable from here"
+		return "embedded models.dev snapshot (internal/modelcatalog) — accurate as of the snapshot's fetch date, not hand-verified"
 	case rateFromFallback:
 		return "provider ceiling — this model has no rate anywhere, so the provider's most expensive known tier is used and the cost is an OVER-estimate"
-	case rateFromFree:
-		return "$0 on every channel — a local/self-hosted wildcard row, or a provider with no rate card at all"
+	case rateFromNone:
+		return "no rate anywhere for this provider — check the spelling; an unknown vendor bills $0 and the operator is meant to notice"
 	}
 	return string(s)
 }
@@ -150,7 +153,7 @@ func explainRate(provider, model string) priceExplain {
 	prov := canonProviderID(provider)
 	mod := canonProviderID(model)
 
-	resolved := cardFor(prov, mod)
+	resolved, src := explainedCardFor(prov, mod)
 	unknown := cardFor(prov, priceProbeModel)
 	cat, hasCat := catalogCard(prov, mod)
 
@@ -165,20 +168,13 @@ func explainRate(provider, model string) priceExplain {
 		ex.Catalog = &c
 	}
 
-	switch {
-	case resolved != unknown && hasCat && resolved == cat:
-		ex.Source = rateFromCatalog
-	case resolved != unknown:
-		ex.Source = rateFromTable
-	case hasCat && resolved == cat:
-		ex.Source = rateFromCatalog
-	case providerHasWildcard(prov):
-		ex.Source = rateFromWildcard
-	case resolved.isZero():
-		ex.Source = rateFromFree
-	default:
-		ex.Source = rateFromFallback
-	}
+	// The source comes from paymaster itself. It used to be DEDUCED here by
+	// re-querying RateCard with a probe model and comparing values, which is
+	// not decidable from outside the package: two steps that happen to agree
+	// are indistinguishable, and that produced two wrong labels — every tiered
+	// model reported as hand-verified, and a hand-written row equal to the
+	// provider ceiling reported as `fallback`.
+	ex.Source = rateSource(src)
 	ex.Detail = ex.Source.describe()
 	return ex
 }
@@ -407,4 +403,16 @@ func init() {
 	modelPriceCmd.Flags().Int64("cached", 0, "Cached input tokens (cache reads)")
 	modelPriceCmd.Flags().Int64("cache-write", 0, "Cache creation tokens (cache writes)")
 	modelCmd.AddCommand(modelPriceCmd)
+}
+
+// explainedCardFor asks paymaster both questions at once: what it would bill,
+// and which step of its own lookup produced it.
+func explainedCardFor(provider, model string) (rateCard, paymaster.RateSource) {
+	p, src := paymaster.ExplainRate(provider, model)
+	return rateCard{
+		InputPerM:       p.InputPerM,
+		OutputPerM:      p.OutputPerM,
+		CachedInputPerM: p.CachedInputPerM,
+		CacheWritePerM:  p.CacheWritePerM,
+	}, src
 }

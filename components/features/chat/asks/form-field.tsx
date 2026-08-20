@@ -431,6 +431,18 @@ export function FormField({
       )
     }
 
+    // `boolean` is what the slash catalog names a routine's boolean
+    // input (internal/api/slash_routine_catalog.go); `checkbox` is what
+    // an ask form calls the same control. Two names for one widget
+    // because the two schemas were written apart — aliased here rather
+    // than renamed on either wire, since both are stable identifiers
+    // with data already shaped to them.
+    //
+    // It emits "true"/"" like every other value in this component, and
+    // lib/routine-inputs.ts parses that back to a real boolean. Falling
+    // through to the text input instead — which is what an unlisted type
+    // does — would have asked people to type the word "true".
+    case "boolean":
     case "checkbox":
       return (
         <div className="space-y-1">

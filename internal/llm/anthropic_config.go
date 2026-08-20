@@ -265,7 +265,15 @@ func (a *Anthropic) applyAuth(req *http.Request, body []byte) error {
 	if a.cfg.Sign != nil {
 		return a.cfg.Sign(req, body)
 	}
-	req.Header.Set("x-api-key", a.apiKey)
+	// An empty key omits the header rather than sending "x-api-key: ". The
+	// OpenAI-compatible codec in this package treats a bare "Bearer " the same
+	// way, and for the same reason: a blank credential header reads to an
+	// upstream as a malformed request rather than as an unauthenticated one,
+	// which turns "you forgot the key" into a less specific error than it
+	// needs to be.
+	if a.apiKey != "" {
+		req.Header.Set("x-api-key", a.apiKey)
+	}
 	return nil
 }
 

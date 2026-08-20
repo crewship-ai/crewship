@@ -237,7 +237,7 @@ Zero is the honest value for ollama/local (genuinely free) and for unknown-provi
 
 The canonical rate card lives in `internal/paymaster/pricing.go`. Adding a model is a one-line change. Prices are USD per 1,000,000 tokens and were verified against provider docs on 2026-04-30.
 
-It is no longer the only rate source: an **embedded models.dev snapshot** (`internal/modelcatalog`, 8 providers) sits underneath it and prices models the table has never heard of. The table stays authoritative — see [The four-step lookup](#the-four-step-lookup) — and `crewship model price --provider <p> --model <m>` reports which source answered for any pair.
+It is no longer the only rate source: an **embedded models.dev snapshot** (`internal/modelcatalog`, 8 providers) sits underneath it and prices models the table has never heard of. The table stays authoritative — see [The five-step lookup](#the-five-step-lookup) — and `crewship model price --provider <p> --model <m>` reports which source answered for any pair.
 
 <Accordion title="Rate card — per-provider prices (USD / 1M tokens)">
 | Provider / Model | Input | Output | Cached input | Cache write |
@@ -271,7 +271,7 @@ It is no longer the only rate source: an **embedded models.dev snapshot** (`inte
   **Anthropic Opus 4.7 was repriced to \$5/\$25 from the old \$15/\$75 in early 2026.** The Crewship rate card was updated on 2026-04-30; ledger rows written before that date carry the old rate as a snapshot in `rate_*_per_m` and will continue to read out at the historical price. New rows use the corrected rate.
 </Note>
 
-### The four-step lookup
+### The five-step lookup
 
 `priceTable` is no longer the only rate source. `lookupPrice` resolves `(provider, model)` in this order and stops at the first hit:
 

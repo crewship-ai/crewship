@@ -22,7 +22,11 @@ package api
 // step. The shape is open — adding `label_de`, `label_es`, ... later
 // is a non-breaking field addition.
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
+)
 
 // slashCommand is one entry in the static catalog the handler
 // returns. Field names match the JSON wire shape — Title-case Go
@@ -42,10 +46,35 @@ type slashCommand struct {
 // back to "text" for unknown types so adding a new type here doesn't
 // require coordinated UI rollout.
 type slashFormField struct {
-	Name     string `json:"name"`
+	Name string `json:"name"`
+	// Type is the WIDGET to draw: text, textarea, cron, timezone,
+	// secret, slug, priority, number, boolean, … It answers "what does
+	// the user see", not "what does the server receive".
 	Type     string `json:"type"`
 	Required bool   `json:"required,omitempty"`
-	Default  string `json:"default,omitempty"`
+	// Default is a string because a form field's value is a string. A
+	// non-string default from a routine's input spec is formatted into
+	// one here and parsed back on the way out — see ValueType.
+	Default string `json:"default,omitempty"`
+	// ValueType is the JSON type the SERVER expects back for this field:
+	// string | integer | number | boolean | array | object. Empty means
+	// string, which is what every entry in the static catalog is.
+	//
+	// It exists because Type cannot answer the question. A routine's
+	// `array` input and an issue's `description` both draw a textarea,
+	// and one of them has to reach the server as a parsed JSON array
+	// while the other must not. Inferring the difference from the widget
+	// worked only as long as no two data types shared one — a property
+	// no widget vocabulary keeps for long. So the wire says both.
+	//
+	// Optional field addition: a client that ignores it sends strings,
+	// which is exactly what it sent before this field existed.
+	ValueType string `json:"value_type,omitempty"`
+	// Help is rendered under the field. Carries a routine input's
+	// `description`, which is the one place its author gets to say what
+	// the value means ("YYYY-MM; empty means the previous month") — the
+	// static catalog's fields have none and omit it.
+	Help string `json:"help,omitempty"`
 }
 
 // slashCommandCatalog is the static platform-defined registry. Order
@@ -120,13 +149,25 @@ var slashCommandCatalog = []slashCommand{
 // router wire-up is a one-liner.
 type SlashCommandsHandler struct {
 	r *Router
+	// pipelines reads the workspace's routines for the per-routine half
+	// of the catalog (slash_routine_catalog.go). Its own store rather
+	// than a reach into r.PipelinesHandler: this handler wants one
+	// read-only List and nothing else the run handler carries, and the
+	// store is a struct around the same *sql.DB. nil → the catalog is
+	// the static list alone, which is what a test that builds this
+	// handler without a DB gets.
+	pipelines *pipeline.Store
 }
 
 // NewSlashCommandsHandler captures the router so we can reach
 // r.db (for CapabilitiesForMember) without piping it through a
 // separate field. Same shape as InternalHandler.
 func NewSlashCommandsHandler(r *Router) *SlashCommandsHandler {
-	return &SlashCommandsHandler{r: r}
+	h := &SlashCommandsHandler{r: r}
+	if r != nil && r.db != nil {
+		h.pipelines = pipeline.NewStore(r.db)
+	}
+	return h
 }
 
 // List handles GET /api/v1/slash-commands. Returns the catalog
@@ -156,7 +197,7 @@ func (h *SlashCommandsHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
-	caps, _, ok := CapabilitiesForMember(r.Context(), h.r.db, wsID, user.ID)
+	caps, role, ok := CapabilitiesForMember(r.Context(), h.r.db, wsID, user.ID)
 	if !ok {
 		// Caller isn't a member of the workspace they asked about.
 		// Empty list is the least-surprise response — same shape as
@@ -171,5 +212,35 @@ func (h *SlashCommandsHandler) List(w http.ResponseWriter, r *http.Request) {
 			out = append(out, sc)
 		}
 	}
+	if canRunRoutines(caps, role) {
+		out = append(out, h.routineSlashCommands(r.Context(), wsID)...)
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// canRunRoutines reports whether the caller may invoke a saved routine,
+// and therefore whether the per-routine entries belong in their palette.
+//
+// It is the run endpoint's admission rule, restated for the catalog:
+// role at MANAGER+ OR an explicit routine.run grant (see
+// PipelineHandler.Run). The palette must not offer what the endpoint
+// refuses — an entry the caller can't run is a button that 403s.
+//
+// The converse is narrower and deliberately so: routineSlashCommands
+// lists only workspace-visible, non-ephemeral routines, while the run
+// endpoint will happily run a hidden or ephemeral one addressed by slug.
+// A routine marked not-visible staying out of a palette is what
+// not-visible means; the asymmetry is on the routine SET, never on who
+// is admitted.
+//
+// The role half is not redundant with the capability half. Migration
+// v109 backfilled every membership's capability column before
+// routine.run existed, so a workspace ADMIN whose row that migration
+// wrote holds routine.create and not routine.run — while clearing the
+// role gate on the endpoint without either. Filtering on the capability
+// alone would have hidden the palette from the very people who
+// administer it, and done so only on databases old enough to have been
+// backfilled, which is every real one.
+func canRunRoutines(caps map[string]struct{}, role string) bool {
+	return canRole(role, "create") || HasCapability(caps, CapabilityRoutineRun)
 }

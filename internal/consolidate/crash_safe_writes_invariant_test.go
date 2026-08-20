@@ -47,17 +47,28 @@ import (
 //     writeFileDurable / memory.WriteFileDurable instead. There is no
 //     legitimate exception to this in either package today; every
 //     match must be allowlisted with a reason or fixed.
-//  2. Append (os.OpenFile ... O_APPEND ... O_WRONLY) — read-modify-
-//     write via the durable helper is not the right shape for a file
-//     that only ever grows (learned-*.md is read by the diff endpoint
-//     up to proposalDiffMaxBytes = 8MiB; re-reading and rewriting that
-//     on every consolidation tick is real, avoidable I/O). The
-//     accepted alternative is O_APPEND + an explicit f.Sync() before
-//     Close(), matching the convention consolidator.go's appendRules
-//     already used before this fix. Every allowlisted O_APPEND call is
-//     additionally required — by this test, not just by the allowlist
-//     comment — to have an f.Sync() call somewhere between the
-//     OpenFile line and the end of its enclosing function.
+//
+//  2. Append (os.OpenFile ... O_APPEND ... O_WRONLY) — O_APPEND plus
+//     an explicit f.Sync() before Close(). This shape buys durability
+//     but NOT atomicity: O_CREATE and the first write are two syscalls,
+//     so between them the file exists at zero bytes and any reader not
+//     holding the writer's flock can observe it empty (#1807 — that is
+//     how pins.md flaked TestPostRunTrigger_WritesIntoTheCrewBindSource,
+//     and the audit watcher reads the same files). It is therefore only
+//     acceptable where the read-modify-write cost is genuinely
+//     prohibitive, and every allowlisted O_APPEND call is additionally
+//     required — by this test, not just by the allowlist comment — to
+//     have an f.Sync() call somewhere between the OpenFile line and the
+//     end of its enclosing function.
+//
+//     consolidator.go's appendRules and snapshotPins used to be
+//     allowlisted here on the "learned-*.md grows to
+//     proposalDiffMaxBytes = 8MiB, re-reading it every tick is real
+//     I/O" argument. #1807 retired that: appendRules already read the
+//     whole file back after every append (to hand the caller the exact
+//     post-write bytes for the audit blob), so the read was being paid
+//     regardless and moving it ahead of the write cost nothing. Both
+//     now go through memory.WriteFileDurableRoot.
 //
 // What this test proves: every write of persistent memory content in
 // these two packages either goes through the durable helper or is an
@@ -86,6 +97,13 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 		"../backup|out, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)":      "memoryblobs.go: restoreMemoryBlobFile IS a durable sequence — fsync of the tempfile, atomic rename, then fsync of the parent dir — just written inline rather than delegating. It streams each blob straight out of the bundle tar, and WriteFileDurable takes []byte, so routing through the helper would mean io.ReadAll-ing every blob into memory. Collapse the two once a streaming variant of the helper exists; the doc comment on that function says so.",
 		"../backup|f, err := os.OpenFile(l.path, os.O_CREATE|os.O_RDWR, 0o600)":                 "keyring_flock_unix.go: flock sentinel file for the backup keyring, same reasoning as memory's writer_lock_unix.go — not memory content",
 		"../backup|f, err := os.OpenFile(clean, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)":      "storage.go: LocalStorageOps.Create, a generic io.WriteCloser primitive backup bundle/keyring/dump code streams arbitrary bytes into (tar entries, keyring JSON, DB dumps) — not itself a memory-content write, and bundle/keyring durability is the backup subsystem's own separate, already-tracked concern",
+
+		// *os.Root-anchored twins of the three entries above. These
+		// were invisible to this guard until #1807 widened the regex
+		// from `os.OpenFile(` to `.OpenFile(` — see the comment there.
+		"../memory|f, err := root.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)":       "durable_write.go: this line IS the WriteFileDurableRoot primitive, the root-anchored form of writeFileDurable — same standing as its os.OpenFile twin above",
+		"../memory|f, err := l.root.OpenFile(l.name, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)": "writer_lock_unix.go: root-anchored form of the flock sentinel open — same reasoning as its os.OpenFile twin above, only its existence as an flock anchor matters",
+		"../memory|f, err := l.root.OpenFile(l.name, os.O_CREATE|os.O_RDWR, 0o600)":                 "writer_lock_windows.go: same flock-sentinel reasoning as the unix build's root-anchored open",
 	}
 
 	// appendLines lists O_APPEND call sites accepted under the
@@ -94,11 +112,16 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 	// to use O_APPEND instead of the durable helper", the test still
 	// verifies the fsync is actually present in source.
 	appendLines := map[string]string{
-		".|f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)":          "consolidator.go (appendRules, snapshotPins): append-only canonical/pins files; read-modify-write via the durable helper would mean re-reading up to proposalDiffMaxBytes (8MiB) on every tick",
-		".|f, err := os.OpenFile(canonicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)": "approve.go (appendToCanonical): same append-only reasoning as consolidator.go's appendRules",
+		".|f, err := os.OpenFile(canonicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)": "approve.go (appendToCanonical): the last append-shaped canonical write. It has the same non-atomic create-then-write window #1807 closed in consolidator.go and should follow it through memory.WriteFileDurable; left as-is here only to keep that fix reviewable on its own.",
 	}
 
-	wholeFileRe := regexp.MustCompile(`os\.WriteFile\(|os\.OpenFile\(`)
+	// `.OpenFile(` rather than `os.OpenFile(`: these packages open
+	// files through *os.Root handles too (root.OpenFile, l.root.OpenFile),
+	// and matching only the `os.` form left every root-anchored write
+	// unscanned. That blind spot is why consolidator.go's two O_APPEND
+	// sites sat here allowlisted-but-unmatched after they moved to
+	// os.Root — the guard would not have caught a regression in them.
+	wholeFileRe := regexp.MustCompile(`os\.WriteFile\(|\.OpenFile\(`)
 
 	checkedFiles := 0
 	for _, dir := range dirs {

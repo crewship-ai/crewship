@@ -28,19 +28,22 @@ func TestExplainRate_Source(t *testing.T) {
 		model    string
 		want     rateSource
 	}{
-		// The documented blind spot: priceTable and the snapshot agree on
-		// this model to the cent, so the hand-written row is invisible from
-		// out here and the result reads as catalog-sourced. See explainRate.
-		{"hand-written row the snapshot agrees with", "anthropic", "claude-opus-4-7", rateFromCatalog},
+		// This used to be a documented blind spot: priceTable and the snapshot
+		// agree on this model to the cent, and an inference layer comparing
+		// VALUES from outside paymaster could not tell which one answered, so
+		// it reported catalog. paymaster.ExplainRate walks its own tables and
+		// says table, which is the truth — the row exists and someone checked
+		// it against an invoice.
+		{"hand-written row the snapshot agrees with", "anthropic", "claude-opus-4-7", rateFromTable},
 		{"hand-written row that disagrees with the catalog", "openai", "gpt-5.5", rateFromTable},
 		{"alias row the catalog has no equivalent for", "openai", "gpt-5-mini", rateFromTable},
 		{"catalog fills a gap the table leaves", "openai", "gpt-4o", rateFromCatalog},
 		{"catalog reaches a provider with no codec", "openrouter", "qwen/qwen3-coder-flash", rateFromCatalog},
 		{"unknown model of a known provider hits the ceiling", "anthropic", "claude-not-a-model", rateFromFallback},
 		{"catalog row priced 0/0 is skipped, not billed at $0", "mistral", "labs-devstral-small-2512", rateFromFallback},
-		{"local runtime is free", "ollama", "qwen2.5:3b", rateFromFree},
+		{"local runtime is free", "ollama", "qwen2.5:3b", rateFromWildcard},
 		{"unknown model of a gateway hits that gateway's ceiling", "openrouter", "not-a-model", rateFromFallback},
-		{"vendor nobody has heard of", "acme-llm", "acme-1", rateFromFree},
+		{"vendor nobody has heard of", "acme-llm", "acme-1", rateFromNone},
 		// The API enum form and the Provider.Name() form must land on the
 		// same row — the case-sensitivity bug the registry exists to fix.
 		{"uppercase provider and model", "OpenAI", "GPT-5.5", rateFromTable},

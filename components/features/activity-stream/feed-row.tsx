@@ -23,6 +23,7 @@ import {
   formatDurationMs,
   scopeOf,
   sourceMeta,
+  type ActivityScope,
   type SpineLabels,
   type SpineLink,
 } from "@/lib/activity-stream"
@@ -37,6 +38,15 @@ const SCOPE_DOT: Record<string, string> = {
 
 export interface FeedRowProps {
   entry: JournalEntry
+  /**
+   * The row's bucket, resolved by the LIST over its whole window (#1876).
+   *
+   * A dot cannot answer "is this ask still open" on its own: the approval
+   * that closed it is a different row, of a different entry type. Omitted,
+   * the row falls back to the per-entry reading, which never claims a
+   * resolved escalation is waiting but cannot see a granted approval.
+   */
+  scope?: ActivityScope
   icon: LucideIcon
   labels: SpineLabels
   actorName?: string
@@ -52,6 +62,7 @@ export interface FeedRowProps {
 
 export function FeedRow({
   entry,
+  scope,
   icon: Icon,
   labels,
   actorName,
@@ -101,7 +112,7 @@ export function FeedRow({
           aria-hidden
           className={cn(
             "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
-            SCOPE_DOT[scopeOf(entry)] ?? "bg-muted",
+            SCOPE_DOT[scope ?? scopeOf(entry)] ?? "bg-muted",
           )}
         />
       </span>

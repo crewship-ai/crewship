@@ -77,10 +77,15 @@ func BuildAuxProviderWithKey(m AuxModel, baseURL, apiKey string) (Provider, erro
 			m.Provider, strings.Join(RegisteredProviders(), "|"))
 	}
 
-	key := apiKey
+	// Trimmed on both paths. auxDefaultSpec already treats a whitespace-only
+	// env var as absent when it chooses which provider a slot lands on, so
+	// accepting one here would let the two disagree: the slot would be pointed
+	// somewhere else for lacking a key, and then this would build a provider
+	// with a blank one anyway and 401 on first use.
+	key := strings.TrimSpace(apiKey)
 	if spec.KeyEnv != "" {
 		if key == "" {
-			key = os.Getenv(spec.KeyEnv)
+			key = strings.TrimSpace(os.Getenv(spec.KeyEnv))
 		}
 		if key == "" {
 			return nil, fmt.Errorf("%s env not set (required for %s aux slot %q)",
@@ -90,7 +95,10 @@ func BuildAuxProviderWithKey(m AuxModel, baseURL, apiKey string) (Provider, erro
 
 	base := strings.TrimSpace(baseURL)
 	if base == "" && spec.BaseEnv != "" {
-		base = os.Getenv(spec.BaseEnv)
+		// Trimmed like the explicit values: a variable set to whitespace is a
+		// misconfiguration, and carrying it through produces a base URL that
+		// fails to parse far from the line that set it.
+		base = strings.TrimSpace(os.Getenv(spec.BaseEnv))
 	}
 	if base == "" {
 		base = spec.BaseDefault

@@ -111,7 +111,18 @@ jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    #
+    # Was 30, with no step-level bound on any of the three long steps below.
+    # `Analyze (go, manual)` was observed hitting that cap mid-build and
+    # passing on a rerun (#1998, item 3) — i.e. the work fits, but not always
+    # on a loaded runner, and when it did not fit the only thing that could
+    # fire was the job budget, which GitHub reports as `cancelled`.
+    #
+    # 45 with per-step caps below, so the job budget is the outermost bound and
+    # not the first one to fire. This is headroom on one observed reap, not a
+    # measurement: if this job starts routinely needing more than ~20 minutes,
+    # find out why rather than raising it again.
+    timeout-minutes: 45
     needs: changes
     # Empty include (docs/CI-only PR) would fail matrix expansion — guard it.
     if: needs.changes.outputs.include != '[]'
@@ -131,6 +142,9 @@ jobs:
           go-version: "1.26.6"
 
       - name: Initialize CodeQL
+        # Downloads the CodeQL bundle — third-party network, so it gets a bound
+        # of its own rather than sharing the job's.
+        timeout-minutes: 15
         uses: github/codeql-action/init@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c # v3
         with:
           languages: ${{ matrix.language }}
@@ -149,9 +163,14 @@ jobs:
       # needed; the checkout already satisfies the embed.
       - if: matrix.language == 'go'
         name: Build for CodeQL
+        # The step that was observed being reaped: under manual build-mode the
+        # extractor traces this compile, so it is far slower than the same
+        # `go build` in ci.yml.
+        timeout-minutes: 20
         run: go build ./cmd/crewship
 
       - name: Perform CodeQL Analysis
+        timeout-minutes: 25
         uses: github/codeql-action/analyze@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c # v3
         with:
           category: "/language:${{ matrix.language }}"

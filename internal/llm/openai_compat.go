@@ -149,7 +149,17 @@ func openAIStreamClient(cfg OpenAICompatConfig) *http.Client {
 	// http.Transport silently disables all of those.
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.ResponseHeaderTimeout = 60 * time.Second
-	return &http.Client{Transport: tr}
+	// A caller-supplied client with a nil Transport still reaches here, and its
+	// CheckRedirect must survive: a governance client is fenced by its dialer
+	// AND by refusing redirects, and dropping half of that on the streaming path
+	// leaves Stream following up to ten hops off an endpoint Complete refuses at
+	// the first. The nil-Transport case is not hypothetical — &http.Client{} with
+	// only CheckRedirect set is a reasonable thing to hand this.
+	c := &http.Client{Transport: tr}
+	if cfg.Client != nil {
+		c.CheckRedirect = cfg.Client.CheckRedirect
+	}
+	return c
 }
 
 // NewOpenAICompat builds a provider for any OpenAI-Chat-Completions-compatible

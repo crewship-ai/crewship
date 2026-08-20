@@ -197,3 +197,59 @@ func lookupPrice(provider, model string) modelPrice {
 	}
 	return modelPrice{}
 }
+
+// RateSource names which step of lookupPrice produced a rate.
+type RateSource string
+
+const (
+	// SourceTable is an exact hand-written priceTable row.
+	SourceTable RateSource = "table"
+	// SourceWildcard is a "<provider>/*" row — how ollama and local stay free.
+	SourceWildcard RateSource = "wildcard"
+	// SourceCatalog is the embedded models.dev snapshot.
+	SourceCatalog RateSource = "catalog"
+	// SourceFallback is the per-provider ceiling for a model nothing prices.
+	SourceFallback RateSource = "fallback"
+	// SourceNone is the zero card returned for an unknown provider.
+	SourceNone RateSource = "none"
+)
+
+// ExplainRate returns the rate lookupPrice would use AND which step produced
+// it. It exists because the alternative — deducing the source from outside the
+// package by re-querying RateCard and comparing — is not decidable: priceTable,
+// providerFallback and catalogPrices are unexported, so an inference layer can
+// only compare VALUES, and two steps that happen to agree are indistinguishable.
+//
+// That is not hypothetical. `crewship model price` inferred the source that way
+// and got it wrong twice: every tiered model was reported as hand-verified
+// because the comparison read base rates while the chain billed ceilings, and a
+// hand-written row whose rates equal the provider ceiling (openai/o3-pro) was
+// reported as `fallback` because it is byte-identical to the step below it.
+//
+// Mislabelling where a price came from is worse than showing no label: the four
+// steps carry very different confidence, and "hand-verified against the
+// provider's published prices" is a claim about someone having checked an
+// invoice.
+//
+// This walks the same order as lookupPrice and must stay in step with it —
+// TestExplainRate_AgreesWithLookupPrice pins that.
+func ExplainRate(provider, model string) (modelPrice, RateSource) {
+	prov := strings.ToLower(strings.TrimSpace(provider))
+	mod := strings.ToLower(strings.TrimSpace(model))
+	if prov == "" {
+		return modelPrice{}, SourceNone
+	}
+	if p, ok := priceTable[prov+"/"+mod]; ok {
+		return p, SourceTable
+	}
+	if p, ok := priceTable[prov+"/*"]; ok {
+		return p, SourceWildcard
+	}
+	if p, ok := catalogPrice(prov, mod); ok {
+		return p, SourceCatalog
+	}
+	if p, ok := providerFallback[prov]; ok {
+		return p, SourceFallback
+	}
+	return modelPrice{}, SourceNone
+}

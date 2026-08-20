@@ -318,7 +318,7 @@ func TestRunProviderCheck(t *testing.T) {
 			        "usage":{"prompt_tokens":37,"completion_tokens":4}}`,
 			pricingKey: "ollama", model: "qwen2.5:0.5b",
 			wantOut: 4, wantStop: "end_turn", wantReply: "Pong!",
-			wantSource: rateFromFree,
+			wantSource: rateFromWildcard,
 		},
 		{
 			// The finding the command exists to surface: a backend that
@@ -557,7 +557,7 @@ func TestPrintProviderCheck_DoesNotPanic(t *testing.T) {
 			// The zero-usage path, plus a preset whose pricing key differs.
 			checkTarget: checkTarget{Provider: "ollama-openai", PricingKey: "ollama", Codec: "openai-compat",
 				Endpoint: "http://localhost:11434/v1", Model: "qwen2.5:3b", KeySource: "none"},
-			RateSource: rateFromFree,
+			RateSource: rateFromWildcard,
 		},
 	} {
 		printProviderCheck(res)

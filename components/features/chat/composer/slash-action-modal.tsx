@@ -13,7 +13,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { apiFetch } from "@/lib/api-fetch"
 import { devWarn } from "@/lib/client-log"
-import type { SlashActionSchema } from "@/hooks/use-slash-commands"
+import type { SlashActionSchema, SlashFormField } from "@/hooks/use-slash-commands"
+import {
+  RoutineInputError,
+  isMissingRequired,
+  routineInputsFromValues,
+  routineSlugFromSlashId,
+} from "@/lib/routine-inputs"
 import { FormField } from "../asks/form-field"
 
 /**
@@ -99,11 +105,29 @@ function Form({
   onSuccess,
 }: FormProps) {
   const fields = command.form_schema ?? []
+  // The transcript pre-fill belongs to the four "…from this conversation"
+  // actions and to nothing else. A routine's inputs are its own: the host
+  // seeds `prompt` and `description` with up to 4000 characters of chat
+  // (chat-panel.tsx), and a routine that happens to declare an input by
+  // either of those very ordinary names would have silently had the last
+  // six turns pasted into it, over the top of the default its author
+  // declared. Running a routine is not authoring something from the
+  // conversation, so it does not take the conversation.
+  const isRoutineRun = Boolean(routineSlugFromSlashId(command.id))
+  // The four platform labels are verb phrases — "Add credential", "Create
+  // issue from this conversation" — so using the label as the button reads
+  // as an instruction. A routine's label is whatever its author called the
+  // routine, which is a noun: a button reading "Účetní podklady za měsíc"
+  // names the thing and never says what pressing it does. Routines get the
+  // verb; everything else keeps the label it has always had.
+  const submitLabel = isRoutineRun ? "Run" : command.label
+  const submittingLabel = isRoutineRun ? "Running…" : "Submitting…"
+  const preFill = isRoutineRun ? undefined : contextPreFill
   const [values, setValues] = useState<Record<string, string>>(() => {
     const seed: Record<string, string> = {}
     for (const f of fields) {
-      if (contextPreFill && contextPreFill[f.name]) {
-        seed[f.name] = contextPreFill[f.name]!
+      if (preFill && preFill[f.name]) {
+        seed[f.name] = preFill[f.name]!
       } else if (f.default) {
         seed[f.name] = f.default
       } else {
@@ -124,10 +148,24 @@ function Form({
     // server validates the rest (cron parse, slug shape, ...) and
     // surfaces the error message back via toast.
     for (const f of fields) {
-      if (f.required && !values[f.name]?.trim()) {
+      if (isMissingRequired(f, values[f.name])) {
         toast.error(`${f.name} is required`)
         return
       }
+    }
+    // Build the body BEFORE anything is sent. A routine input that can't
+    // be restored to its declared type is the user's to fix with the form
+    // still in front of them, so it must not become a request — and must
+    // not leave the modal in its submitting state either.
+    let payload: unknown
+    try {
+      payload = buildPayload(command.id, values, fields)
+    } catch (err) {
+      if (err instanceof RoutineInputError) {
+        toast.error(err.message)
+        return
+      }
+      throw err
     }
     setSubmitting(true)
     try {
@@ -135,7 +173,7 @@ function Form({
       const res = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload(command.id, values)),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
         // Log raw body dev-only for operator debugging; surface
@@ -146,7 +184,7 @@ function Form({
         if (body) {
           devWarn(`[slash ${command.id}] server error:`, body)
         }
-        toast.error(humanizeError(res.status, body))
+        toast.error(humanizeError(res.status, body, Boolean(routineSlugFromSlashId(command.id))))
         return
       }
       const result = await res.json().catch(() => null)
@@ -175,7 +213,7 @@ function Form({
           Cancel
         </Button>
         <Button type="submit" disabled={submitting}>
-          {submitting ? "Submitting…" : command.label}
+          {submitting ? submittingLabel : submitLabel}
         </Button>
       </DialogFooter>
     </form>
@@ -192,6 +230,14 @@ function Form({
  */
 function endpointForCommand(id: string, workspaceId: string): string {
   const ws = encodeURIComponent(workspaceId)
+  // Per-routine entries first: their id carries the routine's slug, so
+  // they cannot be a case in the switch below. The `routine.run:` prefix
+  // is what identifies them — the server put it there for this, and
+  // reading it beats inferring an endpoint from a routine name.
+  const slug = routineSlugFromSlashId(id)
+  if (slug) {
+    return `/api/v1/workspaces/${ws}/pipelines/${encodeURIComponent(slug)}/run`
+  }
   switch (id) {
     case "routine":
       // Reachable only if someone re-enables the action: this endpoint
@@ -226,8 +272,21 @@ function endpointForCommand(id: string, workspaceId: string): string {
 
 /** Transform the flat form-values map into the body shape the
  *  matching backend handler expects. Per-command shaping kept in
- *  one switch to keep the modal generic. */
-function buildPayload(id: string, values: Record<string, string>): unknown {
+ *  one switch to keep the modal generic.
+ *
+ *  Throws RoutineInputError when a routine input cannot be restored to
+ *  its declared JSON type (an unparseable object, a word in an integer
+ *  box). The caller catches it and keeps the form open with the offending
+ *  field named — posting the string and letting the server 400 would say
+ *  less, later. */
+function buildPayload(
+  id: string,
+  values: Record<string, string>,
+  fields: SlashFormField[],
+): unknown {
+  if (routineSlugFromSlashId(id)) {
+    return { inputs: routineInputsFromValues(fields, values) }
+  }
   switch (id) {
     case "routine":
       return {
@@ -260,7 +319,29 @@ function buildPayload(id: string, values: Record<string, string>): unknown {
 //
 // `body` is no longer consumed — kept in the signature for caller
 // compatibility but the modal now logs it before calling this fn.
-function humanizeError(status: number, _body: string): string {
+//
+// `isRoutineRun` adds the two statuses the run endpoint answers with
+// that no other slash action produces. Without them, the commonest way
+// a routine run is refused — the author crew has not connected an
+// integration it declares — reached the user as "Request failed (HTTP
+// 422)", while the identical refusal on the routines detail page says
+// which integration and offers a link to connect it. Same refusal, two
+// surfaces; the quiet one was the new one.
+//
+// The specific missing integration/credential is deliberately NOT named
+// here even though the body carries it: the rule at the top of this
+// function is that response bodies do not reach the DOM on this path,
+// and a slash action is not worth making an exception to it. The
+// message says which KIND of thing is missing and where to look.
+function humanizeError(status: number, _body: string, isRoutineRun = false): string {
+  if (isRoutineRun) {
+    switch (status) {
+      case 409:
+        return "This routine isn't runnable right now — it's awaiting approval or has been disabled."
+      case 422:
+        return "This routine needs an integration or credential its crew doesn't have. Open the routine to see which."
+    }
+  }
   switch (status) {
     case 400:
       return "The form values were rejected by the server."

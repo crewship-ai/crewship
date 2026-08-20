@@ -14,8 +14,9 @@ import (
 
 // The auxiliary evaluator slots, runtime-settable.
 //
-// The six slots plus the fallback are the models behind the behavioural watchdog
-// and the four Keeper Reviews sweeps. Their provider/model/timeout came from
+// The six slots plus the fallback are the models behind the behavioural watchdog,
+// the four Keeper Reviews sweeps, the post-run outcome verdict, and memory
+// consolidation. Their provider/model/timeout came from
 // llm.DefaultAuxiliaryModels layered with YAML and CREWSHIP_AUX_<SLOT>_* env —
 // all boot-time. The admin console could show that five evaluators were pinned to
 // anthropic/claude-haiku-4-5 and offered no way to change one.
@@ -72,6 +73,15 @@ var AuxLabels = map[string]string{
 // into every pipeline executor at boot. Both now resolve from this store at use
 // time, the way the four Keeper Reviews slots always did (#1556), so the label
 // was deleted rather than kept describing a limitation that no longer exists.
+//
+// The same is true field by field, which is a separate claim and was separately
+// untrue: timeout_ms reached no evaluator until #1601, and run_summary's reached
+// nothing at all until #1615 — the verdict path resolved the slot and dropped the
+// budget, so that row's number was settable, validated and rendered beside four
+// working ones while bounding nothing. Every row in AuxSlots now drives the
+// subsystem AuxLabels names it after, with one documented exception: the memory
+// consolidation half of curator is batch work and stays on its provider's client
+// timeout rather than the slot's evaluator budget (internal/server/summarizer.go).
 
 // KnownAuxSlot reports whether s is a slot this store will accept a write for.
 func KnownAuxSlot(s string) bool {

@@ -93,9 +93,12 @@ func TestStrandedCrewIsFoundAndDisarmed(t *testing.T) {
 		detected:       DetectResult{Runtime: "old", Socket: oldDaemon, Host: oldDaemon},
 		digestResolver: dockerutil.NewDigestResolver(0, 0),
 	}
-	if err := old.ensureImage(ctx, image); err != nil {
-		t.Fatalf("pull %s on the old daemon: %v", image, err)
-	}
+	// Only the OLD daemon ever pulls: the new one's job in this test is to
+	// sweep, not to run anything. So there is no second provenance to compare
+	// this one against and nothing here to assert — the subject is #1704, an
+	// abandoned container's write access to the shared /crew tree, which is the
+	// same hazard whichever manifest the image resolved to. Logged and dropped.
+	_ = ensureConformanceImage(ctx, t, old, image)
 
 	crew := provider.CrewConfig{ID: "conf1704crew", Slug: "stranded", MemoryMB: 512, CPUs: 1}
 	dirs, err := old.prepareCrewDirs(crew)

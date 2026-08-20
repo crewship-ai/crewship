@@ -100,7 +100,7 @@ func ReconcileUsersByEmail(ctx context.Context, tx *sql.Tx, dump *DBDump) (map[s
 		if len(rows) == 0 || table == "users" {
 			continue
 		}
-		edges, err := tableFKEdgesTx(ctx, tx, table)
+		edges, err := tableFKEdges(ctx, tx, table)
 		if err != nil {
 			// Table doesn't exist on target — skip. Real driver
 			// errors will surface on the INSERT pass.

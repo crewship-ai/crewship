@@ -225,9 +225,12 @@ func TestRedactURL(t *testing.T) {
 		// No "@" at all is the fast path; an "@" that is not userinfo must
 		// survive byte-identical.
 		{"at in the path", "http://host/p@th", "http://host/p@th"},
-		// Unparseable: returned unchanged rather than blanked, so the typo
-		// that is the actual problem stays visible.
-		{"unparseable", "http://a b@c", "http://a b@c"},
+		// Unparseable, and it still has an "@": the host survives so the typo
+		// stays visible, but whatever preceded the "@" is replaced. url.Parse
+		// fails here because of the space, not because of the userinfo — the
+		// old expectation returned this verbatim, which printed the credential
+		// in the one case the redaction exists for.
+		{"unparseable", "http://a b@c", "http://redacted@c"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -518,5 +521,30 @@ func TestProviderCommandBuildsCLIOnly(t *testing.T) {
 	cmd.Env = os.Environ()
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build -tags clionly: %v\n%s", err, combined)
+	}
+}
+
+// url.Parse fails for reasons unrelated to userinfo — a raw space is enough —
+// and the credential in such a string is no less real. Returning it unchanged
+// printed the secret.
+func TestRedactURL_UnparseableStillRedacts(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{"space in host", "http://user:supersecret@a b/v1"},
+		{"space in userinfo", "https://us er:supersecret@host/v1"},
+		{"control character", "http://user:supersecret@ho\x7fst/v1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactURL(tc.raw)
+			if strings.Contains(got, "supersecret") {
+				t.Errorf("redactURL(%q) = %q — leaked the credential", tc.raw, got)
+			}
+			if !strings.Contains(got, "redacted") {
+				t.Errorf("redactURL(%q) = %q — want the redaction marker so the reader knows something was removed", tc.raw, got)
+			}
+		})
 	}
 }

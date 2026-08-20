@@ -29,9 +29,16 @@ export function buildPipelineActionRequest(
   slug: string,
   action: PipelineAction,
   _routine: RoutineActionContext,
+  /** This run's inputs, already restored to their declared JSON types by
+   *  lib/routine-inputs.ts. Omitted for a routine that declares none, in
+   *  which case the empty map is the honest body — there is nothing to
+   *  send. It used to be the ONLY body: Run posted `{"inputs":{}}`
+   *  unconditionally, so a routine whose argument was which month to
+   *  bill could only ever be run at its default month. */
+  inputs: Record<string, unknown> = {},
 ): PipelineActionRequest {
   return {
     url: `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`,
-    body: { inputs: {} },
+    body: { inputs },
   }
 }

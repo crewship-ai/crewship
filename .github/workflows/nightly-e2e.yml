@@ -123,13 +123,30 @@ env:
   # nightly. This list is SHORT on purpose — see the measured numbers under
   # DRIFT. A one-spec gate that is true beats a seven-spec gate that is red
   # every night for reasons nobody will read.
+  #
+  # routine-run-inputs.spec.ts and slash-run-routine-chat.spec.ts arrived with
+  # #1987 (the routine-inputs form and the chat slash palette). They are in the
+  # GATE bucket because they were re-run here before being placed, not because
+  # they are new: all 7 tests pass against a seeded instance under
+  # `playwright.nightly.config.ts` — first at `--retries=0 --workers=1`, then
+  # alongside create-crew-wizard at the nightly's own `CI=1 --workers=2`, where
+  # the full 15-test bucket is green. Nothing in either spec asserts a drifted
+  # surface: each seeds its own agentless probe routine through the public API,
+  # asserts on that run's recorded output, and deletes the routine in afterAll.
+  # They are also the ONLY automated coverage of #1987's feature — no PR job
+  # selects them (`playwright.pr.config.ts` matches `pr-contract.spec.ts`
+  # only) — so parking them in DRIFT would ship a feature with a test suite
+  # that is never allowed to fail.
   GATE_SPECS: >-
     e2e/create-crew-wizard.spec.ts
+    e2e/routine-run-inputs.spec.ts
+    e2e/slash-run-routine-chat.spec.ts
   #
   # DRIFT: run, reported, never fatal. Measured locally against a seeded
   # instance (main config, per spec: passed / failed):
   #
-  #   create-crew-wizard          7 /  0   ← the whole gate bucket
+  #   create-crew-wizard          7 /  0   ← gate bucket (with the two #1987
+  #                                          specs measured separately above)
   #   feedback                    4 /  2
   #   crews-redesign              5 / 11
   #   crew-journal                3 /  1
@@ -271,10 +288,16 @@ jobs:
             echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
 
-      - name: Install Playwright browsers
-        # --with-deps pulls the apt packages chromium needs on the hosted
-        # runner; without it the headless launch dies on .so lookups.
-        run: pnpm exec playwright install --with-deps chromium
+      # Cached, bounded, and with the apt half off the critical path — see
+      # .github/actions/setup-playwright-browser and #1998. The step cap (12)
+      # is above the action's 12m30s worst case and well below this job's 40,
+      # so a wedged Ubuntu mirror fails as itself instead of reaping the job
+      # and reporting it as `cancelled`.
+      - name: Install Playwright browsers (cached)
+        timeout-minutes: 14
+        uses: ./.github/actions/setup-playwright-browser
+        with:
+          browser: chromium
 
       - name: Start crewship server in background
         env:
@@ -402,8 +425,12 @@ jobs:
             echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
 
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+      # Same as the gate job — see .github/actions/setup-playwright-browser.
+      - name: Install Playwright browsers (cached)
+        timeout-minutes: 14
+        uses: ./.github/actions/setup-playwright-browser
+        with:
+          browser: chromium
 
       - name: Start crewship server in background
         env:

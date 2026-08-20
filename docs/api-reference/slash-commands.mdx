@@ -8,9 +8,17 @@ tag: Experimental
 
 The slash command registry is a server-driven catalog of actions that can be
 launched from the chat UI palette and the CLI repl. Each entry carries a
-`capability`; the handler intersects the static catalog with the caller's
-capability set and returns only the entries the caller is allowed to invoke --
-entries the caller can't use never reach the wire.
+`capability`; the handler intersects the catalog with the caller's capability
+set and returns only the entries the caller is allowed to invoke -- entries the
+caller can't use never reach the wire.
+
+The catalog has two halves. The **static** half is the four platform actions
+below, the same in every workspace. The **per-routine** half is built from the
+workspace's own routines: a routine that carries a
+[`slash` block](/manifest/routine#slash-offering-a-routine-as-a-command) in its
+definition is offered as `/<slug>`, opening a form built from its declared
+inputs and running it with what the user fills in. See
+[Running a routine](#running-a-routine).
 
 The endpoint requires authentication and workspace context (the slash palette
 is workspace-scoped). A caller with no relevant grants gets an empty array,
@@ -72,7 +80,20 @@ order.
 | `name` | string | Field name |
 | `type` | string | Renderer type (open set; unknown types fall back to `text`) |
 | `required` | boolean? | Whether the field is required |
-| `default` | string? | Default value |
+| `default` | string? | Default value, always as a string |
+| `value_type` | string? | JSON type to send back: `string`, `integer`, `number`, `boolean`, `array`, `object`. Absent means `string`. |
+| `help` | string? | Rendered under the field. Carries a routine input's `description`; the static catalog's fields have none. |
+
+`type` and `value_type` answer different questions, and a client needs both.
+`type` is the **widget** to draw; `value_type` is the **JSON type the server
+expects back**. They are not derivable from each other -- a routine's `array`
+input and an issue's `description` both draw a `textarea`, and only one of them
+must reach the server as a parsed JSON array.
+
+`default` is always a string because a form field's value is a string. A
+non-string default is formatted losslessly on the way out (`42`, not `42.0`;
+`true`, not `True`; arrays and objects as compact JSON) and parsed back via
+`value_type`.
 
 ### Static Catalog Entries
 
@@ -85,6 +106,100 @@ capability):
 | `issue` | Create an issue from the conversation | `issue.create` |
 | `skill` | Create a skill from the conversation | `skill.create` |
 | `credential` | Add a credential | `credential.create` |
+
+---
+
+## Running a routine
+
+A routine that opts in with a `slash` block appears as an extra catalog entry:
+
+```json
+{
+  "id": "routine.run:msn-etn-podklady",
+  "label": "Monthly accounting pack",
+  "label_cs": "Účetní podklady za měsíc",
+  "icon": "receipt",
+  "capability": "routine.run",
+  "form_schema": [
+    { "name": "obdobi", "type": "text", "value_type": "string" },
+    { "name": "ucetnictvi_root", "type": "text", "value_type": "string", "default": "Unify - Účetnictví" },
+    { "name": "vypis_odesilatel", "type": "text", "value_type": "string", "default": "info@rb.cz" }
+  ]
+}
+```
+
+**The id and the typed command are different strings.** The id is
+`routine.run:<slug>`; the command a user types is the bare slug --
+`/msn-etn-podklady`. The prefix exists for the dispatcher: both clients read it
+to know the entry runs a routine, rather than inferring an endpoint from a name
+a routine author chose. Strip it before rendering the command anywhere a person
+will read it.
+
+**Dispatch.** An entry whose id carries the prefix posts to that routine's run
+endpoint with the form's values as `inputs`:
+
+```
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run
+{"inputs": {"obdobi": "2026-07", "ucetnictvi_root": "Unify - Účetnictví"}}
+```
+
+Two rules for building that map:
+
+- **Restore each value to its `value_type`.** Post an `integer` as a number.
+  Inputs reach a `code` step with their original types, so a routine
+  evaluating `inputs.limit > 20` fails the run outright when `42` arrives as
+  `"42"`. Nothing catches it earlier: there is no run-time input validation,
+  so the declared `type` is honoured by whatever consumes the value and by
+  nothing before it.
+- **Omit an empty value; never send `""`.** The routine's own default then
+  applies server-side, which is the only place that knows what it is -- for
+  `msn-etn-podklady`, an empty `obdobi` means "the previous month", and `""`
+  would replace that with a blank period. A `boolean` is the exception and
+  always sends: its control is a checkbox with two states, so its empty value
+  is a deliberate `false` rather than "leave this alone".
+
+### Which routines appear
+
+A routine reaches the catalog only when **all** of these hold:
+
+| Condition | Otherwise |
+|---|---|
+| Its definition has `slash.enabled: true` | Absent or `false` keeps it out. Routines written before this block existed are unaffected. |
+| Its governance status is runnable (`active`) | A `proposed` or `disabled` routine would only be a button that `409`s. |
+| The caller may run routines | See the capability note below. |
+| Its slug does not collide with a static `id` | The static catalog wins; the routine is dropped and the collision logged. Rename the routine to reclaim it. |
+
+At most 50 routine entries are returned, ordered by invocation count, so what
+survives a truncation is what people actually run.
+
+### Capability
+
+Routine entries require **`routine.run`** -- distinct from `routine.create`,
+which authors a routine rather than invoking one. It is in the `power` and
+`admin` bundles, and an admin can grant it alone:
+
+```bash
+crewship workspace member capabilities grant <user> routine.run
+```
+
+`routine.run` is granted per membership and is **not floored by role**: an
+admin can grant it to a `VIEWER`, and that VIEWER can then run routines. This
+matches how `credential.create` and the other capabilities already behave — the
+whole point of the layer is that it reaches past the role tier — but it is
+worth knowing before granting it, because a routine run spends money and
+touches the crew's integrations.
+
+A caller at `MANAGER` or above sees routine entries on role alone. That is not
+redundant with the capability: migration v109 backfilled every membership's
+capability column before `routine.run` existed, so an admin on an
+already-migrated database holds `routine.create` and not `routine.run` while
+still clearing the run endpoint's role gate. The catalog admits on role **or**
+capability so it offers exactly what the endpoint accepts.
+
+The same rule gates the endpoint itself -- `routine.run` grants the right to
+*ask*, and nothing more. Governance status, the integrations, resources and
+credentials preconditions, and the routine's spend caps all still apply, and
+refuse a capability-admitted member exactly as they refuse an admin.
 
 | Status | Condition |
 |---|---|
