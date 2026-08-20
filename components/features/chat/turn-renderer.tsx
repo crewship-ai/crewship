@@ -478,16 +478,19 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
  *  and the metadata key count for a payload whose text never changes at all —
  *  a `system_init` turn is all metadata and no content. */
 export function turnContentKey(turn: ChatTurn): string {
+  // Object.keys does not invoke getters, so metadata that throws the moment it
+  // is READ is still safe to count.
+  const keyCount = (value: unknown) =>
+    value && typeof value === "object" ? Object.keys(value).length : 0
   try {
     const parts = Array.isArray(turn.parts) ? turn.parts : []
     const marks = parts.map((p) => {
-      // Object.keys does not invoke getters, so metadata that throws when read
-      // is still safe to count here.
-      const metaKeys = p?.metadata && typeof p.metadata === "object" ? Object.keys(p.metadata).length : 0
       const at = p?.timestamp instanceof Date ? p.timestamp.getTime() : 0
-      return `${p?.id ?? ""}:${p?.content?.length ?? 0}:${p?.isStreaming ? 1 : 0}:${metaKeys}:${at}`
+      return `${p?.id ?? ""}:${p?.content?.length ?? 0}:${p?.isStreaming ? 1 : 0}:${keyCount(p?.metadata)}:${at}`
     })
-    return `${parts.length}:${turn.isStreaming ? 1 : 0}|${marks.join("|")}`
+    // The turn's own metadata is rendered too (the ask-form envelope), so it
+    // belongs in the key for the same reason the parts' does.
+    return `${parts.length}:${turn.isStreaming ? 1 : 0}:${keyCount(turn.metadata)}|${marks.join("|")}`
   } catch {
     // Unreadable is itself a state, and a constant one: the boundary then
     // behaves as it would with an id-only key, which is the old behaviour for

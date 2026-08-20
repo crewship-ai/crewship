@@ -247,6 +247,17 @@ describe("the resetKeys trap — a turn that threw must recover on new content",
     expect(turnContentKey(fixed)).not.toBe(before)
   })
 
+  it("moves the content key when the turn's own metadata arrives", () => {
+    // The ask-form envelope rides on the turn, not on a part, and it is
+    // rendered — so a turn that threw before it landed has to reset when it does.
+    const before = turnContentKey(userTurn("u1", "run the deploy"))
+    const withEnvelope: ChatTurn = {
+      ...userTurn("u1", "run the deploy"),
+      metadata: { ask_form: "deploy" },
+    }
+    expect(turnContentKey(withEnvelope)).not.toBe(before)
+  })
+
   it("never throws on the payload that made the turn throw", () => {
     // The key is computed OUTSIDE the boundary. A throw here would escape to
     // the route boundary — the failure this whole change exists to prevent.
