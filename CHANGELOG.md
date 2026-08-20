@@ -279,8 +279,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   manifest: the container ran the old image, and the `provisioning.step` journal
   attested the newly pulled digest as verified. The journal half is fixed first
   — the digest recorded is now read back off disk, so a run is never attributed
-  to a manifest it did not execute, and `{}` is recorded when nothing answers to
-  the tag at all.
+  to a manifest it did not execute, and no digest at all is recorded when the
+  daemon answers 404 for the tag. A read-back that *fails* is not read as a 404:
+  a timeout says nothing about what the tag resolves to, so the decision falls
+  back on what was proved before the pull.
 
   Execution is now fixed too. That state is bit-for-bit the state a **failed
   pull** over a stale local copy reaches, which has refused to start since

@@ -929,10 +929,32 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 		defer postCancel()
 		post, postErr := p.client.ImageInspect(postCtx, ref)
 		if postErr != nil {
-			// Nothing answers to the tag: the image is present but unnamed, the
-			// case the best-effort comment above describes. Record nothing and
-			// let the caller's own daemon call fail with the real error — this
-			// path is not the one that gets to stop a fleet.
+			// A 404 is an ANSWER: nothing on this host answers to the tag, so
+			// there is no stale image to run and the pulled one is merely
+			// unnamed — the case the best-effort comment above describes.
+			// Record nothing and let the caller's own daemon call fail with the
+			// real error; this path does not get to stop a fleet.
+			//
+			// Any other error is not an answer, it is a failure to look, and
+			// reading it as "absent" would wave through the very state the
+			// branch below refuses. So fall back on what was already proved
+			// BEFORE the pull: reaching the pull with localPresent means the
+			// registry HEAD succeeded and the local copy did not carry its
+			// answer, and the re-tag that would have fixed that just failed.
+			// The pre-pull inspect is therefore still the best evidence of what
+			// `ref` names, and it says stale. Refusing here rests on that proof,
+			// not on the unknown — an unreadable daemon is not a licence to
+			// start a container we cannot vouch for.
+			if !cerrdefs.IsNotFound(postErr) && localPresent {
+				return p.resolveStaleImageDrift(staleImageDrift{
+					ref:            ref,
+					localDigest:    dockerutil.LocalRepoDigest(inspect.RepoDigests, ref),
+					expectedDigest: remoteDigest,
+					happened:       "the local tag could not be moved onto the pulled manifest, and re-reading the tag afterwards failed too",
+					remedy:         "the pulled manifest is already on disk, name it with `docker tag " + pullRef + " " + ref + "` once the daemon answers again",
+					cause:          fmt.Errorf("re-tag: %w; read-back: %w", retagErr, postErr),
+				})
+			}
 			return imageProvenance{}, nil
 		}
 		if dockerutil.RepoDigestsContain(post.RepoDigests, remoteDigest) {

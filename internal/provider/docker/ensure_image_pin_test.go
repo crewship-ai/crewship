@@ -341,6 +341,103 @@ func TestEnsureImage_FailedRetag_StaleTagFailsClosed(t *testing.T) {
 	}
 }
 
+// TestEnsureImage_FailedRetag_UnreadableReadBackIsNotAbsence separates the two
+// things a failed read-back can mean, which the first cut of #2019 conflated.
+//
+// After a failed re-tag we ask the daemon what `ref` resolves to. A 404 is an
+// ANSWER — nothing answers to the tag, there is no stale image to run — and
+// keeps the deliberate pass-through to ContainerCreate. A timeout or a 500 is
+// not an answer, it is a failure to look, and treating it as absence would let
+// a struggling daemon wave through exactly the state the fail-closed branch
+// exists to refuse.
+//
+// The evidence for refusing does not come from the unknown, it comes from
+// before the pull: reaching the pull with a local copy present means the
+// registry HEAD succeeded and the local copy did not carry its digest, and the
+// re-tag that would have fixed that just failed. So the pre-pull inspect is
+// still the best reading of what `ref` names, and it says stale.
+func TestEnsureImage_FailedRetag_UnreadableReadBackIsNotAbsence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		localPresent bool // was a stale copy of the tag on disk before the pull?
+		wantErr      bool
+		why          string
+	}{
+		{
+			name:         "stale copy on disk and the read-back is unreadable",
+			localPresent: true,
+			wantErr:      true,
+			why:          "the pre-pull inspect already proved drift and the re-tag failed to fix it; an unreadable daemon does not un-prove that",
+		},
+		{
+			name:         "nothing was on disk and the read-back is unreadable",
+			localPresent: false,
+			wantErr:      false,
+			why:          "there was no stale image to inherit the tag, so there is nothing to refuse — ContainerCreate surfaces the real error",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var mu sync.Mutex
+			inspects := 0
+			var ref string
+			p, ref := newCovImageProvider(t, pinRemoteDigest, func(w http.ResponseWriter, r *http.Request) {
+				path := r.URL.Path
+				switch {
+				case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/tag"):
+					http.Error(w, `{"message":"conflict: cannot restore tag"}`, http.StatusInternalServerError)
+				case strings.Contains(path, "/images/") && strings.HasSuffix(path, "/json"):
+					mu.Lock()
+					inspects++
+					first := inspects == 1
+					mu.Unlock()
+					if !first {
+						// The post-tag read-back: the daemon is struggling and
+						// cannot say what the tag resolves to. NOT a 404.
+						http.Error(w, `{"message":"daemon overloaded"}`, http.StatusInternalServerError)
+						return
+					}
+					if !tc.localPresent {
+						http.Error(w, `{"message":"No such image"}`, http.StatusNotFound)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"Id":          "sha256:local",
+						"RepoDigests": []string{strings.TrimSuffix(ref, ":tag") + "@" + pinLocalDigest},
+					})
+				case strings.HasSuffix(path, "/images/create"):
+					_, _ = w.Write([]byte("{}"))
+				default:
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			})
+
+			prov, err := p.ensureImage(context.Background(), ref)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want a refusal (%s); got %+v, nil error", tc.why, prov)
+				}
+				if !strings.Contains(err.Error(), pinLocalDigest) || !strings.Contains(err.Error(), staleImageEscapeHatchEnv) {
+					t.Errorf("the refusal must stay actionable — digest and escape hatch: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("must not fail (%s): %v", tc.why, err)
+			}
+			if prov.Digest != "" || prov.Verified {
+				t.Errorf("provenance = %+v, want empty — nothing confirmed anything here", prov)
+			}
+		})
+	}
+}
+
 // TestEnsureImage_FailedRetag_StillVerifiesWhenTheTagCarriesTheDigest is the
 // other half of #2006, and the only branch of the read-back that hands out
 // Verified:true.

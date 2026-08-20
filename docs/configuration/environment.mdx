@@ -113,7 +113,9 @@ or set CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1 to accept the stale copy host-wide
 
 This route is the more recoverable of the two: the manifest you wanted is
 already on disk, it just has no name, which is why the error hands you the
-`docker tag` that fixes it properly.
+`docker tag` that fixes it properly. Digests are abbreviated (`sha256:aaaa…`)
+in the examples above for width — the real error prints them in full, and the
+`docker tag` line it gives you is runnable as printed.
 
 **What the opt-out does and does not relax.** With
 `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1` both routes proceed, log a warning naming
@@ -122,10 +124,17 @@ both digests, and journal the **local** digest — what actually ran — with
 relaxes the audit record: a `provisioning.step` row never claims a digest that
 did not run, opt-out or not.
 
-One case is deliberately left alone: if the re-tag fails and **nothing** answers
-to the tag afterwards, there is no stale image to run and no digest to record.
-Crewship records nothing and lets the daemon's own error surface at container
+One case is deliberately left alone: if the re-tag fails and the daemon answers
+**404** for the tag afterward, there is no stale image to run and no digest to
+record. The `provisioning.step` row is still written — it just carries no
+`digest` and `pinned: false` — and the daemon's own error surfaces at container
 create, which is where it is most legible.
+
+A read-back that *fails* rather than answering 404 is not the same thing and is
+not treated as one: a timeout or a busy daemon says nothing about what the tag
+resolves to, so Crewship falls back on what it proved before the pull. If a
+local copy was present then (which is what sent it to the pull in the first
+place), the tag is still the stale one and the start is refused.
 
 Locally built devcontainer cache images (`crewship-cache:*`) exist in no
 registry and therefore have no digest. Their `provisioning.step` rows omit the
