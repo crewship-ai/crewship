@@ -587,6 +587,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Cancelling a devcontainer build on macOS could leak the process tree
+  forever (#2030).** `AppleContainerBuilder.Build` left `cmd.Cancel` at
+  `os/exec`'s default, `Process.Kill()` — the direct `container` process and
+  nothing under it — while its own watchdog killed the whole process group.
+  Both woke on the same cancellation, and when exec's kill landed first the
+  child could already be an exited, unreaped zombie by the time the group kill
+  asked which group it was in. Darwin cannot answer that: XNU's `getpgid(2)`
+  goes through `proc_find`, which excludes exited processes, so it returns
+  `ESRCH` where Linux still reports the group. The kill then fell back to
+  re-killing the corpse, the CLI's helpers kept the write end of stdout, the
+  log scanner blocked on a pipe nobody would ever close, and `cmd.Wait()` was
+  never reached — the watchdog's cancel branch stopped ticking after that one
+  kill, so there was no idle-timeout rescue either. A cancelled provision leaked
+  the goroutine, the pipe and the process tree indefinitely.
+
+  The group id is now derived from what the command was started with — `Setpgid`
+  makes the child its own group leader, so pgid == pid for the pid's whole life,
+  including as a zombie — instead of being looked up at kill time, and `Cancel`
+  is that same group kill, so exec no longer sends a second, racing signal. The
+  watchdog stays armed after cancelling and re-signals until the pipe actually
+  closes. `internal/provider/apple`'s copy of the helper had the same
+  lookup-at-kill-time shape on its timeout path and got the same fix. The
+  regression tests reap the direct child before killing, which makes Linux's
+  `getpgid` answer `ESRCH` too — so a macOS-only hang is now provable on the
+  Linux runners that gate every PR.
 - **"Waiting on you" counted things nobody was waiting on (#1876).**
   `scopeOf` — the classifier the Activity rail, feed and status segments all
   read — put every human-source journal row in the `waiting` bucket. But the
