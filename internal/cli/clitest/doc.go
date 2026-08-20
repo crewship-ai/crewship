@@ -46,6 +46,35 @@
 // commands against the same stub can still assert call counts
 // without races flagging.
 //
+// # Always talk to a stub through StubServer.Client
+//
+// Never reach a [StubServer] with http.DefaultClient, and never with
+// the http.Get / http.Post / http.Head package-level wrappers — those
+// ARE http.DefaultClient. Use [StubServer.Client], which is backed by
+// the server's own private transport:
+//
+//	resp, err := stub.Client().Get(stub.URL() + "/api/v1/agents")
+//
+// and when driving a real [internal/cli.Client], hand it the same one:
+//
+//	c := cli.NewClient(stub.URL(), token, wsID)
+//	c.HTTPClient = stub.Client()
+//
+// This is not style. httptest.Server.Close — which [StubServer.Close]
+// delegates to — calls http.DefaultTransport.CloseIdleConnections() as
+// a courtesy to the common case. In a parallel package that means every
+// sibling's `defer stub.Close()` empties the shared connection pool
+// underneath any request currently in flight. net/http transparently
+// replays GET/HEAD/OPTIONS/TRACE, so the damage stays invisible until a
+// DELETE, POST, PATCH or PUT is hit, which fails with "net/http:
+// HTTP/1.x transport connection broken: http: CloseIdleConnections
+// called". That was #2041; TestStubServer_ConnPoolSurvivesSiblingClose
+// guards it.
+//
+// Note that cli.NewClient leaves Transport nil — i.e.
+// http.DefaultTransport — so a cli.Client pointed at a stub without the
+// assignment above inherits exactly the same exposure.
+//
 // # Stability
 //
 // This is INTERNAL test tooling. The exported surface MAY change

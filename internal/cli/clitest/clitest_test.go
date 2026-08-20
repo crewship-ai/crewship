@@ -17,7 +17,7 @@ func TestStubServer_HappyPath(t *testing.T) {
 	s.OnPost("/api/v1/agents", JSONResponse(201, map[string]string{"id": "a3"}))
 
 	// GET
-	resp, err := http.Get(s.URL() + "/api/v1/agents")
+	resp, err := s.Client().Get(s.URL() + "/api/v1/agents")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestStubServer_HappyPath(t *testing.T) {
 	}
 
 	// POST
-	resp2, err := http.Post(s.URL()+"/api/v1/agents", "application/json", strings.NewReader(`{"name":"X"}`))
+	resp2, err := s.Client().Post(s.URL()+"/api/v1/agents", "application/json", strings.NewReader(`{"name":"X"}`))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestStubServer_FallbackIs404(t *testing.T) {
 	s := NewStubServer()
 	defer s.Close()
 
-	resp, err := http.Get(s.URL() + "/unregistered")
+	resp, err := s.Client().Get(s.URL() + "/unregistered")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestStubServer_QueryStringIgnored(t *testing.T) {
 	defer s.Close()
 
 	s.OnGet("/api/v1/agents", JSONResponse(200, []string{"ok"}))
-	resp, err := http.Get(s.URL() + "/api/v1/agents?limit=10&offset=0")
+	resp, err := s.Client().Get(s.URL() + "/api/v1/agents?limit=10&offset=0")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -98,12 +98,13 @@ func TestStubServer_CallsFor(t *testing.T) {
 	s.OnPost("/api/v1/agents", JSONResponse(201, map[string]string{"id": "a1"}))
 	s.OnGet("/api/v1/agents", JSONResponse(200, []string{}))
 
-	// Each call's body must be closed to avoid leaking the underlying
-	// connection back to the http transport pool — t.Parallel tests
-	// that re-use the same default transport will otherwise eventually
-	// run into "too many open files" on CI.
+	// Each call's body must be closed so the underlying connection goes
+	// back to the pool rather than leaking; otherwise a package this
+	// parallel eventually runs into "too many open files" on CI.
+	// Requests go through s.Client() — see StubServer.Client — so the
+	// pool in question is this server's own, not the process-global one.
 	postOnce := func() {
-		resp, err := http.Post(s.URL()+"/api/v1/agents", "application/json", strings.NewReader(`{}`))
+		resp, err := s.Client().Post(s.URL()+"/api/v1/agents", "application/json", strings.NewReader(`{}`))
 		if err != nil {
 			t.Fatalf("POST: %v", err)
 		}
@@ -111,7 +112,7 @@ func TestStubServer_CallsFor(t *testing.T) {
 	}
 	postOnce()
 	postOnce()
-	resp, err := http.Get(s.URL() + "/api/v1/agents")
+	resp, err := s.Client().Get(s.URL() + "/api/v1/agents")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -135,7 +136,7 @@ func TestStubServer_RouteReplacement(t *testing.T) {
 	s.OnGet("/x", JSONResponse(200, "first"))
 	s.OnGet("/x", JSONResponse(500, "second"))
 
-	resp, err := http.Get(s.URL() + "/x")
+	resp, err := s.Client().Get(s.URL() + "/x")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestStubServer_Reset(t *testing.T) {
 	s := NewStubServer()
 	defer s.Close()
 	s.OnGet("/x", JSONResponse(200, "ok"))
-	if r, err := http.Get(s.URL() + "/x"); err == nil {
+	if r, err := s.Client().Get(s.URL() + "/x"); err == nil {
 		r.Body.Close()
 	}
 
@@ -159,7 +160,7 @@ func TestStubServer_Reset(t *testing.T) {
 		t.Errorf("post-Reset Calls = %d, want 0", got)
 	}
 	// route should be gone too
-	resp, err := http.Get(s.URL() + "/x")
+	resp, err := s.Client().Get(s.URL() + "/x")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestStubServer_ResetCallsKeepsRoutes(t *testing.T) {
 	s := NewStubServer()
 	defer s.Close()
 	s.OnGet("/x", JSONResponse(200, "ok"))
-	if r, err := http.Get(s.URL() + "/x"); err == nil {
+	if r, err := s.Client().Get(s.URL() + "/x"); err == nil {
 		r.Body.Close()
 	}
 
@@ -182,7 +183,7 @@ func TestStubServer_ResetCallsKeepsRoutes(t *testing.T) {
 	if got := len(s.Calls()); got != 0 {
 		t.Errorf("ResetCalls should clear calls, got %d", got)
 	}
-	resp, err := http.Get(s.URL() + "/x")
+	resp, err := s.Client().Get(s.URL() + "/x")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -204,7 +205,7 @@ func TestStubServer_ConcurrentRequests(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp, _ := http.Get(s.URL() + "/x")
+			resp, _ := s.Client().Get(s.URL() + "/x")
 			if resp != nil {
 				resp.Body.Close()
 			}
@@ -222,7 +223,7 @@ func TestErrorResponse_StandardEnvelope(t *testing.T) {
 	defer s.Close()
 	s.OnGet("/x", ErrorResponse(403, "Forbidden: requires OWNER"))
 
-	resp, err := http.Get(s.URL() + "/x")
+	resp, err := s.Client().Get(s.URL() + "/x")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -246,7 +247,7 @@ func TestEmptyResponse_NoBody(t *testing.T) {
 	s.OnDelete("/x", EmptyResponse(204))
 
 	req, _ := http.NewRequest("DELETE", s.URL()+"/x", nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.Client().Do(req)
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
 	}
@@ -343,7 +344,7 @@ func TestEdgeCases_AllInstallable(t *testing.T) {
 			localStub := NewStubServer()
 			defer localStub.Close()
 			localStub.OnGet("/case", ErrorResponse(ec.Status, ec.Description))
-			resp, err := http.Get(localStub.URL() + "/case")
+			resp, err := localStub.Client().Get(localStub.URL() + "/case")
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
