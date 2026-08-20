@@ -99,9 +99,48 @@ func NewStubServer() *StubServer {
 // [internal/cli.NewClient].
 func (s *StubServer) URL() string { return s.srv.URL }
 
+// Client returns an *http.Client dedicated to this server. ALWAYS use
+// it to talk to a StubServer — never http.DefaultClient, and never the
+// http.Get / http.Post / http.Head package-level wrappers, which are
+// http.DefaultClient in disguise.
+//
+// Rolling your own client is only safe if you also give it its own
+// Transport. A nil Transport means http.DefaultTransport, so
+// &http.Client{} — or an http.Client that only sets Timeout — lands
+// back on the shared pool and is no better than http.DefaultClient.
+// Prefer this method; it is already correct.
+//
+// The reason is [StubServer.Close]. httptest.Server.Close does not
+// only shut down its own listener; it also calls
+// http.DefaultTransport.CloseIdleConnections(), on the stdlib's
+// assumption that "most users of httptest.Server will be using the
+// standard transport". So in a package with parallel tests, every
+// sibling's `defer s.Close()` wipes the process-global connection pool
+// out from under whatever else is in flight. If the wipe lands
+// mid-request on a verb net/http will not replay — DELETE, POST, PATCH,
+// PUT; see Request.isReplayable, which only replays GET/HEAD/OPTIONS/
+// TRACE — the request fails with "net/http: HTTP/1.x transport
+// connection broken: http: CloseIdleConnections called". That was #2041.
+//
+// The client returned here rides the server's own private transport, so
+// no other server's Close can touch its pooled connections.
+//
+// To point a [internal/cli.Client] at the stub, assign it too:
+//
+//	c := cli.NewClient(stub.URL(), token, wsID)
+//	c.HTTPClient = stub.Client()
+//
+// cli.NewClient leaves Transport nil, which means http.DefaultTransport
+// — the same shared pool, and the same exposure.
+func (s *StubServer) Client() *http.Client { return s.srv.Client() }
+
 // Close shuts down the underlying httptest.Server. Always defer
 // this; leaking httptest servers slowly exhausts the test process's
 // listener budget.
+//
+// Note that this also closes idle connections on http.DefaultTransport
+// — that is httptest.Server.Close's behaviour, not ours, and it is why
+// [StubServer.Client] exists. See its doc comment.
 func (s *StubServer) Close() { s.srv.Close() }
 
 // On registers a handler for a method + path tuple. Multiple registrations
