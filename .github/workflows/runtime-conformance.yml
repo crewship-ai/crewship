@@ -74,6 +74,12 @@ jobs:
       - name: Provider contract (live)
         run: go test -tags conformance -run TestDockerProvider_LiveContractSuite -v -count=1 ./internal/provider/docker/
 
+  # NOTE: the alert job at the bottom of this file gates on the `docker` job
+  # only. Podman below 5 is known-red for a measured reason (see the comment
+  # above the podman job), and a nightly that files an issue every night for a
+  # reason that is true but not new is a nightly nobody reads — the failure
+  # mode nightly-e2e.yml's gate/drift split exists to avoid.
+
   # There is deliberately NO leg for a current podman here, and the reason is
   # worth writing down so nobody re-adds one.
   #
@@ -187,3 +193,124 @@ jobs:
       # had never exec'd against (#1779).
       - name: Provider contract (live)
         run: go test -tags conformance -run TestDockerProvider_LiveContractSuite -v -count=1 ./internal/provider/docker/
+
+  # ── A nightly nobody notices is worth nothing ──
+  #
+  # This workflow ran 25 times, failed 23 of them and was never green, over 18
+  # days — and produced no issue, no assignee and no notification, because it
+  # had no alert step while `Nightly E2E` and `Nightly Harness` both do
+  # (#2003). The last 13 days of that were a build break: #1827 gave
+  # `ensureImage` a second return value and four conformance-tagged call sites
+  # were never updated, which nothing compiled. `ci.yml` now vets the tag on
+  # every pull request so that specific cause cannot recur; this job is what
+  # makes the NEXT cause visible.
+  #
+  # WHAT GATES, AND WHY NOT EVERYTHING. The gate is the `docker` leg alone.
+  # Ubuntu ships podman 4.9.3, which drops supplementary GIDs that have no
+  # /etc/group entry — measured, reported by the provider at startup via
+  # knownRuntimeGaps, and not fixable from here. Gating on the podman legs
+  # would file an issue every single night for a reason that is true, known and
+  # unchanged, which is exactly how a real alert gets muted. Their result is
+  # reported in the issue body instead, so a NEW podman failure is still
+  # readable by whoever opens it.
+  conformance-alert:
+    name: Runtime conformance alert
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [docker, podman]
+    if: always() && github.event_name == 'schedule'
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: File, update, or close the alert issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MARKER: "<!-- crewship:runtime-conformance-alert -->"
+          TITLE: "Runtime conformance failed on main"
+          DOCKER: ${{ needs.docker.result }}
+          PODMAN: ${{ needs.podman.result }}
+        run: |
+          set -euo pipefail
+
+          # Fail SAFE, not fail green (the security.yml lesson, restated in
+          # both other nightlies): enumerate the GOOD status only. `skipped`,
+          # `cancelled`, `timed_out` and whatever GitHub adds next all mean the
+          # gate did not run, which is not a pass.
+          results="docker=${DOCKER}"
+          results_clean=$(printf '%s\n' "$results" \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | grep -v '^$' || true)
+          not_green=$(printf '%s\n' "$results_clean" \
+            | grep -vE '=success$' || true)
+          # Zero reported jobs is a bug in THIS workflow, not a green night.
+          if [ -z "$results_clean" ]; then
+            not_green="(no job results were reported — the results block was empty)"
+          fi
+
+          podman_note="The podman legs reported \`${PODMAN}\`. They do **not** gate this alert: ubuntu-latest ships podman 4.9.3, which drops supplementary GIDs that have no /etc/group entry, so the crew-shared-memory assertions fail there for a known and measured reason (podman 6.0.2 is green end to end against a real \`podman machine\`). Read them for a NEW failure, not for that one."
+
+          # --force makes label creation idempotent across runs.
+          gh label create runtime-conformance-alert --repo "$REPO" \
+            --color B60205 \
+            --description "Automated: nightly container-runtime conformance failed on main" \
+            --force
+
+          # Only ever act on an issue THIS job filed: bot author AND our exact
+          # title or body marker. Same containment contract as the other two
+          # nightlies — never comment on or close a human's issue.
+          existing=$(gh issue list --repo "$REPO" --label runtime-conformance-alert \
+            --state open --json number,title,body,author \
+            --jq "[ .[]
+                    | select(.author.is_bot)
+                    | select(.title == \$ENV.TITLE
+                             or (.body // \"\" | contains(\$ENV.MARKER)))
+                  ] | .[0].number // empty")
+
+          if [ -z "$not_green" ]; then
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$REPO" \
+                --body "✅ The docker runtime-conformance leg is green again as of $RUN_URL. Closing.
+
+          $podman_note"
+              gh issue close "$existing" --repo "$REPO" --reason completed
+              echo "Closed alert issue #$existing (docker conformance green)."
+            else
+              echo "Docker conformance green and no alert issue — nothing to do."
+            fi
+            exit 0
+          fi
+
+          echo "Jobs that did not report success:"; echo "$not_green"
+          body="$MARKER
+          The nightly container-runtime conformance run on \`main\` did not complete successfully.
+
+          The gate below did not report \`success\` — a \`skipped\` or \`cancelled\` job means it never ran, which is **not** a green result:
+
+          \`\`\`
+          $not_green
+          \`\`\`
+
+          Run: $RUN_URL
+
+          $podman_note
+
+          This suite starts a real crew container built by the product's own \`buildCrewContainerConfig\` and reads the result back from inside it — /proc/self/status, /proc/mounts, the cgroup files, \`id\`, \`ulimit\`, \`getent\`. Values, not shapes. A red here means a HostConfig field we set is not being applied, and every one of those fails open and quiet: PidsLimit unapplied brings back the zombie leak #1666 fixed, \`core: 0\` unapplied writes the agent's credential environment to a host-persistent bind on the next crash, ReadonlyRootfs unapplied removes the reason a user-supplied base image is safe.
+
+          Two things to check first, in this order:
+
+          1. **Does it still compile?** \`go vet -tags conformance ./...\`. That is what was broken for 13 silent days in #2003, and it is gated on every pull request in \`ci.yml\` now — so if this is a build failure again, either the PR gate was bypassed or the break is in a GOOS that gate does not cover.
+          2. **Read the failing assertion, not the job summary.** The test names the field, the value asked for, and the value read back out of the container.
+
+          This issue auto-closes when the docker leg is green again."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+            echo "Updated existing alert issue #$existing"
+          else
+            gh issue create --repo "$REPO" \
+              --title "$TITLE" \
+              --label runtime-conformance-alert \
+              --body "$body"
+          fi
