@@ -7,10 +7,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/testutil/procgroupfixture"
 )
 
 // TestKillProcessGroup_ReachesDescendantsOfAReapedChild is #2030's regression
@@ -29,13 +30,14 @@ import (
 // Reaping the child before the kill makes that deterministic on Linux, where
 // getpgid answers ESRCH for a gone pid too.
 func TestKillProcessGroup_ReachesDescendantsOfAReapedChild(t *testing.T) {
-	dir := t.TempDir()
-	fake := filepath.Join(dir, "container")
 	// A helper that inherits stdout and outlives the CLI that started it.
-	script := "#!/bin/sh\n( echo holding; sleep 60 ) &\n"
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	//
+	// The fixture backgrounds the holder *before* announcing, and that order is
+	// load-bearing rather than stylistic: shells disagree on how many processes
+	// `( a; b ) &` creates, so only announcing after the fork proves the holder
+	// is in the group by the time the kill below walks it (#2044).
+	// procgroupfixture has the full reasoning; do not inline a simpler script.
+	fake := procgroupfixture.WriteFakeCLI(t, t.TempDir())
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -61,7 +63,7 @@ func TestKillProcessGroup_ReachesDescendantsOfAReapedChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	n, err := r.Read(buf)
-	if err != nil || string(buf[:n]) != "holding\n" {
+	if err != nil || string(buf[:n]) != procgroupfixture.Announcement {
 		t.Fatalf("the descendant never took stdout: read %q, err %v", buf[:n], err)
 	}
 
