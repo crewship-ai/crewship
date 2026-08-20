@@ -332,7 +332,25 @@ func resolveAuxSlot(slot string, dflt, builtin llm.AuxiliaryModels, o AuxOverrid
 		UpdatedAt:  o.UpdatedAt,
 		UpdatedBy:  o.UpdatedBy,
 	}
-	eff.Provider = pickAux(o.Provider, base.Provider, shipped.Provider)
+	// A slot that pins a vault credential but NOT a provider keeps the shipped
+	// provider, not the environment-derived one.
+	//
+	// #1554 lets an operator move a key out of the process environment and into
+	// the vault, pinned per slot. #2001 then made an unconfigured slot follow
+	// whichever provider's key IS in the environment. Those two compose badly:
+	// an instance holding an Anthropic key in the vault and an OPENAI_API_KEY in
+	// the env for agent runs would see its evaluator slots retargeted to openai
+	// while still being built with the Anthropic vault key — a 401 on first use,
+	// with nothing saying the vendor moved.
+	//
+	// A pinned credential is a vendor choice even when the provider field is
+	// blank, because a key is only valid at one vendor. Availability may pick
+	// for a slot that has expressed no preference; it may not overrule one.
+	providerBase := base.Provider
+	if o.CredentialID != "" && o.Provider == "" {
+		providerBase = shipped.Provider
+	}
+	eff.Provider = pickAux(o.Provider, providerBase, shipped.Provider)
 	eff.Model = pickAux(o.Model, base.Model, shipped.Model)
 	// No env layer to inherit from — see AuxEffective.CredentialID.
 	if o.CredentialID != "" {

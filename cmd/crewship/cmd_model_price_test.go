@@ -126,30 +126,6 @@ func TestCatalogCard(t *testing.T) {
 	}
 }
 
-// providerHasWildcard is deduced, so its false-positives are what matter: a
-// provider whose catalog rows are reachable must never be read as wildcarded,
-// including openai, where the o3-pro row happens to carry the provider
-// ceiling's exact rates.
-func TestProviderHasWildcard(t *testing.T) {
-	tests := []struct {
-		provider string
-		want     bool
-	}{
-		{"openai", false},
-		{"anthropic", false},
-		{"openrouter", false},
-		{"ollama", false}, // no catalog rows at all: no evidence either way
-		{"acme-llm", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.provider, func(t *testing.T) {
-			if got := providerHasWildcard(tc.provider); got != tc.want {
-				t.Errorf("providerHasWildcard(%q) = %v, want %v", tc.provider, got, tc.want)
-			}
-		})
-	}
-}
-
 // --- unit: the money ---
 
 // The breakdown and the total come from two different places on purpose — the

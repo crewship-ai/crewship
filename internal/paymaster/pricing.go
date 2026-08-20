@@ -93,12 +93,20 @@ var priceTable = map[string]modelPrice{
 // alternative (median tier) silently undercharges for top-tier models,
 // which defeats the warn/exceed signal exactly when operators need it.
 var providerFallback = map[string]modelPrice{
-	"anthropic": {InputPerM: 10.00, OutputPerM: 50.00, CachedInputPerM: 1.00, CacheWritePerM: 12.50}, // Fable-tier (premium ceiling)
-	"openai":    {InputPerM: 20.00, OutputPerM: 80.00, CachedInputPerM: 5.00, CacheWritePerM: 20.00}, // o3-pro tier (reasoning ceiling)
-	"google":    {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},  // gemini-2.5-pro upper tier
-	"xai":       {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // grok-4-equivalent
-	"deepseek":  {InputPerM: 0.70, OutputPerM: 2.50, CachedInputPerM: 0.07, CacheWritePerM: 0.70},    // reasoner tier (ceiling)
-	"mistral":   {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // mistral-large estimate (ceiling above codestral)
+	// Every row is at or above the highest rate the embedded snapshot publishes
+	// for that provider, per channel, after the nil-mirror convention. Four of
+	// them were not, and the invariant only covered the two gateway rows, so
+	// nothing caught it: openai sat at 20/80 against a snapshot maximum of
+	// 150/600 (o1-pro). A vendor shipping a new top-tier model between snapshot
+	// refreshes is the ONLY case this table answers, and it is exactly the case
+	// where a stale ceiling under-bills — 7.5x, on the row whose whole job is to
+	// over-estimate.
+	"anthropic": {InputPerM: 10.00, OutputPerM: 50.00, CachedInputPerM: 1.00, CacheWritePerM: 12.50},
+	"openai":    {InputPerM: 150.00, OutputPerM: 600.00, CachedInputPerM: 150.00, CacheWritePerM: 150.00},
+	"google":    {InputPerM: 4.00, OutputPerM: 120.00, CachedInputPerM: 3.50, CacheWritePerM: 4.00},
+	"xai":       {InputPerM: 4.00, OutputPerM: 12.00, CachedInputPerM: 2.00, CacheWritePerM: 4.00},
+	"deepseek":  {InputPerM: 0.70, OutputPerM: 2.50, CachedInputPerM: 0.07, CacheWritePerM: 0.70},
+	"mistral":   {InputPerM: 2.00, OutputPerM: 7.50, CachedInputPerM: 2.00, CacheWritePerM: 2.00},
 	// Gateways. These ceilings are the highest rate the embedded snapshot
 	// actually publishes for the provider (including tier rates), computed from
 	// the snapshot rather than guessed. OpenRouter's is startlingly high because

@@ -2,10 +2,10 @@ package main
 
 // `crewship model price` — the human-readable window into the pricing chain.
 //
-// paymaster resolves a rate in four steps (hand-written table → provider
+// paymaster resolves a rate in five steps (hand-written table → provider
 // wildcard → embedded models.dev catalog → provider ceiling), and until now the
 // only way to find out which one answered was to read pricing.go and guess.
-// That matters because the four steps carry very different confidence: a
+// That matters because the five steps carry very different confidence: a
 // hand-verified row is a number someone checked against an invoice, the catalog
 // is a snapshot that can be a release behind, and the ceiling is deliberately an
 // over-estimate. An operator staring at a cost line needs to know which of those
@@ -96,14 +96,10 @@ const priceProbeModel = "\x00crewship-price-probe"
 // priceExplain is the resolved rate plus enough of its neighbourhood to explain
 // the resolution.
 //
-// NOTE — this is inference over paymaster's EXPORTED surface, not a reading of
-// its tables: priceTable, providerFallback and catalogPrices are all unexported,
-// so which step answered is deduced by asking RateCard a second question whose
-// answer isolates the step. It is exact for every case the snapshot and the
-// table produce today, and it would stop being inference the moment paymaster
-// grew an ExplainRate(provider, model) that returned the source directly. That
-// function belongs in paymaster and is the right follow-up; this file is
-// deliberately structured so adopting it is a change to explainRate alone.
+// The source is paymaster's own answer, not an inference: ExplainRate walks the
+// same tables lookupPrice bills from. This file used to deduce it from outside
+// the package by comparing values, which mislabelled two whole classes of rate —
+// see the ExplainRate comment for what that cost.
 type priceExplain struct {
 	Provider string     `json:"provider"`
 	Model    string     `json:"model"`
@@ -120,33 +116,10 @@ type priceExplain struct {
 	UnknownModel rateCard `json:"unknown_model_rates"`
 }
 
-// explainRate resolves (provider, model) and works out which step answered.
-//
-// The deduction, in the order the switch takes it:
-//
-//   - resolved != unknownModel means a step ABOVE the ceiling answered, since
-//     the ceiling is by definition what an unknown model of that provider gets.
-//     If the catalog carries this model at that same rate the catalog is the
-//     answer; otherwise only the hand-written table is left.
-//
-//     That first case is the one blind spot, stated rather than hidden: a
-//     hand-written row that agrees with the snapshot to the cent is reported as
-//     "catalog", because nothing observable separates the two. models.dev and
-//     priceTable agree on anthropic/claude-opus-4-7 today, so that row reads as
-//     catalog-sourced. Preferring "table" on a tie would be far worse — every
-//     genuine catalog hit (gpt-4o, every openrouter model) would claim a
-//     hand-verified provenance it does not have — and the tie changes neither
-//     the rate nor the remedy, since correcting either source means writing a
-//     priceTable row.
-//
-//   - resolved == unknownModel and the catalog agrees means the catalog
-//     answered (a wildcard would have shadowed it, and no wildcard row and no
-//     catalog row carry the same non-zero rates today).
-//
-//   - otherwise the wildcard answered if one can be detected, and the ceiling
-//     otherwise — with an all-zero card reported as "free" rather than guessed
-//     at, because "ollama/*" and "no rate for this provider" are independently
-//     $0 and cannot be told apart from outside the package.
+// explainRate resolves (provider, model) and reports which step of paymaster's
+// lookup produced the rate, plus enough of the neighbourhood to read it against:
+// the catalogue's own figure when it has one (shadowed or not), and what an
+// unknown model of the same provider would bill.
 func explainRate(provider, model string) priceExplain {
 	// Normalized the same way paymaster.lookupPrice normalizes, so the pair
 	// this reports on is the pair that would be billed.
@@ -191,15 +164,10 @@ func catalogCard(provider, model string) (rateCard, bool) {
 	return cardOfCatalogModel(m)
 }
 
-// cardOfCatalogModel must use the SAME accessor paymaster bills with —
-// CeilingRates, not Rates. They differ on the 76 tiered models in the snapshot,
-// and explainRate deduces the rate source by testing whether the resolved rate
-// equals the catalog card. Reading base rates here made that comparison fail
-// for every tiered model, so a rate the catalogue supplied was reported as
-// "hand-written rate card, verified against the provider's published prices"
-// — provenance the number did not have, for providers (openrouter) that have
-// no hand-written row at all. Mislabelling where a price came from is worse
-// than showing no label.
+// cardOfCatalogModel uses the SAME accessor paymaster bills with — CeilingRates,
+// not Rates. They differ on the 76 tiered models in the snapshot, so reading base
+// rates here would print a "catalog says" figure that is not what the catalogue
+// would actually charge.
 func cardOfCatalogModel(m modelcatalog.Model) (rateCard, bool) {
 	in, out, cacheRead, cacheWrite, ok := m.CeilingRates()
 	if !ok || (in == 0 && out == 0) {
@@ -211,34 +179,6 @@ func cardOfCatalogModel(m modelcatalog.Model) (rateCard, bool) {
 		CachedInputPerM: cacheRead,
 		CacheWritePerM:  cacheWrite,
 	}, true
-}
-
-// providerHasWildcard reports whether a "<provider>/*" row exists, deduced from
-// the one observable thing such a row does: it sits ABOVE the catalog, so no
-// catalog-priced model of that provider can ever be billed at its catalog rate.
-//
-// The scan runs to the end rather than judging on the first model, because an
-// exact priceTable row shadows the catalog too, and one of those (openai/o3-pro)
-// happens to carry the openai ceiling's exact rates — judging on it alone would
-// report a wildcard that does not exist. A single model billed at its catalog
-// rate is proof enough that nothing shadows the catalog wholesale.
-//
-// A provider the snapshot carries no priced model for (ollama, local) yields no
-// evidence either way; false is the honest answer, and explainRate's zero-card
-// branch is what covers those.
-func providerHasWildcard(provider string) bool {
-	priced := 0
-	for _, m := range modelcatalog.Default().Models(provider) {
-		c, ok := cardOfCatalogModel(m)
-		if !ok {
-			continue
-		}
-		priced++
-		if cardFor(provider, m.ID) == c {
-			return false
-		}
-	}
-	return priced > 0
 }
 
 // priceChannel is one billed channel of a call: what it costs per million

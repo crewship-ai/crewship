@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -240,35 +239,91 @@ func resolveProviderEndpoint(spec llm.ProviderSpec, lookupEnv lookupEnvFunc) str
 // identical. An operator-set endpoint may be https://user:token@host, and this
 // command's output is the kind that gets pasted into a bug report.
 //
-// Unparseable input containing "@" is redacted by hand rather than returned
-// unchanged. The earlier reasoning here — that a string url.Parse choked on
-// cannot have carried credentials — is false: Parse fails for reasons that have
-// nothing to do with userinfo (a raw space, as in "http://a b@c", which this
-// package's own test pins), and the credential in such a string is just as real.
-// Returning it verbatim printed the secret into human output, JSON, and any bug
-// report either got pasted into.
+// redactURL removes anything credential-shaped from an endpoint before it is
+// printed. This string lands in human output, in JSON an agent parses, and
+// therefore in bug reports and issue threads.
 //
-// So the fallback keeps everything from the last "@" onward — the part that
-// identifies the endpoint and is the actual diagnosis — and replaces whatever
-// preceded it, which is where a credential can hide.
+// It works on the raw text rather than on url.Parse's opinion, because Parse
+// disagrees with a reader about where the credentials are. Two cases that both
+// used to leak:
+//
+//   - Parse FAILS on "http://user:secret@a b/v1" (the space), and returning the
+//     input unchanged printed the password.
+//   - Parse SUCCEEDS on the scheme-less "user:hunter2@gpu-box:11434" — it reads
+//     "user:" as the scheme and the rest as Opaque, so u.User is nil and a
+//     u.User-based check sees nothing to redact. That shape is exactly what
+//     KEEPER_OLLAMA_URL holds on a box where someone put the credential in the
+//     variable.
+//
+// So: find the authority — everything before the first "/", "?" or "#" after an
+// optional scheme — and if it contains "@", replace what precedes the last one.
+// The host and port survive, because they are the diagnosis.
+//
+// Query values are redacted for credential-shaped keys only. An Azure-style
+// endpoint carries "?api-version=2026-02-01", which a reader needs, alongside a
+// possible "?api-key=…", which must never be printed.
 func redactURL(raw string) string {
-	if raw == "" || !strings.Contains(raw, "@") {
+	if raw == "" {
 		return raw
 	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		at := strings.LastIndex(raw, "@")
-		scheme := ""
-		if i := strings.Index(raw, "://"); i >= 0 && i < at {
-			scheme = raw[:i+3]
+	out := redactURLAuthority(raw)
+	return redactURLQuery(out)
+}
+
+// redactURLAuthority replaces userinfo in the authority position.
+func redactURLAuthority(raw string) string {
+	scheme := ""
+	rest := raw
+	if i := strings.Index(raw, "://"); i >= 0 {
+		scheme, rest = raw[:i+3], raw[i+3:]
+	}
+	// The authority ends at the first path/query/fragment delimiter. An "@"
+	// after that point is in a path segment and is not a credential.
+	end := len(rest)
+	if i := strings.IndexAny(rest, "/?#"); i >= 0 {
+		end = i
+	}
+	authority := rest[:end]
+	at := strings.LastIndex(authority, "@")
+	if at < 0 {
+		return raw
+	}
+	return scheme + "redacted@" + rest[at+1:]
+}
+
+// credentialQueryKeys are query parameter names whose VALUE is never printed.
+// Matched case-insensitively as a substring, so "x-api-key" and "sasToken" are
+// both covered.
+var credentialQueryKeys = []string{"key", "token", "secret", "password", "passwd", "pwd", "sig", "credential", "auth"}
+
+// redactURLQuery blanks the values of credential-shaped query parameters and
+// leaves the rest — including their names — intact, because "which parameters
+// were set" is diagnosis and their values mostly are not.
+func redactURLQuery(raw string) string {
+	q := strings.IndexByte(raw, '?')
+	if q < 0 {
+		return raw
+	}
+	head, tail := raw[:q+1], raw[q+1:]
+	frag := ""
+	if i := strings.IndexByte(tail, '#'); i >= 0 {
+		tail, frag = tail[:i], tail[i:]
+	}
+	parts := strings.Split(tail, "&")
+	for i, part := range parts {
+		name, _, hasValue := strings.Cut(part, "=")
+		if !hasValue {
+			continue
 		}
-		return scheme + "redacted@" + raw[at+1:]
+		lower := strings.ToLower(name)
+		for _, bad := range credentialQueryKeys {
+			if strings.Contains(lower, bad) {
+				parts[i] = name + "=redacted"
+				break
+			}
+		}
 	}
-	if u.User == nil {
-		return raw
-	}
-	u.User = url.User("redacted")
-	return u.String()
+	return head + strings.Join(parts, "&") + frag
 }
 
 // providerListRows renders rows for the table view. Column 0 is the provider

@@ -63,7 +63,7 @@ tag, or a release newer than the fetch date — simply carries no catalog column
 ## `crewship model price`
 
 Prints the per-million-token rates paymaster will bill a `(provider, model)`
-pair at, **which of the four lookup steps produced them**, and the cost of a
+pair at, **which of the five lookup steps produced them**, and the cost of a
 call with the given token counts. Entirely local: the rate card and the catalog
 are compiled in.
 
@@ -115,16 +115,19 @@ openai/gpt-5.5
 | `wildcard` | A `<provider>/*` row — every model of that provider bills at this rate. |
 | `catalog` | The embedded models.dev snapshot. Accurate as of its fetch date, not hand-verified. |
 | `fallback` | The provider's **ceiling** — nothing prices this model, so its most expensive known tier is used. A deliberate over-estimate. |
-| `free` | \$0 on every channel: a local/self-hosted wildcard row, **or** a provider with no rate card at all. |
+| `none` | Nothing prices this provider at all — check the spelling. An unknown vendor bills \$0 and you are meant to notice. |
 
 <Warning>
-  **`free` does not always mean free.** From outside the paymaster package, "a
-  `<provider>/*` row said \$0" and "no rate card exists for this provider at
-  all" are the same observation. `ollama/*` and `local/*` are genuinely free;
-  a provider id with no ceiling row — a typo, or a `Provider.Name()` nobody
-  priced — also reads `free`, and bills every call at \$0. Every provider the
-  registry or the catalog knows has a ceiling, so `free` on anything other than
-  a local runtime is a finding.
+  **`none` is a finding, not a price.** It means no step of the lookup had an
+  opinion, so the call bills \$0 — almost always a typo in the provider id, or
+  a `Provider.Name()` nobody added a ceiling row for. Every provider the
+  registry or the catalog knows has one, so `none` should never appear for a
+  provider you actually configured.
+
+  A genuinely free local runtime reads `wildcard`, not `none`: `ollama/*` and
+  `local/*` are \$0 rows someone wrote deliberately. The two used to be
+  indistinguishable and both reported `free`, which meant a typo'd vendor was
+  presented as a free local model.
 
   A `fallback` is the opposite failure and just as misleading if taken at face
   value: `openrouter`'s ceiling is \$150/Mtok input, because a gateway

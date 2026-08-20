@@ -228,8 +228,9 @@ func TestLookupPrice_TieredCatalogModelUsesTheCeiling(t *testing.T) {
 	}
 	// Lookup succeeding says the model is IN the snapshot, not that it carries
 	// a cost block — 23 of them do not. Dereferencing m.Cost on that assumption
-	// panics the moment a refresh drops this model's pricing, which is exactly
-	// when a skip is wanted instead.
+	// panics the moment a refresh drops this model's pricing; failing with the
+	// fixture named is the useful outcome, because a refresh that removes it is
+	// a reason to repoint this test rather than to report ok.
 	if m.Cost == nil || len(m.Cost.Tiers) != 2 {
 		t.Fatalf("%s/%s no longer has the 2 tiers this test was written against — repoint it at a tiered model instead of skipping, or the tier logic stops being covered", provider, model)
 	}
@@ -340,8 +341,13 @@ func TestLookupPrice_HandWrittenTableBeatsTheCatalogue(t *testing.T) {
 			t.Errorf("%s: lookupPrice = %+v, want the hand-written %+v", key, got, want)
 		}
 	}
+	// Vacuity guard. This test used to t.Log here and pass: a snapshot refresh
+	// removing every priceTable/catalogue overlap would leave the precedence
+	// rule — the thing the whole file is about — untested, with the suite still
+	// green. That is the same silently-disappearing coverage the nine skips in
+	// this file were converted away from.
 	if overlap == 0 {
-		t.Log("no priceTable key is also in the catalogue — the precedence rule is untested by data")
+		t.Fatal("no priceTable key has a catalogue counterpart — the precedence rule this test exists for is then untested. Repoint the fixtures rather than reporting ok")
 	}
 }
 
@@ -423,7 +429,7 @@ func TestLookupPrice_Order(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip {
-				t.Fatal("the embedded catalogue has no model outside priceTable — step 3 of the lookup is then untestable, which is a fixture problem to fix, not a result to report as ok")
+				t.Fatal("the embedded catalogue has no model outside priceTable — step 3 of the lookup — the catalogue — is then untestable, which is a fixture problem to fix, not a result to report as ok")
 			}
 			if got := lookupPrice(tt.provider, tt.model); got != tt.want {
 				t.Errorf("lookupPrice(%q, %q) = %+v, want %+v", tt.provider, tt.model, got, tt.want)
@@ -448,8 +454,8 @@ func TestLookupPrice_LocalRuntimesStayFree(t *testing.T) {
 	}
 }
 
-// A gateway's fallback row must not be under the highest rate the snapshot
-// publishes for that gateway, on ANY of the four channels.
+// No fallback row may sit under the highest rate the snapshot publishes for
+// that provider, on ANY of the four channels.
 //
 // This exists because the first version of those rows got it wrong in a way
 // review caught and tests did not: input and output were computed from the
@@ -465,9 +471,15 @@ func TestLookupPrice_LocalRuntimesStayFree(t *testing.T) {
 // convention — a model with no cache_read charges its input rate for cache
 // reads and is therefore a cache-read candidate. Reading raw cost keys is the
 // exact mistake this test was written to prevent recurring.
-func TestProviderFallback_GatewayRowsAreNotUnderTheSnapshotCeiling(t *testing.T) {
+func TestProviderFallback_NoRowIsUnderTheSnapshotCeiling(t *testing.T) {
 	cat := modelcatalog.Default()
-	for _, prov := range []string{"openrouter", "amazon-bedrock"} {
+	// Every provider with a fallback row, not just the two gateways. Scoping the
+	// invariant to gateways is how four stale rows survived — openai's ceiling
+	// was 7.5x below what the snapshot already published.
+	for prov := range providerFallback {
+		if providerFallback[prov] == (modelPrice{}) {
+			continue // ollama/local: deliberately free, no ceiling to hold
+		}
 		row, ok := providerFallback[prov]
 		if !ok {
 			t.Errorf("%s has no providerFallback row — an unknown model of this provider bills at $0", prov)
@@ -606,17 +618,31 @@ func TestExplainRate_AgreesWithLookupPrice(t *testing.T) {
 	}
 }
 
-// The case the inference layer could not decide: a hand-written row whose rates
-// are byte-identical to the provider ceiling below it.
-func TestExplainRate_HandWrittenRowEqualToTheCeilingIsStillTable(t *testing.T) {
-	row, ok := priceTable["openai/o3-pro"]
-	if !ok {
-		t.Fatal("openai/o3-pro is no longer in priceTable — this test needs a hand-written row that collides with its provider ceiling; find another and repoint it")
+// Every row in priceTable is reported as table-sourced. This is what the old
+// inference layer could not guarantee: it compared VALUES, so a hand-written row
+// that happened to equal the step below it was indistinguishable from that step
+// and got the wrong label — openai/o3-pro read as `fallback` because it matched
+// the openai ceiling exactly.
+//
+// The first version of this test pinned that one pair. That was a mistake of the
+// same kind it was testing: it depended on a coincidence in the shipped data, and
+// raising the openai ceiling to its true snapshot maximum dissolved the
+// collision and the test with it. Walking every row asserts the structural
+// property instead — ExplainRate consults priceTable FIRST, so membership alone
+// decides the label, whatever the rates happen to equal.
+func TestExplainRate_EveryTableRowIsReportedAsTable(t *testing.T) {
+	var checked int
+	for key := range priceTable {
+		prov, mod, found := strings.Cut(key, "/")
+		if !found || mod == "*" {
+			continue // wildcards are their own source
+		}
+		checked++
+		if _, src := ExplainRate(prov, mod); src != SourceTable {
+			t.Errorf("%s: source = %q, want %q — a row that exists in the table is table-sourced no matter what its rates equal", key, src, SourceTable)
+		}
 	}
-	if row != providerFallback["openai"] {
-		t.Fatal("openai/o3-pro no longer equals the openai ceiling — the collision is this test's premise, so repoint it at a row that still collides rather than reporting ok")
-	}
-	if _, src := ExplainRate("openai", "o3-pro"); src != SourceTable {
-		t.Errorf("source = %q, want %q — a row that exists in the table is table-sourced no matter what it equals", src, SourceTable)
+	if checked < 10 {
+		t.Fatalf("only %d non-wildcard rows in priceTable — this guard has gone vacuous", checked)
 	}
 }

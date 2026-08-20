@@ -554,3 +554,53 @@ func TestRedactURL_UnparseableStillRedacts(t *testing.T) {
 		})
 	}
 }
+
+// The leak the first fix missed. url.Parse SUCCEEDS on a scheme-less endpoint
+// with userinfo — it reads "user:" as the scheme and the rest as Opaque, so
+// u.User is nil and a u.User-based check finds nothing to redact. That is the
+// exact shape KEEPER_OLLAMA_URL holds when someone puts the credential in the
+// variable, and it printed the password.
+func TestRedactURL_SchemelessUserinfoIsRedacted(t *testing.T) {
+	tests := []struct {
+		name, raw, mustNotContain string
+	}{
+		{"scheme-less with password", "user:hunter2@gpu-box:11434", "hunter2"},
+		{"scheme-less user only", "tokenvalue@gpu-box:11434", "tokenvalue"},
+		{"scheme-less with path", "user:hunter2@gpu-box:11434/v1", "hunter2"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactURL(tc.raw)
+			if strings.Contains(got, tc.mustNotContain) {
+				t.Errorf("redactURL(%q) = %q — leaked %q", tc.raw, got, tc.mustNotContain)
+			}
+			if !strings.Contains(got, "gpu-box:11434") {
+				t.Errorf("redactURL(%q) = %q — lost the host, which is the diagnosis", tc.raw, got)
+			}
+		})
+	}
+}
+
+// A credential in the query string is a credential. An api-version is not, and
+// a reader needs it, so only credential-shaped names lose their value.
+func TestRedactURL_QueryCredentialsAreRedacted(t *testing.T) {
+	tests := []struct {
+		name, raw, mustNotContain, mustContain string
+	}{
+		{"api-key", "https://host/v1?api-key=SECRET", "SECRET", "api-key=redacted"},
+		{"sas token", "https://host/v1?sasToken=SECRET", "SECRET", "sasToken=redacted"},
+		{"api-version survives", "https://host/v1?api-version=2026-02-01", "", "api-version=2026-02-01"},
+		{"mixed", "https://host/v1?api-version=2026-02-01&api-key=SECRET", "SECRET", "api-version=2026-02-01"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactURL(tc.raw)
+			if tc.mustNotContain != "" && strings.Contains(got, tc.mustNotContain) {
+				t.Errorf("redactURL(%q) = %q — leaked %q", tc.raw, got, tc.mustNotContain)
+			}
+			if !strings.Contains(got, tc.mustContain) {
+				t.Errorf("redactURL(%q) = %q, want it to contain %q", tc.raw, got, tc.mustContain)
+			}
+		})
+	}
+}

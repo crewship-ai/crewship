@@ -215,7 +215,7 @@ func buildCheckProvider(o checkOptions, getenv func(string) string) (llm.Provide
 func buildFromSpec(spec llm.ProviderSpec, o checkOptions, base, model string, getenv func(string) string) (llm.Provider, checkTarget, error) {
 	baseOverridden := base != ""
 	if base == "" && spec.BaseEnv != "" {
-		base = getenv(spec.BaseEnv)
+		base = strings.TrimSpace(getenv(spec.BaseEnv))
 	}
 	if base == "" {
 		base = spec.BaseDefault
