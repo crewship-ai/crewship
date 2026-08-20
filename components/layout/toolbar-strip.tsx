@@ -97,7 +97,18 @@ export function ToolbarStrip<T extends string = string>({
   const rovingId =
     tabs?.find((t) => t.id === activeTab && !t.disabled)?.id ?? tabs?.find((t) => !t.disabled)?.id
 
-  /** ArrowLeft/Right cycle, Home/End jump — the WAI-ARIA tabs pattern. */
+  /**
+   * ArrowLeft/Right cycle, Home/End jump — the WAI-ARIA tabs pattern.
+   *
+   * Activation follows focus, the pattern's default and what
+   * `keeper-queue-panel.tsx` already does here: it is the right choice when
+   * switching is cheap, and the one caller with panels keeps all of them
+   * mounted. A strip that has to fetch on select would want the manual variant
+   * (move focus, activate on Enter/Space) instead.
+   *
+   * Only the tablist listens, so a search box or a button in `leading` /
+   * `actions` keeps its own arrow keys.
+   */
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
     const order = tabs?.filter((t) => !t.disabled) ?? []

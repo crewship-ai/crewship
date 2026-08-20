@@ -152,10 +152,11 @@ function TabStateGlyph({ state }: { state: PageTabView["state"] }) {
  * is not a smaller version of the association, it is a broken one, and a
  * second derivation is exactly how the halves drift.
  *
- * `scope` is a `React.useId()` from the component that renders both — two page
- * views in one document (the app's and an embed's, say) would otherwise emit
- * the same ids twice, and every reference in the document would resolve to
- * whichever came first.
+ * `scope` is a `React.useId()` from the component that renders both. Without
+ * it the ids would be the tab slug and nothing else, and a document holding
+ * two page views would emit each of them twice — every reference resolving to
+ * whichever came first. See `page-view.tsx` for why that rule is not worth
+ * owing.
  *
  * The tab id is already a slug (`tabSlug`, hooks/use-pages.ts) — except for a
  * name with nothing ASCII in it, which keeps its own lowercased form and may

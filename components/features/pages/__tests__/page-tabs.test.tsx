@@ -317,10 +317,12 @@ describe("PageView with tabs", () => {
   })
 
   it("does not collide when two page views share a document", () => {
-    // The public page and the embed can both mount a PageView, and an id that
-    // was derived from the tab slug alone would then appear twice — at which
-    // point every aria-controls in the document resolves to the FIRST match
-    // and one of the two page views silently points at the other's panels.
+    // Nothing in the app mounts two of these today, and that is the point:
+    // ids derived from the tab slug alone would make "one PageView per
+    // document" a rule this component never states. A second one — a preview,
+    // an embed, a test — would emit every id twice, every aria-controls would
+    // resolve to the FIRST match, and one view would silently point at the
+    // other's panels.
     const { container } = render(
       <>
         <PageView

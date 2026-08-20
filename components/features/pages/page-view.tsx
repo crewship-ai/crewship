@@ -292,10 +292,16 @@ export function PageView({
   // the ids that pair them (`pageTabIds`). They are also far apart in this
   // tree — the bar sits outside the scroll area, the groups are down inside
   // PanelGrid — so the scope is minted HERE, at the one component that renders
-  // both, and threaded down. Deriving it from the tab slug alone would be
-  // simpler and would break the moment a document held two page views, which
-  // the public page and the embed can do: the ids would repeat, and every
-  // reference in the document would resolve to whichever half rendered first.
+  // both, and threaded down.
+  //
+  // Deriving the ids from the tab slug alone would be shorter and would make
+  // "one PageView per document" a rule this component does not state and
+  // nothing enforces: a second one — a preview beside the page, a future embed
+  // that reuses this rather than `public-page-view.tsx`, a test — would emit
+  // every id twice, and each reference would then resolve to whichever half
+  // rendered first, silently pairing one view's tabs with the other's panels.
+  // `useId` is the cheap way not to owe that rule; it is also SSR-stable,
+  // which a module-level counter is not.
   const tabIdScope = React.useId()
 
   return (
