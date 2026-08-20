@@ -290,11 +290,11 @@ jobs:
 
       # Cached, bounded, and with the apt half off the critical path — see
       # .github/actions/setup-playwright-browser and #1998. The step cap (12)
-      # is above the action's 11-minute worst case and well below this job's
-      # 40, so a wedged Ubuntu mirror fails as itself instead of reaping the
-      # job and reporting it as `cancelled`.
+      # is above the action's 12m30s worst case and well below this job's 40,
+      # so a wedged Ubuntu mirror fails as itself instead of reaping the job
+      # and reporting it as `cancelled`.
       - name: Install Playwright browsers (cached)
-        timeout-minutes: 12
+        timeout-minutes: 14
         uses: ./.github/actions/setup-playwright-browser
         with:
           browser: chromium
@@ -427,7 +427,7 @@ jobs:
 
       # Same as the gate job — see .github/actions/setup-playwright-browser.
       - name: Install Playwright browsers (cached)
-        timeout-minutes: 12
+        timeout-minutes: 14
         uses: ./.github/actions/setup-playwright-browser
         with:
           browser: chromium

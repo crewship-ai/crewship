@@ -490,15 +490,16 @@ jobs:
             echo "ENCRYPTION_KEY=$enckey"
           } >> "$GITHUB_ENV"
       #
-      # ⚠ INVARIANT: the action's own per-attempt deadlines (11 min worst
-      #   case) < this step's timeout-minutes < the job's timeout-minutes.
+      # ⚠ INVARIANT: the action's own per-attempt deadlines (12m30s worst
+      #   case, added up in its header) < this step's timeout-minutes < the
+      #   job's timeout-minutes.
       #   Same rule, same reason, as the API contract gate at :285 — and this
       #   is the step that proved the rule by not having it. #1998: this job
       #   died at exactly its 40-minute budget, reported as `cancelled`, with
       #   17 minutes of silence inside apt-get.
       #
       - name: Install Playwright Chromium (cached)
-        timeout-minutes: 12
+        timeout-minutes: 14
         uses: ./.github/actions/setup-playwright-browser
         with:
           browser: chromium
@@ -667,8 +668,8 @@ jobs:
           } >> "$GITHUB_ENV"
 
       #
-      # ⚠ INVARIANT: the action's per-attempt deadlines (11 min worst case) <
-      #   this step's timeout-minutes < the job's timeout-minutes.
+      # ⚠ INVARIANT: the action's per-attempt deadlines (12m30s worst case,
+      #   added up in its header) < this step's timeout-minutes < the job's.
       #
       # The step this replaced carried a comment asserting that `--with-deps`
       # is required or the headless launch dies on .so lookups. The action
@@ -678,7 +679,7 @@ jobs:
       # leaves the critical path.
       #
       - name: Install Playwright browsers (cached)
-        timeout-minutes: 12
+        timeout-minutes: 14
         uses: ./.github/actions/setup-playwright-browser
         with:
           browser: chromium
@@ -911,7 +912,12 @@ jobs:
     # Whoever wins the race decides how debuggable the failure is, so
     # Go must always win. Budget below keeps ≥5 min of daylight between
     # (overhead + go test -timeout) and this cap.
-    timeout-minutes: 20
+    #
+    # 20 → 22 with the two `-tags conformance` vet steps added below (#2003).
+    # A second tag set is a second compile of the affected packages, so it is
+    # real overhead, not free — and the honest place to pay for it is this cap
+    # rather than the daylight the invariant above depends on.
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

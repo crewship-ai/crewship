@@ -38,9 +38,19 @@ description: >
 #   `timeout-minutes`. Composite-action steps cannot carry `timeout-minutes`
 #   (GitHub does not support it), which is exactly why the inner deadlines are
 #   `timeout(1)` calls and why every caller puts `timeout-minutes` on the
-#   `uses:` step. Worst case here is 2x3m download + 1m probe + 2x2m apt =
-#   11 minutes, so callers use 12. Change one of those three numbers and check
-#   the other two.
+#   `uses:` step. Worst case here, added up rather than estimated:
+#
+#     2 x 3m   download attempts          6m00s
+#     1 x 1m   launch probe               1m00s
+#     2 x 2m   apt attempts               4m00s   (only if the probe failed)
+#     1 x 1m   re-probe after apt         1m00s
+#     3 x 10s  backoff between attempts   0m30s
+#                                        ───────
+#                                        12m30s
+#
+#   so callers use `timeout-minutes: 14`. Change any of those numbers and
+#   re-do this addition — the whole point is that the step cap is a backstop
+#   the inner deadlines cannot reach.
 #
 # REQUIRES: `pnpm install` has already run (i.e. call this after
 # ./.github/actions/setup-node-pnpm), because the Playwright version is read
@@ -87,10 +97,22 @@ runs:
     - name: Resolve the installed Playwright version
       id: pw
       shell: bash
+      env:
+        BROWSER: ${{ inputs.browser }}
       run: |
         set -euo pipefail
+        # Validated here so a typo fails with a sentence, rather than as
+        # `TypeError: Cannot read properties of undefined` out of the launch
+        # probe three steps later.
+        case "$BROWSER" in
+          chromium|firefox|webkit) ;;
+          *)
+            echo "::error::browser input must be chromium, firefox or webkit; got '${BROWSER}'"
+            exit 1
+            ;;
+        esac
         version="$(node -p "require('@playwright/test/package.json').version")"
-        echo "Playwright ${version}"
+        echo "Playwright ${version}, browser ${BROWSER}"
         echo "version=${version}" >> "$GITHUB_OUTPUT"
 
     # No `restore-keys`. A near-miss restore would hand us a DIFFERENT
