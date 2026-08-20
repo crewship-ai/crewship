@@ -892,11 +892,12 @@ func (s *Server) mountAPIRouter(
 	// router so (a) the /api/v1/system/aux-status diagnostic surface
 	// reports the resolved provider/model per slot, and (b) the
 	// Phase 2 evaluator construction below uses the same source of
-	// truth the operator sees in the UI. Defaults put every slot on
-	// anthropic/claude-haiku-4-5; LoadAuxiliaryModels then applies any
-	// CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT} env overrides so an
-	// operator can repoint an aux slot at a cheaper/local model without
-	// a redeploy.
+	// truth the operator sees in the UI. LoadAuxiliaryModels first points
+	// every slot at the first registered provider whose API-key env is
+	// actually set (the shipped default, anthropic/claude-haiku-4-5, when
+	// none is), then applies any CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT}
+	// env overrides so an operator can repoint an aux slot at a
+	// cheaper/local model without a redeploy.
 	//
 	// keepercfg.AuxStore then layers keeper_aux_settings on top, which is what
 	// makes those five paid evaluators settable from the console instead of only

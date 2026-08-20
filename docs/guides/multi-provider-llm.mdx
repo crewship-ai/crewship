@@ -1,0 +1,885 @@
+---
+title: "Multi-provider LLM configuration"
+description: "The provider registry, the two configurable codecs, and the embedded model catalog that prices them."
+icon: "plug-zap"
+stability: experimental
+tag: Experimental
+---
+
+# Multi-provider LLM configuration
+
+Crewship used to reach its LLM providers through a three-arm switch: one `case`
+per provider in the aux-slot builder, a second copy in the Keeper validator, and
+a third inside the error string that told an operator what they were allowed to
+type. The three drifted the way three copies do — the builder matched
+`"anthropic"` case-sensitively while the API carried the uppercase enum, so
+`Anthropic` was a working provider on one side of a call and an unsupported one
+on the other. That switch is now a table (`internal/llm/registry.go`), and the
+two hand-written HTTP clients behind it are now two **configurable codecs** that
+any compatible backend can be pointed at.
+
+What it buys: adding a provider is one registry row plus one price row, and
+reaching a new OpenAI-compatible backend (DeepSeek, vLLM, llama.cpp, Ollama's
+`/v1` shim, OpenRouter) is a config value rather than a new file.
+
+<Note>
+  **Scope.** This page is about the **server's own LLM providers** — the models
+  Keeper's judge, the auxiliary evaluators and the in-process call path use. It
+  is not about the container/storage providers at
+  [Providers](/configuration/providers), and it is not about the agent CLI
+  adapters (`claude`, `codex`, `gemini`, `cursor-agent`, `droid`) at
+  [CLI adapters](/guides/cli-adapters), which bring their own model
+  configuration and are metered by the sidecar.
+</Note>
+
+## The provider registry
+
+One row per provider this build can actually construct. Everything that used to
+be a literal — the picker's vocabulary, the builder's switch, the "want
+anthropic|openai|ollama" hint — reads this table.
+
+| Field | Zero value means | What it is |
+|---|---|---|
+| `ID` | *required* | Canonical lowercase id. Stored on the aux slot, returned by `Provider.Name()`, and the `<provider>/` half of the paymaster rate key. |
+| `DisplayName` | *required* | Human casing used in operator-facing errors ("OpenAI"). |
+| `Codec` | *required* | Wire format: `anthropic-messages`, `openai-compat`, or `ollama-native`. |
+| `Auth` | *required* | How the credential reaches the wire: `none`, `bearer`, `x-api-key`. |
+| `KeyEnv` | no key at all | Environment variable the builder reads a missing API key from. Empty means a missing key is never an error — a local runtime. |
+| `BaseEnv` | not endpoint-driven | Environment variable holding an operator-set endpoint. Empty means we dial our own hosted API. |
+| `BaseDefault` | none | Endpoint used when neither the caller nor `BaseEnv` supplies one. |
+| `CatalogID` | same as `ID` | This provider's id in the models.dev snapshot, when it differs. Empty on a runtime the catalog has no entries for. |
+| `DefaultAuxModel` | slot stays on the shipped default | Model an aux slot gets when the operator named a provider and no model. |
+| `New` | *required* | Constructor. `base` and `apiKey` arrive already resolved (explicit → env → default). |
+
+The three shipped rows, in declaration order:
+
+| ID | Display | Codec | Auth | Key env | Endpoint |
+|---|---|---|---|---|---|
+| `anthropic` | Anthropic | `anthropic-messages` | `x-api-key` | `ANTHROPIC_API_KEY` | `https://api.anthropic.com/v1/messages` (fixed) |
+| `openai` | OpenAI | `openai-compat` | `bearer` | `OPENAI_API_KEY` | `https://api.openai.com/v1/chat/completions` (fixed) |
+| `ollama` | Ollama | `ollama-native` | none | — | `KEEPER_OLLAMA_URL`, default `http://localhost:11434` |
+
+Neither hosted row is endpoint-driven, and that is deliberate: the **server's
+own** key is attached to those requests, so the address they go to has to be
+ours and not an operator-supplied one. A tenant-chosen endpoint is reached
+through a vault credential and the SSRF fence instead — see
+[Keeper](/guides/keeper) for the governance model that does exactly that.
+
+<Note>
+  **Declaration order is load-bearing.** It is what the console's provider
+  picker and `crewship keeper aux set --provider` render, and
+  `keepercfg.AuxProviders()` returns it verbatim, so the validator and the
+  builder can no longer disagree about what an operator may type. Sorting the
+  list would silently reorder an operator's dropdown for no reason anyone could
+  point at.
+</Note>
+
+<Note>
+  **Provider ids are matched case-insensitively and trimmed.** `internal/api`
+  carries the provider as an uppercase enum, `keepercfg` stores it lowercase.
+  `Anthropic` and `" anthropic"` both resolve now; before the registry they
+  resolved on one side of a call and 400'd on the other.
+</Note>
+
+<Warning>
+  **`ID` is the paymaster pricing key.** A registry row whose `ID` has no rate
+  row in `internal/paymaster/pricing.go` and no entry in the embedded catalog
+  bills **every call at \$0** — silently, with a ledger row that looks fine.
+  Adding a provider is a two-file change by construction. See
+  [Pricing: how a provider gets a rate](#pricing-how-a-provider-gets-a-rate).
+</Warning>
+
+Google is absent on purpose. The model catalog carries Gemini ids and
+`GET /api/v1/models` will happily list them, but this package has no Gemini
+`Provider` implementation — so accepting `google` on an evaluator slot would
+give the operator a slot that saves cleanly and then fails at first use.
+Refusing it with a reason is the honest surface.
+
+Registration is **init-only**: `RegisterProvider` is called from one `func init()`
+in `registry.go` and the map has no mutex, deliberately, because making
+registration concurrent-safe would put a lock on a read that sits behind every
+evaluator call for the benefit of a write that happens once before `main`. The
+way to add a provider is a line in that `init`, not a call from elsewhere.
+
+### Evaluator defaults follow the credential you actually have
+
+The shipped default for every auxiliary slot is the first registry row that
+names a `DefaultAuxModel` — `anthropic` / `claude-haiku-4-5`. What an instance
+*boots* with is that default retargeted at the first registered provider whose
+`KeyEnv` is actually set. An operator holding only an `OPENAI_API_KEY` used to
+get six evaluator slots hardcoded to Anthropic, each failing at first use
+demanding a key they have no reason to own; they now get
+`openai` / `gpt-5.4-mini`.
+
+Ties break on declaration order, so an instance holding **both** keys keeps the
+shipped Anthropic default — adding a second key never silently repoints a
+working evaluator. With no credential for any row the slots keep the shipped
+default and the builder still errors loudly, naming the env var to set. An
+explicit `CREWSHIP_AUX_<SLOT>_PROVIDER` always wins over this guess. {/* docs-inventory: ignore — <SLOT> is substituted at runtime (internal/keepercfg/aux.go), so the composed name is never a literal in Go source */}
+
+## Codecs
+
+Three wire formats, two of them now parameterized by a config struct whose
+**zero value reproduces the previous hard-coded client byte for byte**. That
+invariant is what let the codecs land without a behaviour change, and it is
+pinned by tests in `internal/llm`.
+
+### OpenAI-compatible (`openai-compat`)
+
+One implementation, many backends. What is *shared* is the message model — flat
+messages, `tool_call_id` on the tool-result turn, `tools:[{type:"function"}]`,
+`finish_reason` — and every backend this codec serves speaks it. What *differs*
+is transport and vocabulary, which is what `OpenAICompatConfig` carries. A
+backend that differed in the message model would need a second codec, not a
+config value.
+
+| Field | Zero value | Notes |
+|---|---|---|
+| `Name` | `"openai"` | `Provider.Name()`, and through it the **pricing key**. |
+| `DisplayName` | `"OpenAI"` | Operator-facing casing in errors. |
+| `BaseURL` | `https://api.openai.com/v1/chat/completions` | Any shape — bare root, `.../v1`, or the full completions path. Reduced to a mount root at construction. |
+| `APIKey` | empty | |
+| `AuthHeader` | `Authorization` | |
+| `AuthPrefix` | `"Bearer "` | The one-character sentinel `"-"` means *no prefix*. |
+| `NoAuth` | `false` | Suppresses the auth header entirely. An empty `APIKey` does the same implicitly. |
+| `Headers` | none | Extra static headers, applied **before** auth so they can never clobber it. |
+| `Client` | 120s client | The SSRF seam — pass a client whose transport dials through the fence. |
+| `Timeout` | 120s | Ignored when `Client` is set. |
+| `StreamClient` | derived | No total deadline; `ResponseHeaderTimeout` 60s. |
+| `IncludeUsage` | `false` | Emits `stream_options:{include_usage:true}`. |
+| `MaxTokensField` | `max_tokens` | Newer OpenAI models want `max_completion_tokens`. |
+| `DefaultMaxTokens` | `0` — key omitted | |
+| `ExtraBody` | none | Merged **last**, overwrites anything it collides with. |
+| `StopReasons` | built-in map | Overlay; a key present here wins. |
+
+```go
+// DeepSeek: a preset plus a key.
+cfg, _ := llm.OpenAIPreset("deepseek")
+cfg.APIKey = os.Getenv("DEEPSEEK_API_KEY")
+p := llm.NewOpenAICompat(cfg)
+
+// Azure-style auth: header and prefix are both configurable, and "-" is how
+// you say "no prefix" — "" cannot mean it, because "" is what a caller who
+// never thought about auth leaves behind, and they must keep getting "Bearer ".
+p = llm.NewOpenAICompat(llm.OpenAICompatConfig{
+    Name: "openai", BaseURL: "https://example.openai.azure.com/openai/v1",
+    APIKey: key, AuthHeader: "api-key", AuthPrefix: "-",
+    MaxTokensField: "max_completion_tokens", IncludeUsage: true,
+})
+```
+
+<Warning>
+  **Set `IncludeUsage` on anything you stream.** Without
+  `stream_options:{include_usage:true}` an OpenAI-compatible backend returns no
+  usage block on a streamed response at all. Every call then reports zero
+  tokens, and paymaster prices zero tokens at **\$0** — a fleet that looks free
+  and is not. Every shipped preset sets it; a hand-built config must too.
+</Warning>
+
+<Note>
+  `Client` is the SSRF seam, and `StreamClient` carries the caller's transport
+  **and** its `CheckRedirect`. Carrying only the transport would leave `Stream`
+  following redirects off a fenced endpoint while `Complete` refuses at the
+  first 3xx — a provider fenced for one call shape and open for the other.
+  Streaming deliberately has no total deadline: `http.Client.Timeout` covers
+  body read, so a 120s cap silently truncates any generation that runs longer.
+</Note>
+
+The presets this package ships wiring for:
+
+| Preset | `Name()` (pricing key) | Display | Base URL | Auth |
+|---|---|---|---|---|
+| `openai` | `openai` | OpenAI | `https://api.openai.com/v1/chat/completions` | bearer |
+| `deepseek` | `deepseek` | DeepSeek | `https://api.deepseek.com/v1` | bearer |
+| `ollama-openai` | **`ollama`** | Ollama | `http://localhost:11434/v1` | none |
+| `vllm` | **`local`** | vLLM | *(none — caller must set)* | none |
+
+`ollama-openai` and `vllm` deliberately report a pricing key that is not their
+preset name: `ollama/*` and `local/*` are the two rows in `priceTable` that are
+allowed to be free, and a self-hosted backend must land on one of them.
+
+<Warning>
+  **`vllm` ships no `BaseURL`, and an unset one becomes `api.openai.com`.**
+  There is no such thing as a default vLLM address, so the preset leaves it
+  empty and `withDefaults` fills in the hosted OpenAI endpoint — which would
+  send your traffic somewhere you did not ask for. Always set `BaseURL` after
+  taking the `vllm` preset.
+</Warning>
+
+<Note>
+  The preset list is short on purpose. `Name` doubles as the pricing key, so a
+  preset with no verified price row bills every call at \$0. A preset may only
+  be added together with that row, and `TestPresetsResolveToAPricedProvider`
+  enforces it.
+</Note>
+
+### Anthropic Messages (`anthropic-messages`)
+
+| Field | Zero value | Notes |
+|---|---|---|
+| `Name` | `"anthropic"` | Pricing key and the lowercase prefix in wrapped errors. |
+| `DisplayName` | `"Anthropic"` | |
+| `BaseURL` | `https://api.anthropic.com/v1/messages` | Any shape; normalized to a mount root. |
+| `APIKey` | empty | Sent as `x-api-key`. |
+| `Version` | `2023-06-01` | The `anthropic-version` header. |
+| `Beta` | `["prompt-caching-2024-07-31"]` | A **nil** slice means the default set; a non-nil **empty** slice means send no beta header at all, for a proxy that rejects unknown betas. |
+| `Client` | 120s client | SSRF seam. |
+| `Timeout` | 120s | Ignored when `Client` is set. |
+
+Defaults resolve lazily, at each accessor, never at construction — existing
+tests build a bare `&Anthropic{apiKey: "..."}` composite literal, so a zero
+config has to behave like the default one rather than like a half-built object.
+
+<Warning>
+  **There is no Bedrock support.** `AnthropicConfig` declares three fields —
+  `Sign`, `VersionInBody`, `ModelInPath` — that a Bedrock variant would need,
+  and they are honoured where they are read, but **no Bedrock preset, no SigV4
+  code and no AWS dependency ship in this build**. The catalog carries
+  `amazon-bedrock` model ids because it is a verbatim upstream snapshot; that is
+  a price list, not a provider. Read those three fields as a seam, not a
+  feature.
+</Warning>
+
+### Ollama native (`ollama-native`)
+
+Ollama keeps its own codec because `/api/chat` is NDJSON rather than SSE and
+carries the `think` and `format` knobs `llm.Request` exposes — the two switches
+the Keeper judge depends on to get a parseable verdict out of a small model
+inside a 256-token budget. The `ollama-openai` preset is the *other* way to
+reach the same daemon, through its `/v1` compatibility shim; it speaks the
+OpenAI message model and therefore does **not** carry `think`/`format`.
+
+Rule of thumb: use `ollama-native` (the `ollama` registry row) for anything
+wired into Keeper or an evaluator slot, and `ollama-openai` when you want the
+same daemon to stand in for a hosted OpenAI-compatible backend.
+
+## Walkthrough: a keyless local model
+
+This is the shortest end-to-end proof that the OpenAI-compatible codec works,
+and it costs nothing and needs no key. Every command below was run as written
+against a live Ollama daemon, and every output block is what came back — with
+the box-drawing borders the CLI draws around tables trimmed for width, and with
+the model's wording and the exact latency varying between runs, as they will for
+you.
+
+<Steps>
+  <Step title="See what this build can talk to">
+    `crewship provider list` is entirely local — no config file, no token, no
+    reachable server — because the registry and the catalog are both compiled
+    into the binary:
+
+    ```bash
+    crewship provider list
+    ```
+
+    ```
+    PROVIDER    NAME       CODEC               AUTH       KEY ENV            KEY         ENDPOINT                                    MODELS
+    anthropic   Anthropic  anthropic-messages  x-api-key  ANTHROPIC_API_KEY  unset       https://api.anthropic.com/v1/messages       13
+    openai      OpenAI     openai-compat       bearer     OPENAI_API_KEY     unset       https://api.openai.com/v1/chat/completions  47
+    ollama      Ollama     ollama-native       none       —                  not needed  http://localhost:11434                      0
+    ```
+
+    `KEY` reports only whether the environment variable is **set**, never its
+    value; `not needed` is a provider that takes no credential at all. `MODELS`
+    is how many entries the embedded catalog has for that provider — Ollama's
+    `0` is correct, since its model ids are whatever you pulled.
+
+    `--all` re-prints the same table with the catalog-only providers appended:
+    registry rows first in declaration order, then `amazon-bedrock` (120),
+    `deepseek` (4), `google` (39), `mistral` (33), `openrouter` (353) and `xai`
+    (12), sorted. Every column but `PROVIDER`, `NAME` and `MODELS` is a dash on
+    those rows, and that dash is the whole story: `deepseek` is listed because
+    the catalog **prices** it, not because a slot can select it.
+  </Step>
+
+  <Step title="Start the daemon">
+    ```bash
+    ollama serve &          # skip if it is already running as a service
+    curl -fsS http://localhost:11434/api/version
+    ```
+
+    ```
+    {"version":"0.32.5"}
+    ```
+  </Step>
+
+  <Step title="Pull a small model">
+    ```bash
+    ollama pull qwen2.5:0.5b
+    ollama list
+    ```
+
+    ```
+    NAME            ID              SIZE      MODIFIED
+    qwen2.5:0.5b    a8b0c5157701    397 MB    9 minutes ago
+    ```
+
+    A 0.5B model is enough to prove the wiring. It is **not** a judge — see the
+    model-choice warning in [Keeper](/guides/keeper) before pointing anything
+    real at it.
+  </Step>
+
+  <Step title="Prove the OpenAI-compatible shim answers">
+    The `ollama-openai` preset points at `http://localhost:11434/v1`. Hit it
+    directly first, so that a later failure is unambiguously Crewship's and not
+    the daemon's:
+
+    ```bash
+    curl -s http://localhost:11434/v1/chat/completions \
+      -H 'Content-Type: application/json' \
+      -d '{"model":"qwen2.5:0.5b",
+           "messages":[{"role":"user","content":"Reply with the single word: pong"}],
+           "max_tokens":16,"stream":false}'
+    ```
+
+    ```json
+    {
+      "id": "chatcmpl-376",
+      "object": "chat.completion",
+      "model": "qwen2.5:0.5b",
+      "system_fingerprint": "fp_ollama",
+      "choices": [
+        { "index": 0,
+          "message": { "role": "assistant", "content": "Pong!" },
+          "finish_reason": "stop" }
+      ],
+      "usage": { "prompt_tokens": 36, "completion_tokens": 4, "total_tokens": 40 }
+    }
+    ```
+
+    The `id` and the exact wording change on every run; the shape does not. The
+    `usage` block is the part that matters: no usage means no tokens, and no
+    tokens means a \$0 ledger row.
+  </Step>
+
+  <Step title="Drive it through the codec">
+    Now the same call, through the `openai-compat` codec instead of through
+    `curl`. `provider check` builds the real provider, sends one completion, and
+    prints what paymaster would bill for it. It is a **local** command: no
+    server, no token, no workspace, and no key, because `--base-url` names a
+    backend that wants none.
+
+    ```bash
+    crewship provider check \
+      --provider ollama-openai \
+      --base-url http://localhost:11434/v1 \
+      --model qwen2.5:0.5b
+    ```
+
+    ```
+    ollama-openai  qwen2.5:0.5b
+      codec        openai-compat
+      endpoint     http://localhost:11434/v1
+      api key      none
+      pricing key  ollama (what the ledger bills this as)
+
+      latency      15.492s
+      stop reason  end_turn
+      tokens       in 37  out 4  cached-in 0  cache-write 0
+      cost         $0.000000 (free rates: in $0.0000  out $0.0000  cached-in $0.0000  cache-write $0.0000)
+
+      reply        PONG!
+    ```
+
+    Read it line by line, because each one proves a different piece of the
+    wiring:
+
+    | Line | What it proves |
+    |---|---|
+    | `codec openai-compat` | The preset resolved, and to the shared codec rather than to Ollama's native one. |
+    | `pricing key ollama` | The preset's `Name` — **not** its preset key — is what reaches the ledger. This is the mapping that makes a self-hosted backend free. |
+    | `tokens in 37 out 4` | The `usage` block was parsed. Zeros here on a backend that clearly did work mean it sent none, and every call through it would bill \$0. |
+    | `stop reason end_turn` | `finish_reason: "stop"` mapped through the codec. |
+    | `cost $0.000000` | `ollama/*` is a free row in `priceTable`. A **hosted** provider printing \$0 here is a finding, not a bargain. |
+
+    Latency is the model's, not Crewship's — 10–15s for a cold 0.5B on CPU is
+    normal, and the default deadline is 60s (`--timeout` to change it). The
+    reply's exact wording changes every run.
+
+    <Note>
+      **A `context deadline exceeded` on the first run is usually the model
+      loading, not a wiring fault.** A cold 0.5B on a contended CPU box has been
+      measured taking well over the 60s default while a plain `curl` to the same
+      endpoint took 138s in the same window. Warm the model
+      (`ollama run <model> ""`) or pass `--timeout 5m`, and re-run before
+      concluding anything. The exit code tells the two apart: **8** is "nothing
+      answered at that address", **7** is "the provider answered and said no".
+    </Note>
+
+    `--provider` takes either a registry id (`anthropic`, `openai`, `ollama`) or
+    an OpenAI-compatible preset key (`openai`, `deepseek`, `ollama-openai`,
+    `vllm`). `--api-key` exists but prefer the key's environment variable where
+    you can: an argument is visible to every process on the host through `ps`.
+  </Step>
+
+  <Step title="Confirm what it would have cost">
+    The same rate lookup the ledger uses is available offline, so you can check
+    a model's price — and **which of the four steps answered** — before routing
+    any spend through it:
+
+    ```bash
+    crewship model price --provider ollama --model qwen2.5:0.5b --in 37 --out 4
+    ```
+
+    ```
+    ollama/qwen2.5:0.5b
+      rate source  free
+                   $0 on every channel — a local/self-hosted wildcard row, or a
+                   provider with no rate card at all
+
+      channel              tokens       $/Mtok           cost
+      input                    37      $0.0000      $0.000000
+      output                    4      $0.0000      $0.000000
+      cached input              0      $0.0000      $0.000000
+      cache write               0      $0.0000      $0.000000
+      total                                         $0.000000
+    ```
+
+    Note the token counts are the ones `provider check` just reported —
+    `--in` is **fresh** input, exclusive of `--cached`, which is the same
+    convention the ledger uses.
+
+    `rate source` is the point of the command: `table` is a number a human
+    checked against an invoice, `catalog` is a snapshot that can be a release
+    behind, `fallback` is the provider's ceiling and therefore a deliberate
+    over-estimate, and `free` is a `<provider>/*` wildcard row. Reading a
+    ceiling as a real price is how a budget line stops being believed.
+
+    On a pair the hand-written table also carries, the output adds a
+    `catalog says …` line showing what the snapshot would have charged — which
+    is how you see the two sources disagreeing before an invoice does.
+  </Step>
+
+  <Step title="Point the server at it">
+    The daemon is also reachable as a first-class registry provider, on the
+    native codec, with no key and no code:
+
+    ```bash
+    export KEEPER_OLLAMA_URL=http://localhost:11434
+    crewship keeper aux set curator --provider ollama --model qwen2.5:0.5b
+    crewship keeper aux test curator
+    crewship keeper aux list
+    ```
+
+    `aux test` runs one real evaluation against that slot's resolved model and
+    reports the same stages the judge check uses, so a local and a hosted
+    evaluator are held to the same bar. `aux reset curator` puts it back.
+  </Step>
+</Steps>
+
+<Note>
+  The `curl` and `provider check` steps exercise the **`openai-compat`** codec
+  against Ollama's `/v1` shim. The last step exercises the **`ollama-native`**
+  codec against the same daemon. They are different code paths to the same
+  model, and only the second one is wired into evaluator slots today.
+</Note>
+
+Two failure shapes worth recognising, because they are the ones you will
+actually hit:
+
+```bash
+crewship provider check --provider openrouter --model qwen/qwen3-coder-flash
+# unknown provider "openrouter" (known: anthropic, openai, ollama, deepseek, ollama-openai, vllm)
+# exit 3
+
+crewship provider check --provider deepseek --model deepseek-chat
+# deepseek check failed after 327ms: invalid DeepSeek API key
+# exit 7
+```
+
+The first is the registry and the preset list talking: the vocabulary in that
+message is generated from both, never written out, so it cannot drift from what
+the command accepts. The second is the upstream's own refusal, preserved
+verbatim rather than flattened into "provider error" — and the 327ms is the tell
+that it never got as far as the model.
+
+## Pointing at a hosted provider with a real key
+
+Three shapes, in decreasing order of how much of it is configuration rather than
+code.
+
+<Tabs>
+  <Tab title="OpenAI">
+    A registry row, so it is configuration end to end. Set the key the
+    registry names and pick the slot:
+
+    ```bash
+    export OPENAI_API_KEY=sk-...
+    crewship keeper aux set curator --provider openai --model gpt-5.4-mini
+    crewship keeper aux test curator
+    ```
+
+    An empty key is a **hard error**, not a warning: the constructor would
+    otherwise build a provider that 401s on every request, which is strictly
+    worse than the caller falling back to a local judge with a reason in the
+    log. To spend a vault credential instead of the server's own key, pass
+    `--credential <name>` — see [Keeper](/guides/keeper).
+  </Tab>
+
+  <Tab title="DeepSeek">
+    A shipped **preset** with a verified price row, but **not** a registry row.
+    You can check it end to end from the CLI:
+
+    ```bash
+    crewship provider check --provider deepseek --model deepseek-chat \
+      --api-key "$DEEPSEEK_API_KEY"
+    ```
+
+    <Note>
+      **A preset has no key environment variable of its own.** `--api-key` is
+      required here — exporting `DEEPSEEK_API_KEY` alone does nothing, and the
+      check runs unauthenticated and comes back with the provider's 401. Only
+      the `openai` preset inherits one (`OPENAI_API_KEY`), because its pricing
+      name is also a registry id. No convention is invented for the rest: an
+      upstream 401 names the problem better than a guess at a variable name
+      would. Read the key from your own environment as shown rather than
+      pasting it inline — an argument is visible to every process on the host
+      through `ps`.
+    </Note>
+
+    What you cannot do is *select* it: there is no `deepseek` value an aux slot
+    takes, because `crewship keeper aux set --provider` reads the registry and
+    the preset list is a separate table. Routing real traffic through it is a
+    code change at the call site:
+
+    ```go
+    cfg, _ := llm.OpenAIPreset("deepseek")   // https://api.deepseek.com/v1
+    cfg.APIKey = os.Getenv("DEEPSEEK_API_KEY")
+    p := llm.NewOpenAICompat(cfg)            // p.Name() == "deepseek"
+    ```
+
+    Pricing resolves without any further work: `deepseek/deepseek-chat` and
+    `deepseek/deepseek-reasoner` are hand-verified rows in `priceTable`, and
+    `deepseek` has a provider ceiling for anything else.
+
+    <Warning>
+      **Cache tokens on a compat backend are only as good as its usage block.**
+      The codec reads exactly one cache field, `usage.prompt_tokens_details.cached_tokens`,
+      because that is OpenAI's. A backend that reports its cache hits under a
+      different key records **zero cached tokens** here and pays the full input
+      rate on a hit — an over-estimate, so the ledger stays safe, but a
+      cache-hit ratio computed from those rows reads as zero. DeepSeek's API
+      documents its own `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
+      pair; confirm the current shape against their docs before you rely on
+      either reading.
+    </Warning>
+  </Tab>
+
+  <Tab title="OpenRouter">
+    No preset and no registry row — a gateway you configure by hand. Its two
+    attribution headers are static headers, which is exactly what `Headers` is
+    for:
+
+    ```go
+    p := llm.NewOpenAICompat(llm.OpenAICompatConfig{
+        Name:        "openrouter",          // the pricing key — see the warning
+        DisplayName: "OpenRouter",
+        BaseURL:     "https://openrouter.ai/api/v1",
+        APIKey:      os.Getenv("OPENROUTER_API_KEY"),
+        Headers: map[string]string{
+            "HTTP-Referer": "https://your.app",
+            "X-Title":      "Crewship",
+        },
+        IncludeUsage: true,
+    })
+    ```
+
+    Model ids carry the upstream vendor, e.g. `qwen/qwen3-coder-flash`. The
+    embedded catalog carries 353 OpenRouter ids, which is where their rates come
+    from.
+
+    You can dial the gateway from the CLI today without writing any of that,
+    by pointing the `openai` provider at OpenRouter's base URL — but read the
+    warning below before you believe the cost line:
+
+    ```bash
+    crewship provider check --provider openai \
+      --base-url https://openrouter.ai/api/v1 \
+      --model openai/gpt-4o-mini \
+      --api-key "$OPENROUTER_API_KEY"
+    ```
+
+    ```
+    openai  openai/gpt-4o-mini
+      codec        openai-compat
+      endpoint     https://openrouter.ai/api/v1
+      api key      --api-key
+      latency      1.51s
+      stop reason  end_turn
+      tokens       in 15  out 3  cached-in 0  cache-write 0
+      cost         $0.000540 (fallback rates: in $20.0000  out $80.0000  cached-in $5.0000  cache-write $20.0000)
+      reply        Pong.
+    ```
+
+    <Warning>
+      **The pricing key follows the provider NAME, not the endpoint.** In that
+      run the request went to OpenRouter and the ledger priced it as `openai` —
+      and since `openai/gpt-4o-mini` is not a row in the table, at the **openai
+      ceiling**: \$20/Mtok input. OpenRouter's own `usage.cost` for the same
+      call was \$0.000003. We over-estimated by roughly 180×.
+
+      Nothing is broken — `fallback rates` in the output says exactly what
+      happened, and over-estimating is the safe direction — but it is why
+      `Name` is the field to get right when you wire a gateway by hand. Set it
+      to `openrouter` and the same call resolves against the 353 catalog rows
+      instead.
+    </Warning>
+
+    <Note>
+      **OpenRouter is the one backend that will grade our arithmetic for us.**
+      Its response `usage` block carries a `cost` field — the gateway's own
+      charge for that call, in USD — alongside the token counts. Nothing in
+      Crewship reads it today, but it is an independent check: price the same
+      token counts with `crewship model price --provider openrouter --model <id>`
+      and compare. A gap means the snapshot has drifted from what the gateway is
+      actually charging, which is exactly what a rate card cannot tell you about
+      itself. On a measured 15-in / 3-out call to `openai/gpt-4o-mini` the
+      gateway charged \$0.000003.
+    </Note>
+
+    <Warning>
+      **An id the snapshot has never heard of bills at \$150/Mtok, and that is
+      the point.** A gateway reselling 353 models has no median worth guessing
+      at, so `openrouter`'s ceiling is the snapshot's own maximum across every
+      model and every tier it carries — the most expensive thing the gateway is
+      known to sell:
+
+      ```bash
+      crewship model price --provider openrouter --model qwen/no-such-model --in 12000 --out 800
+      ```
+
+      ```
+      openrouter/qwen/no-such-model
+        rate source  fallback
+                     provider ceiling — this model has no rate anywhere, so the
+                     provider's most expensive known tier is used and the cost is
+                     an OVER-estimate
+
+        channel              tokens       $/Mtok           cost
+        input                 12000    $150.0000      $1.800000
+        output                  800    $600.0000      $0.480000
+        total                                         $2.280000
+      ```
+
+      That row fires only for a slug the catalog does not carry — a brand-new
+      release, a rename, a `:free` variant — and a budget that trips loudly on
+      one of those is doing its job. It is **not** what a known id costs: the
+      same command on `qwen/qwen3-coder-flash` answers `rate source catalog` at
+      \$0.52/Mtok. Refresh the snapshot, or add a `priceTable` row, for anything
+      you pin. `amazon-bedrock` has a ceiling on the same basis.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## The model catalog
+
+`internal/modelcatalog` embeds a trimmed [models.dev](https://models.dev)
+snapshot — the provider / model / capability / price index — so Crewship can
+answer "what does this model cost" without a network call.
+
+- **What is in it:** 8 of the 192 upstream providers — `amazon-bedrock`,
+  `anthropic`, `deepseek`, `google`, `mistral`, `openai`, `openrouter`, `xai` —
+  with every model those providers publish kept **verbatim**, including fields
+  this package does not decode. Fetched 2026-08-19.
+- **Why trimmed:** the full index is ~4 MB and 92% of it is gateways we have no
+  codec for. The kept set covers every provider in `priceTable` or the curated
+  model lists, plus the two gateways a future provider would reach through the
+  codecs that already exist.
+- **Why offline:** the catalog backs the *fallback* path taken when a provider
+  cannot be reached live. A fallback that needs a network call to answer inverts
+  its own purpose.
+
+| Call | Returns |
+|---|---|
+| `Default()` | The decoded snapshot. Never nil, never panics. |
+| `DefaultErr()` | Why `Default` came back empty, or nil. For tests. |
+| `Catalog.Lookup(provider, model)` | One `Model` **copy**, or `false`. |
+| `Catalog.Models(provider)` | Every model for a provider, sorted, as copies. |
+| `Catalog.Providers()` | Provider ids, sorted. |
+| `Model.Rates()` | Base rates — below the first context threshold. |
+| `Model.RatesAt(contextToks)` | Rates for a call of that total prompt size. |
+| `Model.CeilingRates()` | The most expensive card the model publishes. |
+
+<Note>
+  **A corrupt snapshot degrades to "no catalog data", never a startup failure.**
+  Every caller falls through to its own fallback — the curated model lists, the
+  provider price ceiling — instead of taking the server down over a data file.
+  The snapshot is decoded once, lazily, on first use: decoding ~650 KB of JSON
+  at init would tax every binary that links the package transitively, including
+  the CLI, where most invocations never touch it.
+</Note>
+
+Refreshing it is a pure re-fetch with no editing:
+
+```bash
+go generate ./internal/modelcatalog/...
+go test ./internal/modelcatalog/...
+```
+
+`jq -S` in that directive sorts keys so a refresh produces a reviewable diff
+rather than a reshuffle. Adding a provider to the trim means editing **both**
+the `go:generate` line and the by-hand `curl` in the same comment — they are
+duplicated on purpose, because the comment is what a reader without `go generate`
+follows. Run the package tests afterwards: `embed_test.go` pins real ids and
+rates and is what catches an upstream repricing or a renamed id.
+
+<Note>
+  **Three model vocabularies, one page each.** The **curated lists** behind
+  `GET /api/v1/models` answer "which ids may I type" for four providers
+  ([Model discovery](/guides/model-discovery)). A provider's **live** `/v1/models`
+  answers "which ids can *this key* use". The **catalog** answers "what does this
+  id cost", for eight providers. The catalog prices; it does not discover, and it
+  is not a claim that Crewship can call the model.
+</Note>
+
+## Pricing: how a provider gets a rate
+
+`lookupPrice` walks four rate sources, in this order, and stops at the first
+hit. Falling off the end is a fifth outcome and a different kind of answer:
+
+<Steps>
+  <Step title="Exact priceTable row">
+    `"<provider>/<model>"`, hand-verified, in `internal/paymaster/pricing.go`.
+  </Step>
+  <Step title="Provider wildcard">
+    `"<provider>/*"` — how `ollama/*` and `local/*` say "free" with a human's
+    signature on it.
+  </Step>
+  <Step title="The embedded catalog">
+    The models.dev snapshot, flattened into the same key space.
+  </Step>
+  <Step title="providerFallback ceiling">
+    The most-expensive known tier for that provider. Every provider the registry
+    or the catalog knows has a row here, including the two gateways
+    (`openrouter` at \$150/Mtok input, `amazon-bedrock` at \$16.50), computed
+    from the snapshot's own maxima with tier rates included.
+  </Step>
+  <Step title="…and then $0">
+    Reached only when the *provider id itself* is unknown — a typo, or a
+    `Provider.Name()` nobody priced. It is not a rate; it is the absence of one,
+    and it is the case worth chasing down.
+  </Step>
+</Steps>
+
+The catalog sits **third**, below the hand-written table, because `priceTable`
+carries corrections a bulk import must not overwrite — the Anthropic Opus 4.7
+repricing is the worked example — and because the wildcard has to keep
+`ollama/*` and `local/*` free. It sits **above** the ceiling because a ceiling
+that is wrong by 10× on a cheap model is the kind of wrong that makes an
+operator stop trusting the budget line.
+
+<Warning>
+  **A model the catalog carries no cost for is skipped, never written as a zero
+  row.** The snapshot holds 23 all-zero cost blocks — hosted models priced 0/0
+  upstream, which is a gap in the data and not a claim that they are free. Those
+  fall through to the ceiling and are over-estimated, which is the safe
+  direction. It also over-bills genuinely free OpenRouter `:free` tiers, and
+  that trade is deliberate: free is a claim only `ollama/*` and `local/*` get to
+  make, in `priceTable`, where a human signed off on it.
+</Warning>
+
+### Long-context tiers
+
+76 models in the snapshot publish a second rate card that takes over above a
+context threshold — usually 200k or 272k tokens, and up to **6.7×** the base
+rate. Only two of them are shadowed by `priceTable`, so the rest reach the
+ledger through the catalog.
+
+`Estimate` receives token counts but no context axis, so it cannot know which
+card applies; until that signature changes, `catalog_pricing.go` bills tiered
+models at `CeilingRates()` — the most expensive card the model publishes. A
+short call on a tiered model is therefore **over**-estimated. That is the same
+call `providerFallback` already makes ("the most-expensive known tier, not the
+median") and the same call the hand-written table made independently for the one
+tiered model it carries. Under-billing weakens the budget signal exactly when an
+operator needs it; over-billing is visible and annoying, so we take visible and
+annoying.
+
+The row picked is always **one published tier**, never a per-channel maximum
+assembled from several — a synthetic worst-of-every-column row would describe a
+price no provider charges. A caller that *does* know the prompt size can ask
+`Model.RatesAt(contextToks)` directly. Note that the threshold is exclusive:
+models.dev names these tiers "over 200k", so a call at exactly 200,000 tokens is
+base-priced.
+
+`cost.context_over_200k` is deliberately not decoded. It duplicates one tier
+entry with the `tier` key removed, and its name lies — for 34 of the 65 models
+that carry it the real threshold is 256,000 or 272,000 tokens.
+
+### Input tokens are fresh tokens, on every codec
+
+`Response.InputToks` means **fresh** input: exclusive of `CachedInputToks` and
+`CacheCreationToks`, on every provider. Anthropic reports it that way on the
+wire; OpenAI does not — its `prompt_tokens` *includes* cached tokens — so the
+OpenAI codec subtracts, clamped at zero. Without that subtraction an 80%-cached
+1500-token prompt bills 2.67× the invoice, and the sidecar's proxy path (which
+has always subtracted) and the in-process codec would disagree while writing to
+the same `cost_ledger`.
+
+All four OpenAI-compatible presets inherit the subtraction, including compat
+backends that report a `cached_tokens` larger than `prompt_tokens` — the clamp
+is what keeps a negative token count out of the ledger.
+
+<Note>
+  `cost_ledger.input_tokens` therefore changed meaning for OpenAI-family rows.
+  Historic rows are not migrated, so a rollup spanning the change is not
+  comparable across it.
+</Note>
+
+Full rate card and the ledger schema: [Paymaster](/guides/paymaster#pricing--current-rates).
+
+## Adding a provider
+
+<Steps>
+  <Step title="Add the registry row">
+    One `RegisterProvider` call in `registry.go`'s `init`, at the position you
+    want it to appear in the operator's picker. `provider_build_registry_test.go`
+    checks the row is buildable.
+  </Step>
+  <Step title="Give it a rate">
+    Either a `priceTable` row (hand-verified) or confirm the embedded catalog
+    covers the ids you will use — `CatalogID` is how a provider whose registry
+    id differs from its models.dev id finds them. A row with neither bills at
+    \$0. If you added an OpenAI preset,
+    `TestPresetsResolveToAPricedProvider` fails until the rate exists.
+  </Step>
+  <Step title="Wire the surfaces, if any">
+    A new API route needs a line in `internal/api/testdata/route-roles.txt`, and
+    every API endpoint needs a matching CLI command
+    (`cli_route_contract_test.go` enforces it). A provider row on its own adds
+    neither.
+  </Step>
+  <Step title="Document it">
+    This page, plus [Paymaster](/guides/paymaster) if the rate source is new and
+    [Environment](/configuration/environment) if you introduced an env var.
+  </Step>
+</Steps>
+
+## What does not ship yet
+
+- **No Bedrock.** The `AnthropicConfig` seam is declared and unused; there is no
+  SigV4 code and no AWS dependency.
+- **No Google/Gemini provider.** Discoverable and priced, not callable.
+- **No API route for the registry.** `crewship provider list` and
+  `crewship model price` read the compiled-in tables directly; there is no
+  providers endpoint behind them and none is needed. The vocabulary reaches
+  the server through `crewship keeper aux set --provider`, the admin Keeper API
+  and the console picker.
+- **Presets are code-level.** `deepseek`, `ollama-openai` and `vllm` cannot be
+  *selected* from configuration — an evaluator slot takes only the three
+  registry ids. `crewship provider check --provider` does accept a preset key,
+  because a one-shot check is not a stored setting, but `provider list` will not
+  show them: a preset is not a registry row.
+- **One cache-token vocabulary.** The OpenAI codec reads
+  `usage.prompt_tokens_details.cached_tokens` and nothing else, so a compatible
+  backend that names its cache hits differently records zero cached tokens and
+  pays the full input rate — see the DeepSeek tab above.
+
+## Related
+
+- [Model discovery](/guides/model-discovery) — which model ids exist.
+- [Paymaster](/guides/paymaster) — what they cost, and the ledger.
+- [LLM middleware](/guides/llm-middleware) — the call stack they plug into.
+- [Keeper](/guides/keeper) — the judge and the evaluator slots that consume the registry.
+- [Environment](/configuration/environment) — the key and endpoint variables.
+- [Providers](/configuration/providers) — container/storage providers, a different thing entirely.

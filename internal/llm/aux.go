@@ -21,12 +21,15 @@ type AuxModel struct {
 // want their own dedicated model should add a slot here in lockstep
 // with extending the Slot enum and the resolver switch.
 //
-// MVP defaults (DefaultAuxiliaryModels) put every slot on Anthropic
-// claude-haiku-4-5. Local-model support (Ollama / llama.cpp) is a
-// documented Phase 2 follow-up; until then F3 features (Keeper,
-// F4 evaluators, Curator) require an ANTHROPIC_API_KEY. The "no API
-// key required" core moat is a known compromise per PRD §6 F3
-// "Known compromise" note.
+// The SHIPPED defaults (DefaultAuxiliaryModels) put every slot on the
+// first row of the provider registry that names a DefaultAuxModel —
+// anthropic/claude-haiku-4-5 today. What an instance actually boots
+// with is LoadAuxiliaryModels, which retargets that at the first
+// registered provider whose credential is present, so an operator
+// holding only an OPENAI_API_KEY gets working evaluators instead of
+// six slots that fail at first use. Neither path invents a key: with
+// no credential at all the slots keep the shipped default and the
+// builder still errors loudly, naming the env var to set.
 type AuxiliaryModels struct {
 	Curator      AuxModel `yaml:"curator"`       // memory consolidation, skill review (F4.1)
 	Keeper       AuxModel `yaml:"keeper"`        // credential gatekeeper evaluator
@@ -71,36 +74,124 @@ const (
 // card or `crewship keeper aux set <slot> --timeout`.
 const auxDefaultTimeout = 20 * time.Second
 
-// DefaultAuxiliaryModels returns the MVP-default config: every slot
-// on claude-haiku-4-5, with the per-call budget each evaluator enforces.
+// auxDefaultSpec returns the registry row an unconfigured slot points at: the
+// first provider in DECLARATION order that names a DefaultAuxModel and whose
+// credential requirement getenv can satisfy.
+//
+// getenv == nil means "ignore credentials" — the SHIPPED answer, which is what
+// DefaultAuxiliaryModels wants and what keepercfg compares against to tell a
+// value we shipped apart from one the operator's environment chose.
+//
+// A row with no DefaultAuxModel is skipped, credential or not. That is the
+// ollama row: it needs no key, but the model id is whatever the operator
+// pulled, and a slot naming the empty model would build a provider that fails
+// on its first request — strictly worse than the shipped default plus the
+// builder's "ANTHROPIC_API_KEY env not set" error, which at least names the fix.
+//
+// The key is trimmed before it counts. BuildAuxProviderWithKey tests the raw
+// value, so a whitespace-only key is "set" there and would 401 on first use;
+// treating it as absent here keeps the default on a provider whose failure mode
+// is a startup line rather than a live 401.
+func auxDefaultSpec(getenv func(string) string) (ProviderSpec, bool) {
+	for _, spec := range RegisteredProviderSpecs() {
+		if spec.DefaultAuxModel == "" {
+			continue
+		}
+		if getenv != nil && spec.KeyEnv != "" && strings.TrimSpace(getenv(spec.KeyEnv)) == "" {
+			continue
+		}
+		return spec, true
+	}
+	return ProviderSpec{}, false
+}
+
+// auxiliaryModelsOn puts every slot on one provider/model, with the per-call
+// budget each evaluator enforces.
 //
 // Keeper and RunSummary keep their PRD §6 F3 numbers: nothing resolves
 // SlotKeeper (see keepercfg.AuxSlots, which deliberately omits it), and the
 // run_summary path bounds its call by the caller's context rather than by this
 // field — neither is a budget an evaluator reads.
-func DefaultAuxiliaryModels() AuxiliaryModels {
-	haiku := func(timeout time.Duration) AuxModel {
-		return AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: timeout}
+//
+// The budgets do not move with the provider. auxDefaultTimeout is already sized
+// for a slow local judge (see its comment), so re-deriving it per provider would
+// only re-introduce the #1530 failure it was widened to fix.
+func auxiliaryModelsOn(provider, model string) AuxiliaryModels {
+	slot := func(timeout time.Duration) AuxModel {
+		return AuxModel{Provider: provider, Model: model, Timeout: timeout}
 	}
 	return AuxiliaryModels{
-		Curator:      haiku(auxDefaultTimeout),
-		Keeper:       haiku(5 * time.Second),
-		Behavior:     haiku(auxDefaultTimeout),
-		MemoryHealth: haiku(auxDefaultTimeout),
-		Negative:     haiku(auxDefaultTimeout),
-		RunSummary:   haiku(15 * time.Second),
-		Fallback:     haiku(auxDefaultTimeout),
+		Curator:      slot(auxDefaultTimeout),
+		Keeper:       slot(5 * time.Second),
+		Behavior:     slot(auxDefaultTimeout),
+		MemoryHealth: slot(auxDefaultTimeout),
+		Negative:     slot(auxDefaultTimeout),
+		RunSummary:   slot(15 * time.Second),
+		Fallback:     slot(auxDefaultTimeout),
 	}
 }
 
-// LoadAuxiliaryModels returns the MVP defaults with any
-// CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT} environment overrides applied.
-// This is the wiring entry point for server bootstrap — operators can point
-// individual aux slots at a cheaper (or local) model without a config-file
-// redeploy, closing the "documented but unimplemented" gap the struct comment
-// promised.
+// DefaultAuxiliaryModels returns the SHIPPED config: every slot on the first
+// registry row that names a DefaultAuxModel — anthropic/claude-haiku-4-5 — with
+// the per-call budget each evaluator enforces.
+//
+// Deliberately environment-independent, which is the whole reason it is a
+// separate function from LoadAuxiliaryModels. keepercfg.AuxStore keeps this
+// value as its `builtin` layer purely to tell "we shipped this" apart from "the
+// operator's environment selected this" (keepercfg.pickAux); making it read the
+// environment would collapse that distinction exactly where it matters — the
+// console would report a slot the operator's OPENAI_API_KEY moved as a default
+// nobody chose.
+//
+// It reads the registry rather than repeating the literal so the shipped model
+// and ProviderSpec.DefaultAuxModel cannot drift apart. If no row names a
+// DefaultAuxModel at all the slots come back empty and ResolveAux errors — loud,
+// per PR-Z Z.2, rather than a hidden third copy of "anthropic".
+func DefaultAuxiliaryModels() AuxiliaryModels {
+	spec, _ := auxDefaultSpec(nil)
+	return auxiliaryModelsOn(spec.ID, spec.DefaultAuxModel)
+}
+
+// AvailableAuxiliaryModels returns the defaults retargeted at the first
+// registered provider whose credential is actually present in getenv.
+//
+// An instance whose operator holds only an OPENAI_API_KEY used to get six
+// evaluator slots hardcoded to anthropic, each failing at first use with
+// "ANTHROPIC_API_KEY env not set" — a key they have no reason to own. The
+// registry knows which env var each provider reads (ProviderSpec.KeyEnv) and
+// which model to name (DefaultAuxModel), so "the provider this instance can
+// actually reach" is answerable from the table instead of from a literal.
+//
+// Declaration order decides ties, the same order the console's picker renders:
+// an instance holding both keys keeps the shipped anthropic default, so adding
+// a second key never silently repoints a working evaluator.
+//
+// With no credential for any row this returns the shipped default unchanged —
+// it does not fall through to a keyless provider it cannot name a model for,
+// and it does not degrade to a slot that resolves and then 401s. The operator
+// still gets the builder's loud error, naming the env var to set.
+//
+// getenv is injected for testability (pass os.Getenv in prod), matching
+// AuxiliaryModelsFromEnv.
+func AvailableAuxiliaryModels(getenv func(string) string) AuxiliaryModels {
+	if spec, ok := auxDefaultSpec(getenv); ok {
+		return auxiliaryModelsOn(spec.ID, spec.DefaultAuxModel)
+	}
+	return DefaultAuxiliaryModels()
+}
+
+// LoadAuxiliaryModels returns the defaults for the providers this instance has
+// credentials for, with any CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT}
+// environment overrides applied on top. This is the wiring entry point for
+// server bootstrap — operators can point individual aux slots at a cheaper (or
+// local) model without a config-file redeploy, closing the "documented but
+// unimplemented" gap the struct comment promised.
+//
+// Order matters: availability picks the base, the explicit CREWSHIP_AUX_* values
+// win over it. An operator who named a provider has already answered the
+// question this function's first half guesses at.
 func LoadAuxiliaryModels() AuxiliaryModels {
-	return AuxiliaryModelsFromEnv(DefaultAuxiliaryModels(), os.Getenv)
+	return AuxiliaryModelsFromEnv(AvailableAuxiliaryModels(os.Getenv), os.Getenv)
 }
 
 // AuxiliaryModelsFromEnv overlays CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT}

@@ -99,8 +99,19 @@ var providerFallback = map[string]modelPrice{
 	"xai":       {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // grok-4-equivalent
 	"deepseek":  {InputPerM: 0.70, OutputPerM: 2.50, CachedInputPerM: 0.07, CacheWritePerM: 0.70},    // reasoner tier (ceiling)
 	"mistral":   {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // mistral-large estimate (ceiling above codestral)
-	"ollama":    {},
-	"local":     {},
+	// Gateways. These ceilings are the highest rate the embedded snapshot
+	// actually publishes for the provider (including tier rates), computed from
+	// the snapshot rather than guessed. OpenRouter's is startlingly high because
+	// it resells 353 models and a few are exotic — and that is the right number
+	// anyway: this row fires ONLY for a model the catalogue does not know, i.e.
+	// a renamed or brand-new slug. A loud over-estimate on a slug nobody
+	// recognises is the signal; billing it at $0 was the bug (a call to an
+	// unknown openrouter model priced at zero until this row existed).
+	"openrouter":     {InputPerM: 150.00, OutputPerM: 600.00, CachedInputPerM: 7.50, CacheWritePerM: 37.50},
+	"amazon-bedrock": {InputPerM: 16.50, OutputPerM: 82.50, CachedInputPerM: 1.65, CacheWritePerM: 20.625},
+
+	"ollama": {},
+	"local":  {},
 }
 
 // Estimate computes the USD cost of a single LLM call. Token counts are int64

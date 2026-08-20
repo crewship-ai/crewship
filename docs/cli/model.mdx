@@ -1,6 +1,6 @@
 ---
 title: "model"
-description: "Discover models available from a provider."
+description: "Discover models available from a provider, and price a call before you make it."
 icon: "cpu"
 stability: experimental
 tag: Experimental
@@ -8,14 +8,142 @@ tag: Experimental
 
 ## `crewship model list`
 
-Lists models a provider can serve. With an active provider credential the list
-is live; otherwise Crewship returns a curated fallback where available.
+Lists the models a provider can serve.
 
 ```bash
 crewship model list --provider anthropic
-crewship model list --provider openai --format json
-crewship model list --provider ollama
+crewship model list --provider deepseek                  # offline, from the catalog
+crewship model list --provider openrouter --search qwen3-coder
+crewship model list --provider anthropic --source catalog --format json
+crewship model list --provider ollama                    # live only; needs a reachable daemon
 ```
 
-`--provider` is required (`anthropic`, `openai`, `google`, or `ollama`). The
-response identifies its source as live or curated.
+| Flag | Type | Description |
+|---|---|---|
+| `--provider` | `string` | Required. Any id `crewship provider list --all` prints. |
+| `--source` | `string` | `auto` (default), `live` (ask the server), or `catalog` (the embedded models.dev snapshot, offline). |
+| `--search` | `string` | Only show models whose id or name contains this substring. Applied after the fetch. |
+
+**Two sources, and `auto` picks between them.** For a provider the server can
+answer for — `anthropic`, `openai`, `google`, `ollama` — the list comes from the
+server: live from the provider when the workspace has an active API key,
+a curated fallback otherwise, and the `source` field says which. That path needs
+a login and a workspace. Every other provider is answered from the snapshot
+compiled into the binary, with **no token, no workspace and no server**, which
+is how the providers this build has no codec for are still visible and priced.
+
+```bash
+crewship model list --provider deepseek
+```
+
+```
+deepseek models  (source=catalog, 4 listed)
+MODEL              NAME               CONTEXT  MAX OUT  TOOLS  IN $/MTOK  OUT $/MTOK
+deepseek-v4-pro    DeepSeek V4 Pro    1M       384k     yes    0.435      0.87
+deepseek-v4-flash  DeepSeek V4 Flash  1M       384k     yes    0.14       0.28
+deepseek-chat      DeepSeek Chat      1M       384k     yes    0.14       0.28
+deepseek-reasoner  DeepSeek Reasoner  1M       384k     yes    0.14       0.28
+```
+
+Rows are in **source order** — most-capable and most-recent first, the order
+both the curated lists and the catalog use — not alphabetical.
+
+<Note>
+  **The rates in this table are the catalog's, not necessarily the billed
+  ones.** Paymaster's hand-verified table sits above the snapshot and can
+  correct it, and a long-context model is billed at its ceiling. Ask
+  `crewship model price` for the number that will actually reach the ledger.
+</Note>
+
+`--source live` forces the server path for a provider `auto` would have answered
+offline; `--source catalog` is the escape hatch when the server is unreachable
+or refuses a provider id. A model the snapshot has never heard of — an Ollama
+tag, or a release newer than the fetch date — simply carries no catalog columns.
+
+## `crewship model price`
+
+Prints the per-million-token rates paymaster will bill a `(provider, model)`
+pair at, **which of the four lookup steps produced them**, and the cost of a
+call with the given token counts. Entirely local: the rate card and the catalog
+are compiled in.
+
+```bash
+crewship model price --provider anthropic --model claude-sonnet-5 --in 12000 --out 800
+crewship model price --provider openai --model gpt-5.5 --in 3000 --out 500 --cached 9000
+crewship model price --provider openrouter --model qwen/qwen3-coder-flash --format json
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--provider` | `string` | The pricing key the model is billed under — `Provider.Name()`, not a display name. |
+| `--model` | `string` | Model id to price. |
+| `--in` | `int` | **Fresh** input tokens: those *not* served from the prompt cache. |
+| `--out` | `int` | Output tokens. |
+| `--cached` | `int` | Cached input tokens (cache reads). |
+| `--cache-write` | `int` | Cache creation tokens (cache writes). |
+
+The four channels are priced separately, which is why `--in` excludes
+`--cached` rather than including it. That is the same convention the ledger
+uses — see [Paymaster](/guides/paymaster#prompt-cache-token-flow).
+
+```bash
+crewship model price --provider openai --model gpt-5.5 --in 300 --out 50 --cached 1200
+```
+
+```
+openai/gpt-5.5
+  rate source  table
+               hand-written rate card, verified against the provider's published prices (internal/paymaster/pricing.go)
+
+  channel              tokens       $/Mtok           cost
+  input                   300      $4.0000      $0.001200
+  output                   50     $24.0000      $0.001200
+  cached input           1200      $0.4000      $0.000480
+  cache write               0      $4.0000      $0.000000
+  total                                         $0.002880
+
+  catalog says  in $10.0000  out $45.0000  cached-in $1.0000  cache-write $10.0000 (shadowed by the table rate above)
+
+  unknown openai model bills at  in $20.0000  out $80.0000  cached-in $5.0000  cache-write $20.0000
+```
+
+`rate source` is the reason the command exists:
+
+| Source | What the number is |
+|---|---|
+| `table` | The hand-written rate card. A human checked it against an invoice. |
+| `wildcard` | A `<provider>/*` row — every model of that provider bills at this rate. |
+| `catalog` | The embedded models.dev snapshot. Accurate as of its fetch date, not hand-verified. |
+| `fallback` | The provider's **ceiling** — nothing prices this model, so its most expensive known tier is used. A deliberate over-estimate. |
+| `free` | \$0 on every channel: a local/self-hosted wildcard row, **or** a provider with no rate card at all. |
+
+<Warning>
+  **`free` does not always mean free.** From outside the paymaster package, "a
+  `<provider>/*` row said \$0" and "no rate card exists for this provider at
+  all" are the same observation. `ollama/*` and `local/*` are genuinely free;
+  a provider id with no ceiling row — a typo, or a `Provider.Name()` nobody
+  priced — also reads `free`, and bills every call at \$0. Every provider the
+  registry or the catalog knows has a ceiling, so `free` on anything other than
+  a local runtime is a finding.
+
+  A `fallback` is the opposite failure and just as misleading if taken at face
+  value: `openrouter`'s ceiling is \$150/Mtok input, because a gateway
+  reselling 353 models has no median worth guessing at. Reading a ceiling — or
+  a \$0 — as a real price is how a budget line stops being believed.
+</Warning>
+
+The `catalog says` line appears when the snapshot also carries the pair, so you
+can see the two sources disagreeing before an invoice does — it is the
+snapshot's **ceiling** for that model, the same number the catalog step would
+have billed, which is why it can sit well above the table rate that shadows it.
+The
+`unknown <provider> model bills at` line is what that provider charges for a
+model nothing prices, printed to give the resolved number a scale to be read
+against.
+
+## Related
+
+- [Model discovery](/guides/model-discovery) — the live/curated API behind `--source live`.
+- [Multi-provider LLM configuration](/guides/multi-provider-llm) — the catalog and the four-step rate lookup.
+- [`crewship provider`](/cli/provider) — which providers exist, and a live check against one.
+- [Paymaster](/guides/paymaster) — the ledger these rates land in.

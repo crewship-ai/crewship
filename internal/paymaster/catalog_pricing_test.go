@@ -43,7 +43,7 @@ func TestBuildCatalogPrices_SkipsCostlessModels(t *testing.T) {
 	for _, prov := range cat.Providers() {
 		for _, m := range cat.Models(prov) {
 			key := prov + "/" + m.ID
-			in, out, cacheRead, cacheWrite, ok := m.Rates()
+			in, out, cacheRead, cacheWrite, ok := m.CeilingRates()
 			got, present := prices[key]
 			if !ok {
 				checkedCostless++
@@ -64,8 +64,8 @@ func TestBuildCatalogPrices_SkipsCostlessModels(t *testing.T) {
 				t.Errorf("%s has a cost in the catalogue but no rate row", key)
 				continue
 			}
-			// The nil-mirror convention lives in Rates(); the bridge must copy
-			// it through unchanged rather than re-deriving it.
+			// The nil-mirror convention lives in CeilingRates(); the bridge
+			// must copy it through unchanged rather than re-deriving it.
 			want := modelPrice{
 				InputPerM:       in,
 				OutputPerM:      out,
@@ -88,6 +88,13 @@ func TestBuildCatalogPrices_SkipsCostlessModels(t *testing.T) {
 
 // An absent cache_read or cache_write mirrors the input rate, never zero. Zero
 // would mean "cached input is free", which under-bills every cache hit.
+//
+// The base block is the exact witness only for untiered models — a tiered
+// model's row comes from whichever block CeilingRates selected, so the mirror
+// is taken against THAT block's input. The tiered half of the check is
+// therefore looser by necessity: the rate must be either a rate the catalogue
+// published somewhere on that model, or the row's own input. The precise
+// per-block rule is pinned in modelcatalog's own tests.
 func TestBuildCatalogPrices_NilCacheRatesMirrorInput(t *testing.T) {
 	cat := modelcatalog.Default()
 	prices := catalogPrices()
@@ -101,15 +108,188 @@ func TestBuildCatalogPrices_NilCacheRatesMirrorInput(t *testing.T) {
 			if !ok {
 				continue
 			}
-			if m.Cost.CacheRead == nil && p.CachedInputPerM != p.InputPerM {
-				t.Errorf("%s/%s: no cache_read in the catalogue, CachedInputPerM = %v, want it to mirror InputPerM %v",
-					prov, m.ID, p.CachedInputPerM, p.InputPerM)
+			if len(m.Cost.Tiers) == 0 {
+				if m.Cost.CacheRead == nil && p.CachedInputPerM != p.InputPerM {
+					t.Errorf("%s/%s: no cache_read in the catalogue, CachedInputPerM = %v, want it to mirror InputPerM %v",
+						prov, m.ID, p.CachedInputPerM, p.InputPerM)
+				}
+				if m.Cost.CacheWrite == nil && p.CacheWritePerM != p.InputPerM {
+					t.Errorf("%s/%s: no cache_write in the catalogue, CacheWritePerM = %v, want it to mirror InputPerM %v",
+						prov, m.ID, p.CacheWritePerM, p.InputPerM)
+				}
+				continue
 			}
-			if m.Cost.CacheWrite == nil && p.CacheWritePerM != p.InputPerM {
-				t.Errorf("%s/%s: no cache_write in the catalogue, CacheWritePerM = %v, want it to mirror InputPerM %v",
-					prov, m.ID, p.CacheWritePerM, p.InputPerM)
+
+			published := func(pick func(modelcatalog.CostTier) *float64, base *float64) []float64 {
+				var out []float64
+				if base != nil {
+					out = append(out, *base)
+				}
+				for _, tier := range m.Cost.Tiers {
+					if v := pick(tier); v != nil {
+						out = append(out, *v)
+					}
+				}
+				return out
+			}
+			readRates := published(func(t modelcatalog.CostTier) *float64 { return t.CacheRead }, m.Cost.CacheRead)
+			writeRates := published(func(t modelcatalog.CostTier) *float64 { return t.CacheWrite }, m.Cost.CacheWrite)
+
+			if !containsFloat(readRates, p.CachedInputPerM) && p.CachedInputPerM != p.InputPerM {
+				t.Errorf("%s/%s: CachedInputPerM = %v is neither a published cache_read %v nor the row's input %v",
+					prov, m.ID, p.CachedInputPerM, readRates, p.InputPerM)
+			}
+			if !containsFloat(writeRates, p.CacheWritePerM) && p.CacheWritePerM != p.InputPerM {
+				t.Errorf("%s/%s: CacheWritePerM = %v is neither a published cache_write %v nor the row's input %v",
+					prov, m.ID, p.CacheWritePerM, writeRates, p.InputPerM)
 			}
 		}
+	}
+}
+
+func containsFloat(haystack []float64, needle float64) bool {
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// Tiered models are billed at their CEILING, deliberately. This is the test
+// that says so out loud, because the alternative reading — "the catalogue rate
+// is cost.input" — is what a reader assumes and what the code did before.
+//
+// Estimate has no context-size argument, so nothing here can know which tier a
+// given call actually landed in. Given that, the only two options are the base
+// rate (under-bills a long-context call, by up to 6.7× in this snapshot) and
+// the ceiling (over-bills a short one). Over-billing keeps the budget
+// warn/exceed signal firing; under-billing spends money the operator was told
+// they had. See buildCatalogPrices for the full argument.
+func TestBuildCatalogPrices_TieredModelsBillAtTheCeiling(t *testing.T) {
+	cat := modelcatalog.Default()
+	prices := catalogPrices()
+
+	var tiered, dearer int
+	for _, prov := range cat.Providers() {
+		for _, m := range cat.Models(prov) {
+			if m.Cost == nil || len(m.Cost.Tiers) == 0 {
+				continue
+			}
+			key := prov + "/" + m.ID
+			p, ok := prices[key]
+			if !ok {
+				continue
+			}
+			tiered++
+
+			ceilIn, ceilOut, ceilRead, ceilWrite, _ := m.CeilingRates()
+			want := modelPrice{
+				InputPerM:       ceilIn,
+				OutputPerM:      ceilOut,
+				CachedInputPerM: ceilRead,
+				CacheWritePerM:  ceilWrite,
+			}
+			if p != want {
+				t.Errorf("%s: rate row = %+v, want the ceiling %+v", key, p, want)
+			}
+
+			baseIn, _, _, _, _ := m.Rates()
+			if p.InputPerM < baseIn {
+				t.Errorf("%s: InputPerM %v is below the base rate %v — that is an under-estimate on every call",
+					key, p.InputPerM, baseIn)
+			}
+			if p.InputPerM > baseIn {
+				dearer++
+			}
+		}
+	}
+
+	if tiered == 0 {
+		t.Fatal("no tiered model reached a rate row; either the snapshot lost cost.tiers or the bridge stopped seeing them")
+	}
+	if dearer == 0 {
+		t.Error("no tiered model priced above its base rate — the ceiling rule is untested by data, which means a regression to base rates would pass this suite")
+	}
+	t.Logf("%d tiered models billed at the ceiling, %d of them above their base rate", tiered, dearer)
+}
+
+// The concrete row, spelled out. openrouter/qwen/qwen3-coder-flash publishes
+// three prices for the same model — 0.195 base, 0.325 above 32k, 0.52 above
+// 128k — and no priceTable key shadows it, so the catalogue is what the ledger
+// bills. Before tier support it billed 0.195 at every context length, which is
+// 37% of the invoice on a long call.
+func TestLookupPrice_TieredCatalogModelUsesTheCeiling(t *testing.T) {
+	const provider, model = "openrouter", "qwen/qwen3-coder-flash"
+
+	m, ok := modelcatalog.Default().Lookup(provider, model)
+	if !ok {
+		t.Skip(provider + "/" + model + " is not in this snapshot")
+	}
+	if len(m.Cost.Tiers) != 2 {
+		t.Skipf("%s/%s no longer has the 2 tiers this test was written against (%d)", provider, model, len(m.Cost.Tiers))
+	}
+
+	got := lookupPrice(provider, model)
+	want := modelPrice{
+		InputPerM:       0.52,
+		OutputPerM:      2.6,
+		CachedInputPerM: 0.104,
+		CacheWritePerM:  0.65,
+	}
+	if got != want {
+		t.Fatalf("lookupPrice(%q, %q) = %+v, want the top tier %+v (0.195/0.975 is the base rate — that is the bug)",
+			provider, model, got, want)
+	}
+
+	// And the money. A 1M-token prompt above the 128k threshold costs $0.52 on
+	// the invoice; billing the base rate would put $0.195 on the ledger.
+	if cost := Estimate(provider, model, 1_000_000, 0, 0, 0); cost != 0.52 {
+		t.Fatalf("Estimate over 1M input tokens = %v, want 0.52", cost)
+	}
+}
+
+// RateCard is what the ledger snapshots onto the row at write time, so it must
+// carry the same ceiling Estimate charged. A divergence here would produce a
+// ledger row whose stored rates do not explain its own cost column.
+func TestRateCard_CarriesTheCeilingForTieredModels(t *testing.T) {
+	const provider, model = "openrouter", "qwen/qwen3-coder-flash"
+	if _, ok := modelcatalog.Default().Lookup(provider, model); !ok {
+		t.Skip(provider + "/" + model + " is not in this snapshot")
+	}
+	card := RateCard(provider, model)
+	if card != lookupPrice(provider, model) {
+		t.Fatalf("RateCard = %+v, lookupPrice = %+v; they must be the same rate", card, lookupPrice(provider, model))
+	}
+	if card.InputPerM != 0.52 {
+		t.Fatalf("RateCard(%q, %q).InputPerM = %v, want the top tier 0.52", provider, model, card.InputPerM)
+	}
+}
+
+// The hand-written table still wins over a tiered catalogue row. gemini-2.5-pro
+// is the only model where the two sources overlap AND the catalogue is tiered,
+// and priceTable independently chose the same upper tier — so this asserts both
+// that precedence holds and that the two sources now agree on the number.
+func TestLookupPrice_HandWrittenTableStillWinsOnATieredModel(t *testing.T) {
+	const key = "google/gemini-2.5-pro"
+	want, ok := priceTable[key]
+	if !ok {
+		t.Skip(key + " is no longer hand-priced")
+	}
+	m, inCatalog := modelcatalog.Default().Lookup("google", "gemini-2.5-pro")
+	if !inCatalog || len(m.Cost.Tiers) == 0 {
+		t.Skip(key + " is not tiered in this snapshot")
+	}
+
+	if got := lookupPrice("google", "gemini-2.5-pro"); got != want {
+		t.Fatalf("lookupPrice = %+v, want the hand-written %+v", got, want)
+	}
+	// Not a requirement, but a drift alarm worth having: the hand table's
+	// comment says it picked the upper tier on purpose. If the catalogue's
+	// ceiling ever disagrees, one of the two repriced.
+	if ceilIn, ceilOut, _, _, _ := m.CeilingRates(); ceilIn != want.InputPerM || ceilOut != want.OutputPerM {
+		t.Errorf("catalogue ceiling %v/%v disagrees with priceTable %v/%v; one of the two sources repriced",
+			ceilIn, ceilOut, want.InputPerM, want.OutputPerM)
 	}
 }
 

@@ -469,9 +469,32 @@ func (o *OpenAI) stopReason(s string) StopReason {
 	return openAIStopReason(s)
 }
 
+// freshPromptToks reduces OpenAI's prompt_tokens to the fresh (uncached) part
+// of the prompt. OpenAI's `prompt_tokens` INCLUDES cached_tokens; feeding it to
+// paymaster.Estimate verbatim bills the cached read twice — once at the full
+// input rate and again at the cached rate. internal/sidecar/usage.go:122 has
+// always done this subtraction on the proxy billing path, so taking the wire
+// value here made the two writers of cost_ledger disagree.
+//
+// The clamp is not defensive tidiness: an OpenAI-compatible backend (the vllm
+// and ollama-openai presets) that reports cached_tokens > prompt_tokens would
+// otherwise store a NEGATIVE cost_ledger.input_tokens. Estimate's own clamp
+// protects the dollar figure, not the stored count, and a negative count
+// inverts the cache-hit ratio gate in paymaster/ledger.go.
+//
+// Note the asymmetry with anthropic.go, which is correct as it stands:
+// Anthropic reports input_tokens and cache_read_input_tokens as disjoint
+// counts, so subtracting there would under-bill every cache read.
+func freshPromptToks(prompt, cached int) int {
+	if fresh := prompt - cached; fresh > 0 {
+		return fresh
+	}
+	return 0
+}
+
 func (r *openaiResponse) toResponse() *Response {
 	resp := &Response{
-		InputToks:       r.Usage.PromptTokens,
+		InputToks:       freshPromptToks(r.Usage.PromptTokens, r.Usage.PromptTokensDetails.CachedTokens),
 		OutputToks:      r.Usage.CompletionTokens,
 		CachedInputToks: r.Usage.PromptTokensDetails.CachedTokens,
 	}
@@ -585,7 +608,11 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 			return false, nil
 		}
 		if chunk.Usage != nil {
-			final.InputToks = chunk.Usage.PromptTokens
+			// Recomputed from THIS chunk's own pair, never subtracted from
+			// the already-stored final.InputToks: a backend that repeats the
+			// usage block on more than one chunk would otherwise subtract the
+			// cached count twice.
+			final.InputToks = freshPromptToks(chunk.Usage.PromptTokens, chunk.Usage.PromptTokensDetails.CachedTokens)
 			final.OutputToks = chunk.Usage.CompletionTokens
 			final.CachedInputToks = chunk.Usage.PromptTokensDetails.CachedTokens
 		}

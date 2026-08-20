@@ -1,0 +1,160 @@
+---
+title: "crewship provider"
+description: "Inspect the LLM providers this build can talk to, and send one live completion to prove a backend answers."
+icon: "plug-zap"
+stability: experimental
+tag: Experimental
+---
+
+# crewship provider
+
+Reads the LLM provider registry compiled into the binary, and — with `check` —
+dials a provider once to prove the wiring end to end.
+
+```bash
+crewship provider <subcommand> [flags]
+```
+
+Both subcommands are **local**. There is no server route behind
+them: the registry and the model catalog are compiled in, so they work with no
+config file, no token, no workspace and no reachable server. `check` reaches the
+provider directly from the machine you run it on, which means it can test a
+local backend the server itself cannot see.
+
+Background on what these tables are:
+[Multi-provider LLM configuration](/guides/multi-provider-llm).
+
+## Subcommands
+
+### list
+
+```bash
+crewship provider list [--all]
+```
+
+**Flags:**
+
+| Flag | Type | Description |
+|---|---|---|
+| `--all` | `bool` | Also list providers that exist only in the embedded model catalog. Those have no codec in this build — they can be listed and priced, but nothing here can call them. |
+
+**Example:**
+
+```bash
+crewship provider list
+```
+
+```
+PROVIDER    NAME       CODEC               AUTH       KEY ENV            KEY         ENDPOINT                                    MODELS
+anthropic   Anthropic  anthropic-messages  x-api-key  ANTHROPIC_API_KEY  unset       https://api.anthropic.com/v1/messages       13
+openai      OpenAI     openai-compat       bearer     OPENAI_API_KEY     unset       https://api.openai.com/v1/chat/completions  47
+ollama      Ollama     ollama-native       none       —                  not needed  http://localhost:11434                      0
+```
+
+Rows are in registry **declaration order**, which is also the order the admin
+console's provider picker renders. Columns:
+
+| Column | Meaning |
+|---|---|
+| `PROVIDER` | The registry id. This is what `crewship keeper aux set --provider` accepts, and the `<provider>/` half of every paymaster rate key. |
+| `CODEC` | The wire format: `anthropic-messages`, `openai-compat`, or `ollama-native`. |
+| `AUTH` | How the credential reaches the wire: `x-api-key`, `bearer`, or `none`. |
+| `KEY ENV` | The environment variable the server reads a missing key from. |
+| `KEY` | Whether that variable is **set** — never its value. `not needed` is a provider that takes no credential. |
+| `ENDPOINT` | Where calls go. Hosted providers are fixed; `ollama` follows `KEEPER_OLLAMA_URL`. |
+| `MODELS` | How many entries the embedded catalog has for this provider. Ollama's `0` is correct — its model ids are whatever you pulled. |
+
+`--all` appends the catalog-only providers (`amazon-bedrock`, `deepseek`,
+`google`, `mistral`, `openrouter`, `xai`), sorted, with a dash in every column
+but `PROVIDER`, `NAME` and `MODELS`. That dash is the point: `deepseek` is
+listed because the catalog **prices** it, not because an evaluator slot can
+select it.
+
+`--format json` adds `registered`, `key_required`, `key_set` and `catalog_id`
+per row, which is the shape to script against:
+
+```bash
+crewship provider list --format json | jq '.providers[] | select(.key_set | not)'
+```
+
+### check
+
+```bash
+crewship provider check --provider <id|preset> --model <id> [flags]
+```
+
+Builds the provider for real, sends **one** completion, and prints the endpoint
+it dialled, the latency, the token counts the backend reported and what
+paymaster will bill for them.
+
+**Flags:**
+
+| Flag | Type | Description |
+|---|---|---|
+| `--provider` | `string` | A registry id (`anthropic`, `openai`, `ollama`) or an OpenAI-compatible preset key (`openai`, `deepseek`, `ollama-openai`, `vllm`). |
+| `--model` | `string` | Model id to send the completion to. |
+| `--base-url` | `string` | Override the endpoint. Required for a preset that ships none (`vllm`), and what makes a keyless local check possible. |
+| `--api-key` | `string` | API key. A **registry** provider falls back to its key environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) and so does the `openai` preset; the other presets have none, so `deepseek` and a keyed `vllm` need this flag. Read it from your own environment (`--api-key "$DEEPSEEK_API_KEY"`) rather than pasting it: an argument is visible to every process on the host through `ps`. |
+| `--prompt` | `string` | Prompt to send. Defaults to `Reply with the single word: pong.` |
+| `--timeout` | `duration` | Deadline for the whole call. Default `1m0s`. |
+
+**Example — a local backend, no key:**
+
+```bash
+crewship provider check \
+  --provider ollama-openai \
+  --base-url http://localhost:11434/v1 \
+  --model qwen2.5:0.5b
+```
+
+```
+ollama-openai  qwen2.5:0.5b
+  codec        openai-compat
+  endpoint     http://localhost:11434/v1
+  api key      none
+  pricing key  ollama (what the ledger bills this as)
+
+  latency      15.492s
+  stop reason  end_turn
+  tokens       in 37  out 4  cached-in 0  cache-write 0
+  cost         $0.000000 (free rates: in $0.0000  out $0.0000  cached-in $0.0000  cache-write $0.0000)
+
+  reply        PONG!
+```
+
+`pricing key` is the line to read twice. It is `Provider.Name()`, not the
+preset key you passed — `ollama-openai` bills as `ollama` and `vllm` bills as
+`local`, which is how a self-hosted backend lands on a free rate row.
+
+<Warning>
+  **Zero tokens on a backend that clearly did work is the finding.** It means
+  the response carried no `usage` block, and every call through that backend
+  will be priced at \$0. On a streamed OpenAI-compatible endpoint the usual
+  cause is a config without `IncludeUsage` — see
+  [Multi-provider LLM configuration](/guides/multi-provider-llm#codecs).
+</Warning>
+
+**Exit codes** follow the usual [CLI contract](/cli/overview). The two you will
+meet:
+
+```bash
+crewship provider check --provider openrouter --model qwen/qwen3-coder-flash
+# unknown provider "openrouter" (known: anthropic, openai, ollama, deepseek, ollama-openai, vllm)
+# exit 3
+
+crewship provider check --provider deepseek --model deepseek-chat
+# deepseek check failed after 327ms: invalid DeepSeek API key
+# exit 7
+```
+
+The vocabulary in the first message is generated from the registry and the
+preset table, so it cannot drift from what the command accepts. The second is
+the upstream's own refusal, preserved verbatim rather than flattened into
+"provider error".
+
+## Related
+
+- [Multi-provider LLM configuration](/guides/multi-provider-llm) — what the registry and the codecs are.
+- [`crewship model`](/cli/model) — which model ids exist, and what they cost.
+- [Paymaster](/guides/paymaster) — the rate card `check` reports against.
+- [`crewship keeper`](/cli/keeper) — where a provider id is actually selected.

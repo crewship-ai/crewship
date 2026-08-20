@@ -32,15 +32,42 @@ var catalogPrices = sync.OnceValue(buildCatalogPrices)
 // something only "ollama/*" and "local/*" get to say, and they say it in
 // priceTable.
 //
-// modelcatalog.Model.Rates() already applies the nil-mirror convention that
-// priceTable encodes by hand: an absent cache_read or cache_write mirrors the
-// input rate rather than reading as free.
+// TIERED MODELS ARE PRICED AT THEIR CEILING, and that is a deliberate
+// over-estimate. Read this before "fixing" it.
+//
+// 76 of the snapshot's models publish a second rate card that kicks in above a
+// context threshold — usually 200k or 272k tokens, and up to 6.7× the base
+// rate (openrouter/qwen/qwen3.7-flash: 0.03 → 0.20 above 256k). Only 2 of the
+// 76 are shadowed by priceTable, so the other 74 reach the ledger through this
+// file. Picking the base rate would bill a long-context call on that model at
+// 15% of the invoice.
+//
+// Picking the RIGHT tier needs the prompt size, and Estimate does not have an
+// axis to carry it: Estimate(provider, model, inTok, outTok, cachedIn,
+// cacheCreate) has no context parameter, and threading one through means
+// changing Estimate, RateCard and lookupPrice in pricing.go plus their call
+// sites in paymaster/middleware.go, api/internal_cost.go and the ledger. That
+// is a real change and it should be made deliberately, not as a side effect of
+// this one. Until it is, we bill the ceiling: a short call on a tiered model is
+// over-estimated, which is the direction providerFallback already chose ("the
+// most-expensive known tier for that provider, not the median") and the same
+// call the hand-written table made for the one tiered model it carries —
+// priceTable["google/gemini-2.5-pro"] is 2.50/15.00, the upper tier, with a
+// comment saying so.
+//
+// Under-billing weakens the budget signal exactly when an operator needs it.
+// Over-billing is visible and annoying. We take visible and annoying.
+//
+// modelcatalog.Model.CeilingRates() already applies the nil-mirror convention
+// that priceTable encodes by hand — an absent cache_read or cache_write mirrors
+// the input rate rather than reading as free — and applies it against the
+// selected tier's own input, not the base block's.
 func buildCatalogPrices() map[string]modelPrice {
 	cat := modelcatalog.Default()
 	out := make(map[string]modelPrice, 512)
 	for _, prov := range cat.Providers() {
 		for _, m := range cat.Models(prov) {
-			in, outRate, cacheRead, cacheWrite, ok := m.Rates()
+			in, outRate, cacheRead, cacheWrite, ok := m.CeilingRates()
 			if !ok {
 				continue
 			}

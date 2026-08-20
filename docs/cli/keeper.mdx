@@ -230,7 +230,7 @@ clears that override or returns it to inheritance.
 
 | Flag | Behavior |
 | --- | --- |
-| `--provider` | `anthropic`, `openai`, or `ollama`; empty inherits. |
+| `--provider` | `anthropic`, `openai`, or `ollama`; empty inherits. The vocabulary is the **LLM provider registry** (`llm.RegisteredProviders()`), in declaration order — the CLI's rejection message enumerates it from the same table, so it cannot drift from what the server accepts. `crewship provider list` prints it. Not the same list as `keeper model set --provider`, which is the governance-judge vocabulary and includes `openai_compat`. |
 | `--model` | Model ID; empty inherits. |
 | `--timeout` | Positive duration such as `30s`; empty inherits. |
 | `--credential` | Stored vault `API_KEY` name; empty uses the server's own key. |
