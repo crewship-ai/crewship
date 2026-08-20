@@ -232,6 +232,18 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 	// #nosec G204 — bin is PATH-resolved; every argument is internally built.
 	cmd := exec.CommandContext(ctx, b.bin, args...)
 
+	// StdoutPipe, not a bytes.Buffer, and that choice decides which rescues are
+	// available here. Both ends of a StdoutPipe are *os.File, so exec starts no
+	// copying goroutines, never allocates c.goroutineErr, and its watchCtx
+	// therefore never closes the parent's pipe ends — that cleanup sits inside
+	// `if c.goroutineErr != nil`.
+	//
+	// The consequence, since it has already been proposed once as a follow-up:
+	// setting cmd.WaitDelay would NOT rescue a stuck read in this function.
+	// Verified by execution — the scanner below is still blocked after
+	// WaitDelay elapses. Process-group signalling is the only lever here.
+	// WaitDelay does work at the sibling site that buffers into memory, which
+	// is #2037 (internal/provider/apple/apple_exec.go); fix that one there.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("build stdout pipe: %w", err)
@@ -296,18 +308,37 @@ func (b *AppleContainerBuilder) Build(ctx context.Context, contextDir, tag strin
 				// timer fires — minutes after the caller gave up. kill()
 				// takes the whole process group, which closes the pipe.
 				kill()
-				// Stay armed until the read side actually closes. This branch
-				// used to return, so one kill that missed left nothing able to
-				// try again and no idle rescue either — the build leaked its
-				// goroutine, its pipe and its process tree for good, not for
-				// five minutes (#2030). A closed Done channel stays ready, so
-				// drop it from the select and re-signal on a short cadence
-				// instead; the loop ends when the scanner drains and Build
-				// closes watchdogDone.
+				// Keep signalling instead of returning. A closed Done channel
+				// stays ready, so drop it from the select and re-signal on a
+				// short cadence; the loop ends when the scanner drains and
+				// Build closes watchdogDone.
+				//
+				// Be precise about what this buys, because it is easy to read
+				// as more than it is. The pgid is now static and SIGKILL is
+				// uncatchable, so the FIRST kill already reaches every member
+				// of the group that exists when it runs. What repeating adds
+				// is exactly one case: a member that forks between the kernel
+				// walking the group and the signal landing, whose child is
+				// therefore in the group but was never signalled. The next
+				// tick catches it.
+				//
+				// It is NOT a rescue for a holder outside the group — one that
+				// called setsid, say. Nothing here can reach that process, so
+				// the pipe never closes, the scanner never drains and Build
+				// never returns. Note also that once cancelled is nil the
+				// quiet >= idle branch below is unreachable for the rest of
+				// the build, so there is no idle-timeout backstop either.
+				// Neither of those is a regression — `main` hangs identically,
+				// and worse, because it stops signalling after one attempt —
+				// but neither is fixed here.
 				cancelled = nil
 				ticker.Reset(cancelKillInterval)
 			case <-ticker.C:
 				if cancelled == nil {
+					// Cancelled: re-signal only. The idle check below is
+					// deliberately not reachable from here — the caller is
+					// already gone, so "has this gone quiet for five minutes"
+					// is no longer a question worth asking.
 					kill()
 					continue
 				}
