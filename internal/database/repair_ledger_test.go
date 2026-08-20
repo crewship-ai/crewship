@@ -179,6 +179,18 @@ func TestApplyLedgerRepair(t *testing.T) {
 	})
 }
 
+// migrationByName looks one migration up in the merged registry. Tests that
+// pin a migration by name — rather than by an index into a list that every new
+// migration shifts — go through this.
+func migrationByName(name string) (migration, bool) {
+	for _, m := range migrations {
+		if m.name == name {
+			return m, true
+		}
+	}
+	return migration{}, false
+}
+
 // End-to-end: a database in the exact state dev3 was in must boot after the
 // repair. This is the claim the whole command rests on, so it is checked
 // against the real Migrate rather than a stand-in.
@@ -194,18 +206,46 @@ func TestRepairThenMigrate_RecoversARenumberedDatabase(t *testing.T) {
 
 	logger := quietLogger()
 
-	// Recreate dev3 exactly: the last migration was authored under the previous
-	// one's number, so it sits at `other.version` — and `other` itself has
+	// Recreate dev3 exactly: the newest migration was authored under an older
+	// migration's number, so it sits at `other.version` — and `other` itself has
 	// never run on this machine, because it merged to main only after this
-	// database had already applied the branch.
+	// database had already applied the branch. Migrate walks in version order,
+	// so it meets the mislabelled row at `other.version` and refuses there,
+	// before it ever reaches the (now vacant) slot the branch migration really
+	// belongs in. That direction is load-bearing: park the row on a LATER
+	// version instead and Migrate re-applies the freed earlier migration before
+	// it ever notices the collision.
+	//
+	// `victim` is the newest entry, whatever it is, so the fixture moves with
+	// the tree. `other` is NAMED rather than computed as "the second-newest",
+	// because it is applied LATE — after every migration that normally follows
+	// it — and that is only safe for a migration nothing later depends on. That
+	// is a property of one specific migration, not of a position in the list:
+	// #1973 rebuilt issue_counters and #1797 rebuilt it again the next day, so
+	// while those two were the tail of the registry, "the second-newest" meant
+	// replaying #1973's `SELECT ic.crew_id` against a table #1797 had already
+	// re-keyed — "no such column: ic.crew_id", a failure about migration
+	// ordering surfacing in a test about ledger repair, waiting for whoever
+	// wrote the next pair of migrations over one table.
+	//
+	// escalation_answer_deadline adds two columns, swaps an index and repairs
+	// some credential rows; nothing after it reads any of that (grep
+	// answer_deadline_at / agent_gave_up_at: this migration is the only hit).
+	// If a future migration ever does depend on it, this test says so loudly
+	// and the fix is to re-point the name, not to compute it.
+	const heldBackName = "escalation_answer_deadline"
 	victim := migrations[len(migrations)-1] // authored as, and renumbered from…
-	other := migrations[len(migrations)-2]  // …this version, which main then took
+	other, ok := migrationByName(heldBackName)
+	if !ok { // …this version, which main then took
+		t.Fatalf("no migration named %q — re-point heldBackName at a migration "+
+			"that is safe to apply after the ones that follow it", heldBackName)
+	}
 	// MigrateSkipping, not "Migrate then DELETE the ledger row": deleting the
 	// row would leave `other`'s schema change applied while claiming it never
 	// ran, and the final Migrate below — which applies it for real — would then
 	// fail on a duplicate column for reasons that have nothing to do with the
 	// repair. That is not a hypothetical: it is what a plain ALTER TABLE ADD
-	// COLUMN in the second-newest migration does to this test.
+	// COLUMN in the held-back migration does to this test.
 	if err := MigrateSkipping(ctx, db, logger, other.name); err != nil {
 		t.Fatalf("initial migrate (without %s): %v", other.name, err)
 	}

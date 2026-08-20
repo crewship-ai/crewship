@@ -4,9 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -70,45 +68,19 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Get crew info
-	var issuePrefix sql.NullString
-	var crewSlug string
-	err = tx.QueryRowContext(r.Context(),
-		`SELECT issue_prefix, slug FROM crews WHERE id = ? AND workspace_id = ?`,
-		crewID, wsID).Scan(&issuePrefix, &crewSlug)
+	// Resolve the crew's prefix and take the next number in that prefix's
+	// workspace-wide sequence. Shared with insertIssueTx (the agent-tool and
+	// recurring-issue path) — this used to be a second, hand-copied generator,
+	// which is how the two drifted (#1797).
+	identifier, issueNumber, err := nextIssueIdentifierTx(r.Context(), tx, wsID, crewID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, errIssueCrewNotFound) {
 			writeProblem(w, r, http.StatusNotFound, "Crew not found")
 			return
 		}
-		internalError(w, r, h.logger, "get crew for issue", err)
+		internalError(w, r, h.logger, "allocate issue identifier", err)
 		return
 	}
-
-	// Derive prefix from slug if not set
-	prefix := issuePrefix.String
-	if !issuePrefix.Valid || prefix == "" {
-		slugUpper := strings.ToUpper(crewSlug)
-		if len(slugUpper) >= 3 {
-			prefix = slugUpper[:3]
-		} else {
-			prefix = slugUpper
-		}
-	}
-
-	// Atomic counter for issue number
-	var issueNumber int
-	err = tx.QueryRowContext(r.Context(), `
-		INSERT INTO issue_counters(crew_id, next_number) VALUES(?, 1)
-		ON CONFLICT(crew_id) DO UPDATE SET next_number = issue_counters.next_number + 1
-		RETURNING next_number`,
-		crewID).Scan(&issueNumber)
-	if err != nil {
-		internalError(w, r, h.logger, "issue counter upsert", err)
-		return
-	}
-
-	identifier := fmt.Sprintf("%s-%d", prefix, issueNumber)
 
 	// Find lead agent for the crew
 	var leadAgentID string

@@ -88,9 +88,31 @@ func buildLedgerFixtures() ledgerFixtures {
 		head.Close()
 		return failed("need at least two migrations, got %d", len(led))
 	}
-	f.to = led[len(led)-1].Version   // where the newest migration belongs
-	f.from = led[len(led)-2].Version // …and this one had not merged yet
-	fromName := led[len(led)-2].Name
+	f.to = led[len(led)-1].Version // where the newest migration belongs
+	// …and this one had not merged yet. It is NAMED rather than taken as "the
+	// second-newest", because holding it back means applying it AFTER every
+	// migration that normally follows it, and that is only safe for a migration
+	// nothing later depends on — a property of one specific migration, not of a
+	// position in a list that every new migration shifts. #1973 rebuilt
+	// issue_counters and #1797 rebuilt it again the next day, so while those
+	// two were the tail of the registry, "the second-newest" meant replaying
+	// #1973's `SELECT ic.crew_id` against a table #1797 had re-keyed: "no such
+	// column", a migration-ordering failure inside a ledger-repair test.
+	// escalation_answer_deadline adds two columns, swaps an index and repairs
+	// some rows; nothing after it reads any of that.
+	const fromName = "escalation_answer_deadline"
+	f.from = 0
+	for _, e := range led {
+		if e.Name == fromName {
+			f.from = e.Version
+			break
+		}
+	}
+	if f.from == 0 {
+		head.Close()
+		return failed("no migration named %q at head — re-point fromName at a migration "+
+			"that is safe to apply after the ones that follow it", fromName)
+	}
 	if err := head.Close(); err != nil {
 		return failed("close head: %w", err)
 	}
@@ -99,9 +121,12 @@ func buildLedgerFixtures() ledgerFixtures {
 	}
 
 	// The state that took dev3 down on 2026-07-27: the newest migration
-	// recorded under the PREVIOUS migration's version, and that version's real
+	// recorded under an EARLIER migration's version, and that version's real
 	// occupant missing — what a machine looks like after it ran a feature
-	// branch whose migration was renumbered before the branch merged.
+	// branch whose migration was renumbered before the branch merged. The
+	// direction matters: Migrate walks in version order, so it meets the
+	// mislabelled row before it reaches the vacant slot, and refuses there
+	// instead of quietly re-applying the freed migration.
 	//
 	// MigrateSkipping, not "migrate to head then delete a ledger row": on dev3
 	// the migration that took the branch's number had never run, and deleting
@@ -226,6 +251,35 @@ func readStagedLedger(t *testing.T) []database.LedgerEntry {
 	return led
 }
 
+// assertRenumbered checks which of the two versions the renumbered migration
+// currently occupies: `from` while the collision stands, `to` once the repair
+// has run, and never both.
+//
+// This used to read "the highest applied version", which was the same question
+// only while the held-back migration was the second-newest one. It is not any
+// more (see buildLedgerFixtures): migrations newer than `from` are applied
+// either way, so the highest version says nothing about whether the repair ran.
+func assertRenumbered(t *testing.T, led []database.LedgerEntry, from, to int, repaired bool) {
+	t.Helper()
+	has := func(v int) bool {
+		for _, e := range led {
+			if e.Version == v {
+				return true
+			}
+		}
+		return false
+	}
+	wantAt, wantVacant := from, to
+	if repaired {
+		wantAt, wantVacant = to, from
+	}
+	if !has(wantAt) || has(wantVacant) {
+		t.Errorf("ledger has v%d=%v v%d=%v; want the renumbered migration at v%d and v%d vacant "+
+			"(repair %s)", from, has(from), to, has(to), wantAt, wantVacant,
+			map[bool]string{true: "should have run", false: "should NOT have run"}[repaired])
+	}
+}
+
 // migrateStaged runs migrations against the staged database and lets go of it,
 // returning what Migrate said.
 func migrateStaged(t *testing.T) error {
@@ -260,11 +314,7 @@ func TestRepairLedger_DryRunShowsThePlanAndChangesNothing(t *testing.T) {
 	}
 
 	// The ledger is untouched: still the wrong number.
-	led := readStagedLedger(t)
-	if got := led[len(led)-1].Version; got != from {
-		t.Errorf("highest applied version = %d, want %d (dry run must not write)", got, from)
-	}
-	_ = to
+	assertRenumbered(t, readStagedLedger(t), from, to, false)
 }
 
 func TestRepairLedger_RepairsAndLetsTheDatabaseBoot(t *testing.T) {
@@ -292,10 +342,7 @@ func TestRepairLedger_RepairsAndLetsTheDatabaseBoot(t *testing.T) {
 		t.Errorf("output:\n%s", out)
 	}
 
-	led := readStagedLedger(t)
-	if got := led[len(led)-1].Version; got != to {
-		t.Errorf("highest applied version = %d, want %d", got, to)
-	}
+	assertRenumbered(t, readStagedLedger(t), from, to, true)
 
 	// The point of the exercise: the collision is gone, and the migration
 	// whose number was freed is queued to run rather than being skipped.
@@ -457,16 +504,7 @@ func TestRepairLedger_DatabaseInUseGuard(t *testing.T) {
 
 			// The ledger is the fact of the matter: either the renumber
 			// happened or it did not.
-			led := readStagedLedger(t)
-			got := led[len(led)-1].Version
-			want := from
-			if tt.wantRepaired {
-				want = to
-			}
-			if got != want {
-				t.Errorf("highest applied version = %d, want %d (repair %s)", got, want,
-					map[bool]string{true: "should have run", false: "should NOT have run"}[tt.wantRepaired])
-			}
+			assertRenumbered(t, readStagedLedger(t), from, to, tt.wantRepaired)
 		})
 	}
 }
@@ -572,16 +610,7 @@ func TestRepairLedger_RechecksBeforeTheApply(t *testing.T) {
 				}
 			}
 
-			led := readStagedLedger(t)
-			got := led[len(led)-1].Version
-			want := from
-			if tt.wantRepaired {
-				want = to
-			}
-			if got != want {
-				t.Errorf("highest applied version = %d, want %d (repair %s)", got, want,
-					map[bool]string{true: "should have run", false: "should NOT have run"}[tt.wantRepaired])
-			}
+			assertRenumbered(t, readStagedLedger(t), from, to, tt.wantRepaired)
 		})
 	}
 }

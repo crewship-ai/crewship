@@ -126,10 +126,14 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean up soft-deleted crews: cascade-delete their missions to free
-	// identifier space in THIS workspace — missions are UNIQUE(workspace_id,
-	// identifier) since #1733, and the new crew's issue_counters row starts at 1,
-	// so a soft-deleted crew's leftover "ENG-5" blocks the new crew's "ENG-5".
+	// Clean up soft-deleted crews: cascade-delete their missions. This used to be
+	// load-bearing for identifier space — missions are UNIQUE(workspace_id,
+	// identifier) since #1733, and the new crew's issue_counters row started at
+	// 1, so a soft-deleted crew's leftover "ENG-5" blocked the new crew's
+	// "ENG-5". Since #1797 the counter is keyed on (workspace_id, prefix) and is
+	// not deleted with the crew, so the new crew picks the sequence up where the
+	// old one left it and cannot land on a leftover. The delete stays because a
+	// deleted crew's issues should not show up in the workspace's lists.
 	// Only this workspace's rows are touched, and only this workspace's ever
 	// mattered. Match by exact slug OR already-renamed "{slug}_deleted_*" pattern.
 	if _, err := h.db.ExecContext(r.Context(),

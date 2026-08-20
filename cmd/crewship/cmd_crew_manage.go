@@ -318,6 +318,18 @@ var crewUpdateCmd = &cobra.Command{
 			v, _ := flags.GetBool("allow-private-endpoints")
 			body["allow_private_endpoints"] = v
 		}
+		if flags.Changed("issue-prefix") {
+			// Sent verbatim, empty string included: the server reads "" as
+			// "clear it", after which the prefix falls back to the first three
+			// letters of the slug. No local uniqueness check — since #1797 the
+			// issue counter is keyed on (workspace_id, prefix), so two crews
+			// sharing a prefix share one sequence and interleave instead of
+			// colliding. Rejecting a duplicate here would refuse a legitimate
+			// crew ("Engine" alongside "Engineering") for a problem that no
+			// longer exists.
+			v, _ := flags.GetString("issue-prefix")
+			body["issue_prefix"] = v
+		}
 		pkgRegistries, _ := flags.GetBool("allow-package-registries")
 		if flags.Changed("allowed-domains") || pkgRegistries {
 			var base []string
@@ -530,6 +542,7 @@ func init() {
 	crewUpdateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode (supports *.example.com wildcards)")
 	crewUpdateCmd.Flags().Bool("allow-package-registries", false, "Append the common package registries (npm, pip, cargo, go, apt, Docker Hub) to the crew's allowed domains")
 	crewUpdateCmd.Flags().Bool("allow-private-endpoints", false, "Allow agents to reach a private/LAN model endpoint (RFC1918/loopback); link-local/metadata stay blocked")
+	crewUpdateCmd.Flags().String("issue-prefix", "", "Issue identifier prefix, e.g. ENG for ENG-42 (empty string clears it: identifiers then use the first three letters of the slug)")
 
 	crewDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 

@@ -266,6 +266,36 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   their canary. Removing it belongs with #1768 item 8, together with moving those
   guards.
 
+### Fixed
+
+- **Two crews with the same issue prefix no longer wedge each other (#1797).**
+  An identifier is `<prefix>-<n>`, where the prefix is the crew's
+  `issue_prefix` or the first three letters of its slug — so `engineering` and
+  `engine` both derive `ENG` with nothing configured. The number came from a
+  counter keyed **per crew**, while identifiers are unique **per workspace**, so
+  both crews minted `ENG-1` and the second one's insert was rejected.
+
+  It was not a one-off 500. The counter increment and the issue insert shared
+  one transaction, so the rejection rolled the increment back too: the losing
+  crew asked for the same identifier on every subsequent create and **could
+  never file an issue again**, with no message naming the cause. Any workspace
+  with two such crews had one of them silently out of service.
+
+  The counter is now keyed on `(workspace_id, prefix)`, which is the namespace
+  it feeds. Two crews sharing a prefix share one sequence and interleave
+  (`ENG-1`, `ENG-2`) instead of colliding — no validation to remember at each
+  write site, and no legitimate crew refused for its name. The migration
+  collapses colliding counters onto the highest of them, which also unwedges a
+  crew that was stuck, and seeds each prefix above the identifiers it has
+  already minted so a crew that changed its prefix cannot restart into an
+  existing range. The two duplicate identifier generators (the REST create and
+  the agent/recurring path) are now one.
+
+- **`crewship crew update --issue-prefix` (#1797).** `issue_prefix` has been
+  accepted by `PATCH /api/v1/crews/{id}` since v38 and had no CLI flag at all;
+  it was reachable only from the web UI. Pass an empty string to clear it and
+  fall back to the slug.
+
 ### Security
 
 - **Go toolchain bumped 1.26.5 → 1.26.6, clearing eight advisories (#1959).**
