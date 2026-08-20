@@ -8,53 +8,70 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
+
+	"github.com/crewship-ai/crewship/internal/llm/endpoint"
 )
 
 const anthropicAPIURL = "https://api.anthropic.com/v1/messages"
 const anthropicModelsURL = "https://api.anthropic.com/v1/models"
 
+// anthropicDefaultVersion is the anthropic-version header sent when the config
+// does not name one. anthropicDefaultBeta enables prompt caching; dropping it
+// silently disables cache routing, which is why it is pinned by a test.
+const anthropicDefaultVersion = "2023-06-01"
+const anthropicDefaultBeta = "prompt-caching-2024-07-31"
+
 // Anthropic implements Provider for the Anthropic Messages API.
 type Anthropic struct {
 	apiKey string
 	client *http.Client
+	// cfg parameterizes the endpoint, auth and protocol headers. Its zero value
+	// is the historical hard-coded provider — see AnthropicConfig — so a bare
+	// &Anthropic{apiKey: "..."} literal still behaves.
+	cfg AnthropicConfig
+	// ep is cfg.BaseURL reduced to its mount root, so the API path is appended
+	// exactly once no matter which shape the operator stored. Zero when the base
+	// could not be parsed; the URL builders then fall back to the raw value.
+	ep endpoint.Endpoint
+	// epErr is why normalization failed, kept so a base that is not a URL at all
+	// surfaces as a parse error rather than as a confusing request-construction
+	// failure further down. A base rejected on policy is NOT an error here.
+	epErr error
 }
 
 // NewAnthropic creates a provider that calls the Anthropic Messages API.
 func NewAnthropic(apiKey string) *Anthropic {
-	return &Anthropic{
-		apiKey: apiKey,
-		client: &http.Client{
-			Timeout: 120 * time.Second,
-			Transport: &http.Transport{
-				DisableCompression: true, // SSE lines are small — gzip adds latency, not value
-			},
-		},
-	}
+	return NewAnthropicWith(AnthropicConfig{APIKey: apiKey})
 }
 
-// Name returns "anthropic".
-func (a *Anthropic) Name() string { return "anthropic" }
+// Name returns the configured provider name, "anthropic" by default.
+func (a *Anthropic) Name() string { return a.name() }
 
 // ListModels implements ModelLister against Anthropic's GET /v1/models. On any
 // failure the caller falls back to the curated set (CuratedModels), so the raw
 // error here is informational only — but we still return it so the caller can
 // distinguish "no credential" from "API said no".
 func (a *Anthropic) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, anthropicModelsURL, nil)
+	if err := a.baseURLError(); err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, a.modelsURL(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-	httpReq.Header.Set("x-api-key", a.apiKey)
+	a.applyProtocolHeaders(httpReq)
+	// No body on a GET, so signers that hash the payload see nil.
+	if err := a.applyAuth(httpReq, nil); err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
 
 	resp, err := a.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("anthropic http: %w", err)
+		return nil, fmt.Errorf("%s http: %w", a.name(), err)
 	}
 	defer resp.Body.Close()
 
-	if err := checkStatus(resp, "Anthropic"); err != nil {
+	if err := checkStatus(resp, a.displayName()); err != nil {
 		return nil, err
 	}
 
@@ -65,7 +82,7 @@ func (a *Anthropic) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decode anthropic models: %w", err)
+		return nil, fmt.Errorf("decode %s models: %w", a.name(), err)
 	}
 
 	out := make([]ModelInfo, 0, len(raw.Data))
@@ -77,7 +94,7 @@ func (a *Anthropic) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		if name == "" {
 			name = m.ID
 		}
-		out = append(out, ModelInfo{ID: m.ID, DisplayName: name, Provider: "anthropic"})
+		out = append(out, ModelInfo{ID: m.ID, DisplayName: name, Provider: a.name()})
 	}
 	return out, nil
 }
@@ -88,19 +105,19 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (*Response, error
 	if err != nil {
 		return nil, err
 	}
-	resp, err := a.doWithRetry(ctx, body)
+	resp, err := a.doWithRetry(ctx, body, req.Model, false)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if err := checkStatus(resp, "Anthropic"); err != nil {
+	if err := checkStatus(resp, a.displayName()); err != nil {
 		return nil, err
 	}
 
 	var raw anthropicResponse
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decode anthropic response: %w", err)
+		return nil, fmt.Errorf("decode %s response: %w", a.name(), err)
 	}
 	return raw.toResponse(), nil
 }
@@ -111,28 +128,45 @@ func (a *Anthropic) Stream(ctx context.Context, req Request, handler func(Stream
 	if err != nil {
 		return nil, err
 	}
-	resp, err := a.doWithRetry(ctx, body)
+	resp, err := a.doWithRetry(ctx, body, req.Model, true)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if err := checkStatus(resp, "Anthropic"); err != nil {
+	if err := checkStatus(resp, a.displayName()); err != nil {
 		return nil, err
 	}
 
 	return a.parseSSEStream(resp.Body, handler)
 }
 
+// newHTTPRequest builds the chat POST for the default (Messages) path. It keeps
+// its two-parameter shape because the header contract is asserted against it
+// directly; model and stream only ever matter to the ModelInPath seam, which
+// goes through newRequest.
 func (a *Anthropic) newHTTPRequest(ctx context.Context, body []byte) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicAPIURL, bytes.NewReader(body))
+	return a.newRequest(ctx, body, "", false)
+}
+
+// newRequest builds the chat POST. model and stream select the URL under the
+// ModelInPath seam and are ignored otherwise.
+func (a *Anthropic) newRequest(ctx context.Context, body []byte, model string, stream bool) (*http.Request, error) {
+	// Wrapped as a request-build failure because that is what it is from the
+	// retry loop's point of view — it must not retry a base URL that will never
+	// parse.
+	if err := a.baseURLError(); err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.chatURL(model, stream), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
-	req.Header.Set("x-api-key", a.apiKey)
+	a.applyProtocolHeaders(req)
+	if err := a.applyAuth(req, body); err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
 	return req, nil
 }
 
@@ -143,8 +177,15 @@ func (a *Anthropic) buildRequestBody(req Request, stream bool) ([]byte, error) {
 	}
 
 	body := map[string]any{
-		"model":    req.Model,
 		"messages": msgs,
+	}
+	// Bedrock addresses the model in the URL and carries the API version in the
+	// body; the direct API is the other way round. Default is the direct shape,
+	// byte for byte.
+	if a.cfg.VersionInBody {
+		body["anthropic_version"] = a.version()
+	} else {
+		body["model"] = req.Model
 	}
 	if req.System != "" {
 		// Use structured system prompt with cache_control for prompt caching.
@@ -299,10 +340,10 @@ func toAnthropicToolsCached(tools []ToolDef) []map[string]any {
 
 // doWithRetry executes an HTTP request with exponential backoff retry on transient errors.
 // Max 3 attempts. Respects Retry-After header. See the shared doWithRetry in httpretry.go.
-func (a *Anthropic) doWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
+func (a *Anthropic) doWithRetry(ctx context.Context, body []byte, model string, stream bool) (*http.Response, error) {
 	return doWithRetry(ctx, a.client, func(ctx context.Context) (*http.Request, error) {
-		return a.newHTTPRequest(ctx, body)
-	}, "anthropic", "Anthropic")
+		return a.newRequest(ctx, body, model, stream)
+	}, a.name(), a.displayName())
 }
 
 // parseSSEStream reads Anthropic's SSE stream and emits StreamEvents.

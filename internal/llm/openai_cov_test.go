@@ -306,14 +306,21 @@ func TestOpenAIParseSSEStream_EdgeCases(t *testing.T) {
 		t.Errorf("texts = %v", texts)
 	}
 	// Index 1 is a gap in toolMap — it must be skipped, indices 0 and 2 kept.
-	if len(toolCalls) != 1 {
-		// toolMap iteration goes 0..len(toolMap)-1; with indices {0,2} the
-		// loop sees i=1 as nil and stops short of i=2 by length — only the
-		// fully-assembled call_0 is emitted.
-		t.Fatalf("toolCalls = %+v, want exactly the assembled call_0", toolCalls)
+	//
+	// This assertion used to demand exactly ONE call, which contradicted the
+	// line above it: the old counting loop walked 0..len-1, saw len==2, and
+	// never reached index 2, so call_2 was dropped. The comment described the
+	// intent and the assertion pinned the bug. Backends that leave gaps or
+	// start at 1 (vLLM, Mistral-compat) hit this on every multi-tool turn, and
+	// a dropped tool call reads as the model declining to act.
+	if len(toolCalls) != 2 {
+		t.Fatalf("toolCalls = %+v, want both call_0 and call_2 — a gap at index 1 must not truncate the run", toolCalls)
 	}
 	if toolCalls[0].ID != "call_0" || toolCalls[0].Name != "f0" || toolCalls[0].Input != `{"a":1}` {
-		t.Errorf("assembled tool call = %+v", toolCalls[0])
+		t.Errorf("assembled tool call [0] = %+v", toolCalls[0])
+	}
+	if toolCalls[1].ID != "call_2" || toolCalls[1].Name != "f2" || toolCalls[1].Input != `{}` {
+		t.Errorf("assembled tool call [1] = %+v, want call_2/f2 — the call after the gap", toolCalls[1])
 	}
 	if done != 1 {
 		t.Errorf("done events = %d, want 1", done)

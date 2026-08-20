@@ -7,6 +7,19 @@ stability: experimental
 tag: Experimental
 ---
 
+<Update label="August 20, 2026" tags={["features", "fixes"]}>
+
+## Multi-provider LLM configuration
+
+The three-arm provider switch is now a registry: one row per provider, read by the aux-slot builder, the Keeper validator, the console picker and the error message that tells an operator what they may type. The two hand-written HTTP clients behind it became configurable codecs, so any OpenAI-compatible backend (DeepSeek, vLLM, llama.cpp, Ollama's `/v1` shim, OpenRouter) is a config value rather than a new file. Evaluator slots now default to the first provider whose key you actually have, so an instance holding only an `OPENAI_API_KEY` stops demanding an Anthropic one. A trimmed [models.dev](https://models.dev) snapshot ships embedded and prices 621 models across eight providers offline, as a third step in the rate lookup below the hand-verified table. Two new local commands read those tables with no server: `crewship provider list` and `crewship model price`. See [Multi-provider LLM configuration](/guides/multi-provider-llm) and [Paymaster](/guides/paymaster).
+
+## Fixes
+
+- **OpenAI cached tokens were billed twice.** OpenAI's `prompt_tokens` includes the prompt-cache read, and the codec stored it verbatim alongside the cached count — so an 80%-cached 1500-token prompt billed 2.67× the invoice. The codec now records fresh input only, matching what the sidecar proxy path has always done. `cost_ledger.input_tokens` changes meaning for OpenAI-family rows and historic rows are not migrated, so a rollup spanning the change is not comparable across it. See [Paymaster](/guides/paymaster#prompt-cache-token-flow).
+- **Long-context models were billed at their base rate.** 76 catalog models publish a second rate card above a context threshold, up to 6.7× base. They are now priced at that ceiling — a deliberate over-estimate, because under-billing weakens the budget signal exactly when it matters.
+
+</Update>
+
 <Update label="July 23, 2026" tags={["fixes"]}>
 
 ## Updates

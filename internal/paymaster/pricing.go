@@ -93,14 +93,44 @@ var priceTable = map[string]modelPrice{
 // alternative (median tier) silently undercharges for top-tier models,
 // which defeats the warn/exceed signal exactly when operators need it.
 var providerFallback = map[string]modelPrice{
-	"anthropic": {InputPerM: 10.00, OutputPerM: 50.00, CachedInputPerM: 1.00, CacheWritePerM: 12.50}, // Fable-tier (premium ceiling)
-	"openai":    {InputPerM: 20.00, OutputPerM: 80.00, CachedInputPerM: 5.00, CacheWritePerM: 20.00}, // o3-pro tier (reasoning ceiling)
-	"google":    {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},  // gemini-2.5-pro upper tier
-	"xai":       {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // grok-4-equivalent
-	"deepseek":  {InputPerM: 0.70, OutputPerM: 2.50, CachedInputPerM: 0.07, CacheWritePerM: 0.70},    // reasoner tier (ceiling)
-	"mistral":   {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // mistral-large estimate (ceiling above codestral)
-	"ollama":    {},
-	"local":     {},
+	// Every row is at or above the highest rate the embedded snapshot publishes
+	// for that provider, per channel, after the nil-mirror convention. Four of
+	// them were not, and the invariant only covered the two gateway rows, so
+	// nothing caught it: openai sat at 20/80 against a snapshot maximum of
+	// 150/600 (o1-pro). A vendor shipping a new top-tier model between snapshot
+	// refreshes is the ONLY case this table answers, and it is exactly the case
+	// where a stale ceiling under-bills — 7.5x, on the row whose whole job is to
+	// over-estimate.
+	"anthropic": {InputPerM: 10.00, OutputPerM: 50.00, CachedInputPerM: 1.00, CacheWritePerM: 12.50},
+	"openai":    {InputPerM: 150.00, OutputPerM: 600.00, CachedInputPerM: 150.00, CacheWritePerM: 150.00},
+	"google":    {InputPerM: 4.00, OutputPerM: 120.00, CachedInputPerM: 3.50, CacheWritePerM: 4.00},
+	"xai":       {InputPerM: 4.00, OutputPerM: 12.00, CachedInputPerM: 2.00, CacheWritePerM: 4.00},
+	"deepseek":  {InputPerM: 0.70, OutputPerM: 2.50, CachedInputPerM: 0.07, CacheWritePerM: 0.70},
+	"mistral":   {InputPerM: 2.00, OutputPerM: 7.50, CachedInputPerM: 2.00, CacheWritePerM: 2.00},
+	// Gateways. These ceilings are the highest rate the embedded snapshot
+	// actually publishes for the provider (including tier rates), computed from
+	// the snapshot rather than guessed. OpenRouter's is startlingly high because
+	// it resells 353 models and a few are exotic — and that is the right number
+	// anyway: this row fires ONLY for a model the catalogue does not know, i.e.
+	// a renamed or brand-new slug. A loud over-estimate on a slug nobody
+	// recognises is the signal; billing it at $0 was the bug (a call to an
+	// unknown openrouter model priced at zero until this row existed).
+	// All four channels are the per-channel maximum over every cost block and
+	// every tier in the snapshot, taken AFTER the nil-mirror convention is
+	// applied — a model with no cache_read charges its input rate for cache
+	// reads, so it counts as a cache-read candidate. The first version of this
+	// row read raw JSON keys instead and derived the two cache channels from
+	// the input rate by Anthropic's ratios, which billed a cache-heavy unknown
+	// openrouter slug at $7.50 against a real ceiling of $150 — 20x under, the
+	// same failure this row was added to prevent, one order of magnitude down.
+	// A per-channel max is the right shape precisely BECAUSE this row does not
+	// describe a real model: it is the bound below which no known model of this
+	// provider can be under-billed.
+	"openrouter":     {InputPerM: 150.00, OutputPerM: 600.00, CachedInputPerM: 150.00, CacheWritePerM: 150.00},
+	"amazon-bedrock": {InputPerM: 16.50, OutputPerM: 82.50, CachedInputPerM: 2.50, CacheWritePerM: 20.625},
+
+	"ollama": {},
+	"local":  {},
 }
 
 // Estimate computes the USD cost of a single LLM call. Token counts are int64
@@ -135,11 +165,25 @@ func RateCard(provider, model string) modelPrice {
 }
 
 // lookupPrice resolves (provider, model) to a rate. Lookup order:
-//  1. exact "<provider>/<model>" match
+//  1. exact "<provider>/<model>" match in priceTable
 //  2. provider-wildcard "<provider>/*" match (used by ollama/local)
-//  3. providerFallback for the provider
-//  4. zero (returned if even the provider is unknown — we never invent a rate
+//  3. exact match in the embedded models.dev snapshot (catalog_pricing.go)
+//  4. providerFallback for the provider
+//  5. zero (returned if even the provider is unknown — we never invent a rate
 //     for a totally unknown vendor; the operator should see $0 and notice)
+//
+// The snapshot's position in that list is the whole design. It sits AFTER the
+// exact hand-written match, because priceTable carries verified corrections a
+// bulk import must never overwrite — Opus 4.7 was billed 3× over until someone
+// checked, and alias rows like "openai/gpt-5" have no catalogue equivalent at
+// all.
+//
+// It also sits AFTER the wildcard, so "ollama/*" and "local/*" keep zeroing out
+// every local model no matter what a catalogue thinks a same-named hosted model
+// costs. The trim happens to exclude ollama today, but embed.go documents how to
+// widen it — and a refresh that pulled in an ollama or local provider would
+// otherwise start billing every local call. A promise that only holds because of
+// what a snapshot currently omits is not a promise.
 func lookupPrice(provider, model string) modelPrice {
 	prov := strings.ToLower(strings.TrimSpace(provider))
 	mod := strings.ToLower(strings.TrimSpace(model))
@@ -153,8 +197,67 @@ func lookupPrice(provider, model string) modelPrice {
 	if p, ok := priceTable[prov+"/*"]; ok {
 		return p
 	}
+	if p, ok := catalogPrice(prov, mod); ok {
+		return p
+	}
 	if p, ok := providerFallback[prov]; ok {
 		return p
 	}
 	return modelPrice{}
+}
+
+// RateSource names which step of lookupPrice produced a rate.
+type RateSource string
+
+const (
+	// SourceTable is an exact hand-written priceTable row.
+	SourceTable RateSource = "table"
+	// SourceWildcard is a "<provider>/*" row — how ollama and local stay free.
+	SourceWildcard RateSource = "wildcard"
+	// SourceCatalog is the embedded models.dev snapshot.
+	SourceCatalog RateSource = "catalog"
+	// SourceFallback is the per-provider ceiling for a model nothing prices.
+	SourceFallback RateSource = "fallback"
+	// SourceNone is the zero card returned for an unknown provider.
+	SourceNone RateSource = "none"
+)
+
+// ExplainRate returns the rate lookupPrice would use AND which step produced
+// it. It exists because the alternative — deducing the source from outside the
+// package by re-querying RateCard and comparing — is not decidable: priceTable,
+// providerFallback and catalogPrices are unexported, so an inference layer can
+// only compare VALUES, and two steps that happen to agree are indistinguishable.
+//
+// That is not hypothetical. `crewship model price` inferred the source that way
+// and got it wrong twice: every tiered model was reported as hand-verified
+// because the comparison read base rates while the chain billed ceilings, and a
+// hand-written row whose rates equal the provider ceiling (openai/o3-pro) was
+// reported as `fallback` because it is byte-identical to the step below it.
+//
+// Mislabelling where a price came from is worse than showing no label: the four
+// steps carry very different confidence, and "hand-verified against the
+// provider's published prices" is a claim about someone having checked an
+// invoice.
+//
+// This walks the same order as lookupPrice and must stay in step with it —
+// TestExplainRate_AgreesWithLookupPrice pins that.
+func ExplainRate(provider, model string) (modelPrice, RateSource) {
+	prov := strings.ToLower(strings.TrimSpace(provider))
+	mod := strings.ToLower(strings.TrimSpace(model))
+	if prov == "" {
+		return modelPrice{}, SourceNone
+	}
+	if p, ok := priceTable[prov+"/"+mod]; ok {
+		return p, SourceTable
+	}
+	if p, ok := priceTable[prov+"/*"]; ok {
+		return p, SourceWildcard
+	}
+	if p, ok := catalogPrice(prov, mod); ok {
+		return p, SourceCatalog
+	}
+	if p, ok := providerFallback[prov]; ok {
+		return p, SourceFallback
+	}
+	return modelPrice{}, SourceNone
 }

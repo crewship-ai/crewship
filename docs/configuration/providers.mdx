@@ -10,6 +10,15 @@ tag: Experimental
 
 Crewship uses a provider abstraction for containers, storage, and state management. Each provider implements a Go interface and can be swapped via configuration.
 
+<Note>
+  **These are not LLM providers.** "Provider" on this page means the
+  `internal/provider/` abstraction over container runtimes, object storage and
+  state — Docker, Apple Containers, BoltDB. If you came looking for Anthropic /
+  OpenAI / Ollama, model endpoints, API keys or what a token costs, that is
+  [Multi-provider LLM configuration](/guides/multi-provider-llm). The two
+  vocabularies share a word and nothing else.
+</Note>
+
 ## Container Providers
 
 The `ContainerProvider` interface (`internal/provider/`) defines the contract for container lifecycle management.

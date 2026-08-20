@@ -174,6 +174,9 @@ Cache token counts are provider-reported and surface as discounted ledger lines.
   <Step title="internal/llm/{anthropic,openai}.go parses">
     The fields into `Response.CachedInputToks` + `Response.CacheCreationToks`.
   </Step>
+  <Step title="The OpenAI codec subtracts">
+    OpenAI's `prompt_tokens` **includes** the cached read, so the codec stores `prompt_tokens - cached_tokens` (clamped at zero) in `Response.InputToks`. Anthropic's `input_tokens` is already disjoint from `cache_read_input_tokens` and is taken verbatim.
+  </Step>
   <Step title="internal/llm/middleware.go plumbs">
     Them through `providerCaller` / `streamCaller` into `paymaster.CallResponse.CachedInputTokens` + `.CacheCreationTokens`.
   </Step>
@@ -187,6 +190,12 @@ Cache token counts are provider-reported and surface as discounted ledger lines.
 
 The 10% discount for Anthropic cache reads (a `claude-haiku-4-5` cache read bills $0.10/M vs $1.00/M base input) lands automatically because the rate-card column is its own field; no per-row multiplier needed.
 
+<Note>
+  **`input_tokens` on a ledger row means FRESH input on every provider** — exclusive of `cached_input_tokens` and `cache_creation_tokens`. That convention is a provider-side subtraction, not an `Estimate` one: `Estimate` bills the three channels **additively**, so subtracting inside it would under-bill every Anthropic call by `cached × input_rate` and double-subtract the sidecar path, which has always corrected its own numbers (`internal/sidecar/usage.go`).
+
+  This changed for OpenAI-family rows. Before it, `prompt_tokens` went to the ledger verbatim and the cached read was billed twice — once at the full input rate, once at the cached rate — 2.67× over on an 80%-cached 1500-token prompt. Historic rows are **not** migrated, so an OpenAI rollup spanning the change is not comparable across it, and the cache-hit ratio's denominator shrank (a ratio above 1 is now possible for OpenAI, as it always was for Anthropic).
+</Note>
+
 A regression earlier in this PR's history shipped the parser without consuming the cache fields — every workspace recorded zero cached tokens and the discount never triggered. The `cost_ledger.cached_input_tokens` column has been present since v62 but was effectively dead until this wiring landed.
 
 ## Cost controls
@@ -199,7 +208,7 @@ Anthropic bills a cache read at ~10% of a fresh input token, but only when the r
 
 ### Auxiliary & sub-agent model routing
 
-Auxiliary work (memory consolidation, Keeper/behavior evaluators, memory-health, negative learning) defaults to `anthropic/claude-haiku-4-5`. Override any slot per deployment — point it at a cheaper or local model without a redeploy:
+Auxiliary work (memory consolidation, Keeper/behavior evaluators, memory-health, negative learning) ships defaulted to `anthropic/claude-haiku-4-5`, but an unconfigured slot follows the credential you actually have — see [Evaluator defaults follow the credential you actually have](/guides/multi-provider-llm#evaluator-defaults-follow-the-credential-you-actually-have). Override any slot per deployment — point it at a cheaper or local model without a redeploy:
 
 ```bash
 CREWSHIP_AUX_<SLOT>_PROVIDER   # curator|keeper|behavior|memory_health|negative|fallback
@@ -220,13 +229,15 @@ Two independent guards stop a confused agent from burning budget:
 
 ## Rate-card snapshotting
 
-Every metered row writes the `rate_*_per_m` columns from `RateCard(provider, model)` at the moment of write. When `pricing.go` is later edited (a provider repriced, a new model was added), historical rollups stay consistent: the old row continues to imply its old rate. New rollup queries can either trust `cost_usd` directly or recompute from `rate_*_per_m * tokens` to verify nothing has drifted.
+Every metered row writes the `rate_*_per_m` columns from `RateCard(provider, model)` at the moment of write. When the rate card later changes, historical rollups stay consistent: the old row continues to imply its old rate. There are now **two** ways it can change — an edit to `pricing.go` (a provider repriced, a new model added), and a refresh of the embedded models.dev snapshot (`go generate ./internal/modelcatalog/...`), which can reprice any model that resolves at step 3 of the lookup below without anyone touching `pricing.go`. New rollup queries can either trust `cost_usd` directly or recompute from `rate_*_per_m * tokens` to verify nothing has drifted.
 
 Zero is the honest value for ollama/local (genuinely free) and for unknown-provider lookups (we couldn't price). The columns are stored as nullable `REAL` (the v62 migration adds them without a `NOT NULL` / `DEFAULT` constraint), but the writer always supplies an explicit zero in those cases, so historical rows never observe NULL in practice — readers can treat the column as effectively populated.
 
 ## Pricing — current rates
 
 The canonical rate card lives in `internal/paymaster/pricing.go`. Adding a model is a one-line change. Prices are USD per 1,000,000 tokens and were verified against provider docs on 2026-04-30.
+
+It is no longer the only rate source: an **embedded models.dev snapshot** (`internal/modelcatalog`, 8 providers) sits underneath it and prices models the table has never heard of. The table stays authoritative — see [The five-step lookup](#the-five-step-lookup) — and `crewship model price --provider <p> --model <m>` reports which source answered for any pair.
 
 <Accordion title="Rate card — per-provider prices (USD / 1M tokens)">
 | Provider / Model | Input | Output | Cached input | Cache write |
@@ -260,7 +271,27 @@ The canonical rate card lives in `internal/paymaster/pricing.go`. Adding a model
   **Anthropic Opus 4.7 was repriced to \$5/\$25 from the old \$15/\$75 in early 2026.** The Crewship rate card was updated on 2026-04-30; ledger rows written before that date carry the old rate as a snapshot in `rate_*_per_m` and will continue to read out at the historical price. New rows use the corrected rate.
 </Note>
 
-When `(provider, model)` misses the table, lookup falls through to a **per-provider ceiling** in `providerFallback` rather than \$0 — picking the most-expensive known tier means budgets warn correctly even on premium reasoning models, at the cost of a mild over-estimate for cheap unknown ones. Better to over-estimate than to silently bill \$0.
+### The five-step lookup
+
+`priceTable` is no longer the only rate source. `lookupPrice` resolves `(provider, model)` in this order and stops at the first hit:
+
+| # | Source | Notes |
+|---|---|---|
+| 1 | `priceTable["<provider>/<model>"]` | Exact, hand-verified. Authoritative. |
+| 2 | `priceTable["<provider>/*"]` | The wildcard. How `ollama/*` and `local/*` stay free. |
+| 3 | The embedded **models.dev snapshot** | 8 providers, 621 models (`internal/paymaster/catalog_pricing.go`). |
+| 4 | `providerFallback["<provider>"]` | The per-provider ceiling. |
+| 5 | \$0 | Only when the provider itself is unknown — the operator is meant to notice. |
+
+The ceiling (step 4) picks the most-expensive known tier rather than the median, so budgets warn correctly even on premium reasoning models, at the cost of a mild over-estimate for cheap unknown ones. Better to over-estimate than to silently bill \$0.
+
+The snapshot sits **third** on purpose: after the exact match, because `priceTable` carries verified corrections a bulk import must never overwrite (Opus 4.7 was billed 3× over until someone checked); and after the wildcard, so a future refresh that pulled an `ollama` or `local` provider into the trim could not start billing local calls.
+
+Models the snapshot carries no cost for — including 23 all-zero cost blocks, which are upstream gaps rather than free models — are **skipped**, never written as a \$0 row, and fall through to the ceiling.
+
+<Warning>
+  **Tiered models are priced at their ceiling.** 76 snapshot models publish a second rate card above a context threshold (typically 200k/272k, up to 6.7× base). `Estimate` has no context-size parameter, so the catalog flattens each model to its most expensive card via `modelcatalog.Model.CeilingRates()`. A short call on a tiered model is therefore over-estimated. The alternative — the base rate — would bill a long-context call at 15% of the invoice, and under-billing weakens the budget signal exactly when it matters. Selecting the right tier per call means changing `Estimate`, `RateCard` and `lookupPrice` together, which is a deliberate change, not a side effect. See [Multi-provider LLM configuration](/guides/multi-provider-llm#long-context-tiers).
+</Warning>
 
 ## The call path
 
@@ -345,11 +376,12 @@ Look for the `llm.call` journal entry: if it exists, the call was metered. If yo
 
 - **Soft budgets still emit entries.** A soft budget at 120% still writes `budget.warning` to the journal -- the UI uses this to paint red. Don't filter out "soft" when looking for "who was over".
 - **Stream path is unmetered.** `wrappedProvider.Stream()` bypasses the full middleware (token counts arrive in the terminal `message_delta` event, which the sync `CallResponse` shape can't carry). Streaming callers pay through orchestrator-level accounting that predates this package.
-- **Pricing is estimated.** `pricing.go` hard-codes per-token prices per (provider, model). When the provider ships a new model the estimate falls to zero until pricing is added -- check `internal/paymaster/pricing.go` after any provider upgrade.
+- **Pricing is estimated, and a "price" may be a ceiling.** A new model from a provider the snapshot covers (anthropic, openai, google, deepseek, mistral, xai, openrouter, amazon-bedrock) is priced automatically at step 3. Anything else lands on the per-provider ceiling at step 4 — a real number, deliberately high, and not the invoice. The estimate does **not** fall to \$0 unless the *provider id itself* is unknown, which is the case worth chasing: a registry row or a `Provider.Name()` with no rate row and no catalog entry bills every call at \$0. Run `crewship model price` on the pair before assuming; `pricing.go` is where a correction goes, but it is no longer the first place to look.
 
 ## Related
 
 - [LLM middleware](/guides/llm-middleware) -- layer order and composition.
+- [Multi-provider LLM configuration](/guides/multi-provider-llm) -- the registry, the codecs, and the embedded catalog that supplies step 3 of the lookup.
 - [`crewship paymaster`](/cli/paymaster) -- CLI.
 - [Paymaster API](/api-reference/paymaster).
 - [Crew Journal](/guides/crew-journal) -- `llm.call`, `cost.incurred`, `budget.*` entry types.

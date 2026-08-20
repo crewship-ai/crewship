@@ -107,7 +107,12 @@ appear shortly after.
 Crewship's `internal/telemetry` wires GenAI Semantic Convention
 attributes on every LLM call (defined in `internal/telemetry/spans.go`):
 
-- `gen_ai.system` — `anthropic`, `openai`, `ollama`
+- `gen_ai.system` — `anthropic`, `openai`, `ollama`. The value is
+  `Provider.Name()`, not a fixed enum, so a configured OpenAI-compatible codec
+  reports whatever its `Name` is — `deepseek` and `local` are the other values
+  the shipped presets produce. It is also the paymaster pricing key, so a span
+  whose `gen_ai.system` you do not recognise is a call whose cost you should
+  check.
 - `gen_ai.request.model` — model identifier
 - `gen_ai.usage.input_tokens` / `output_tokens` / `cached_input_tokens`
 - `gen_ai.usage.cache_creation_tokens`

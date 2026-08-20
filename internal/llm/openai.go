@@ -9,8 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/llm/endpoint"
 )
@@ -33,6 +33,70 @@ type OpenAI struct {
 	// falls through to the raw value.
 	epErr  error
 	client *http.Client
+	// stream is the streaming client: same transport, no total deadline.
+	// http.Client.Timeout covers body read, so reusing `client` silently
+	// truncated any generation that outran it. See openAIStreamClient.
+	stream *http.Client
+	// cfg carries the backend-specific knobs (vocabulary, auth shape, extra
+	// headers) already resolved through withDefaults. It sits ALONGSIDE the
+	// fields above rather than replacing them: apiKey/baseURL/ep/epErr/client
+	// are poked directly by the existing tests, and cfg.APIKey/cfg.BaseURL are
+	// their construction-time copies, not a second source of truth.
+	//
+	// A zero-value OpenAI is not produced by any constructor, but the
+	// accessors below still fall back to the hosted-OpenAI identity so one
+	// could not silently send a bare key or an empty provider name.
+	cfg OpenAICompatConfig
+}
+
+// name is Provider.Name() and the paymaster pricing key.
+func (o *OpenAI) name() string {
+	if o.cfg.Name == "" {
+		return "openai"
+	}
+	return o.cfg.Name
+}
+
+// displayName is the operator-facing casing used in error messages.
+func (o *OpenAI) displayName() string {
+	if o.cfg.DisplayName == "" {
+		return "OpenAI"
+	}
+	return o.cfg.DisplayName
+}
+
+// streamClient is the client Stream uses. It falls back to the bounded client
+// only for a zero-value provider, which no constructor produces.
+func (o *OpenAI) streamClient() *http.Client {
+	if o.stream == nil {
+		return o.client
+	}
+	return o.stream
+}
+
+// applyHeaders writes the configured static headers and then the auth header.
+// Auth goes last so a Headers entry can never clobber it.
+//
+// An empty key sends NO auth header at all. It used to send a bare "Bearer ",
+// which a local vLLM/llama.cpp server rejects outright — the one thing an
+// unauthenticated backend cannot cope with is being offered an empty
+// credential.
+func (o *OpenAI) applyHeaders(req *http.Request) {
+	for k, v := range o.cfg.Headers {
+		req.Header.Set(k, v)
+	}
+	if o.cfg.NoAuth || o.apiKey == "" {
+		return
+	}
+	header, prefix := o.cfg.AuthHeader, o.cfg.AuthPrefix
+	if header == "" {
+		// Zero-value provider: keep the historical Authorization: Bearer
+		// shape rather than sending the key raw. withDefaults fills this in
+		// for anything a constructor produced, so this is unreachable in
+		// practice and deliberately cheap.
+		header, prefix = "Authorization", "Bearer "
+	}
+	req.Header.Set(header, prefix+o.apiKey)
 }
 
 // baseURLError returns a parse error when the configured base is not a URL at
@@ -94,27 +158,24 @@ func rawModelsURL(base string) string {
 
 // NewOpenAI creates a provider that calls the OpenAI Chat Completions API.
 func NewOpenAI(apiKey string) *OpenAI {
-	ep, err := newOpenAIEndpoint(openaiAPIURL)
-	return &OpenAI{
-		apiKey:  apiKey,
-		baseURL: openaiAPIURL,
-		ep:      ep,
-		epErr:   err,
-		client:  &http.Client{Timeout: 120 * time.Second},
-	}
+	return NewOpenAICompat(OpenAICompatConfig{APIKey: apiKey, IncludeUsage: true})
 }
 
 // NewOpenAIWithBaseURL creates an OpenAI-compatible provider with a custom base URL.
 // Useful for Azure OpenAI, local proxies, or other OpenAI-compatible APIs.
+// An explicitly-empty baseURL is NOT rewritten to the hosted default: it is an
+// unambiguous misconfiguration and keeps surfacing as a parse error, which is
+// the only response that names the actual problem.
+// stream_options is deliberately NOT set here. The hosted API accepts it, but
+// this constructor takes an arbitrary endpoint: Azure OpenAI before
+// api-version 2024-08-01 and several self-hosted servers reject unknown body
+// keys outright ("Unrecognized request argument supplied: stream_options"), so
+// forcing it on would break streaming that worked before this existed. Callers
+// who know their backend supports it can opt in through NewOpenAICompat.
 func NewOpenAIWithBaseURL(apiKey, baseURL string) *OpenAI {
-	ep, err := newOpenAIEndpoint(baseURL)
-	return &OpenAI{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		ep:      ep,
-		epErr:   err,
-		client:  &http.Client{Timeout: 120 * time.Second},
-	}
+	cfg := OpenAICompatConfig{APIKey: apiKey}.withDefaults()
+	cfg.BaseURL = baseURL
+	return newOpenAIProvider(cfg)
 }
 
 // NewOpenAIWithClient creates an OpenAI-compatible provider with a custom base
@@ -126,21 +187,17 @@ func NewOpenAIWithBaseURL(apiKey, baseURL string) *OpenAI {
 // NewOpenAIWithBaseURL) — callers wiring an untrusted endpoint MUST pass a
 // guarded client, never nil.
 func NewOpenAIWithClient(apiKey, baseURL string, client *http.Client) *OpenAI {
-	if client == nil {
-		client = &http.Client{Timeout: 120 * time.Second}
-	}
-	ep, err := newOpenAIEndpoint(baseURL)
-	return &OpenAI{
-		apiKey:  apiKey,
-		baseURL: baseURL,
-		ep:      ep,
-		epErr:   err,
-		client:  client,
-	}
+	// No stream_options — a tenant-configured endpoint is exactly the case
+	// that may reject it. See NewOpenAIWithBaseURL.
+	cfg := OpenAICompatConfig{APIKey: apiKey, Client: client}.withDefaults()
+	cfg.BaseURL = baseURL // explicit, including "" — see NewOpenAIWithBaseURL
+	return newOpenAIProvider(cfg)
 }
 
-// Name returns "openai".
-func (o *OpenAI) Name() string { return "openai" }
+// Name returns the configured provider id — "openai" for the hosted API, and
+// whatever the compat config declared otherwise ("deepseek", "local", …).
+// It is the paymaster pricing key, so it is never a display string.
+func (o *OpenAI) Name() string { return o.name() }
 
 // ListModels implements ModelLister against the OpenAI-compatible
 // GET {root}/v1/models. baseURL may be given in any shape — a bare root,
@@ -157,15 +214,15 @@ func (o *OpenAI) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+	o.applyHeaders(httpReq)
 
 	resp, err := o.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("openai http: %w", err)
+		return nil, fmt.Errorf("%s http: %w", o.name(), err)
 	}
 	defer resp.Body.Close()
 
-	if err := checkStatus(resp, "OpenAI"); err != nil {
+	if err := checkStatus(resp, o.displayName()); err != nil {
 		return nil, err
 	}
 
@@ -175,7 +232,7 @@ func (o *OpenAI) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decode openai models: %w", err)
+		return nil, fmt.Errorf("decode %s models: %w", o.name(), err)
 	}
 
 	out := make([]ModelInfo, 0, len(raw.Data))
@@ -183,7 +240,7 @@ func (o *OpenAI) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		if m.ID == "" {
 			continue
 		}
-		out = append(out, ModelInfo{ID: m.ID, DisplayName: m.ID, Provider: "openai"})
+		out = append(out, ModelInfo{ID: m.ID, DisplayName: m.ID, Provider: o.name()})
 	}
 	return out, nil
 }
@@ -200,15 +257,22 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	}
 	defer resp.Body.Close()
 
-	if err := checkStatus(resp, "OpenAI"); err != nil {
+	if err := checkStatus(resp, o.displayName()); err != nil {
 		return nil, err
 	}
 
 	var raw openaiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decode openai response: %w", err)
+		return nil, fmt.Errorf("decode %s response: %w", o.name(), err)
 	}
-	return raw.toResponse(), nil
+	out := raw.toResponse()
+	// toResponse resolves finish_reason through the built-in map only — its
+	// signature is pinned by the existing tests, so the per-backend overlay is
+	// applied here, where the config is in scope.
+	if len(raw.Choices) > 0 {
+		out.StopReason = o.stopReason(raw.Choices[0].FinishReason)
+	}
+	return out, nil
 }
 
 // Stream sends a streaming completion request, calling handler for each event.
@@ -217,13 +281,13 @@ func (o *OpenAI) Stream(ctx context.Context, req Request, handler func(StreamEve
 	if err != nil {
 		return nil, err
 	}
-	resp, err := o.doWithRetry(ctx, body)
+	resp, err := o.do(ctx, o.streamClient(), body)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if err := checkStatus(resp, "OpenAI"); err != nil {
+	if err := checkStatus(resp, o.displayName()); err != nil {
 		return nil, err
 	}
 
@@ -237,9 +301,18 @@ func (o *OpenAI) Stream(ctx context.Context, req Request, handler func(StreamEve
 // upstream the moment OpenAI rate-limited a burst -- which the orchestrator's own retry
 // layer would then duplicate, amplifying spikes.
 func (o *OpenAI) doWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
-	return doWithRetry(ctx, o.client, func(ctx context.Context) (*http.Request, error) {
+	return o.do(ctx, o.client, body)
+}
+
+// do is doWithRetry with the client made explicit, so Stream can run on the
+// deadline-free streaming client while Complete keeps its 120s safety net.
+func (o *OpenAI) do(ctx context.Context, client *http.Client, body []byte) (*http.Response, error) {
+	if client == nil {
+		client = o.client
+	}
+	return doWithRetry(ctx, client, func(ctx context.Context) (*http.Request, error) {
 		return o.newHTTPRequest(ctx, body)
-	}, "openai", "OpenAI")
+	}, o.name(), o.displayName())
 }
 
 func (o *OpenAI) newHTTPRequest(ctx context.Context, body []byte) (*http.Request, error) {
@@ -254,8 +327,18 @@ func (o *OpenAI) newHTTPRequest(ctx context.Context, body []byte) (*http.Request
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	o.applyHeaders(req)
 	return req, nil
+}
+
+// maxTokensField is the body key the output cap is written to. Newer OpenAI
+// models want "max_completion_tokens"; everything else still takes
+// "max_tokens", which stays the default.
+func (o *OpenAI) maxTokensField() string {
+	if o.cfg.MaxTokensField == "" {
+		return "max_tokens"
+	}
+	return o.cfg.MaxTokensField
 }
 
 func (o *OpenAI) buildRequestBody(req Request, stream bool) ([]byte, error) {
@@ -271,8 +354,11 @@ func (o *OpenAI) buildRequestBody(req Request, stream bool) ([]byte, error) {
 		"model":    req.Model,
 		"messages": msgs,
 	}
-	if req.MaxTokens > 0 {
-		body["max_tokens"] = req.MaxTokens
+	switch {
+	case req.MaxTokens > 0:
+		body[o.maxTokensField()] = req.MaxTokens
+	case o.cfg.DefaultMaxTokens > 0:
+		body[o.maxTokensField()] = o.cfg.DefaultMaxTokens
 	}
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature
@@ -282,6 +368,19 @@ func (o *OpenAI) buildRequestBody(req Request, stream bool) ([]byte, error) {
 	}
 	if stream {
 		body["stream"] = true
+		// Without stream_options a streamed response carries no usage block
+		// at all: every streamed call reports zero tokens and paymaster
+		// prices it at $0. It is only valid on a streamed request — sending
+		// it on a non-streamed one is a 400 on real OpenAI.
+		if o.cfg.IncludeUsage {
+			body["stream_options"] = map[string]any{"include_usage": true}
+		}
+	}
+	// Merged last, and deliberately allowed to overwrite: ExtraBody is the
+	// escape hatch for a backend that needs a key this codec does not model,
+	// which includes replacing one it does.
+	for k, v := range o.cfg.ExtraBody {
+		body[k] = v
 	}
 	return json.Marshal(body)
 }
@@ -337,9 +436,66 @@ type openaiResponse struct {
 	} `json:"usage"`
 }
 
+// openAIStopReasonTable maps every finish_reason this codec has seen in the
+// wild. "tool_calls" and "length" are what hosted OpenAI sends; "function_call"
+// is the deprecated form that several compat backends still emit, "tool_use"
+// is what an Anthropic-shim proxy passes through, and "max_tokens" is vLLM's
+// spelling. Until they were listed here a backend using any of the three
+// accumulated its tool calls correctly and then reported end_turn — an agent
+// loop reading StopReason would stop mid-turn with tool calls unanswered.
+var openAIStopReasonTable = map[string]StopReason{
+	"tool_calls":    StopToolUse,
+	"function_call": StopToolUse,
+	"tool_use":      StopToolUse,
+	"length":        StopMaxToks,
+	"max_tokens":    StopMaxToks,
+	"stop":          StopEndTurn,
+}
+
+// openAIStopReason is the built-in mapping, with StopEndTurn as the default:
+// an unknown terminal reason is a finished turn, not a failure.
+func openAIStopReason(s string) StopReason {
+	if r, ok := openAIStopReasonTable[s]; ok {
+		return r
+	}
+	return StopEndTurn
+}
+
+// stopReason is openAIStopReason with the per-backend overlay applied on top,
+// for a backend whose vocabulary collides with the built-in one.
+func (o *OpenAI) stopReason(s string) StopReason {
+	if r, ok := o.cfg.StopReasons[s]; ok {
+		return r
+	}
+	return openAIStopReason(s)
+}
+
+// freshPromptToks reduces OpenAI's prompt_tokens to the fresh (uncached) part
+// of the prompt. OpenAI's `prompt_tokens` INCLUDES cached_tokens; feeding it to
+// paymaster.Estimate verbatim bills the cached read twice — once at the full
+// input rate and again at the cached rate. internal/sidecar/usage.go:122 has
+// always done this subtraction on the proxy billing path, so taking the wire
+// value here made the two writers of cost_ledger disagree.
+//
+// The clamp is not defensive tidiness: an OpenAI-compatible backend (the vllm
+// and ollama-openai presets) that reports cached_tokens > prompt_tokens would
+// otherwise store a NEGATIVE cost_ledger.input_tokens. Estimate's own clamp
+// protects the dollar figure, not the stored count, and a negative count
+// inverts the cache-hit ratio gate in paymaster/ledger.go.
+//
+// Note the asymmetry with anthropic.go, which is correct as it stands:
+// Anthropic reports input_tokens and cache_read_input_tokens as disjoint
+// counts, so subtracting there would under-bill every cache read.
+func freshPromptToks(prompt, cached int) int {
+	if fresh := prompt - cached; fresh > 0 {
+		return fresh
+	}
+	return 0
+}
+
 func (r *openaiResponse) toResponse() *Response {
 	resp := &Response{
-		InputToks:       r.Usage.PromptTokens,
+		InputToks:       freshPromptToks(r.Usage.PromptTokens, r.Usage.PromptTokensDetails.CachedTokens),
 		OutputToks:      r.Usage.CompletionTokens,
 		CachedInputToks: r.Usage.PromptTokensDetails.CachedTokens,
 	}
@@ -348,14 +504,7 @@ func (r *openaiResponse) toResponse() *Response {
 		return resp
 	}
 	choice := r.Choices[0]
-	switch choice.FinishReason {
-	case "tool_calls":
-		resp.StopReason = StopToolUse
-	case "length":
-		resp.StopReason = StopMaxToks
-	default:
-		resp.StopReason = StopEndTurn
-	}
+	resp.StopReason = openAIStopReason(choice.FinishReason)
 	resp.Content = choice.Message.Content
 	for _, tc := range choice.Message.ToolCalls {
 		resp.ToolCalls = append(resp.ToolCalls, ToolCall{
@@ -460,7 +609,11 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 			return false, nil
 		}
 		if chunk.Usage != nil {
-			final.InputToks = chunk.Usage.PromptTokens
+			// Recomputed from THIS chunk's own pair, never subtracted from
+			// the already-stored final.InputToks: a backend that repeats the
+			// usage block on more than one chunk would otherwise subtract the
+			// cached count twice.
+			final.InputToks = freshPromptToks(chunk.Usage.PromptTokens, chunk.Usage.PromptTokensDetails.CachedTokens)
 			final.OutputToks = chunk.Usage.CompletionTokens
 			final.CachedInputToks = chunk.Usage.PromptTokensDetails.CachedTokens
 		}
@@ -494,14 +647,7 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 
 		if choice.FinishReason != "" {
 			sawFinishReason = true
-		}
-		switch choice.FinishReason {
-		case "tool_calls":
-			final.StopReason = StopToolUse
-		case "length":
-			final.StopReason = StopMaxToks
-		case "stop":
-			final.StopReason = StopEndTurn
+			final.StopReason = o.stopReason(choice.FinishReason)
 		}
 		return false, nil
 	})
@@ -510,7 +656,21 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 	}
 
 	final.Content = strings.Join(textParts, "")
-	for i := 0; i < len(toolMap); i++ {
+	// Iterate the map's own keys in order, not 0..len-1. The counting loop that
+	// used to be here assumed every backend numbers its tool_calls contiguously
+	// from zero: with indices {0, 2} it read len==2, walked i=0 and i=1, and
+	// never reached the call at index 2 — silently emitting one tool call where
+	// the model asked for two. Hosted OpenAI numbers contiguously so it never
+	// showed there, but the vLLM and Mistral-compat builds start at 1 or leave
+	// gaps, and this package now ships a vllm preset and a `provider check
+	// --provider vllm` path. A dropped tool call in an agent loop is not a
+	// visible failure; it is the model appearing to decline to act.
+	indices := make([]int, 0, len(toolMap))
+	for i := range toolMap {
+		indices = append(indices, i)
+	}
+	sort.Ints(indices)
+	for _, i := range indices {
 		ptc := toolMap[i]
 		if ptc == nil {
 			continue

@@ -229,15 +229,21 @@ func TestEstimate(t *testing.T) {
 			name:     "google fallback for unknown model",
 			provider: "google", model: "gemini-future-99",
 			in: 1000, out: 500,
-			// fallback equals gemini-2.5-pro rate (upper tier)
-			want: 0.0025 + 0.0075,
+			// The ceiling is the highest rate the snapshot publishes for google
+			// (4/120, gemini-3-pro-image), not gemini-2.5-pro's upper tier. It
+			// was the latter until the ceilings were re-derived per channel —
+			// a stale ceiling under-bills a model shipped between refreshes,
+			// which is the one case this row exists for.
+			want: 0.004 + 0.060,
 		},
 		{
 			name:     "openai fallback for unknown model",
 			provider: "openai", model: "gpt-future-99",
 			in: 1000, out: 500,
-			// Conservative fallback: o3-pro tier ($20/$80 per 1M).
-			want: 0.02 + 0.04,
+			// The ceiling is the snapshot's own maximum for openai — 150/600,
+			// from o1-pro — not the o3-pro tier it used to name. 1000 in at
+			// $150/M plus 500 out at $600/M.
+			want: 0.15 + 0.30,
 		},
 		{
 			name:     "deepseek fallback for unknown model",

@@ -73,6 +73,7 @@
               "guides/credentials",
               "guides/auto-managed-credentials",
               "guides/model-discovery",
+              "guides/multi-provider-llm",
               {
                 "group": "Skills",
                 "icon": "sparkles",
@@ -293,6 +294,7 @@
               "cli/recap",
               "cli/inspect"
               ,"cli/model",
+              "cli/provider",
               "cli/rehire"
             ]
           },

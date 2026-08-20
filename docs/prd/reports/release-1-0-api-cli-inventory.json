@@ -4,9 +4,9 @@
     "api_exact_docs": 584,
     "api_resource_docs": 0,
     "api_missing_docs": 0,
-    "cli_operations": 786,
-    "cli_exact_docs": 786,
-    "cli_root_docs_present": 786,
+    "cli_operations": 790,
+    "cli_exact_docs": 790,
+    "cli_root_docs_present": 790,
     "cli_root_docs_missing": 0,
     "api_with_test_signals": 435,
     "api_with_concrete_response_schemas": 569,
@@ -15,9 +15,9 @@
     "api_with_concrete_json_requests": 244,
     "api_generic_json_requests": 0,
     "api_non_json_request_bodies": 4,
-    "cli_with_test_signals": 771,
-    "cli_with_flags": 375,
-    "cli_with_all_flags_documented": 375,
+    "cli_with_test_signals": 775,
+    "cli_with_flags": 378,
+    "cli_with_all_flags_documented": 378,
     "cli_missing_flag_docs": 0,
     "api_contract_gaps": 0,
     "environment_variables": 102,
@@ -16331,7 +16331,8 @@
         "docs/api-reference/agents.mdx",
         "docs/configuration/environment.mdx",
         "docs/guides/keeper.mdx",
-        "docs/guides/model-discovery.mdx"
+        "docs/guides/model-discovery.mdx",
+        "docs/guides/multi-provider-llm.mdx"
       ],
       "status": "documented_exact",
       "test_signals": [
@@ -28376,6 +28377,7 @@
       "status": "documented_exact",
       "test_signals": [
         "cmd/crewship/cmd_commands_test.go",
+        "cmd/crewship/cmd_provider_test.go",
         "cmd/crewship/cmd_slash_admin_cov_test.go",
         "cmd/crewship/cmd_slash_cov_test.go",
         "cmd/crewship/cmd_slash_fastpath_test.go"
@@ -28745,7 +28747,8 @@
       "test_signals": [
         "cmd/crewship/cmd_cost_cov_test.go",
         "cmd/crewship/cmd_cost_forecast_cov_test.go",
-        "cmd/crewship/cmd_cost_test.go"
+        "cmd/crewship/cmd_cost_test.go",
+        "cmd/crewship/cmd_provider_test.go"
       ],
       "flags": [
         "limit",
@@ -35198,7 +35201,8 @@
       "exact_docs": [
         "docs/cli/escalation.mdx",
         "docs/cli/journal.mdx",
-        "docs/cli/keeper.mdx"
+        "docs/cli/keeper.mdx",
+        "docs/cli/provider.mdx"
       ],
       "root_docs": [
         "docs/cli/keeper.mdx"
@@ -35354,7 +35358,8 @@
       "short": "Evaluator models: what the Keeper Reviews sweeps and the watchdog run on",
       "root": "keeper",
       "exact_docs": [
-        "docs/cli/keeper.mdx"
+        "docs/cli/keeper.mdx",
+        "docs/cli/provider.mdx"
       ],
       "root_docs": [
         "docs/cli/keeper.mdx"
@@ -35432,7 +35437,8 @@
       "short": "Change one evaluator slot (requires OWNER or ADMIN)",
       "root": "keeper",
       "exact_docs": [
-        "docs/cli/keeper.mdx"
+        "docs/cli/keeper.mdx",
+        "docs/cli/provider.mdx"
       ],
       "root_docs": [
         "docs/cli/keeper.mdx"
@@ -37903,7 +37909,8 @@
       "short": "Discover the models a provider can serve",
       "root": "model",
       "exact_docs": [
-        "docs/cli/model.mdx"
+        "docs/cli/model.mdx",
+        "docs/cli/provider.mdx"
       ],
       "root_docs": [
         "docs/cli/model.mdx"
@@ -37917,14 +37924,14 @@
         "cmd/crewship/cmd_keeper_aux_credential_test.go",
         "cmd/crewship/cmd_keeper_config_test.go",
         "cmd/crewship/cmd_keeper_test.go",
-        "cmd/crewship/cmd_model_test.go",
+        "cmd/crewship/cmd_model_price_test.go",
         "…"
       ]
     },
     {
       "path": "model list",
       "use": "list",
-      "short": "List models for a provider (live when a credential exists, else curated)",
+      "short": "List models for a provider (live when the server can, else the embedded catalog)",
       "root": "model",
       "exact_docs": [
         "docs/cli/model.mdx"
@@ -37945,9 +37952,46 @@
         "…"
       ],
       "flags": [
+        "provider",
+        "search",
+        "source"
+      ],
+      "documented_flags": [
+        "provider",
+        "search",
+        "source"
+      ]
+    },
+    {
+      "path": "model price",
+      "use": "price",
+      "short": "Resolve the rate card for a model and estimate what a call costs",
+      "root": "model",
+      "exact_docs": [
+        "docs/cli/model.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/model.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_model_price_test.go",
+        "cmd/crewship/cmd_model_test.go"
+      ],
+      "flags": [
+        "cache-write",
+        "cached",
+        "in",
+        "model",
+        "out",
         "provider"
       ],
       "documented_flags": [
+        "cache-write",
+        "cached",
+        "in",
+        "model",
+        "out",
         "provider"
       ]
     },
@@ -40774,6 +40818,97 @@
       "test_signals": [
         "cmd/crewship/cmd_prompt_cov_test.go",
         "cmd/crewship/cmd_prompt_test.go"
+      ]
+    },
+    {
+      "path": "provider",
+      "use": "provider",
+      "short": "Inspect the LLM providers this build can talk to",
+      "root": "provider",
+      "exact_docs": [
+        "docs/cli/keeper.mdx",
+        "docs/cli/model.mdx",
+        "docs/cli/provider.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/provider.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_agent_channels_test.go",
+        "cmd/crewship/cmd_agent_introspect_cov_test.go",
+        "cmd/crewship/cmd_credential_assignment_cov_test.go",
+        "cmd/crewship/cmd_credential_cov2_test.go",
+        "cmd/crewship/cmd_credential_cov_test.go",
+        "cmd/crewship/cmd_credential_crews_test.go",
+        "cmd/crewship/cmd_credential_list_paging_test.go",
+        "cmd/crewship/cmd_credential_mutate_cov2_test.go",
+        "…"
+      ]
+    },
+    {
+      "path": "provider check",
+      "use": "check",
+      "short": "Send one live completion to a provider and report latency, tokens and cost",
+      "root": "provider",
+      "exact_docs": [
+        "docs/cli/provider.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/provider.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_provider_check_test.go",
+        "cmd/crewship/cmd_provider_test.go"
+      ],
+      "flags": [
+        "api-key",
+        "base-url",
+        "model",
+        "prompt",
+        "provider",
+        "timeout"
+      ],
+      "documented_flags": [
+        "api-key",
+        "base-url",
+        "model",
+        "prompt",
+        "provider",
+        "timeout"
+      ]
+    },
+    {
+      "path": "provider list",
+      "use": "list",
+      "short": "List the LLM providers in the registry, and whether their key is set",
+      "root": "provider",
+      "exact_docs": [
+        "docs/cli/keeper.mdx",
+        "docs/cli/model.mdx",
+        "docs/cli/provider.mdx"
+      ],
+      "root_docs": [
+        "docs/cli/provider.mdx"
+      ],
+      "status": "documented_exact",
+      "test_signals": [
+        "cmd/crewship/cmd_admin_extras_test.go",
+        "cmd/crewship/cmd_agent_mcp_cov_test.go",
+        "cmd/crewship/cmd_approvals_test.go",
+        "cmd/crewship/cmd_chain_test.go",
+        "cmd/crewship/cmd_chat_attachments_test.go",
+        "cmd/crewship/cmd_chat_cov2_test.go",
+        "cmd/crewship/cmd_checkpoint_cov_test.go",
+        "cmd/crewship/cmd_checkpoint_test.go",
+        "…"
+      ],
+      "flags": [
+        "all"
+      ],
+      "documented_flags": [
+        "all"
       ]
     },
     {
@@ -48415,11 +48550,11 @@
     }
   ],
   "docs_to_code": {
-    "command_references": 4311,
-    "api_path_references": 2155,
+    "command_references": 4364,
+    "api_path_references": 2158,
     "environment_references": 425,
     "manifest_kind_references": 229,
-    "flag_references": 1993,
+    "flag_references": 2054,
     "missing_commands": 0,
     "missing_api_paths": 0,
     "missing_environment_variables": 0,

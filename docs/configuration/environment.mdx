@@ -263,9 +263,10 @@ These names are used by CLI commands, test harnesses, or the agent runtime rathe
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `KEEPER_ENABLED` | `false` | Enable Keeper AI gatekeeper (`true` or `1`) |
-| `KEEPER_OLLAMA_URL` | `http://localhost:11434` | Ollama API URL for Keeper LLM |
+| `KEEPER_OLLAMA_URL` | `http://localhost:11434` | Endpoint any `ollama` provider row resolves to — the Keeper judge and every auxiliary slot set to `ollama`. It is `ProviderSpec.BaseEnv` for that row (`internal/llm/registry.go`), not a Keeper-only variable. |
 | `KEEPER_MODEL` | _(none)_ | Model for Keeper evaluations (e.g. `claude-haiku-4-5`, or an Ollama model name). No default — an enabled Keeper with an empty model fails startup validation. |
 | `ANTHROPIC_API_KEY` | _(none)_ | **Required when `KEEPER_MODEL` (or an auxiliary-model slot) names a `claude-*` model** — the server builds an Anthropic provider for it and an empty key is a hard error / `503`. Not needed for Ollama models. |
+| `OPENAI_API_KEY` | _(none)_ | **Required when an auxiliary-model slot names the `openai` provider** — the server's own OpenAI key. Same rule as `ANTHROPIC_API_KEY`: an empty key is a hard error rather than a provider that 401s on first use. These two are `ProviderSpec.KeyEnv` for their registry rows, and which one an unconfigured instance defaults to depends on which you have set — see [Multi-provider LLM configuration](/guides/multi-provider-llm). Distinct from the same-named variable injected into an **agent container** ([`crewship credential`](/cli/credential)); this one is the server's. |
 
 <Tip>
   Setting `KEEPER_OLLAMA_URL` auto-enables Keeper (unless `KEEPER_ENABLED` is explicitly `false`). This means you only need to set the URL to activate Keeper.

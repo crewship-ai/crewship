@@ -92,6 +92,14 @@ const (
 // ≥1024 tokens and reports cached_tokens). Providers that don't surface
 // cache info leave both fields zero — dashboards can still compute
 // "cached / input" without branching per provider.
+//
+// InputToks is FRESH input on every codec: exclusive of CachedInputToks and
+// CacheCreationToks, never a total. Anthropic reports it that way on the wire
+// and its codec passes the value through; OpenAI reports prompt_tokens
+// INCLUSIVE of prompt_tokens_details.cached_tokens, so openai.go subtracts
+// (clamped at zero) to meet this contract. A codec that leaves the inclusive
+// wire value in place bills cache reads at the full input rate — the paymaster
+// prices these three fields as separate channels and adds them.
 type Response struct {
 	Content string `json:"content,omitempty"`
 	// Thinking is a reasoning model's chain of thought when the provider returns
