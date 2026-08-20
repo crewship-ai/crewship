@@ -89,6 +89,14 @@ older image than stop the fleet, set `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1`.
 The journal then records the **local** digest — what actually ran — not the one
 that was wanted, and each start logs a warning naming both.
 
+The same rule holds when the pull succeeds but the local tag cannot be restored
+afterwards. A digest-pinned pull leaves the image unnamed, so Crewship re-creates
+the `repo:tag` alias itself; if the daemon refuses that, and an older copy of the
+tag is still on disk, the container starts from the **old** manifest. Crewship
+re-reads the tag before writing the journal, records the digest that tag actually
+carries with `payload.pinned: false`, and logs an error naming both digests. The
+`provisioning.step` row never claims a digest that did not run.
+
 Locally built devcontainer cache images (`crewship-cache:*`) exist in no
 registry and therefore have no digest. Their `provisioning.step` rows omit the
 `digest` key entirely; their provenance is the base image recorded on the

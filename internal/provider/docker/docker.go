@@ -900,16 +900,53 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 	//
 	// Best-effort: a tagging failure means the image is present but unnamed, so
 	// the caller's own ImageInspect is the honest place for that to surface,
-	// with the real daemon error rather than one invented here.
+	// with the real daemon error rather than one invented here. That rationale
+	// only holds when `ref` was ABSENT locally — if a stale copy of the tag was
+	// already on disk, the failed re-tag leaves it pointing at the OLD manifest,
+	// nothing downstream errors, and the run would be journalled under a digest
+	// it did not execute (#2006). So the provenance below is not taken on trust
+	// when the re-tag failed; it is read back off disk.
+	tagRestored := true
 	if pinned && !dockerutil.IsDigestRef(ref) {
 		if _, tagErr := p.client.ImageTag(ctx, client.ImageTagOptions{Source: pullRef, Target: ref}); tagErr != nil {
+			tagRestored = false
 			p.logger.Warn("pulled by digest but could not restore the local tag; downstream lookups by tag may fail",
 				"image", ref, "pull_ref", pullRef, "error", tagErr)
 		}
 	}
 
-	if remoteDigest != "" {
+	if remoteDigest != "" && tagRestored {
 		return imageProvenance{Digest: remoteDigest, Verified: pinned}, nil
+	}
+	if remoteDigest != "" {
+		// The re-tag failed, so we no longer know that `ref` names the manifest
+		// we just fetched. Ask the daemon instead of assuming, on a FRESH
+		// timeout — inspectCtx above was bounded before the pull and is long
+		// expired by now.
+		postCtx, postCancel := context.WithTimeout(ctx, dockerutil.DefaultHeadTimeout)
+		defer postCancel()
+		post, postErr := p.client.ImageInspect(postCtx, ref)
+		if postErr != nil {
+			// Nothing answers to the tag: the image is present but unnamed, the
+			// case the best-effort comment above describes. Record nothing and
+			// let the caller's own daemon call fail with the real error — this
+			// path is not the one that gets to stop a fleet.
+			return imageProvenance{}, nil
+		}
+		if dockerutil.RepoDigestsContain(post.RepoDigests, remoteDigest) {
+			// The tag already resolved to the pulled manifest (the daemon named
+			// it for us, or a concurrent start won the race). Same guarantee the
+			// re-tag was there to create.
+			return imageProvenance{Digest: remoteDigest, Verified: true}, nil
+		}
+		// The tag resolves to a DIFFERENT manifest than we pulled — the stale
+		// local copy survived. Report what will actually run, unverified, for
+		// the same reason the escape hatch above does: a tamper-evident log is
+		// worse than useless if it attests a digest that never executed.
+		localDigest := dockerutil.LocalRepoDigest(post.RepoDigests, ref)
+		p.logger.Error("the local tag still resolves to a different manifest than the one just pulled; the container will run the OLD image and the audit record says so",
+			"image", ref, "running_digest", localDigest, "pulled_digest", remoteDigest)
+		return imageProvenance{Digest: localDigest}, nil
 	}
 	// Unpinned pull (registry digest was never resolvable but the image was
 	// also absent locally). Read back what the daemon actually landed so the
