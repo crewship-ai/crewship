@@ -456,8 +456,10 @@ func markProposalDecided(ctx context.Context, db *sql.DB, proposalID, status, us
 // human approval rather than on a tick.
 //
 // Note the rename resets the file mode to 0o644, as every rename-based
-// replace in the repo does, and replaces a symlinked target rather than
-// writing through it.
+// replace in the repo does. A symlinked target is refused outright
+// (appendRules does the same for this same file): the rename would not
+// write through it, but the pre-read would read through it, and those
+// bytes become the prefix of what we write back.
 func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 	if err := os.MkdirAll(filepath.Dir(canonicalPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir canonical: %w", err)
@@ -467,6 +469,21 @@ func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 		return fmt.Errorf("lock canonical: %w", err)
 	}
 	defer func() { _ = lk.Unlock() }()
+
+	// Refuse a planted final-component symlink before reading anything,
+	// exactly as appendRules does for this same file. os.ReadFile below
+	// FOLLOWS a symlink, and its bytes become the prefix of the file we
+	// write back — so without this check a link dropped at the canonical
+	// path copies its target verbatim into the crew's learned rules,
+	// which the diff endpoint, the audit watcher, every agent projecting
+	// shared memory and the memory_versions blob all read. (The old
+	// O_APPEND wrote THROUGH the link instead — #1039's confused-deputy
+	// write. The rename below already refuses to write through it; this
+	// makes the read refuse too, and turns a planted link into a loud
+	// error rather than either silent outcome.)
+	if fi, lerr := os.Lstat(canonicalPath); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("canonical %s: refusing symlinked target", canonicalPath)
+	}
 
 	// Read the prior content once, inside the lock. The same bytes
 	// serve both the header-vs-divider decision and — since the write

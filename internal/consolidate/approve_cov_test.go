@@ -315,6 +315,61 @@ func TestAppendToCanonical_UnreadableTargetIsAnError(t *testing.T) {
 	}
 }
 
+// TestAppendToCanonical_RefusesSymlinkedTarget is the guard the
+// whole-file replace needs and the O_APPEND shape did not.
+//
+// appendRules — the OTHER writer of this same learned-YYYY-MM-DD.md, in
+// the same directory, under the same <path>.lock — Lstats the target and
+// refuses a symlink ("refusing symlinked target"). appendToCanonical now
+// writes with the same shape, so it needs the same refusal, and for a
+// sharper reason: the pre-read is what supplies the prefix of the new
+// file. os.ReadFile FOLLOWS a planted final-component symlink, so
+// without this check the link target's bytes are copied verbatim into
+// the crew's canonical learned file — which the HITL diff endpoint, the
+// audit watcher, every agent projecting shared memory, and the
+// memory_versions audit blob all read. The old O_APPEND wrote THROUGH
+// the link instead (#1039's confused-deputy write); neither is
+// acceptable, and internal/memory already refuses the shape for the
+// host-side card writers.
+func TestAppendToCanonical_RefusesSymlinkedTarget(t *testing.T) {
+	dir := t.TempDir()
+	secretDir := t.TempDir()
+	secret := filepath.Join(secretDir, "secret.txt")
+	const secretBody = "content the approver may not copy into crew memory\n"
+	if err := os.WriteFile(secret, []byte(secretBody), 0o600); err != nil {
+		t.Fatalf("write secret: %v", err)
+	}
+	canonical := filepath.Join(dir, "learned-2026-06-01.md")
+	if err := os.Symlink(secret, canonical); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	err := appendToCanonical(canonical, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC), "- **rule**\n")
+	if err == nil {
+		t.Fatal("appendToCanonical accepted a symlinked canonical path")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("error = %v, want it to name the symlink refusal", err)
+	}
+
+	// The refusal must come BEFORE anything is read or written: the link
+	// still points at the secret, and the secret is untouched.
+	fi, lerr := os.Lstat(canonical)
+	if lerr != nil {
+		t.Fatalf("lstat canonical: %v", lerr)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Error("the symlink was replaced by a regular file — the refusal came too late")
+	}
+	got, rerr := os.ReadFile(canonical)
+	if rerr != nil {
+		t.Fatalf("read through link: %v", rerr)
+	}
+	if string(got) != secretBody {
+		t.Errorf("the link target was modified: %q", got)
+	}
+}
+
 func TestAppendToCanonical_LockFails(t *testing.T) {
 	dir := t.TempDir()
 	canonical := filepath.Join(dir, "learned-x.md")
