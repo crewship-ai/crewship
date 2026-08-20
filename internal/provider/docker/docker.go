@@ -915,10 +915,10 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) (imageProvenance
 		}
 	}
 
-	if remoteDigest != "" && tagRestored {
-		return imageProvenance{Digest: remoteDigest, Verified: pinned}, nil
-	}
 	if remoteDigest != "" {
+		if tagRestored {
+			return imageProvenance{Digest: remoteDigest, Verified: pinned}, nil
+		}
 		// The re-tag failed, so we no longer know that `ref` names the manifest
 		// we just fetched. Ask the daemon instead of assuming, on a FRESH
 		// timeout — inspectCtx above was bounded before the pull and is long
