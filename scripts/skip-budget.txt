@@ -96,4 +96,18 @@
 #                     125 + 8 + 1. Neither side is new debt; both are described
 #                     above and both carry waivers.
 
-134
+#
+# 2026-08-20          134 -> 135. +1 from the multi-provider branch (#2001),
+#                     which added ten skips and keeps ONE. Nine were eliminated
+#                     rather than waived: they guarded on a model still being
+#                     present in the embedded models.dev snapshot, and a snapshot
+#                     refresh that drops a fixture model is a reason to repoint
+#                     the test, not to report ok — so they are t.Fatal with a
+#                     message naming the fixture to replace. The one kept is
+#                     TestProviderCommandBuildsCLIOnly's -short guard: it shells
+#                     out to `go build -tags clionly`, which is what -short is
+#                     for. Permanent by design, carries a SKIP-WAIVER comment and
+#                     deliberately no tracking issue, on the #1546 precedent.
+#                     CI does not pass -short, so the variant is still covered.
+
+135

@@ -224,14 +224,14 @@ func TestLookupPrice_TieredCatalogModelUsesTheCeiling(t *testing.T) {
 
 	m, ok := modelcatalog.Default().Lookup(provider, model)
 	if !ok {
-		t.Skip(provider + "/" + model + " is not in this snapshot")
+		t.Fatalf("%s/%s is not in this snapshot — this test uses it as a fixture, so pick a model the snapshot carries rather than letting the check disappear", provider, model)
 	}
 	// Lookup succeeding says the model is IN the snapshot, not that it carries
 	// a cost block — 23 of them do not. Dereferencing m.Cost on that assumption
 	// panics the moment a refresh drops this model's pricing, which is exactly
 	// when a skip is wanted instead.
 	if m.Cost == nil || len(m.Cost.Tiers) != 2 {
-		t.Skipf("%s/%s no longer has the 2 tiers this test was written against", provider, model)
+		t.Fatalf("%s/%s no longer has the 2 tiers this test was written against — repoint it at a tiered model instead of skipping, or the tier logic stops being covered", provider, model)
 	}
 
 	got := lookupPrice(provider, model)
@@ -259,7 +259,7 @@ func TestLookupPrice_TieredCatalogModelUsesTheCeiling(t *testing.T) {
 func TestRateCard_CarriesTheCeilingForTieredModels(t *testing.T) {
 	const provider, model = "openrouter", "qwen/qwen3-coder-flash"
 	if _, ok := modelcatalog.Default().Lookup(provider, model); !ok {
-		t.Skip(provider + "/" + model + " is not in this snapshot")
+		t.Fatalf("%s/%s is not in this snapshot — this test uses it as a fixture, so pick a model the snapshot carries rather than letting the check disappear", provider, model)
 	}
 	card := RateCard(provider, model)
 	if card != lookupPrice(provider, model) {
@@ -278,11 +278,11 @@ func TestLookupPrice_HandWrittenTableStillWinsOnATieredModel(t *testing.T) {
 	const key = "google/gemini-2.5-pro"
 	want, ok := priceTable[key]
 	if !ok {
-		t.Skip(key + " is no longer hand-priced")
+		t.Fatalf("%s is no longer in priceTable — this test needs a hand-priced tiered model as its fixture; repoint it", key)
 	}
 	m, inCatalog := modelcatalog.Default().Lookup("google", "gemini-2.5-pro")
 	if !inCatalog || m.Cost == nil || len(m.Cost.Tiers) == 0 {
-		t.Skip(key + " is not tiered in this snapshot")
+		t.Fatalf("%s is not tiered in this snapshot — repoint this test at one that is, rather than letting the shadowing check disappear", key)
 	}
 
 	if got := lookupPrice("google", "gemini-2.5-pro"); got != want {
@@ -423,7 +423,7 @@ func TestLookupPrice_Order(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.skip {
-				t.Skip("the embedded catalogue has no model outside priceTable to exercise this step")
+				t.Fatal("the embedded catalogue has no model outside priceTable — step 3 of the lookup is then untestable, which is a fixture problem to fix, not a result to report as ok")
 			}
 			if got := lookupPrice(tt.provider, tt.model); got != tt.want {
 				t.Errorf("lookupPrice(%q, %q) = %+v, want %+v", tt.provider, tt.model, got, tt.want)
@@ -611,10 +611,10 @@ func TestExplainRate_AgreesWithLookupPrice(t *testing.T) {
 func TestExplainRate_HandWrittenRowEqualToTheCeilingIsStillTable(t *testing.T) {
 	row, ok := priceTable["openai/o3-pro"]
 	if !ok {
-		t.Skip("openai/o3-pro is no longer in the hand-written table")
+		t.Fatal("openai/o3-pro is no longer in priceTable — this test needs a hand-written row that collides with its provider ceiling; find another and repoint it")
 	}
 	if row != providerFallback["openai"] {
-		t.Skip("openai/o3-pro no longer equals the openai ceiling — this test's whole premise is that they collide")
+		t.Fatal("openai/o3-pro no longer equals the openai ceiling — the collision is this test's premise, so repoint it at a row that still collides rather than reporting ok")
 	}
 	if _, src := ExplainRate("openai", "o3-pro"); src != SourceTable {
 		t.Errorf("source = %q, want %q — a row that exists in the table is table-sourced no matter what it equals", src, SourceTable)

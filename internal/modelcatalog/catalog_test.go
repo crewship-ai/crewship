@@ -1048,7 +1048,7 @@ func TestDefault_TieredModelsAreRealAndDearer(t *testing.T) {
 func TestDefault_GeminiProTiers(t *testing.T) {
 	m, ok := Default().Lookup("google", "gemini-2.5-pro")
 	if !ok {
-		t.Skip("google/gemini-2.5-pro is not in this snapshot")
+		t.Fatal("google/gemini-2.5-pro is not in this snapshot — this test uses it as the tiered fixture that catches the snapshot and the hand table drifting apart; repoint it at another tiered model rather than letting the check vanish behind an ok")
 	}
 
 	cases := []struct {

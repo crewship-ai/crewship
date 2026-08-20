@@ -513,6 +513,12 @@ func TestAcceptance_ProviderCommandIsRegistered(t *testing.T) {
 // Guards the build variant: the local commands must link into `-tags clionly`,
 // which is where a stray server-side import would surface.
 func TestProviderCommandBuildsCLIOnly(t *testing.T) {
+	// SKIP-WAIVER: -short exists to drop exactly this kind of work — the test
+	// shells out to `go build -tags clionly`, which is tens of seconds. There is
+	// no tracking issue because there is nothing to come back and fix: the guard
+	// is permanent by design, matching the #1546 precedent recorded in
+	// scripts/skip-budget.txt. CI does not pass -short, so the build variant is
+	// still covered on every run; the guard only spares a developer's inner loop.
 	if testing.Short() {
 		t.Skip("skipping build in -short mode")
 	}
