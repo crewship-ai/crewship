@@ -156,6 +156,13 @@ crewship workspace member remove <member-id-or-user-id> --yes
 | --- | --- | --- |
 | `-y`, `--yes` | `false` | Skip the confirmation prompt. |
 
+Removal also drops every **crew** membership the person holds in this
+workspace, and first transfers any page they own to a crew — a page that
+resolves to no crew refuses the whole removal. Adding them back later
+restores neither: crew membership and any per-crew role override have to
+be granted again. See
+[Remove member](/api-reference/workspaces#remove-member).
+
 ### `workspace invite` / `workspace invite create`
 
 | Flag | Default | Effect |
