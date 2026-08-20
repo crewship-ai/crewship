@@ -7,10 +7,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/testutil/procgroupfixture"
 )
 
 // TestKillProcessGroup_ReachesDescendantsOfAReapedChild pins #2030 — a
@@ -33,15 +34,16 @@ import (
 // the scanner blocks on a pipe nobody will ever close. A killer that signals
 // the group the child was started in kills it.
 func TestKillProcessGroup_ReachesDescendantsOfAReapedChild(t *testing.T) {
-	dir := t.TempDir()
-	fake := filepath.Join(dir, "container")
 	// The shape of the real thing: the CLI backgrounds a helper that inherits
 	// stdout and then exits itself, leaving the write end of the pipe held by
 	// something exec.Cmd knows nothing about.
-	script := "#!/bin/sh\n( echo holding; sleep 60 ) &\n"
-	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	//
+	// The fixture backgrounds the holder *before* announcing, and that order is
+	// load-bearing rather than stylistic: shells disagree on how many processes
+	// `( a; b ) &` creates, so only announcing after the fork proves the holder
+	// is in the group by the time the kill below walks it (#2044).
+	// procgroupfixture has the full reasoning; do not inline a simpler script.
+	fake := procgroupfixture.WriteFakeCLI(t, t.TempDir())
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -71,7 +73,7 @@ func TestKillProcessGroup_ReachesDescendantsOfAReapedChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	n, err := r.Read(buf)
-	if err != nil || string(buf[:n]) != "holding\n" {
+	if err != nil || string(buf[:n]) != procgroupfixture.Announcement {
 		t.Fatalf("the descendant never took stdout: read %q, err %v", buf[:n], err)
 	}
 
