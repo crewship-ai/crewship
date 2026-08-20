@@ -67,6 +67,8 @@ func TestMissionMutate_NoAuth(t *testing.T) {
 }
 
 func TestMissionCreateRunE(t *testing.T) {
+	guardCLIState(t)
+
 	missionsPath := "/api/v1/crews/" + covMissionCrew + "/missions"
 
 	t.Run("title required", func(t *testing.T) {
@@ -227,6 +229,8 @@ func TestMissionUpdateRunE(t *testing.T) {
 }
 
 func TestMissionDeleteRunE(t *testing.T) {
+	guardCLIState(t)
+
 	deletePath := "/api/v1/crews/" + covMissionCrew + "/missions/" + covMissionIDCli7
 
 	t.Run("with --yes deletes", func(t *testing.T) {
@@ -268,6 +272,8 @@ func TestMissionDeleteRunE(t *testing.T) {
 }
 
 func TestMissionCloneRunE(t *testing.T) {
+	guardCLIState(t)
+
 	clonePath := "/api/v1/crews/" + covMissionCrew + "/missions/" + covMissionIDCli7 + "/clone"
 
 	t.Run("clone with title override", func(t *testing.T) {
@@ -340,6 +346,8 @@ func TestMissionMutate_NoWorkspace(t *testing.T) {
 }
 
 func TestMissionCreateRunE_ResolveErrors(t *testing.T) {
+	guardCLIState(t)
+
 	t.Run("unknown crew", func(t *testing.T) {
 		s := clitest.NewStubServer()
 		defer s.Close()
@@ -424,6 +432,8 @@ func TestMissionUpdateRunE_DescriptionAndAPIError(t *testing.T) {
 }
 
 func TestMissionDeleteCloneRunE_ResolveAndAPIErrors(t *testing.T) {
+	guardCLIState(t)
+
 	t.Run("delete unknown mission", func(t *testing.T) {
 		s := clitest.NewStubServer()
 		defer s.Close()

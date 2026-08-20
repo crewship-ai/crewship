@@ -247,6 +247,8 @@ func TestCostForecastRunE_PromptMode(t *testing.T) {
 }
 
 func TestCostForecastRunE_HistoryMode(t *testing.T) {
+	guardCLIState(t)
+
 	agentID := "cagent123456789012345678"
 
 	newStub := func(t *testing.T, runs []map[string]any) *clitest.StubServer {

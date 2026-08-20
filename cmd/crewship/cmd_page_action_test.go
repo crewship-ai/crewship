@@ -265,6 +265,8 @@ func TestPageActionCLI_DedupedReceiptSaysSo(t *testing.T) {
 // TestPageActionCLI_ServerRefusalsReachTheOperator — the 409 and the 429 are
 // the two answers §8b.3 designs for, and both have to arrive as words.
 func TestPageActionCLI_ServerRefusalsReachTheOperator(t *testing.T) {
+	guardCLIState(t)
+
 	cases := []struct {
 		name   string
 		status int
@@ -310,6 +312,8 @@ func TestPageActionCLI_ServerRefusalsReachTheOperator(t *testing.T) {
 // ── Local refusals, before any request ─────────────────────────────────────
 
 func TestPageActionCLI_MalformedInvocationIsRefusedLocally(t *testing.T) {
+	guardCLIState(t)
+
 	cases := []struct {
 		name string
 		args []string
