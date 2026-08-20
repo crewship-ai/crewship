@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"log/slog"
 
@@ -39,9 +40,11 @@ const stubVerdictJSON = `{"outcome":"goal_met","verdict":"Agent completed the ta
 // staticVerdictResolver is the boot-time-pinned wiring these tests want: a
 // resolver that always hands back the same provider. Production's resolver
 // (Router.RunVerdict) re-reads the aux store per run — see
-// TestUpdateRun_UsesTheProviderInForceAtRunTime.
+// TestUpdateRun_UsesTheProviderInForceAtRunTime — and the slot's per-call
+// budget with it, which is asserted in internal_runs_verdict_budget_test.go.
+// Zero here: these tests are about which provider is called, not for how long.
 func staticVerdictResolver(p llm.Provider, model string) runverdict.Resolver {
-	return func() (llm.Provider, string) { return p, model }
+	return func() (llm.Provider, string, time.Duration) { return p, model, 0 }
 }
 
 // verdictEntryPayload looks up the summary.generated entry (if any) for
@@ -219,7 +222,7 @@ func TestUpdateRun_UsesTheProviderInForceAtRunTime(t *testing.T) {
 	booted := &stubVerdictProvider{content: stubVerdictJSON}
 	overridden := &stubVerdictProvider{content: stubVerdictJSON}
 	inForce := llm.Provider(booted)
-	h.SetRunVerdict(func() (llm.Provider, string) { return inForce, "claude-haiku-4-5" })
+	h.SetRunVerdict(func() (llm.Provider, string, time.Duration) { return inForce, "claude-haiku-4-5", 0 })
 
 	createAndCompleteRun(t, h, db, wsID, "a-live", "run-live-1", "COMPLETED")
 	if booted.calls != 1 {
@@ -235,5 +238,38 @@ func TestUpdateRun_UsesTheProviderInForceAtRunTime(t *testing.T) {
 	}
 	if booted.calls != 1 {
 		t.Errorf("second run went to the boot provider again (calls = %d)", booted.calls)
+	}
+}
+
+// A slot that resolves no budget at all leaves the call on the caller's
+// context. That is the pre-#1615 behaviour and it stays available: a zero
+// budget must mean "no deadline of ours", never "deadline of zero", which
+// would cancel every verdict before it started.
+func TestGenerateRunVerdict_ZeroBudgetLeavesTheCallerContextInCharge(t *testing.T) {
+	db := setupTestDB(t)
+	logger := newTestLogger()
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES ('a-nobudget', ?, 'Bot', 'bot', 'IDLE')`, wsID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	h := NewInternalHandler(db, "test-token", logger)
+	_ = wireTestJournalForHandler(t, db, h)
+	provider := &deadlineRecordingProvider{stubVerdictProvider: stubVerdictProvider{content: stubVerdictJSON}}
+	h.SetRunVerdict(func() (llm.Provider, string, time.Duration) { return provider, "m", 0 })
+
+	createAndCompleteRun(t, h, db, wsID, "a-nobudget", "run-nobudget-1", "COMPLETED")
+
+	if provider.calls != 1 {
+		t.Fatalf("provider.Complete calls = %d, want 1", provider.calls)
+	}
+	if provider.hadDeadline {
+		t.Errorf("a zero budget imposed a deadline (%s remaining); it must leave the caller's context alone",
+			provider.remaining)
+	}
+	if _, _, found := verdictEntryPayload(t, db, "run-nobudget-1"); !found {
+		t.Error("no verdict emitted: a zero budget must not cancel the call")
 	}
 }

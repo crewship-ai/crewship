@@ -58,3 +58,43 @@ func TestUserModelAux_BudgetChangeIsLiveWithoutRebuildingTheProvider(t *testing.
 		t.Error("a timeout change rebuilt the provider; it is not part of the client's identity")
 	}
 }
+
+// ConsolidatorAux is the memory consolidator's half of the curator slot
+// (#1695). Until it existed the consolidator built its summariser from
+// KEEPER_OLLAMA_URL + KEEPER_MODEL and never read the slot at all, so the
+// "Skill review + memory consolidation" label described a subsystem the slot
+// did not reach.
+func TestConsolidatorAux_ResolvesTheCuratorSlot(t *testing.T) {
+	aux := llm.DefaultAuxiliaryModels()
+	aux.Curator = llm.AuxModel{Provider: "ollama", Model: "curator-model", Timeout: 11 * time.Second}
+	r := covRONewRouter(t, WithAuxiliaryModels(aux))
+
+	p, model, budget := r.ConsolidatorAux()
+	if p == nil {
+		t.Fatal("no provider for a buildable curator slot")
+	}
+	if model != "curator-model" {
+		t.Errorf("model = %q, want the curator slot's curator-model", model)
+	}
+	if budget != 11*time.Second {
+		t.Errorf("budget = %v, want the curator slot's 11s", budget)
+	}
+}
+
+// Both curator consumers share one cache, because they resolve one slot: two
+// caches would mean two keep-alive'd clients (and for Ollama two model loads)
+// for a wiring that is identical by construction.
+func TestConsolidatorAux_SharesTheBuiltClientWithTheUserModelSweep(t *testing.T) {
+	aux := llm.DefaultAuxiliaryModels()
+	aux.Curator = llm.AuxModel{Provider: "ollama", Model: "curator-model", Timeout: 11 * time.Second}
+	r := covRONewRouter(t, WithAuxiliaryModels(aux))
+
+	sweep, _, _ := r.UserModelAux()
+	consolidation, _, _ := r.ConsolidatorAux()
+	if sweep == nil || consolidation == nil {
+		t.Fatal("one of the curator consumers got no provider")
+	}
+	if sweep != consolidation {
+		t.Error("the two curator consumers built separate clients for the same slot")
+	}
+}

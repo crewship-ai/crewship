@@ -111,8 +111,8 @@ func fullExecutorDeps(t *testing.T, db *sql.DB, runner AgentRunner) ExecutorDeps
 		// factory has to prove is that SOMETHING lands on every executor.
 		Preflight: &stubPreflight{},
 		Crewship:  &recordingCrewship{},
-		RunVerdict: func() (llm.Provider, string) {
-			return &stubVerdictProviderForFactoryTest{}, "claude-haiku-4-5"
+		RunVerdict: func() (llm.Provider, string, time.Duration) {
+			return &stubVerdictProviderForFactoryTest{}, "claude-haiku-4-5", 0
 		},
 		VerdictWG: &sync.WaitGroup{},
 	}

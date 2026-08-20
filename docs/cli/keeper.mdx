@@ -214,6 +214,23 @@ Reviews and the watchdog. Valid slots are `curator`, `behavior`,
 as the authoritative catalog for the running server. Hosted slots bill per
 token, while Ollama does not.
 
+Each slot drives a named subsystem, and an edit applies on that subsystem's
+next run — never on the next restart:
+
+| Slot | What it runs |
+| --- | --- |
+| `curator` | Skill review, **and** the memory-consolidation summarizer (which also compacts long conversations). |
+| `behavior` | The sampled tool-call behavior monitor. |
+| `memory_health` | The daily memory-health audit. |
+| `negative` | Failure → lessons extraction. |
+| `run_summary` | The post-run outcome verdict on agent and routine runs. |
+| `fallback` | Used for any field a slot above leaves unset. |
+
+`--timeout` is a real per-call deadline on every slot in that table: the
+evaluator (or verdict) call is cancelled when it overruns. The one exception is
+the consolidation prompt behind `curator`, which is batch work and stays on the
+provider's own client timeout — see [Consolidate](/guides/consolidate).
+
 ```bash
 crewship keeper aux list
 crewship keeper aux set behavior --provider anthropic --model claude-opus-5

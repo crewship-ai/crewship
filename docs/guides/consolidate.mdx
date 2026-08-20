@@ -64,9 +64,32 @@ type SummarizerClient interface {
 }
 ```
 
-Production wiring uses the Ollama adapter against a chat model (typically `llama3.1:8b` or similar). If no summarizer is configured:
+### Which model runs it
 
-- Background runner skips every crew silently.
+The summarizer resolves the **`curator` auxiliary slot** -- the slot the Judge
+models card and `crewship keeper aux list` have always described as "Skill
+review + memory consolidation". Repointing it applies to the **next**
+consolidation, not the next restart:
+
+```bash
+crewship keeper aux set curator --provider anthropic --model claude-haiku-4-5
+crewship keeper aux set curator --provider ollama --model qwen2.5:7b
+```
+
+If that slot has no buildable provider -- the common case being the shipped
+`anthropic` default on an instance with no `ANTHROPIC_API_KEY` -- consolidation
+falls back to the boot-time `KEEPER_OLLAMA_URL` + `KEEPER_MODEL` client, so an
+install running a local judge with no API key keeps consolidating. Only when
+there is neither is the summarizer absent.
+
+The `curator` slot's `--timeout` bounds the slot's **evaluator** (skill review)
+and the operator-model sweep; it is deliberately not applied to a consolidation
+prompt, which is batch work over up to a few hundred journal entries and is
+bounded by the provider's own client timeout instead.
+
+If no summarizer is configured at all:
+
+- Background runner skips every crew silently (the pin-snapshot path still runs).
 - Manual trigger returns **202 Accepted** with `note: "no summarizer configured, skipping"` and emits `system.consolidation_triggered` + `system.consolidation_completed` (`status=skipped-no-summarizer`) so the audit trail captures the no-op.
 
 ## Compactor
@@ -142,7 +165,7 @@ Full reference: [`crewship consolidate`](/cli/consolidate).
 
 ## Gotchas
 
-- **Ollama must be reachable.** Both the consolidator (via `SummarizerClient`) and the episodic indexer depend on Ollama. Set `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"` and `ollama serve` before starting the server locally.
+- **Ollama must be reachable when the `curator` slot points at it** (and for the episodic indexer, which always does). Set `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"` and `ollama serve` before starting the server locally. Consolidation itself is no longer Ollama-only: a `curator` slot on a hosted provider works with no Ollama at all.
 - **The triggered journal entry is always emitted.** Even the "no summarizer" skip path emits both triggered + completed so operators see the full round-trip. If you filter for `memory.consolidated` only, you'll miss skipped runs.
 - **Per-workspace in-flight guard.** A second manual trigger for the same workspace while the first is running returns 409. Track `worker_id` if you need to wait for completion.
 - **Compactor is aggressive on info/notice.** If you rely on `exec.command` entries older than 30 days for forensics, export them out-of-band before the Compactor rolls them up.
