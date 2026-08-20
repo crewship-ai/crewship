@@ -281,6 +281,11 @@ func TestCheckpointerBoundsWAL(t *testing.T) {
 	if t.Failed() {
 		return // the numbers below are only meaningful if both arms ran
 	}
+	if peak[unmanagedArm] == 0 || peak[managedArm] == 0 {
+		// A -run filter selected a single subtest. Comparing one arm against a
+		// zeroed other one would invent a verdict, so say nothing instead.
+		t.Skip("both arms are needed to compare peaks; run the whole test")
+	}
 
 	// One un-checkpointed window of this exact workload, measured rather than
 	// assumed. Doubled: see the header.
@@ -395,6 +400,8 @@ func TestCheckpointerLoopTruncatesOnATick(t *testing.T) {
 	defer stop()
 
 	abandon := time.After(checkpointerAbandonAfter)
+	poll := time.NewTicker(time.Millisecond)
+	defer poll.Stop()
 	for {
 		if got := db.walBytes(); got == 0 {
 			return
@@ -404,7 +411,7 @@ func TestCheckpointerLoopTruncatesOnATick(t *testing.T) {
 			t.Fatalf("the checkpointer loop never truncated a %d-byte WAL; it is still %d bytes "+
 				"after %s with no writer in the way, so the periodic tick is not reaching TRUNCATE",
 				before, db.walBytes(), checkpointerAbandonAfter)
-		case <-time.After(time.Millisecond):
+		case <-poll.C:
 		}
 	}
 }
