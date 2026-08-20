@@ -128,7 +128,7 @@ section "5. leave the crew as we found it"
 # What is already fixed: the handler used to answer `"status":"running"`
 # here without asking the runtime, so the sequence FAILED SILENTLY and
 # the next file write got the 409. It now says so.
-if out="$(cs crew start "$CREW" 2>&1)"; then
+if cs crew start "$CREW" >/dev/null 2>&1; then
   _pass "crew start $CREW (restore)"
   assert_ok "remove the harness file" cs crew files delete "$CREW" "$DEST" --yes
 else
