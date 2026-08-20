@@ -363,7 +363,7 @@ func TestRestoreBackup_DockerPhase(t *testing.T) {
 			DockerOps:    ops,
 			ContainerFor: func(_, slug string) string { return "ctr-" + slug },
 		})
-		if err == nil || !strings.Contains(err.Error(), "is not provisioned on this instance") {
+		if err == nil || !strings.Contains(err.Error(), "has no container") {
 			t.Fatalf("err = %v", err)
 		}
 	})

@@ -591,11 +591,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				)
 			}
 			if opts.Logger != nil {
-				opts.Logger("docker phase skipped because --as-workspace / --as-crew was supplied. " +
-					"Provision the new crews (`crewship crew provision <crew> -w <workspace>`), then land their files with " +
-					"`crewship backup restore <bundle> -w <workspace> --files-only`. " +
-					"Re-running restore WITHOUT --files-only will not work and is not what to do: the bundle is not bound to the forked workspace, " +
-					"and its rows are already there under new ids")
+				opts.Logger(restoreForkedWorkspaceRemediation())
 			}
 			return nil
 		}
@@ -630,7 +626,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				return fmt.Errorf("backup: preflight crew %s: %w", targetSlug, err)
 			}
 			if !exists {
-				return fmt.Errorf("backup: crew %q has filesystem data in the bundle but container %q is not provisioned on this instance; run `crewship crew provision %s` then re-run restore", targetSlug, containerID, targetSlug)
+				return fmt.Errorf("%s", restoreMissingContainerRemediation(targetSlug, containerID))
 			}
 		}
 		for _, c := range manifest.Contents.Crews {
@@ -755,8 +751,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			return nil, err
 		}
 		if crewsRestored == 0 {
-			return nil, fmt.Errorf("backup: --files-only landed no crew filesystem state: the bundle's %d crew(s) either carry no filesystem sections or have no provisioned container on this instance — provision them with `crewship crew provision <crew> -w %s` and re-run",
-				len(manifest.Contents.Crews), opts.ResumeWorkspaceID)
+			return nil, fmt.Errorf("%s",
+				restoreFilesOnlyEmptyRemediation(len(manifest.Contents.Crews), opts.ResumeWorkspaceID))
 		}
 		// RestoredWs is a SLUG everywhere else — it is what the CLI
 		// prints as `workspace=`. Resolve it rather than echoing the id

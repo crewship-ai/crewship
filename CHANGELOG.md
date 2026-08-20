@@ -85,6 +85,148 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   never reach that refcount, so `crewship issue delete` runs a reclaim pass
   derived purely from the table.
 
+### Fixed
+
+- **A failed `crewship apply` no longer reports success.** Apply is fail-fast,
+  so on an error the counters describe a *prefix* of the plan — but they were
+  printed under the word `Applied:` regardless, with the error on a later line.
+  A production run that uploaded none of its ten crew files reported
+  `Applied: 7 created, 3 updated` and was filed as done; the routine went on
+  running against the stale script the deploy existed to replace.
+
+  `Applied:` is now reserved for a run that finished. A failed run prints
+  `FAILED after N created, …  — the manifest was NOT fully applied.` and then a
+  `NOT APPLIED` block naming the item it died on and every item behind it that
+  was never attempted. The counters say how far the run got; only that list
+  answers the question the operator actually has, which is *which of them
+  landed*.
+
+- **`crewship apply` stops silently dropping routine DSL fields.** `spec:` was a
+  closed struct and the wire body an 11-key allowlist, so `guardrails`,
+  `integrations_required`, `concurrency_key`, `max_concurrent`, `outputs`,
+  `display_name`, `agentless`, `hooks`, `eval`, `resources`, `execution_tier`
+  and `parallelism` were dropped between the file and the server — no error, no
+  warning, no plan diff. The allowlist was justified by a comment claiming the
+  server rejects unknown keys; `pipeline.Parse` is a plain `json.Unmarshal` and
+  does not, so it bought nothing.
+
+  The export half was the dangerous one: `crewship export` decoded the *stored*
+  definition through the same struct, so a field set via `routine save` or the
+  dashboard vanished from the exported YAML and the next `apply` **deleted** it
+  from the live routine. An `agentless: true` token-zero guarantee could be
+  revoked by editing an unrelated line.
+
+  `spec` now carries an inline catch-all, the pattern its own steps have always
+  used, so any `routine.v1.json` key rides through in both directions. Typed
+  fields still win every collision, and `schedules`/`webhook` still stay out of
+  the definition. Because a typo is now forwarded rather than dropped, apply
+  warns at plan time for every `spec` key the DSL has no field for.
+
+- **The crew-file 409 names a command that exists.** Overwriting a file under
+  `/crew/shared` on a stopped crew answered "start the crew and retry", which
+  reads as `crewship crew provision` — a command that builds an image and, on a
+  cache hit, reports `provisioned` while the container stays `stopped`.
+  Following the message reproduced the 409. It now names `crewship crew start`
+  (below) and rules out the wrong turn it used to invite. `crew provision` says
+  `provisioned (container image ready)` and points at the same command, for the
+  same reason.
+
+### Added
+
+- **`crewship crew start <crew>` — start a crew's container on purpose.** There
+  was no way to. `crew provision` builds an image and stops; the container was
+  only ever created lazily by the crew's first agent run, so the only route to a
+  running crew was to run an agent at it with a throwaway prompt — spending
+  tokens for a side effect. That gap is what made the crew-file 409 unanswerable.
+
+  `POST /api/v1/crews/{crewId}/container-start` runs the same three steps the
+  dispatch path runs before an agent — EnsureProvisioned, then the crew's full
+  resolved config, then `crewstart.Start` — so a crew started this way is the
+  crew a run would have started: its provisioned image, its mounts and limits,
+  its declared sidecars. That sequence is copied rather than reinvented on
+  purpose; `internal/crewstart` exists because thirteen call sites once each had
+  their own idea of what starting a crew meant and disagreed invisibly.
+
+  Idempotent (starting a running crew returns its container and exits `0`, so a
+  deploy can start-then-write without branching), synchronous (the caller's next
+  action depends on the answer), and it provisions a cold crew first rather than
+  starting it onto the bare runtime image. Degradation the start survived — a
+  provider with no sidecar support — comes back as `notices` and is printed, not
+  logged.
+
+  It reports the start to the orchestrator's idle-TTL reaper. Every other
+  `EnsureCrewRuntime` caller gets that for free because an agent run follows and
+  reports the activity; this is the first path whose whole purpose is a start
+  with no run behind it, so an unreported container would have outlived its
+  `container_ttl_hours` until crewshipd restarted and rediscovered it.
+
+  It verifies rather than asserts. `EnsureCrewRuntime` is get-or-create and
+  normally restarts a stopped container, but not always — after two
+  consecutive stops it can return the id of a container that is still
+  `exited`. Answering `"status": "running"` there would be the very defect
+  this command exists to fix in `crew provision`, so the handler polls the
+  runtime before reporting success and returns `502` if the container never
+  comes up. (A known sequence — stop, stop, refused write, start — still fails
+  to restart; it is now a loud failure instead of a silent one, and is pinned
+  as `xfail` in `scripts/test-harness/test-crew-lifecycle.sh`.)
+
+  The CLI waits up to 20 minutes (`--timeout` to change it) rather than the
+  client's 30-second default. The default would not merely time out: Go's client
+  cancels the request, which cancels the handler's context, which tears down the
+  image build it was waiting on — leaving `context deadline exceeded` and no
+  container on exactly the never-provisioned crew this command exists to rescue.
+
+- **`crewship crew stop <crew>`.** The counterpart to `crew start`. Until now a
+  crew container could be started deliberately but only stopped by accident —
+  an idle TTL expiring, or a network-policy edit dropping it as a side effect —
+  so an operator who started three crews to land a restore had no way to give
+  the memory back.
+
+  `POST /api/v1/crews/{crewId}/container-stop` proxies to crewshipd, which
+  already stops the runtime AND the crew's declared sidecars in one operation.
+  Reimplementing the sidecar half here would be a second, slightly different
+  teardown, which is how one once reached into another tenant's Postgres
+  (#1732). Named volumes survive, so data does. Stopping an already-stopped
+  crew succeeds, and the crew is dropped from the idle-TTL reaper's
+  bookkeeping so it no longer logs an expiry for something a human stopped.
+
+  Because container memory and CPU limits are fixed at create time, stop-then-
+  start is also how a resize takes effect on a running crew.
+
+- **`crewship apply` warns at plan time when a crew it writes files into is
+  stopped.** Files under a crew's shared tree are owned by the container user,
+  so overwriting one needs the container up; against a stopped crew the save
+  answers 409, and because apply is fail-fast that lands mid-run, after earlier
+  resources are already committed. The plan knows both halves twenty seconds
+  earlier, so it now says so — naming the crew, the file count, and
+  `crewship crew start <crew>`.
+
+  Advisory, not an error: the crew may be started between the plan and the
+  apply, including by whoever is reading the line. A probe that cannot answer
+  stays silent rather than warning on a guess, and a crew being created by the
+  same apply is never warned about.
+
+- **`crewship apply --no-delete`.** Refuses any run whose plan contains a
+  delete, before a single request is issued, printing what it would have
+  destroyed. Sync mode makes deletion the default for anything that fell out of
+  the manifest, and some deletions are not a rollback away: removing an agent
+  takes its memory and its Composio OAuth binding with it, and that binding is a
+  browser consent no manifest can replay.
+
+  It deliberately outranks `--yes` — `--yes` is the flag every automated
+  invocation already carries, so a guard it could switch off would not be one —
+  and it fails `--dry-run` too, so the rehearsal and the performance agree.
+  This turns "this apply deletes nothing", previously a claim a human made by
+  reading a plan carefully enough, into one CI can check.
+
+  Enforced twice, against two different plans: once by the CLI against the plan
+  it rendered, and again inside `manifest.Apply` against the plan it builds from
+  its own fresh read immediately before executing it. Only the second one closes
+  the window — a resource that disappeared server-side between the two reads
+  adds a delete the rendered plan never showed, and `--yes` (which every CI
+  invocation carries) would have waved it through. SDK callers get the same
+  guarantee via `manifest.Options{NoDelete: true}` → `ErrDeletesRefused`.
+
 ### Changed
 
 - **`OTEL_EXPORTER_OTLP_ENDPOINT` is treated as the base URL it is, and

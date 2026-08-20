@@ -38,11 +38,13 @@ func TestRestoreCrew_PreflightNamesARealCommand(t *testing.T) {
 	if !errors.Is(err, ErrRestorePreflight) {
 		t.Fatalf("must refuse in the preflight, before writing: %v", err)
 	}
-	if !strings.Contains(err.Error(), "crewship crew provision") {
-		t.Errorf("remediation must name a command that exists; got %v", err)
-	}
-	if strings.Contains(err.Error(), "crew start") {
-		t.Errorf("`crewship crew start` is not a registered command — the message sends the operator to `unknown command`: %v", err)
+	// `crewship crew start` starts the container (and provisions its
+	// image first if there is none), so it is both a command that exists
+	// and the one that fixes this. It replaced `crew provision` here,
+	// which only ever reconciled a stopped container back to running as
+	// a side effect and mostly just built an image.
+	if !strings.Contains(err.Error(), "crewship crew start") {
+		t.Errorf("remediation must name the command that starts a crew; got %v", err)
 	}
 	// The operator also has to be told WHY, or "run provision" reads as
 	// a guess rather than the fix.

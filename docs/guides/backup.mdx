@@ -22,7 +22,7 @@ Backups are cheap to make and expensive to wish you'd made. The five canonical r
 
 - **Before any destructive admin write.** Before `crewship admin reset-password`, before a database migration on a binary upgrade, before a large schema-changing PR lands in prod — capture the current state first. The bundle is the one-command rollback if anything goes wrong.
 - **Disaster recovery / hot spare.** Schedule a nightly `crewship backup create --scope=workspace --passphrase-file …` cron and ship the bundle to a separate host. If the primary disk dies, restoring onto a fresh binary is one `crewship backup restore` away — no replication agent, no streaming WAL, no extra moving parts.
-- **Workspace migration to another host.** Moving a workspace from a dev VM to a prod host (or between two prod hosts) is exactly what bundles are for. Create on the source, scp the file, `crewship backup restore --as-workspace <new-slug>` on the destination, provision the crews, then `crewship backup restore … --files-only` to land their filesystem state. The `--as-workspace` rename avoids the "two `acme` workspaces colliding" hazard; the third step is not optional — without it the rows migrate and every crew's workspace files and memory tree stay behind.
+- **Workspace migration to another host.** Moving a workspace from a dev VM to a prod host (or between two prod hosts) is exactly what bundles are for. Create on the source, scp the file, `crewship backup restore --as-workspace <new-slug>` on the destination, start the crews, then `crewship backup restore … --files-only` to land their filesystem state. The `--as-workspace` rename avoids the "two `acme` workspaces colliding" hazard; the third step is not optional — without it the rows migrate and every crew's workspace files and memory tree stay behind.
 - **Legal hold or compliance archive.** Customer leaves; you need to keep their workspace state on cold storage for N years. One AGE-encrypted `.tar.zst` is a forever-readable artefact — no live database, no service required. `inspect` later proves the bundle's contents without decrypting.
 - **Forensic snapshot before incident response.** Suspected compromise of an admin account, or a "what was the state when X happened" investigation. `backup create` + immediate offsite copy preserves the audit trail before anyone (you, the attacker, the well-meaning oncall) starts changing things.
 
@@ -41,7 +41,7 @@ Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them 
 | **Advisory lock** | A row in the `backup_locks` table, primary-keyed on workspace ID. Taken before any DB dump or docker pause; released by `defer Release()` on the happy path. 1-hour TTL (`DefaultLockTTL`) so a crashed backup self-heals after the window. |
 | **`refuseIfBackupInProgress` guard** | A shared middleware wired into the assignments, peer-query, and webhook handlers. Reads the lock state and refuses *new* agent runs while a backup is in progress — closes the TOCTOU window between `ensureAgentsIdle` (initial check) and `docker pause` (the actual freeze). |
 | **Dry-run restore** | `--dry-run` on `crewship backup restore`. Decrypts, validates the manifest, replays the DB transaction, then rolls back. The only side effect is one `backup.restore.dry_run` audit row — distinct from `backup.restore` so auditors can tell "verified" apart from "actually restored". |
-| **`--as-workspace` / `--as-crew` rename** | Restore the bundle under a new slug instead of the original. Skips the docker phase — the crews it just created have no containers yet — and names the crews whose files are therefore not landed. Finish with `crewship crew provision` then `crewship backup restore … --files-only`. Avoids "two `acme` workspaces colliding" during DR drills. |
+| **`--as-workspace` / `--as-crew` rename** | Restore the bundle under a new slug instead of the original. Skips the docker phase — the crews it just created have no containers yet — and names the crews whose files are therefore not landed. Finish with `crewship crew start` then `crewship backup restore … --files-only`. Avoids "two `acme` workspaces colliding" during DR drills. |
 | **`--files-only` resume** | Step 3 of a renamed restore: lands per-crew container state (workspace, memory tree, named volumes, `/var/lib`) into crews that already exist, changing no database rows. Authorised by the `backup_restore_origins` row the rename wrote — the caller's workspace must be one this instance created by restoring **this** bundle, matched on payload digest. Resolves each bundle crew through that record, so it writes to the crew the rename created rather than the crew the manifest names. |
 | **Retention sweep** | `crewship backup rotate --keep-last N --keep-days D`. Per-workspace — never touches another workspace's bundles. Both flags can be combined; both must be positive. `--dry-run` lists what would be deleted without touching disk. |
 | **Stale lock** | A lock whose holder process is dead but whose row still exists. Detected when `acquired_at + DefaultLockTTL < now()`. Auto-released on next `create`; manually clearable via `crewship backup unlock --force` (admin-only, with confirmation). |
@@ -192,12 +192,14 @@ crewship backup restore bundle.tar.zst --as-workspace acme-dr
 # ⚠ Docker phase skipped (--as-workspace/--as-crew supplied) — crew files are NOT restored yet.
 #   Crews still missing their container state: engineering, research.
 #   Finish the restore with:
-#     crewship crew provision <crew> -w ws_new123
+#     crewship crew start <crew> -w ws_new123
 #     crewship backup restore bundle.tar.zst -w ws_new123 --files-only
 
-# 2. Provision the forked crews so there is somewhere for the files to land.
-crewship crew provision engineering -w ws_new123
-crewship crew provision research -w ws_new123
+# 2. Start the forked crews. --files-only writes by exec'ing into the
+#    container, so it has to be RUNNING, not merely built. `crew start`
+#    provisions the image first when the crew has none.
+crewship crew start engineering -w ws_new123
+crewship crew start research -w ws_new123
 
 # 3. Land the container state.
 crewship backup restore bundle.tar.zst -w ws_new123 --files-only
@@ -223,11 +225,17 @@ preflight, before anything is written, and the message names the fix:
 
 ```
 cannot reach /workspace to restore into it — the crew container must be RUNNING
-(exec is how every section is written now). Start it with `crewship crew provision engineering`
+(exec is how every section is written now). Start it with `crewship crew start engineering`
 ```
 
-`crew provision` is the right command for this: it reconciles an existing
-stopped container back to running rather than rebuilding it.
+[`crew start`](/cli/crew#crewship-crew-start) is the command for this: it
+starts the container, and provisions its image first if the crew has
+none — so it covers both the stopped crew and the never-provisioned one.
+
+It is **not** `crew provision`. Provision builds an image and starts
+nothing; on a cache hit it reports `provisioned` in seconds while the
+container stays `stopped`. This message used to name it, which sent
+operators round the loop once more before they got here.
 
 The preflight also refuses when a path the bundle writes to cannot be
 written by the agent — a directory or file left owned by root or by the
@@ -365,13 +373,13 @@ crewship backup restore /tmp/crewship-workspace-acme-*.tar.zst \
 # ⚠ Docker phase skipped (--as-workspace supplied) — crew files are NOT restored yet.
 #   Crews still missing their container state: engineering, research.
 #   Finish the restore with:
-#     crewship crew provision <crew> -w ws_new123
+#     crewship crew start <crew> -w ws_new123
 #     crewship backup restore /tmp/crewship-workspace-acme-*.tar.zst -w ws_new123 --files-only
 
 # Stand the crews up under the new slug — provision each crew by slug
 # (provision takes one crew per call):
-crewship crew provision <crew-slug> -w ws_new123
-crewship crew provision <another-crew-slug> -w ws_new123
+crewship crew start <crew-slug> -w ws_new123
+crewship crew start <another-crew-slug> -w ws_new123
 
 # THEN land their filesystem state. Skipping this step migrates the rows
 # and leaves every crew's workspace files and memory tree behind.
@@ -636,7 +644,7 @@ Passing two raises a CLI error rather than silently picking one. A bundle encryp
 </Accordion>
 
 <Accordion title="Same-slug restore refuses by default">
-`crewship backup restore` will not overwrite an existing workspace or crew under the same slug. If the existing one is stale and you want to replace it, delete it first (a crew via `crewship crew delete`; a workspace via `crewship workspace delete <slug> --confirm <slug>` — OWNER only, refused if it is your only workspace, see the [workspace CLI](/cli/workspace#workspace-delete)); if you want both side-by-side, use `--as-workspace=<new-slug>` and then `crewship crew provision`.
+`crewship backup restore` will not overwrite an existing workspace or crew under the same slug. If the existing one is stale and you want to replace it, delete it first (a crew via `crewship crew delete`; a workspace via `crewship workspace delete <slug> --confirm <slug>` — OWNER only, refused if it is your only workspace, see the [workspace CLI](/cli/workspace#workspace-delete)); if you want both side-by-side, use `--as-workspace=<new-slug>` and then `crewship crew start`.
 </Accordion>
 
 <Accordion title="Disk space during restore is not bounded by the heap streaming guarantee">

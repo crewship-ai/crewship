@@ -930,13 +930,10 @@ find %q ! -writable -print 2>/dev/null | head -n 500
 	code, out, err := ops.ExecAs(ctx, containerID, spec.User, []string{"sh", "-c", script})
 	if err != nil {
 		// Almost always a stopped container: exec needs a running one,
-		// and every restore section now goes through exec-tar. Name a
-		// command that EXISTS — `crewship crew start` does not, and
-		// `crew provision` is what reconciles a stopped container back
-		// to running (it logs "restarted stopped container" for exactly
-		// this case).
-		return fmt.Errorf("cannot reach %s to restore into it — the crew container must be RUNNING (exec is how every section is written now). Start it with `crewship crew provision %s`: %w",
-			spec.Dest, crewSlug, err)
+		// and every restore section now goes through exec-tar. The
+		// sentence lives in restore_remediation.go with its three
+		// siblings — see there for why it no longer names `provision`.
+		return fmt.Errorf("%s: %w", restorePreflightRemediation(spec.Dest, crewSlug), err)
 	}
 	text := strings.TrimSpace(string(out))
 	if code != 0 {

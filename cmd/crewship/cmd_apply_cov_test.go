@@ -51,6 +51,8 @@ func declareApplyFlags(c *cobra.Command) {
 	c.Flags().Bool("from-env", false, "")
 	c.Flags().String("secrets-file", "", "")
 	c.Flags().Bool("skip-test-gate", false, "")
+	c.Flags().Bool("skip-governance-gate", false, "")
+	c.Flags().Bool("no-delete", false, "")
 	c.Flags().BoolP("yes", "y", false, "")
 }
 
@@ -192,7 +194,7 @@ func TestPrintPlanSummaryWarnings(t *testing.T) {
 	// All printers must be nil-safe.
 	out, _ := covCaptureStdoutCli4(t, func() error {
 		printPlan(nil, false)
-		printSummary(nil, nil)
+		printSummary(nil, nil, nil)
 		printWarnings(nil)
 		return nil
 	})
@@ -212,8 +214,8 @@ func TestPrintPlanSummaryWarnings(t *testing.T) {
 	warned := &manifest.Plan{Warnings: []string{"code steps are not executed"}}
 	out, _ = covCaptureStdoutCli4(t, func() error {
 		printWarnings(warned)
-		printSummary(warned, nil)
-		printSummary(warned, &manifest.Result{Created: 2, Updated: 1, Unchanged: 3, Deleted: 0})
+		printSummary(warned, nil, nil)
+		printSummary(warned, &manifest.Result{Created: 2, Updated: 1, Unchanged: 3, Deleted: 0}, nil)
 		return nil
 	})
 	if !strings.Contains(out, "Warnings:") || !strings.Contains(out, "! code steps are not executed") {

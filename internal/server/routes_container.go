@@ -139,9 +139,23 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 	containerName, slug, _ := s.resolveCrewContainer(r.Context(), id, true)
 
 	if err := s.container.StopCrewRuntime(r.Context(), containerName); err != nil {
-		s.logger.Error("container stop failed", "crew_id", id, "container", containerName, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container stop failed"})
-		return
+		// "There is no container" is the state the caller asked for, not a
+		// failure. Docker's stop is idempotent for an EXITED container but
+		// 404s when the container object is gone entirely — a crew that was
+		// never started, or one whose container `refresh-image` removed.
+		// Reporting that as a 500 made `crewship crew stop <fresh-crew>`
+		// exit non-zero, which breaks the start-then-stop bracketing the
+		// command exists for and contradicts its own documentation.
+		//
+		// Sidecars are still swept below: the runtime container being
+		// absent says nothing about them, and leaving a Postgres holding
+		// its memory is exactly what "stopped" must not mean.
+		if !containerGone(err) {
+			s.logger.Error("container stop failed", "crew_id", id, "container", containerName, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container stop failed"})
+			return
+		}
+		s.logger.Debug("container stop: nothing to stop", "crew_id", id, "container", containerName, "error", err)
 	}
 	// Stop sidecars on the same crew bridge. The provider's
 	// SidecarProvider implementation is optional; providers without

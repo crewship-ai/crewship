@@ -91,6 +91,12 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 	// whole request. Declared rather than left to the generic JSON fallback so
 	// a client is told there is nothing to send.
 	add("POST", "/api/v1/crews/{crewId}/refresh-image", "FinalCoreEmptyRequest")
+	// container-start takes no body either: the crew id in the path names
+	// everything, and what the container looks like is resolved from the
+	// crew row, never from the caller. Declared so a client is told there
+	// is nothing to send rather than being left to guess at the fallback.
+	add("POST", "/api/v1/crews/{crewId}/container-start", "FinalCoreEmptyRequest")
+	add("POST", "/api/v1/crews/{crewId}/container-stop", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/inbox/bulk", "FinalCoreInboxBulkRequest")
 	add("POST", "/api/v1/onboarding/complete", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/workspaces/{workspaceId}/invitations", "FinalCoreInvitationRequest")

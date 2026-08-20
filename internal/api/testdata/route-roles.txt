@@ -180,6 +180,8 @@ POST /api/v1/crew-connections roleCreate
 POST /api/v1/crew-templates/{slug}/deploy roleCreate
 POST /api/v1/crews roleCreate
 POST /api/v1/crews/{crewId}/apply-avatar-style roleManage
+POST /api/v1/crews/{crewId}/container-start roleCreate
+POST /api/v1/crews/{crewId}/container-stop roleCreate
 POST /api/v1/crews/{crewId}/integrations roleCreate
 POST /api/v1/crews/{crewId}/integrations/{integrationId}/test roleCreate
 POST /api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh roleManage

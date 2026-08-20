@@ -80,6 +80,15 @@ spec:
     label_cs: <Czech label>             # optional — falls back to label
     icon: <lucide-icon-name>            # optional — lowercase kebab-case, e.g. receipt
 
+  # ---- any other routine.v1.json field ----
+  # Keys this page does not list ride through untouched — guardrails,
+  # integrations_required, concurrency_key, max_concurrent, outputs,
+  # display_name, agentless, hooks, eval, resources, execution_tier,
+  # parallelism. `schemas/routine.v1.json` is the full list; run
+  # `crewship routine schema` to print it.
+  guardrails:                           # example of a pass-through field
+    input: sanitize
+
   # ---- manifest-only nested triggers ----
   schedules:                            # optional — 0..N cron triggers
     - name: <schedule label>            # required, unique within this routine
@@ -751,6 +760,39 @@ the run's outcome). Hooks fire only on the **top-level** run (not nested
 routine's `egress_targets` and the authoring crew's network policy gate the
 host (redirects included), and `credential_ref.type` resolves against the
 workspace credential vault by type at run time.
+
+## Fields this page does not list
+
+`spec` carries the routine DSL, and the DSL is bigger than the subset
+documented above. Any top-level key from `schemas/routine.v1.json` is
+passed to the server unchanged, whether or not this build models it —
+`guardrails`, `integrations_required`, `concurrency_key`,
+`max_concurrent`, `outputs`, `display_name`, `agentless`, `hooks`,
+`eval`, `resources`, `execution_tier`, `parallelism`. Print the
+authoritative list with `crewship routine schema`.
+
+This is not merely a convenience. Until it was true, `spec` was a closed
+struct and anything it did not model was dropped silently in **both**
+directions:
+
+- `crewship apply` reported success and the field never reached the
+  server, so a routine that declared `agentless: true` landed without
+  the token-zero guarantee it was written to carry;
+- `crewship export` decoded the *stored* definition through the same
+  struct, so a field set via `crewship routine save` or the dashboard
+  disappeared from the exported YAML — and the next `apply` then deleted
+  it from the live routine. Editing an unrelated line was enough.
+
+Two consequences worth knowing:
+
+- **A typo is now sent rather than dropped**, and the server discards
+  unknown keys just as quietly. `crewship apply` therefore warns at plan
+  time for every `spec` key the DSL has no field for:
+  `routine "x": spec key "guardrail" is not a routine DSL field`. Read
+  the warnings block on a dry run.
+- **`schedules` and `webhook` still do not travel.** They describe
+  sibling tables, not the DSL, and are the only two keys stripped from
+  the definition body.
 
 ## Declarative cron
 

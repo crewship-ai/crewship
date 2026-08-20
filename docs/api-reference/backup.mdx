@@ -373,7 +373,7 @@ Restore a bundle into the current workspace.
 }
 ```
 
-`docker_phase_skipped: true` when `as_workspace` / `as_crew` rewrote the slug — container state is not landed. `dropped_crew_filesystems` names the crews that lost it. Finish the restore by provisioning each of them (`POST /api/v1/crews/{crewId}/provision`) and then calling this endpoint again with `files_only: true` and the new workspace in context.
+`docker_phase_skipped: true` when `as_workspace` / `as_crew` rewrote the slug — container state is not landed. `dropped_crew_filesystems` names the crews that lost it. Finish the restore by starting each of them ([`POST /api/v1/crews/{crewId}/container-start`](/api-reference/crews#start-container)) and then calling this endpoint again with `files_only: true` and the new workspace in context. It must be `container-start` and not `/provision`: `files_only` writes each section by exec'ing into the crew's container, so the container has to be running, and provision only builds the image.
 
 Re-calling WITHOUT `files_only` after a rename does not work and is not the recovery: the forked workspace matches neither the bundle's id nor its slug, so the tenant guard returns 403 — and its rows are already present under new ids anyway.
 

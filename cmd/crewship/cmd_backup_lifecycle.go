@@ -319,11 +319,13 @@ var backupRestoreCmd = &cobra.Command{
 			if len(out.DroppedCrewFilesystems) > 0 {
 				warning += fmt.Sprintf("\n  Crews still missing their container state: %s.", strings.Join(out.DroppedCrewFilesystems, ", "))
 			}
-			warning += fmt.Sprintf(
-				"\n  Finish the restore with:\n"+
-					"    crewship crew provision <crew> -w %s\n"+
-					"    crewship backup restore %s -w %s --files-only",
-				target, args[0], target)
+			// Command names come from internal/backup so this copy — the
+			// one the operator actually reads — cannot drift from the
+			// server's. It said `crew provision` for a while after the
+			// server stopped: provision builds an image, and --files-only
+			// writes by exec'ing into a container that has to be running.
+			steps := backup.ForkedRestoreSteps("<crew>", target, args[0])
+			warning += fmt.Sprintf("\n  Finish the restore with:\n    %s\n    %s", steps[0], steps[1])
 			cli.PrintWarning(warning)
 		}
 		// CrewsRestored, not CrewsCount: the first is what landed, the

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -52,6 +53,32 @@ var stepIDRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 // else. This keeps the template language a substitution, not an
 // evaluator, and rules out a whole class of injection attacks.
 var templateRE = regexp.MustCompile(`\{\{\s*([^{}]+?)\s*\}\}`)
+
+// knownDSLKeys is the set of top-level JSON keys the DSL models,
+// derived from the struct tags so it cannot drift as fields are added.
+var knownDSLKeys = func() map[string]bool {
+	keys := map[string]bool{}
+	t := reflect.TypeOf(DSL{})
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			keys[name] = true
+		}
+	}
+	return keys
+}()
+
+// IsKnownDSLKey reports whether key is a top-level field of the routine
+// DSL this build understands.
+//
+// Parse discards unknown keys silently (encoding/json has no strict
+// mode here, and making it strict would break forward compatibility —
+// an older server must still accept a manifest written against a newer
+// one). So callers that hold author-supplied keys use this to SAY
+// something instead: `crewship apply` warns at plan time, which turns a
+// typo like `guardrail:` from an inert key into a line the operator
+// reads before it costs a routine its safety config.
+func IsKnownDSLKey(key string) bool { return knownDSLKeys[key] }
 
 // Parse decodes a raw DSL JSON document into the typed in-memory
 // representation. It does NOT do semantic validation (see Validate)

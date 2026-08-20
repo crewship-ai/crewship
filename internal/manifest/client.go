@@ -790,3 +790,36 @@ func (c *Client) SaveCrewFile(ctx context.Context, crewID, destPath string, data
 	}
 	return nil
 }
+
+// CrewContainerStatus reports whether a crew's runtime container is
+// currently running.
+//
+// Used only to warn at plan time. Deliberately forgiving: any failure —
+// no IPC socket, an unreachable crewshipd, a crew that does not exist
+// yet — answers (false, false) meaning "could not tell", and the caller
+// says nothing rather than warning on a guess. A plan that grew a scary
+// line because a status probe timed out would train people to ignore
+// the warnings block.
+func (c *Client) CrewContainerStatus(ctx context.Context, crewID string) (running bool, known bool) {
+	body, err := c.fetchBody(ctx, "/api/v1/crews/"+crewID+"/container-status")
+	if err != nil || len(body) == 0 {
+		return false, false
+	}
+	var out struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return false, false
+	}
+	switch out.Status {
+	case "running":
+		return true, true
+	case "stopped":
+		return false, true
+	default:
+		// creating / error / unknown / not_configured are all "do not
+		// claim anything" — the first will be running by apply time, the
+		// rest mean this process cannot see a container runtime at all.
+		return false, false
+	}
+}
