@@ -5,12 +5,14 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
@@ -153,6 +155,12 @@ func TestCheckSentryDSNWiring(t *testing.T) {
 }
 
 func TestCheckDsnReachability(t *testing.T) {
+	// This test is parallel but swaps the package-level dialTCP var. That is
+	// safe only because the other caller of checkDsnReachability,
+	// TestCheckDsnReachability_EnabledBranches (cmd_doctor_cov_test.go), is
+	// NOT parallel: Go runs every non-parallel test to completion before
+	// resuming the paused parallel ones, so the two never overlap. Do not
+	// add t.Parallel() to that test — it would race on dialTCP under -race.
 	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
@@ -203,6 +211,51 @@ func TestCheckDsnReachability(t *testing.T) {
 		got := checkDsnReachability(ctx, db.DB, "")
 		if got.status != "INFO" {
 			t.Errorf("status = %q, want INFO; detail=%q", got.status, got.detail)
+		}
+	})
+
+	t.Run("opted in + DSN reachable → PASS", func(t *testing.T) {
+		// The success branch. Nothing else in this package pins it down: the
+		// only other caller dials the real 127.0.0.1:443 and accepts WARN or
+		// PASS, so on a runner with nothing listening the PASS branch is
+		// never executed and a regression there goes unnoticed. Hand the
+		// check a live connection through the same dialTCP seam the WARN
+		// subtest uses (a net.Pipe end — no port, no listener, no network)
+		// and assert the exact row it must produce.
+		orig := dialTCP
+		ours, theirs := net.Pipe()
+		var gotNetwork, gotAddress string
+		dialTCP = func(ctx context.Context, network, address string) (net.Conn, error) {
+			gotNetwork, gotAddress = network, address
+			return ours, nil
+		}
+		t.Cleanup(func() {
+			dialTCP = orig
+			_ = theirs.Close()
+		})
+
+		if _, _, err := crashreport.SetOptIn(ctx, db.DB, true); err != nil {
+			t.Fatalf("SetOptIn: %v", err)
+		}
+		got := checkDsnReachability(ctx, db.DB, "https://k@sentry.example.com/1")
+		if got.status != "PASS" {
+			t.Errorf("status = %q, want PASS for reachable host; detail=%q", got.status, got.detail)
+		}
+		if want := "TCP sentry.example.com:443 ok"; got.detail != want {
+			t.Errorf("detail = %q, want %q", got.detail, want)
+		}
+		if got.hint != "" {
+			// A healthy endpoint has nothing to advise about.
+			t.Errorf("PASS row should carry no hint, got %q", got.hint)
+		}
+		if gotNetwork != "tcp" || gotAddress != "sentry.example.com:443" {
+			t.Errorf("dialed (%q, %q), want (\"tcp\", \"sentry.example.com:443\")", gotNetwork, gotAddress)
+		}
+		// checkDsnReachability must not leak the probe socket: the far end
+		// sees EOF only if our end was closed.
+		_ = theirs.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if _, err := theirs.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+			t.Errorf("probe connection not closed: read from peer = %v, want io.EOF", err)
 		}
 	})
 }
