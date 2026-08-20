@@ -340,8 +340,17 @@ func TestAppendToCanonical_RefusesSymlinkedTarget(t *testing.T) {
 		t.Fatalf("write secret: %v", err)
 	}
 	canonical := filepath.Join(dir, "learned-2026-06-01.md")
+	// Fatal, not Skip. CI runs `go test ./...` on ubuntu-latest,
+	// macos-14 and ubuntu-24.04-arm only — Windows is cross-COMPILED
+	// (`GOOS=windows go build`) and never tested. On all three an
+	// unprivileged os.Symlink succeeds, so a skip here could not fire in
+	// CI; it could only turn "this security guard was never exercised"
+	// into a green `ok`, which is the exact failure mode
+	// scripts/skip-budget.txt was opened to stop. A box that supports
+	// symlinks and then refuses to make one is broken, not a reason to
+	// report ok.
 	if err := os.Symlink(secret, canonical); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		t.Fatalf("plant symlink: %v", err)
 	}
 
 	err := appendToCanonical(canonical, time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC), "- **rule**\n")
