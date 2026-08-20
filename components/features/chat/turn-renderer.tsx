@@ -2,6 +2,8 @@
 
 import React from "react"
 import { motion } from "motion/react"
+import { ErrorBoundary } from "react-error-boundary"
+import * as Sentry from "@sentry/nextjs"
 import {
   AlertCircle,
   AlertTriangle,
@@ -20,6 +22,7 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card"
 import { arrival } from "@/lib/motion"
+import { fieldText } from "@/lib/adapter-field"
 import type { ChatTurn } from "@/hooks/use-chat"
 import { askProvenanceForTurn } from "./asks/ask-provenance"
 import { AssistantTurn } from "./assistant-turn"
@@ -58,19 +61,6 @@ function describeMetaValue(value: unknown): string | undefined {
   }
   if (value == null) return undefined
   return JSON.stringify(value)
-}
-
-/** Read one CLI-supplied field as display text. Init metadata is forwarded
- *  unparsed, so a key that holds a string today can hold an object tomorrow,
- *  and TypeScript's `as` says nothing about it: calling `.trim()` on such a
- *  value threw during render, and nothing in the chat tree is an error
- *  boundary — the throw reaches the dashboard route's, which replaces the whole
- *  page of the very session that was degraded. A field we cannot read as text
- *  reads as absent instead, and the entry falls back to another one. */
-function fieldText(value: unknown): string | undefined {
-  if (typeof value === "string") return value.trim() || undefined
-  if (typeof value === "number" || typeof value === "boolean") return String(value)
-  return undefined
 }
 
 function mcpFields(value: unknown): McpServerInfo {
@@ -163,8 +153,11 @@ interface TurnRendererProps {
   resolveAskProvenance?: (content: string) => string | null
 }
 
-/** Render a single turn (user, assistant, or system). */
-export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
+/** Render a single turn (user, assistant, or system). Not exported, and not
+ *  memoised here: everything goes through `TurnRenderer` below — this component
+ *  inside its own error boundary — and the memo sits on that, so the render is
+ *  cut at exactly the same point it was before the boundary existed. */
+function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
   const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
   const initialAnim = shouldAnimate ? arrival.initial : false
   const transition = shouldAnimate ? arrival.transition : { duration: 0 }
@@ -467,5 +460,128 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
         </div>
       )}
     </motion.div>
+  )
+}
+
+/** A cheap stand-in for "this turn's content changed".
+ *
+ *  It exists for the error boundary's `resetKeys` and nothing else, so the two
+ *  properties it needs are: it MOVES whenever the payload the renderer reads
+ *  moves, and it NEVER THROWS. The second one is not decoration — this runs
+ *  outside the boundary, on the same untrusted turn that just brought the
+ *  renderer down, so a throw here would escape to the route boundary and take
+ *  the page exactly as before.
+ *
+ *  A streaming turn mutates in place under a constant id: same turn id, same
+ *  part id, growing content. So the content LENGTH is what carries recovery,
+ *  with the part timestamps for a replacement of equal length (history reload)
+ *  and the metadata key count for a payload whose text never changes at all —
+ *  a `system_init` turn is all metadata and no content. */
+export function turnContentKey(turn: ChatTurn): string {
+  // Object.keys does not invoke getters, so metadata that throws the moment it
+  // is READ is still safe to count.
+  const keyCount = (value: unknown) =>
+    value && typeof value === "object" ? Object.keys(value).length : 0
+  try {
+    const parts = Array.isArray(turn.parts) ? turn.parts : []
+    const marks = parts.map((p) => {
+      const at = p?.timestamp instanceof Date ? p.timestamp.getTime() : 0
+      return `${p?.id ?? ""}:${p?.content?.length ?? 0}:${p?.isStreaming ? 1 : 0}:${keyCount(p?.metadata)}:${at}`
+    })
+    // The turn's own metadata is rendered too (the ask-form envelope), so it
+    // belongs in the key for the same reason the parts' does.
+    return `${parts.length}:${turn.isStreaming ? 1 : 0}:${keyCount(turn.metadata)}|${marks.join("|")}`
+  } catch {
+    // Unreadable is itself a state, and a constant one: the boundary then
+    // behaves as it would with an id-only key, which is the old behaviour for
+    // this one turn rather than a crash for the whole page.
+    return "unreadable"
+  }
+}
+
+/** The fallback that replaces ONE turn. Deliberately inline and turn-shaped —
+ *  it sits in the transcript where the message was, so the reader can see which
+ *  message is missing and that the conversation around it is intact. */
+function TurnErrorCard({ turn, onRetry }: { turn: ChatTurn; onRetry: () => void }) {
+  return (
+    <div
+      role="alert"
+      data-testid="turn-error"
+      data-turn-id={turn.id}
+      className="my-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3"
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <p className="text-body text-destructive">This message could not be rendered.</p>
+          <p className="mt-1 text-micro text-muted-foreground">
+            The rest of the conversation is unaffected and the session is still live.
+          </p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-2 flex items-center gap-1 text-micro text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <RefreshCw className="h-3 w-3" aria-hidden="true" />
+            <span>Try again</span>
+          </button>
+          <p className="mt-2 text-micro text-muted-foreground font-mono">Turn ID: {turn.id}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Render a single turn, inside its own error boundary.
+ *
+ * The boundary is here rather than at the two call sites (`chat-panel` and
+ * `virtual-conversation`) so that neither can forget it, and it is per TURN
+ * rather than per route because of what the route boundary costs: it replaces
+ * the page, which unmounts `chat-page-client`, discards `useChat`'s turns and
+ * drops the live WebSocket — of the very session that just degraded. A turn
+ * renders adapter-supplied values that nothing type-checks (see
+ * `lib/adapter-field`), so one of them being unreadable must cost that message
+ * and nothing else.
+ *
+ * Honest limit, same as every React boundary: this catches throws from render
+ * and lifecycle only. An event handler or an awaited callback that throws still
+ * goes uncaught.
+ */
+export const TurnRenderer = React.memo(function TurnRenderer(props: TurnRendererProps) {
+  const { turn } = props
+  return (
+    <ErrorBoundary
+      // The turn's CONTENT has to be in here, not just its identity.
+      //
+      // registry.tsx documents what an identity-only key does: a panel that
+      // threw once stayed broken until a full reload, because nothing in its
+      // keys moved when a good payload arrived. A streaming turn is the same
+      // shape of trap and worse — `turn.id` is constant for the whole run while
+      // tokens land, so one bad intermediate shape would wedge the message even
+      // after the text that follows it renders perfectly.
+      resetKeys={[turn.id, turnContentKey(turn)]}
+      onError={(error) => {
+        // Reporting runs in the boundary's own `componentDidCatch`, which is
+        // OUTSIDE anything this boundary catches: a throw here propagates to
+        // the route boundary and replaces the page — the exact failure the
+        // boundary exists to prevent, reintroduced at the one moment it
+        // matters, when a turn has already thrown. Same reasoning as
+        // `turnContentKey`'s catch: the reporting path is never allowed to
+        // cost more than the turn it is reporting on.
+        try {
+          Sentry.captureException(error, {
+            tags: { boundary: "chat-turn", turnId: turn.id, turnRole: turn.role },
+          })
+        } catch {
+          // Losing one crash report is strictly cheaper than losing the session.
+        }
+      }}
+      fallbackRender={({ resetErrorBoundary }) => (
+        <TurnErrorCard turn={turn} onRetry={resetErrorBoundary} />
+      )}
+    >
+      <TurnBody {...props} />
+    </ErrorBoundary>
   )
 })
