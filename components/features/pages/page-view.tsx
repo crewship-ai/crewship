@@ -288,6 +288,16 @@ export function PageView({
   const tabs = React.useMemo<PageTabView[]>(() => derivePageTabs(page?.panels ?? []), [page])
   const [activeTab, selectTab] = usePageTabState(tabs)
 
+  // The bar and the groups are two halves of one control and have to agree on
+  // the ids that pair them (`pageTabIds`). They are also far apart in this
+  // tree — the bar sits outside the scroll area, the groups are down inside
+  // PanelGrid — so the scope is minted HERE, at the one component that renders
+  // both, and threaded down. Deriving it from the tab slug alone would be
+  // simpler and would break the moment a document held two page views, which
+  // the public page and the embed can do: the ids would repeat, and every
+  // reference in the document would resolve to whichever half rendered first.
+  const tabIdScope = React.useId()
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumb back-bar — inside the content area, matching /routines and
@@ -321,7 +331,7 @@ export function PageView({
       </div>
 
       {tabs.length > 0 && (
-        <PageTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} />
+        <PageTabs tabs={tabs} activeId={activeTab} onSelect={selectTab} idScope={tabIdScope} />
       )}
 
       <div className="flex-1 overflow-auto">
@@ -336,6 +346,7 @@ export function PageView({
             workspaceId={workspaceId}
             tabs={tabs}
             activeTab={activeTab}
+            tabIdScope={tabIdScope}
           />
         </div>
       </div>
@@ -353,7 +364,12 @@ function PageBody({
   workspaceId,
   tabs,
   activeTab,
-}: Omit<PageViewProps, "onBack"> & { tabs: PageTabView[]; activeTab: string }) {
+  tabIdScope,
+}: Omit<PageViewProps, "onBack"> & {
+  tabs: PageTabView[]
+  activeTab: string
+  tabIdScope: string
+}) {
   if (notFound) {
     return (
       <EmptyState
@@ -433,6 +449,7 @@ function PageBody({
         workspaceId={workspaceId}
         tabs={tabs}
         activeTab={activeTab}
+        tabIdScope={tabIdScope}
       />
     </>
   )
@@ -461,6 +478,7 @@ function PanelGrid({
   workspaceId,
   tabs,
   activeTab,
+  tabIdScope,
 }: {
   panels: NonNullable<PageRecord["panels"]>
   slug: string
@@ -468,6 +486,7 @@ function PanelGrid({
   workspaceId?: string | null
   tabs: PageTabView[]
   activeTab: string
+  tabIdScope: string
 }) {
   const actions = React.useMemo(() => {
     const map = new Map<string, readonly PageAction[]>()
@@ -491,7 +510,12 @@ function PanelGrid({
             // is what lets print reveal them all (§10b.8) — and what keeps a
             // panel's "the data just changed" baseline from resetting every
             // time somebody clicks back to its tab.
-            <PageTabGroup key={tab.id} tab={tab} active={tab.id === activeTab}>
+            <PageTabGroup
+              key={tab.id}
+              tab={tab}
+              active={tab.id === activeTab}
+              idScope={tabIdScope}
+            >
               <PanelGridCells panels={tab.panels} now={now} />
             </PageTabGroup>
           ))}

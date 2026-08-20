@@ -270,6 +270,102 @@ describe("PageView with tabs", () => {
     expect(new URL(window.location.href).searchParams.get("tab")).toBe("odezva")
   })
 
+  it("pairs every tab with the panel it controls, in both directions", () => {
+    // A tab and its panel are two halves of one control. Without the pairing a
+    // screen-reader user hears "tab, selected" and is told nothing about where
+    // the thing it selected went — the panel is somewhere else in the document
+    // with no announced relationship to the button that revealed it.
+    //
+    // Both directions are asserted because each fails on its own: an
+    // aria-controls pointing at nothing is as useless as a panel that names no
+    // tab, and only the round trip proves the two ids were derived from the
+    // same source.
+    const { container } = renderPage()
+
+    for (const tab of tabButtons()) {
+      const controls = tab.getAttribute("aria-controls")
+      expect(controls, `tab ${tab.textContent} has no aria-controls`).toBeTruthy()
+
+      const panel = container.querySelector(`#${CSS.escape(controls!)}`)
+      expect(panel, `aria-controls="${controls}" resolves to nothing`).toBeTruthy()
+      expect(panel!.getAttribute("role")).toBe("tabpanel")
+      expect(panel!.getAttribute("data-slot")).toBe("tab-group")
+
+      // …and back. The panel is named BY the tab rather than by a copy of its
+      // text, so the two cannot drift.
+      expect(tab.id, "the tab needs an id to be pointed at").toBeTruthy()
+      expect(panel!.getAttribute("aria-labelledby")).toBe(tab.id)
+      // aria-labelledby supersedes it; leaving both would be two sources of
+      // one name.
+      expect(panel!.getAttribute("aria-label")).toBeNull()
+    }
+  })
+
+  it("keeps a hidden panel addressable, since every group stays mounted", () => {
+    // aria-controls may point at a hidden element, and here it always does for
+    // the tabs that are not selected — which is exactly why this is worth
+    // pinning: the pairing must survive the state the panels spend most of
+    // their life in.
+    const { container } = renderPage()
+    const disk = screen.getByRole("tab", { name: /Disk/ })
+    const panel = container.querySelector<HTMLElement>(
+      `#${CSS.escape(disk.getAttribute("aria-controls")!)}`,
+    )
+    expect(panel).toBeTruthy()
+    expect(panel!.hidden).toBe(true)
+    expect(panel!.getAttribute("aria-labelledby")).toBe(disk.id)
+  })
+
+  it("does not collide when two page views share a document", () => {
+    // The public page and the embed can both mount a PageView, and an id that
+    // was derived from the tab slug alone would then appear twice — at which
+    // point every aria-controls in the document resolves to the FIRST match
+    // and one of the two page views silently points at the other's panels.
+    const { container } = render(
+      <>
+        <PageView
+          page={toPageView(WIRE)} slug="sit" loading={false} error={null}
+          notFound={false} onBack={vi.fn()} now={NOW}
+        />
+        <PageView
+          page={toPageView(WIRE)} slug="sit" loading={false} error={null}
+          notFound={false} onBack={vi.fn()} now={NOW}
+        />
+      </>,
+    )
+
+    const ids = Array.from(container.querySelectorAll("[id]")).map((el) => el.id)
+    expect(new Set(ids).size, `duplicate ids: ${ids.join(", ")}`).toBe(ids.length)
+
+    // And each half still resolves within itself.
+    for (const tab of screen.getAllByRole("tab")) {
+      const panel = container.querySelector(`#${CSS.escape(tab.getAttribute("aria-controls")!)}`)
+      expect(panel?.getAttribute("aria-labelledby")).toBe(tab.id)
+    }
+  })
+
+  it("moves between tabs with the arrow keys, and keeps one tab stop", () => {
+    // The WAI-ARIA tabs pattern: Tab enters the group once, arrows move within
+    // it. Without the roving tabIndex a keyboard user pays one Tab press per
+    // tab just to walk past the bar.
+    const { container } = renderPage()
+    const [sit, odezva, disk] = tabButtons()
+    expect([sit.tabIndex, odezva.tabIndex, disk.tabIndex]).toEqual([0, -1, -1])
+
+    fireEvent.keyDown(sit, { key: "ArrowRight" })
+    expect(screen.getByRole("tab", { name: /Odezva/ }).getAttribute("aria-selected")).toBe("true")
+    expect(group(container, "odezva").hidden).toBe(false)
+
+    fireEvent.keyDown(tabButtons()[1], { key: "End" })
+    expect(screen.getByRole("tab", { name: /Disk/ }).getAttribute("aria-selected")).toBe("true")
+
+    fireEvent.keyDown(tabButtons()[2], { key: "ArrowRight" })
+    expect(screen.getByRole("tab", { name: /Síť/ }).getAttribute("aria-selected")).toBe("true")
+
+    fireEvent.keyDown(tabButtons()[0], { key: "Home" })
+    expect(screen.getByRole("tab", { name: /Síť/ }).getAttribute("aria-selected")).toBe("true")
+  })
+
   it("renders a page with no tabs exactly as it did before tabs existed", () => {
     const { container } = renderPage({
       ...WIRE,

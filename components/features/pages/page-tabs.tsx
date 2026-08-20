@@ -144,22 +144,55 @@ function TabStateGlyph({ state }: { state: PageTabView["state"] }) {
   return <Icon className={cn("h-3.5 w-3.5 shrink-0", meta.tone)} aria-hidden="true" />
 }
 
+/**
+ * The two ids that pair a tab with the panels it reveals.
+ *
+ * One function, called from both halves, because the pairing is only worth
+ * anything if the two sides agree: an `aria-controls` that resolves to nothing
+ * is not a smaller version of the association, it is a broken one, and a
+ * second derivation is exactly how the halves drift.
+ *
+ * `scope` is a `React.useId()` from the component that renders both — two page
+ * views in one document (the app's and an embed's, say) would otherwise emit
+ * the same ids twice, and every reference in the document would resolve to
+ * whichever came first.
+ *
+ * The tab id is already a slug (`tabSlug`, hooks/use-pages.ts) — except for a
+ * name with nothing ASCII in it, which keeps its own lowercased form and may
+ * therefore contain spaces. An IDREF cannot, and `aria-controls` is a
+ * space-separated list, so a space would silently split one reference into
+ * two broken ones.
+ */
+export function pageTabIds(scope: string, tabId: string): { tab: string; panel: string } {
+  const key = tabId.replace(/\s+/g, "_")
+  return { tab: `${scope}tab-${key}`, panel: `${scope}panel-${key}` }
+}
+
 export interface PageTabsProps {
   tabs: readonly PageTabView[]
   activeId: string
   onSelect: (id: string) => void
+  /** `React.useId()` from the renderer of both halves — see `pageTabIds`. */
+  idScope: string
 }
 
-export function PageTabs({ tabs, activeId, onSelect }: PageTabsProps) {
-  const items: ToolbarTab[] = tabs.map((tab) => ({
-    id: tab.id,
-    label: tab.name,
-    badge: <TabStateGlyph state={tab.state} />,
-    // The state in words, so the bar says the same thing to a screen reader
-    // that it says to an eye. A tab with no readable state (all its panels are
-    // sealed) says only its name, which is all that is known about it.
-    ariaLabel: tab.state ? `${tab.name} — ${PAGE_STATE_META[tab.state].label}` : tab.name,
-  }))
+export function PageTabs({ tabs, activeId, onSelect, idScope }: PageTabsProps) {
+  const items: ToolbarTab[] = tabs.map((tab) => {
+    const ids = pageTabIds(idScope, tab.id)
+    return {
+      id: tab.id,
+      label: tab.name,
+      badge: <TabStateGlyph state={tab.state} />,
+      // The half of the pairing that lives on the button: this tab, named so
+      // its panel can point back at it, and pointed at the panel it reveals.
+      domId: ids.tab,
+      ariaControls: ids.panel,
+      // The state in words, so the bar says the same thing to a screen reader
+      // that it says to an eye. A tab with no readable state (all its panels are
+      // sealed) says only its name, which is all that is known about it.
+      ariaLabel: tab.state ? `${tab.name} — ${PAGE_STATE_META[tab.state].label}` : tab.name,
+    }
+  })
 
   return (
     <ToolbarStrip
@@ -213,6 +246,8 @@ export function PageTabsStyles() {
 export interface PageTabGroupProps {
   tab: PageTabView
   active: boolean
+  /** The same `React.useId()` the bar was given — see `pageTabIds`. */
+  idScope: string
   children: React.ReactNode
 }
 
@@ -224,14 +259,27 @@ export interface PageTabGroupProps {
  * what the screen is hiding. The name is drawn only on paper: on screen the bar
  * above already says which tab this is, and repeating it would spend a heading
  * on something the reader just clicked.
+ *
+ * The panel is named BY its tab (`aria-labelledby`) rather than by a copy of
+ * the tab's text (`aria-label`): the tab is a real element in the document
+ * whose name already carries the freshness state, so pointing at it says the
+ * same thing the bar says, and cannot fall out of step with it. The reference
+ * runs both ways — the tab's `aria-controls` points here — which is what makes
+ * a reader able to move from a tab to what it revealed and back.
+ *
+ * Pointing at a panel that is `hidden` is fine, and it is the normal case
+ * here: every group stays mounted so print can reveal them all (§10b.8), so
+ * all but one of these references is to a hidden element at any moment.
  */
-export function PageTabGroup({ tab, active, children }: PageTabGroupProps) {
+export function PageTabGroup({ tab, active, idScope, children }: PageTabGroupProps) {
+  const ids = pageTabIds(idScope, tab.id)
   return (
     <section
       data-slot="tab-group"
       data-tab={tab.id}
+      id={ids.panel}
       role="tabpanel"
-      aria-label={tab.name}
+      aria-labelledby={ids.tab}
       hidden={!active}
       className={active ? undefined : "hidden"}
     >
