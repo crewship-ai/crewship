@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -109,15 +110,56 @@ func (p *Plan) Summary() (int, int, int, int) {
 	return c, u, n, d
 }
 
+// Line renders one plan item the way the plan preview prints it —
+// "~ crew-file uctarna/shared/scripts/archiv.py". Result reuses it to
+// name the item an apply died on and the ones behind it, so the failure
+// report and the plan the operator just read use identical strings.
+func (it PlanItem) Line() string {
+	return fmt.Sprintf("%s %s %s", it.Action.String(), it.Kind, it.Description)
+}
+
 // Render returns a human-readable plan listing. Used by the CLI for
 // both the pre-apply preview and (with the result tally appended)
 // the final summary.
 func (p *Plan) Render() string {
 	var sb strings.Builder
 	for _, it := range p.Items {
-		fmt.Fprintf(&sb, "  %s %s %s\n", it.Action.String(), it.Kind, it.Description)
+		fmt.Fprintf(&sb, "  %s\n", it.Line())
 	}
 	return sb.String()
+}
+
+// ErrDeletesRefused is returned when Options.NoDelete is set and the
+// plan contains a delete. Callers branch on it to distinguish "you
+// asked me not to" from a failure.
+var ErrDeletesRefused = errors.New("plan contains destructive operations and NoDelete is set")
+
+// checkNoDelete enforces Options.NoDelete against this plan, naming
+// every resource it would have destroyed. Nil when the flag is off or
+// the plan is clean.
+func (p *Plan) checkNoDelete(opts Options) error {
+	if !opts.NoDelete {
+		return nil
+	}
+	deletes := p.Deletes()
+	if len(deletes) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrDeletesRefused, strings.Join(deletes, ", "))
+}
+
+// Deletes returns the rendered lines of every destructive item in the
+// plan. HasDestructive answers whether to prompt; this answers the
+// question that follows it — delete WHAT — which is the one a refusal
+// has to include to be worth reading.
+func (p *Plan) Deletes() []string {
+	var out []string
+	for _, it := range p.Items {
+		if it.Action == ActionDelete {
+			out = append(out, it.Line())
+		}
+	}
+	return out
 }
 
 // BuildPlan walks the manifest, fetches current workspace state via
@@ -339,6 +381,12 @@ type planBuilder struct {
 	// Workspace-scope state available to nested crew specs.
 	workspaceCreds      map[string]Credential
 	workspaceSkillSlugs map[string]Skill
+
+	// containerStatusFn probes whether a crew's container is running,
+	// returning (running, known). nil means "use the real client" — it is
+	// a seam for tests, which have no server to ask and would otherwise
+	// have to stand one up to exercise a single advisory line.
+	containerStatusFn func(crewID string) (running bool, known bool)
 }
 
 func (pb *planBuilder) appendItem(action Action, kind, desc string, exec func(ctx context.Context, c *Client, opts Options) error) {
@@ -882,7 +930,7 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 	}
 
 	// Declarative crew files (scripts/fixtures) → the shared volume.
-	if err := pb.planCrewFiles(crewSlug, crewID, spec.Files); err != nil {
+	if err := pb.planCrewFiles(ctx, crewSlug, crewID, spec.Files); err != nil {
 		return err
 	}
 	return nil

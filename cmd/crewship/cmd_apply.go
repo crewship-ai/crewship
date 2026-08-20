@@ -44,6 +44,13 @@ Conflict modes (mutually exclusive):
   --strict       Fail if any resource in the manifest already exists
   --replace      Delete every matching resource before recreating it
 
+Pass --no-delete to refuse any run whose plan would destroy something.
+It outranks --yes, and it fails the dry run too, so "this apply deletes
+nothing" is a claim CI can check rather than one a human has to read a
+plan carefully enough to make. Worth defaulting to on production: an
+agent's Composio OAuth binding is a browser consent, so deleting one is
+not a rollback away.
+
 Credential values are NEVER stored in the manifest itself. By default
 declared credentials are created as PENDING slots that show up in the
 UI as "Needs value". Pass --from-env to read values from environment
@@ -65,6 +72,7 @@ func init() {
 	applyCmd.Flags().String("secrets-file", "", "Load credential values from a KEY=VALUE file")
 	applyCmd.Flags().Bool("skip-test-gate", false, "Forward skip_test_gate=true on routine save (requires OWNER/ADMIN role server-side)")
 	applyCmd.Flags().Bool("skip-governance-gate", false, "Forward skip_governance_gate=true so risky routines land active instead of queued for approval (requires OWNER/ADMIN)")
+	applyCmd.Flags().Bool("no-delete", false, "Refuse the run if the plan would delete anything (outranks --yes)")
 	applyCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompts (required for destructive plans in non-TTY)")
 	_ = applyCmd.MarkFlagRequired("file")
 
@@ -90,6 +98,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 	secretsFile, _ := cmd.Flags().GetString("secrets-file")
 	skipTestGate, _ := cmd.Flags().GetBool("skip-test-gate")
 	skipGovGate, _ := cmd.Flags().GetBool("skip-governance-gate")
+	noDelete, _ := cmd.Flags().GetBool("no-delete")
 	yes, _ := cmd.Flags().GetBool("yes")
 
 	if strict && replace {
@@ -136,8 +145,18 @@ func runApply(cmd *cobra.Command, args []string) error {
 
 	printPlan(plan, dryRun)
 
+	// Before the dry-run exit, so the rehearsal and the performance
+	// agree: a plan --no-delete would refuse has to fail the dry run
+	// too, or the check people run in CI passes on a run that won't.
+	if noDelete {
+		if err := refuseDeletes(plan); err != nil {
+			printWarnings(plan)
+			return err
+		}
+	}
+
 	if dryRun {
-		printSummary(plan, nil)
+		printSummary(plan, nil, nil)
 		// A dry run is exactly where "what will NOT happen" belongs: it is
 		// the preview someone reads before committing, and the first version
 		// of this printed skips only on the real run — so the plan quietly
@@ -157,9 +176,14 @@ func runApply(cmd *cobra.Command, args []string) error {
 	}
 
 	result, err := manifest.Apply(cmd.Context(), client, bundle, manifest.Options{
-		Mode:               mode,
-		Secrets:            secrets,
-		Yes:                yes,
+		Mode:    mode,
+		Secrets: secrets,
+		Yes:     yes,
+		// Passed through as well as checked above. refuseDeletes judged
+		// the plan we rendered; Apply builds its own from a fresh read,
+		// and a delete that appeared in between would otherwise execute
+		// under --yes — which is how CI invokes this.
+		NoDelete:           noDelete,
 		SkipTestGate:       skipTestGate,
 		SkipGovernanceGate: skipGovGate,
 		BaseDir:            manifestBaseDir(path),
@@ -175,7 +199,8 @@ func runApply(cmd *cobra.Command, args []string) error {
 	// remainder of this function deref a possibly-nil result and
 	// fool downstream tooling into thinking apply succeeded.
 	if err != nil {
-		printSummary(plan, result)
+		printSummary(plan, result, err)
+		printNotApplied(result)
 		printSkipped(plan)
 		printWarnings(plan)
 		if errors.Is(err, manifest.ErrConfirmationRequired) {
@@ -184,7 +209,7 @@ func runApply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	printSummary(plan, result)
+	printSummary(plan, result, nil)
 
 	if result != nil && len(result.PendingCredentials) > 0 {
 		fmt.Fprintln(os.Stdout)
@@ -264,18 +289,88 @@ func printPlan(plan *manifest.Plan, dryRun bool) {
 	fmt.Fprint(os.Stdout, plan.Render())
 }
 
-func printSummary(plan *manifest.Plan, result *manifest.Result) {
+// printSummary writes the one line most readers actually read.
+//
+// applyErr is not decoration: on a failed run the counters describe a
+// PREFIX of the plan, because Apply stops at the first error. Printed
+// under the word "Applied:" that prefix reads as the whole job — which
+// is how a production run that uploaded none of its ten crew files was
+// filed as done, leaving a routine on the stale script it was being
+// fixed to replace. "Applied:" is therefore reserved for a run that
+// finished; a failed one says FAILED and keeps the counters as
+// evidence, not as a verdict.
+func printSummary(plan *manifest.Plan, result *manifest.Result, applyErr error) {
 	if plan == nil {
 		return
 	}
 	c, u, n, d := plan.Summary()
 	fmt.Fprintln(os.Stdout)
 	if result == nil {
+		if applyErr != nil {
+			// Failed before executing anything (confirmation refused, a
+			// guard tripped). A "Plan:" line here would be the last
+			// thing printed and would read like a completed dry run.
+			fmt.Fprintf(os.Stdout, "%sFAILED: nothing was applied.%s\n", cli.Red, cli.Reset)
+			return
+		}
 		fmt.Fprintf(os.Stdout, "Plan: %d to create, %d to update, %d unchanged, %d to delete.\n", c, u, n, d)
+		return
+	}
+	if applyErr != nil {
+		fmt.Fprintf(os.Stdout,
+			"%sFAILED after %d created, %d updated, %d unchanged, %d deleted — the manifest was NOT fully applied.%s\n",
+			cli.Red, result.Created, result.Updated, result.Unchanged, result.Deleted, cli.Reset)
 		return
 	}
 	fmt.Fprintf(os.Stdout, "Applied: %d created, %d updated, %d unchanged, %d deleted.\n",
 		result.Created, result.Updated, result.Unchanged, result.Deleted)
+}
+
+// printNotApplied names the item the run died on and every item behind
+// it that was never attempted.
+//
+// The counters say how far the run got; this says what it left. Without
+// it the operator's next move is to guess, and the guess that costs the
+// most is "the summary said created, so it's there" — verified against
+// a `files list` that shows the right filename holding the wrong bytes.
+func printNotApplied(result *manifest.Result) {
+	if result == nil || result.FailedItem == "" {
+		return
+	}
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "%sNOT APPLIED:%s\n", cli.Red, cli.Reset)
+	fmt.Fprintf(os.Stdout, "  x %s  <- failed here\n", result.FailedItem)
+	for _, line := range result.NotApplied {
+		fmt.Fprintf(os.Stdout, "    %s  (never attempted)\n", line)
+	}
+	fmt.Fprintf(os.Stdout, "  %sApply stops at the first failure and is idempotent — fix the cause and re-run.%s\n",
+		cli.Dim, cli.Reset)
+}
+
+// refuseDeletes implements --no-delete: a plan carrying any destructive
+// operation is rejected before a single mutation is issued.
+//
+// Deleting an agent takes its memory and its Composio OAuth binding
+// with it, and that binding is a browser consent no manifest can
+// replay — an unintended delete is not a rollback away, it is a person
+// away. Sync mode makes deletion the DEFAULT for anything that fell out
+// of the file, so the guard has to be a flag on the run and not a
+// property of the manifest, and it deliberately outranks --yes: --yes
+// is the flag every automated invocation already carries, so a guard it
+// could switch off would not be one.
+func refuseDeletes(plan *manifest.Plan) error {
+	deletes := plan.Deletes()
+	if len(deletes) == 0 {
+		return nil
+	}
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "%sREFUSED (--no-delete): the plan would destroy %d resource%s:%s\n",
+		cli.Red, len(deletes), plural(len(deletes)), cli.Reset)
+	for _, line := range deletes {
+		fmt.Fprintf(os.Stdout, "  %s\n", line)
+	}
+	return fmt.Errorf("--no-delete: plan contains %d destructive operation%s; re-add the resource to the manifest or drop --no-delete",
+		len(deletes), plural(len(deletes)))
 }
 
 // provisionHintForCrews prints a note for every crew with a

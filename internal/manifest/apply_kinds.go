@@ -231,6 +231,13 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		if err != nil {
 			return fmt.Errorf("crew %q: plan: %w", doc.Metadata.Slug, err)
 		}
+		// Same advisory the legacy nested-crew planner emits. Raised here
+		// rather than inside kinds.CrewDocument.Plan because the kinds
+		// package has no warnings channel, and giving it one for a single
+		// advisory is more plumbing than the warning is worth.
+		if remote != nil {
+			pb.warnIfCrewStopped(ctx, doc.Metadata.Slug, remote.ID, len(doc.Spec.Files))
+		}
 		pb.appendKindItems(items)
 	}
 

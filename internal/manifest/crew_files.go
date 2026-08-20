@@ -57,7 +57,8 @@ func (v *validator) checkFiles(scope string, files []CrewFile) {
 // — one write path, one validation surface. When the parent crew is new,
 // crewID is empty and the closure resolves it by slug at apply time, exactly
 // like the other crew children.
-func (pb *planBuilder) planCrewFiles(crewSlug, crewID string, files []CrewFile) error {
+func (pb *planBuilder) planCrewFiles(ctx context.Context, crewSlug, crewID string, files []CrewFile) error {
+	pb.warnIfCrewStopped(ctx, crewSlug, crewID, len(files))
 	for i := range files {
 		f := files[i]
 		dest, err := normalizeCrewFileDest(f.Src, f.Dest)
@@ -93,4 +94,42 @@ func (pb *planBuilder) planCrewFiles(crewSlug, crewID string, files []CrewFile) 
 			})
 	}
 	return nil
+}
+
+// warnIfCrewStopped adds a plan-time advisory when the manifest ships
+// files into a crew whose container is not running.
+//
+// Files under the crew's shared tree are owned by the container user, so
+// the server can only overwrite one by replaying the write inside the
+// container — which has to be up. Against a stopped crew the save
+// answers 409, and because apply is fail-fast that 409 lands in the
+// middle of a run, after earlier resources are already committed. This
+// is the same fact, twenty seconds earlier, in the dry-run someone reads
+// before they commit to anything.
+//
+// Advisory and not an error, on purpose. The crew may be started between
+// the plan and the apply — including by the operator reading this line —
+// and a manifest that refused to plan against a stopped crew would be
+// unusable in exactly the deploy where it matters most.
+//
+// Only for crews that already exist: a crew being created in this same
+// apply has no container yet, its files are a first write to an
+// unowned path, and warning about it would fire on every fresh install.
+func (pb *planBuilder) warnIfCrewStopped(ctx context.Context, crewSlug, crewID string, fileCount int) {
+	if crewID == "" || fileCount == 0 {
+		return
+	}
+	statusFn := pb.containerStatusFn
+	if statusFn == nil {
+		statusFn = func(id string) (bool, bool) {
+			return pb.client.CrewContainerStatus(ctx, id)
+		}
+	}
+	running, known := statusFn(crewID)
+	if !known || running {
+		return
+	}
+	pb.plan.Warnings = append(pb.plan.Warnings, fmt.Sprintf(
+		"crew %q is not running, and this manifest writes %d file(s) into it — files it already owns can only be overwritten while its container is up, so those saves will fail with 409. Start it first: `crewship crew start %s`",
+		crewSlug, fileCount, crewSlug))
 }

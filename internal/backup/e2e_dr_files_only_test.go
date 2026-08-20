@@ -375,7 +375,10 @@ func TestE2E_DisasterRecovery_FilesOnlyRefusesWhenNothingLands(t *testing.T) {
 		if !strings.Contains(err.Error(), "landed no crew filesystem state") {
 			t.Errorf("refusal should say nothing landed; got %v", err)
 		}
-		if !strings.Contains(err.Error(), "crew provision") {
+		// `crew start` and not `crew provision`: the container has to be
+		// RUNNING for exec-tar to write into it, and provision only ever
+		// built an image (see restore_remediation.go).
+		if !strings.Contains(err.Error(), "crewship crew start") {
 			t.Errorf("refusal should name the step that fixes it; got %v", err)
 		}
 		if len(ops.written) != 0 {

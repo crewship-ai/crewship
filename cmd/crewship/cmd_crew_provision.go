@@ -297,7 +297,17 @@ func watchProvision(client *cli.Client, crewID, slug string) error {
 
 		switch status.Status {
 		case "completed":
-			cli.PrintSuccess(fmt.Sprintf("Crew %q provisioned.", slug))
+			// "provisioned" has been read as "ready to use" often
+			// enough to cost a deploy an hour: provision builds an
+			// image and nothing more, and on a cache hit it reaches
+			// here in a second or two having started nothing. The
+			// container is created lazily on the crew's first agent
+			// run, and until then `crew files save` into the shared
+			// tree 409s. One line, so the next reader knows.
+			cli.PrintSuccess(fmt.Sprintf("Crew %q provisioned (container image ready).", slug))
+			fmt.Fprintf(os.Stdout, "  %sImage only — nothing is running yet. Start the container with "+
+				"'crewship crew start %s', or let the crew's first agent run start it.%s\n",
+				cli.Dim, slug, cli.Reset)
 			if status.AgentsPendingRestart > 0 {
 				fmt.Fprintf(os.Stdout, "  %s%d agent%s on the old image. Run 'crewship crew restart-agents %s' when ready.%s\n",
 					cli.Yellow, status.AgentsPendingRestart, plural(status.AgentsPendingRestart), slug, cli.Reset)

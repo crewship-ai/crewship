@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -63,6 +64,101 @@ type RoutineSpec struct {
 	// webhook per routine (the pipeline_webhooks store enforces this
 	// at apply time; the manifest mirrors the cardinality).
 	Webhook *RoutineWebhook `yaml:"webhook,omitempty" json:"webhook,omitempty"`
+
+	// Rest carries every top-level `spec:` key this build does not model
+	// as a typed field, so the routine DSL rides through apply and
+	// export whole. RoutineStep has always had one; RoutineSpec did not,
+	// and the asymmetry was a silent data loss in both directions:
+	// guardrails, integrations_required, concurrency_key,
+	// max_concurrent, outputs, display_name, agentless, hooks, eval,
+	// resources, execution_tier and parallelism are all valid DSL and
+	// were all dropped between the file and the wire — no error, no
+	// warning, no plan diff.
+	//
+	// The export half is the dangerous one. ExportRoutines decodes the
+	// STORED definition into this struct, so a field authored through
+	// `crewship routine save` or the dashboard vanished from the
+	// exported YAML, and the next apply then DELETED it from the live
+	// routine — an `agentless: true` token-zero guarantee could be
+	// revoked by someone editing an unrelated line.
+	//
+	// Typed fields still win every collision (see definitionJSONShape),
+	// so modelling a key later is never a behaviour change. Keys land
+	// here unvalidated by design: pipeline.Parse on the server is the
+	// authority on what the DSL means, and a manifest that second-
+	// guesses it can only be wrong in the direction of dropping valid
+	// input. routinePlanWarnings names anything unrecognised at plan
+	// time so a typo is visible rather than merely inert.
+	Rest map[string]any `yaml:",inline" json:"-"`
+}
+
+// routineSpecKnownKeys is the set of top-level keys RoutineSpec models
+// as typed fields, derived from the struct tags so that adding a field
+// can never leave a stale hand-written list behind.
+//
+// UnmarshalJSON uses it to keep Rest disjoint from the typed fields.
+// That disjointness is load-bearing, not tidiness: yaml.Marshal rejects
+// a struct whose inline map repeats a field's key ("duplicated key"),
+// so a Rest that shadowed `steps` would make every export fail.
+var routineSpecKnownKeys = func() map[string]bool {
+	keys := map[string]bool{
+		// Not a RoutineSpec field, but not a pass-through either:
+		// definitionJSONShape always derives the DSL's `name` from
+		// metadata.slug, and letting it into Rest would put a stale
+		// copy in the exported YAML that apply then ignores.
+		"name": true,
+	}
+	t := reflect.TypeOf(RoutineSpec{})
+	for i := 0; i < t.NumField(); i++ {
+		for _, tag := range []string{"json", "yaml"} {
+			name, _, _ := strings.Cut(t.Field(i).Tag.Get(tag), ",")
+			if name != "" && name != "-" {
+				keys[name] = true
+			}
+		}
+	}
+	return keys
+}()
+
+// UnmarshalJSON decodes the typed fields and routes every other
+// top-level key into Rest.
+//
+// encoding/json has no equivalent of yaml's `,inline`, so the YAML path
+// (the manifest a human writes) and the JSON path (the stored
+// definition ExportRoutines reads back) needed different mechanisms to
+// reach the same result. Without this, export stayed lossy even after
+// apply stopped being.
+func (s *RoutineSpec) UnmarshalJSON(data []byte) error {
+	// The alias sheds this method, so the typed decode below does not
+	// recurse into it.
+	type alias RoutineSpec
+	var typed alias
+	if err := json.Unmarshal(data, &typed); err != nil {
+		return err
+	}
+
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	var rest map[string]any
+	for k, raw := range all {
+		if routineSpecKnownKeys[k] {
+			continue
+		}
+		var v any
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("routine spec key %q: %w", k, err)
+		}
+		if rest == nil {
+			rest = map[string]any{}
+		}
+		rest[k] = v
+	}
+
+	*s = RoutineSpec(typed)
+	s.Rest = rest
+	return nil
 }
 
 // RoutineSlash mirrors pipeline.SlashSpec — the routine's entry in the
@@ -601,14 +697,26 @@ func (d *RoutineDocument) buildSaveBody() map[string]any {
 
 // definitionJSONShape strips the manifest-only fields (schedules,
 // webhook) from the spec before handing the rest to pipeline.Parse on
-// the server side. The DSL parser rejects unknown top-level keys, so
-// we MUST omit anything the schema doesn't recognize.
+// the server side. Those two describe sibling tables, not the DSL, and
+// are the only keys that must not travel.
+//
+// Everything else does travel, including keys this build does not model
+// — they come through Spec.Rest. The previous shape was an explicit
+// allowlist built on the belief, stated in this comment, that "the DSL
+// parser rejects unknown top-level keys". It does not: pipeline.Parse
+// is a plain json.Unmarshal and discards what it doesn't know. So the
+// allowlist bought no safety and cost six valid DSL fields per apply.
 func definitionJSONShape(d *RoutineDocument) map[string]any {
-	out := map[string]any{
-		"dsl_version": d.Spec.DSLVersion,
-		"name":        d.Metadata.Slug,
-		"steps":       d.Spec.Steps,
+	out := make(map[string]any, len(d.Spec.Rest)+11)
+	// Unmodelled keys first so a typed field always wins the collision.
+	// The catch-all must never be able to override something the
+	// manifest schema actually understands.
+	for k, v := range d.Spec.Rest {
+		out[k] = v
 	}
+	out["dsl_version"] = d.Spec.DSLVersion
+	out["name"] = d.Metadata.Slug
+	out["steps"] = d.Spec.Steps
 	if d.Spec.Description != "" {
 		out["description"] = d.Spec.Description
 	}

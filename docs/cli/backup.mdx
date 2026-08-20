@@ -165,9 +165,15 @@ they create have no containers yet. Three steps:
 
 ```bash
 crewship backup restore bundle.tar.zst --as-workspace acme-dr
-crewship crew provision <crew> -w ws_new123
+crewship crew start <crew> -w ws_new123
 crewship backup restore bundle.tar.zst -w ws_new123 --files-only
 ```
+
+Step 2 is [`crew start`](/cli/crew#crewship-crew-start), not `crew
+provision`: `--files-only` writes each section by exec'ing into the
+crew's container, so the container has to be **running**. Provision only
+builds the image, which left this recipe one command short. `crew start`
+builds the image too when there is none, so it covers both.
 
 `--files-only` is authorised by provenance, not by the flag: step 1
 records which bundle the new workspace came from (matched on the

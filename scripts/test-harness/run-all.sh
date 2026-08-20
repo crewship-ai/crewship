@@ -18,7 +18,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QUICK=0
 [[ "${1:-}" == "--quick" ]] && QUICK=1
 
-tests=(test-memory.sh test-delegation.sh test-crew-links.sh test-notifications.sh test-inbox.sh test-orchestration.sh test-credentials.sh test-keeper.sh test-keeper-config.sh test-keeper-aux.sh)
+tests=(test-memory.sh test-delegation.sh test-crew-links.sh test-crew-lifecycle.sh test-notifications.sh test-inbox.sh test-orchestration.sh test-credentials.sh test-keeper.sh test-keeper-config.sh test-keeper-aux.sh)
 (( QUICK == 0 )) && tests+=(test-determinism.sh)
 [[ "${WITH_GITHUB:-0}" == "1" ]] && tests+=(test-realworld-github.sh)
 # Secretless-GitHub proof (PRD-CREDENTIALS-V2 §4.3, T-H1…T-H9) — opt-in for the

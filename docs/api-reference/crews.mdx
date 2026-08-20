@@ -34,6 +34,8 @@ workspace ID or slug.
 | GET | [`/api/v1/crews/{crewId}/policy`](#get-crew-policy) | Get the crew autonomy policy |
 | PUT | [`/api/v1/crews/{crewId}/policy`](#set-crew-policy) | Set the crew autonomy policy |
 | POST | [`/api/v1/crews/{crewId}/apply-avatar-style`](#apply-avatar-style) | Apply an avatar style across agents |
+| POST | [`/api/v1/crews/{crewId}/container-start`](#start-container) | Start the crew's runtime container |
+| POST | [`/api/v1/crews/{crewId}/container-stop`](#stop-container) | Stop the crew's runtime container and sidecars |
 | GET | [`/api/v1/crews/{crewId}/container-status`](#container-status) | Get the crew's runtime container status |
 | GET | [`/api/v1/crews/{crewId}/credential-readiness`](#credential-readiness) | Report credentials whose CLI is missing from the container |
 | GET | [`/api/v1/crews/{crewId}/capabilities`](#crew-capabilities) | Return the crew's authoring capabilities bundle |
@@ -658,6 +660,132 @@ When `reset_overrides` is `true`, the response is `{ "updated": N, "reset": true
 ---
 
 ## Container
+
+### Start Container
+
+```
+POST /api/v1/crews/{crewId}/container-start?workspace_id={workspaceId}
+```
+
+Starts the crew's runtime container and returns once it is running.
+
+This is **not** [provisioning](/api-reference/provisioning#trigger-provision). Provision builds the container
+*image*; this creates and starts the container itself, running the same sequence
+an agent run performs — the crew's provisioned image, its mounts, `containerEnv`,
+capabilities and resource limits, and any sidecar services declared in
+`services_json`. A crew with no image yet is provisioned first, so the call
+works on a cold crew (that build can take minutes).
+
+**Idempotent.** Starting a running crew returns its existing container and
+`200`, so a caller can start-then-write without branching on current state.
+
+**Auth:** MANAGER+ (role `create`) — starting a container spends host memory and
+CPU, so it sits with `provision` / `rebuild` / `restart-agents` rather than with
+the reads.
+
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "ccrew0123456789abcdefghij",
+  "slug": "uctarna",
+  "container_id": "3f9a1c02b7de...",
+  "status": "running",
+  "notices": ["sidecar services are not supported by this container provider"]
+}
+```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `crew_id` | string | The crew's ID |
+| `slug` | string | The crew's slug |
+| `container_id` | string | The runtime container's ID |
+| `status` | string | Always `running` on a `200` |
+| `notices` | array? | Degradation the start survived — e.g. a container provider with no sidecar support, so a crew that declares `services:` came up without them. **Absent** when the crew started exactly as declared |
+
+| Status | Condition |
+|---|---|
+| `400` | `crewId` missing |
+| `403` | Insufficient role |
+| `404` | Crew not found in this workspace |
+| `502` | The image build failed, or the container failed to start |
+| `503` | No container runtime is configured on this server (`--no-docker`, or a daemon unreachable at boot) |
+
+<Note>
+**Why this exists.** Files under `/crew/shared` are owned by the container user
+(uid 1001), so the server can only overwrite one by replaying the write inside
+the container — which has to be running. Against a stopped crew,
+[`PUT /files/save`](#crew-files-proxy) answers `409 file is owned by the crew
+runtime`. Before this endpoint the only way to clear that was to run an agent at
+the crew with a throwaway prompt, spending tokens for a side effect.
+
+`notices` is returned rather than logged deliberately: the caller asked for this
+crew to be up, and "up, but without its declared postgres" changes what they do
+next.
+</Note>
+
+**CLI:** [`crewship crew start`](/cli/crew#crewship-crew-start)
+
+---
+
+### Stop Container
+
+```
+POST /api/v1/crews/{crewId}/container-stop?workspace_id={workspaceId}
+```
+
+Stops the crew's runtime container and any sidecar services it declared.
+Proxied to `crewshipd`, which owns both halves of the operation.
+
+**Idempotent.** Stopping an already-stopped crew answers `200` — that is
+the state the caller asked for.
+
+**Auth:** MANAGER+ (role `create`). Not a lower bar than
+[starting](#start-container): stopping a crew somebody is working in
+interrupts them, so it is not read-shaped just because it frees memory
+rather than spending it.
+
+**Request:** `crewId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "ccrew0123456789abcdefghij",
+  "slug": "uctarna",
+  "status": "stopped"
+}
+```
+
+No `container_id`: the container it would name is gone by the time the
+caller reads the answer, and returning one invites a follow-up call
+against a dead id.
+
+| Status | Condition |
+|---|---|
+| `400` | `crewId` missing |
+| `403` | Insufficient role |
+| `404` | Crew not found in this workspace |
+| `502` | crewshipd refused or could not be reached |
+| `503` | No container runtime is configured on this server |
+
+<Note>
+Named volumes are **not** removed, so sidecar data survives a stop. Only
+`crewship crew delete` removes them (see the crew-delete teardown
+report).
+
+Container memory and CPU limits are applied at container-create time, so
+stop-then-start is how a resize takes effect on a crew that is already
+running.
+</Note>
+
+**CLI:** [`crewship crew stop`](/cli/crew#crewship-crew-stop)
+
+---
 
 ### Container Status
 
