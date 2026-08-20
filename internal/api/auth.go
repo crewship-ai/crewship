@@ -360,9 +360,9 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), "SELECT id FROM users WHERE email = ?", req.Email).Scan(&existingID)
 	if err == nil {
 		// Address is taken. Spend one bcrypt so this path costs what
-		// the create path costs (GenerateFromPassword at the same cost
-		// 12 below), then answer exactly as if we had created the
-		// account. The owner hears about the attempt by email.
+		// the create path costs (GenerateFromPassword at the same
+		// bcryptCost below), then answer exactly as if we had created
+		// the account. The owner hears about the attempt by email.
 		_ = bcryptCompareHashAndPassword(dummyBcryptHash(), req.Password)
 		// Answer FIRST. The notice is an outbound HTTPS call to a third
 		// party and it happens on this branch only — awaited here it
@@ -378,7 +378,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	if err != nil {
 		replyInternalError(w, h.logger, "hash password", err)
 		return
@@ -692,7 +692,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 	if err != nil {
 		replyInternalError(w, h.logger, "bootstrap: hash password", err)
 		return

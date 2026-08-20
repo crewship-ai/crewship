@@ -263,14 +263,20 @@ func concurrentTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// TestDummyBcryptHash_LazyMemoizedCost12 pins the #967 startup fix:
-// the timing-equalizer hash must be produced by a memoized accessor
+// TestDummyBcryptHash_LazyMemoizedAtTheSharedCost pins the #967 startup
+// fix: the timing-equalizer hash must be produced by a memoized accessor
 // (sync.OnceValue), NOT an eager package-level generation — the eager
 // version cost every invocation of the full crewship binary ~290 ms
-// of bcrypt before main() ran, `crewship version` included. The cost
-// must stay 12 to match the real hashes in users.hashed_password, or
-// the unknown-email compare stops equalizing timing.
-func TestDummyBcryptHash_LazyMemoizedCost12(t *testing.T) {
+// of bcrypt before main() ran, `crewship version` included.
+//
+// The cost must equal bcryptCost — the same number the signup/bootstrap/
+// recovery paths write into users.hashed_password — or the unknown-email
+// compare stops equalizing timing. That is asserted against the var
+// rather than the literal 12 because the test binary lowers the var
+// (#2031); what the property needs is that the two move together, and
+// that production's number is 12 is pinned separately by
+// TestBcryptCost_ProductionValueIsPinned.
+func TestDummyBcryptHash_LazyMemoizedAtTheSharedCost(t *testing.T) {
 	h1 := dummyBcryptHash()
 	h2 := dummyBcryptHash()
 	if h1 != h2 {
@@ -280,8 +286,8 @@ func TestDummyBcryptHash_LazyMemoizedCost12(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dummyBcryptHash() is not a valid bcrypt hash: %v", err)
 	}
-	if cost != 12 {
-		t.Errorf("dummy hash cost = %d, want 12 (must match users.hashed_password cost)", cost)
+	if cost != bcryptCost {
+		t.Errorf("dummy hash cost = %d, want %d (must match users.hashed_password cost)", cost, bcryptCost)
 	}
 }
 

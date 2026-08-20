@@ -18,9 +18,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// bcryptCost matches the signup/bootstrap/recovery paths (cost 12).
-const profileBcryptCost = 12
-
 // UserProfileHandler serves /api/v1/users/me — the caller's own account.
 type UserProfileHandler struct {
 	db       *sql.DB
@@ -208,7 +205,7 @@ func (h *UserProfileHandler) ChangePassword(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), profileBcryptCost)
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcryptCost)
 	if err != nil {
 		replyInternalError(w, h.logger, "hash new password", err)
 		return

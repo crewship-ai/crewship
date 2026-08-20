@@ -88,11 +88,16 @@ env:
 #          slowest runners in the fleet left no daylight for overhead.
 #   FIXED  (codeql.yml) `Analyze (go, manual)`, observed hitting its 30m cap
 #          mid-build and passing on rerun.
-#   OK     go / go-shuffle / go-race / go-race-api — each already keeps ≥5 min
-#          between (overhead + `go test -timeout`) and its job cap, and the
-#          `-timeout` values (12m/15m/25m/30m) are already well above Go's
+#   OK     go / go-shuffle / go-race — each already keeps ≥5 min between
+#          (overhead + `go test -timeout`) and its job cap, and the
+#          `-timeout` values (12m/15m/25m) are already well above Go's
 #          600s per-package default, which #1998 reports two packages
 #          exceeding on a loaded box.
+#   FIXED  go-race-api: that ≥5 min was a claim in prose, and the `-timeout`
+#          it was measured against had rotted from 1.7x the binary to 1.03x
+#          (#2031). Both are now derived from one measured baseline, and the
+#          step refuses to start if the derived `-timeout` plus overhead no
+#          longer fits this job's cap.
 #   FIXED  (setup-node-pnpm) `pnpm install --frozen-lockfile` — same hazard
 #          class, a third-party registry. Bounded with `timeout(1)` inside the
 #          composite action, because composite-action steps cannot carry
@@ -1391,10 +1396,10 @@ jobs:
   # ── Go race: the internal/api shard ──
   #
   # Same gate, one package, its own budget. internal/api is ~90% serial
-  # (502 t.Parallel calls across 5263 tests) and simply large: 519.4s local
-  # under -race, 1056.5s here. Sharing go-race's per-binary timeout meant
-  # either that job carried a 30m+ cap for all 107 packages or internal/api
-  # died at 20m — it died at 20m (job 90981983760).
+  # (520 t.Parallel calls across 6367 tests) and simply large. Sharing
+  # go-race's per-binary timeout meant either that job carried a 30m+ cap
+  # for all 107 packages or internal/api died at 20m — it died at 20m (job
+  # 90981983760).
   #
   # Splitting it out is the shape #1548 used for go-api, and it costs
   # nothing in wall clock: this runs in parallel with go-race, so the PR's
@@ -1410,16 +1415,43 @@ jobs:
     needs: [merge-conflict-markers]
     name: Go Race (internal/api)
     runs-on: ubuntu-latest
-    # BLOCKING, same as go-race. Same cap invariant too: 40m > 30m
-    # -timeout + ~3 min overhead, so Go's goroutine dump wins over
-    # GitHub's opaque cancel.
+    # BLOCKING, same as go-race.
     #
-    # Measured, not extrapolated: 1056.5s (17.6m) for the binary, 19m41s
-    # for the job, on this job's first green run. 30m is ~1.7x that — the
-    # same ratio go-race gives cmd/crewship, and enough that ordinary
-    # growth in the repo's largest package does not turn this red for a
-    # reason unrelated to any race.
-    timeout-minutes: 40
+    # ── The budget (#2031) ──
+    #
+    # This job's `-timeout` used to be a hand-written 30m, documented as
+    # "~1.7x" a 1056.5s measurement carrying no date. By 2026-08-20 the
+    # gate was panicking on PRs that touched no Go at all, with no
+    # `--- FAIL` and no `WARNING: DATA RACE` to say otherwise — which reads
+    # exactly like the author's own regression.
+    #
+    # Measured, on `main`, green, `ok … Ns` straight from each job log:
+    #
+    #   run           sha        binary seconds
+    #   32265046451   750805de       1528.9
+    #   32297961942   01354cf4       1708.1
+    #   32356542793   74abd726       1155.7
+    #   32366381186   39a4ea4b       1626.9
+    #   32384479926   7f0a8e1f       1549.2
+    #
+    # Two things that table settles. First, growth is real but slower than
+    # it looked: 1056.5s at the split, ~1550s median now. Second — and this
+    # is what actually broke the gate — the SPREAD on essentially the same
+    # tree is 1.48x (1155.7 vs 1626.9, two hours apart on the same day, two
+    # commits apart). Runner-to-runner variance, not the diff under test,
+    # is the dominant term. A cap at 1.16x the median was never going to
+    # survive it, and re-measuring the median more often would not have
+    # helped: the number that matters is the slow tail.
+    #
+    # So the budget is now derived from ONE maintained number,
+    # RACE_API_BASELINE_SECONDS, instead of three claims in prose that can
+    # each rot independently. See the test step for the derivation and for
+    # the alarm that fires when the margin erodes again.
+    #
+    # This cap only ever bounds a hang. It must stay above the derived
+    # `-timeout` plus job overhead — and the step CHECKS that before it
+    # starts a single test, rather than trusting this comment.
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1433,6 +1465,32 @@ jobs:
         # No -shuffle, for the same reason as go-race: go-shuffle owns
         # order-dependence, and a fixed order keeps a race report
         # reproducible from the log without replaying a seed.
+        env:
+          # ── The one number to maintain ──
+          #
+          # Binary seconds for this package on a TYPICAL ubuntu-latest
+          # runner — the median of the green `main` runs tabulated in the
+          # job comment above, re-measured after #2031 lowered the test
+          # binary's bcrypt cost.
+          #
+          #   measured:  2026-08-20
+          #   value:     1400s   (run TBD, `ok … Ns`)
+          #
+          # Everything below is derived from it, so no multiplier can be
+          # true in a comment and false in the YAML:
+          #
+          #   -timeout      = 2.0x baseline   the hang bound
+          #   erosion alarm = 1.6x baseline   above the 1.48x runner spread,
+          #                                   so a slow runner alone is not
+          #                                   enough to trip it
+          #   job cap       > -timeout + JOB_OVERHEAD_MINUTES  (checked)
+          #
+          # To re-measure: take `ok … Ns` off a few green `main` runs of
+          # this job — the step prints it into the run summary for exactly
+          # this purpose — and update the three lines above together.
+          RACE_API_BASELINE_SECONDS: "1400"
+          JOB_CAP_MINUTES: "55"       # MUST equal timeout-minutes above
+          JOB_OVERHEAD_MINUTES: "6"   # checkout + toolchain + race build
         run: |
           set -euo pipefail
           pkg=github.com/crewship-ai/crewship/internal/api
@@ -1457,7 +1515,68 @@ jobs:
             echo "::error::$pkg does not resolve against 'go list ./...'. This shard is testing nothing — reconcile it and go-race's race-shard.txt together."
             exit 1
           fi
-          go test "$pkg" -race -count=1 -timeout 30m
+
+          baseline="$RACE_API_BASELINE_SECONDS"
+          timeout_s=$(( baseline * 2 ))        # 2.0x — the hang bound
+          alarm_s=$(( baseline * 16 / 10 ))    # 1.6x — above the 1.48x runner spread
+
+          # The cap invariant, checked rather than asserted. Raising the
+          # baseline without raising timeout-minutes would silently hand the
+          # kill back to GitHub, whose cancel produces no goroutine dump —
+          # the exact ambiguity this job's budget exists to remove.
+          if [ $(( timeout_s + JOB_OVERHEAD_MINUTES * 60 )) -ge $(( JOB_CAP_MINUTES * 60 )) ]; then
+            echo "::error::Budget does not fit its job cap: -timeout ${timeout_s}s + ${JOB_OVERHEAD_MINUTES}m overhead >= timeout-minutes ${JOB_CAP_MINUTES}. Raise timeout-minutes (and JOB_CAP_MINUTES with it) or lower RACE_API_BASELINE_SECONDS."
+            exit 1
+          fi
+
+          echo "internal/api race budget: baseline ${baseline}s, -timeout ${timeout_s}s, erosion alarm ${alarm_s}s."
+
+          log="${RUNNER_TEMP:-/tmp}/race-api.log"
+          status=0
+          go test "$pkg" -race -count=1 -timeout "${timeout_s}s" 2>&1 | tee "$log" || status=$?
+
+          # `ok  <pkg>  1155.745s` on success, `FAIL <pkg> 1800.087s` on a
+          # timeout panic — both carry the number, so the budget is reported
+          # on the run that blew it too, which is the run that needs it.
+          secs="$(grep -aoE 'internal/api[[:space:]]+[0-9]+\.[0-9]+s$' "$log" | tail -1 | grep -oE '[0-9]+\.[0-9]+' || true)"
+
+          if [ -n "$secs" ]; then
+            ratio="$(awk -v s="$secs" -v b="$baseline" 'BEGIN{printf "%.2f", s/b}')"
+            {
+              echo "### Go Race (internal/api) — budget"
+              echo ""
+              echo "| | seconds |"
+              echo "|---|---:|"
+              echo "| measured (\`ok … Ns\`) | ${secs} |"
+              echo "| baseline | ${baseline} |"
+              echo "| erosion alarm | ${alarm_s} |"
+              echo "| \`-timeout\` | ${timeout_s} |"
+              echo ""
+              echo "Measured / baseline = **${ratio}x**. Re-measure from a few green \`main\` runs when this drifts."
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            echo "internal/api race binary: ${secs}s (${ratio}x baseline ${baseline}s)."
+          fi
+
+          if [ "$status" -ne 0 ]; then
+            if grep -qa 'panic: test timed out' "$log"; then
+              echo "::error::internal/api hit its ${timeout_s}s -timeout. A timeout panic prints a goroutine dump and NO 'WARNING: DATA RACE' and NO '--- FAIL' — it is not evidence that this PR broke anything. Check the log for 'WARNING: DATA RACE' first; if there is none, this is the budget (#2031), and RACE_API_BASELINE_SECONDS needs re-measuring against green 'main' runs."
+            fi
+            exit "$status"
+          fi
+
+          if [ -n "$secs" ] && [ "${secs%%.*}" -gt "$alarm_s" ]; then
+            # On a PR this is a warning: the observed runner-to-runner
+            # spread is 1.48x, so one slow runner must never be able to turn
+            # somebody's frontend-only diff red — that misattribution is the
+            # whole of #2031. On `main` the same reading is an error,
+            # because there the subject really is the repo.
+            msg="internal/api took ${secs}s, over the ${alarm_s}s erosion alarm (${ratio}x the ${baseline}s baseline). This is about the package's size and the runner, not about any one diff. Re-measure RACE_API_BASELINE_SECONDS from green 'main' runs and re-size, or shard the package (see #2031)."
+            if [ "${GITHUB_EVENT_NAME:-}" = "push" ]; then
+              echo "::error::${msg}"
+              exit 1
+            fi
+            echo "::warning::${msg}"
+          fi
 
   # ── Go: cross-platform test matrix ──
   #

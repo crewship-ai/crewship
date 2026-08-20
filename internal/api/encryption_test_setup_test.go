@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // encKeyOnce ensures ENCRYPTION_KEY is set once at package level so parallel
@@ -29,7 +31,31 @@ var encKeyOnce sync.Once
 // t.Setenv("ENCRYPTION_KEY", ""), which restores this value afterwards.
 func TestMain(m *testing.M) {
 	installTestEncryptionKey()
+	lowerBcryptCostForTests()
 	os.Exit(m.Run())
+}
+
+// lowerBcryptCostForTests is the ONLY write to bcryptCost anywhere, and it
+// happens before a single test runs — so no test observes the value change
+// and no -race report can come out of it.
+//
+// Why it is needed: bcrypt is deliberately slow and its cost is exponential,
+// so production's cost 12 is ~256x cost 4. This package hashes a real
+// password on every signup, bootstrap, password reset, profile password
+// change and public-page token, and burns a real compare against the
+// equaliser hash on every unknown-email signin. Under -race, where blowfish's
+// key schedule is instrumented on every array access, that arithmetic was the
+// single largest line item in the test binary and it is what spent the
+// `Go Race (internal/api)` 30-minute budget (#2031).
+//
+// bcrypt.MinCost is a genuine bcrypt hash, not a stub: the handlers still
+// call GenerateFromPassword, the stored value is still a `$2a$` hash that
+// only the right password verifies against, and
+// TestSignup_StoresARealBcryptHashAtTheConfiguredCost pins that. What the
+// tests stop paying for is the key-stretching, which is a property of the
+// deployed system, not of the handler logic under test.
+func lowerBcryptCostForTests() {
+	bcryptCost = bcrypt.MinCost
 }
 
 func installTestEncryptionKey() {

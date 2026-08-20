@@ -364,7 +364,7 @@ func hashPagePublicPassword(w http.ResponseWriter, password string) (string, boo
 			pagePublicPasswordMaxBytes))
 		return "", false
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), profileBcryptCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, "that password could not be stored")
 		return "", false
