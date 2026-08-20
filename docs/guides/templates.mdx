@@ -14,6 +14,37 @@ Crewship provides two types of templates: **crew templates** (pre-configured tea
 
 Crew templates create a complete team in one step -- a crew with pre-configured agents, roles, system prompts, and skill assignments. Deploy with `crewship template deploy <slug>` or the Settings UI.
 
+### Slugs, workspaces, and shadowing
+
+A crew template is either **built-in** -- shipped with the binary, seeded from
+embedded YAML, visible to every workspace -- or **workspace-owned**, created
+inside one workspace and visible only there.
+
+Slugs are scoped accordingly:
+
+| Template kind | Slug must be unique across |
+|---|---|
+| Built-in | all built-ins (one shared catalog) |
+| Workspace-owned | that workspace only |
+
+So two workspaces may both hold `backend-team`, and neither can see the
+other's. A workspace-owned slug never collides with another tenant's.
+
+**A workspace template shadows the built-in of the same slug.** When a
+workspace owns `backend-team` *and* a built-in `backend-team` exists, every
+by-slug operation in that workspace -- `template get`, `template deploy`, the
+hire path, the onboarding wizard -- resolves to the workspace's version, and
+`template list` shows the slug once, as the workspace's version. The more
+specific definition wins.
+
+This is what lets you customise a shipped template in place: adjust the roster
+or the prompts, save it under the same slug, and every existing reference to
+that slug picks up your version. Renaming would break those references
+instead. Other workspaces are unaffected -- they keep seeing the built-in.
+
+To get the built-in back, delete the workspace template; nothing about the
+built-in was modified, it was only hidden.
+
 ### Seed Data Crews
 
 The built-in seed data (`cmd/crewship/seeddata/builtin/crews.yaml` +

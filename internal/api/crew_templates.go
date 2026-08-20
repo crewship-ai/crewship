@@ -23,6 +23,33 @@ var errTemplateNotFound = errors.New("template not found")
 // errCrewSlugConflict is returned by deployCrewTemplate when the crew slug is already taken.
 var errCrewSlugConflict = errors.New("crew slug already exists")
 
+// crewTemplateBySlugScope is the tail every single-row crew-template lookup
+// shares. It exists as one constant because the tie-break in it is a product
+// rule, not a query detail, and four call sites have to agree on it:
+// crew_templates.go (Get, deployCrewTemplate), agents_hire.go
+// (lookupCrewTemplate) and onboarding.go (the crew-name default).
+//
+// Until #1796 the schema made the tie-break unnecessary: crew_templates.slug
+// carried a global UNIQUE, so `slug = ? AND (is_builtin = 1 OR workspace_id =
+// ?)` could match at most one row and QueryRow's "first row wins" was never
+// exercised. Scoping that constraint to the workspace is what makes two
+// matches possible — a builtin and a workspace template of the same slug — and
+// without an ORDER BY, which one a caller gets is up to whatever order SQLite
+// happens to produce. Nondeterministic, and silently so.
+//
+// The rule: THE MORE SPECIFIC ROW WINS. A workspace template shadows the
+// builtin of the same slug, for that workspace only. `workspace_id IS NULL`
+// evaluates to 0 for the workspace-owned row and 1 for the builtin, so
+// ordering by it ascending puts the override first. This is what lets an
+// operator customise a shipped template in place instead of renaming it —
+// renaming would break every reference to the old slug.
+//
+// Takes two placeholders, in order: slug, workspace id.
+const crewTemplateBySlugScope = `
+	WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)
+	ORDER BY (workspace_id IS NULL)
+	LIMIT 1`
+
 type deployCrewResult struct {
 	CrewID     string   `json:"crew_id"`
 	CrewName   string   `json:"crew_name"`
@@ -53,8 +80,8 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 	var agentsJSON string
 	var icon, color *string
 	err := db.QueryRowContext(ctx, `
-		SELECT agents_json, icon, color FROM crew_templates
-		WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)`, templateSlug, wsID).Scan(&agentsJSON, &icon, &color)
+		SELECT agents_json, icon, color FROM crew_templates`+
+		crewTemplateBySlugScope, templateSlug, wsID).Scan(&agentsJSON, &icon, &color)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errTemplateNotFound
@@ -301,11 +328,23 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("seed crew templates", "error", err)
 	}
 
+	// The NOT EXISTS clause is the list-shaped half of the shadowing rule
+	// documented on crewTemplateBySlugScope: a builtin whose slug this
+	// workspace has overridden is dropped from the catalogue, so each slug
+	// appears exactly once and it is the workspace's version. Without it the
+	// list would show the same slug twice — and the second copy would be the
+	// one Get and Deploy refuse to return, since those resolve to the
+	// override. Only rows the caller's own workspace owns shadow anything;
+	// another tenant's template is not visible here and cannot hide a builtin.
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT id, name, slug, description, icon, color, category, agents_json, is_builtin, created_at
-		FROM crew_templates
-		WHERE is_builtin = 1 OR workspace_id = ?
-		ORDER BY is_builtin DESC, category ASC, name ASC`, wsID)
+		SELECT ct.id, ct.name, ct.slug, ct.description, ct.icon, ct.color,
+		       ct.category, ct.agents_json, ct.is_builtin, ct.created_at
+		FROM crew_templates ct
+		WHERE (ct.is_builtin = 1 OR ct.workspace_id = ?)
+		  AND NOT (ct.workspace_id IS NULL AND EXISTS (
+		        SELECT 1 FROM crew_templates ov
+		        WHERE ov.slug = ct.slug AND ov.workspace_id = ?))
+		ORDER BY ct.is_builtin DESC, ct.category ASC, ct.name ASC`, wsID, wsID)
 	if err != nil {
 		internalError(w, r, h.logger, "list crew templates", err)
 		return
@@ -346,7 +385,7 @@ func (h *CrewTemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var agentsJSON string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT id, name, slug, description, icon, color, category, agents_json, is_builtin, created_at
-		FROM crew_templates WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)`, slug, wsID).Scan(
+		FROM crew_templates`+crewTemplateBySlugScope, slug, wsID).Scan(
 		&t.ID, &t.Name, &t.Slug, &t.Description, &t.Icon, &t.Color,
 		&t.Category, &agentsJSON, &t.IsBuiltin, &t.CreatedAt)
 	if err != nil {

@@ -641,15 +641,17 @@ func (h *AgentHandler) dispatchHireInbox(w http.ResponseWriter, r *http.Request,
 
 // lookupCrewTemplate fetches a template by slug, honoring the built-in
 // + workspace-owned predicate so a workspace cannot hire from another
-// workspace's private templates.
+// workspace's private templates — and, when the workspace has a template
+// of its own under that slug, resolving to that one rather than to the
+// builtin it shadows (see crewTemplateBySlugScope).
 func (h *AgentHandler) lookupCrewTemplate(r *http.Request, workspaceID, slug string) (name string, defaultModel string, err error) {
 	// crew_templates has no first-class default-model column; the
 	// model usually lives inside agents_json. For the MVP we leave
 	// the model empty and let the orchestrator default kick in at
 	// first message — clients can always pass --model on the hire.
 	err = h.db.QueryRowContext(r.Context(), `
-		SELECT COALESCE(name, '') FROM crew_templates
-		WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)`,
+		SELECT COALESCE(name, '') FROM crew_templates`+
+		crewTemplateBySlugScope,
 		slug, workspaceID).Scan(&name)
 	return name, "", err
 }
