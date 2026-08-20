@@ -81,9 +81,12 @@ func seedNullableScopeWorkspace(t *testing.T, db *sql.DB) string {
 	// crews with a colliding prefix mint the same identifier. The row now
 	// carries workspace_id itself, which is the strongest possible answer to
 	// #1973 for this table: there is no foreign key left to scope it through,
-	// nullable or otherwise. It is still seeded here because what the counter
-	// costs when a bundle comes back short has not changed — the crew restarts
-	// at 1 on top of identifiers that restored alongside it.
+	// nullable or otherwise. It is still seeded here because a bundle that comes
+	// back short still costs something: #1797's allocator re-seeds a missing
+	// counter above the identifiers that restored alongside it, so numbering no
+	// longer lands ON them, but it does restart wherever those identifiers stop
+	// — a crew whose issues were all closed and deleted before the backup would
+	// hand out identifiers it has used before.
 	exec(`INSERT INTO issue_counters (workspace_id, prefix, next_number) VALUES (?, 'ENG', 42)`, workspaceID)
 
 	return workspaceID

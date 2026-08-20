@@ -113,6 +113,15 @@ func buildLedgerFixtures() ledgerFixtures {
 		return failed("no migration named %q at head — re-point fromName at a migration "+
 			"that is safe to apply after the ones that follow it", fromName)
 	}
+	if f.from >= f.to {
+		// The collision is staged by parking the newest migration's ledger row on
+		// `from`, so `from` has to be a DIFFERENT, EARLIER version. Equal versions
+		// make the staging UPDATE a no-op and every assertion below fail without
+		// naming the cause.
+		head.Close()
+		return failed("held-back migration %q is at v%d, not earlier than the newest (v%d) — "+
+			"re-point fromName at an earlier migration", fromName, f.from, f.to)
+	}
 	if err := head.Close(); err != nil {
 		return failed("close head: %w", err)
 	}

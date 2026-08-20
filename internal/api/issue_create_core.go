@@ -105,6 +105,14 @@ func crewIssuePrefix(issuePrefix, crewSlug string) string {
 // a new row starting at 1 would hand out identifiers the crew's own history
 // already holds. The ON CONFLICT on the seeding INSERT covers the case where
 // another writer created the row between the two statements.
+//
+// The seeding subquery cannot use an index — SUBSTR and GLOB see to that — so
+// it scans this workspace's identified missions. Once, normally: the row it
+// writes makes every later create take the UPDATE. A create that gets past the
+// seed and then fails LATER in the handler (no LEAD agent, a rejected assignee)
+// rolls the row back with the rest of the transaction and re-scans on the next
+// attempt, which is the cost of the counter and the mission being one atomic
+// decision rather than two.
 func nextIssueIdentifierTx(ctx context.Context, tx *sql.Tx, workspaceID, crewID string) (string, int, error) {
 	var issuePrefix sql.NullString
 	var crewSlug string

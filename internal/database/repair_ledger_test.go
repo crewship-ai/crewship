@@ -240,6 +240,14 @@ func TestRepairThenMigrate_RecoversARenumberedDatabase(t *testing.T) {
 		t.Fatalf("no migration named %q — re-point heldBackName at a migration "+
 			"that is safe to apply after the ones that follow it", heldBackName)
 	}
+	if other.version >= victim.version {
+		// The collision is staged by parking victim's ledger row on other.version,
+		// which has to be a DIFFERENT, EARLIER version: equal versions make the
+		// staging UPDATE a no-op and every assertion below fail without naming why.
+		t.Fatalf("held-back migration %q is at v%d, not earlier than the newest (%q at v%d) — "+
+			"re-point heldBackName at an earlier migration",
+			heldBackName, other.version, victim.name, victim.version)
+	}
 	// MigrateSkipping, not "Migrate then DELETE the ledger row": deleting the
 	// row would leave `other`'s schema change applied while claiming it never
 	// ran, and the final Migrate below — which applies it for real — would then
