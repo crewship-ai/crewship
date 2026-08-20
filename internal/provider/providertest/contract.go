@@ -456,7 +456,11 @@ func contractExecResultShape() Contract {
 				res.violate("Exec returned an error: %v", err)
 				return res
 			}
-			defer closeExec(result)
+			// finishExec, not closeExec: this check reads nothing, so closing
+			// is all the caller half of it needs — but a closed stream says
+			// only that the caller stopped reading, and the process is still
+			// running. Nothing here has any reason to outlive it (#1951).
+			defer finishExec(ctx, rt, result)
 			if result == nil {
 				res.violate("Exec returned (nil, nil)")
 				return res
@@ -729,6 +733,34 @@ func closeExec(r *provider.ExecResult) {
 	if r != nil && r.Reader != nil {
 		_ = r.Reader.Close()
 	}
+}
+
+// finishExec closes the caller's stream and then waits for the exec's process
+// to actually exit.
+//
+// Closing is not joining. On a provider that shells out, Exec returns once the
+// child has been STARTED, and Close only says the caller stopped reading — the
+// process keeps running, by design (see apple's execSpool: the exit code has to
+// be a fact about the process, not about the caller's reading habits). So a
+// contract that closes and returns leaves a live process behind, still writing
+// into the fixture directory the subtest is about to remove. That is #1951:
+// `TempDir RemoveAll cleanup: directory not empty` from the apple harness's CLI
+// stub recreating its call log after RemoveAll had already emptied the
+// directory, on a subtest whose own assertions had all passed.
+//
+// The contracts that DRAIN (execAndRead, drainExecResult) already join —
+// EOF on the stream is the process's own end-of-output. This is for the ones
+// that legitimately do not read, and it is the same shape as releaseBlocked.
+//
+// Bounded, and the result deliberately discarded: this is teardown, the
+// verdict was decided above, and a provider that cannot report the exit is
+// already failing execinspect/reports_the_real_exit_code_after_completion.
+func finishExec(ctx context.Context, rt Runtime, r *provider.ExecResult) {
+	closeExec(r)
+	if r == nil || r.ExecID == "" {
+		return
+	}
+	_, _ = provider.WaitExecExit(ctx, rt.Provider, r.ExecID, 10*time.Second)
 }
 
 // releaseBlocked unblocks a blocking exec and waits for it to actually exit.
