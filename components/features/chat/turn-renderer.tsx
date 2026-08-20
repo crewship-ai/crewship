@@ -153,10 +153,11 @@ interface TurnRendererProps {
   resolveAskProvenance?: (content: string) => string | null
 }
 
-/** Render a single turn (user, assistant, or system). Not exported: everything
- *  goes through `TurnRenderer` below, which is this component inside its own
- *  error boundary. */
-const TurnBody = React.memo(function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
+/** Render a single turn (user, assistant, or system). Not exported, and not
+ *  memoised here: everything goes through `TurnRenderer` below — this component
+ *  inside its own error boundary — and the memo sits on that, so the render is
+ *  cut at exactly the same point it was before the boundary existed. */
+function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
   const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
   const initialAnim = shouldAnimate ? arrival.initial : false
   const transition = shouldAnimate ? arrival.transition : { duration: 0 }
@@ -460,7 +461,7 @@ const TurnBody = React.memo(function TurnBody({ turn, onCopy, onFileClick, isLas
       )}
     </motion.div>
   )
-})
+}
 
 /** A cheap stand-in for "this turn's content changed".
  *
@@ -536,14 +537,15 @@ function TurnErrorCard({ turn, onRetry }: { turn: ChatTurn; onRetry: () => void 
  * rather than per route because of what the route boundary costs: it replaces
  * the page, which unmounts `chat-page-client`, discards `useChat`'s turns and
  * drops the live WebSocket — of the very session that just degraded. A turn
- * renders adapter-supplied values that no type checks (see `lib/adapter-field`),
- * so one of them being unreadable must cost that message and nothing else.
+ * renders adapter-supplied values that nothing type-checks (see
+ * `lib/adapter-field`), so one of them being unreadable must cost that message
+ * and nothing else.
  *
  * Honest limit, same as every React boundary: this catches throws from render
  * and lifecycle only. An event handler or an awaited callback that throws still
  * goes uncaught.
  */
-export function TurnRenderer(props: TurnRendererProps) {
+export const TurnRenderer = React.memo(function TurnRenderer(props: TurnRendererProps) {
   const { turn } = props
   return (
     <ErrorBoundary
@@ -568,4 +570,4 @@ export function TurnRenderer(props: TurnRendererProps) {
       <TurnBody {...props} />
     </ErrorBoundary>
   )
-}
+})
