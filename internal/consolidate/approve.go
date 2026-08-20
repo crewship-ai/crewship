@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -425,23 +426,38 @@ func markProposalDecided(ctx context.Context, db *sql.DB, proposalID, status, us
 
 // appendToCanonical merges the proposal's rules block into the
 // canonical learned-YYYY-MM-DD.md under a memory.FileLock. Reuses the
-// same atomic-append shape as the consolidator's appendRules — header
-// on first write, divider between runs, trailing newline. The lock
-// path mirrors the canonical path with .lock suffix so concurrent
-// approvers serialise.
+// same block layout as the consolidator's appendRules — header on first
+// write, divider between runs, trailing newline. The lock path mirrors
+// the canonical path with a .lock suffix, which is the exact lock
+// appendRules takes on the same file: that is what keeps the
+// read-modify-write below safe against a consolidation tick landing
+// mid-approval, not just against a second approver.
 //
-// Durability: this is an append, not a whole-file rewrite, so it does
-// not go through the temp+rename durable-write helper — that would
-// mean reading the whole canonical file back in on every approval
-// just to rewrite it, real cost on a file the diff endpoint already
-// treats as growing up to proposalDiffMaxBytes (8MiB). Instead we
-// fsync the file itself before closing, matching the convention
-// appendRules already uses in consolidator.go: the write is durable
-// once this returns, but it is not atomic the way a rename-based
-// replace is — a reader racing the crash could in principle observe a
-// torn tail. The FileLock above serialises writers so that torn-tail
-// window can only be hit by an actual crash, not a concurrent second
-// appender.
+// Durability: the write goes through memory.WriteFileDurable — sibling
+// tempfile, fsync, atomic rename over the canonical path, fsync of the
+// parent dir. Append-only semantics are unchanged: the prior bytes go
+// back out verbatim and the block only ever adds to them.
+//
+// This used to be O_CREATE|O_APPEND|O_WRONLY plus an explicit f.Sync(),
+// which bought durability but not atomicity: the create and the write
+// are two syscalls, and between them the file exists on disk with zero
+// bytes (#1807, #1999). The FileLock above guards <path>.lock, so it
+// serialises two approvers against each other and does nothing for a
+// reader that takes no lock — and learned-*.md has exactly those
+// readers: the audit watcher, the HITL proposal-diff endpoint, and
+// agents reading their own learned rules. One landing in the window got
+// an empty file rather than the previous good contents. A rename is
+// atomic, so a reader now sees either the whole old file or the whole
+// new one.
+//
+// The read-modify-write cost this shape used to be justified by is the
+// same one consolidator.go's appendRules already pays for the identical
+// file (up to proposalDiffMaxBytes = 8MiB), on a path that runs once per
+// human approval rather than on a tick.
+//
+// Note the rename resets the file mode to 0o644, as every rename-based
+// replace in the repo does, and replaces a symlinked target rather than
+// writing through it.
 func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 	if err := os.MkdirAll(filepath.Dir(canonicalPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir canonical: %w", err)
@@ -452,25 +468,27 @@ func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 	}
 	defer func() { _ = lk.Unlock() }()
 
-	_, statErr := os.Stat(canonicalPath)
-	canonicalExists := !os.IsNotExist(statErr)
+	// Read the prior content once, inside the lock. The same bytes
+	// serve both the header-vs-divider decision and — since the write
+	// below is a whole-file replace rather than an O_APPEND — the
+	// prefix the new block is appended to.
+	prior, readErr := os.ReadFile(canonicalPath)
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		// Only "not there yet" may be read as "this is the first
+		// approval of the day". Any other read failure means we do not
+		// know what we would be replacing, and the whole-file write
+		// would silently drop it — where the old O_APPEND could shrug
+		// and append blind. Refuse instead.
+		return fmt.Errorf("read canonical: %w", readErr)
+	}
+	canonicalExists := readErr == nil
 	block := BuildCanonicalAppendBlock(canonicalExists, now, body)
 
-	f, err := os.OpenFile(canonicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open canonical: %w", err)
-	}
-	defer f.Close()
-	if _, err := f.WriteString(block); err != nil {
+	content := make([]byte, 0, len(prior)+len(block))
+	content = append(content, prior...)
+	content = append(content, block...)
+	if err := memory.WriteFileDurable(canonicalPath, content, 0o644); err != nil {
 		return fmt.Errorf("write canonical: %w", err)
-	}
-	// fsync before close so an approved rule is durably on disk before
-	// this function reports success — without this a crash right
-	// after "approved" leaves the write sitting in the page cache
-	// only, and the operator's approval silently evaporates on
-	// restart.
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("sync canonical: %w", err)
 	}
 	return nil
 }

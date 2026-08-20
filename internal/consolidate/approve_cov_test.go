@@ -295,16 +295,23 @@ func TestAppendToCanonical_MkdirFails(t *testing.T) {
 	}
 }
 
-func TestAppendToCanonical_OpenFails(t *testing.T) {
+// TestAppendToCanonical_UnreadableTargetIsAnError pins the rule #1999
+// carried over from #1807: only fs.ErrNotExist may be read as "this is
+// the first approval of the day". The write is a whole-file replace
+// now, so a read failure we shrugged off would mean writing the
+// first-run header over content we never read — where the old O_APPEND
+// could append blind and survive it. A directory at the canonical path
+// is the cheap portable way to make the pre-read fail with something
+// that is not ErrNotExist.
+func TestAppendToCanonical_UnreadableTargetIsAnError(t *testing.T) {
 	dir := t.TempDir()
 	asDir := filepath.Join(dir, "learned-x.md")
 	if err := os.Mkdir(asDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	// Canonical path is a directory → OpenFile fails after the lock.
 	err := appendToCanonical(asDir, time.Now(), "body")
-	if err == nil || !strings.Contains(err.Error(), "open canonical") {
-		t.Errorf("expected open error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "read canonical") {
+		t.Errorf("expected read error, got %v", err)
 	}
 }
 

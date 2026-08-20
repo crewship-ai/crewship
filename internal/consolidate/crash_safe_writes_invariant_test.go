@@ -111,9 +111,16 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 	// the fsync check below — it only says "this call site is allowed
 	// to use O_APPEND instead of the durable helper", the test still
 	// verifies the fsync is actually present in source.
-	appendLines := map[string]string{
-		".|f, err := os.OpenFile(canonicalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)": "approve.go (appendToCanonical): the last append-shaped canonical write. It has the same non-atomic create-then-write window #1807 closed in consolidator.go and should follow it through memory.WriteFileDurable; left as-is here only to keep that fix reviewable on its own.",
-	}
+	//
+	// Empty as of #1999: approve.go's appendToCanonical was the last
+	// entry — "the last append-shaped canonical write [...] left as-is
+	// here only to keep that fix reviewable on its own" — and it now
+	// goes through memory.WriteFileDurable like the two consolidator.go
+	// sites #1807 converted. Neither package has a write of persistent
+	// memory content left that the append+fsync shape is right for, so
+	// the next O_APPEND to appear here should be argued for rather than
+	// inherited.
+	appendLines := map[string]string{}
 
 	// `.OpenFile(` rather than `os.OpenFile(`: these packages open
 	// files through *os.Root handles too (root.OpenFile, l.root.OpenFile),
