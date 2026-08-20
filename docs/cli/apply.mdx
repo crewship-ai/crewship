@@ -28,6 +28,7 @@ For the narrative tour and the manifest format, see [Guides → Workspace Manife
 | `--secrets-file <path>` | `""` | Load credential values from a `KEY=VALUE` file. Comments (`#`) and quoted values supported. |
 | `--skip-test-gate` | `false` | Forward `skip_test_gate: true` on routine save so apply can ship a brand-new routine without first running it. Server gates the field on OWNER/ADMIN role; MANAGER+ callers get the standard "fresh passing test_run within 5 minutes" requirement. |
 | `--skip-governance-gate` | `false` | Forward `skip_governance_gate: true` so risky routines become active instead of waiting for approval. Requires OWNER/ADMIN; use only when the governance decision is intentional and auditable. |
+| `--no-delete` | `false` | Refuse the run outright if the plan contains any delete. Outranks `--yes` and fails `--dry-run` too. |
 | `-y`, `--yes` | `false` | Skip confirmation prompts. Required when running in a non-TTY (CI) with destructive operations. |
 
 `--strict` and `--replace` are mutually exclusive. Apply also requires an authenticated session (`crewship login`) and a workspace context — both are inherited from the current CLI profile.
@@ -127,6 +128,75 @@ The leading character on each line tells you the action:
 | `=` | Unchanged — matches |
 | `-` | Delete — exists in workspace, manifest doesn't declare it |
 
+## Reading a failed run
+
+Apply is **fail-fast**: the first error aborts the run, and every plan
+item behind it is left untouched. That makes the counters a *prefix*, so
+a failed run never prints `Applied:` — it prints what it managed, says
+it failed, and then names what it did not do:
+
+```
+$ crewship apply --file workspace.yaml --yes
+
+Plan:
+  + crew uctarna
+  ~ crew-file uctarna/shared/scripts/archiv.py
+  ~ crew-file uctarna/shared/scripts/verify.py
+  + routine msn-etn-podklady
+
+FAILED after 1 created, 0 updated, 0 unchanged, 0 deleted — the manifest was NOT fully applied.
+
+NOT APPLIED:
+  x ~ crew-file uctarna/shared/scripts/archiv.py  <- failed here
+    ~ crew-file uctarna/shared/scripts/verify.py  (never attempted)
+    + routine msn-etn-podklady  (never attempted)
+  Apply stops at the first failure and is idempotent — fix the cause and re-run.
+```
+
+The `NOT APPLIED` block exists because the counters cannot answer the
+only question you have at that moment — *which of them landed?* Nothing
+was attempted for the listed items, so re-running after fixing the cause
+is safe.
+
+Grepping for `Applied:` is a valid success check. Grepping for the
+absence of a non-zero exit code is better.
+
+## Refusing deletes outright
+
+Sync mode makes deletion the default for anything that fell out of the
+manifest, and some deletions are not a rollback away: removing an agent
+takes its memory and its Composio OAuth binding with it, and that
+binding is a browser consent no manifest can replay.
+
+`--no-delete` turns "this run deletes nothing" from a claim a human
+makes by reading the plan carefully into one the machine checks:
+
+```bash
+crewship apply --file workspace.yaml --no-delete --yes
+```
+
+```
+REFUSED (--no-delete): the plan would destroy 1 resource:
+  - agent uctarna/sberac
+```
+
+Nothing is mutated — the refusal happens after the plan is built and
+before the first request. It deliberately outranks `--yes` (the flag
+every automated invocation already carries, so a guard `--yes` could
+switch off would not be one), and it fails `--dry-run` too, so the
+rehearsal and the performance agree.
+
+The check runs **twice**, against two different plans. The CLI refuses
+against the plan it rendered for you; `manifest.Apply` refuses again
+against the plan it builds from its own fresh read of the server,
+immediately before executing it. Without the second one a resource that
+disappeared between the two reads would add a delete to the second plan
+that the first never showed, and `--yes` would wave it through. SDK
+callers get the same guarantee via `manifest.Options{NoDelete: true}`,
+which returns `manifest.ErrDeletesRefused`.
+
+Worth making the default on production manifests.
+
 ## Credential resolution
 
 Manifests never carry secret values. `crewship apply` resolves the `env:` slot through a chain of sources, in order:
@@ -178,7 +248,7 @@ Next: build crew containers with:
   crewship crew provision triage
 ```
 
-The original design auto-provisioned containers, but the apply CLI had already exited by the time provisioning streamed progress — so we surface the chained command instead of hiding it behind a flag. Run the printed line(s) to actually pull images and start the bridge network.
+The original design auto-provisioned containers, but the apply CLI had already exited by the time provisioning streamed progress — so we surface the chained command instead of hiding it behind a flag. Run the printed line(s) to build the crew's container image.
 
 ## See also
 

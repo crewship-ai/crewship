@@ -107,7 +107,16 @@ type Options struct {
 	// different things, and a seeder asking to skip one has not asked for the
 	// other.
 	SkipGovernanceGate bool
-	OnReport           func(line string)
+	// NoDelete refuses the whole run if the plan contains any delete,
+	// before a single mutation is issued.
+	//
+	// Deliberately outranks Yes. Yes is the flag every automated
+	// invocation already carries, so a guard it could switch off would
+	// not be one — and the deletions this exists for are not a rollback
+	// away: an agent's Composio binding is a browser consent no manifest
+	// can replay.
+	NoDelete bool
+	OnReport func(line string)
 	// BaseDir is the directory the manifest file was loaded from —
 	// relative CrewFile.Src paths resolve against it. Empty = process
 	// working directory (stdin manifests).
@@ -159,11 +168,19 @@ func Apply(ctx context.Context, c *Client, b *Bundle, opts Options) (*Result, er
 		return res, nil
 	}
 
+	// Checked against THIS plan, the one about to run. The CLI also
+	// refuses earlier, against the plan it rendered — but that is a
+	// different plan, built from an earlier read, and a delete that
+	// appeared in between would otherwise sail past on --yes.
+	if err := plan.checkNoDelete(opts); err != nil {
+		return res, err
+	}
+
 	if plan.HasDestructive() && !opts.Yes {
 		return res, ErrConfirmationRequired
 	}
 
-	for _, it := range plan.Items {
+	for i, it := range plan.Items {
 		if it.exec == nil {
 			// Unchanged entries have no exec; nothing to do.
 			switch it.Action {
@@ -174,6 +191,19 @@ func Apply(ctx context.Context, c *Client, b *Bundle, opts Options) (*Result, er
 		}
 		if err := it.exec(ctx, c, opts); err != nil {
 			res.LastError = err
+			// Record what the run did NOT do. Apply is fail-fast, so
+			// every item behind this one is untouched — and "which of
+			// the ten landed?" is the only question the operator has at
+			// this moment. The counters cannot answer it: they report a
+			// prefix, which is exactly what makes a partial run read as
+			// a whole one.
+			res.FailedItem = it.Line()
+			for _, rest := range plan.Items[i+1:] {
+				if rest.exec == nil {
+					continue // unchanged: nothing was owed
+				}
+				res.NotApplied = append(res.NotApplied, rest.Line())
+			}
 			return res, fmt.Errorf("%s %s %s: %w", it.Action, it.Kind, it.Description, err)
 		}
 		switch it.Action {
@@ -197,6 +227,19 @@ type Result struct {
 	Deleted            int
 	PendingCredentials []string
 	LastError          error
+
+	// FailedItem is the rendered plan line whose exec returned
+	// LastError. Empty on a clean run.
+	FailedItem string
+	// NotApplied lists the rendered plan lines behind FailedItem that
+	// were never attempted — no request was made for any of them.
+	//
+	// Counters alone let a partial run read as a complete one: a
+	// manifest that failed on its first crew-file still reported
+	// "Applied: 7 created, 3 updated" for the resources ahead of it,
+	// and the ten scripts nobody uploaded were invisible. This is the
+	// list that makes them visible.
+	NotApplied []string
 }
 
 // buildCrewBody packs a CrewSpec into the body the /crews POST

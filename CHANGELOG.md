@@ -85,6 +85,66 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   never reach that refcount, so `crewship issue delete` runs a reclaim pass
   derived purely from the table.
 
+### Fixed
+
+- **A failed `crewship apply` no longer reports success.** Apply is fail-fast,
+  so on an error the counters describe a *prefix* of the plan — but they were
+  printed under the word `Applied:` regardless, with the error on a later line.
+  A production run that uploaded none of its ten crew files reported
+  `Applied: 7 created, 3 updated` and was filed as done; the routine went on
+  running against the stale script the deploy existed to replace.
+
+  `Applied:` is now reserved for a run that finished. A failed run prints
+  `FAILED after N created, …  — the manifest was NOT fully applied.` and then a
+  `NOT APPLIED` block naming the item it died on and every item behind it that
+  was never attempted. The counters say how far the run got; only that list
+  answers the question the operator actually has, which is *which of them
+  landed*.
+
+- **`crewship apply` stops silently dropping routine DSL fields.** `spec:` was a
+  closed struct and the wire body an 11-key allowlist, so `guardrails`,
+  `integrations_required`, `concurrency_key`, `max_concurrent`, `outputs`,
+  `display_name`, `agentless`, `hooks`, `eval`, `resources`, `execution_tier`
+  and `parallelism` were dropped between the file and the server — no error, no
+  warning, no plan diff. The allowlist was justified by a comment claiming the
+  server rejects unknown keys; `pipeline.Parse` is a plain `json.Unmarshal` and
+  does not, so it bought nothing.
+
+  The export half was the dangerous one: `crewship export` decoded the *stored*
+  definition through the same struct, so a field set via `routine save` or the
+  dashboard vanished from the exported YAML and the next `apply` **deleted** it
+  from the live routine. An `agentless: true` token-zero guarantee could be
+  revoked by editing an unrelated line.
+
+  `spec` now carries an inline catch-all, the pattern its own steps have always
+  used, so any `routine.v1.json` key rides through in both directions. Typed
+  fields still win every collision, and `schedules`/`webhook` still stay out of
+  the definition. Because a typo is now forwarded rather than dropped, apply
+  warns at plan time for every `spec` key the DSL has no field for.
+
+### Added
+
+- **`crewship apply --no-delete`.** Refuses any run whose plan contains a
+  delete, before a single request is issued, printing what it would have
+  destroyed. Sync mode makes deletion the default for anything that fell out of
+  the manifest, and some deletions are not a rollback away: removing an agent
+  takes its memory and its Composio OAuth binding with it, and that binding is a
+  browser consent no manifest can replay.
+
+  It deliberately outranks `--yes` — `--yes` is the flag every automated
+  invocation already carries, so a guard it could switch off would not be one —
+  and it fails `--dry-run` too, so the rehearsal and the performance agree.
+  This turns "this apply deletes nothing", previously a claim a human made by
+  reading a plan carefully enough, into one CI can check.
+
+  Enforced twice, against two different plans: once by the CLI against the plan
+  it rendered, and again inside `manifest.Apply` against the plan it builds from
+  its own fresh read immediately before executing it. Only the second one closes
+  the window — a resource that disappeared server-side between the two reads
+  adds a delete the rendered plan never showed, and `--yes` (which every CI
+  invocation carries) would have waved it through. SDK callers get the same
+  guarantee via `manifest.Options{NoDelete: true}` → `ErrDeletesRefused`.
+
 ### Changed
 
 - **`OTEL_EXPORTER_OTLP_ENDPOINT` is treated as the base URL it is, and
