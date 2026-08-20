@@ -421,15 +421,7 @@ func TestPageGrants_WidenTheGrantNeverTheCrewsData(t *testing.T) {
 	doc := pagesGet(t, h, wsID, "outsider", "MEMBER", "fleet-201")
 	panel := pagesPanel(t, doc, "sluzby")
 
-	if sealed, _ := panel["sealed"].(bool); !sealed {
-		t.Fatalf("a write grantee outside crew/lookout was served the panel itself: %s", mustPagesJSON(t, panel))
-	}
-	for _, leaked := range []string{"data", "schema", "producer", "sla_seconds", "state"} {
-		if _, present := panel[leaked]; present {
-			t.Errorf("the sealed placeholder carries %q; §11b decision 14 pins it to {panel_id, span, sealed, owner_crew_name}: %s",
-				leaked, mustPagesJSON(t, panel))
-		}
-	}
+	pagesAssertSealedPlaceholder(t, panel, "sluzby")
 	if strings.Contains(mustPagesJSON(t, doc), "200 OK") {
 		t.Error("the payload of a crew panel reached a grantee outside that crew")
 	}
