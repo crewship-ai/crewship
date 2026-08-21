@@ -15,8 +15,10 @@ import { test, expect, type Page } from "@playwright/test"
  *     accepts a fake Claude Code CLI token instead of live-calling
  *     api.anthropic.com.
  *
- * Bootstrap is a one-shot (POST /api/v1/bootstrap returns 403 after
- * the first user), so the whole describe block runs serially with the
+ * Bootstrap is a one-shot (POST /api/v1/bootstrap returns 410 once a
+ * user exists — the header said 403, the test at the bottom of this
+ * file has always asserted 410), so the whole describe block runs
+ * serially with the
  * validation tests first — they fail submission so they don't consume
  * the shot.
  */

@@ -11,7 +11,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       system_prompt: You are the Research Director. You define research objectives, coordinate data collection and analysis tasks, ensure methodology rigor, and synthesize findings into actionable insights.
     - name: Data Collector
@@ -20,7 +20,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Data Acquisition Specialist. You gather data from web sources, APIs, documents, and databases. Clean and structure raw data for analysis. Handle scraping and ETL tasks.
     - name: Analyst
@@ -29,7 +29,7 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Data Analyst. You analyze datasets, identify patterns and trends, perform statistical analysis, and create visualizations. Use Python, pandas, and data science tools.
     - name: Report Writer
@@ -38,6 +38,6 @@ agents:
       agent_role: AGENT
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-4-20250514
+      llm_model: claude-sonnet-5
       tool_profile: CODING
       system_prompt: You are a Research Writer. You transform analytical findings into clear, well-structured reports, executive summaries, and presentations. Ensure data is presented accurately and accessibly.

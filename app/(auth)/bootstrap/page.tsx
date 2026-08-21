@@ -13,17 +13,21 @@ import { useAuth } from "@/hooks/use-auth"
 import { serverFetch } from "@/lib/server-base"
 
 /**
- * Single-form first-run bootstrap with a time-bounded window.
+ * Single-form first-run bootstrap, open until the first admin exists.
  *
  * Four input fields (name + email + password + confirmation), one
  * submit, done. No
  * setup token, no placeholder credentials, no separate profile-setup
- * step afterwards. Deploy-race protection is a fixed-duration
- * bootstrap window enforced server-side (default 5 minutes): the
- * /api/v1/bootstrap endpoint accepts requests for that long after
- * `crewship start`, then refuses with 410 until the server is
+ * step afterwards. By default there is no timer: the server keeps
+ * /api/v1/bootstrap open until the users table is non-empty — the
+ * empty table is the gate (the GitLab/Grafana first-run pattern) — and
+ * once an admin exists it refuses with 410. Deploy-race protection is
+ * opt-in: setting CREWSHIP_BOOTSTRAP_WINDOW=<duration> (e.g. "5m")
+ * arms a finite window after startup so an internet-reachable instance
+ * nobody bootstrapped doesn't sit open to whichever scanner finds the
+ * URL first; after it elapses the endpoint refuses until the server is
  * restarted. Headless / CI provisioning uses `crewship init` against
- * the same endpoint and is bound by the same window.
+ * the same endpoint and is bound by the same gates.
  *
  * Flow:
  *   /login  → setup-status check finds needs_bootstrap=true → /bootstrap

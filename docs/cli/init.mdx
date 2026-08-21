@@ -57,7 +57,7 @@ Calls `POST /api/v1/bootstrap` and prints the returned `user_id`, `workspace_id`
 
 - **`--email is required`** / **`--name is required`** — both are mandatory.
 - **`password must be at least 8 characters`** — server-side rule, enforced client-side first so you don't waste a round-trip.
-- **`bootstrap request failed: HTTP 403: Already initialized — …`** — the database already has a user. `init` is a one-shot. Use `crewship login` and (if you've lost UI access) `crewship admin reset-password` instead.
+- **`bootstrap request failed: HTTP 410: Already initialized — …`** — the database already has a user. `init` is a one-shot. Use `crewship login` and (if you've lost UI access) `crewship admin reset-password` instead.
 - **`bootstrap request failed (is the server running at http://localhost:8080?)`** — the server didn't answer on `--server`. Check `crewship start` is running or pass the right URL.
 
 ## See also

@@ -36,7 +36,7 @@ End users now get a server-driven slash palette in chat and CLI for `/routine`, 
 
 ## Streamlined first-run bootstrap
 
-The setup-token gate is gone. The `/bootstrap` form now takes name, email, and password — submit and you're in. Bootstrap stays open for a 5-minute window after `crewship start`, then returns 410 until the server is restarted. Both browser and headless (`crewship init`) paths use the same window. See [Quickstart](/quickstart).
+The setup-token gate is gone. The `/bootstrap` form now takes name, email, and password — submit and you're in. Bootstrap stays open until the first admin account exists, then returns 410; set `CREWSHIP_BOOTSTRAP_WINDOW` (any Go duration, e.g. `5m`) to opt into a finite deploy-race window that closes that long after `crewship start` — for instances reachable from the internet before anyone bootstraps them. Both browser and headless (`crewship init`) paths hit the same endpoint and share the same gates. See [Quickstart](/quickstart).
 
 ## Disaster-recovery backup rewrite
 

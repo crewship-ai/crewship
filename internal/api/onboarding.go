@@ -529,7 +529,18 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, noopEmitter{}, workspaceID, req.CrewTemplateSlug, crewName, "")
+	// The wizard's Model select rides the template path too. req.LlmModel used
+	// to be read ONLY by the blank/single-agent branch below, so for the four
+	// builtin crews the control was dead: every agent silently kept whatever
+	// the template YAML pinned, no matter what the user chose.
+	//
+	// Resolve rather than validate — an unknown provider yields the zero
+	// value, modelFor's provider comparison then fails, and the template's own
+	// model survives. Validation stays where it already is, on the credential
+	// branch above.
+	ovProvider, _ := resolveLLMProvider(req.LlmProvider)
+	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, noopEmitter{}, workspaceID, req.CrewTemplateSlug, crewName, "",
+		deployOverrides{LLMModel: strings.TrimSpace(req.LlmModel), Provider: ovProvider.provider})
 	if err != nil {
 		// Roll back the onboarding_completed=1 flag we claimed above
 		// so the user can retry the wizard (with a corrected

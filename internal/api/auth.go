@@ -612,12 +612,14 @@ If it wasn't you, no action is needed: your password was not changed and no new 
 // (a LAN-reachable scanner racing the operator to be the first POST)
 // is threefold:
 //
-//  1. Fixed-duration first-run window: bootstrap is only open for a
-//     known interval after server start (default 5 minutes — see
-//     ArmDeployRaceWindow). After the deadline the handler refuses
-//     with 410. The operator who started the server is expected to
-//     hit the form within seconds; anyone arriving 5 minutes later
-//     is by definition not the operator.
+//  1. First-run window: by default it has no expiry — bootstrap stays
+//     open until the first admin exists, because the empty users table
+//     is the gate, not a clock (see ArmDeployRaceWindow). Setting
+//     CREWSHIP_BOOTSTRAP_WINDOW=<duration> opts into a finite window
+//     after server start, after which the handler refuses with 410
+//     until a restart. That is for instances reachable from the
+//     internet before anyone bootstraps them, where an open-ended
+//     window is open to whichever scanner finds the URL first.
 //
 //  2. Fail-closed on arming failure: if ArmDeployRaceWindow couldn't
 //     probe the users table at startup (transient DB blip), the

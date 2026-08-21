@@ -79,7 +79,34 @@ type deployCrewResult struct {
 // Pass a journal.Emitter (callers' h.journal — already defaulted to noopEmitter
 // when nothing is wired up) so the template/Captain auto-assign trail lands in
 // the canonical event stream alongside server logs.
-func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j journal.Emitter, wsID, templateSlug, crewName, crewSlugInput string) (*deployCrewResult, error) {
+// deployOverrides carries explicit user choices that replace a template's
+// per-agent defaults. The zero value deploys the template verbatim, which is
+// what every caller that has nothing to override passes.
+type deployOverrides struct {
+	// LLMModel replaces CrewTemplateAgent.LLMModel — but only on agents whose
+	// llm_provider matches Provider. Writing a Gemini model id onto a
+	// CLAUDE_CODE agent breaks it outright, which is strictly worse than the
+	// template's own default, so a mismatch falls back rather than applying.
+	LLMModel string
+	// Provider is the user's chosen provider, already normalised by
+	// resolveLLMProvider. Empty disables the override entirely.
+	Provider string
+}
+
+// modelFor returns the model an agent should be created with: the override
+// when it applies, otherwise the template's own pin.
+func (o deployOverrides) modelFor(agentProvider, templateModel string) string {
+	m := strings.TrimSpace(o.LLMModel)
+	if m == "" || strings.TrimSpace(o.Provider) == "" {
+		return templateModel
+	}
+	if !strings.EqualFold(strings.TrimSpace(o.Provider), strings.TrimSpace(agentProvider)) {
+		return templateModel
+	}
+	return m
+}
+
+func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j journal.Emitter, wsID, templateSlug, crewName, crewSlugInput string, overrides deployOverrides) (*deployCrewResult, error) {
 	crewSlug := crewSlugInput
 	if crewSlug == "" {
 		crewSlug = slugify(crewName)
@@ -153,7 +180,7 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 				timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			agentID, wsID, crewID, a.Name, agentSlug, a.RoleTitle, a.AgentRole,
-			a.CLIAdapter, a.LLMProvider, a.LLMModel, a.ToolProfile, a.SystemPrompt,
+			a.CLIAdapter, a.LLMProvider, overrides.modelFor(a.LLMProvider, a.LLMModel), a.ToolProfile, a.SystemPrompt,
 			1800, true, webhookSecret, now, now); err != nil {
 			return nil, fmt.Errorf("create agent %s: %w", a.Name, err)
 		}
@@ -213,11 +240,43 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 		}
 	}
 
+	// Match the credential to the agent's OWN provider, read from the row
+	// that was just written.
+	//
+	// This used to be hardcoded to ANTHROPIC, and the failure was silent
+	// and total: a workspace set up with Gemini, Codex, Cursor or Factory
+	// stored its credential under that provider, this query matched
+	// nothing, and every agent in the crew came up with zero credentials.
+	// No error surfaced anywhere the user could see it — the crew simply
+	// did not work. The onboarding wizard reaches this path for all four
+	// builtin templates, so it was one adapter choice away on the most
+	// common flow in the product.
+	//
+	// An agent whose provider is unset falls back to ANTHROPIC, which is
+	// the same default resolveLLMProvider applies on the write side; the
+	// two have to agree or a credential stored under the default would
+	// stop matching the agent that shares it.
+	var agentProvider string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(llm_provider, '') FROM agents WHERE id = ?`, agentID,
+	).Scan(&agentProvider); err != nil {
+		if logger != nil {
+			logger.Warn("autoAssignCredentials: agent provider lookup failed",
+				"workspace_id", wsID, "agent_id", agentID, "error", err)
+		}
+		emitFailure("provider_lookup", "", err)
+		return
+	}
+	agentProvider = strings.ToUpper(strings.TrimSpace(agentProvider))
+	if agentProvider == "" {
+		agentProvider = "ANTHROPIC"
+	}
+
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, name FROM credentials
 		WHERE workspace_id = ? AND type IN ('API_KEY', 'AI_CLI_TOKEN')
-		  AND provider = 'ANTHROPIC' AND deleted_at IS NULL AND status = 'ACTIVE'
-		ORDER BY created_at ASC`, wsID)
+		  AND provider = ? AND deleted_at IS NULL AND status = 'ACTIVE'
+		ORDER BY created_at ASC`, wsID, agentProvider)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("autoAssignCredentials: list query failed",
@@ -448,7 +507,7 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, h.journal, wsID, slug, body.CrewName, body.CrewSlug)
+	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, h.journal, wsID, slug, body.CrewName, body.CrewSlug, deployOverrides{})
 	if err != nil {
 		if errors.Is(err, errTemplateNotFound) {
 			writeProblem(w, r, http.StatusNotFound, "Template not found")
