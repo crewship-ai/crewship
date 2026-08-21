@@ -100,6 +100,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	       ac.priority      AS priority,
 	       c.encrypted_value AS encrypted_value,
 	       c.type            AS cred_type,
+	       COALESCE(c.provider, '')    AS provider,
 	       COALESCE(c.username, '')    AS username,
 	       COALESCE(ac.expires_at, '') AS lease_expires_at,
 	       %d AS source_rank
@@ -115,6 +116,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	       0                AS priority,
 	       c.encrypted_value AS encrypted_value,
 	       c.type            AS cred_type,
+	       COALESCE(c.provider, '') AS provider,
 	       COALESCE(c.username, '') AS username,
 	       ''  AS lease_expires_at,
 	       rb.spec AS source_rank
@@ -134,6 +136,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	       0      AS priority,
 	       c.encrypted_value AS encrypted_value,
 	       c.type            AS cred_type,
+	       COALESCE(c.provider, '') AS provider,
 	       COALESCE(c.username, '') AS username,
 	       ''  AS lease_expires_at,
 	       %d AS source_rank
@@ -174,6 +177,13 @@ type deliveredCredential struct {
 	Priority       int
 	EncryptedValue string
 	Type           string
+	// Provider is credentials.provider — the free-form service label
+	// ("ANTHROPIC", "OPENROUTER", "GITHUB", "NONE"). It is the only thing that
+	// identifies a provider whose agent-facing env-var name does not
+	// (credTypeToProvider's switch). Selected as COALESCE(c.provider, '')
+	// because the column is TEXT NOT NULL DEFAULT 'NONE' with no CHECK, and a
+	// row written before that default existed can still be NULL.
+	Provider       string
 	Username       string
 	LeaseExpiresAt string
 	// Source is one of the credSource* ranks: where this row came from, and
@@ -270,8 +280,12 @@ func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) (
 	var out []deliveredCredential
 	for rows.Next() {
 		var d deliveredCredential
+		// Scan order follows the SELECT list column-for-column. The three UNION
+		// arms must stay aligned: inserting a column into one arm only would
+		// shift every later field into the wrong struct member silently, with
+		// no error from database/sql.
 		if err := rows.Scan(&d.ID, &d.EnvVar, &d.Priority, &d.EncryptedValue,
-			&d.Type, &d.Username, &d.LeaseExpiresAt, &d.Source); err != nil {
+			&d.Type, &d.Provider, &d.Username, &d.LeaseExpiresAt, &d.Source); err != nil {
 			return nil, nil, fmt.Errorf("scan delivered credential: %w", err)
 		}
 		out = append(out, d)

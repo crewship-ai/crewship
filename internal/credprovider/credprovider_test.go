@@ -23,6 +23,7 @@ func TestDefaultEnvVar(t *testing.T) {
 		"GCP":         "GOOGLE_APPLICATION_CREDENTIALS",
 		"HUGGINGFACE": "HF_TOKEN",
 		"DATADOG":     "DD_API_KEY",
+		"OPENROUTER":  "OPENROUTER_API_KEY",
 		// Providers whose CLI reads no single conventional variable MUST
 		// stay unmapped — see TestDefaultEnvVarNeverGates.
 		"DOCKER":     "",
@@ -30,6 +31,12 @@ func TestDefaultEnvVar(t *testing.T) {
 		"CUSTOM_CLI": "",
 		"NONE":       "",
 		"":           "",
+		// OPENAI_COMPAT is the deliberate one. Its credential is an
+		// endpoint object the sidecar dials, not a token an agent-side tool
+		// reads from its environment; a suggestion here would be invented,
+		// and worse, would nudge the operator into the env-var delivery the
+		// provider exists to avoid.
+		"OPENAI_COMPAT": "",
 	}
 	for provider, want := range cases {
 		if got := DefaultEnvVar(provider); got != want {
@@ -90,6 +97,23 @@ func TestEnvVarProvidersAreListed(t *testing.T) {
 	for provider := range defaultEnvVars {
 		if !slices.Contains(Providers, provider) {
 			t.Errorf("provider %q has a default env var but is missing from Providers enum", provider)
+		}
+	}
+}
+
+// TestProvidersCoverSidecarRoutedProviders pins the providers whose credential
+// the sidecar can proxy an agent's LLM traffic through. These are the whole of
+// "a provider becomes a credential" (FR-1/FR-2): an operator who cannot see the
+// value in `credential create --provider` help has no way to discover that
+// pasting a key is all that is required, and will reach for a CLI --base-url
+// flag instead. OPENAI_COMPAT is listed here rather than in defaultEnvVars
+// precisely because it has no agent-facing variable — presence in the enum and
+// presence in the env-var map are independent facts.
+func TestProvidersCoverSidecarRoutedProviders(t *testing.T) {
+	for _, p := range []string{"ANTHROPIC", "OPENAI", "GOOGLE", "OPENROUTER", "OPENAI_COMPAT"} {
+		if !slices.Contains(Providers, p) {
+			t.Errorf("provider %q is routable through the sidecar but missing from the Providers enum, "+
+				"so `credential create --provider` help never mentions it", p)
 		}
 	}
 }

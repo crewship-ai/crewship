@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -43,19 +44,35 @@ func BenchmarkDomainAllowlistLookupBlocked(b *testing.B) {
 	}
 }
 
+// benchSpec resolves a descriptor outside the timed loop. In production the
+// lookup is one map hit per request, and it is deliberately NOT inside
+// ResetTimer here: these benchmarks measure header writing, which is what
+// injectCredential used to do and what llmroute.ApplyAuth does now, so the
+// numbers stay comparable to the pre-descriptor baseline.
+func benchSpec(b *testing.B, provider ProviderType) llmroute.Spec {
+	b.Helper()
+	s, ok := llmroute.Lookup(string(provider))
+	if !ok {
+		b.Fatalf("no llmroute spec for %q", provider)
+	}
+	return s
+}
+
 func BenchmarkInjectCredentialAnthropic(b *testing.B) {
+	spec := benchSpec(b, ProviderAnthropic)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
-		injectCredential(req, ProviderAnthropic, "sk-ant-benchmark-key-1234567890")
+		llmroute.ApplyAuth(req, spec, "sk-ant-benchmark-key-1234567890", nil)
 	}
 }
 
 func BenchmarkInjectCredentialOpenAI(b *testing.B) {
+	spec := benchSpec(b, ProviderOpenAI)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		req := httptest.NewRequest("POST", "https://api.openai.com/v1/chat/completions", nil)
-		injectCredential(req, ProviderOpenAI, "sk-benchmark-key-1234567890")
+		llmroute.ApplyAuth(req, spec, "sk-benchmark-key-1234567890", nil)
 	}
 }
 
@@ -84,6 +101,7 @@ func BenchmarkProxyHealthEndpoint(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		req := httptest.NewRequest("GET", "http://localhost:9119/health", nil)
 		req.Host = "localhost:9119"
+		req.RemoteAddr = "127.0.0.1:54321"
 		w := httptest.NewRecorder()
 		proxy.ServeHTTP(w, req)
 	}
@@ -104,11 +122,11 @@ func BenchmarkProxyFullPipeline(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		host := "api.anthropic.com"
 		al.IsAllowed(host)
-		provider := providerForHost(host)
-		cred := cs.Select(provider)
+		spec, _ := llmroute.MatchHost(host)
+		cred := cs.Select(ProviderType(spec.ID))
 		req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages",
 			strings.NewReader(`{"model":"claude-3","max_tokens":1024}`))
-		injectCredential(req, provider, cred.Token)
+		llmroute.ApplyAuth(req, spec, cred.Token, cred.Headers)
 	}
 }
 

@@ -186,6 +186,15 @@ describe("detectBrandFromName", () => {
     ["KUBERNETES_TOKEN", "KUBERNETES"], // ahead of Uber's "uber" and Elasticsearch's old "es_"
     ["MAPBOX_TOKEN", "MAPBOX"],
     ["PROTONMAIL_BRIDGE", "PROTONMAIL"],
+    // OPENAI_COMPAT sits directly after OPENAI, which is the row most easily
+    // broken by it: OPENAI's keywords include the bare "openai", so a
+    // BYO-endpoint keyword containing that substring would be unreachable,
+    // and the same row placed above OPENAI would swallow every plain OpenAI
+    // credential. Both directions pinned.
+    ["OPENAI_API_KEY", "OPENAI"],
+    ["LITELLM_GATEWAY_KEY", "OPENAI_COMPAT"],
+    ["VLLM_SELF_HOSTED", "OPENAI_COMPAT"],
+    ["OPENROUTER_API_KEY", "OPENROUTER"],
   ])("reads %s as %s", (name, key) => {
     expect(detectBrandFromName(name)?.key).toBe(key)
   })
@@ -211,6 +220,15 @@ describe("detectBrandFromValue", () => {
 
   it("returns null for an unfamiliar shape", () => {
     expect(detectBrandFromValue("just-some-opaque-secret")).toBeNull()
+  })
+
+  // OpenRouter's key shape is the one a BYO-endpoint row could plausibly have
+  // stolen, since a self-hosted gateway may also mint "sk-"-prefixed tokens.
+  // OPENAI_COMPAT therefore declares no prefixes at all, and this pins the
+  // consequence: an sk-or- paste still lands on OpenRouter.
+  it("keeps sk-or- on OpenRouter, not on the BYO-endpoint row", () => {
+    expect(detectBrandFromValue("sk-or-v1-0123456789abcdef")?.key).toBe("OPENROUTER")
+    expect(BRAND_REGISTRY.find((b) => b.key === "OPENAI_COMPAT")?.prefixes).toBeUndefined()
   })
 })
 

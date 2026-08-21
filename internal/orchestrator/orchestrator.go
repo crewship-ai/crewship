@@ -72,7 +72,7 @@ type AgentRunRequest struct {
 	AllowedDomains        []string          // Extra allowed domains for restricted mode
 	AllowPrivateEndpoints bool              // #961: crew opted in to reach a private/LAN model endpoint (RFC1918/loopback). Link-local/metadata stay blocked regardless.
 	LocalModelBaseURL     string            // OpenAI-compatible local model endpoint; resolved from an ENDPOINT_URL credential by the chat resolver (#955), with the CREWSHIP_LOCAL_MODEL_BASE_URL env as a deprecated fallback applied in RunAgent. Empty = local models disabled.
-	LocalModelAPIKey      string            // Optional bearer token for an authenticated local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.apiKey, never the agent env.
+	LocalModelAPIKey      string            // Optional bearer token for an authenticated local endpoint (#961). On the sidecar-routed path it is NOT emitted at all — options.apiKey carries a dummy and the real key is held by the sidecar's CredStore. On the direct path it is inlined into OPENCODE_CONFIG_CONTENT, which IS an agent env var, so the key is visible in the container. See localModelConfigEnv.
 	LocalModelHeaders     map[string]string // Optional custom headers for the local endpoint (#961); injected into OPENCODE_CONFIG_CONTENT options.headers.
 	MemoryMB              int
 	CPUs                  float64
@@ -167,6 +167,23 @@ type Credential struct {
 	// USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL. See
 	// internal/api/credentials_types.go for the closed enum.
 	Type string `json:"type,omitempty"`
+	// Provider is credentials.provider as delivered by the API tier: the
+	// service label, UPPERCASE, equal to llmroute.Spec.ID for a routable LLM
+	// provider and free-form ("GITHUB", "NONE", "") for everything else.
+	//
+	// It exists because a credential's agent-facing env-var name is not a
+	// reliable provider identity — OPENROUTER_API_KEY names no arm of
+	// credTypeToProvider's switch, so before this field an OpenRouter
+	// credential stored perfectly was dropped on the way to the sidecar. It is
+	// consulted ONLY when that switch declines; see credTypeToProvider.
+	Provider string `json:"provider,omitempty"`
+	// BaseURL and Headers carry the upstream for a provider whose endpoint is
+	// part of the credential rather than a constant (llmroute
+	// UpstreamFromCredential — OPENAI_COMPAT). Empty for every other
+	// credential. PlainValue holds the bare token in that case, never the
+	// stored {baseURL,apiKey,headers} object.
+	BaseURL string            `json:"base_url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 	// Username is the cleartext identifier half of a USERPASS credential
 	// (e.g. "user@gmail.com"). Empty for all other types. Kept separate
 	// from PlainValue so the env-var pair X_USERNAME / X_PASSWORD can
@@ -382,6 +399,12 @@ type Orchestrator struct {
 	// per-run logger.Error is kept unconditionally for local stdout tails.
 	// Zero-value sync.Map is usable, so tests with a bare Orchestrator work.
 	staleSidecarJournaled sync.Map
+
+	// crewEgressExtras holds one *crewEgressExtras per container ID, carrying
+	// the per-agent half of the restricted-mode allowlist so every member of a
+	// crew computes the same desired set — see crewDesiredDomains
+	// (sidecar_domains.go). Zero-value works.
+	crewEgressExtras sync.Map
 
 	// sidecarLifecycleLocks holds one *sync.Mutex per container ID,
 	// serializing the sidecar check→decide→pkill→start sequence across

@@ -14,6 +14,12 @@ Paymaster owns cost accounting and budget enforcement. It is the read/write side
 Paymaster separates two billing models that **cannot share a single \$ aggregate**:
 
 - **Metered** — pay-per-token API-key calls. Real \$ math, real budgets.
+
+<Warning>
+  **Proxied agent calls recorded \$0 until August 2026.** `parseLLMUsage` matched on a lowercase provider name while the sidecar proxy passed an uppercase one, so no proxied response body was ever parsed and every such call wrote a zero-token, \$0 row. Any rollup, KPI or budget decision taken on proxied traffic before that fix was taken against zero.
+
+  The fix means those crews now post real token counts. Budgets that never fired on them can fire on the first day — the spend did not change, only the recording of it. Ceilings set while the rows read \$0 should be re-checked.
+</Warning>
 - **Flat-rate** — subscription credentials (Anthropic Max, ChatGPT Plus, etc.). The \$200/mo is paid up front; the marginal cost of one more token is \$0 from our perspective.
 
 Mixing them in the same KPI silently misleads operators, so the ledger row carries a `billing_mode` column and the UI keeps the two surfaces disjoint: KPIs and budgets show **metered** spend; subscriptions get a separate panel with call/token counts but no \$ figure.

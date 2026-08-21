@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credprovider"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/keeper"
 )
@@ -257,6 +258,15 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "" {
 		req.Type = "SECRET"
 	}
+	// Fold the provider onto its canonical spelling BEFORE validation, not
+	// after: validateCredentialPayload's endpoint gate asks the route table
+	// whether this provider stores a {baseURL,…} object, and the table is keyed
+	// by the canonical name. A lower-case "openai_compat" from the web UI or any
+	// REST client skipped that gate, skipped the delivery-time value split, and
+	// was then dropped from the sidecar's CredStore with no error on any of the
+	// three — a credential that stored successfully and did nothing. The CLI was
+	// the only caller that normalized.
+	req.Provider = credprovider.Canonical(req.Provider)
 	if req.Provider == "" {
 		req.Provider = "NONE"
 	}
@@ -571,7 +581,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 //
 // Returns "" when the merged payload is valid, otherwise the
 // end-user-readable message for the 400 response body.
-func validateCredentialUpdate(body map[string]interface{}, currentType string, currentUsername sql.NullString) string {
+func validateCredentialUpdate(body map[string]interface{}, currentType string, currentUsername sql.NullString, currentProvider string) string {
 	mergedType := currentType
 	if v, ok := body["type"]; ok {
 		s, isStr := v.(string)
@@ -582,6 +592,23 @@ func validateCredentialUpdate(body map[string]interface{}, currentType string, c
 	}
 	if msg := validateCredentialType(mergedType); msg != "" {
 		return msg
+	}
+
+	// `provider` is itself patchable (it is in the `allowed` map at the call
+	// site), so the endpoint rules below must be judged against the MERGED
+	// provider. Validating against the stored one would let a single PATCH
+	// switch a credential to an endpoint-backed provider and replace its value
+	// in the same request, with neither half ever seeing the endpoint gate.
+	mergedProvider := currentProvider
+	if v, ok := body["provider"]; ok {
+		switch s := v.(type) {
+		case string:
+			mergedProvider = s
+		case nil:
+			mergedProvider = ""
+		default:
+			return "provider must be a string"
+		}
 	}
 
 	// Per-type field rules. Skip value-shape checks for SSH_KEY and
@@ -643,7 +670,62 @@ func validateCredentialUpdate(body map[string]interface{}, currentType string, c
 			}
 		}
 	}
+
+	// Endpoint-backed credentials: the value is a base URL (or a
+	// {baseURL,apiKey,headers} object), and it is dialled by the sidecar at run
+	// time. Create runs it through validateEndpointURL; Update did not, for
+	// EITHER shape. That let a PATCH replace a validated endpoint with
+	// http://169.254.169.254/v1 — the cloud metadata service — without the value
+	// ever meeting the gate its own Create path enforces.
+	//
+	// Checked last so a type/provider change that is itself invalid is reported
+	// first, and only when a value is actually being written: a PATCH that
+	// touches only the name must not be failed by a stored value it is not
+	// changing.
+	if valueSent && (mergedType == CredTypeEndpointURL || providerNeedsEndpointValue(mergedProvider)) {
+		if msg := validateEndpointURL(valueStr); msg != "" {
+			return msg
+		}
+	}
+
+	// Crossing the endpoint boundary WITHOUT sending a value is the case the
+	// gate above cannot reach, and it is not a no-op — it re-interprets bytes
+	// that are already stored, in both directions:
+	//
+	//   bare key → OPENAI_COMPAT: the stored value is a token, not a
+	//   {baseURL,…} object, so providerEndpointFromValue fails at delivery and
+	//   all three loaders `continue` past it. The operator sees a saved
+	//   credential that never reaches an agent and a server-side log they
+	//   cannot read.
+	//
+	//   OPENAI_COMPAT → bare key: worse. The stored value IS the object, and
+	//   nothing splits it any more, so the whole blob — base URL, custom
+	//   headers and key — travels upstream in an Authorization header. That is
+	//   the exact leak the delivery-time split exists to prevent, re-opened
+	//   through a field the operator thinks of as a label.
+	//
+	// Refuse, and say which field to send. Guessing a conversion here would be
+	// inventing a value the operator did not write.
+	// Judged on the pair (type, provider), not the provider alone. TYPE crosses
+	// the same boundary: ENDPOINT_URL and an endpoint-backed API_KEY both store
+	// the object, every other type stores an opaque value. A PATCH of
+	// ENDPOINT_URL → API_KEY with the provider left alone therefore turns the
+	// stored {baseURL,apiKey,headers} into "an opaque API key" without touching
+	// the provider at all — and the earlier version of this guard, which asked
+	// only about the provider, let it through.
+	if storesEndpointObject(currentType, currentProvider) != storesEndpointObject(mergedType, mergedProvider) && !valueSent {
+		return "this change re-interprets the stored value (an endpoint-backed credential holds a {baseURL, apiKey, headers} object; every other kind holds an opaque value), so `value` must be sent in the same request"
+	}
 	return ""
+}
+
+// storesEndpointObject reports whether a credential of this (type, provider)
+// pair holds the endpoint object rather than an opaque value. Both coordinates
+// matter and either one alone is a hole: ENDPOINT_URL stores the object whatever
+// its provider, and an API_KEY stores it when the provider's upstream comes from
+// the credential.
+func storesEndpointObject(credType, provider string) bool {
+	return credType == CredTypeEndpointURL || providerNeedsEndpointValue(provider)
 }
 
 func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -660,12 +742,12 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// validation below sees the persisted state, not just the patch.
 	// Doubles as the existence + workspace-scoping check that
 	// credentialExists used to do — single round-trip, same gate.
-	var currentType string
+	var currentType, currentProvider string
 	var currentUsername sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT type, username FROM credentials
+		`SELECT type, username, COALESCE(provider, '') FROM credentials
 		 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credID, workspaceID).Scan(&currentType, &currentUsername)
+		credID, workspaceID).Scan(&currentType, &currentUsername, &currentProvider)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "Credential not found")
@@ -681,8 +763,17 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Canonicalise before validating, for the same reason Create does: the
+	// endpoint gate below is keyed by the route table's canonical name, and it
+	// has to judge the value the row will actually end up holding.
+	if v, ok := body["provider"]; ok {
+		if s, isStr := v.(string); isStr {
+			body["provider"] = credprovider.Canonical(s)
+		}
+	}
+
 	// Merged-payload validation — see validateCredentialUpdate.
-	if msg := validateCredentialUpdate(body, currentType, currentUsername); msg != "" {
+	if msg := validateCredentialUpdate(body, currentType, currentUsername, currentProvider); msg != "" {
 		replyError(w, http.StatusBadRequest, msg)
 		return
 	}

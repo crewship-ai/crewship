@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
+	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -906,36 +907,7 @@ func startSidecar(
 	mcpServers []MCPServerConfig,
 	logger *slog.Logger,
 ) error {
-	// Field names/tags must match sidecar.Credential — the sidecar unmarshals the
-	// boot payload straight into that type.
-	type sidecarCred struct {
-		ID       string `json:"id"`
-		Provider string `json:"provider"`
-		Token    string `json:"token"`
-		Priority int    `json:"priority"`
-		// LeaseExpiresAt hands the grant's #1373 lease deadline to the CredStore
-		// so a leased provider key stops being served when its TTL lapses,
-		// instead of living as long as the container.
-		LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
-	}
-
-	var sc []sidecarCred
-	for _, c := range creds {
-		prov := credTypeToProvider(c)
-		if prov == "" {
-			continue
-		}
-		sc = append(sc, sidecarCred{
-			ID:             c.ID,
-			Provider:       prov,
-			Token:          c.PlainValue,
-			Priority:       c.Priority,
-			LeaseExpiresAt: c.LeaseExpiresAt,
-		})
-	}
-	if len(sc) == 0 {
-		sc = []sidecarCred{}
-	}
+	sc := buildSidecarCreds(creds, logger)
 
 	// Build the input payload (new object format that includes memory config and IPC config)
 	type sidecarMCPServer struct {
@@ -1059,12 +1031,113 @@ func startSidecar(
 	return nil
 }
 
+// sidecarCred is one credential as the sidecar's CredStore receives it. Field
+// names and JSON tags must match sidecar.Credential — the sidecar unmarshals the
+// boot payload straight into that type, so a tag that drifts here does not fail
+// to compile, it silently delivers a credential with a missing field.
+type sidecarCred struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider"`
+	Token    string `json:"token"`
+	Priority int    `json:"priority"`
+	// LeaseExpiresAt hands the grant's #1373 lease deadline to the CredStore
+	// so a leased provider key stops being served when its TTL lapses,
+	// instead of living as long as the container.
+	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	// BaseURL and Headers are the credential-supplied upstream for a provider
+	// whose endpoint is not a constant (OPENAI_COMPAT). omitempty keeps the
+	// payload byte-identical for every credential without them, so an older
+	// sidecar sees exactly the bytes it saw before these fields existed.
+	BaseURL string            `json:"base_url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// buildSidecarCreds maps the delivered credentials onto the sidecar boot
+// payload, dropping every credential the CredStore has no provider for.
+//
+// Package-level rather than inline in startSidecar so the payload the sidecar
+// actually receives can be asserted directly, instead of through a container
+// exec script.
+func buildSidecarCreds(creds []Credential, logger *slog.Logger) []sidecarCred {
+	sc := []sidecarCred{}
+	for _, c := range creds {
+		prov := credTypeToProvider(c)
+		if prov == "" {
+			// A credential the vault delivered but the CredStore will never
+			// hold. Most are correct drops (OAuth tokens, GitHub PATs, an
+			// agent's own SECRET), so this is not a warning — but before it was
+			// logged at all, a genuinely misrouted LLM key vanished here with
+			// no trace and surfaced only as a 401 from the upstream, which
+			// blames the key rather than the delivery.
+			if logger != nil {
+				logger.Debug("credential not routed to sidecar credstore",
+					"credential_id", c.ID, "env_var", c.EnvVarName,
+					"type", c.Type, "provider", c.Provider)
+			}
+			continue
+		}
+		sc = append(sc, sidecarCred{
+			ID:             c.ID,
+			Provider:       prov,
+			Token:          c.PlainValue,
+			Priority:       c.Priority,
+			LeaseExpiresAt: c.LeaseExpiresAt,
+			BaseURL:        c.BaseURL,
+			Headers:        c.Headers,
+		})
+	}
+	return sc
+}
+
 // credTypeToProvider maps orchestrator credential types to sidecar provider types.
 // AI_CLI_TOKEN (OAuth) returns "" — these are injected directly as CLAUDE_CODE_OAUTH_TOKEN
 // env var in BuildEnvVarsSidecar rather than stored in the sidecar CredStore, because
 // the sidecar CredStore only supports x-api-key injection which won't work for OAuth tokens.
+//
+// The env-var switch runs FIRST and unchanged, so every credential that reaches
+// the CredStore today reaches it identically. The provider column is consulted
+// ONLY when the switch returns "" — i.e. only in the case that silently dropped
+// the credential before. Strictly additive.
+//
+// The ordering is not an implementation detail. Preferring the column would
+// change where an existing credential lands whenever the two disagree (a row
+// with provider=OPENAI delivered under ANTHROPIC_API_KEY is legal today and
+// lands under ANTHROPIC), and that is a behaviour change for credentials that
+// work.
+//
+// CURSOR and FACTORY keep their env-var arms and deliberately have no llmroute
+// spec: they need CredStore counts but must not reach the reverse-proxy path,
+// where a provider with no descriptor would previously have been forwarded
+// upstream unauthenticated.
 func credTypeToProvider(c Credential) string {
-	switch c.EnvVarName {
+	// EXCEPT for a provider whose upstream comes from the credential, which the
+	// env-var switch must never claim. AddCredential accepts any syntactically
+	// valid env_var_name for any provider, so an OPENAI_COMPAT credential
+	// carrying OPENAI_API_KEY resolved to OPENAI here — while buildSidecarCreds
+	// kept its BaseURL and Headers. The sidecar routes OPENAI to a fixed host,
+	// ignores the BaseURL, and the operator's gateway token is sent to
+	// api.openai.com. The wrong upstream receives a working credential, which is
+	// worse than any delivery failure.
+	//
+	// This is not the behaviour change the ordering above warns about: no
+	// credential predating this change can carry an UpstreamFromCredential
+	// provider, because that provider value did not exist.
+	if s, ok := llmroute.LookupProvider(c.Provider); ok && s.UpstreamFromCredential {
+		return s.ID
+	}
+	if p := credProviderFromEnvVar(c.EnvVarName); p != "" {
+		return p
+	}
+	if s, ok := llmroute.LookupProvider(c.Provider); ok {
+		return s.ID
+	}
+	return ""
+}
+
+// credProviderFromEnvVar is the pre-phase-2 mapping, verbatim: a credential's
+// agent-facing variable name to the sidecar provider that serves it.
+func credProviderFromEnvVar(envVar string) string {
+	switch envVar {
 	case "ANTHROPIC_API_KEY":
 		return "ANTHROPIC"
 	case "OPENAI_API_KEY":

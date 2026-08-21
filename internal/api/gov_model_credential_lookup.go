@@ -46,11 +46,11 @@ func (l *govModelCredentialLookup) LookupCredential(ctx context.Context, workspa
 		return "", "", fmt.Errorf("gov-model credential lookup: empty workspace or credential id")
 	}
 
-	var encrypted, credType string
+	var encrypted, credType, credProvider string
 	err := l.db.QueryRowContext(ctx, `
-		SELECT encrypted_value, type FROM credentials
+		SELECT encrypted_value, type, COALESCE(provider, '') FROM credentials
 		WHERE id = ? AND workspace_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`,
-		credentialID, workspaceID).Scan(&encrypted, &credType)
+		credentialID, workspaceID).Scan(&encrypted, &credType, &credProvider)
 	if err == sql.ErrNoRows {
 		return "", "", fmt.Errorf("gov-model credential %q not found, inactive, or revoked in workspace %q", credentialID, workspaceID)
 	}
@@ -74,7 +74,20 @@ func (l *govModelCredentialLookup) LookupCredential(ctx context.Context, workspa
 		}
 		return CredTypeEndpointURL, baseURL, nil
 	case CredTypeAPIKey:
-		return CredTypeAPIKey, dec, nil
+		// An API_KEY row is no longer always an opaque secret. Phase 2 lets a
+		// provider that carries its own endpoint (OPENAI_COMPAT) store
+		// {"baseURL":…,"apiKey":…,"headers":{…}} under this same type, so
+		// returning `dec` verbatim would hand that whole JSON object to
+		// llm.NewAnthropic as the key — and every judge call would send the
+		// operator's real secret, base URL and custom headers to
+		// api.anthropic.com as an x-api-key value. The splitter is a no-op for
+		// every provider that does not carry an endpoint, so this costs the
+		// common path nothing.
+		token, _, _, perr := providerEndpointFromValue(credProvider, dec)
+		if perr != nil {
+			return "", "", fmt.Errorf("gov-model credential %q is unusable: %v", credentialID, perr)
+		}
+		return CredTypeAPIKey, token, nil
 	default:
 		// Governance only routes ENDPOINT_URL / API_KEY; anything else is a
 		// mis-selection the resolver should degrade on rather than misuse.

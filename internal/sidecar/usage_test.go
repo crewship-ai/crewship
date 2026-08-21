@@ -88,13 +88,38 @@ func TestParseLLMUsageGoogle(t *testing.T) {
 // the proxy — empty struct returned, parsing continues. This is load-
 // bearing: the parse path is on the hot proxy goroutine and an unhandled
 // JSON error would leak as a 502 to the agent.
+//
+// It used to assert that parseLLMUsage echoed its first argument back as
+// usage.Provider. It no longer does, and that is the point of the codec/ledger
+// split: the first argument is now the BODY CODEC ("openai" for OpenRouter as
+// much as for OpenAI), while usage.Provider is the paymaster rate-card key the
+// CALLER stamps on. Echoing the codec there is how the two got conflated in
+// the first place — copyAndObserveLLM passed an uppercase ProviderType into a
+// parser switching on lowercase, so nothing ever matched and no proxied call
+// ever produced a token count.
 func TestParseLLMUsageGarbage(t *testing.T) {
 	got := parseLLMUsage("anthropic", "this is not json")
-	if got.Provider != "anthropic" {
-		t.Errorf("provider should be preserved: got %q", got.Provider)
+	if got.Provider != "" {
+		t.Errorf("parseLLMUsage must not stamp Provider (that is the caller's ledger key): got %q", got.Provider)
 	}
 	if got.InputTokens != 0 || got.OutputTokens != 0 {
 		t.Errorf("malformed body should yield zero counts: %+v", got)
+	}
+}
+
+// TestParseLLMUsage_CodecIsNotTheLedgerKey states the distinction the two
+// fields exist for: OpenRouter responses are OpenAI-shaped, so they parse with
+// codec "openai" while billing under their own rate card. A future refactor
+// that collapses the two arguments back into one breaks here rather than
+// silently re-billing every OpenRouter call as OpenAI.
+func TestParseLLMUsage_CodecIsNotTheLedgerKey(t *testing.T) {
+	body := `{"model":"anthropic/claude-sonnet-4-6","usage":{"prompt_tokens":90,"completion_tokens":12}}`
+	got := parseLLMUsage("openai", body)
+	if got.InputTokens != 90 || got.OutputTokens != 12 {
+		t.Fatalf("OpenAI-shaped body did not parse under codec %q: %+v", "openai", got)
+	}
+	if got.Provider != "" {
+		t.Errorf("Provider = %q, want empty until the caller stamps its LedgerProvider", got.Provider)
 	}
 }
 
@@ -182,5 +207,73 @@ func TestIsJSONResponse(t *testing.T) {
 		if got := isJSONResponse(ct); got != want {
 			t.Errorf("isJSONResponse(%q) = %v, want %v", ct, got, want)
 		}
+	}
+}
+
+// The Responses API reports usage under a different set of field names than
+// chat.completions. The sidecar proxies /openai/v1/responses — there is a golden
+// fixture for that leg — so a body in that shape reaches parseLLMUsage in
+// production, and parsing only the chat.completions family reported zero tokens
+// and dropped the cost event. The doc comment on the branch had claimed both
+// were covered.
+func TestParseLLMUsage_OpenAIBothUsageFamilies(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantModel  string
+		wantIn     int64
+		wantOut    int64
+		wantCached int64
+	}{
+		{
+			name:      "chat.completions",
+			body:      `{"model":"gpt-5.5","usage":{"prompt_tokens":300,"completion_tokens":40}}`,
+			wantModel: "gpt-5.5", wantIn: 300, wantOut: 40,
+		},
+		{
+			name:      "chat.completions with cached tokens subtracted from fresh input",
+			body:      `{"model":"gpt-5.5","usage":{"prompt_tokens":300,"completion_tokens":40,"prompt_tokens_details":{"cached_tokens":120}}}`,
+			wantModel: "gpt-5.5", wantIn: 180, wantOut: 40, wantCached: 120,
+		},
+		{
+			name:      "responses",
+			body:      `{"model":"gpt-5.5","usage":{"input_tokens":2600,"output_tokens":91}}`,
+			wantModel: "gpt-5.5", wantIn: 2600, wantOut: 91,
+		},
+		{
+			name:      "responses with cached tokens subtracted from fresh input",
+			body:      `{"model":"gpt-5.5","usage":{"input_tokens":2600,"output_tokens":91,"input_tokens_details":{"cached_tokens":2000}}}`,
+			wantModel: "gpt-5.5", wantIn: 600, wantOut: 91, wantCached: 2000,
+		},
+		{
+			// cached_tokens is documented as present even when nothing was
+			// cached, so a zero must not be read as "the other family".
+			name:      "responses with an explicit zero cached_tokens",
+			body:      `{"model":"gpt-5.5","usage":{"input_tokens":10,"output_tokens":2,"input_tokens_details":{"cached_tokens":0}}}`,
+			wantModel: "gpt-5.5", wantIn: 10, wantOut: 2,
+		},
+		{
+			name:      "a body with no usage at all yields zero, not a parse failure",
+			body:      `{"model":"gpt-5.5"}`,
+			wantModel: "gpt-5.5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseLLMUsage("openai", tt.body)
+			if got.Model != tt.wantModel {
+				t.Errorf("Model = %q, want %q", got.Model, tt.wantModel)
+			}
+			if got.InputTokens != tt.wantIn {
+				t.Errorf("InputTokens = %d, want %d", got.InputTokens, tt.wantIn)
+			}
+			if got.OutputTokens != tt.wantOut {
+				t.Errorf("OutputTokens = %d, want %d", got.OutputTokens, tt.wantOut)
+			}
+			if got.CachedInputTokens != tt.wantCached {
+				t.Errorf("CachedInputTokens = %d, want %d", got.CachedInputTokens, tt.wantCached)
+			}
+		})
 	}
 }

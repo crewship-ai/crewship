@@ -40,9 +40,10 @@ import (
 // state (network_mode, domains_hash) is derived from the startSidecar stdin
 // payload it actually received, instead of being preset by the test.
 type payloadDrivenContainer struct {
-	mu   sync.Mutex
-	mode map[string]string // containerID → running sidecar network_mode ("" = not running)
-	hash map[string]string // containerID → domains_hash the sidecar reports on /health
+	mu      sync.Mutex
+	mode    map[string]string   // containerID → running sidecar network_mode ("" = not running)
+	hash    map[string]string   // containerID → domains_hash the sidecar reports on /health
+	domains map[string][]string // containerID → the allowlist that sidecar is actually enforcing
 
 	kills  int32
 	starts int32
@@ -50,9 +51,19 @@ type payloadDrivenContainer struct {
 
 func newPayloadDrivenContainer() *payloadDrivenContainer {
 	return &payloadDrivenContainer{
-		mode: map[string]string{},
-		hash: map[string]string{},
+		mode:    map[string]string{},
+		hash:    map[string]string{},
+		domains: map[string][]string{},
 	}
+}
+
+// lastPolicyDomains is the allowlist the container's currently-running sidecar
+// was started with. The hash alone cannot answer "is every member's host in
+// there" — it only answers "did it change".
+func (c *payloadDrivenContainer) lastPolicyDomains(containerID string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.domains[containerID]...)
 }
 
 // sidecarPayloadPolicy extracts the network policy from startSidecar's shell
@@ -109,6 +120,7 @@ func (c *payloadDrivenContainer) exec(t *testing.T, cfg provider.ExecConfig) (*p
 		c.mu.Lock()
 		c.mode[cfg.ContainerID] = mode
 		c.hash[cfg.ContainerID] = DomainsHash(policyDomains)
+		c.domains[cfg.ContainerID] = policyDomains
 		c.mu.Unlock()
 		return execResult("start", ""), nil
 

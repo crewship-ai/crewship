@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/composio"
@@ -441,6 +442,24 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	if len(localEndpoint.Headers) > 0 {
 		resp["local_model_headers"] = localEndpoint.Headers
 	}
+	// The same endpoint, delivered a second way: as an OPENAI_COMPAT entry in
+	// the credential list so the sidecar's CredStore holds the key and the
+	// agent's OpenCode config can point at 127.0.0.1 with a dummy. This is what
+	// closes the #961 leak. resp is rebuilt rather than mutated in place because
+	// resp["credentials"] captured the slice header above.
+	//
+	// Gated on blockPrivilegedCreds like every other step that repopulates
+	// creds. A privileged crew collapses the UID 1001/1002 boundary, so #1032
+	// refuses to put ANY credential in a CredStore the agent can read out of the
+	// sidecar's memory — and this is a credential. Withholding it also stops the
+	// orchestrator routing (resolveRoutedProvider asks for the credential, not
+	// just for the key), so such a run stays on exactly the path it takes today.
+	if !blockPrivilegedCreds {
+		if withEndpoint, added := h.appendProxiedEndpointCredential(creds, localEndpoint); added {
+			creds = withEndpoint
+			resp["credentials"] = creds
+		}
+	}
 	// PR-E F6 — opener identity + role title for the orchestrator's
 	// PERSONA / peer card injection. opener is "" for agent-only
 	// resolves (no chat in play); role_title is "" when the agent
@@ -455,6 +474,103 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 		resp["role_title"] = data.roleTitle.String
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// sidecarOpenAICompatProvider is the llmroute descriptor ID under which a
+// credential-supplied OpenAI-compatible endpoint is held in the sidecar's
+// CredStore. Pinned by TestSidecarOpenAICompatProvider_IsTheEndpointDescriptor,
+// which asserts it resolves to a spec whose upstream comes from the credential
+// — so a rename in llmroute fails here rather than silently delivering a
+// credential under a provider that routes nowhere.
+const sidecarOpenAICompatProvider = "OPENAI_COMPAT"
+
+// appendProxiedEndpointCredential delivers the resolved local-model endpoint to
+// the sidecar's CredStore as an OPENAI_COMPAT credential, returning the extended
+// list and whether anything was added.
+//
+// It fires only when the endpoint carries a bearer token. A bare Ollama box has
+// no secret to isolate, and OPENAI_COMPAT is RequireCredential — routing an
+// unauthenticated endpoint would put a 503 in front of a path that works today.
+//
+// A HEADERS-ONLY endpoint (custom headers, no token) IS delivered. It used not
+// to be: llmroute.ApplyAuth returned early on an empty token, dropping the
+// custom headers with it, so the sidecar would have forwarded a request the
+// endpoint then rejected. The headers stayed in the agent's OpenCode config
+// instead — where they work, and where the agent process can read them. That is
+// precisely the exposure this delivery exists to close, so ApplyAuth now writes
+// custom headers independently of the token and the gate below asks for auth
+// material of EITHER kind.
+//
+// EnvVarName is deliberately EMPTY. Every path that can put a credential into
+// the agent's environment or its /secrets files — the provider-key override
+// loop, the MCP env refs, CLI_TOKEN, the Keeper-disabled fallback,
+// buildCredFileScript — first requires a non-empty env-var name, while
+// credTypeToProvider's env-var switch declines an empty name and falls through
+// to the provider column. So this entry reaches the CredStore and nothing else,
+// which is the whole point: the key must never enter the container.
+//
+// At most one OPENAI_COMPAT entry is delivered. The CredStore is crew-wide and
+// Select round-robins within a priority tier, so a second endpoint would be
+// served to requests meant for the first. A real assigned OPENAI_COMPAT
+// credential wins over the resolved endpoint — it is the more specific grant —
+// and the collision is logged rather than resolved silently.
+// endpointHostForLog reduces a credential's base URL to the one part of it that
+// is safe to write to a log: host and port, with no scheme, path, query or
+// userinfo.
+//
+// An endpoint URL is not a secret, but it is not reliably free of one either.
+// The stored-value gate rejects user:pass@host and nothing else, so a key can
+// still ride in the query string — and a log line is read by people and systems
+// that were never granted the credential. Returning the host alone keeps every
+// diagnostic these lines exist to give (which endpoint, and is it the one you
+// expected) and carries none of the rest.
+//
+// A URL that will not parse yields a fixed placeholder rather than the original
+// string: the fallback must not be "log it raw", which is how redaction helpers
+// usually leak.
+func endpointHostForLog(rawURL string) string {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" {
+		return "<unparseable>"
+	}
+	return u.Host
+}
+
+func (h *InternalHandler) appendProxiedEndpointCredential(creds []mcpCredEntry, ep localModelEndpoint) ([]mcpCredEntry, bool) {
+	if ep.BaseURL == "" || (ep.APIKey == "" && len(ep.Headers) == 0) {
+		return creds, false
+	}
+	for _, c := range creds {
+		if !providerNeedsEndpointValue(c.Provider) {
+			continue
+		}
+		if c.BaseURL != ep.BaseURL {
+			// HOSTS, not URLs. The host is the whole diagnostic — "these two
+			// disagree, and this is the one being dropped" — while the rest of
+			// the URL can carry a secret: validateEndpointURL rejects
+			// user:pass@host but says nothing about the query string, so
+			// https://gw.example/v1?api-key=SECRET stores cleanly and would be
+			// written here verbatim, to a log with a different audience and a
+			// different retention than the vault. Caught by CodeQL
+			// (go/clear-text-logging) on the PR that added this line.
+			h.logger.Warn("more than one OpenAI-compatible endpoint resolved for this agent; the assigned credential wins and the resolved endpoint is not delivered to the sidecar",
+				"assigned_credential_id", c.ID, "assigned_host", endpointHostForLog(c.BaseURL),
+				"resolved_host", endpointHostForLog(ep.BaseURL))
+		}
+		return creds, false
+	}
+	return append(creds, mcpCredEntry{
+		// A synthetic id: the entry is derived from a credential the sidecar is
+		// not told about, and a blank id would collide in the CredStore's own
+		// bookkeeping (and in the scrubber's per-credential pattern names).
+		ID:       "local-model-endpoint",
+		EnvVar:   "",
+		Value:    ep.APIKey,
+		Type:     string(CredTypeAPIKey),
+		Provider: sidecarOpenAICompatProvider,
+		BaseURL:  ep.BaseURL,
+		Headers:  ep.Headers,
+	}), true
 }
 
 // -----------------------------------------------------------------------------
@@ -684,6 +800,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 			EnvVar:         d.EnvVar,
 			Priority:       d.Priority,
 			Type:           d.Type,
+			Provider:       d.Provider,
 			Username:       d.Username,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 		}
@@ -700,6 +817,26 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 			continue
 		}
 		ce.Value = dec
+
+		// A provider whose upstream lives in the credential (OPENAI_COMPAT)
+		// stores {baseURL,apiKey,headers} as one object. Split it here, at the
+		// only tier that knows the storage shape: Value must end up carrying
+		// the bare token, because Value is what the sidecar injects into the
+		// Authorization header. Shipping the JSON blob as the token would send
+		// the base URL and every custom header upstream as a bearer secret.
+		if providerNeedsEndpointValue(d.Provider) {
+			token, baseURL, headers, err := providerEndpointFromValue(d.Provider, dec)
+			if err != nil {
+				// Re-validated at delivery as defence in depth: a value that
+				// somehow got stored malformed is refused here rather than
+				// delivered blank, which would boot an agent pointing at
+				// nothing and fail at the first call.
+				h.logger.Error("endpoint credential rejected at delivery",
+					"id", ce.ID, "provider", d.Provider, "error", err)
+				continue
+			}
+			ce.Value, ce.BaseURL, ce.Headers = token, baseURL, headers
+		}
 
 		// The credential's parts, through the SAME opener its value just went
 		// through. A failure drops the whole credential rather than one part:

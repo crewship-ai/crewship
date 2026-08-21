@@ -5,10 +5,58 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/llmroute"
 )
+
+// endpointBackedProviders lists the provider column values whose stored
+// credential value is a {baseURL, apiKey, headers} object rather than a bare
+// token. Computed once at init: llmroute.Specs() deep-copies the whole table
+// and these resolvers run per http step.
+var endpointBackedProviders = func() []string {
+	var out []string
+	for _, s := range llmroute.Specs() {
+		if s.UpstreamFromCredential {
+			out = append(out, s.ID)
+		}
+	}
+	sort.Strings(out)
+	return out
+}()
+
+// excludeEndpointProviders returns a WHERE fragment (and its args) that keeps
+// endpoint-backed credentials out of both resolvers below.
+//
+// Both of them select by TYPE alone, which was sound while `type = 'API_KEY'`
+// meant "a bare token". It stopped meaning that: an OPENAI_COMPAT credential is
+// stored as API_KEY and holds the whole endpoint object. Without this filter,
+// creating one made it the newest API_KEY row in the workspace, so the next
+// routine step declaring `credential_ref: {type: API_KEY}` would have had that
+// entire object — base URL, custom headers and key — injected into whatever
+// third-party endpoint the routine dials. That is the same leak the delivery
+// split fixed on the agent path, arriving by a route that has nothing to do
+// with agents.
+//
+// It EXCLUDES rather than splits deliberately. A step asking for "an API key"
+// wants a bare token, and the value it should get is the next-newest row that
+// actually is one — not the apiKey field prised out of a credential the author
+// never asked for. OPENAI_COMPAT is new in this change, so nothing that
+// resolved before can stop resolving because of it.
+func excludeEndpointProviders() (string, []any) {
+	if len(endpointBackedProviders) == 0 {
+		return "", nil
+	}
+	placeholders := make([]string, len(endpointBackedProviders))
+	args := make([]any, len(endpointBackedProviders))
+	for i, p := range endpointBackedProviders {
+		placeholders[i] = "?"
+		args[i] = p
+	}
+	return "  AND UPPER(COALESCE(provider, '')) NOT IN (" + strings.Join(placeholders, ", ") + ")\n", args
+}
 
 // NewVaultCredentialResolver builds the production credential resolver
 // for http steps: credential_ref.type → the decrypted value of a
@@ -53,17 +101,19 @@ func NewVaultCredentialResolver(db *sql.DB) func(ctx context.Context, scope RunS
 		if credType == "" {
 			return "", fmt.Errorf("credential_ref.type is empty")
 		}
+		notEndpoint, notEndpointArgs := excludeEndpointProviders()
+		args := append([]any{scope.WorkspaceID, credType}, notEndpointArgs...)
+		args = append(args, scope.AuthorCrewID, scope.AuthorCrewID)
 		var encryptedValue string
 		err := db.QueryRowContext(ctx, `
 SELECT encrypted_value FROM credentials
 WHERE workspace_id = ?
   AND UPPER(type) = UPPER(?)
-  AND status = 'ACTIVE'
+`+notEndpoint+`  AND status = 'ACTIVE'
   AND deleted_at IS NULL
   AND (crew_id IS NULL OR crew_id = '' OR crew_id = ?)
 ORDER BY CASE WHEN crew_id = ? THEN 0 ELSE 1 END, created_at DESC, id
-LIMIT 1`,
-			scope.WorkspaceID, credType, scope.AuthorCrewID, scope.AuthorCrewID,
+LIMIT 1`, args...,
 		).Scan(&encryptedValue)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", fmt.Errorf("no active credential of type %q in workspace vault", credType)
@@ -101,16 +151,23 @@ func NewVaultCredentialProbe(db *sql.DB) func(ctx context.Context, scope RunScop
 		if credType == "" {
 			return false, fmt.Errorf("credential type is empty")
 		}
+		// The same filter as the resolver, and for the reason the doc comment
+		// above states: "declared credential resolves" must mean exactly "the
+		// runtime would inject it". A probe that counted an endpoint-backed row
+		// the resolver now skips would report a credentials_required gate
+		// satisfied by a credential the step will never receive.
+		notEndpoint, notEndpointArgs := excludeEndpointProviders()
+		args := append([]any{scope.WorkspaceID, credType}, notEndpointArgs...)
+		args = append(args, scope.AuthorCrewID)
 		var one int
 		err := db.QueryRowContext(ctx, `
 SELECT 1 FROM credentials
 WHERE workspace_id = ?
   AND UPPER(type) = UPPER(?)
-  AND status = 'ACTIVE'
+`+notEndpoint+`  AND status = 'ACTIVE'
   AND deleted_at IS NULL
   AND (crew_id IS NULL OR crew_id = '' OR crew_id = ?)
-LIMIT 1`,
-			scope.WorkspaceID, credType, scope.AuthorCrewID,
+LIMIT 1`, args...,
 		).Scan(&one)
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil

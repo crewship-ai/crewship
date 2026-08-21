@@ -203,6 +203,13 @@ type credentialResponse struct {
 	Value    string `json:"value"`
 	Priority int    `json:"priority"`
 	Type     string `json:"type"`
+	// Provider, BaseURL and Headers mirror api.mcpCredEntry's fields of the
+	// same JSON names — this struct decodes that payload. Dropping any of them
+	// here silently strips the provider identity between the API and the
+	// orchestrator, which is the whole channel phase 2 adds.
+	Provider string            `json:"provider,omitempty"`
+	BaseURL  string            `json:"base_url,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
 	// Username is populated for USERPASS credentials only — see the
 	// per-type behaviour table in orchestrator.buildCredFileScript.
 	Username string `json:"username,omitempty"`
@@ -484,6 +491,9 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			PlainValue:     c.Value,
 			Priority:       c.Priority,
 			Type:           c.Type,
+			Provider:       c.Provider,
+			BaseURL:        c.BaseURL,
+			Headers:        c.Headers,
 			Username:       c.Username,
 			LeaseExpiresAt: c.LeaseExpiresAt,
 		}

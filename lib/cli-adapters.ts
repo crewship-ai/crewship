@@ -196,7 +196,16 @@ const OPENCODE_MODELS: ModelOption[] = [
 /**
  * True when the model routes to the operator's local OpenAI-compatible
  * endpoint (Ollama et al.) and therefore needs no provider API key.
- * Mirrors localModelPrefix in internal/orchestrator/exec_env.go — keep in sync.
+ * Mirrors localModelPrefix / localEndpointModel in
+ * internal/orchestrator/exec_env.go — keep in sync.
+ *
+ * This asks which ENDPOINT the model goes to, not whether the run is
+ * proxy-routed through the sidecar. Those became two different questions when a
+ * provider became a credential: an authenticated endpoint is now reached
+ * through the sidecar, but it is the same endpoint and still needs no key from
+ * the user. Routing depends on which credentials a crew actually holds, which
+ * only the server can answer, so there is deliberately no client-side mirror of
+ * it — see resolveRoutedProvider.
  */
 export function isLocalModel(model?: string): boolean {
   return typeof model === "string" && model.startsWith("ollama/")

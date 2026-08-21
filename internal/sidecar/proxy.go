@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/httpsafe"
+	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -371,8 +373,20 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		host = r.URL.Host
 	}
 
-	// Requests to localhost are internal control-plane calls (health, etc.)
-	if isLocalhost(host) {
+	// Requests to localhost are internal control-plane calls (health, the
+	// reverse-proxy provider paths).
+	//
+	// Gated on BOTH the Host header parsing as localhost AND the underlying
+	// TCP connection coming from a loopback IP — the same pair server.go's
+	// buildHandler has used since Patch-E, for the same reason: the Host
+	// header is attacker-controllable over a shared crew bridge
+	// (`curl --resolve localhost:9119:172.18.0.5 …`) and the sidecar's
+	// loopback bind was the only thing standing behind it. Not exploitable
+	// today — the sidecar binds 127.0.0.1:9119 inside the agent's own network
+	// namespace — but this handler now selects an upstream and injects a
+	// credential from a descriptor table, so the gate in front of it should
+	// not be weaker than the one in front of /credentials.
+	if isLocalhost(host) && remoteIsLoopback(r) {
 		p.handleLocal(w, r)
 		return
 	}
@@ -389,16 +403,20 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Inject credentials for known LLM providers
-	provider := providerForHost(host)
-	if provider != "" {
-		cred := p.credStore.Select(provider)
+	// Inject credentials for known LLM providers. MatchHost only ever
+	// resolves the three grandfathered specs (see providerForHost) — a
+	// credential-era provider is reached by path prefix, not by host.
+	spec, isLLM := llmroute.MatchHost(strings.ToLower(stripPort(host)))
+	provider := ""
+	if isLLM {
+		provider = spec.ID
+		cred := p.credStore.Select(ProviderType(spec.ID))
 		if cred == nil {
 			p.logger.Error("no credential available", "provider", provider)
-			http.Error(w, "no credential available for "+string(provider), http.StatusServiceUnavailable)
+			http.Error(w, "no credential available for "+provider, http.StatusServiceUnavailable)
 			return
 		}
-		injectCredential(r, provider, cred.Token)
+		llmroute.ApplyAuth(r, spec, cred.Token, cred.Headers)
 		p.logger.Debug("credential injected",
 			"provider", provider,
 			"credential_id", cred.ID,
@@ -437,7 +455,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		// success from the journal's perspective. statusCode 0 marks the
 		// "transport error" case distinctly from any HTTP 5xx response.
 		if p.onEgress != nil {
-			p.onEgress(host, r.Method, string(provider), 0, false)
+			p.onEgress(host, r.Method, provider, 0, false)
 		}
 		return
 	}
@@ -448,7 +466,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// method / provider / status keeps PII and credentials out of the
 	// journal — path and body are deliberately excluded.
 	if p.onEgress != nil {
-		p.onEgress(host, r.Method, string(provider), resp.StatusCode, false)
+		p.onEgress(host, r.Method, provider, resp.StatusCode, false)
 	}
 
 	// Copy response headers
@@ -458,7 +476,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	p.copyAndObserveLLM(w, resp, string(provider))
+	p.copyAndObserveLLM(w, resp, spec.BodyCodec, spec.LedgerProvider)
 }
 
 // handleConnect handles HTTPS CONNECT tunnel requests.
@@ -537,101 +555,165 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	go transfer(clientConn, targetConn)
 }
 
-// handleLocal handles requests to localhost (health check, Anthropic reverse proxy).
+// handleLocal handles requests to localhost (health check, LLM reverse proxies).
+//
+// The provider arms used to be a hardcoded prefix switch (/gemini/, /openai/,
+// /v1/, in that order — Anthropic's /v1/ is a catch-all, so anything sharing
+// its prefix had to be listed ABOVE it). That ordering hazard is what made a
+// fourth provider unsafe to add by hand, so routing is now one
+// longest-prefix-wins lookup over llmroute.Specs(): /v1 → ANTHROPIC,
+// /openai → OPENAI, /gemini → GOOGLE, /llm/{id} → everything registered since.
+// /health keeps its own arm ahead of the lookup because it is control plane,
+// not a provider.
 func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
-	switch {
-	case r.URL.Path == "/health" || r.URL.Path == "/healthz":
-		networkMode := "free"
-		if !p.freeMode {
-			networkMode = "restricted"
-		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d,"network_mode":"%s","sidecar_hash":"%s","domains_hash":"%s","token_fp":"%s"}`,
-			p.credStore.Count(ProviderAnthropic),
-			p.credStore.Count(ProviderOpenAI),
-			p.credStore.Count(ProviderGoogle),
-			networkMode,
-			p.buildHash,
-			p.policyDomainsHash,
-			p.tokenFP,
-		)
-	case strings.HasPrefix(r.URL.Path, "/gemini/"):
-		// #1030: reverse-proxy to generativelanguage.googleapis.com. The
-		// Gemini CLI points GOOGLE_GEMINI_BASE_URL at
-		// http://127.0.0.1:9119/gemini, so its requests arrive here as
-		// /gemini/v1beta/... . The /gemini prefix disambiguates them from
-		// Anthropic's /v1/ and OpenAI's /openai/ on the shared port and is
-		// stripped before forwarding. The dummy GOOGLE_API_KEY/GEMINI_API_KEY
-		// in the agent env is swapped for the real key from the CredStore
-		// mid-flight.
-		p.handleGeminiReverseProxy(w, r)
-	case strings.HasPrefix(r.URL.Path, "/openai/"):
-		// #1030: reverse-proxy to api.openai.com. Codex points
-		// OPENAI_BASE_URL at http://127.0.0.1:9119/openai/v1, so its requests
-		// arrive here as /openai/v1/... . The /openai prefix disambiguates
-		// them from Anthropic's /v1/ (both providers share this port) and is
-		// stripped before forwarding. The dummy OPENAI_API_KEY in the agent
-		// env is swapped for the real key from the CredStore mid-flight.
-		p.handleOpenAIReverseProxy(w, r)
-	case strings.HasPrefix(r.URL.Path, "/v1/"):
-		// Reverse-proxy to api.anthropic.com.
-		// This handles the ANTHROPIC_BASE_URL=http://127.0.0.1:9119 mode where
-		// Claude Code sends API requests directly to the sidecar over plain HTTP.
-		// For OAuth tokens the request already carries Authorization: Bearer;
-		// for API keys we inject x-api-key from the CredStore.
-		p.handleReverseProxy(w, r)
-	default:
-		http.Error(w, "not found", http.StatusNotFound)
+	if r.URL.Path == "/health" || r.URL.Path == "/healthz" {
+		p.writeHealth(w)
+		return
 	}
+	if s, ok := llmroute.MatchPath(r.URL.Path); ok {
+		p.reverseProxyToProvider(w, r, s)
+		return
+	}
+	http.Error(w, "not found", http.StatusNotFound)
 }
 
-// handleReverseProxy reverse-proxies a request to api.anthropic.com.
-// It injects an API key from the CredStore when available (API key mode).
-// For OAuth token mode, CLAUDE_CODE_OAUTH_TOKEN is already set in the container env
-// so the request already carries Authorization: Bearer — no injection needed.
-func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
-	p.reverseProxyToProvider(w, r, ProviderAnthropic, "api.anthropic.com", "")
+// healthPayload is the /health response. It is a struct rather than the
+// fmt.Fprintf template it replaced so a field can't drift out of sync with its
+// format verb, and the field ORDER is load-bearing: the first eight keys must
+// serialise byte-identically to the pre-descriptor payload (the orchestrator's
+// restart-skip and the stale-sidecar / orphan-token checks all read it, and two
+// tests assert on raw substrings). provider_creds is appended last.
+type healthPayload struct {
+	Status         string         `json:"status"`
+	AnthropicCreds int            `json:"anthropic_creds"`
+	OpenAICreds    int            `json:"openai_creds"`
+	GoogleCreds    int            `json:"google_creds"`
+	NetworkMode    string         `json:"network_mode"`
+	SidecarHash    string         `json:"sidecar_hash"`
+	DomainsHash    string         `json:"domains_hash"`
+	TokenFP        string         `json:"token_fp"`
+	ProviderCreds  map[string]int `json:"provider_creds"`
 }
 
-// handleOpenAIReverseProxy reverse-proxies a request to api.openai.com (#1030),
-// stripping the /openai routing prefix that keeps it distinct from the
-// Anthropic /v1/ path on the shared sidecar port. Codex reaches this via
-// OPENAI_BASE_URL=http://127.0.0.1:9119/openai/v1. The real OpenAI key is
-// injected from the CredStore (Bearer), so it never leaves the sidecar heap.
-func (p *Proxy) handleOpenAIReverseProxy(w http.ResponseWriter, r *http.Request) {
-	p.reverseProxyToProvider(w, r, ProviderOpenAI, "api.openai.com", "/openai")
-}
+// writeHealth emits the /health payload. Credential counts come from ONE
+// CredStore pass (CountsByProvider) rather than one Count call per provider —
+// with a descriptor table that grows, the old shape was N locks and N scans on
+// a polled endpoint.
+//
+// The three legacy `*_creds` fields are derived from each spec's
+// LegacyHealthKey rather than hardcoded, so they stay wired to the providers
+// they name without inviting a fourth `openrouter_creds` sibling: a new
+// provider is reported only under provider_creds.
+func (p *Proxy) writeHealth(w http.ResponseWriter) {
+	networkMode := "free"
+	if !p.freeMode {
+		networkMode = "restricted"
+	}
 
-// handleGeminiReverseProxy reverse-proxies a request to
-// generativelanguage.googleapis.com (#1030), stripping the /gemini routing
-// prefix that keeps it distinct from the other providers on the shared
-// sidecar port. The Gemini CLI reaches this via
-// GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:9119/gemini (the @google/genai SDK
-// appends /v1beta/... to the base URL, the same path-suffixed shape gateway
-// deployments use). The real Google key is injected from the CredStore
-// (x-goog-api-key header + key query param), so it never leaves the sidecar
-// heap.
-func (p *Proxy) handleGeminiReverseProxy(w http.ResponseWriter, r *http.Request) {
-	p.reverseProxyToProvider(w, r, ProviderGoogle, "generativelanguage.googleapis.com", "/gemini")
+	counts := p.credStore.CountsByProvider()
+	// One call, not two: Specs() deep-copies every spec's Hosts, KeyEnvVars,
+	// StaticHeaders and AuthRules, and /health is polled. Taking the length
+	// from a second call cloned the whole table again for an int.
+	specs := llmroute.Specs()
+	legacy := make(map[string]int, 3)
+	perProvider := make(map[string]int, len(specs))
+	for _, s := range specs {
+		perProvider[s.ID] = counts[s.ID]
+		if s.LegacyHealthKey != "" {
+			legacy[s.LegacyHealthKey] = counts[s.ID]
+		}
+	}
+
+	body, err := json.Marshal(healthPayload{
+		Status:         "ok",
+		AnthropicCreds: legacy["anthropic_creds"],
+		OpenAICreds:    legacy["openai_creds"],
+		GoogleCreds:    legacy["google_creds"],
+		NetworkMode:    networkMode,
+		SidecarHash:    p.buildHash,
+		DomainsHash:    p.policyDomainsHash,
+		TokenFP:        p.tokenFP,
+		ProviderCreds:  perProvider,
+	})
+	if err != nil {
+		// Unreachable: every field is a string/int/map[string]int. Fail loudly
+		// rather than emitting a truncated body a health checker would parse.
+		p.logger.Error("health payload marshal failed", "error", err)
+		http.Error(w, "health unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 
 // reverseProxyToProvider is the shared reverse-proxy body used by every
-// provider's ANTHROPIC_BASE_URL-style plain-HTTP endpoint. It injects the
-// provider's API key from the CredStore when one is present (overwriting any
-// dummy key the agent env carries); when the store is empty the request is
-// forwarded as-is (the OAuth Bearer path). stripPrefix, when non-empty, is
-// removed from the outbound path so a routing prefix (e.g. "/openai") added
-// to disambiguate providers on the shared port doesn't reach the upstream.
+// provider's ANTHROPIC_BASE_URL-style plain-HTTP endpoint. Everything that
+// used to be a per-provider argument (upstream host, strip prefix, auth
+// header) now comes off the llmroute.Spec, so adding a provider is a table
+// row rather than a new switch arm in three places.
+//
+// It injects the provider's key from the CredStore when one is present
+// (overwriting any dummy the agent env carries); for the three grandfathered
+// providers an empty store still forwards the request as-is, which is the
+// Anthropic OAuth path — the agent already holds CLAUDE_CODE_OAUTH_TOKEN and
+// the request arrives with Authorization: Bearer. A spec that declares
+// RequireCredential refuses instead: for a credential-supplied upstream a nil
+// credential means there is no upstream to forward to, and for a new provider
+// there is no pre-existing pass-through behaviour to preserve.
 //
 // It reuses p.transport (whose DialContext is p.dialSSRF), so the resolve-
 // then-pin SSRF guard and the #1139 shared DNS cache apply identically to
 // every provider — no provider gets a weaker egress path than Anthropic.
-func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, prov ProviderType, upstreamHost, stripPrefix string) {
-	cred := p.credStore.Select(prov)
+func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s llmroute.Spec) {
+	cred := p.credStore.Select(ProviderType(s.ID))
+	if cred == nil && s.RequireCredential {
+		p.logger.Error("no credential available for reverse proxy", "provider", s.ID, "path", r.URL.Path)
+		http.Error(w, "no credential available for "+s.ID, http.StatusServiceUnavailable)
+		return
+	}
+
+	var credBaseURL string
+	var credHeaders map[string]string
 	if cred != nil {
-		injectCredential(r, prov, cred.Token)
+		credBaseURL, credHeaders = cred.BaseURL, cred.Headers
+	}
+	up, err := llmroute.ResolveUpstream(s, credBaseURL)
+	if err != nil {
+		// Only reachable for an UpstreamFromCredential spec: the fixed-host
+		// specs carry a compile-time-valid host. A credential that stored a
+		// malformed base URL is refused here rather than dialled — but note
+		// this is validation, NOT the egress control; the two gates below are.
+		p.logger.Error("reverse proxy upstream unresolvable", "provider", s.ID, "error", err)
+		http.Error(w, "upstream not configured", http.StatusBadGateway)
+		return
+	}
+
+	// Crew egress fence for a credential-supplied upstream. The three fixed-host
+	// providers make ZERO allowlist calls (their host is a compile-time literal
+	// that was never checked here), so their behaviour is untouched. For an
+	// operator-supplied host this check is what stops a credential from being
+	// an unmetered egress primitive: without it, "paste a base URL" would let
+	// any crew reach any host the sidecar can dial, bypassing the allowlist
+	// that governs every other outbound request the agent makes.
+	//
+	// This is layer 2 of 3. Create-time URL validation (crewshipd) cannot be
+	// the control because DNS can rebind between validate and dial, and because
+	// the crew-scoped decision isn't knowable then. Layer 3 is p.dialSSRF, which
+	// resolves-then-pins and refuses link-local / cloud-metadata / reserved
+	// unconditionally and RFC1918 / loopback unless the crew opted in.
+	if s.UpstreamFromCredential && !p.freeMode && !p.allowlist.IsAllowed(up.Host) {
+		p.logger.Warn("blocked reverse-proxy upstream not on the crew allowlist", "provider", s.ID, "host", up.Host)
+		if p.onEgress != nil {
+			p.onEgress(up.Host, r.Method, s.ID, http.StatusForbidden, true)
+		}
+		http.Error(w, "domain not allowed", http.StatusForbidden)
+		return
+	}
+
+	if cred != nil {
+		llmroute.ApplyAuth(r, s, cred.Token, credHeaders)
 		p.logger.Debug("api key injected for reverse proxy",
-			"provider", prov,
+			"provider", s.ID,
 			"credential_id", cred.ID,
 			"path", r.URL.Path,
 		)
@@ -643,17 +725,16 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, p
 
 	outReq := r.Clone(r.Context())
 	outReq.RequestURI = ""
-	outReq.URL.Scheme = "https"
-	outReq.URL.Host = upstreamHost
-	outReq.Host = upstreamHost
-	if stripPrefix != "" {
-		outReq.URL.Path = strings.TrimPrefix(outReq.URL.Path, stripPrefix)
-		if outReq.URL.Path == "" {
-			outReq.URL.Path = "/"
-		}
+	outReq.URL.Scheme = up.Scheme
+	outReq.URL.Host = up.Host
+	outReq.Host = up.Host
+	outReq.URL.Path = llmroute.OutboundPath(s, up, outReq.URL.Path)
+	if s.StripPrefix || up.BasePath != "" {
 		// RawPath is an optional escaped hint; clearing it makes URL.String()
-		// re-derive the request-target from the (now-stripped) Path so the
-		// prefix can't survive via a stale RawPath.
+		// re-derive the request-target from the (now-rewritten) Path so the
+		// prefix can't survive via a stale RawPath. Left alone when the path
+		// passes through verbatim (Anthropic), because clearing it there would
+		// silently un-escape a path the old code forwarded byte-for-byte.
 		outReq.URL.RawPath = ""
 	}
 
@@ -663,17 +744,17 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, p
 
 	resp, err := p.transport.RoundTrip(outReq)
 	if err != nil {
-		p.logger.Error("reverse proxy upstream failed", "provider", prov, "host", upstreamHost, "path", r.URL.Path, "error", err)
+		p.logger.Error("reverse proxy upstream failed", "provider", s.ID, "host", up.Host, "path", r.URL.Path, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
 		if p.onEgress != nil {
-			p.onEgress(upstreamHost, r.Method, string(prov), 0, false)
+			p.onEgress(up.Host, r.Method, s.ID, 0, false)
 		}
 		return
 	}
 	defer resp.Body.Close()
 
 	if p.onEgress != nil {
-		p.onEgress(upstreamHost, r.Method, string(prov), resp.StatusCode, false)
+		p.onEgress(up.Host, r.Method, s.ID, resp.StatusCode, false)
 	}
 
 	for k, vv := range resp.Header {
@@ -682,7 +763,7 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, p
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	p.copyAndObserveLLM(w, resp, string(prov))
+	p.copyAndObserveLLM(w, resp, s.BodyCodec, s.LedgerProvider)
 }
 
 // copyAndObserveLLM streams the upstream response body to the client and,
@@ -697,9 +778,15 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, p
 // Body buffering is bounded by maxRequestBodyBytes (10 MB) — the same cap
 // that protects the request path, applied here to the response so a
 // pathological upstream can't OOM the sidecar.
-func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, provider string) {
+//
+// The two provider-ish arguments are NOT interchangeable. `codec` is the
+// response body SHAPE (llmroute.Spec.BodyCodec) the parser switches on;
+// `ledgerProvider` is the lowercase paymaster rate-card key
+// (Spec.LedgerProvider) stamped onto the usage row. OpenRouter is why they
+// are separate — OpenAI-shaped bodies, its own rate card.
+func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, codec, ledgerProvider string) {
 	// Bail out fast for non-LLM traffic or when nobody's listening for usage.
-	if provider == "" || p.onLLMCall == nil {
+	if ledgerProvider == "" || p.onLLMCall == nil {
 		_, _ = io.Copy(w, resp.Body)
 		return
 	}
@@ -712,7 +799,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, pr
 		_, _ = io.Copy(w, resp.Body)
 		quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 		if quota.RemainingPct > 0 || quota.HadStatus429 {
-			p.onLLMCall(LLMUsage{Provider: provider}, quota, p.billingMode, p.subPlan)
+			p.onLLMCall(LLMUsage{Provider: ledgerProvider}, quota, p.billingMode, p.subPlan)
 		}
 		return
 	}
@@ -729,10 +816,11 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, pr
 		// Client disconnected or upstream cut off mid-stream. We still try
 		// to parse whatever we've got — partial JSON returns zero usage,
 		// which is fine.
-		p.logger.Debug("response copy interrupted", "provider", provider, "error", err)
+		p.logger.Debug("response copy interrupted", "provider", ledgerProvider, "error", err)
 	}
 
-	usage := parseLLMUsage(provider, buf.String())
+	usage := parseLLMUsage(codec, buf.String())
+	usage.Provider = ledgerProvider
 	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 	p.onLLMCall(usage, quota, p.billingMode, p.subPlan)
 }
@@ -760,31 +848,14 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 
 func (b *boundedBuffer) String() string { return string(b.buf) }
 
-// injectCredential adds the appropriate authentication header for the LLM provider.
-func injectCredential(r *http.Request, provider ProviderType, token string) {
-	switch provider {
-	case ProviderAnthropic:
-		if strings.HasPrefix(token, "sk-ant-oat") {
-			r.Header.Set("Authorization", "Bearer "+token)
-		} else {
-			r.Header.Set("x-api-key", token)
-		}
-		r.Header.Set("anthropic-version", "2023-06-01")
-	case ProviderOpenAI:
-		r.Header.Set("Authorization", "Bearer "+token)
-	case ProviderGoogle:
-		// The Gemini API accepts the key either as the x-goog-api-key header
-		// (what the @google/genai SDK — and therefore the Gemini CLI — sends,
-		// so the dummy the agent carries MUST be overwritten here, #1030) or
-		// as the ?key= query param (kept for clients authenticating that
-		// way). Set both to the same real value so neither slot can retain a
-		// stale dummy.
-		r.Header.Set("x-goog-api-key", token)
-		q := r.URL.Query()
-		q.Set("key", token)
-		r.URL.RawQuery = q.Encode()
-	}
-}
+// injectCredential is gone: the per-provider auth switch it held is now
+// llmroute.ApplyAuth over the spec's AuthRules. Beyond removing the third
+// place a new provider had to be spelled out, that closes a fail-open default
+// — CURSOR and FACTORY credentials fell off the end of the three-arm switch to
+// a silent no-op and the request was forwarded upstream unauthenticated. A
+// spec with no matching rule is impossible by construction (registration
+// enforces exactly one default rule), and CURSOR/FACTORY have no spec, so they
+// never reach a proxy path at all.
 
 func transfer(dst io.WriteCloser, src io.ReadCloser) {
 	defer dst.Close()

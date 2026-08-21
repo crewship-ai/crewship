@@ -22,6 +22,16 @@ const (
 	// ProviderFactory — Factory Droid (droid exec). Same direct-env-var
 	// injection model as Cursor; sidecar reverse-proxy not wired yet.
 	ProviderFactory ProviderType = "FACTORY"
+	// ProviderOpenRouter — OpenRouter, reached through the reverse proxy at
+	// /llm/openrouter. Unlike Cursor/Factory this one IS proxy-routed: it has
+	// an llmroute.Spec, so the key stays in the sidecar heap.
+	ProviderOpenRouter ProviderType = "OPENROUTER"
+	// ProviderOpenAICompat — a generic OpenAI-compatible endpoint (self-hosted
+	// a self-hosted runtime or an inference vendor). The upstream host comes from the
+	// credential itself (Credential.BaseURL), which is why it is the only
+	// provider whose dial target is not a compile-time constant — see the
+	// allowlist + SSRF gates in reverseProxyToProvider.
+	ProviderOpenAICompat ProviderType = "OPENAI_COMPAT"
 )
 
 // Credential holds a decrypted credential for injection into outbound requests.
@@ -42,6 +52,18 @@ type Credential struct {
 	// credential passes its visibility filter regardless of any grant's TTL, so
 	// the server cannot express "this delivery was leased" through that channel.
 	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+
+	// BaseURL is the operator-supplied upstream for a provider whose spec is
+	// UpstreamFromCredential (today: OPENAI_COMPAT). Empty for every built-in
+	// provider, whose upstream host is a compile-time constant in the
+	// descriptor. `omitempty` is load-bearing: a credential without it must
+	// serialise byte-identically to the pre-phase-2 boot payload.
+	BaseURL string `json:"base_url,omitempty"`
+
+	// Headers are extra request headers the credential carries (an org / route
+	// selector some gateways require). Written by ApplyAuth alongside the auth
+	// slots, so they never reach the agent env. Empty for every built-in.
+	Headers map[string]string `json:"headers,omitempty"`
 
 	// leaseDeadline is LeaseExpiresAt parsed once at Load, so the hot Select path
 	// does no time parsing. Zero value means "no lease" (standing). Unexported,
@@ -274,4 +296,22 @@ func (cs *CredStore) Count(provider ProviderType) int {
 		}
 	}
 	return n
+}
+
+// CountsByProvider returns one count per provider present in the store, in a
+// SINGLE pass. /health used to call Count once per provider, which was fine at
+// three hardcoded providers and stops being fine once the surface is
+// descriptor-driven (one O(n) scan and one RLock acquisition per registered
+// spec, on a handler the orchestrator polls). Providers with no credentials
+// are absent from the map — the caller decides whether a missing key means
+// "zero" (it does) or "not advertised".
+func (cs *CredStore) CountsByProvider() map[string]int {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	out := make(map[string]int, 4)
+	for _, c := range cs.creds {
+		out[string(c.Provider)]++
+	}
+	return out
 }
