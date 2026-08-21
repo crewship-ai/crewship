@@ -297,9 +297,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   finite window is opt-in through `CREWSHIP_BOOTSTRAP_WINDOW` for instances
   reachable from the internet before anyone claims them. One of the comments
   named a symbol that is not in the tree. Four docs pages also said the closed
-  endpoint answers 403 where the server answers 410 — the code was right in
-  every case and only the prose was wrong, which is the kind of drift that gets
+  endpoint answers 403 where the server answers 410, as did an assertion in
+  `e2e/onboarding-fresh.mjs` — the code was right in every case and only the
+  prose and one stale check were wrong, which is the kind of drift that gets
   believed because it is checked in.
+
+- **`e2e/onboarding-fresh.mjs` runs past its 24th check.** A module-scope
+  `const URL` shadowed the global constructor, so `new URL(...)` threw partway
+  through and the eleven checks after it had never executed — in a script that
+  reports its own pass count, which made a truncated run look like a short one.
+  Nothing in CI runs this script, so it went unnoticed; it completes now, 37
+  checks against a fresh database. Two of the newly-reachable checks were
+  themselves stale: the 410 above, and a `console.anthropic.com` link no
+  onboarding component renders any more (the step deep-links into the adapter's
+  own CLI-auth docs, deliberately not to the API-key page, because onboarding
+  rejects raw API keys).
 
 - **A failed `crewship apply` no longer reports success.** Apply is fail-fast,
   so on an error the counters describe a *prefix* of the plan — but they were
