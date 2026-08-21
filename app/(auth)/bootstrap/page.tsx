@@ -15,7 +15,8 @@ import { serverFetch } from "@/lib/server-base"
 /**
  * Single-form first-run bootstrap with a time-bounded window.
  *
- * Three input fields (name + email + password), one submit, done. No
+ * Four input fields (name + email + password + confirmation), one
+ * submit, done. No
  * setup token, no placeholder credentials, no separate profile-setup
  * step afterwards. Deploy-race protection is a fixed-duration
  * bootstrap window enforced server-side (default 5 minutes): the
@@ -42,6 +43,7 @@ export default function BootstrapPage() {
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(true)
@@ -69,6 +71,10 @@ export default function BootstrapPage() {
     }
     if (password.length < 8) {
       setError("Password must be at least 8 characters.")
+      return
+    }
+    if (password !== confirmPassword) {
+      setError("Those passwords don't match.")
       return
     }
     setLoading(true)
@@ -169,6 +175,24 @@ export default function BootstrapPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="At least 8 characters"
+                  required
+                  autoComplete="new-password"
+                  className="h-11"
+                />
+              </div>
+              {/* Confirmation, same as /signup. This is the one account on the
+                  instance that owns the workspace, it is created before any
+                  session exists, and a typo here is only discoverable at the
+                  next sign-in — by which point the only way back in is a
+                  password reset the fresh install may not be able to send. */}
+              <div className="space-y-2">
+                <Label htmlFor="confirm_password">Confirm password</Label>
+                <Input
+                  id="confirm_password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repeat it"
                   required
                   autoComplete="new-password"
                   className="h-11"

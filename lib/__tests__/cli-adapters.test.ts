@@ -81,10 +81,13 @@ describe("CLI_ADAPTERS registry", () => {
   })
 
   it("frontier Anthropic models are present in CLAUDE_CODE", () => {
+    // Current generation. The superseded aliases this used to assert were
+    // removed from the picker; they still resolve a label (see
+    // anthropic-models.test.ts and the getModelLabel case below).
     const values = CLI_ADAPTERS.CLAUDE_CODE.models.map((m) => m.value)
-    expect(values).toContain("claude-opus-4-7")
-    expect(values).toContain("claude-sonnet-4-6")
-    expect(values).toContain("claude-haiku-4-5-20251001")
+    expect(values).toContain("claude-opus-5")
+    expect(values).toContain("claude-sonnet-5")
+    expect(values).toContain("claude-haiku-4-5")
   })
 })
 
@@ -133,9 +136,20 @@ describe("getProviderLabel", () => {
 
 describe("getModelLabel", () => {
   it("translates Anthropic API IDs to friendly labels", () => {
+    expect(getModelLabel("claude-opus-5")).toBe("Claude Opus 5")
+    expect(getModelLabel("claude-sonnet-5")).toBe("Claude Sonnet 5")
+    expect(getModelLabel("claude-haiku-4-5")).toBe("Claude Haiku 4.5")
+  })
+
+  it("keeps naming models the picker no longer offers", () => {
+    // Trimming the picker changes what a new workspace may choose, not how
+    // an existing one reads. claude-sonnet-4-6 is the sharp case: it is also
+    // registered under Cursor, so without the superseded table it silently
+    // relabelled to "Claude Sonnet 4.6 (Cursor)" on live workspaces.
     expect(getModelLabel("claude-sonnet-4-6")).toBe("Claude Sonnet 4.6")
     expect(getModelLabel("claude-opus-4-7")).toBe("Claude Opus 4.7")
     expect(getModelLabel("claude-haiku-4-5-20251001")).toBe("Claude Haiku 4.5")
+    expect(getModelLabel("claude-opus-4-5-20251101")).toBe("Claude Opus 4.5")
   })
 
   it("translates OpenAI API IDs to friendly labels", () => {

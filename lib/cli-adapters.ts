@@ -54,24 +54,57 @@ export interface CLIAdapterConfig {
 
 // ===== ANTHROPIC =====
 // Source: https://platform.claude.com/docs/en/about-claude/models/overview
-// claude-fable-5 is the premium flagship (most capable); claude-opus-4-8 and
-// claude-sonnet-5 are the current Opus/Sonnet tiers. All are bare aliases =
-// canonical for their version. Haiku 4.5 has alias `claude-haiku-4-5` resolving
-// to the dated `claude-haiku-4-5-20251001`. Superseded 4.7/4.6 aliases stay
-// selectable under "legacy"; anything claude-3-* / claude-*-4-2025* is
-// deprecated (retiring 2026-06-15) and removed from the picker.
+//
+// Current generation only. The picker is the first thing a new workspace
+// sees, and a list that opens with superseded models invites people to
+// start on one.
+//
+// claude-fable-5 is the premium flagship (most capable); claude-opus-5 is
+// the current Opus and the default choice; claude-opus-4-8 is the previous
+// Opus, kept because it is the documented fallback target for Opus 5's
+// refusal classifiers; claude-sonnet-5 is the current Sonnet;
+// claude-haiku-4-5 is the fast tier.
+//
+// Every value is a bare alias, which is canonical and complete as-is —
+// never append a date suffix. `claude-haiku-4-5-20251001` was the dated
+// form of the Haiku alias and is the shape the docs explicitly warn
+// against; the alias resolves to the same model.
+//
+// Superseded aliases (Opus 4.7 / 4.6 / 4.5 / 4.1, Sonnet 4.6 / 4.5) still
+// answer at the API and can be set through the CLI or the API — they are
+// simply not offered here. Anything claude-3-* is deprecated outright.
 const ANTHROPIC_MODELS: ModelOption[] = [
+  { value: "claude-opus-5", label: "Claude Opus 5", category: "frontier" },
   { value: "claude-fable-5", label: "Claude Fable 5", category: "frontier" },
-  { value: "claude-opus-4-8", label: "Claude Opus 4.8", category: "frontier" },
   { value: "claude-sonnet-5", label: "Claude Sonnet 5", category: "frontier" },
-  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", category: "fast" },
-  { value: "claude-opus-4-7", label: "Claude Opus 4.7", category: "legacy" },
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", category: "legacy" },
-  { value: "claude-opus-4-6", label: "Claude Opus 4.6", category: "legacy" },
-  { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", category: "legacy" },
-  { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", category: "legacy" },
-  { value: "claude-opus-4-1-20250805", label: "Claude Opus 4.1", category: "legacy" },
+  { value: "claude-opus-4-8", label: "Claude Opus 4.8", category: "frontier" },
+  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5", category: "fast" },
 ]
+
+/**
+ * Display names for Anthropic models the picker no longer offers.
+ *
+ * Trimming ANTHROPIC_MODELS changes what a NEW workspace may choose; it must
+ * not change how an EXISTING one reads. Workspaces created before the trim
+ * still store these values, and getModelLabel resolves by scanning adapters
+ * — so dropping an entry here would silently relabel a live workspace with
+ * whatever other adapter happens to also register the model (Cursor's
+ * "Claude Sonnet 4.6 (Cursor)", for instance).
+ *
+ * Label-only. Nothing here is selectable; add to ANTHROPIC_MODELS for that.
+ */
+const ANTHROPIC_SUPERSEDED_LABELS: Record<string, string> = {
+  "claude-opus-4-7": "Claude Opus 4.7",
+  "claude-opus-4-6": "Claude Opus 4.6",
+  "claude-opus-4-5": "Claude Opus 4.5",
+  "claude-opus-4-5-20251101": "Claude Opus 4.5",
+  "claude-opus-4-1": "Claude Opus 4.1",
+  "claude-opus-4-1-20250805": "Claude Opus 4.1",
+  "claude-sonnet-4-6": "Claude Sonnet 4.6",
+  "claude-sonnet-4-5": "Claude Sonnet 4.5",
+  "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+  "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+}
 
 // ===== OPENAI — Codex CLI subset =====
 // Source: https://developers.openai.com/codex/models
@@ -320,6 +353,17 @@ export function getProviderLabel(provider: string): string {
  */
 export function getModelLabel(value: string): string {
   if (!value) return ""
+  // Superseded models first. They are no longer offered by the picker, but
+  // workspaces created before the trim still store them and must keep
+  // rendering under their own name.
+  //
+  // Scanning adapters alone is not enough once a model leaves
+  // ANTHROPIC_MODELS: claude-sonnet-4-6 is also registered under Cursor,
+  // whose label carries a "(Cursor)" suffix, so an existing Claude Code
+  // workspace on that model silently started reading "Claude Sonnet 4.6
+  // (Cursor)".
+  const superseded = ANTHROPIC_SUPERSEDED_LABELS[value]
+  if (superseded) return superseded
   for (const adapter of Object.values(CLI_ADAPTERS)) {
     const found = adapter.models.find((m) => m.value === value)
     if (found) return found.label

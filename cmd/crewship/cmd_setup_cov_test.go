@@ -371,7 +371,10 @@ func TestRunSetup_HappyPathTemplateCrew(t *testing.T) {
 		"preferred_language": "Čeština",
 		"cli_adapter":        "CLAUDE_CODE",
 		"llm_provider":       "ANTHROPIC",
-		"llm_model":          "claude-sonnet-4-6", // adapter default kicks in
+		// The property under test is "the adapter default kicks in", not any
+		// one model string. Derived from supportedAdapters so bumping a
+		// default is a one-line change there instead of a failing test here.
+		"llm_model":          adapterDefaultModel(t, "CLAUDE_CODE"),
 		"credential_name":    "ANTHROPIC_API_KEY",
 		"credential_value":   "sk-ant-oat01-perfectly-fine-token",
 		"crew_template_slug": "software-development",
@@ -751,4 +754,18 @@ func TestRunSetup_TelemetryDisabledFlag(t *testing.T) {
 	if body["telemetry_opt_in"] != false {
 		t.Errorf("telemetry_opt_in: %v", body["telemetry_opt_in"])
 	}
+}
+
+// adapterDefaultModel returns the default model supportedAdapters declares for
+// key, so assertions about "the adapter default was applied" stay true across
+// model bumps instead of pinning a string that goes stale on the next release.
+func adapterDefaultModel(t *testing.T, key string) string {
+	t.Helper()
+	for _, a := range supportedAdapters {
+		if a.key == key {
+			return a.defaultModel
+		}
+	}
+	t.Fatalf("no supported adapter %q", key)
+	return ""
 }
