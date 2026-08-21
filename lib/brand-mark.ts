@@ -166,3 +166,31 @@ export const MARK_GEOMETRY = {
   baseline: 750,
   feet: [203, 442, 620],
 } as const
+
+/**
+ * The transform the logo component wraps the path in to place it inside a
+ * 1024 viewBox. Lives here so the tight viewBox below can be derived from it
+ * rather than from a second copy of the same three numbers.
+ */
+export const MARK_TRANSFORM = { x: 194.6, y: 234.9, scale: 0.7936 } as const
+
+/**
+ * viewBox cropped to the mark's own bounds.
+ *
+ * Inside the 1024 box the mark occupies roughly 62% of the width and 58% of
+ * the height — the rest is padding that belongs to the squircle tile, not to
+ * the silhouette. Rendered on its own at a small size that padding is most
+ * of the box, and the sails shrink to a few pixels. This viewBox drops it, so
+ * `<CrewshipLogo tight />` fills its container edge to edge.
+ *
+ * Note the mark is NOT square (about 1.07:1), so size it on one axis and let
+ * the other follow.
+ */
+export const MARK_VIEWBOX_TIGHT = [
+  MARK_TRANSFORM.x,
+  MARK_TRANSFORM.y,
+  MARK_GEOMETRY.width * MARK_TRANSFORM.scale,
+  MARK_GEOMETRY.height * MARK_TRANSFORM.scale,
+]
+  .map((n) => Number(n.toFixed(2)))
+  .join(" ")

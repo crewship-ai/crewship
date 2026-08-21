@@ -1,6 +1,6 @@
 import { useId, type SVGProps } from "react"
 
-import { SAIL_PATH } from "@/lib/brand-mark"
+import { SAIL_PATH, MARK_VIEWBOX_TIGHT } from "@/lib/brand-mark"
 
 /**
  * Crewship brand mark — the cruise-ship sail silhouette.
@@ -21,12 +21,25 @@ export { SAIL_PATH }
  * Just the sail silhouette — transparent background, currentColor fill.
  * Use inside any tinted container (`bg-primary` square, navy circle, etc.)
  * or apply a `text-*` class to color it directly.
+ *
+ * `tight` crops the viewBox to the mark's own bounds. The default 1024 box
+ * is the *tile's* box: the silhouette fills about 62% of its width and 58%
+ * of its height, and the rest is the padding the squircle needs. Standing on
+ * its own that padding is most of the element — at 28px it leaves the sails
+ * about 16px and they stop being legible — so anywhere the mark is shown
+ * without its tile, pass `tight`.
+ *
+ * The tight mark is NOT square (about 1.07:1). Size it on one axis and let
+ * the other follow (`h-8 w-auto`), or it will be squashed.
  */
-export function CrewshipLogo(props: SVGProps<SVGSVGElement>) {
+export function CrewshipLogo({
+  tight = false,
+  ...props
+}: SVGProps<SVGSVGElement> & { tight?: boolean }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 1024 1024"
+      viewBox={tight ? MARK_VIEWBOX_TIGHT : "0 0 1024 1024"}
       fill="currentColor"
       role="img"
       aria-label="Crewship"

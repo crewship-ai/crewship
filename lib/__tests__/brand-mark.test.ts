@@ -3,6 +3,8 @@ import {
   SAIL_PATH,
   MARK_SAILS,
   MARK_GEOMETRY,
+  MARK_TRANSFORM,
+  MARK_VIEWBOX_TIGHT,
   splitSubpaths,
 } from "@/lib/brand-mark"
 
@@ -158,6 +160,33 @@ describe("the Crewship mark", () => {
     }
     // Feet run left to right, matching the sail order above.
     expect([...MARK_GEOMETRY.feet]).toEqual([...MARK_GEOMETRY.feet].sort((a, b) => a - b))
+  })
+
+  it("crops the tight viewBox to the mark and not to the tile", () => {
+    const [x, y, w, h] = MARK_VIEWBOX_TIGHT.split(" ").map(Number)
+    // Origin is where the group transform puts the path's top-left.
+    expect(x).toBeCloseTo(MARK_TRANSFORM.x, 1)
+    expect(y).toBeCloseTo(MARK_TRANSFORM.y, 1)
+    // Extent is the path's own box, scaled by that transform.
+    expect(w).toBeCloseTo(MARK_GEOMETRY.width * MARK_TRANSFORM.scale, 1)
+    expect(h).toBeCloseTo(MARK_GEOMETRY.height * MARK_TRANSFORM.scale, 1)
+    // The whole point: meaningfully smaller than the 1024 tile box, in both
+    // axes. If this ever stops holding, `tight` has stopped doing anything
+    // and the sails are back to being padding.
+    expect(w).toBeLessThan(1024 * 0.8)
+    expect(h).toBeLessThan(1024 * 0.8)
+    // And it must still contain the mark — a crop that clipped a sail would
+    // be worse than the padding it removes.
+    expect(x + w).toBeLessThanOrEqual(1024)
+    expect(y + h).toBeLessThanOrEqual(1024)
+  })
+
+  it("keeps the tight mark's aspect, which is not square", () => {
+    const [, , w, h] = MARK_VIEWBOX_TIGHT.split(" ").map(Number)
+    // Callers have to size on one axis and let the other follow; a square
+    // container would squash it. Pinning the ratio documents why.
+    expect(w / h).toBeCloseTo(1.067, 2)
+    expect(w).not.toBeCloseTo(h, 0)
   })
 
   it("splits fast enough to do at module load", () => {

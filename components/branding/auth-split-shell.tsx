@@ -1,7 +1,7 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
+import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { AnimatedMark, type MarkMotion } from "@/components/branding/animated-mark"
 
 /**
@@ -87,14 +87,14 @@ export function AuthSplitShell({
 
       {/* LEFT on desktop */}
       <div className="relative flex flex-col p-6 lg:p-[clamp(24px,3.2vw,44px)]">
-        <div className="flex items-center gap-2.5">
-          {/* size/rounded/iconSize are props, not className — passing sizing
-              through className would collide with the component's defaults.
-              An explicit radius, because the project's --radius is 1.3rem
-              and rounded-lg derives from it, which is nearly a circle at
-              28px. */}
-          <CrewshipLogoTile size="h-7 w-7" rounded="rounded-[8px]" iconSize="h-4 w-4" />
-          <span className="text-[15px] font-bold tracking-[-0.01em]">Crewship</span>
+        <div className="flex items-center gap-3">
+          {/* The bare mark, not the tile. A squircle here would put the
+              silhouette inside two nested boxes — the tile's padding and the
+              viewBox's — and at lockup size the sails stop being readable.
+              `tight` crops to the mark's own bounds; w-auto keeps its 1.07:1
+              aspect. */}
+          <CrewshipLogo tight className="h-9 w-auto text-foreground" />
+          <span className="text-lg font-bold tracking-[-0.015em]">Crewship</span>
         </div>
         <div className="flex min-h-0 flex-1 items-center py-8">
           <div className="mx-auto w-full max-w-[352px]">{children}</div>

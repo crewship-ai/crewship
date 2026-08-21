@@ -115,6 +115,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   form — the headline is hidden there, because over a 12 rem banner it ran
   straight through the sails.
 
+  `<CrewshipLogo tight />` crops the viewBox to the mark's own bounds. The
+  default 1024 box is the *tile's* box — the silhouette fills about 62% of its
+  width and 58% of its height, and the rest is padding the squircle needs.
+  Shown without a tile that padding is most of the element, which is why the
+  sign-in lockup's 28px mark read as a few grey pixels with no legible sails.
+  The lockup now uses the bare cropped mark at 36px. The tight mark is not
+  square (about 1.07:1), so size it on one axis and let the other follow.
+
   None of the auth logic moved: `safeRedirectPath`, the
   `/system/setup-status` first-run gate, the four banner states and the
   signup-allowed flag are untouched. `SAIL_PATH` moved from

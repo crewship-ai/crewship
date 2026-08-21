@@ -29,6 +29,11 @@ function authPages(): { name: string; source: string }[] {
 // the tile is pinned below, so the chain stays checked end to end.
 const SHELL = "AuthSplitShell"
 const TILE = "CrewshipLogoTile"
+// The shell shows the bare mark rather than the tile: nested inside both the
+// tile's padding and the viewBox's, the sails stop being readable at lockup
+// size. Either component satisfies the property — both come from the shared
+// branding module, which is the thing being pinned.
+const SHARED_MARK = /Crewship(Logo|LogoTile)\b/
 
 describe("auth pages wear the product mark", () => {
   const pages = authPages()
@@ -50,7 +55,19 @@ describe("auth pages wear the product mark", () => {
       join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
       "utf8"
     )
-    expect(shell).toContain(TILE)
+    expect(shell).toMatch(SHARED_MARK)
+  })
+
+  it("shows the mark cropped to its own bounds when it stands without a tile", () => {
+    // Without `tight` the mark renders inside the tile's padding with no tile
+    // around it, which is what made it read as a few grey pixels at 28px.
+    const shell = readFileSync(
+      join(process.cwd(), "components", "branding", "auth-split-shell.tsx"),
+      "utf8"
+    )
+    if (shell.includes("<CrewshipLogo ")) {
+      expect(shell).toMatch(/<CrewshipLogo\s+tight\b/)
+    }
   })
 
   it.each(pages.map((p) => p.name))("%s does not hand-roll a lucide ship", (name) => {
